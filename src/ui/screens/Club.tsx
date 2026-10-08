@@ -27,7 +27,11 @@ export function Club() {
       {session.phase === 'offseason' && !o.offers?.length && (
         <div className="note row-between">
           <span>{session.year} 시즌 결산이 끝났습니다. 오프시즌(FA·외국인·드래프트·연봉)을 진행하세요.</span>
-          <button type="button" onClick={() => go('offseason')}>오프시즌으로</button>
+          <span className="inline">
+            {!!session.league.awards?.length && <button type="button" className="ghost" onClick={() => go('awards')}>시상식</button>}
+            {session.offseason?.growth && <button type="button" className="ghost" onClick={() => go('growth')}>선수 성장 결과</button>}
+            <button type="button" onClick={() => go('offseason')}>오프시즌으로</button>
+          </span>
         </div>
       )}
 

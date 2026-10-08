@@ -2,8 +2,9 @@
 import { useState } from 'react';
 import { OfferPanel } from './Club';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
+import * as Off from '../../league/offseason';
 import {
-  ASIA_NEW_CAP, capPayroll, dollarText, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
+  ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
 } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame } from '../context';
@@ -67,7 +68,7 @@ export function Offseason() {
 
   const stageIdx = STAGES.indexOf(off.stage);
   const nextLabel = off.stage === 'fa'
-    ? (off.fa.round < FA_ROUNDS ? `${off.fa.round}라운드 마감` : `${off.fa.round}라운드 마감 → 외국인 선수`)
+    ? (off.fa.round < FA_ROUNDS ? `${off.fa.round}라운드 마감` : `${off.fa.round}라운드 마감 → 다음 단계`)
     : `다음: ${STAGE_LABEL[STAGES[stageIdx + 1]] ?? ''}`;
 
   return (
@@ -94,6 +95,7 @@ export function Offseason() {
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
 
       {off.stage === 'fa' && <FaPanel act={act} />}
+      {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'foreign' && <ForeignPanel act={act} />}
       {off.stage === 'draft' && <DraftPanel act={act} />}
       {off.stage === 'salary' && <SalaryPanel act={act} />}
@@ -112,6 +114,121 @@ export function Offseason() {
 }
 
 type Act = (r: { ok: boolean; message: string }, okText?: string) => void;
+
+/** FA 보상선수 (2026-10-08): 영입 구단은 보호선수 명단을, 원 소속 구단은 보상선수 또는 보상금만을 고른다 */
+function CompPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const off = session.offseason!;
+  const info = useInfo();
+  const me = session.teamIdx;
+  const cases = off.comp ?? [];
+  const name = (id: string) => session.leaguePlayer(id)?.name ?? id;
+  const mineIn = cases.filter((c) => c.to === me);
+  const mineOut = cases.filter((c) => c.from === me);
+  const others = cases.filter((c) => c.to !== me && c.from !== me);
+
+  return (
+    <section className="stack">
+      <div className="panel">
+        <h2>FA 보상선수</h2>
+        <p className="muted small">
+          A·B등급 FA를 데려간 구단은 보호선수 명단(A 20명, B 25명)을 내고, 원 소속 구단은 명단 밖 선수 1명과 보상금
+          (A 직전 연봉 200%, B 100%) 또는 보상금만(A 300%, B 200%)을 고릅니다. 외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다.
+          "다음" 단계로 넘어가면 확정됩니다.
+        </p>
+      </div>
+
+      {mineIn.map((c) => <ProtectEditor key={c.fa} c={c} act={act} />)}
+
+      {mineOut.map((c) => {
+        const cands = Off.compCandidates(session.league, off, c)
+          .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+          .sort((a, b) => b.runs - a.runs);
+        return (
+          <div className="panel mine" key={c.fa}>
+            <h2>
+              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {c.grade}등급 · 직전 연봉 {wonText(c.prevSalary)}</span>
+            </h2>
+            <p className="small">
+              지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${wonText(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${wonText(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
+            </p>
+            <div className="actions">
+              <button type="button" className={c.pick === 'cash' ? '' : 'ghost'} onClick={() => act(session.pickComp(c.fa, 'cash'))}>
+                보상금만 받기 ({wonText(FA_COMP[c.grade].cashOnly * c.prevSalary)})
+              </button>
+              <button type="button" className="ghost" onClick={() => act(session.autoComp(), '추천 기준으로 골랐습니다.')}>추천대로 고르기</button>
+            </div>
+            <table>
+              <thead><tr><th className="l">보호 명단 밖 선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th><th /></tr></thead>
+              <tbody>
+                {cands.map(({ p }) => {
+                  const i = info(p);
+                  return (
+                    <tr key={p.id} className={c.pick === p.id ? 'me' : ''}>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td>
+                      <td>{wonText(p.contract.salary)}</td>
+                      <td><button type="button" className="small-btn" onClick={() => act(session.pickComp(c.fa, p.id))}>지명</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+
+      {others.length > 0 && (
+        <div className="panel">
+          <h2>다른 구단 보상 건</h2>
+          <ul className="small">
+            {others.map((c) => (
+              <li key={c.fa}>{name(c.fa)} ({c.grade}등급): {session.league.teams[c.from].name} → {session.league.teams[c.to].name}. 단계를 마감하면 원 소속 구단이 고릅니다.</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
+  const { session } = useGame();
+  const off = session.offseason!;
+  const info = useInfo();
+  const limit = FA_COMP[c.grade].protect!;
+  const prot = new Set(c.protect);
+  const pool = Off.protectPool(session.league, off, c)
+    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+    .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs);
+  const auto = session.league.players.filter((p) => p.team === c.to && Off.autoProtected(off, p)).length;
+  const toggle = (id: string) => {
+    const next = prot.has(id) ? c.protect.filter((x) => x !== id) : [...c.protect, id];
+    act(session.setProtect(c.fa, next));
+  };
+  return (
+    <div className="panel mine">
+      <h2>
+        {session.leaguePlayer(c.fa)?.name} 영입: 보호선수 명단 <span className="muted small">{c.protect.length}/{limit}명 · 자동 보호 {auto}명 · 원 소속 {session.league.teams[c.from].name}</span>
+      </h2>
+      <p className="muted small">처음에는 가치 높은 순 추천 명단이 들어 있습니다. 체크를 풀거나 넣어 바꾸세요. 명단 밖 선수 중 1명을 상대 구단이 데려갈 수 있습니다.</p>
+      <table>
+        <thead><tr><th>보호</th><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
+        <tbody>
+          {pool.map(({ p }) => {
+            const i = info(p);
+            const on = prot.has(p.id);
+            return (
+              <tr key={p.id} className={on ? 'me' : ''}>
+                <td><input type="checkbox" checked={on} disabled={!on && c.protect.length >= limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
+                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td><td>{wonText(p.contract.salary)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function CapLine() {
   const { session } = useGame();

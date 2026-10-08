@@ -164,6 +164,8 @@ export interface SeasonSave {
   absentUntil: number[];
   fatigue: number[];
   fatigueDay: number[];
+  /** 연투 일수 (2026-10-08 추가, 예전 저장에는 없다) */
+  streak?: number[];
   lastStartDay: number[];
   /** 선수별 기록. 필드 순서는 emptyBatLine / emptyPitLine의 키 순서 */
   bat: number[][];
@@ -477,6 +479,7 @@ export class Season {
       absentUntil: Array.from(st.absentUntil),
       fatigue: Array.from(st.fatigue),
       fatigueDay: Array.from(st.fatigueDay),
+      streak: Array.from(st.streak),
       lastStartDay: Array.from(st.lastStartDay),
       bat: this.bat.map((b) => BAT_KEYS.map((k) => b[k])),
       pit: this.pit.map((p) => PIT_KEYS.map((k) => p[k])),
@@ -517,6 +520,7 @@ export class Season {
     s.states.absentUntil.set(save.absentUntil);
     s.states.fatigue.set(save.fatigue);
     s.states.fatigueDay.set(save.fatigueDay);
+    if (save.streak) s.states.streak.set(save.streak);
     s.states.lastStartDay.set(save.lastStartDay);
     save.bat.forEach((row, i) => BAT_KEYS.forEach((k, j) => { s.bat[i][k] = row[j]; }));
     save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j]; }));

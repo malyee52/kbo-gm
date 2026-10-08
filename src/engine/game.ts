@@ -4,7 +4,7 @@ import type { Rates } from '../data/types';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
-import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, type PlayerStates, type TeamSeason } from './team';
+import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, PitSkill, SimPlayer } from './types';
 
 /** 시즌 전체 리그 합계 (검증용) */
@@ -120,61 +120,111 @@ function combine(batRate: number, pitRate: number, lg: number): number {
   return o / (1 + o);
 }
 
+const STARTER_LIMIT_SCALE = 1.08;
+/** 어제 던진 필승조를 오늘 아낄 확률 (임시값, 상위 구원 투수 시즌 등판 80경기 안팎에 맞춤) */
+const SPARE_YESTERDAY = 0.4;
+
 function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameContext): PitcherInGame {
   const skill = p.pit!;
   const line = ctx.pit[p.idx];
   line.g++;
   if (isStarter) line.gs++;
-  const base = isStarter ? skill.stamina : skill.reliefStint;
+  // 선발 한계는 기록으로 추정한 체력보다 조금 길게 (체력 추정이 평균 쪽으로 당겨져 있어 실제 선발 타자 수 23.4명에 맞춤, 임시값)
+  const base = isStarter ? skill.stamina * STARTER_LIMIT_SCALE : skill.reliefStint;
   return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead };
 }
 
+/** 쓸 수 있는 구원 투수: 이번 경기에 안 나왔고, 쉴 만큼 쉬었고, 3연투가 아닌 투수 */
+function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
+  const st = ctx.states;
+  return fld.ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx)
+    && currentFatigue(st, p.idx, ctx.day) < FATIGUE_AVAILABLE_BELOW && !needsRest(st, p.idx, ctx.day));
+}
+
+/**
+ * 구원 투수 고르기 (2026-10-08 사용자 지적 "투수 교체가 비현실적"으로 다시 짬).
+ * 불펜을 좋은 순으로 줄 세워 역할을 나눈다: 마무리, 필승조(좋은 순 1·2번째 = 8회·7회 셋업), 추격조(그다음), 롱릴리프·패전조(나머지).
+ * 역할 나누기와 점수 차 기준은 임시값.
+ */
 function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext): SimPlayer | null {
   const { ts } = fld;
   const st = ctx.states;
-  const fresh: SimPlayer[] = [];
-  for (const p of ts.bullpen) {
-    if (fld.usedIdx.has(p.idx)) continue;
-    if (currentFatigue(st, p.idx, ctx.day) < FATIGUE_AVAILABLE_BELOW) fresh.push(p);
-  }
-  let pool = fresh;
+  const pool = availableRelievers(fld, ctx);
   if (pool.length === 0) {
-    // 쉴 만큼 쉰 투수가 없으면 덜 지친 투수부터
-    pool = ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx));
-    if (pool.length === 0) return null;
-    pool.sort((a, b) => currentFatigue(st, a.idx, ctx.day) - currentFatigue(st, b.idx, ctx.day));
-    return pool[0];
+    // 쉴 만큼 쉰 투수가 없으면 덜 지친 투수부터 (3연투는 마지막까지 미룬다)
+    const rest = ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx));
+    if (rest.length === 0) return null;
+    const cost = (p: SimPlayer) => currentFatigue(st, p.idx, ctx.day) + (needsRest(st, p.idx, ctx.day) ? 100 : 0);
+    return rest.reduce((a, b) => (cost(b) < cost(a) ? b : a));
   }
   const closer = ts.closer;
-  const saveSituation = inning >= 9 && lead >= 1 && lead <= 3;
-  if (closer && pool.includes(closer) && (saveSituation || (inning >= 9 && lead === 0))) return closer;
-  const nonCloser = pool.filter((p) => p !== closer);
-  const cands = nonCloser.length ? nonCloser : pool;
-  if (inning >= 7 && Math.abs(lead) <= 2) {
-    return cands.reduce((a, b) => (b.value < a.value ? b : a)); // 접전 후반: 가장 좋은 구원
+  const closerOk = !!closer && pool.includes(closer);
+  // 마무리: 9회 이후 3점 차 이내 리드, 또는 9회 이후 동점(홈은 끝내기를 기다리며, 원정은 연장)
+  if (closerOk && inning >= 9 && lead >= 0 && lead <= 3) return closer;
+  // 불펜 서열: 좋은 순 (value가 낮을수록 좋다). 마무리는 빼고
+  const order = ts.bullpen.filter((p) => p !== closer).sort((a, b) => a.value - b.value);
+  const avail = order.filter((p) => pool.includes(p));
+  if (avail.length === 0) return closerOk ? closer : null;
+  const rank = (p: SimPlayer) => order.indexOf(p);
+  const close = lead >= -2 && lead <= 3; // 이기고 있거나 근소하게 지는 접전
+  const late = inning >= 7;
+  if (late && close && lead >= 0) {
+    // 필승조: 8회 이후는 1번 셋업, 7회는 2번 셋업부터. 없으면 다음으로 좋은 투수
+    const want = inning >= 8 ? 0 : 1;
+    const cands = avail.filter((p) => rank(p) >= want);
+    const list = cands.length ? cands : avail;
+    // 어제 던졌으면 확률적으로 아끼고 다음 투수를 쓴다
+    const pick = list.find((p) => st.fatigueDay[p.idx] !== ctx.day - 1 || !ctx.rng.chance(SPARE_YESTERDAY));
+    return pick ?? list[0];
   }
-  if (inning <= 4) {
-    return cands.reduce((a, b) => (b.pit!.reliefStint > a.pit!.reliefStint ? b : a)); // 이른 강판: 길게 던질 투수
+  if (late && close) {
+    // 근소하게 지는 후반: 필승조는 아끼고 추격조(3~5번째)부터
+    return avail.find((p) => rank(p) >= 2) ?? avail[avail.length - 1];
   }
-  // 그 밖: 좋은 투수는 아끼고 하위 절반에서 고른다
-  const sorted = [...cands].sort((a, b) => b.value - a.value);
-  return sorted[ctx.rng.int(Math.max(1, Math.ceil(sorted.length / 2)))];
+  if (inning <= 5) {
+    // 이른 강판: 아래쪽 절반 중 가장 길게 던질 투수 (롱릴리프)
+    const low = avail.filter((p) => rank(p) >= 2);
+    const cands = low.length ? low : avail;
+    return cands.reduce((a, b) => (b.pit!.reliefStint > a.pit!.reliefStint ? b : a));
+  }
+  // 점수 차가 큰 경기나 중반: 필승조를 빼고 아래쪽에서 고른다
+  const low = avail.filter((p) => rank(p) >= 2);
+  const cands = low.length ? low : avail;
+  return cands[ctx.rng.int(cands.length)];
 }
 
-function maybeChangePitcher(fld: Side, bat: Side, inning: number, outs: number, basesEmpty: boolean, ctx: GameContext): void {
+/**
+ * 투수 교체 판단. 타석마다 부르지만, 감독처럼 이닝 시작에 바꾸는 것이 기본이다.
+ * 이닝 중간에는 한계를 크게 넘었거나 이번 이닝에 무너질 때만 바꾼다. 기준값은 임시값 (실제 2025 KBO의 선발 이닝·구원 이닝에 맞춤).
+ * start: 반 이닝의 첫 타석. halfRuns: 이번 반 이닝에 내준 점수
+ */
+function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEmpty: boolean, start: boolean, halfRuns: number, ctx: GameContext): void {
   const pg = fld.pitcher;
   const lead = fld.runs - bat.runs;
+  const closer = fld.ts.closer;
   let pull = false;
   if (pg.isStarter) {
-    if (pg.bf >= pg.limit) pull = true;
-    else if (pg.runs >= 7 || (pg.runs >= 5 && inning <= 5 && pg.bf >= 12)) pull = true;
-  } else if (pg.bf >= pg.limit || pg.runs >= 4) {
-    pull = true;
+    if (start) {
+      // 이닝 시작: 한 이닝을 더 못 버티거나, 이미 많이 내줬으면 내린다
+      pull = pg.bf + 2 >= pg.limit || pg.runs >= 6 || (pg.runs >= 5 && inning <= 4);
+    } else {
+      pull = pg.bf >= pg.limit + 4 // 한계를 크게 넘김
+        || (pg.bf >= pg.limit && !basesEmpty) // 한계를 넘긴 뒤 주자를 내보냄
+        || pg.runs >= 7
+        || (halfRuns >= 3 && !basesEmpty && (pg.runs >= 4 || pg.bf >= pg.limit - 3)) // 이번 이닝 무너짐
+        || (pg.runs >= 5 && inning <= 3 && !basesEmpty); // 초반 대량 실점
+    }
+  } else if (pg.p === closer) {
+    // 마무리는 경기를 끝내게 둔다. 크게 흔들릴 때만
+    pull = !start && (pg.runs >= 3 || pg.bf >= pg.limit + 4);
+  } else if (start) {
+    // 구원: 다음 이닝(타자 약 4명)을 맡기에 모자라면 이닝 시작에 바꾼다
+    pull = pg.bf + 3 >= pg.limit || pg.runs >= 3;
+  } else {
+    pull = pg.runs >= 3 || pg.bf >= pg.limit + 3 || (halfRuns >= 2 && !basesEmpty && Math.abs(lead) <= 2 && inning >= 7);
   }
-  const closer = fld.ts.closer;
-  if (!pull && inning >= 9 && outs === 0 && basesEmpty && lead >= 1 && lead <= 3 && closer && pg.p !== closer && !fld.usedIdx.has(closer.idx)) {
-    if (currentFatigue(ctx.states, closer.idx, ctx.day) < FATIGUE_AVAILABLE_BELOW) pull = true;
-  }
+  // 9회 세이브 상황에서 마무리가 쉬었으면 이닝 시작에 마무리로
+  if (!pull && start && inning >= 9 && lead >= 1 && lead <= 3 && closer && pg.p !== closer && availableRelievers(fld, ctx).includes(closer)) pull = true;
   if (!pull) return;
   const next = pickReliever(fld, lead, inning, ctx);
   if (!next) return;
@@ -289,6 +339,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   /** 공격 반 이닝. 끝내기면 true */
   const playHalf = (bat: Side, fld: Side, inning: number): boolean => {
     let outs = 0;
+    let first = true;
+    const runsAtStart = bat.runs;
     halfUnearned = false;
     const bases: (Runner | null)[] = [null, null, null];
     const walkOff = () => bat.isHome && inning >= 9 && bat.runs > fld.runs;
@@ -300,7 +352,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     };
 
     while (outs < 3) {
-      maybeChangePitcher(fld, bat, inning, outs, !bases[0] && !bases[1] && !bases[2], ctx);
+      maybeChangePitcher(fld, bat, inning, !bases[0] && !bases[1] && !bases[2], first, bat.runs - runsAtStart, ctx);
+      first = false;
       const pg = fld.pitcher;
 
       // 도루: 1루 주자, 2루가 비었을 때
@@ -520,6 +573,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       const i = pg.p.idx;
       if (pg.isStarter) st.lastStartDay[i] = ctx.day;
       st.fatigue[i] = currentFatigue(st, i, ctx.day) + pg.bf;
+      st.streak[i] = st.fatigueDay[i] === ctx.day - 1 ? st.streak[i] + 1 : st.fatigueDay[i] === ctx.day ? Math.max(1, st.streak[i]) : 1;
       st.fatigueDay[i] = ctx.day;
     }
   }

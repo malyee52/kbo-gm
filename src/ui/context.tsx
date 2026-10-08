@@ -5,7 +5,7 @@ import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
 import { teamColor } from './teams';
 
-export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'save' | 'season-end' | 'offseason';
+export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'save' | 'season-end' | 'offseason';
 
 export interface GameUi {
   store: BrowserStore;

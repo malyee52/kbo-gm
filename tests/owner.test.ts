@@ -114,7 +114,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   beforeAll(() => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop', difficulty: 'hard' }, FAST);
+    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-2', difficulty: 'hard' }, FAST);
     firstTeam = g.teamIdx;
     // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
     g.owner.trust = 30;
@@ -133,7 +133,8 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   it('목표를 놓쳐 해고되고, 하위권 구단의 영입 제의를 받는다. 고르기 전에는 오프시즌을 진행할 수 없다', () => {
     const ps = g.league.lastSeason!.postseason!;
-    if (ps.champion === firstTeam) return; // 이 시드에서 우승하면 이 시험은 성립하지 않는다 (지금 시드는 아님)
+    // 이 시드에서 우승하면 이 시험은 성립하지 않는다. 엔진이 바뀌어 우승하게 되면 시드를 바꾼다 (2026-10-08 투수 교체 개편 때 m7-loop → m7-loop-2)
+    expect(ps.champion, '이 시드에서 LG가 우승했습니다. 시드를 바꾸세요').not.toBe(firstTeam);
     expect(g.owner.trust).toBeLessThan(FIRE_BELOW);
     expect(g.owner.offers!.length).toBeGreaterThan(0);
     expect(g.owner.offers).not.toContain(firstTeam);
@@ -149,6 +150,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(g.owner.trust).toBe(50);
     while (g.offseason!.stage !== 'ready') {
       if (g.offseason!.stage === 'draft') g.autoDraft();
+      if (g.offseason!.stage === 'comp') g.autoComp();
       if (g.offseason!.stage === 'release') g.autoRelease();
       expect(g.nextStage().ok).toBe(true);
     }
@@ -164,7 +166,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(b.owner.offers).toEqual(save.league.owner!.offers);
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     // 신뢰도·목표는 이 시험에서 직접 바꿔 조작 기록에 없다. 그래서 해고까지 재현하지는 않고 시즌 결과가 같은지만 본다
-    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
+    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-2', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
     c.advance(100000);
     expect(c.season.teams).toEqual(b.season.teams);
   });

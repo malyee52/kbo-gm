@@ -14,6 +14,8 @@ export interface PlayerStates {
   /** 불펜 피로도와 그 값을 기록한 날짜. 하루에 5씩 회복 */
   fatigue: Float32Array;
   fatigueDay: Int32Array;
+  /** fatigueDay까지 연속으로 던진 날 수 (연투 관리) */
+  streak: Int32Array;
   lastStartDay: Int32Array;
 }
 
@@ -22,12 +24,18 @@ export function newPlayerStates(n: number): PlayerStates {
     absentUntil: new Int32Array(n),
     fatigue: new Float32Array(n),
     fatigueDay: new Int32Array(n),
+    streak: new Int32Array(n),
     lastStartDay: new Int32Array(n).fill(-99),
   };
 }
 
 export const FATIGUE_RECOVERY_PER_DAY = 5;
 export const FATIGUE_AVAILABLE_BELOW = 6;
+
+/** 어제까지 이틀 연속 던져 오늘 쉬어야 하는가 (3연투는 피한다) */
+export function needsRest(st: PlayerStates, idx: number, day: number): boolean {
+  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2;
+}
 
 export function currentFatigue(st: PlayerStates, idx: number, day: number): number {
   return Math.max(0, st.fatigue[idx] - FATIGUE_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));

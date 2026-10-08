@@ -29,11 +29,18 @@ function toOffseason(seed: string, team = lgIdx): GameSession {
   return g;
 }
 
+/** 다음 단계로 (FA 보상선수 단계면 우리 보상을 자동으로 고른 뒤) */
+function step(g: GameSession): void {
+  if (g.offseason!.stage === 'comp') g.autoComp();
+  g.nextStage();
+}
+
 /** 플레이어 결정을 모두 자동으로 해서 오프시즌을 끝내고 개막한다 */
 function finishOffseason(g: GameSession): void {
   let guard = 0;
   while (g.offseason && g.offseason.stage !== 'ready' && guard++ < 50) {
     if (g.offseason.stage === 'draft') g.autoDraft();
+    if (g.offseason.stage === 'comp') g.autoComp();
     if (g.offseason.stage === 'release') g.autoRelease();
     g.nextStage();
   }
@@ -163,6 +170,27 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(delta(34, 45)).toBeLessThan(0.35);
   });
 
+  it('성장 결과 화면 자료: 소속 선수마다 전후 기여가 남고, 은퇴한 선수는 없으며, 젊은 선수는 대체로 오르고 노장은 대체로 내린다', () => {
+    const list = g.offseason!.growth!;
+    expect(list.filter((x) => x.team === lgIdx).length).toBeGreaterThan(40);
+    const ids = new Set(list.map((x) => x.id));
+    expect(ids.size).toBe(list.length);
+    for (const x of list) {
+      expect(Number.isFinite(x.before) && Number.isFinite(x.after)).toBe(true);
+      expect(g.league.players.find((p) => p.id === x.id)!.team).toBeGreaterThanOrEqual(0);
+    }
+    const retired = new Set((g.league.retired ?? []).filter((r) => r.year === 2026).map((r) => r.id));
+    expect(list.some((x) => retired.has(x.id))).toBe(false);
+    const upShare = (lo: number, hi: number) => {
+      const xs = list.filter((x) => x.age !== null && x.age >= lo && x.age <= hi && !x.tags?.includes('입대'));
+      return xs.filter((x) => x.after > x.before).length / xs.length;
+    };
+    expect(upShare(18, 23)).toBeGreaterThan(0.6);
+    expect(upShare(34, 45)).toBeLessThan(0.4);
+    // 저장했다 불러와도 남는다
+    expect(GameSession.load(store, roundTrip(g.toSave()), FAST).offseason!.growth).toEqual(list);
+  });
+
   it('FA 제시 검사: 최저 연봉 미만, 샐러리캡 초과는 받지 않는다', () => {
     const e = g.offseason!.fa.entries.find((x) => x.from !== g.teamIdx)!;
     expect(g.offerFa(e.id, MIN_SALARY - 1, 2).ok).toBe(false);
@@ -170,7 +198,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(g.offerFa(e.id, e.ask * 1.2, e.years).ok).toBe(true);
   });
 
-  it('FA: 요구액보다 넉넉히 제시하면 첫 라운드에 우리와 계약하고, 원 소속 구단에 보상금이 기록된다', () => {
+  it('FA: 요구액보다 넉넉히 제시하면 첫 라운드에 우리와 계약하고, 원 소속 구단에 보상이 간다 (C등급은 보상금, A·B등급은 보상선수 단계)', () => {
     afterFa = GameSession.load(store, roundTrip(g.toSave()), FAST);
     const e = afterFa.offseason!.fa.entries.find((x) => x.from !== afterFa.teamIdx && x.status === 'open')!;
     expect(afterFa.offerFa(e.id, Math.round(e.ask * 1.3), e.years).ok).toBe(true);
@@ -181,14 +209,22 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     const p = afterFa.leaguePlayer(e.id)!;
     expect(p.team).toBe(afterFa.teamIdx);
     expect(p.faCount).toBeGreaterThanOrEqual(1);
-    const ledger = afterFa.league.ledger.find((l) => l.note.startsWith(p.name));
-    expect(ledger?.to).toBe(e.from);
-    expect(ledger?.amount).toBe(Math.round(COMPENSATION[e.grade] * e.prevSalary));
+    if (e.grade === 'C') {
+      const ledger = afterFa.league.ledger.find((l) => l.note.startsWith(p.name));
+      expect(ledger?.to).toBe(e.from);
+      expect(ledger?.amount).toBe(Math.round(COMPENSATION[e.grade] * e.prevSalary));
+    } else {
+      // 보상선수 단계는 FA 시장이 끝난 뒤 열린다
+      while (afterFa.offseason!.stage === 'fa') afterFa.nextStage();
+      const c = afterFa.offseason!.comp!.find((x) => x.fa === e.id)!;
+      expect(c.to).toBe(afterFa.teamIdx);
+      expect(c.from).toBe(e.from);
+    }
   });
 
   it('외국인: 끝나면 모든 구단이 아시아쿼터 빼고 3명 이하, 아시아쿼터 1명 이하, 금액 상한을 지킨다', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
-    while (h.offseason!.stage === 'fa') h.nextStage();
+    while (h.offseason!.stage === 'fa' || h.offseason!.stage === 'comp') step(h);
     expect(h.offseason!.stage).toBe('foreign');
     // 우리 차례: 후보 중 계약 가능한 선수 하나와 계약해 본다
     const pool = h.offseason!.foreign!.pool.map((id) => h.leaguePlayer(id)!);
@@ -207,7 +243,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
 
   it('드래프트: 11라운드, 전년도 순위 역순, 구단마다 11명, 2027 입단은 실제 지명 명단의 선수', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
-    while (h.offseason!.stage !== 'draft') h.nextStage();
+    while (h.offseason!.stage !== 'draft') step(h);
     expect(h.nextStage().ok).toBe(false); // 우리 차례에 멈춰 있다
     const firstPick = h.offseason!.draft!.picks[0];
     const st = h.league.lastSeason!.standings;
@@ -238,7 +274,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     const h = GameSession.create(store, { year: 2005, teamIdx: 0, seed: 'ryu' }, FAST);
     h.advance(100000);
     h.beginOffseason();
-    while (h.offseason!.stage !== 'draft') h.nextStage();
+    while (h.offseason!.stage !== 'draft') step(h);
     const ryu = h.leaguePlayer('76715')!; // 류현진: 실제 선수 id
     expect(ryu.name).toBe('류현진');
     expect(ryu.birthYear).toBe(1987);
@@ -253,7 +289,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
   it('지명 명단이 없는 해의 드래프트는 실존 선수와 이름이 겹치지 않는 가상 신인', () => {
     const noList = { ...store, drafts: undefined };
     const h = GameSession.load(noList, roundTrip(g.toSave()), FAST);
-    while (h.offseason!.stage !== 'draft') h.nextStage();
+    while (h.offseason!.stage !== 'draft') step(h);
     h.autoDraft();
     const realNames = new Set([...store.players.values()].map((m) => m.name));
     for (const pk of h.offseason!.draft!.picks) {
@@ -269,7 +305,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     while (h.offseason!.stage !== 'salary') {
       if (h.offseason!.stage === 'draft') h.autoDraft();
-      h.nextStage();
+      step(h);
     }
     const s = h.offseason!.salary!;
     const [id, demand] = Object.entries(s.demands).find(([k]) => k in s.offers)!;
@@ -284,7 +320,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     while (h.offseason!.stage !== 'release') {
       if (h.offseason!.stage === 'draft') h.autoDraft();
-      h.nextStage();
+      step(h);
     }
     const mine = () => h.league.players.filter((p) => p.team === h.teamIdx && !isServing(p)).length;
     if (mine() > ORG_LIMIT) expect(h.nextStage().ok).toBe(false);
@@ -367,5 +403,66 @@ describe('오프시즌 저장·불러오기와 재현', () => {
     h.advance(5);
     g.advance(5);
     expect(h.season.teams).toEqual(g.season.teams);
+  });
+});
+
+describe('FA 보상선수 (A·B등급 이적)', () => {
+  // 여러 시드로 결산해 A·B등급 이적이 있는 오프시즌을 찾는다
+  let h: GameSession;
+  beforeAll(() => {
+    for (const seed of ['comp-1', 'comp-2', 'comp-3', 'comp-4']) {
+      const g = toOffseason(seed);
+      while (g.offseason!.stage === 'fa') g.nextStage();
+      if (g.offseason!.stage === 'comp') { h = g; break; }
+    }
+  }, 300_000);
+
+  it('보호 인원(A 20명, B 25명)을 지키고, 외국인·군 보류·이번 FA 계약 선수는 명단에 넣지 않는다', () => {
+    expect(h, 'A·B등급 이적이 있는 시드가 없습니다').toBeDefined();
+    const off = h.offseason!;
+    for (const c of off.comp!) {
+      expect(c.protect.length).toBeLessThanOrEqual(c.grade === 'A' ? 20 : 25);
+      for (const id of c.protect) {
+        const p = h.leaguePlayer(id)!;
+        expect(p.team).toBe(c.to);
+        expect(Off.autoProtected(off, p)).toBe(false);
+      }
+    }
+  });
+
+  it('마감하면 보상선수는 원 소속 구단으로 옮기고(보호 명단·자동 보호 밖 선수), 보상금이 장부에 남는다', () => {
+    const off = h.offseason!;
+    const before = new Map(off.comp!.map((c) => [c.fa, Off.compCandidates(h.league, off, c).map((p) => p.id)]));
+    if (off.comp!.some((c) => c.from === h.teamIdx)) {
+      expect(h.nextStage().ok).toBe(false); // 우리 보상을 고르기 전에는 넘어갈 수 없다
+      h.autoComp();
+    }
+    expect(h.nextStage().ok).toBe(true);
+    expect(h.offseason!.stage).toBe('foreign');
+    for (const c of h.offseason!.comp!) {
+      expect(c.pick).not.toBeNull();
+      const fa = h.leaguePlayer(c.fa)!;
+      const ledger = h.league.ledger.find((l) => l.note.startsWith(`${fa.name} FA 보상금`))!;
+      expect(ledger.to).toBe(c.from);
+      if (c.pick === 'cash') {
+        expect(ledger.amount).toBe(Math.round((c.grade === 'A' ? 3 : 2) * c.prevSalary));
+      } else {
+        expect(before.get(c.fa)).toContain(c.pick);
+        expect(h.leaguePlayer(c.pick!)!.team).toBe(c.from);
+        expect(ledger.amount).toBe(Math.round((c.grade === 'A' ? 2 : 1) * c.prevSalary));
+      }
+    }
+  });
+
+  it('보호선수 명단 검사: 다른 구단 선수나 인원 초과는 받지 않는다', () => {
+    const off = { ...h.offseason!, stage: 'comp' as const };
+    const c = { ...off.comp![0], to: h.teamIdx, pick: null };
+    off.comp = [c];
+    off.userTeam = h.teamIdx;
+    const pool = Off.protectPool(h.league, off, c).map((p) => p.id);
+    const other = h.league.players.find((p) => p.team >= 0 && p.team !== h.teamIdx)!;
+    expect(Off.setProtectByUser(h.league, off, c.fa, [other.id]).ok).toBe(false);
+    expect(Off.setProtectByUser(h.league, off, c.fa, pool.slice(0, (c.grade === 'A' ? 20 : 25) + 1)).ok).toBe(false);
+    expect(Off.setProtectByUser(h.league, off, c.fa, pool.slice(0, 5)).ok).toBe(true);
   });
 });
