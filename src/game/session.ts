@@ -70,6 +70,9 @@ export type GameAction =
   | { year: number; type: 'draft'; id: string | null }
   | { year: number; type: 'draft-auto' }
   | { year: number; type: 'salary-offer'; id: string; amount: number }
+  | { year: number; type: 'comp-protect'; fa: string; ids: string[] }
+  | { year: number; type: 'comp-pick'; fa: string; pick: string }
+  | { year: number; type: 'comp-auto' }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'next' }
@@ -849,6 +852,9 @@ export class GameSession {
       case 'draft': res = Off.draftByUser(L, off, a.id); break;
       case 'draft-auto': Off.autoDraftRest(L, off); break;
       case 'salary-offer': res = Off.setSalaryOffer(off, a.id, a.amount); break;
+      case 'comp-protect': res = Off.setProtectByUser(L, off, a.fa, a.ids); break;
+      case 'comp-pick': res = Off.pickCompByUser(L, off, a.fa, a.pick); break;
+      case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'accept-offer': {
@@ -982,6 +988,9 @@ export class GameSession {
   draft(id: string | null) { return this.dispatchOff({ year: this.year, type: 'draft', id }); }
   autoDraft() { return this.dispatchOff({ year: this.year, type: 'draft-auto' }); }
   setSalaryOffer(id: string, amount: number) { return this.dispatchOff({ year: this.year, type: 'salary-offer', id, amount }); }
+  setProtect(fa: string, ids: string[]) { return this.dispatchOff({ year: this.year, type: 'comp-protect', fa, ids }); }
+  pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
+  autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   release(id: string) { return this.dispatchOff({ year: this.year, type: 'release', id }); }
   autoRelease() { return this.dispatchOff({ year: this.year, type: 'release-auto' }); }
   nextStage() { return this.dispatchOff({ year: this.year, type: 'next' }); }

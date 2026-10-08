@@ -89,8 +89,18 @@ export function faEligible(p: LeaguePlayer, year: number): boolean {
 
 export type FaGrade = 'A' | 'B' | 'C';
 
-/** 보상금 비율 (기획서 8장: 보상선수 없이 보상금만) */
-export const COMPENSATION: Record<FaGrade, number> = { A: 3, B: 2, C: 1.5 };
+/**
+ * FA 보상 (KBO 등급제, 2026-10-08 사용자 요청으로 보상선수 도입. 처음 기획서 8장은 보상금만이었다).
+ * 원 소속 구단은 "직전 연봉 × withPlayer + 보호선수 밖 1명" 또는 "직전 연봉 × cashOnly"를 고른다. C등급은 보상선수 없이 150%.
+ * protect: 영입 구단이 내는 보호선수 수 (외국인·군 보류·이번 FA 계약 선수는 자동 보호라 세지 않는다).
+ */
+export const FA_COMP: Record<FaGrade, { cashOnly: number; withPlayer: number | null; protect: number | null }> = {
+  A: { cashOnly: 3, withPlayer: 2, protect: 20 },
+  B: { cashOnly: 2, withPlayer: 1, protect: 25 },
+  C: { cashOnly: 1.5, withPlayer: null, protect: null },
+};
+/** AI가 FA 영입 비용을 셀 때 쓰는 보상 비율 (보상금만 고를 때 기준) */
+export const COMPENSATION: Record<FaGrade, number> = { A: FA_COMP.A.cashOnly, B: FA_COMP.B.cashOnly, C: FA_COMP.C.cashOnly };
 
 /**
  * FA 등급 (2020년 시즌 뒤 등급제, 출처 확인): 구단 연봉 순위와 리그 전체 연봉 순위로 정한다.

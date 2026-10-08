@@ -18,7 +18,7 @@ import { foreignName, koreanName } from './names';
 import {
   ASIA_NEW_CAP, capPayroll, COMPENSATION, faEligible, faGrade, faYears, FOREIGN_ASIA, FOREIGN_NEW_CAP, FOREIGN_REGULAR,
   FOREIGN_TOTAL_CAP, foreignSalary, marketSalary, MIN_SALARY, nextReserveSalary, ORG_LIMIT, reserveTarget, runsForSalary, salaryCap,
-  SERVICE_SHARE, WON_PER_RUN, type FaGrade,
+  SERVICE_SHARE, WON_PER_RUN, FA_COMP, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -26,10 +26,10 @@ import { worldFromLeague } from './world';
 
 type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts'>;
 
-export type Stage = 'fa' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
-export const STAGES: Stage[] = ['fa', 'foreign', 'draft', 'salary', 'release', 'ready'];
+export type Stage = 'fa' | 'comp' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
+export const STAGES: Stage[] = ['fa', 'comp', 'foreign', 'draft', 'salary', 'release', 'ready'];
 export const STAGE_LABEL: Record<Stage, string> = {
-  fa: 'FA', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', ready: '개막 준비',
+  fa: 'FA', comp: 'FA 보상선수', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', ready: '개막 준비',
 };
 /** 오프시즌 기록의 구분: 단계 + 결산(은퇴·병역 등) */
 export type LogStage = Stage | 'settle';
@@ -128,6 +128,22 @@ export interface OffseasonState {
   log: { stage: LogStage; text: string; mine: boolean; major?: boolean }[];
   /** 시즌 뒤 성장·하락 결과 (2026-10-08 추가, 예전 저장에는 없다) */
   growth?: GrowthEntry[];
+  /** FA 보상선수 (A·B등급 이적 건마다 하나, 2026-10-08 추가) */
+  comp?: CompCase[];
+}
+
+/** FA 보상 한 건: 영입 구단(to)이 보호선수 명단을 내고, 원 소속 구단(from)이 보상선수 또는 보상금만을 고른다 */
+export interface CompCase {
+  /** 이적한 FA 선수 id */
+  fa: string;
+  from: number;
+  to: number;
+  grade: FaGrade;
+  prevSalary: number;
+  /** 보호선수 (자동 보호 선수는 넣지 않는다) */
+  protect: string[];
+  /** 고른 보상선수 id, 'cash'(보상금만), 아직이면 null */
+  pick: string | null;
 }
 
 /** 한 선수의 성장 판정 결과. before·after는 같은 기준(다음 시즌 나이 반영 전)의 한 시즌 기여(런) */
@@ -469,8 +485,128 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       log(off, 'fa', `${p.name}: 계약하지 못하고 리그를 떠났습니다.`, e.from === off.userTeam);
     }
   }
-  enterForeign(league, off, store, params);
+  enterComp(league, off, store, params);
 }
+
+// ---- FA 보상선수
+
+/** 보호선수 명단에 넣지 않아도 자동 보호되는 선수: 외국인, 군 보류(복무 중), 이번 오프시즌 FA 계약 선수 */
+export function autoProtected(off: OffseasonState, p: LeaguePlayer): boolean {
+  if (p.foreign || isServing(p)) return true;
+  return off.fa.entries.some((e) => e.id === p.id && e.status === 'signed');
+}
+
+/** 보호선수 명단 대상 (영입 구단 소속 중 자동 보호가 아닌 선수) */
+export function protectPool(league: LeagueState, off: OffseasonState, c: CompCase): LeaguePlayer[] {
+  return league.players.filter((p) => p.team === c.to && !autoProtected(off, p));
+}
+
+/** AI가 매기는 선수 가치 (보호·지명 판단): 지금과 앞으로 몇 해의 기여 (런) */
+function compValue(view: LeagueView, id: string): number {
+  return playerValue(view.sim.get(id)!, view.ctx, horizonWeights('rebuild', 1));
+}
+
+/** 가치 높은 순으로 보호 인원만큼 (AI 구단의 명단, 플레이어 구단의 추천 명단) */
+export function suggestProtect(league: LeagueState, off: OffseasonState, c: CompCase, view: LeagueView): string[] {
+  return protectPool(league, off, c)
+    .map((p) => ({ id: p.id, v: compValue(view, p.id) }))
+    .sort((a, b) => b.v - a.v || a.id.localeCompare(b.id))
+    .slice(0, FA_COMP[c.grade].protect!)
+    .map((x) => x.id);
+}
+
+/** 보상선수 후보: 영입 구단 소속 중 자동 보호도 아니고 보호 명단에도 없는 선수 */
+export function compCandidates(league: LeagueState, off: OffseasonState, c: CompCase): LeaguePlayer[] {
+  const prot = new Set(c.protect);
+  return protectPool(league, off, c).filter((p) => !prot.has(p.id));
+}
+
+function enterComp(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  const cases: CompCase[] = [];
+  for (const e of off.fa.entries) {
+    if (e.status !== 'signed' || e.team === undefined || e.team === e.from || FA_COMP[e.grade].withPlayer === null) continue;
+    cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
+  }
+  if (!cases.length) {
+    enterForeign(league, off, store, params);
+    return;
+  }
+  off.stage = 'comp';
+  off.comp = cases;
+  const view = leagueView(league, store, params);
+  // 영입 구단의 보호선수 명단 (플레이어 구단 것은 추천 명단으로 채워 두고 고칠 수 있다)
+  for (const c of cases) c.protect = suggestProtect(league, off, c, view);
+}
+
+export function setProtectByUser(league: LeagueState, off: OffseasonState, fa: string, ids: string[]): OfferCheck {
+  const c = off.comp?.find((x) => x.fa === fa);
+  if (off.stage !== 'comp' || !c || c.to !== off.userTeam) return { ok: false, message: '우리 구단이 보호선수 명단을 낼 건이 아닙니다.' };
+  const pool = new Set(protectPool(league, off, c).map((p) => p.id));
+  const uniq = [...new Set(ids)];
+  if (uniq.some((id) => !pool.has(id))) return { ok: false, message: '보호선수 명단에 넣을 수 없는 선수가 있습니다.' };
+  const n = FA_COMP[c.grade].protect!;
+  if (uniq.length > n) return { ok: false, message: `보호선수는 ${n}명까지입니다.` };
+  c.protect = uniq;
+  return { ok: true, message: `보호선수 ${uniq.length}명을 정했습니다.` };
+}
+
+export function pickCompByUser(league: LeagueState, off: OffseasonState, fa: string, pick: string): OfferCheck {
+  const c = off.comp?.find((x) => x.fa === fa);
+  if (off.stage !== 'comp' || !c || c.from !== off.userTeam) return { ok: false, message: '우리 구단이 보상을 고를 건이 아닙니다.' };
+  if (pick !== 'cash' && !compCandidates(league, off, c).some((p) => p.id === pick)) {
+    return { ok: false, message: '보상선수로 고를 수 없는 선수입니다 (보호선수이거나 자동 보호 대상).' };
+  }
+  c.pick = pick;
+  const p = pick === 'cash' ? null : league.players.find((x) => x.id === pick)!;
+  return { ok: true, message: p ? `보상선수로 ${p.name} 선수를 골랐습니다.` : '보상금만 받기로 했습니다.' };
+}
+
+/** AI 기준의 보상 선택: 보호 밖 최고 선수의 가치가 추가로 받을 수 있는 보상금(연봉 차액)보다 크면 선수, 아니면 보상금만 */
+function aiCompPick(league: LeagueState, off: OffseasonState, c: CompCase, view: LeagueView): string {
+  const rule = FA_COMP[c.grade];
+  const best = compCandidates(league, off, c)
+    .map((p) => ({ p, v: compValue(view, p.id) }))
+    .sort((a, b) => b.v - a.v || a.p.id.localeCompare(b.p.id))[0];
+  const extraCash = ((rule.cashOnly - rule.withPlayer!) * c.prevSalary) / WON_PER_RUN;
+  return best && best.v > extraCash ? best.p.id : 'cash';
+}
+
+/** 플레이어 구단의 보상을 AI 기준으로 고른다 (자동 선택) */
+export function autoCompUser(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams = DEFAULT_PARAMS): void {
+  if (off.stage !== 'comp') return;
+  const view = leagueView(league, store, params);
+  for (const c of off.comp ?? []) if (c.from === off.userTeam && c.pick === null) c.pick = aiCompPick(league, off, c, view);
+}
+
+/** 단계를 마감한다: 고르지 않은 건은 AI가 고르고, 선수 이동과 보상금을 처리한다 */
+function finishComp(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  const view = leagueView(league, store, params);
+  const players = byId(league);
+  for (const c of off.comp ?? []) {
+    const rule = FA_COMP[c.grade];
+    const faName = players.get(c.fa)!.name;
+    const cands = compCandidates(league, off, c);
+    // 앞선 건에서 이미 옮겨 간 선수는 고를 수 없다
+    let pick = c.pick;
+    if (pick !== null && pick !== 'cash' && !cands.some((p) => p.id === pick)) pick = null;
+    if (pick === null) pick = aiCompPick(league, off, c, view);
+    c.pick = pick;
+    const mine = c.from === off.userTeam || c.to === off.userTeam;
+    if (pick === 'cash') {
+      const amount = Math.round(rule.cashOnly * c.prevSalary);
+      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${c.grade}등급, 보상선수 없이)` });
+      log(off, 'comp', `${faName} 보상: ${league.teams[c.from].name}, 보상금만 ${(amount / 10000).toFixed(1)}억 원 (${c.grade}등급)`, mine);
+    } else {
+      const amount = Math.round(rule.withPlayer! * c.prevSalary);
+      const p = players.get(pick)!;
+      p.team = c.from;
+      moveInView(view, view.sim.get(p.id)!, c.from);
+      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${c.grade}등급, 보상선수 ${p.name})` });
+      log(off, 'comp', `${faName} 보상선수: ${p.name}, ${league.teams[c.to].name} → ${league.teams[c.from].name} (보상금 ${(amount / 10000).toFixed(1)}억 원)`, mine, true);
+    }
+  }
+}
+
 
 function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer, round: number, view: LeagueView): void {
   const p = league.players.find((x) => x.id === e.id)!;
@@ -492,9 +628,13 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
     log(off, 'fa', `${p.name}, ${league.teams[o.team].name} 잔류 (${money})`, mine);
   } else {
     off.fa.signings[o.team]++;
-    const comp = Math.round(COMPENSATION[e.grade] * e.prevSalary);
-    league.ledger.push({ year: year + 1, from: o.team, to: e.from, amount: comp, note: `${p.name} FA 보상금 (${e.grade}등급)` });
-    log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). 보상금 ${(comp / 10000).toFixed(1)}억 원`, mine);
+    if (FA_COMP[e.grade].withPlayer === null) {
+      const comp = Math.round(FA_COMP[e.grade].cashOnly * e.prevSalary);
+      league.ledger.push({ year: year + 1, from: o.team, to: e.from, amount: comp, note: `${p.name} FA 보상금 (${e.grade}등급)` });
+      log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). 보상금 ${(comp / 10000).toFixed(1)}억 원`, mine);
+    } else {
+      log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). ${e.grade}등급: 보상은 보상선수 단계에서`, mine);
+    }
   }
 }
 
@@ -896,6 +1036,9 @@ export function userOrgSize(league: LeagueState, off: OffseasonState): number {
 
 /** 지금 단계에서 다음으로 넘어갈 수 있는가. 안 되면 이유 */
 export function blockedReason(league: LeagueState, off: OffseasonState): string | null {
+  if (off.stage === 'comp' && off.comp?.some((c) => c.from === off.userTeam && c.pick === null)) {
+    return '우리 구단의 FA 보상을 고르세요 (보상선수 지명 또는 보상금만).';
+  }
   if (off.stage === 'draft' && off.draft && off.draft.pick < draftTotal(off) && off.draft.pool.length) return '우리 지명 차례입니다. 선수를 지명하거나 자동 지명을 하세요.';
   if (off.stage === 'release' && off.userTeam >= 0 && orgSize(league, off.userTeam) > ORG_LIMIT) {
     return `소속 선수가 ${orgSize(league, off.userTeam)}명입니다. 정원 ${ORG_LIMIT}명에 맞게 방출하세요.`;
@@ -912,6 +1055,10 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
   switch (off.stage) {
     case 'fa':
       resolveFaRound(league, off, store, params);
+      return;
+    case 'comp':
+      finishComp(league, off, store, params);
+      enterForeign(league, off, store, params);
       return;
     case 'foreign':
       finishForeign(league, off, store, params);

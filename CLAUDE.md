@@ -16,7 +16,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 자동 테스트 (Vitest, 139개)
+npm test           # 자동 테스트 (Vitest, 148개)
 npm run typecheck
 npm run build
 npm run data       # data-src/ 엑셀 → public/data/ JSON 변환 후 검사 (Python 3 + openpyxl 필요)

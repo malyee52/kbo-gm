@@ -150,6 +150,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(g.owner.trust).toBe(50);
     while (g.offseason!.stage !== 'ready') {
       if (g.offseason!.stage === 'draft') g.autoDraft();
+      if (g.offseason!.stage === 'comp') g.autoComp();
       if (g.offseason!.stage === 'release') g.autoRelease();
       expect(g.nextStage().ok).toBe(true);
     }
