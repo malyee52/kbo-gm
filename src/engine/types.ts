@@ -70,6 +70,8 @@ export interface SimPlayer {
   real?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
+  /** 나이가 추정값 (생년 자료 없음, M8) */
+  ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */
   traits?: readonly import('./traits').Trait[];
 }

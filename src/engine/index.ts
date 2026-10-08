@@ -30,6 +30,7 @@ export {
   TRAIT_CODES, TRAIT_INFO, DEFAULT_TRAIT_PARAMS, traitKey, traitsOf, traitEdge, hasTrait, agingScale, injuryScale, fatigueScale,
   type Trait, type TraitParams, type Situation,
 } from './traits';
+export { eraPitching, type EraPitching } from './eras';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */

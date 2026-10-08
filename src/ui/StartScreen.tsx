@@ -117,7 +117,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <span className="muted small">{DIFFICULTY_NOTE[difficulty]}</span>
         </div>
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
-        {year < 2001 && <p className="note small">2000년 이전은 선발 투수 기용 방식이 지금과 달라 득점이 실제보다 높게 나옵니다 (M8에서 보정 예정).</p>}
+        {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
         {store.meta.inProgress.includes(year) && (
           <p className="note small">{year}년 선수단은 시즌 중 자료(정규시즌 종료 전 스냅샷)로 만듭니다. 능력은 직전 3시즌 기록에서 뽑습니다.</p>
         )}
