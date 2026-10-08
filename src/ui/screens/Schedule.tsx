@@ -75,7 +75,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
           }
           return (
             <button key={c.day} type="button" role="gridcell"
-              className={`cal-cell${c.day === selDay ? ' on' : ''}${c.day === s.day && !session.done ? ' today' : ''}${!g ? ' off' : ''}`}
+              className={`cal-cell${c.day === selDay ? ' on' : ''}${c.day === s.day && !session.done ? ' today' : ''}${!g ? ' off' : ''}${res ? ` r-${res[0]}` : ''}`}
               onClick={() => pick(c)} aria-label={formatDate(year, c.day)}>
               <span className="cal-date">{c.date}</span>
               {g ? (

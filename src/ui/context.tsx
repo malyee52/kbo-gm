@@ -57,10 +57,15 @@ export function PlayerLink({ p, showTeam = false }: { p: SimPlayer; showTeam?: b
   );
 }
 
+/** 20~80 등급의 색 구분: 65 이상 매우 좋음, 55 이상 좋음, 45 이하 아쉬움, 35 이하 나쁨 */
+export function gradeClass(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '';
+  return v >= 65 ? 'g-hi' : v >= 55 ? 'g-up' : v <= 35 ? 'g-lo' : v <= 45 ? 'g-dn' : '';
+}
+
 export function Grade({ v }: { v: number | null | undefined }) {
   if (v === null || v === undefined) return <span className="muted">-</span>;
-  const cls = v >= 65 ? 'g-hi' : v >= 55 ? 'g-up' : v <= 35 ? 'g-lo' : v <= 45 ? 'g-dn' : '';
-  return <span className={`grade ${cls}`}>{v}</span>;
+  return <span className={`grade ${gradeClass(v)}`}>{v}</span>;
 }
 
 export const HAND: Record<string, string> = { R: '우', L: '좌', S: '양' };

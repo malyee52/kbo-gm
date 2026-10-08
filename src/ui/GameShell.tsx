@@ -24,17 +24,19 @@ import { Awards } from './screens/Awards';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 
-const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean }[] = [
-  { id: 'home', label: '홈' },
-  { id: 'offseason', label: '오프시즌' },
-  { id: 'roster', label: '선수단', season: true },
-  { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정' },
-  { id: 'standings', label: '순위', offLabel: '지난 시즌 순위' },
-  { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록' },
-  { id: 'trade', label: '트레이드', season: true },
-  { id: 'club', label: '구단' },
-  { id: 'save', label: '저장·설정' },
+/** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
+const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '운영' | '리그' | '시스템' }[] = [
+  { id: 'home', label: '홈', group: '운영' },
+  { id: 'offseason', label: '오프시즌', group: '운영' },
+  { id: 'roster', label: '선수단', season: true, group: '운영' },
+  { id: 'trade', label: '트레이드', season: true, group: '운영' },
+  { id: 'club', label: '구단', group: '운영' },
+  { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정', group: '리그' },
+  { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', group: '리그' },
+  { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록', group: '리그' },
+  { id: 'save', label: '저장·설정', group: '시스템' },
 ];
+const GROUPS = ['운영', '리그', '시스템'] as const;
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
@@ -122,27 +124,35 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       <div className="shell" style={{ ['--team' as string]: teamColor(team.franchise) }}>
         <aside className="nav">
           <div className="brand">
-            <span className="small muted">{session.world.year} {off ? '오프시즌' : '시즌'}</span>
-            <strong>{team.name}</strong>
+            <i className="brand-mark" aria-hidden />
+            <div>
+              <span className="brand-sub">{session.world.year} {off ? '오프시즌' : '시즌'}</span>
+              <strong>{team.name}</strong>
+            </div>
           </div>
           <nav aria-label="메뉴">
-            {nav.map((n) => (
-              <button key={n.id} type="button" className={screen === n.id ? 'on' : ''} aria-current={screen === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
-                {off && n.offLabel ? n.offLabel : n.label}
-              </button>
+            {GROUPS.map((g) => (
+              <div key={g} className="nav-group">
+                <span className="nav-head" aria-hidden>{g}</span>
+                {nav.filter((n) => n.group === g).map((n) => (
+                  <button key={n.id} type="button" className={screen === n.id ? 'on' : ''} aria-current={screen === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
+                    {off && n.offLabel ? n.offLabel : n.label}
+                  </button>
+                ))}
+                {g === '리그' && (session.done || off) && (session.postseason || session.league.lastSeason?.postseason) && (
+                  <button type="button" className={screen === 'postseason' ? 'on' : ''} onClick={() => go('postseason')}>가을야구</button>
+                )}
+                {g === '리그' && session.done && (
+                  <button type="button" className={screen === 'season-end' ? 'on' : ''} onClick={() => go('season-end')}>시즌 결과</button>
+                )}
+                {g === '리그' && !!session.league.awards?.length && (
+                  <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
+                )}
+                {g === '운영' && off && session.offseason?.growth && (
+                  <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
+                )}
+              </div>
             ))}
-            {(session.done || off) && (session.postseason || session.league.lastSeason?.postseason) && (
-              <button type="button" className={screen === 'postseason' ? 'on' : ''} onClick={() => go('postseason')}>가을야구</button>
-            )}
-            {session.done && (
-              <button type="button" className={screen === 'season-end' ? 'on' : ''} onClick={() => go('season-end')}>시즌 결과</button>
-            )}
-            {!!session.league.awards?.length && (
-              <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
-            )}
-            {off && session.offseason?.growth && (
-              <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
-            )}
           </nav>
           <button type="button" className="ghost quit" onClick={onQuit}>시작 화면으로</button>
         </aside>

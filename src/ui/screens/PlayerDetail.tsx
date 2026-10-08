@@ -5,8 +5,9 @@ import { absenceLabel, defenseAt, defenseGrade, FIELD_POS, isVirtual, playablePo
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText, wonText } from '../../league/salary';
-import { Grade, HAND, posName, TeamName, useGame } from '../context';
+import { Grade, gradeClass, HAND, posName, TeamName, useGame } from '../context';
 import { runsGrade } from '../grades';
+import { teamColor } from '../teams';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -42,7 +43,8 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   };
 
   return (
-    <dialog ref={ref} className="player" onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-labelledby="player-name">
+    <dialog ref={ref} className="player" style={{ ['--team' as string]: teamColor(session.world.teams[p.teamIdx].franchise) }}
+      onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="row-between">
           <div>
@@ -193,7 +195,7 @@ function GradeBar({ label, v }: { label: string; v: number | null }) {
   return (
     <div className="gbar">
       <span>{label}</span>
-      <span className="track" aria-hidden><i style={{ width: `${v === null ? 0 : ((v - 20) / 60) * 100}%` }} /></span>
+      <span className="track" aria-hidden><i className={gradeClass(v)} style={{ width: `${v === null ? 0 : ((v - 20) / 60) * 100}%` }} /></span>
       <Grade v={v} />
     </div>
   );

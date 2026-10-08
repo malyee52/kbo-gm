@@ -66,6 +66,7 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 - 트레이드는 `Season.transfer`로 월드의 소속을 직접 바꾸고 저장에 이적 기록을 남긴다. 한 월드를 두 시즌이 같이 쓰지 않는다.
 - AI 판단을 바꾸면 `docs/trade-exploits.md` 시나리오 테스트(`tests/trade.test.ts`)를 돌린다.
 - 저장 후 이어서 돌린 결과, 화면 조회(`refresh`)를 끼운 결과가 끊김 없이 돌린 결과와 같아야 한다 (`tests/game.test.ts`). 엔진 진행 순서를 바꿀 때 이 테스트가 깨지지 않게 한다.
+- 화면 스타일은 `src/ui/base.css`(색·글꼴 토큰, 입력·버튼·표 공통)와 `src/ui/game.css`(게임 화면 부품)에 모은다. 색은 토큰만 쓰고 직접 값을 넣지 않는다. 구단 색은 `.shell`의 `--team` 변수(선수 창·구단 카드는 `--team`·`--c` 인라인 변수)로 내려오고, 라이트·다크는 `prefers-color-scheme`으로 모두 지원한다. 글꼴 Pretendard는 `index.html`에서 CDN으로 받고 없으면 시스템 글꼴로 대신한다.
 - **난수는 `Rng`만 쓴다.** `Math.random()`, 현재 시각 등 시드로 재현되지 않는 값을 엔진에 넣지 않는다. 같은 시드는 같은 결과를 내야 한다 (테스트로 확인 중).
 - 엔진을 고치면 `npm test`와 `npm run validate -- --years 2025,2019,2012 --seasons 100`으로 리그 평균이 틀어지지 않았는지 확인한다. 기준은 `docs/engine.md` 4장.
 - 조정값은 `params.ts`에 모은다. 근거 없이 정한 값은 주석에 "임시값"이라고 적는다.

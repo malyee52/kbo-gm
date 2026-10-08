@@ -36,14 +36,16 @@ export function Home() {
         </div>
       )}
       <section className="cards">
-        <div className="card">
-          <h2>우리 구단</h2>
+        <div className="card hero">
+          <h2>우리 구단 <span className="muted small">{year} · 포스트시즌 진출권 상위 {cut}팀</span></h2>
           <p className="big">{rec.g === 0 ? '개막 전' : <>{rank}위 <span className="muted">/ {s.teams.length}</span></>}</p>
-          <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(winPct(rec))} · {rank === 1 ? '선두' : `선두와 ${gamesBehind(leader, rec)}경기 차`}</p>
-          <p className="muted small">
-            최근 10경기 {form.w}승 {form.l}패{form.t ? ` ${form.t}무` : ''}{form.streak && ` · ${form.streak}`} · 득점 {rec.rs} 실점 {rec.ra}
-          </p>
-          <p className="muted small">포스트시즌 진출권: 상위 {cut}팀</p>
+          <div className="stats">
+            <div className="stat"><span className="stat-label">승-패-무</span><span className="stat-value">{rec.w}-{rec.l}-{rec.t}</span></div>
+            <div className="stat"><span className="stat-label">승률</span><span className="stat-value">{rec.g === 0 ? '-' : rate3(winPct(rec))}</span></div>
+            <div className="stat"><span className="stat-label">게임차</span><span className="stat-value">{rec.g === 0 ? '-' : rank === 1 ? '선두' : gamesBehind(leader, rec).toFixed(1)}</span></div>
+            <div className="stat"><span className="stat-label">최근 10경기</span><span className="stat-value">{form.w}-{form.l}{form.t ? `-${form.t}` : ''}{form.streak && <small>{form.streak}</small>}</span></div>
+            <div className="stat"><span className="stat-label">득점 / 실점</span><span className="stat-value">{rec.rs}<small>/ {rec.ra}</small></span></div>
+          </div>
           {session.owner.goal?.year === year && (
             <p className="small">
               구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust}{' '}
