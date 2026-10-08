@@ -6,7 +6,10 @@
 
 import { seasonAwards } from './awards';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
-import { ageDefense, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
+import {
+  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, traitsOf,
+  type EngineParams, type Season, type SimPlayer, type World,
+} from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
@@ -24,7 +27,7 @@ import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits'>;
 
 export type Stage = 'fa' | 'comp' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
 export const STAGES: Stage[] = ['fa', 'comp', 'foreign', 'draft', 'salary', 'release', 'ready'];
@@ -287,7 +290,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       ? pt.bf / ((sp.pit!.startShare >= 0.5 ? 650 : 280))
       : b.pa / 550;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
-    const next = growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher) - eff.runsDrop;
+    const next = growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits)) - eff.runsDrop;
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
@@ -305,7 +309,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (!isServing(p) || p.team < 0) continue;
     growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runsAt(p, year), after: 0, tags: ['복무 중'] });
     const next = growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 0.4,
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher);
+      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits));
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };

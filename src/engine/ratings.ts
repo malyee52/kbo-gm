@@ -7,6 +7,7 @@
 import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
 import type { EngineParams } from './params';
+import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
 const BAT_EVENTS = ['so', 'bb', 'hbp', 'hr', 's1', 'd2', 't3'] as const;
@@ -144,6 +145,8 @@ export interface BuildWorldInput {
   players: Map<string, PlayerMaster>;
   meta: Meta;
   params: EngineParams;
+  /** 숨겨진 특수능력 표 (traits.json의 traits). 없으면 아무도 능력이 없다 */
+  traits?: Record<string, string[]>;
 }
 
 /**
@@ -236,6 +239,8 @@ export function buildWorld(input: BuildWorldInput): World {
       debutEstimate,
       real: m.real,
     };
+    const traits = traitsOf(input.traits, id);
+    if (traits) p.traits = traits;
     players.push(p);
     teams[team].org.push(p);
   }

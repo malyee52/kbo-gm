@@ -25,10 +25,15 @@ export {
   type Absence, type AbsenceKind, type EventCode, type InjuryParams,
 } from './injury';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
+// 숨겨진 특수능력: 화면(src/ui)은 이것을 가져다 쓰면 안 된다 (tests/traits.test.ts가 검사). 도구·테스트·리그 계층용
+export {
+  TRAIT_CODES, TRAIT_INFO, DEFAULT_TRAIT_PARAMS, traitKey, traitsOf, traitEdge, hasTrait, agingScale, injuryScale, fatigueScale,
+  type Trait, type TraitParams, type Situation,
+} from './traits';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -38,5 +43,6 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     players: store.players,
     meta: store.meta,
     params,
+    traits: store.traits,
   });
 }

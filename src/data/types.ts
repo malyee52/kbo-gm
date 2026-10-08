@@ -226,6 +226,8 @@ export interface DataStore {
   contracts?: ContractRow[];
   /** 신인 지명 (입단 연도 → 지명 순). drafts.json. 없으면 가상 신인만 쓴다 */
   drafts?: Record<string, DraftRow[]>;
+  /** 숨겨진 특수능력: 선수 ID 해시(engine/traits.ts의 traitKey) → 능력 코드. traits.json. 없으면 아무도 없다 */
+  traits?: Record<string, string[]>;
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */
