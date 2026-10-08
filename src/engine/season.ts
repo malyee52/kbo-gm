@@ -176,6 +176,8 @@ export interface SeasonSave {
   fixedAbsence: [number, FixedAbsence[]][];
   /** 시즌 중 이적: [날짜, 선수 색인, 새 구단 색인]. 불러올 때 이 순서대로 다시 적용한다 */
   transfers?: [number, number, number][];
+  /** 선수별 1군 등록 경기일 수 (FA 연차 산정용) */
+  activeDays?: number[];
 }
 
 /** 월드의 선수 구성 지문 (FNV-1a) */
@@ -219,6 +221,8 @@ export class Season {
   /** 이적 전 월드의 선수 구성 지문 (저장 호환 확인용) */
   readonly baseRoster: string;
   readonly transfers: [number, number, number][] = [];
+  /** 선수별로 1군에 등록돼 있던 경기일 수 (자기 팀 경기가 있는 날만 센다) */
+  readonly activeDays: Int32Array;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
   constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
@@ -229,6 +233,7 @@ export class Season {
     this.baseRoster = rosterFingerprint(world);
     const n = world.players.length;
     this.states = newPlayerStates(n);
+    this.activeDays = new Int32Array(n);
     this.bat = Array.from({ length: n }, emptyBatLine);
     this.pit = Array.from({ length: n }, emptyPitLine);
     this.teams = world.teams.map(emptyTeamRecord);
@@ -330,6 +335,13 @@ export class Season {
       }
     }
     for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day);
+    for (const g of games) {
+      for (const ts of [season[g.home], season[g.away]]) {
+        for (const p of ts.hitters) this.activeDays[p.idx]++;
+        for (const p of ts.rotation) this.activeDays[p.idx]++;
+        for (const p of ts.bullpen) this.activeDays[p.idx]++;
+      }
+    }
 
     for (const g of games) {
       const h = season[g.home];
@@ -421,6 +433,7 @@ export class Season {
       manual: this.teamSeasons.map((ts) => (ts.manual ? [...ts.manual] : null)),
       fixedAbsence: [...this.fixedAbsence.entries()],
       transfers: this.transfers.map((t) => [...t] as [number, number, number]),
+      activeDays: Array.from(this.activeDays),
     };
   }
 
@@ -440,6 +453,7 @@ export class Season {
     s.day = save.day;
     s.dayRng = Rng.fromState(root.fork('days').seed, save.rngDays);
     s.ctx.rng = Rng.fromState(root.fork('games').seed, save.rngGames);
+    if (save.activeDays) s.activeDays.set(save.activeDays);
     s.states.absentUntil.set(save.absentUntil);
     s.states.fatigue.set(save.fatigue);
     s.states.fatigueDay.set(save.fatigueDay);

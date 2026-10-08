@@ -16,15 +16,17 @@ import { Schedule } from './screens/Schedule';
 import { SeasonEnd } from './screens/SeasonEnd';
 import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
+import { Offseason } from './screens/Offseason';
 import { teamColor } from './teams';
 
-const NAV: { id: Screen; label: string }[] = [
+const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean }[] = [
   { id: 'home', label: '홈' },
-  { id: 'roster', label: '선수단' },
-  { id: 'schedule', label: '일정·결과' },
-  { id: 'standings', label: '순위' },
-  { id: 'leaders', label: '기록' },
-  { id: 'trade', label: '트레이드' },
+  { id: 'offseason', label: '오프시즌' },
+  { id: 'roster', label: '선수단', season: true },
+  { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정' },
+  { id: 'standings', label: '순위', offLabel: '지난 시즌 순위' },
+  { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록' },
+  { id: 'trade', label: '트레이드', season: true },
   { id: 'save', label: '저장·설정' },
 ];
 
@@ -32,12 +34,14 @@ const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
 export function GameShell({ store, session, onQuit }: { store: BrowserStore; session: GameSession; onQuit: () => void }) {
   const [version, setVersion] = useState(0);
-  const [screen, setScreen] = useState<Screen>(session.done ? 'season-end' : 'home');
+  const [screen, setScreen] = useState<Screen>(session.phase === 'offseason' ? 'offseason' : session.done ? 'season-end' : 'home');
   const [screenArg, setScreenArg] = useState<number | undefined>(undefined);
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const grades = useMemo(() => computeGrades(session.world), [session]);
+  // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다
+  const world = session.world;
+  const grades = useMemo(() => computeGrades(world), [world]);
 
   const changed = useCallback(() => setVersion((v) => v + 1), []);
   const go = useCallback((s: Screen, arg?: number) => {
@@ -85,8 +89,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.done) go('season-end');
   };
 
-  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer };
+  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave };
   const team = session.team;
+  const off = session.phase === 'offseason';
+  const nav = NAV.filter((n) => (off ? !n.season : n.id !== 'offseason'));
   const left = session.season.schedule.slice(session.day).filter((d) => d.some((g) => g.home === session.teamIdx || g.away === session.teamIdx)).length;
 
   return (
@@ -94,13 +100,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       <div className="shell" style={{ ['--team' as string]: teamColor(team.franchise) }}>
         <aside className="nav">
           <div className="brand">
-            <span className="small muted">{session.world.year} 시즌</span>
+            <span className="small muted">{session.world.year} {off ? '오프시즌' : '시즌'}</span>
             <strong>{team.name}</strong>
           </div>
           <nav aria-label="메뉴">
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <button key={n.id} type="button" className={screen === n.id ? 'on' : ''} aria-current={screen === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
-                {n.label}
+                {off && n.offLabel ? n.offLabel : n.label}
               </button>
             ))}
             {session.done && (
@@ -113,18 +119,18 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
         <div className="main">
           <header className="topbar">
             <div className="when">
-              <strong>{session.done ? `${session.world.year} 정규시즌 종료` : formatDate(session.world.year, session.day, true)}</strong>
+              <strong>{off ? `${session.world.year} 오프시즌` : session.done ? `${session.world.year} 정규시즌 종료` : formatDate(session.world.year, session.day, true)}</strong>
               <span className="muted small">
                 {summaryOf(session)}{!session.done && ` · 남은 경기 ${left}`}
               </span>
             </div>
-            <div className="advance">
+            {!off && <div className="advance">
               {busy && <span className="muted small" role="status">{busy}</span>}
               <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
               <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done}>하루</button>
               <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done}>일주일</button>
               <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중')} disabled={!!busy || session.done}>시즌 끝까지</button>
-            </div>
+            </div>}
           </header>
           {saveError && <p className="error banner" role="alert">{saveError}</p>}
           <main className="content" aria-busy={!!busy}>
@@ -136,6 +142,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             {screen === 'trade' && <Trade />}
             {screen === 'save' && <SaveScreen onQuit={onQuit} />}
             {screen === 'season-end' && <SeasonEnd />}
+            {screen === 'offseason' && <Offseason />}
           </main>
         </div>
         {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}

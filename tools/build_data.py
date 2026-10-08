@@ -9,8 +9,10 @@
   players.json          선수 마스터 (선수 한 명당 한 줄)
   seasons/<연도>.json   그 해의 구단, 리그 합계, 타자·투수 시즌 기록
   meta.json             연도 목록, 구단 계보, 연도별 규칙, 능력 산출용 사전 평균
+  contracts.json        FA·비FA 다년 계약 (2000~2025 계약 시작, 금액 미검증 보조자료)
 """
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -47,6 +49,27 @@ def hands(bt):
         return None, None, False
     th, ba = bt.split('투')
     return HAND.get(th[0]), HAND.get(ba[0]), '언' in th
+
+
+def school_of(career):
+    """2026 프로필의 출신교·경력 문자열 → 'UNIV'(대졸) / 'HS'(고졸) / None.
+    괄호 안 학교는 프로 입단 뒤 다닌 곳(사이버대 등)이라 빼고, 대학('...대')을 거쳤으면 대졸로 본다."""
+    if not career:
+        return None
+    parts = [x.strip() for x in career.split('-') if x.strip() and not x.strip().startswith('(')]
+    if any(x.endswith('대') or '대학' in x for x in parts):
+        return 'UNIV'
+    if any(x.endswith('고') for x in parts):
+        return 'HS'
+    return None
+
+
+def contract_years(v):
+    """계약 기간. '2(+2 선수옵션)'처럼 옵션이 붙으면 보장 기간(앞 숫자)만 쓴다."""
+    if isinstance(v, int):
+        return v
+    m = re.match(r'\s*(\d+)', str(v or ''))
+    return int(m.group(1)) if m else None
 
 
 def rules_for(year):
@@ -92,11 +115,25 @@ def main():
             'birthYear': r['출생연도'], 'foreign': foreign,
             'entryYear': r['입단연도(추정)'], 'entryExact': r['입단연도(보조자료)'],
             'first': r['첫 1군 시즌'], 'last': r['마지막 1군 시즌'],
+            'school': school_of(r['출신교·경력(2026 프로필)']),
             'real': True,
         })
     for p in players:
         for k in [k for k, v in p.items() if v is None]:
             del p[k]
+
+    # ---- 계약 (FA계약 시트)
+    contracts = []
+    for r in rows(wb['FA계약']):
+        years_ = contract_years(r['기간(년)'])
+        if not isinstance(r['계약 첫 시즌'], int) or not years_:
+            continue
+        contracts.append({
+            'first': r['계약 첫 시즌'], 'id': str(r['선수ID']), 'name': r['선수명'],
+            'kind': 'FA' if r['종류'] == 'FA' else 'nonFA', 'years': years_,
+            'guaranteed': r['보장액(억 원)'] or 0, 'option': r['옵션(억 원)'] or 0,
+            **({'note': str(r['기간(년)'])} if not isinstance(r['기간(년)'], int) else {}),
+        })
 
     # ---- 순위표
     teams = defaultdict(list)
@@ -193,6 +230,8 @@ def main():
     (OUT / 'seasons').mkdir(parents=True, exist_ok=True)
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     dump({'version': 1, 'players': players}, OUT / 'players.json')
+    dump({'version': 1, 'note': '보조자료의 FA 계약 목록. 금액은 구단 발표와 대조하지 않았다. 옵션 제외 보장액(억 원)', 'contracts': contracts},
+         OUT / 'contracts.json')
     for y in years:
         dump({
             'year': y, 'complete': y != years[-1], 'games': max(t['g'] for t in teams[y]) if y != years[-1] else 144,
@@ -215,6 +254,7 @@ def main():
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')
+    print(f'계약 {len(contracts)}건, 학력 구분 {sum(1 for p in players if p.get("school"))}명')
     print(f'사전 평균(타자): {priors["batter"]}')
     print(f'사전 평균(투수): {priors["pitcher"]}')
     print(f'출력: {OUT} ({total / 1e6:.1f} MB)')

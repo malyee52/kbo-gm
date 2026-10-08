@@ -7,7 +7,7 @@ import type { World } from './types';
 
 export { DEFAULT_PARAMS, type EngineParams } from './params';
 export { Rng } from './rng';
-export { buildWorld, batValue, pitValue } from './ratings';
+export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor } from './ratings';
 export {
   simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
   type SeasonResult, type SeasonSave, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,

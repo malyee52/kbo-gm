@@ -10,7 +10,7 @@ const TITLE_BAT = ['avg', 'hr', 'rbi', 'h', 'sb', 'ops'];
 const TITLE_PIT = ['era', 'w', 'sv', 'so'];
 
 export function SeasonEnd() {
-  const { session, go } = useGame();
+  const { session, go, changed, autosave } = useGame();
   const s = session.season;
   const me = session.teamIdx;
   const year = session.world.year;
@@ -48,7 +48,7 @@ export function SeasonEnd() {
           <h2><TeamName idx={me} /></h2>
           <p className="big">{verdict}</p>
           <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
-          <p className="muted small">포스트시즌, 오프시즌(드래프트·FA·연봉), 다음 시즌 진행은 이후 단계(M5~)에서 추가합니다.</p>
+          <p className="muted small">포스트시즌 경기는 아직 치르지 않습니다. 결산하면 성장 판정과 1군 연차가 반영되고 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다.</p>
         </div>
       </section>
 
@@ -122,7 +122,16 @@ export function SeasonEnd() {
       </section>
 
       <div className="actions">
-        <button type="button" onClick={() => go('leaders')}>기록 전체 보기</button>
+        {session.phase === 'season' && (
+          <button type="button" onClick={() => {
+            session.beginOffseason();
+            changed();
+            void autosave();
+            go('offseason');
+          }}>오프시즌 시작 (결산)</button>
+        )}
+        {session.phase === 'offseason' && <button type="button" onClick={() => go('offseason')}>오프시즌으로</button>}
+        <button type="button" className="ghost" onClick={() => go('leaders')}>기록 전체 보기</button>
         <button type="button" className="ghost" onClick={() => go('save')}>저장·내보내기</button>
       </div>
     </div>

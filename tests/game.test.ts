@@ -239,6 +239,6 @@ describe('게임 저장·불러오기와 재현', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'bad' }, FAST);
     const s = g.toSave();
     expect(() => GameSession.load(store, { ...s, teamName: '없는팀' }, FAST)).toThrow(/구단/);
-    expect(() => GameSession.load(store, { ...s, format: 2 as 1 }, FAST)).toThrow(/형식/);
+    expect(() => GameSession.load(store, { ...s, format: 99 as 2 }, FAST)).toThrow(/형식/);
   });
 });
