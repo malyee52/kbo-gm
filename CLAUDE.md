@@ -41,7 +41,7 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 | `src/ui/` | 화면. `App.tsx` → 시작 화면 / `GameShell.tsx`(메뉴·진행 버튼) → `screens/`. 엔진 시험 화면은 `EngineLab.tsx` |
 | `tools/` | 데이터 변환·검사(Python), 엔진 검증(TypeScript), 숨겨진 특수능력 후보 추천(`suggest_traits.py`) |
 | `public/data/` | 게임 데이터 JSON. 직접 고치지 말고 엑셀을 고친 뒤 `npm run data` |
-| `data-src/` | 원자료 엑셀. 출처와 한계는 엑셀의 "안내", "출처", "데이터공백" 시트. `외국인_개막명단.csv`는 시작 연도 개막 외국인·아시아쿼터 (지금은 모두 미확인 추정값), `baseballchart/`는 1982~2027년 입단 신인 지명 원본 (baseballchart.kr CSV, CC BY-NC-SA 2.0 KR, 고치지 않는다) |
+| `data-src/` | 원자료 엑셀. 출처와 한계는 엑셀의 "안내", "출처", "데이터공백" 시트. `외국인_개막명단.csv`는 시작 연도 개막 외국인·아시아쿼터 (지금은 모두 미확인 추정값), `추가_명단.csv`는 그 해 1군 기록이 자료에 없어도 선수단에 넣을 선수 (기록 0 행으로 더해 능력은 직전 시즌에서. 2026 김광현, 사용자 요청), `baseballchart/`는 1982~2027년 입단 신인 지명 원본 (baseballchart.kr CSV, CC BY-NC-SA 2.0 KR, 고치지 않는다) |
 | `reports/` | 엔진 검증 결과 |
 
 엔진 파일: `rng.ts` 시드 난수 · `ratings.ts` 능력 산출과 월드 구성 · `team.ts` 엔트리·라인업(최적 배정)·로테이션·기용표 · `defense.ts` 포지션별 수비 · `game.ts` 한 경기 · `season.ts` 일정·환경 맞춤·하루 단위 시즌 진행(`Season`)과 저장·복원 · `injury.ts` 부상·이탈 이벤트와 결장 문구 · `display.ts` 20~80 등급 · `params.ts` 조정값.

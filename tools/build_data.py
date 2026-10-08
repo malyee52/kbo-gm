@@ -33,6 +33,8 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
+# 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
+EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
 TRAIT_LABELS = {
     '승부사': 'clutch', '가을 사나이': 'october', '위기 탈출': 'escape', '철인': 'ironman', '늦게 지는 꽃': 'evergreen',
@@ -277,6 +279,31 @@ def main():
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '역할(보조)' else r[c]) for c in PIT_COLS]
         pit[r['시즌']].append(row)
 
+    # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
+    extra_ids = set()
+    if EXTRA_ROSTER.exists():
+        with EXTRA_ROSTER.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                y, pid, team = int(r['시즌']), str(r['선수ID']).strip(), r['구단'].strip()
+                m = next((p for p in players if p['id'] == pid), None)
+                if not m:
+                    raise SystemExit(f'추가_명단.csv: 없는 선수 ID {pid} ({r.get("선수명")})')
+                if team not in {t['name'] for t in teams.get(y, [])}:
+                    raise SystemExit(f'추가_명단.csv: {y}년에 없는 구단 {team} ({r.get("선수명")})')
+                is_pit = r['구분'].strip() == '투수'
+                have = any(row[0] == pid for row in (pit[y] if is_pit else bat[y]))
+                if have:
+                    continue
+                if is_pit:
+                    role = m.get('pos') if m.get('pos') in ('SP', 'RP', 'CL') else None
+                    pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 3))
+                else:
+                    pos = m.get('pos') if m.get('pos') not in ('SP', 'RP', 'CL', 'P') else None
+                    bat[y].append([pid, team, pos] + [0] * (len(BAT_FIELDS) - 3))
+                extra_ids.add((y, pid))
+                if m.get('last', 0) < y:
+                    m['last'] = y
+
     years = sorted(teams)
     bi = {f: i for i, f in enumerate(BAT_FIELDS)}
     pi = {f: i for i, f in enumerate(PIT_FIELDS)}
@@ -366,8 +393,8 @@ def main():
         ids = []
         for pid, (g, pa, bf) in use.items():
             m = pmap.get(pid)
-            if not m or not m.get('birthYear'):
-                continue
+            if not m or not m.get('birthYear') or (y, pid) in extra_ids:
+                continue  # 추가 명단의 기록 0 행은 은퇴식이 아니다
             if g <= 2 and pa <= 3 and bf <= 3 and y - m['birthYear'] >= 34 and m.get('last') == y:
                 ids.append(pid)
         if ids:
@@ -408,6 +435,7 @@ def main():
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')
     print(f'계약 {len(contracts)}건, 학력 구분 {sum(1 for p in players if p.get("school"))}명')
     print(f'신인 지명: {len(drafts)}개 연도 {sum(len(v) for v in drafts.values()):,}명 ({min(drafts, default="-")}~{max(drafts, default="-")} 입단)')
+    print(f'추가 명단: {len(extra_ids)}명')
     print(f'외국인 개막 명단: {", ".join(f"{y}년 {sum(len(v) for v in t.values())}명" for y, t in foreign_opening.items()) or "없음"}, 아시아쿼터 {len(asia_ids)}명')
     print(f'사전 평균(타자): {priors["batter"]}')
     print(f'사전 평균(투수): {priors["pitcher"]}')
