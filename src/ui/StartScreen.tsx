@@ -190,7 +190,21 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       </section>
 
       <footer className="muted small">
-        KBO 및 각 구단과 관련 없는 팬 프로젝트입니다. 구단 로고와 선수 사진은 쓰지 않습니다. · <a href="?lab">엔진 시험 화면</a>
+        <p>
+          KBO 및 각 구단과 관련 없는 비영리 팬 프로젝트입니다. 구단 로고와 선수 사진은 쓰지 않습니다.
+          {import.meta.env.DEV && <> · <a href="?lab">엔진 시험 화면</a></>}
+        </p>
+        <details>
+          <summary>데이터 출처</summary>
+          <ul>
+            <li>선수·시즌 기록: 공개된 KBO 기록을 정리한 자료집 (원자료는 제3자 수집본으로 라이선스를 확인하지 못했습니다).</li>
+            <li>
+              신인 지명 1982~2027: <a href="https://baseballchart.kr/draft" target="_blank" rel="noreferrer">baseballchart.kr</a>
+              {' '}(나무위키 「(연도) KBO 신인 드래프트」 문서 정리), CC BY-NC-SA 2.0 KR. 게임 안에서 지명은 다시 하고 능력은 추정값입니다.
+            </li>
+            <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력, 병역 상태는 기록에서 추정한 값입니다.</li>
+          </ul>
+        </details>
       </footer>
     </main>
   );
