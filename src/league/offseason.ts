@@ -532,6 +532,7 @@ function enterComp(league: LeagueState, off: OffseasonState, store: Store, param
     cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
   }
   if (!cases.length) {
+    log(off, 'comp', 'A·B등급 FA의 구단 이동이 없어 보상선수 단계를 건너뜁니다.', true);
     enterForeign(league, off, store, params);
     return;
   }
@@ -565,14 +566,16 @@ export function pickCompByUser(league: LeagueState, off: OffseasonState, fa: str
   return { ok: true, message: p ? `보상선수로 ${p.name} 선수를 골랐습니다.` : '보상금만 받기로 했습니다.' };
 }
 
-/** AI 기준의 보상 선택: 보호 밖 최고 선수의 가치가 추가로 받을 수 있는 보상금(연봉 차액)보다 크면 선수, 아니면 보상금만 */
+/**
+ * AI 기준의 보상 선택: 보호 밖에서 가치(앞으로 몇 해의 기여)가 가장 높은 선수. 후보가 아무도 없을 때만 보상금만.
+ * 실제 KBO 구단은 A·B등급 보상에서 거의 늘 선수를 데려가고, 게임 안에서 보상금은 장부에만 남아 전력에 보탬이 없다.
+ * (2026-10-08 수정 전에는 "선수 가치 > 추가 보상금(연봉 차액)"이라 보호 20~25명 밖의 선수는 늘 그보다 낮아 사실상 보상금만 골랐다)
+ */
 function aiCompPick(league: LeagueState, off: OffseasonState, c: CompCase, view: LeagueView): string {
-  const rule = FA_COMP[c.grade];
   const best = compCandidates(league, off, c)
     .map((p) => ({ p, v: compValue(view, p.id) }))
     .sort((a, b) => b.v - a.v || a.p.id.localeCompare(b.p.id))[0];
-  const extraCash = ((rule.cashOnly - rule.withPlayer!) * c.prevSalary) / WON_PER_RUN;
-  return best && best.v > extraCash ? best.p.id : 'cash';
+  return best ? best.p.id : 'cash';
 }
 
 /** 플레이어 구단의 보상을 AI 기준으로 고른다 (자동 선택) */
@@ -1097,18 +1100,37 @@ export function draftPool(store: Pick<DataStore, 'drafts'>, entryYear: number): 
   return (store.drafts?.[String(entryYear)] ?? []).filter((d) => d.kind !== '육성선수' && d.kind !== '원년 멤버');
 }
 
-/** 지명 선수를 선수 마스터(실제 기록이 있는 선수)와 맞춘다: 이름, 입단 연도 ±1 (마스터의 입단 연도는 추정값), 투수 여부. 애매하면 null */
+const PITCHER_POS = ['SP', 'RP', 'CL', 'P'];
+
+/**
+ * 지명 선수를 선수 마스터(실제 기록이 있는 선수)와 맞춘다: 이름, 입단 연도 ±1 (마스터의 입단 연도는 추정값). 애매하면 null.
+ * 지명 자료의 포지션은 후보가 여럿일 때 가르는 데만 쓴다. 이대호(2001년 투수 지명, 야수로 성공)·나성범(2012년 투수 지명)처럼
+ * 지명 포지션과 실제 커리어가 다른 선수가 있어, 포지션이 다르다고 연결을 끊지 않는다 (2026-10-08 수정).
+ */
 export function matchDraftee(store: Pick<DataStore, 'players'>, d: DraftRow, entryYear: number, league: LeagueState): PlayerMaster | null {
   // 마스터에는 1군 기록이 있는 선수만 있다. 지명 자료에서 1군 0경기인 선수를 맞추면 같은 이름의 다른 선수가 걸린다
   if (d.games === 0) return null;
   const inLeague = new Set(league.players.map((p) => p.id));
-  const wantPitcher = d.pos === 'P';
   const cands = [...store.players.values()].filter((m) =>
-    m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id)
-    && (m.kind === 'BP' || (m.kind === 'P') === wantPitcher));
-  if (cands.length === 1) return cands[0];
-  const exact = cands.filter((m) => m.entryYear === entryYear);
-  return exact.length === 1 ? exact[0] : null;
+    m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id));
+  const pick = (list: PlayerMaster[]): PlayerMaster | null => (list.length === 1 ? list[0] : null);
+  if (cands.length <= 1) return pick(cands);
+  const wantPitcher = d.pos === 'P';
+  const sameRole = cands.filter((m) => m.kind === 'BP' || (m.kind === 'P') === wantPitcher);
+  return pick(sameRole) ?? pick(sameRole.filter((m) => m.entryYear === entryYear)) ?? pick(cands.filter((m) => m.entryYear === entryYear));
+}
+
+/**
+ * 실존 선수의 실제 커리어로 본 투수 여부: 주포지션이 있으면 그것, 없으면 구분(투타 둘 다 기록이 있으면 통산 상대 타자 수와 타석 수 비교).
+ * 지명 자료의 포지션은 보지 않는다 (지명은 투수였지만 야수로 성공한 선수가 있다).
+ */
+export function masterIsPitcher(m: PlayerMaster, career: () => CareerIndex): boolean {
+  if (m.pos) return PITCHER_POS.includes(m.pos);
+  if (m.kind !== 'BP') return m.kind === 'P';
+  const idx = career();
+  const pa = (idx.bat.get(m.id) ?? []).reduce((s, x) => s + x.row.pa, 0);
+  const tbf = (idx.pit.get(m.id) ?? []).reduce((s, x) => s + x.row.tbf, 0);
+  return tbf > pa;
 }
 
 /** 1군에 끝내 오르지 못한 지명자의 잠재력 (기획서 6.3: 낮은 범위, 임시값) */
@@ -1126,8 +1148,8 @@ const NEVER_POTENTIAL: [number, number] = [-15, -3];
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
                             entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'>, career: () => CareerIndex): LeaguePlayer {
   const m = matchDraftee(store, d, entryYear, league);
-  const isPitcher = m ? (m.kind === 'P' || (m.kind === 'BP' && d.pos === 'P')) : d.pos === 'P';
-  const masterPos = m?.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null;
+  const isPitcher = m ? masterIsPitcher(m, career) : d.pos === 'P';
+  const masterPos = m?.pos && !PITCHER_POS.includes(m.pos) ? m.pos : null;
   const pos = isPitcher ? null : masterPos ?? (d.pos === 'P' ? 'IF' : d.pos);
   const lastData = Math.max(...store.meta.years);
   let potential: number;
