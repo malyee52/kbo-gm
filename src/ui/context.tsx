@@ -5,7 +5,7 @@ import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
 import { teamColor } from './teams';
 
-export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'save' | 'season-end';
+export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'save' | 'season-end' | 'offseason';
 
 export interface GameUi {
   store: BrowserStore;
@@ -14,6 +14,8 @@ export interface GameUi {
   /** 세션이 바뀔 때마다 오른다 (세션 객체는 그대로 두고 내용만 바뀌므로 다시 그리기용) */
   version: number;
   changed(): void;
+  /** 자동 저장 칸에 저장 */
+  autosave(): Promise<void>;
   go(screen: Screen, arg?: number): void;
   openPlayer(idx: number): void;
 }

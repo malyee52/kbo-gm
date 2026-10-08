@@ -41,10 +41,12 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
 
   const start = async () => {
     if (teamIdx === null || !seed.trim()) return;
-    setBusy('시즌을 준비하는 중입니다 (리그 환경 맞춤)');
+    setBusy('선수 기록과 계약 자료를 불러오는 중입니다');
     setError(null);
-    await nextFrame();
     try {
+      await store.ensureAll();
+      setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
+      await nextFrame();
       onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim() }));
     } catch (e) {
       setError((e as Error).message);
@@ -57,7 +59,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     setError(null);
     await nextFrame();
     try {
-      await store.ensureYear(save.year);
+      await store.ensureAll();
       onStart(GameSession.load(store, save));
     } catch (e) {
       setError(`불러오지 못했습니다: ${(e as Error).message}`);
@@ -183,7 +185,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   );
 }
 
-/** 저장 기록이 시즌 종료 상태인지 */
+/** 저장 기록이 시즌 종료(또는 오프시즌) 상태인지 */
 function isSeasonDone(s: SaveRecord): boolean {
-  return s.data.news.some((n) => n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
+  if (s.data.format === 2 && s.data.phase === 'offseason') return true;
+  return s.data.news.some((n) => (n.year ?? s.year) === s.year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
 }

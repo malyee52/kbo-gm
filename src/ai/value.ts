@@ -2,8 +2,8 @@
 //
 // 단위는 "대체 선수 대비 한 시즌 득점 기여"(런). 1군 주전급 평균이 대략 10~20런이다.
 // - 현재 능력: 엔진의 기대 타석 가치(batValue·pitValue)를 대체 선수와 비교해 한 시즌 출전량을 곱한다.
-// - 잠재력: 아직 잠재력 모델(M5)이 없어 나이에 따른 연간 변화량으로 향후 시즌을 추정한다 (임시).
-// - 연봉 부담: 연봉 자료가 없어 넣지 않았다. M5에서 연봉이 생기면 더한다.
+// - 잠재력: 선수별 잠재력(전성기 기여)이 있으면 성장 판정과 같은 식의 기댓값으로, 없으면 나이별 연간 변화량으로 향후 시즌을 추정한다.
+// - 연봉 부담: 트레이드 판단(trade.ts)에서 연봉을 런으로 바꿔 뺀다.
 // - 포지션 희소성: 선수 가치에는 포지션 보정을, 구단 전력에는 "그 자리를 맡을 선수가 없을 때의 손해"를 넣는다.
 
 import { assignLineup, LINEUP_SLOTS, positionFit, type SimPlayer, type World } from '../engine';
@@ -23,7 +23,7 @@ const POS_ADJ: Record<string, number> = {
 /** 제 포지션이 아닌 자리를 맡을 때의 수비 손해: (1 - 적합도) × 이 값 (런, 임시값) */
 const MISFIT_RUNS = 40;
 
-/** 나이별 연간 능력 변화량 (런/시즌, 임시값). 잠재력 모델(M5)과 노화 곡선(M6)이 들어오면 바꾼다 */
+/** 나이별 연간 능력 변화량 (런/시즌, 임시값). 잠재력이 없는 선수와 31세 이상의 하락에 쓴다. 노화 곡선(M6)이 들어오면 바꾼다 */
 export function agingDelta(age: number): number {
   if (age <= 23) return 6;
   if (age <= 26) return 3;
@@ -34,7 +34,20 @@ export function agingDelta(age: number): number {
 }
 
 /** 나이를 모르는 선수는 이 나이로 본다 */
-const DEFAULT_AGE = 28;
+export const DEFAULT_AGE = 28;
+
+/**
+ * 한 해 동안의 기대 성장 (런). 성장 판정(league/growth.ts)이 여기에 출전 기회와 운을 더한다.
+ * 27세까지는 잠재력과의 격차를 빠르게, 28~30세는 천천히 좁히고, 31세부터는 나이에 따라 떨어진다 (임시값).
+ * 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
+ */
+export function expectedGrowth(age: number, runs: number, potential: number): number {
+  if (age >= 31) return agingDelta(age);
+  const gap = potential - runs;
+  if (gap < 0) return gap * 0.2;
+  const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.2 : 0.1;
+  return gap * rate;
+}
 /** 앞으로 몇 시즌을 내다보는지 (이번 시즌 포함) */
 export const HORIZON = 4;
 
@@ -44,6 +57,10 @@ export interface ValueContext {
   replBat: number;
   /** 대체 선수의 피타석 가치 (규정급 투수 하위 10%, 클수록 나쁨) */
   replPit: number;
+  /** 선수 id → 잠재력 (런). 없으면 나이별 변화량으로 추정 */
+  potential?: Map<string, number>;
+  /** 선수 id → 연봉 (만 원, 외국인은 달러를 원화 환산하지 않고 빼둔다). 없으면 연봉 부담을 보지 않는다 */
+  salary?: Map<string, number>;
 }
 
 function quantile(sorted: number[], q: number, fallback: number): number {
@@ -80,12 +97,20 @@ export function currentRuns(p: SimPlayer, ctx: ValueContext): number {
   return batRuns(p, ctx) + (POS_ADJ[p.pos ?? ''] ?? 0) * (FULL_PA / 600);
 }
 
-/** y시즌 뒤(0 = 이번 시즌)의 추정 기여 변화량 */
-export function agingShift(p: SimPlayer, y: number): number {
+/** y시즌 뒤(0 = 이번 시즌)의 추정 기여 변화량. ctx에 잠재력이 있으면 성장 기댓값으로 계산한다 */
+export function agingShift(p: SimPlayer, y: number, ctx?: ValueContext): number {
+  if (y === 0) return 0;
   let age = p.age ?? DEFAULT_AGE;
-  let shift = 0;
-  for (let k = 0; k < y; k++) shift += agingDelta(age++);
-  return shift;
+  const pot = ctx?.potential?.get(p.id);
+  if (pot === undefined || !ctx) {
+    let shift = 0;
+    for (let k = 0; k < y; k++) shift += agingDelta(age++);
+    return shift;
+  }
+  const start = currentRuns(p, ctx);
+  let r = start;
+  for (let k = 0; k < y; k++) r += expectedGrowth(++age, r, pot);
+  return r - start;
 }
 
 /**
@@ -95,7 +120,7 @@ export function agingShift(p: SimPlayer, y: number): number {
 export function playerValue(p: SimPlayer, ctx: ValueContext, weights: number[]): number {
   const now = currentRuns(p, ctx);
   let v = 0;
-  for (let y = 0; y < weights.length; y++) v += weights[y] * Math.max(-5, now + agingShift(p, y));
+  for (let y = 0; y < weights.length; y++) v += weights[y] * Math.max(-5, now + agingShift(p, y, ctx));
   return v;
 }
 
@@ -112,7 +137,7 @@ const SPARE_RELIEVERS = 3;
  * 주전 배치는 AI 감독과 같은 규칙(assignLineup)을 쓰고, 제 포지션이 아닌 자리는 수비 손해를 뺀다.
  */
 export function teamStrength(org: SimPlayer[], ctx: ValueContext, y: number): number {
-  const proj = (p: SimPlayer, base: number) => base + agingShift(p, y);
+  const proj = (p: SimPlayer, base: number) => base + agingShift(p, y, ctx);
   const hitters = org.filter((p) => !p.isPitcher && p.bat);
   // 미래 시즌은 그때 능력 순으로 주전을 다시 고른다
   const hv = new Map(hitters.map((p) => [p.idx, proj(p, batRuns(p, ctx))]));

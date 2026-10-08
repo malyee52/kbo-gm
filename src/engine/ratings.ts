@@ -6,7 +6,7 @@
 
 import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import type { EngineParams } from './params';
-import type { BatSkill, PitSkill, SimPlayer, SimTeam, World } from './types';
+import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
 const BAT_EVENTS = ['so', 'bb', 'hbp', 'hr', 's1', 'd2', 't3'] as const;
 const PIT_EVENTS = ['so', 'bb', 'hbp', 'hr', 'hit'] as const;
@@ -226,13 +226,18 @@ export function buildWorld(input: BuildWorldInput): World {
     gamesPerTeam: current.games,
     rules: meta.rules[String(year)],
     league: { ...lg },
-    env: {
-      roe: params.roePerUnearnedShare * current.league.unearnedShare,
-      sac: current.league.sacPerPa,
-      unearnedRun: params.unearnedRunScale * current.league.unearnedShare,
-      wildPitch: params.wildPitchScale * (current.league.wpbkPerPa ?? params.wildPitchDefault),
-    },
+    env: leagueEnvFor(current.league, params),
     teams,
     players,
+  };
+}
+
+/** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
+export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams): LeagueEnv {
+  return {
+    roe: params.roePerUnearnedShare * league.unearnedShare,
+    sac: league.sacPerPa,
+    unearnedRun: params.unearnedRunScale * league.unearnedShare,
+    wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
   };
 }

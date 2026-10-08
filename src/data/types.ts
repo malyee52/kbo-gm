@@ -19,6 +19,8 @@ export interface PlayerMaster {
   entryExact?: number;
   first: number;
   last: number;
+  /** 학력: 2026 프로필의 출신교로 가른 값 (HS 고졸, UNIV 대졸). 없으면 모름 */
+  school?: 'HS' | 'UNIV';
   /** 실존 선수 여부. 구체적 사건 이벤트는 false인 선수에게만 걸린다. */
   real: boolean;
 }
@@ -162,12 +164,29 @@ export interface Meta {
   };
 }
 
+/** FA·비FA 다년 계약 (자료집 FA계약 시트, 금액 미검증) */
+export interface ContractRow {
+  /** 계약 첫 시즌 */
+  first: number;
+  id: string;
+  name: string;
+  kind: 'FA' | 'nonFA';
+  /** 보장 기간 (년) */
+  years: number;
+  /** 보장액 (억 원, 옵션 제외) */
+  guaranteed: number;
+  option: number;
+  note?: string;
+}
+
 /** 불러온 데이터에 접근하는 창구. Node용(loadNode)과 브라우저용(loadBrowser) 구현이 있다 */
 export interface DataStore {
   meta: Meta;
   players: Map<string, PlayerMaster>;
   /** 불러오지 않았거나 없는 해는 undefined */
   season(year: number): SeasonData | undefined;
+  /** 계약 기록. 불러오지 않았으면 빈 배열 */
+  contracts?: ContractRow[];
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */

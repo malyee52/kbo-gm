@@ -97,7 +97,7 @@ export function Home() {
           <ul className="news">
             {news.map((n, k) => (
               <li key={k} className={`news-${n.kind}`}>
-                <span className="muted small">{formatDate(year, n.day)}</span>
+                <span className="muted small">{n.day < 0 ? `${n.year ?? year} 오프시즌` : formatDate(n.year ?? year, n.day)}</span>
                 <span>{n.text}</span>
               </li>
             ))}

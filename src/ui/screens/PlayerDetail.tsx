@@ -3,7 +3,9 @@ import { useEffect, useRef } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
+import { dollarText, wonText } from '../../league/salary';
 import { Grade, HAND, posName, TeamName, useGame } from '../context';
+import { runsGrade } from '../grades';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -95,10 +97,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           )}
         </section>
 
-        <section>
-          <h3>계약</h3>
-          <p className="muted small">연봉과 계약 기간은 오프시즌(M5)에서 추가합니다.</p>
-        </section>
+        <ContractInfo id={p.id} />
 
         {mine && !session.done && (
           <div className="actions">
@@ -107,6 +106,26 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         )}
       </div>
     </dialog>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = { reserve: '보류 선수 (해마다 협상)', rookie: '신인', fa: 'FA 계약', nonFA: '비FA 다년 계약', foreign: '외국인 (1년)' };
+
+function ContractInfo({ id }: { id: string }) {
+  const { session } = useGame();
+  const lp = session.leaguePlayer(id);
+  if (!lp) return null;
+  const c = lp.contract;
+  return (
+    <section>
+      <h3>계약과 잠재력</h3>
+      <dl className="facts">
+        <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? dollarText(c.salary) : wonText(c.salary)} · {c.until}년까지</dd>
+        <dt>잠재력</dt><dd><Grade v={runsGrade(lp.scoutPotential ?? lp.potential)} />{lp.scoutPotential !== undefined && <span className="muted small"> (스카우트 평가)</span>}</dd>
+        {!lp.foreign && <><dt>FA</dt><dd>1군 연차 {lp.service}년{lp.faCount ? ` · FA 계약 ${lp.faCount}회` : ''}</dd></>}
+      </dl>
+      {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}
+    </section>
   );
 }
 

@@ -21,6 +21,11 @@ const HORIZON_WEIGHTS: Record<Tendency, number[]> = {
 /** 수락에 필요한 최소 이득: max(MIN_GAIN, 내주는 선수 가치 × GAIN_SHARE) (런, 임시값) */
 const MIN_GAIN = 2;
 const GAIN_SHARE = 0.08;
+/**
+ * 연봉 부담: 받는 선수와 주는 선수의 연봉 차이(만 원)를 이 단가로 나눠 런에서 뺀다 (이번 시즌 몫만, 임시값).
+ * 시장 단가(약 4,500만 원/런)의 절반으로 둔 까닭: 이미 계약된 연봉은 구단이 어차피 내는 돈이라 새 계약보다 덜 따진다.
+ */
+const SALARY_WON_PER_RUN = 9000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
 /** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값) */
@@ -114,7 +119,9 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
 
   const before = teamValue(org, ctx, weights);
   const afterV = teamValue(after, ctx, weights);
-  const gain = afterV - before;
+  const pay = (ps: SimPlayer[]) => ps.reduce((s, p) => s + (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0)), 0);
+  const salaryCost = (pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN;
+  const gain = afterV - before - salaryCost;
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0);
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE);
   const detail = { gain, need, before, after: afterV, tendency };

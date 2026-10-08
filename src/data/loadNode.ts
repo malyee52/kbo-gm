@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSeason, type DataStore, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
 
 export type { DataStore } from './types';
 
@@ -19,6 +19,7 @@ export function loadDataStore(): DataStore {
   return {
     meta,
     players,
+    contracts: read<{ contracts: ContractRow[] }>('contracts.json').contracts,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);
