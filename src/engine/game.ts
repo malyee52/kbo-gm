@@ -5,6 +5,7 @@ import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
 import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest, type PlayerStates, type TeamSeason } from './team';
+import { fatigueScale, traitEdge, type Situation } from './traits';
 import type { BatLine, LeagueEnv, PitLine, PitSkill, SimPlayer } from './types';
 
 /** 시즌 전체 리그 합계 (검증용) */
@@ -55,6 +56,8 @@ export interface GameContext {
   bat: BatLine[];
   pit: PitLine[];
   totals: LeagueCounters;
+  /** 포스트시즌 경기인가 (숨겨진 특수능력 '가을 사나이'용). 없으면 정규시즌 */
+  postseason?: boolean;
 }
 
 interface PitcherInGame {
@@ -254,16 +257,21 @@ function fieldDefense(ts: TeamSeason, lineup: SimPlayer[]): { def: number; catch
   return { def, catcherDef };
 }
 
+/** 주자·이닝·점수 상황 (숨겨진 특수능력 판정용) */
+type PaState = Pick<Situation, 'runnersOn' | 'scoring' | 'late'>;
+const NO_STATE: PaState = { runnersOn: false, scoring: false, late: false };
+
 /** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
-function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0): Ev {
+function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE): Ev {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
-  // 타자에게 유리한 정도: 좌우 상성 + 홈 이점
-  const edge = platoonEdge(b, pg.p, params.platoon) + (batIsHome ? params.homeEdge : -params.homeEdge);
+  // 타자에게 유리한 정도: 좌우 상성 + 홈 이점 + 숨겨진 특수능력 (둘 다 없으면 0)
+  const edge = platoonEdge(b, pg.p, params.platoon) + (batIsHome ? params.homeEdge : -params.homeEdge)
+    + (b.traits || pg.p.traits ? traitEdge(b, pg.p, { ...state, postseason: !!ctx.postseason, home: batIsHome }, params.traits) : 0);
   // 투수 피로: 한계를 넘긴 타자 수에 비례
   const over = pg.bf - pg.limit;
-  const fat = over > 0 ? Math.min(0.3, over * params.fatiguePerBatter) : 0;
+  const fat = over > 0 ? Math.min(0.3, over * params.fatiguePerBatter * fatigueScale(pg.p, params.traits)) : 0;
   const up = 1 + edge;
   const down = 1 - edge;
   const worse = 1 + fat;
@@ -403,7 +411,9 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           continue;
         }
       }
-      const ev = samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def);
+      const ev = samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def, {
+        runnersOn: !!(bases[0] || bases[1] || bases[2]), scoring: !!(bases[1] || bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
+      });
       const me: Runner = { p: batter, resp: pg, earned: true };
       const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
       const twoOut = outs === 2 ? params.twoOutBonus : 0;

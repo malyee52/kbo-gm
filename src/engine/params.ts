@@ -4,6 +4,7 @@
 //   tools/validate_engine.ts 결과를 맞춰 정한 값. 근거와 검증 결과는 docs/engine.md 참조.
 
 import type { InjuryParams } from './injury';
+import { DEFAULT_TRAIT_PARAMS, type TraitParams } from './traits';
 
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
@@ -79,6 +80,9 @@ export interface EngineParams {
   // ---- 환경 맞춤
   /** 시즌 시작 전에 리그 비율을 목표값에 맞추려고 돌리는 예비 시즌 수 */
   pilotSeasons: number;
+
+  // ---- 숨겨진 특수능력 (traits.ts). 모두 임시값
+  traits: TraitParams;
 }
 
 export const DEFAULT_PARAMS: EngineParams = {
@@ -126,4 +130,6 @@ export const DEFAULT_PARAMS: EngineParams = {
   starterRestDays: 5,
 
   pilotSeasons: 3,
+
+  traits: DEFAULT_TRAIT_PARAMS,
 };

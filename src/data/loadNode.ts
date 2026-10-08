@@ -21,6 +21,7 @@ export function loadDataStore(): DataStore {
     players,
     contracts: read<{ contracts: ContractRow[] }>('contracts.json').contracts,
     drafts: existsSync(join(DATA_DIR, 'drafts.json')) ? read<{ years: Record<string, DraftRow[]> }>('drafts.json').years : undefined,
+    traits: existsSync(join(DATA_DIR, 'traits.json')) ? read<{ traits: Record<string, string[]> }>('traits.json').traits : undefined,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);

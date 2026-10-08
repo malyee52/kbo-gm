@@ -5,6 +5,7 @@
 import type { Rates } from '../data/types';
 import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
+import { injuryScale } from './traits';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
 import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
@@ -357,7 +358,7 @@ export class Season {
       for (const ts of season) {
         for (const p of ts.team.org) {
           if (p.availability !== undefined || states.absentUntil[p.idx] > day) continue;
-          if (dayRng.chance(injuryChance(p, this.pit[p.idx], day, len, ip))) {
+          if (dayRng.chance(injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits))) {
             const inj = drawInjury(dayRng, ip);
             this.addAbsence({ day, idx: p.idx, until: day + inj.days, kind: inj.kind }, ts);
           } else if (this.eventRng.chance(ip.eventChance)) {
@@ -437,7 +438,7 @@ export class Season {
   playExtraGame(home: number, away: number, day: number, rng: Rng, maxInnings: number,
                 rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[] } {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals };
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     refreshActive(h, this.world, this.states, day);

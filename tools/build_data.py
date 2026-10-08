@@ -29,8 +29,53 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
+ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
+SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
+TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
+# 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
+TRAIT_LABELS = {
+    '승부사': 'clutch', '가을 사나이': 'october', '위기 탈출': 'escape', '철인': 'ironman', '늦게 지는 꽃': 'evergreen',
+    '에이스 체력': 'stamina', '안방 사나이': 'homer', '좌완 킬러': 'vsLeft', '우완 킬러': 'vsRight',
+}
+
+
+def trait_key(pid):
+    """선수 ID → traits.json의 키. 소금을 붙인 FNV-1a 32비트 해시 (src/engine/traits.ts의 traitKey와 같은 값)"""
+    h = 0x811c9dc5
+    for b in f'kbo-gm/traits/{pid}'.encode('utf-8'):
+        h ^= b
+        h = (h * 0x01000193) & 0xffffffff
+    return f'{h:08x}'
+
+
+def build_traits(known_ids):
+    """data-src/특수능력.csv → {해시: [코드, ...]}. 모르는 선수 ID나 능력 이름은 오류"""
+    table = {}
+    if not TRAITS_CSV.exists():
+        return table
+    with TRAITS_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            pid = str(r['선수ID']).strip()
+            codes = [TRAIT_LABELS.get(x.strip()) for x in (r['능력'] or '').split(';') if x.strip()]
+            if not codes:
+                continue
+            if pid not in known_ids:
+                raise SystemExit(f'특수능력.csv: 없는 선수 ID {pid} ({r.get("선수명")})')
+            if None in codes:
+                raise SystemExit(f'특수능력.csv: 모르는 능력 이름 "{r["능력"]}" ({r.get("선수명")}). 가능한 값: {", ".join(TRAIT_LABELS)}')
+            table[trait_key(pid)] = sorted(set(codes))
+    return dict(sorted(table.items()))
+
+
+def dump_traits(table):
+    (OUT).mkdir(parents=True, exist_ok=True)
+    (OUT / 'traits.json').write_text(json.dumps({
+        'version': 1,
+        'note': '숨겨진 특수능력. 키는 선수 ID의 해시(tools/build_data.py trait_key), 값은 능력 코드. 화면에 보이지 않는다.',
+        'traits': table,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'특수능력: {len(table)}명 → {OUT / "traits.json"}')
 DRAFTS = ROOT / 'data-src' / 'baseballchart' / 'kbo_draft_1982-2027.csv'
 DRAFT_POS = {'투수': 'P', '포수': 'C', '내야수': 'IF', '외야수': 'OF', '지명타자': 'DH'}
 
@@ -73,7 +118,7 @@ def draft_rows():
                 row['twoWay'] = True
             out[str(r['연도'])].append(row)
     return out
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'public' / 'data'
+OUT = Path(ARGS[1]) if len(ARGS) > 1 else ROOT / 'public' / 'data'
 
 POS = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격수': 'SS', '좌익수': 'LF', '중견수': 'CF',
        '우익수': 'RF', '지명타자': 'DH', '내야수': 'IF', '외야수': 'OF', '선발투수': 'SP', '구원투수': 'RP',
@@ -149,6 +194,11 @@ def rules_for(year):
 
 
 def main():
+    if '--traits-only' in sys.argv:
+        # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
+        ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
+        dump_traits(build_traits(ids))
+        return
     print(f'읽는 중: {SRC}')
     wb = load_workbook(SRC, read_only=True, data_only=True)
 
@@ -327,6 +377,7 @@ def main():
     (OUT / 'seasons').mkdir(parents=True, exist_ok=True)
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     dump({'version': 1, 'players': players}, OUT / 'players.json')
+    dump_traits(build_traits({p['id'] for p in players}))
     dump({'version': 1, 'source': 'baseballchart.kr/draft (나무위키 「(연도) KBO 신인 드래프트」 문서 정리, 2026-09-21 수집)',
           'license': 'CC BY-NC-SA 2.0 KR', 'years': drafts}, OUT / 'drafts.json')
     dump({'version': 1, 'note': '보조자료의 FA 계약 목록. 금액은 구단 발표와 대조하지 않았다. 옵션 제외 보장액(억 원)', 'contracts': contracts},

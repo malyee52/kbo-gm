@@ -4,7 +4,7 @@
 
 import type { DataStore, Rates } from '../data/types';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
@@ -13,7 +13,7 @@ import type { LeagueState } from './types';
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -93,6 +93,9 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       real: lp.real,
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
     };
+    // 숨겨진 특수능력은 리그 상태(저장)에 두지 않고 데이터에서 매번 붙인다
+    const traits = traitsOf(store.traits, lp.id);
+    if (traits) p.traits = traits;
     players.push(p);
     teams[lp.team].org.push(p);
   }

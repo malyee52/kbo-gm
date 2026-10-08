@@ -147,11 +147,13 @@ const GROWTH_NOISE = 3;
 /**
  * 한 오프시즌의 성장 판정 (기획서 6.3): 잠재력과의 격차, 나이, 출전 기회, 소폭의 운.
  * share: 지난 시즌 출전 기회 (0~1, 주전 출전량 대비). 27세 이하는 기회가 적으면 덜 자란다.
+ * aging: 31세 이후 노화 하락에 곱하는 배율 (숨겨진 특수능력 '늦게 지는 꽃'. 보통 1)
  * 반환값: 새 능력 기여 (런)
  */
-export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng, isPitcher = false): number {
+export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng, isPitcher = false, aging = 1): number {
   let d = expectedGrowth(age, runs, potential, isPitcher);
   if (age <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
+  if (age >= 31 && d < 0) d *= aging;
   // 균등 분포 둘의 합으로 가운데가 두꺼운 운을 만든다
   const noise = (rng.next() + rng.next() - 1) * GROWTH_NOISE * 1.7;
   return runs + d + noise;

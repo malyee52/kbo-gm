@@ -38,7 +38,7 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 | `src/league/` | 여러 해 리그 상태: 선수 능력·잠재력·계약·이력(`types.ts`), 새 리그 만들기(`create.ts`), 리그 → 월드(`world.ts`), 잠재력·성장(`growth.ts`), 연봉·FA·캡·외국인 규정(`salary.ts`), 오프시즌 단계(`offseason.ts`), 은퇴·병역·부상 후유증·슬럼프(`careers.ts`), 포스트시즌(`postseason.ts`), 구단주 평가·난이도·예산·캡 제재·업적(`owner.ts`), 가상 이름(`names.ts`) |
 | `src/game/` | 게임 진행 계층: 세션(플레이어 구단, 엔트리, 알림, 조작 기록), 달력, 기록 계산, 브라우저 저장. `storage.ts`만 브라우저 전용 |
 | `src/ui/` | 화면. `App.tsx` → 시작 화면 / `GameShell.tsx`(메뉴·진행 버튼) → `screens/`. 엔진 시험 화면은 `EngineLab.tsx` |
-| `tools/` | 데이터 변환·검사(Python), 엔진 검증(TypeScript) |
+| `tools/` | 데이터 변환·검사(Python), 엔진 검증(TypeScript), 숨겨진 특수능력 후보 추천(`suggest_traits.py`) |
 | `public/data/` | 게임 데이터 JSON. 직접 고치지 말고 엑셀을 고친 뒤 `npm run data` |
 | `data-src/` | 원자료 엑셀. 출처와 한계는 엑셀의 "안내", "출처", "데이터공백" 시트. `외국인_개막명단.csv`는 시작 연도 개막 외국인·아시아쿼터 (지금은 모두 미확인 추정값), `baseballchart/`는 1982~2027년 입단 신인 지명 원본 (baseballchart.kr CSV, CC BY-NC-SA 2.0 KR, 고치지 않는다) |
 | `reports/` | 엔진 검증 결과 |
@@ -57,6 +57,7 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 - 경기 중 작전(타순, 투수 교체)은 AI 감독이 한다. 플레이어는 단장이다. 다만 기용표(야수 주전 자리·서브, 투수 선발·중계·마무리)는 플레이어가 드롭다운으로 정할 수 있다 (2026-10-08 사용자 결정).
 - 외국인 선수는 트레이드할 수 없다 (2026-10-08 사용자 지시). 시작 연도 외국인은 `data-src/외국인_개막명단.csv`의 개막 명단만 넣는다.
 - **KBO 공식 사이트를 자동으로 수집하지 않는다.** 사이트가 자동 접근을 막아 두었고 이용약관을 아직 확인하지 못했다. 사용자가 약관을 확인하고 결정할 때까지 보류.
+- **숨겨진 특수능력은 어디에도 보여 주지 않는다** (2026-10-08 사용자 결정). 레전드·프랜차이즈 선수의 작은 보정(`src/engine/traits.ts`)으로, 화면(`src/ui`)·AI 가치 계산·저장 파일·알림 어디에도 나오지 않는다 (`tests/traits.test.ts`가 검사). 실존 선수에게는 긍정·중립 능력만 둔다. 데이터는 `data-src/특수능력.csv` → `public/data/traits.json`(선수 ID 해시 키)이고, 후보 초안은 `python tools/suggest_traits.py`, 반영은 `python tools/build_data.py --traits-only` (다른 JSON과 저장 호환은 그대로).
 
 ## 작업 방식
 
@@ -147,6 +148,7 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 - 가을야구는 정규시즌 뒤 한 경기씩 진행한다 (`GameSession.postseason`, 저장에 진행 상태). 가을야구 중 조작은 가을야구 날짜(`currentDay`)로 기록된다.
 - 특별 엔트리(은퇴식 등) 명단은 규칙으로 고른 값이다 (2015~2026 명단은 2026-10-08 사용자 확인). 데이터를 바꾸면 검사 경고에서 연도별 명단을 다시 확인한다.
 - 연봉 입력(FA 제시, 연봉 협상)은 화면에서 억 원 단위다. 내부 값은 만 원 단위 그대로.
+- 숨겨진 특수능력(2026-10-08): 효과 크기(`params.ts`의 `traits`)와 후보 선정 기준(`tools/suggest_traits.py`)은 모두 임시값. 가을 사나이·좌완 킬러·우완 킬러는 기록으로 가릴 수 없어 자동으로 주지 않는다 (CSV에서 직접). 능력은 선수 ID로 붙으므로 2025년 이전 검증 월드에도 들어간다 (리그 평균 영향은 `reports/`에서 확인). 데이터 파일 자체는 브라우저 개발자 도구로 열 수 있다 (해시는 가림막일 뿐).
 
 ### 운영
 - git 저장소 (2026-10-08 시작, 기본 브랜치 `main`). 원격: `origin` = https://github.com/malyee52/kbo-gm (공개, 2026-10-08 사용자 결정으로 로컬 전용 방침을 바꿈). 배포는 GitHub Pages (`docs/deploy.md`, main에 반영되면 자동 배포). main에는 직접 push하지 않고 브랜치를 올려 PR로 병합한다. 줄바꿈은 LF로 고정 (`.gitattributes`). 커밋은 사용자가 요청하거나 허락할 때만 한다.

@@ -179,6 +179,24 @@ def main():
         if two_way:
             warn(f'신인 지명: 포지션이 둘인 선수 {two_way}명 (앞의 포지션, 투타겸업은 투수로 봄)')
 
+    # ---- 숨겨진 특수능력 (traits.json): 키가 실제 선수의 해시인지, 코드가 아는 값인지. 이름은 출력하지 않는다 (숨김)
+    traits_path = DATA / 'traits.json'
+    if traits_path.exists():
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_data import TRAIT_LABELS, trait_key  # noqa: E402
+        keys = {trait_key(p['id']) for p in players}
+        codes = set(TRAIT_LABELS.values())
+        table = load(traits_path)['traits']
+        for k, v in table.items():
+            if k not in keys:
+                err(f'특수능력: 어느 선수와도 맞지 않는 키 {k}')
+            for c in v:
+                if c not in codes:
+                    err(f'특수능력: 모르는 코드 {c}')
+            if len(v) > 3:
+                warn(f'특수능력: 한 선수에 능력 {len(v)}개')
+        warn(f'특수능력: {len(table)}명 (기준은 tools/suggest_traits.py, 수정은 data-src/특수능력.csv)')
+
     # ---- 특별 엔트리 (새 게임에서 빼는 선수, 규칙으로 고른 값이라 확인용으로 보여 준다)
     for y, ids in sorted(meta.get('specialEntries', {}).items()):
         if int(y) >= 2015:
