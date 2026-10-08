@@ -381,12 +381,15 @@ function SalaryPanel({ act }: { act: Act }) {
       </div>
       <div className="scroll">
         <table>
-          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th>요구액</th><th className="l">제시액 (만 원)</th></tr></thead>
+          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th>요구액</th><th className="l">제시액 (억 원)</th></tr></thead>
           <tbody>
             {ids.map((id) => {
               const p = players.get(id)!;
               const i = info(p);
-              const v = edit[id] ?? String(s.offers[id]);
+              // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
+              // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
+              const shown = (Math.ceil(s.offers[id] / 100) / 100).toFixed(2);
+              const v = edit[id] ?? shown;
               const low = s.offers[id] < s.demands[id];
               return (
                 <tr key={id}>
@@ -394,9 +397,9 @@ function SalaryPanel({ act }: { act: Act }) {
                   <td>{wonText(p.contract.salary)}</td><td>{wonText(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={MIN_SALARY} step={100} value={v} aria-label={`${p.name} 제시액`} style={{ width: '8em' }}
+                      <input type="number" min={MIN_SALARY / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
-                        onBlur={() => act(session.setSalaryOffer(id, Number(v)))} />
+                        onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round(Number(v) * 10000))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
                     </span>
                   </td>
