@@ -13,7 +13,7 @@ export function Standings() {
   return (
     <div className="stack">
       <h1>순위</h1>
-      <p className="muted small">승률(무승부 제외) 순. 점선 위가 포스트시즌 진출권(상위 {cut}팀)입니다. 포스트시즌 경기는 아직 치르지 않습니다.</p>
+      <p className="muted small">승률(무승부 제외) 순. 점선 위가 포스트시즌 진출권(상위 {cut}팀)입니다. 정규시즌이 끝나면 가을야구를 치릅니다.</p>
       <div className="scroll">
         <table>
           <thead>
