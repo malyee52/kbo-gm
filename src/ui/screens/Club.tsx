@@ -49,7 +49,7 @@ export function Club() {
             </p>
           )}
           <p className="muted small">
-            목표는 개막 때 전력 예상 순위로 정합니다: 1~2위 한국시리즈 우승, {session.world.rules.postseasonTeams + 1}위까지 가을야구, 그 아래 탈꼴찌.
+            목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.
             달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
           </p>
           <p className="muted small">난이도: {DIFFICULTY_LABEL[L.difficulty ?? 'normal']}</p>

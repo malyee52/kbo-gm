@@ -27,6 +27,13 @@ function weighted<T>(list: [T, number][], rng: Rng): T {
 const pick = <T>(arr: T[], rng: Rng): T => arr[rng.int(arr.length)];
 
 /** 국내 가상 선수 이름. taken에 있는 이름(실존 선수 전원 + 이미 쓴 이름)은 피한다 */
+/** 이름 뒤에 붙는 조사: 받침이 있으면 pair[1], 없으면 pair[0] (예: josa('오스틴', '와과') → '과'). 한글이 아니면 pair[0] */
+export function josa(name: string, pair: '와과' | '이가' | '은는' | '을를'): string {
+  const ch = name.charCodeAt(name.length - 1) - 0xac00;
+  const batchim = ch >= 0 && ch < 11172 && ch % 28 !== 0;
+  return batchim ? pair[1] : pair[0];
+}
+
 export function koreanName(rng: Rng, taken: Set<string>): string {
   for (let i = 0; i < 200; i++) {
     const n = weighted(SURNAMES, rng) + pick(GIVEN_1, rng) + pick(GIVEN_2, rng);

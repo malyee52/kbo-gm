@@ -5,7 +5,8 @@ import { DEFAULT_PARAMS, worldForYear } from '../src/engine';
 import { createLeague } from '../src/league/create';
 import { budgetFor, spendLimit } from '../src/league/owner';
 import { roundsFor } from '../src/league/postseason';
-import { FOREIGN_NEW_CAP, foreignSalary, PRE_CAP_BUDGET, priceIndex, salaryCap, wonText } from '../src/league/salary';
+import { ASIA_NEW_CAP, FOREIGN_NEW_CAP, foreignSalary, PRE_CAP_BUDGET, priceIndex, salaryCap, wonText } from '../src/league/salary';
+import { josa } from '../src/league/names';
 import { autoSlotOf, isAutoSlot } from '../src/game/storage';
 import { GameSession } from '../src/game/session';
 
@@ -98,5 +99,29 @@ describe('부임 이력의 구단 이름', () => {
     const h = g.owner.history[0];
     expect(h.year).toBe(1999);
     expect(h.teamName).toBe('쌍방울');
+  }, 120_000);
+});
+
+describe('전수조사(2026-10-09)에서 고친 것', () => {
+  it('조사 와/과는 받침으로 고른다', () => {
+    expect(josa('오스틴', '와과')).toBe('과');
+    expect(josa('톨허스트', '와과')).toBe('와');
+    expect(josa('에릭 마틴', '와과')).toBe('과');
+    expect(josa('Smith', '와과')).toBe('와');
+  });
+
+  it('재계약하지 않은 아시아쿼터 선수는 신규 상한 이하의 요구액으로 후보 풀에 들어온다', () => {
+    const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+    const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'qa-asia-pool' }, FAST);
+    g.advance(100000);
+    g.beginOffseason();
+    const stage = () => g.offseason!.stage;
+    for (let guard = 0; stage() !== 'foreign' && guard < 10; guard++) { if (stage() === 'comp') g.autoComp(); g.nextStage(); }
+    expect(stage()).toBe('foreign');
+    const pool = g.offseason!.foreign!.pool.map((id) => g.leaguePlayer(id)!);
+    const asia = pool.filter((p) => p.asia);
+    expect(asia.length).toBeGreaterThan(0);
+    for (const p of asia) expect(p.contract.salary, p.name).toBeLessThanOrEqual(ASIA_NEW_CAP);
+    for (const p of pool) expect(p.contract.salary, p.name).toBeLessThanOrEqual(FOREIGN_NEW_CAP);
   }, 120_000);
 });

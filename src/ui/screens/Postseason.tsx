@@ -14,7 +14,7 @@ function bracketText(n: number): string {
     const len = r === 'wc' ? `${high}위 ${rule.highHeadStart}승 어드밴티지, 최대 ${rule.maxGames}경기` : `${rule.need * 2 - 1}전 ${rule.need}선승`;
     return i === 0 ? `${high}위 대 ${n}위 ${ROUND_LABEL[r]}(${len})` : `${ROUND_LABEL[r]}(${high}위, ${len})`;
   };
-  return rounds.map(desc).join(' → ') + '.';
+  return rounds.map(desc).join(' → ') + '. ';
 }
 
 export function Postseason() {
@@ -72,7 +72,7 @@ export function Postseason() {
             <span className="muted small">
               <TeamName idx={x.high} /> {x.winsHigh} - {x.winsLow} <TeamName idx={x.low} />
               {x.round === 'wc' && ` (4위 ${RULES.wc.highHeadStart}승 포함)`}
-              {x.winner >= 0 ? <> · <TeamName idx={x.winner} /> 진출</> : ' · 진행 중'}
+              {x.winner >= 0 ? <> · <TeamName idx={x.winner} /> {x.round === 'ks' ? '우승' : '진출'}</> : ' · 진행 중'}
             </span>
           </h2>
           {x.games.length === 0 ? <p className="muted small">아직 경기를 치르지 않았습니다.</p> : (

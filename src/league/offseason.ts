@@ -17,11 +17,11 @@ import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, MILITARY_RUST, retirements, rollForm,
   type CareerNews,
 } from './careers';
-import { foreignName, koreanName } from './names';
+import { foreignName, josa, koreanName } from './names';
 import {
   ASIA_NEW_CAP, capPayroll, COMPENSATION, faEligible, faGrade, faYears, FOREIGN_ASIA, FOREIGN_NEW_CAP, FOREIGN_REGULAR,
   FOREIGN_TOTAL_CAP, foreignSalary, marketSalary, MIN_SALARY, nextReserveSalary, ORG_LIMIT, reserveTarget, runsForSalary, salaryCap,
-  SERVICE_SHARE, WON_PER_RUN, FA_COMP, type FaGrade,
+  SERVICE_SHARE, WON_PER_RUN, FA_COMP, wonText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -743,6 +743,15 @@ function expandTeam(league: LeagueState, off: OffseasonState, store: Store, para
 // ---- 외국인 선수
 
 const isForeignOf = (p: LeaguePlayer, t: number) => p.team === t && p.foreign;
+
+/**
+ * 재계약하지 않은 외국인을 후보 풀로 보낸다: 무소속으로 두고 요구액을 신규 계약 기준으로 다시 매긴다.
+ * (2026-10-09 전수조사 H3: 아시아쿼터 선수가 재계약 연봉 55만 달러를 들고 풀에 들어와 신규 상한 20만 달러에 걸려 아무도 계약하지 못했다)
+ */
+function toPool(view: LeagueView, p: LeaguePlayer): void {
+  p.team = -1;
+  p.contract = { ...p.contract, salary: foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), true, p.asia) };
+}
 /** 계약 기간이 이번 오프시즌에 끝나는 외국인 */
 const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.until <= year;
 
@@ -810,8 +819,8 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     if (advice) {
       p.contract = { kind: 'foreign', salary: resignForeignSalary(view, p, FOREIGN_TOTAL_CAP - otherRegularPay(league, p, year)), until: year + 1 };
     } else {
-      log(off, 'foreign', `${league.teams[p.team].name}, ${p.name}와 재계약하지 않음`, false);
-      p.team = -1;
+      log(off, 'foreign', `${league.teams[p.team].name}, ${p.name}${josa(p.name, '와과')} 재계약하지 않음`, false);
+      toPool(view, p);
       pool.push(p.id);
     }
   }
@@ -870,7 +879,7 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
   p.team = team;
   p.contract = { ...p.contract, until: off.year + 1 };
   off.foreign!.pool = off.foreign!.pool.filter((x) => x !== p.id);
-  log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}와 계약 (${Math.round(p.contract.salary / 10000)}만 달러${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
+  log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(p.contract.salary / 10000)}만 달러${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
 }
 
 function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, view: LeagueView): void {
@@ -934,17 +943,17 @@ function finishForeign(league: LeagueState, off: OffseasonState, store: Store, p
     if (keep) {
       const room = FOREIGN_TOTAL_CAP - otherRegularPay(league, p, off.year);
       if (!p.asia && room < FOREIGN_MIN_DEAL) {
-        p.team = -1;
+        toPool(view0, p);
         f.pool.push(id);
         log(off, 'foreign', `${p.name}: 외국인 총액 상한 때문에 재계약하지 못함`, true);
         continue;
       }
       p.contract = { kind: 'foreign', salary: resignForeignSalary(view0, p, room), until: off.year + 1 };
-      log(off, 'foreign', `${p.name}와 재계약`, true);
+      log(off, 'foreign', `${p.name}${josa(p.name, '와과')} 재계약`, true);
     } else {
-      p.team = -1;
+      toPool(view0, p);
       f.pool.push(id);
-      log(off, 'foreign', `${p.name}와 재계약하지 않음`, true);
+      log(off, 'foreign', `${p.name}${josa(p.name, '와과')} 재계약하지 않음`, true);
     }
   }
   f.keep = {};
@@ -1093,7 +1102,7 @@ function finishSalary(league: LeagueState, off: OffseasonState): void {
     const p = league.players.find((x) => x.id === id)!;
     const mine = p.team === off.userTeam;
     const salary = mine ? settledSalary(s.offers[id] ?? demand, demand) : demand;
-    if (mine && (s.offers[id] ?? demand) < demand) log(off, 'salary', `${p.name}: 제시액이 요구액보다 적어 조정 끝에 ${salary.toLocaleString('ko-KR')}만 원`, true);
+    if (mine && (s.offers[id] ?? demand) < demand) log(off, 'salary', `${p.name}: 제시액이 요구액보다 적어 조정 끝에 ${wonText(salary)}`, true);
     p.contract = { kind: 'reserve', salary, until: off.year + 1 };
   }
 }
