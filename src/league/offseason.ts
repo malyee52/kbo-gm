@@ -4,11 +4,11 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
-import type { DataStore, DraftRow } from '../data/types';
+import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import { ageDefense, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
-import { asSim, growthRuns, skillForRuns } from './growth';
+import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, MILITARY_RUST, retirements, rollForm,
   type CareerNews,
@@ -668,8 +668,9 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
   const pool: string[] = [];
   // 실제 지명이 있는 해: 풀은 실제 지명 선수 (기획서 5장. 육성선수·원년 멤버는 지명이 아니라 뺀다). 지명은 게임 속 순위 역순으로 다시 한다
   const real = draftPool(store, year + 1);
+  let ci: CareerIndex | null = null;
   real.forEach((d, i) => {
-    const p = makeDraftee(league, view, rng, taken, d, i, year + 1);
+    const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)));
     pool.push(p.id);
   });
   for (let i = 0; i < (real?.length ? 0 : DRAFT_POOL); i++) {
@@ -892,22 +893,58 @@ export function draftPool(store: Pick<DataStore, 'drafts'>, entryYear: number): 
   return (store.drafts?.[String(entryYear)] ?? []).filter((d) => d.kind !== '육성선수' && d.kind !== '원년 멤버');
 }
 
+/** 지명 선수를 선수 마스터(실제 기록이 있는 선수)와 맞춘다: 이름, 입단 연도 ±1 (마스터의 입단 연도는 추정값), 투수 여부. 애매하면 null */
+export function matchDraftee(store: Pick<DataStore, 'players'>, d: DraftRow, entryYear: number, league: LeagueState): PlayerMaster | null {
+  // 마스터에는 1군 기록이 있는 선수만 있다. 지명 자료에서 1군 0경기인 선수를 맞추면 같은 이름의 다른 선수가 걸린다
+  if (d.games === 0) return null;
+  const inLeague = new Set(league.players.map((p) => p.id));
+  const wantPitcher = d.pos === 'P';
+  const cands = [...store.players.values()].filter((m) =>
+    m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id)
+    && (m.kind === 'BP' || (m.kind === 'P') === wantPitcher));
+  if (cands.length === 1) return cands[0];
+  const exact = cands.filter((m) => m.entryYear === entryYear);
+  return exact.length === 1 ? exact[0] : null;
+}
+
+/** 1군에 끝내 오르지 못한 지명자의 잠재력 (기획서 6.3: 낮은 범위, 임시값) */
+const NEVER_POTENTIAL: [number, number] = [-15, -3];
+
 /**
- * 실제 지명 신인 한 명을 리그(무소속)에 넣는다. 아직 프로 기록이 없어 능력은 만든다 (임시값):
- * 그 해 지명 순번(index, 0부터)을 가상 신인과 같은 순위 식에 넣고 운을 크게 더한다. 지명 순번과 실제 커리어의 관계는 약하다.
+ * 실제 지명 신인 한 명을 리그(무소속)에 넣는다 (기획서 6.3).
+ * - 실제 기록이 있는 선수(마스터와 맞춰짐): 실존 선수와 같은 id·생년·투타를 쓰고, 잠재력은 실제 커리어의 전성기 기여(realPeakRuns).
+ *   그래서 과거 연도에서 시작하면 류현진 같은 선수는 실제 커리어대로 높은 잠재력을 가진다.
+ * - 과거 지명자인데 1군 기록이 없는 선수: 낮은 범위에서.
+ * - 아직 커리어를 알 수 없는 최근 지명자 (자료 마지막 해 기준 2년 안, 예: 2027 입단): 지명 순번(index, 0부터)을 가상 신인과 같은
+ *   순위 식에 넣고 운을 크게 더한다. 지명 순번과 실제 커리어의 관계는 약하다 (임시값).
+ * 시작 능력은 잠재력에서 나이 여유분(growthRoom × 0.7~1.3)을 뺀 값 (-15런 아래로는 내리지 않는다).
  */
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
-                            entryYear: number): LeaguePlayer {
-  const f = (index + 0.5) / DRAFT_POOL;
-  const expected = -10 + 8 * (-Math.log(Math.min(1, f))) ** 1.2;
-  const potential = expected + (rng.next() + rng.next() - 1) * 12;
-  const age = d.univ ? 22 : 18;
-  const runs = d.univ ? potential * 0.35 - 8 : potential * 0.1 - 14;
+                            entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'>, career: () => CareerIndex): LeaguePlayer {
+  const m = matchDraftee(store, d, entryYear, league);
+  const isPitcher = m ? (m.kind === 'P' || (m.kind === 'BP' && d.pos === 'P')) : d.pos === 'P';
+  const masterPos = m?.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null;
+  const pos = isPitcher ? null : masterPos ?? (d.pos === 'P' ? 'IF' : d.pos);
+  const lastData = Math.max(...store.meta.years);
+  let potential: number;
+  if (m) {
+    const probe = { id: m.id, isPitcher, pos, bat: null, pit: null, birthYear: null } as unknown as SimPlayer;
+    potential = realPeakRuns(probe, career(), store, view.ctx) ?? rng.range(...NEVER_POTENTIAL);
+  } else if (d.games === 0 && entryYear <= lastData - 2) {
+    potential = rng.range(...NEVER_POTENTIAL);
+  } else {
+    const f = (index + 0.5) / DRAFT_POOL;
+    potential = -10 + 8 * (-Math.log(Math.min(1, f))) ** 1.2 + (rng.next() + rng.next() - 1) * 12;
+  }
+  const age = m?.birthYear ? entryYear - m.birthYear : d.univ ? 22 : 18;
+  const start = Math.max(-15, potential - growthRoom(age) * rng.range(0.7, 1.3));
   const p = makeVirtual(league, view, rng, taken, {
-    foreign: false, asia: false, age, runs: runs + rng.range(-3, 3), potential,
-    real: true, name: d.name, isPitcher: d.pos === 'P', pos: d.pos === 'P' ? null : d.pos, id: `d${entryYear}-${index + 1}`,
+    foreign: false, asia: false, age, runs: start, potential,
+    real: true, name: m?.name ?? d.name, isPitcher, pos, id: m?.id ?? `d${entryYear}-${index + 1}`,
+    birthYear: m?.birthYear, bats: m?.bats, throws: m?.throws,
+    starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
   }, entryYear - 1);
-  p.school = d.univ ? 'UNIV' : 'HS';
+  p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
   p.scoutPotential = Math.round(potential + rng.range(-8, 8));
   view.ctx.potential?.set(p.id, p.scoutPotential);
   p.contract = { kind: 'rookie', salary: MIN_SALARY, until: entryYear };
@@ -940,6 +977,11 @@ interface VirtualSpec {
   isPitcher?: boolean;
   pos?: string | null;
   id?: string;
+  /** 실존 선수의 생년·투타·선발 여부 (없으면 나이와 난수로) */
+  birthYear?: number | null;
+  bats?: 'R' | 'L' | 'S';
+  throws?: 'R' | 'L';
+  starter?: boolean;
 }
 
 /** 가상 선수 한 명을 만들어 리그(무소속)에 넣는다. 능력은 리그 평균(모든 비율 1.00) 선수에서 목표 런에 맞게 옮긴다 */
@@ -955,14 +997,14 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     for (const [p, w] of HIT_POS) if ((u -= w) < 0) { pos = p; break; }
     pos ??= '1B';
   }
-  const starter = isPitcher && rng.chance(0.6);
+  const starter = isPitcher && (spec.starter ?? rng.chance(0.6));
   const p: LeaguePlayer = {
     id: spec.id ?? `v${nextYear}-${serial}`,
     name: spec.name ?? (spec.foreign ? foreignName(rng, taken, spec.asia) : koreanName(rng, taken)),
     real: spec.real ?? false, isPitcher, pos,
-    bats: isPitcher ? (rng.chance(0.25) ? 'L' : 'R') : (['R', 'R', 'L', 'L', 'S'] as const)[rng.int(5)],
-    throws: rng.chance(isPitcher ? 0.3 : 0.15) ? 'L' : 'R',
-    foreign: spec.foreign, asia: spec.asia, birthYear: nextYear - spec.age, school: null, entryYear: nextYear,
+    bats: spec.bats ?? (isPitcher ? (rng.chance(0.25) ? 'L' : 'R') : (['R', 'R', 'L', 'L', 'S'] as const)[rng.int(5)]),
+    throws: spec.throws ?? (rng.chance(isPitcher ? 0.3 : 0.15) ? 'L' : 'R'),
+    foreign: spec.foreign, asia: spec.asia, birthYear: spec.birthYear ?? nextYear - spec.age, school: null, entryYear: nextYear,
     bat: isPitcher ? null : {
       so: 1, bb: 1, hbp: 1, hr: 1, s1: 1, d2: 1, t3: 1,
       sbAtt: 0.02 + rng.next() * 0.1, sbPct: 0.6 + rng.next() * 0.2, speed: 0.25 + rng.next() * 0.5, sample: 0,

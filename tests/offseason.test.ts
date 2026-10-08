@@ -231,6 +231,22 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(first.school).toBe('HS');
   });
 
+  it('과거 연도 드래프트: 실제 기록이 있는 지명자는 실존 선수 id로 연결되고 잠재력이 실제 커리어를 따른다 (2005 시작, 류현진)', () => {
+    const h = GameSession.create(store, { year: 2005, teamIdx: 0, seed: 'ryu' }, FAST);
+    h.advance(100000);
+    h.beginOffseason();
+    while (h.offseason!.stage !== 'draft') h.nextStage();
+    const ryu = h.leaguePlayer('76715')!; // 류현진: 실제 선수 id
+    expect(ryu.name).toBe('류현진');
+    expect(ryu.birthYear).toBe(1987);
+    expect(ryu.potential).toBeGreaterThan(40); // 실제 전성기 기여 (지명 순번으로 만들면 10런 안팎이었다)
+    // 1군에 오르지 못한 과거 지명자는 낮은 잠재력
+    const ids = [...h.offseason!.draft!.pool, ...h.offseason!.draft!.picks.map((x) => x.id)];
+    const never = ids.map((id) => h.leaguePlayer(id)!).filter((p) => p.id.startsWith('d2006-'));
+    expect(never.length).toBeGreaterThan(0);
+    for (const p of never) expect(p.potential).toBeLessThanOrEqual(0);
+  }, 60_000);
+
   it('지명 명단이 없는 해의 드래프트는 실존 선수와 이름이 겹치지 않는 가상 신인', () => {
     const noList = { ...store, drafts: undefined };
     const h = GameSession.load(noList, roundTrip(g.toSave()), FAST);

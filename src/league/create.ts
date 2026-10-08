@@ -89,7 +89,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     teams: recorded.teams.map((t) => ({ name: t.name, franchise: t.franchise })),
     players, lastSeason: null, ledger: [], nextVirtualId: 1,
   };
-  const added = addUnrecordedRookies(league, store, ctx, startYear, seed);
+  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx);
   const world = opening || added ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
@@ -99,7 +99,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
  * 그 해 기록이 있는 선수만 월드에 들어오므로, 넣지 않으면 2군 신인이 통째로 빠진다.
  * 같은 이름이 같은 구단에 이미 있으면 넣지 않는다 (1군에 올라온 신인). 넣은 수를 돌려준다.
  */
-function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, seed: string): number {
+function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, seed: string,
+                              idx: CareerIndex): number {
   const rows = (store.drafts?.[String(startYear)] ?? []).filter((d) => d.kind !== '원년 멤버' && d.games === 0);
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
@@ -112,7 +113,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   for (const d of rows) {
     const t = teamIdx.get(d.team);
     if (t === undefined || have.has(`${t}/${d.name}`)) continue;
-    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear);
+    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx);
     p.team = t;
     p.military = { state: 'pending' };
     n++;
