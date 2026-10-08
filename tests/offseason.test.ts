@@ -9,7 +9,8 @@ import * as Off from '../src/league/offseason';
 import {
   ASIA_NEW_CAP, COMPENSATION, faEligible, faGrade, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
 } from '../src/league/salary';
-import type { LeaguePlayer } from '../src/league/types';
+import { careerIndex } from '../src/league/growth';
+import type { LeaguePlayer, LeagueState } from '../src/league/types';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -286,6 +287,21 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     for (const p of never) expect(p.potential).toBeLessThanOrEqual(0);
   }, 60_000);
 
+  it('지명 포지션과 실제 커리어가 다른 선수는 실제 커리어를 따른다 (이대호·나성범 야수, 김재윤 투수)', () => {
+    const empty = { players: [] } as unknown as LeagueState;
+    const career = () => careerIndex(store);
+    const row = (year: number, name: string) => store.drafts![String(year)].find((d) => d.name === name)!;
+    const daeho = Off.matchDraftee(store, row(2001, '이대호'), 2001, empty)!; // 2001년 투수로 지명
+    expect(daeho?.id).toBe('71564');
+    expect(Off.masterIsPitcher(daeho, career)).toBe(false);
+    const na = Off.matchDraftee(store, row(2012, '나성범'), 2012, empty)!; // 2012년 투수로 지명, 마스터는 야수(B)라 수정 전에는 연결이 끊겼다
+    expect(na?.id).toBe('62947');
+    expect(Off.masterIsPitcher(na, career)).toBe(false);
+    const jy = Off.matchDraftee(store, row(2015, '김재윤'), 2015, empty)!; // 포수로 지명, 마무리 투수로 성공
+    expect(jy).not.toBeNull();
+    expect(Off.masterIsPitcher(jy, career)).toBe(true);
+  });
+
   it('지명 명단이 없는 해의 드래프트는 실존 선수와 이름이 겹치지 않는 가상 신인', () => {
     const noList = { ...store, drafts: undefined };
     const h = GameSession.load(noList, roundTrip(g.toSave()), FAST);
@@ -439,6 +455,8 @@ describe('FA 보상선수 (A·B등급 이적)', () => {
     }
     expect(h.nextStage().ok).toBe(true);
     expect(h.offseason!.stage).toBe('foreign');
+    // AI는 보호 밖에 쓸 만한 선수가 있으면 선수를 고른다 (보상금만 고르는 것은 예외여야 한다)
+    expect(h.offseason!.comp!.some((c) => c.pick !== 'cash')).toBe(true);
     for (const c of h.offseason!.comp!) {
       expect(c.pick).not.toBeNull();
       const fa = h.leaguePlayer(c.fa)!;

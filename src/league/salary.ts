@@ -3,6 +3,7 @@
 // 제도 값은 자료집 "제도연표"에서 "출처 확인"인 것만 확정값으로 쓰고, 나머지는 "임시값"으로 표시한다.
 // 연봉 단위는 만 원 (외국인 선수만 달러).
 
+import { faServiceNeeded } from './eras';
 import type { LeaguePlayer, School } from './types';
 
 /** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
@@ -67,10 +68,10 @@ export function faYears(age: number): number {
 /** 런을 돈으로 바꾸는 시장 단가 (만 원/런, 임시값). 시장 연봉식의 주전급 기울기 근처 */
 export const WON_PER_RUN = 4500;
 
-/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인) */
-export function serviceNeeded(school: School | null, entryYear: number, birthYear: number | null): number {
+/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (임시값) */
+export function serviceNeeded(school: School | null, entryYear: number, birthYear: number | null, year = 2022): number {
   const s = school ?? (birthYear && entryYear - birthYear >= 22 ? 'UNIV' : 'HS');
-  return s === 'UNIV' ? 7 : 8;
+  return faServiceNeeded(year, s === 'UNIV');
 }
 
 /** FA 재자격: 마지막 FA 계약 이후 1군 4시즌 (임시값, 실제 규정 미확인) */
@@ -83,7 +84,7 @@ export const SERVICE_SHARE = 0.6;
 export function faEligible(p: LeaguePlayer, year: number): boolean {
   if (p.foreign || p.team < 0 || p.military?.state === 'serving') return false;
   if (p.contract.until > year) return false;
-  const need = p.faCount === 0 ? serviceNeeded(p.school, p.entryYear, p.birthYear) : FA_RE_ELIGIBLE;
+  const need = p.faCount === 0 ? serviceNeeded(p.school, p.entryYear, p.birthYear, year) : FA_RE_ELIGIBLE;
   return p.service >= need;
 }
 

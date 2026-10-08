@@ -19,6 +19,15 @@ function servedSeason(idx: CareerIndex, id: string, year: number): boolean {
   return (b?.row.pa ?? 0) >= 100 || (p?.row.tbf ?? 0) >= 100;
 }
 
+/**
+ * 생년이 없는 선수(1980~90년대 자료에 많다)의 생년 추정: 입단 때 대졸 22세, 1991년 이전 입단은 23세(실업·대학 출신이 많던 시대), 그 뒤는 19세 (임시값).
+ * 2026-10-08 사용자 결정: 빈 자료는 추정치로 채운다. 화면에는 "약 N세"로 표시한다 (birthYearEstimated).
+ */
+export function estimatedBirthYear(m: { entryYear: number; school?: 'HS' | 'UNIV' }): number {
+  const age = m.school === 'UNIV' ? 22 : m.entryYear < 1992 ? 23 : 19;
+  return m.entryYear - age;
+}
+
 export interface CreatedLeague {
   league: LeagueState;
   /** 시작 연도 월드. 외국인 개막 명단이 있는 해는 명단에 없는 외국인이 빠진다 (그 밖에는 worldForYear와 같다) */
@@ -79,7 +88,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
 
     return {
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
-      foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? null, school: m.school ?? null, entryYear: m.entryYear,
+      foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
+      ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, history: [],
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear) }),

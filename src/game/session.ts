@@ -15,6 +15,7 @@ import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
+import { changeText } from '../league/eras';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, offersFor, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
@@ -814,6 +815,7 @@ export class GameSession {
       }
       case 'open': {
         if (!off || off.stage !== 'ready') return { ok: false, message: '오프시즌 단계를 모두 마쳐야 개막할 수 있습니다.' };
+        const changes = off.changes ?? [];
         Off.closeOffseason(L, off);
         this.postseason = null;
         const sanctions = applyCapSanctions(L, L.year);
@@ -826,6 +828,7 @@ export class GameSession {
         this.lastCallUps = new Set();
         this.valueCtx = null;
         this.startEntry();
+        for (const c of changes) this.addNews(0, 'season', `${L.year} 시즌: ${changeText(c)}.`);
         this.actions.push(clone(a));
         this.addNews(0, 'season', `${this.year} 시즌을 시작합니다. 개막일은 ${formatDate(this.year, 0)}입니다.`);
         for (const p of this.team.org) {

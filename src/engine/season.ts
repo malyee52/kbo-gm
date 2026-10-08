@@ -6,6 +6,7 @@ import type { Rates } from '../data/types';
 import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
+import { eraPitching } from './eras';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
 import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
@@ -261,7 +262,7 @@ export class Season {
     this.eventRng = rng.fork('events');
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: rng.fork('games'),
-      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals,
+      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
     };
 
     // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다

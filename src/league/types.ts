@@ -78,6 +78,8 @@ export interface LeaguePlayer {
   startAbsentReason?: 'injury' | 'military';
   /** 부상 이력 (게임 안에서 치른 시즌만, 장기·큰 부상) */
   injuries?: InjuryLine[];
+  /** 생년이 자료에 없어 입단 연도로 가늠한 값 (M8). 화면에는 "약 N세" */
+  birthYearEstimated?: boolean;
 }
 
 export type MilitaryState =
@@ -172,4 +174,6 @@ export interface LeagueState {
   draftPenalty?: (number | null)[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
+  /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
+  expansions?: { team: number; firstYear: number }[];
 }

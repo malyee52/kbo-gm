@@ -58,6 +58,8 @@ export interface GameContext {
   totals: LeagueCounters;
   /** 포스트시즌 경기인가 (숨겨진 특수능력 '가을 사나이'용). 없으면 정규시즌 */
   postseason?: boolean;
+  /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
+  startLimitScale?: number;
 }
 
 interface PitcherInGame {
@@ -133,7 +135,7 @@ function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameC
   line.g++;
   if (isStarter) line.gs++;
   // 선발 한계는 기록으로 추정한 체력보다 조금 길게 (체력 추정이 평균 쪽으로 당겨져 있어 실제 선발 타자 수 23.4명에 맞춤, 임시값)
-  const base = isStarter ? skill.stamina * STARTER_LIMIT_SCALE : skill.reliefStint;
+  const base = isStarter ? skill.stamina * STARTER_LIMIT_SCALE * (ctx.startLimitScale ?? 1) : skill.reliefStint;
   return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead };
 }
 

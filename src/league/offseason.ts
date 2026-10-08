@@ -26,6 +26,8 @@ import {
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
+import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
+import { estimatedBirthYear } from './create';
 
 type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits'>;
 
@@ -111,6 +113,9 @@ export interface OffseasonState {
     pool: string[];
     /** 플레이어 구단 외국인의 재계약 여부 */
     keep: Record<string, boolean>;
+    /** 다음 시즌 보유 한도 (M8, 시대별). 없으면 2026년 값 */
+    regular?: number;
+    asia?: number;
   } | null;
   draft: {
     order: number[];
@@ -133,6 +138,8 @@ export interface OffseasonState {
   growth?: GrowthEntry[];
   /** FA 보상선수 (A·B등급 이적 건마다 하나, 2026-10-08 추가) */
   comp?: CompCase[];
+  /** 다음 시즌의 구단 변화 (M8: 명칭 변경·승계·창단). 개막 때 알림으로 보여 준다 */
+  changes?: TeamChange[];
 }
 
 /** FA 보상 한 건: 영입 구단(to)이 보호선수 명단을 내고, 원 소속 구단(from)이 보상선수 또는 보상금만을 고른다 */
@@ -192,7 +199,7 @@ const ageIn = (p: LeaguePlayer, year: number) => (p.birthYear ? year - p.birthYe
 function tendencyFor(league: LeagueState, view: LeagueView, team: number): Tendency {
   const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
   return tendencyOf({
-    teamIdx: team, rank: st.indexOf(team) + 1, nTeams: league.teams.length, cut: 5,
+    teamIdx: team, rank: (st.indexOf(team) < 0 ? st.length : st.indexOf(team)) + 1, nTeams: league.teams.length, cut: 5,
     coreAge: coreAge(view.orgs[team], view.ctx), remaining: 1,
   });
 }
@@ -349,7 +356,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     off.growth.push(g);
   }
 
-  openFaMarket(league, off, store, params);
+  applyTeamChanges(league, off, store, params);
+  enterFa(league, off, store, params);
   return off;
 }
 
@@ -532,6 +540,7 @@ function enterComp(league: LeagueState, off: OffseasonState, store: Store, param
     cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
   }
   if (!cases.length) {
+    log(off, 'comp', 'A·B등급 FA의 구단 이동이 없어 보상선수 단계를 건너뜁니다.', true);
     enterForeign(league, off, store, params);
     return;
   }
@@ -565,14 +574,16 @@ export function pickCompByUser(league: LeagueState, off: OffseasonState, fa: str
   return { ok: true, message: p ? `보상선수로 ${p.name} 선수를 골랐습니다.` : '보상금만 받기로 했습니다.' };
 }
 
-/** AI 기준의 보상 선택: 보호 밖 최고 선수의 가치가 추가로 받을 수 있는 보상금(연봉 차액)보다 크면 선수, 아니면 보상금만 */
+/**
+ * AI 기준의 보상 선택: 보호 밖에서 가치(앞으로 몇 해의 기여)가 가장 높은 선수. 후보가 아무도 없을 때만 보상금만.
+ * 실제 KBO 구단은 A·B등급 보상에서 거의 늘 선수를 데려가고, 게임 안에서 보상금은 장부에만 남아 전력에 보탬이 없다.
+ * (2026-10-08 수정 전에는 "선수 가치 > 추가 보상금(연봉 차액)"이라 보호 20~25명 밖의 선수는 늘 그보다 낮아 사실상 보상금만 골랐다)
+ */
 function aiCompPick(league: LeagueState, off: OffseasonState, c: CompCase, view: LeagueView): string {
-  const rule = FA_COMP[c.grade];
   const best = compCandidates(league, off, c)
     .map((p) => ({ p, v: compValue(view, p.id) }))
     .sort((a, b) => b.v - a.v || a.p.id.localeCompare(b.p.id))[0];
-  const extraCash = ((rule.cashOnly - rule.withPlayer!) * c.prevSalary) / WON_PER_RUN;
-  return best && best.v > extraCash ? best.p.id : 'cash';
+  return best ? best.p.id : 'cash';
 }
 
 /** 플레이어 구단의 보상을 AI 기준으로 고른다 (자동 선택) */
@@ -642,6 +653,93 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
   }
 }
 
+// ---- 시대 (M8): FA 도입 전, 구단 변화, 창단 수급
+
+/** FA 단계 진입: 제도가 없던 시대(1999 시즌 뒤 도입)는 건너뛴다 */
+function enterFa(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  if (faEnabled(off.year)) {
+    openFaMarket(league, off, store, params);
+    return;
+  }
+  log(off, 'fa', `${off.year} 시즌 뒤에는 FA 제도가 없어 FA 단계를 건너뜁니다 (1999 시즌 뒤 도입).`, true);
+  enterComp(league, off, store, params);
+}
+
+/** 외국인·드래프트 지명 순서: 지난 시즌 순위 역순. 지난 시즌에 없던 구단(창단)은 맨 앞 */
+function pickOrder(league: LeagueState): number[] {
+  const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
+  const missing = league.teams.map((_, i) => i).filter((i) => !st.includes(i));
+  return [...missing, ...[...st].reverse()];
+}
+
+/** 창단 구단의 추가 지명: 라운드 1 앞에 우선 지명 2명, 2라운드 뒤 5명 (NC 방식, 기획서 4.1) */
+export function expansionSlots(slots: number[], nTeams: number, expanding: number[]): number[] {
+  if (!expanding.length) return slots;
+  const out = [...slots];
+  const after2 = Math.min(out.length, nTeams * 2);
+  for (const t of expanding) out.splice(after2, 0, t, t, t, t, t);
+  for (const t of expanding) out.unshift(t, t);
+  return out;
+}
+
+/** 기존 구단이 특별 지명에서 보호하는 인원 (기획서 4.1: 보호선수 20명 외 1명씩) */
+export const EXPANSION_PROTECT = 20;
+/** 창단 구단의 최소 소속 인원. 모자라면 가상 창단 선수로 채운다 (임시값) */
+export const EXPANSION_MIN = 45;
+
+/**
+ * 다음 시즌의 구단 변화를 리그에 반영한다 (기획서 4.1): 명칭 변경은 이름만, 해체는 후속 구단이 승계, 창단은 새 구단 자리와 선수 수급.
+ * 자료가 있는 해(2026년까지)만. 사용자 구단이어도 같다.
+ */
+function applyTeamChanges(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  const changes = teamChangesFor(store, league.teams, off.year + 1);
+  if (!changes.length) return;
+  off.changes = changes;
+  for (const c of changes) {
+    if (c.kind === 'rename') league.teams[c.team].name = c.to;
+    else if (c.kind === 'succeed') league.teams[c.team] = { name: c.to, franchise: c.franchise };
+    else expandTeam(league, off, store, params, c.name, c.franchise);
+    const mine = c.kind !== 'expand' && c.team === off.userTeam;
+    log(off, 'settle', `${off.year + 1}년: ${changeText(c)}`, mine, true);
+  }
+  off.fa.signings = league.teams.map(() => 0);
+}
+
+/** 창단: 기존 구단마다 보호 20명 밖 최고 가치 1명을 특별 지명하고, 모자라는 인원은 가상 창단 선수로 채운다 */
+function expandTeam(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams, name: string, franchise: string): void {
+  const t = league.teams.push({ name, franchise }) - 1;
+  league.capStrikes?.push(0);
+  league.draftPenalty?.push(null);
+  (league.expansions ??= []).push({ team: t, firstYear: off.year + 1 });
+  const view = leagueView(league, store, params);
+  view.orgs.push([]);
+  for (let o = 0; o < t; o++) {
+    const cand = league.players
+      .filter((p) => p.team === o && !p.foreign && !isServing(p))
+      .map((p) => ({ p, v: compValue(view, p.id) }))
+      .sort((a, b) => b.v - a.v || a.p.id.localeCompare(b.p.id))[EXPANSION_PROTECT];
+    if (!cand) continue;
+    cand.p.team = t;
+    moveInView(view, view.sim.get(cand.p.id)!, t);
+    log(off, 'settle', `${name} 특별 지명: ${cand.p.name} (${league.teams[o].name}, 보호 ${EXPANSION_PROTECT}명 외)`, o === off.userTeam, false);
+  }
+  const rng = new Rng(`${league.seed}/expansion/${off.year}/${franchise}`);
+  const taken = takenNames(league, store);
+  let n = league.players.filter((p) => p.team === t).length;
+  let made = 0;
+  for (; n < EXPANSION_MIN; n++, made++) {
+    const mine = league.players.filter((p) => p.team === t);
+    const pitchers = mine.filter((p) => p.isPitcher).length;
+    const age = 21 + rng.int(9);
+    const runs = -8 + rng.range(-4, 6);
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential: runs + rng.range(0, 10), isPitcher: pitchers * 2 <= mine.length }, off.year);
+    p.team = t;
+    p.contract = { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
+    moveInView(view, view.sim.get(p.id)!, t);
+  }
+  if (made) log(off, 'settle', `${name}: 창단 선수 ${made}명 영입 (해외·독립 리그·퓨처스 출신, 가상 선수)`, false, false);
+}
+
 // ---- 외국인 선수
 
 const isForeignOf = (p: LeaguePlayer, t: number) => p.team === t && p.foreign;
@@ -668,8 +766,15 @@ function otherRegularPay(league: LeagueState, p: LeaguePlayer, year: number): nu
 function enterForeign(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   off.stage = 'foreign';
   const year = off.year;
+  const rule = foreignRule(store.meta, year + 1);
+  if (rule.total === 0) {
+    // 외국인 선수 제도가 없던 시대 (1998년 도입, 기획서 4.2)
+    log(off, 'foreign', `${year + 1}년에는 외국인 선수 제도가 없어 외국인 단계를 건너뜁니다.`, true);
+    enterDraft(league, off, store, params);
+    return;
+  }
   const view = leagueView(league, store, params);
-  const order = [...(league.lastSeason?.standings ?? league.teams.map((_, i) => i))].reverse();
+  const order = pickOrder(league);
   const pool: string[] = [];
 
   // 재계약 판단: AI 구단은 바로, 플레이어 구단은 권고만 하고 단계를 넘길 때 정한다.
@@ -685,7 +790,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     const cands = mine.filter((p) => expiring(p, year) && foreignKeepAdvice(view, p, year))
       .sort((a, b) => currentRuns(view.sim.get(b.id)!, view.ctx) - currentRuns(view.sim.get(a.id)!, view.ctx) || a.id.localeCompare(b.id));
     for (const p of cands) {
-      if (p.asia ? asia >= FOREIGN_ASIA : regular >= FOREIGN_REGULAR) continue;
+      if (p.asia ? asia >= rule.asia : regular >= rule.regular) continue;
       if (!p.asia && FOREIGN_TOTAL_CAP - pay < FOREIGN_MIN_DEAL) continue;
       advised.add(p.id);
       if (p.asia) asia++;
@@ -714,7 +819,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
   // 새 외국인 후보 (가상 선수)
   const rng = new Rng(`${league.seed}/foreign/${year}`);
   const taken = takenNames(league, store);
-  for (let i = 0; i < FOREIGN_POOL_REGULAR + FOREIGN_POOL_ASIA; i++) {
+  for (let i = 0; i < FOREIGN_POOL_REGULAR + (rule.asia > 0 ? FOREIGN_POOL_ASIA : 0); i++) {
     const asia = i >= FOREIGN_POOL_REGULAR;
     const p = makeVirtual(league, view, rng, taken, {
       foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(8),
@@ -723,7 +828,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia), until: year + 1 };
     pool.push(p.id);
   }
-  off.foreign = { order, pointer: 0, pool, keep };
+  off.foreign = { order, pointer: 0, pool, keep, regular: rule.regular, asia: rule.asia };
   runForeignUntilUser(league, off, store, params);
 }
 
@@ -740,16 +845,22 @@ export function foreignSlots(league: LeagueState, team: number, off?: OffseasonS
   return { regular: regular.length, asia: list.length - regular.length, regularPay: regular.reduce((s, p) => s + p.contract.salary, 0) };
 }
 
+/** 이번 오프시즌의 외국인 보유 한도 (M8 전 저장에는 없어 2026년 값) */
+export function foreignLimits(off: OffseasonState): { regular: number; asia: number } {
+  return { regular: off.foreign?.regular ?? FOREIGN_REGULAR, asia: off.foreign?.asia ?? FOREIGN_ASIA };
+}
+
 /** 이 외국인 후보와 계약할 수 있는가 (보유 한도와 금액 상한) */
 export function canSignForeign(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer): OfferCheck {
   if (!off.foreign?.pool.includes(p.id) || p.team !== -1) return { ok: false, message: '계약할 수 없는 선수입니다.' };
   const s = foreignSlots(league, team, off);
+  const lim = foreignLimits(off);
   if (p.asia) {
-    if (s.asia >= FOREIGN_ASIA) return { ok: false, message: '아시아쿼터 자리가 찼습니다.' };
+    if (s.asia >= lim.asia) return { ok: false, message: lim.asia ? '아시아쿼터 자리가 찼습니다.' : '아시아쿼터 제도가 없는 시대입니다.' };
     if (p.contract.salary > ASIA_NEW_CAP) return { ok: false, message: '아시아쿼터 신규 계약 상한(20만 달러)을 넘습니다.' };
     return { ok: true, message: '' };
   }
-  if (s.regular >= FOREIGN_REGULAR) return { ok: false, message: `외국인 선수는 아시아쿼터를 빼고 ${FOREIGN_REGULAR}명까지입니다.` };
+  if (s.regular >= lim.regular) return { ok: false, message: `외국인 선수는 ${lim.asia ? '아시아쿼터를 빼고 ' : ''}${lim.regular}명까지입니다.` };
   if (p.contract.salary > FOREIGN_NEW_CAP) return { ok: false, message: '신규 외국인 계약 상한(100만 달러)을 넘습니다.' };
   if (s.regularPay + p.contract.salary > FOREIGN_TOTAL_CAP) return { ok: false, message: '외국인 3명 총액 상한(400만 달러)을 넘습니다.' };
   return { ok: true, message: '' };
@@ -797,8 +908,9 @@ export function setForeignKeep(league: LeagueState, off: OffseasonState, id: str
   const p = league.players.find((x) => x.id === id)!;
   if (keep && !off.foreign.keep[id]) {
     const s = foreignSlots(league, off.userTeam, off);
-    if (p.asia ? s.asia >= FOREIGN_ASIA : s.regular >= FOREIGN_REGULAR) {
-      return { ok: false, message: p.asia ? '아시아쿼터 자리가 찼습니다.' : `외국인 선수는 아시아쿼터를 빼고 ${FOREIGN_REGULAR}명까지입니다.` };
+    const lim = foreignLimits(off);
+    if (p.asia ? s.asia >= lim.asia : s.regular >= lim.regular) {
+      return { ok: false, message: p.asia ? '아시아쿼터 자리가 찼습니다.' : `외국인 선수는 ${lim.regular}명까지입니다.` };
     }
   }
   off.foreign.keep[id] = keep;
@@ -876,11 +988,13 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 1 };
     pool.push(p.id);
   }
-  const order = [...(league.lastSeason?.standings ?? league.teams.map((_, i) => i))].reverse();
+  const order = pickOrder(league);
   // 샐러리캡 2회 이상 연속 초과 구단은 1라운드 지명권이 9단계 밀린다 (owner.ts, 제도연표)
   const penalized = new Set(league.teams.map((_, t) => t).filter((t) => league.draftPenalty?.[t] === year));
   for (const t of penalized) log(off, 'draft', `${league.teams[t].name}: 샐러리캡 연속 초과로 1라운드 지명권 9단계 하락`, t === off.userTeam, true);
-  off.draft = { order, slots: draftSlots(order, DRAFT_ROUNDS, penalized), pick: 0, pool, picks: [] };
+  // 창단 구단은 두 번째 드래프트까지 우선 지명 2명과 2라운드 뒤 5명을 더 뽑는다 (NC 방식, 기획서 4.1)
+  const expanding = (league.expansions ?? []).filter((e) => year + 1 <= e.firstYear + 1).map((e) => e.team);
+  off.draft = { order, slots: expansionSlots(draftSlots(order, DRAFT_ROUNDS, penalized), order.length, expanding), pick: 0, pool, picks: [] };
   runDraftUntilUser(league, off);
 }
 
@@ -1097,18 +1211,37 @@ export function draftPool(store: Pick<DataStore, 'drafts'>, entryYear: number): 
   return (store.drafts?.[String(entryYear)] ?? []).filter((d) => d.kind !== '육성선수' && d.kind !== '원년 멤버');
 }
 
-/** 지명 선수를 선수 마스터(실제 기록이 있는 선수)와 맞춘다: 이름, 입단 연도 ±1 (마스터의 입단 연도는 추정값), 투수 여부. 애매하면 null */
+const PITCHER_POS = ['SP', 'RP', 'CL', 'P'];
+
+/**
+ * 지명 선수를 선수 마스터(실제 기록이 있는 선수)와 맞춘다: 이름, 입단 연도 ±1 (마스터의 입단 연도는 추정값). 애매하면 null.
+ * 지명 자료의 포지션은 후보가 여럿일 때 가르는 데만 쓴다. 이대호(2001년 투수 지명, 야수로 성공)·나성범(2012년 투수 지명)처럼
+ * 지명 포지션과 실제 커리어가 다른 선수가 있어, 포지션이 다르다고 연결을 끊지 않는다 (2026-10-08 수정).
+ */
 export function matchDraftee(store: Pick<DataStore, 'players'>, d: DraftRow, entryYear: number, league: LeagueState): PlayerMaster | null {
   // 마스터에는 1군 기록이 있는 선수만 있다. 지명 자료에서 1군 0경기인 선수를 맞추면 같은 이름의 다른 선수가 걸린다
   if (d.games === 0) return null;
   const inLeague = new Set(league.players.map((p) => p.id));
-  const wantPitcher = d.pos === 'P';
   const cands = [...store.players.values()].filter((m) =>
-    m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id)
-    && (m.kind === 'BP' || (m.kind === 'P') === wantPitcher));
-  if (cands.length === 1) return cands[0];
-  const exact = cands.filter((m) => m.entryYear === entryYear);
-  return exact.length === 1 ? exact[0] : null;
+    m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id));
+  const pick = (list: PlayerMaster[]): PlayerMaster | null => (list.length === 1 ? list[0] : null);
+  if (cands.length <= 1) return pick(cands);
+  const wantPitcher = d.pos === 'P';
+  const sameRole = cands.filter((m) => m.kind === 'BP' || (m.kind === 'P') === wantPitcher);
+  return pick(sameRole) ?? pick(sameRole.filter((m) => m.entryYear === entryYear)) ?? pick(cands.filter((m) => m.entryYear === entryYear));
+}
+
+/**
+ * 실존 선수의 실제 커리어로 본 투수 여부: 주포지션이 있으면 그것, 없으면 구분(투타 둘 다 기록이 있으면 통산 상대 타자 수와 타석 수 비교).
+ * 지명 자료의 포지션은 보지 않는다 (지명은 투수였지만 야수로 성공한 선수가 있다).
+ */
+export function masterIsPitcher(m: PlayerMaster, career: () => CareerIndex): boolean {
+  if (m.pos) return PITCHER_POS.includes(m.pos);
+  if (m.kind !== 'BP') return m.kind === 'P';
+  const idx = career();
+  const pa = (idx.bat.get(m.id) ?? []).reduce((s, x) => s + x.row.pa, 0);
+  const tbf = (idx.pit.get(m.id) ?? []).reduce((s, x) => s + x.row.tbf, 0);
+  return tbf > pa;
 }
 
 /** 1군에 끝내 오르지 못한 지명자의 잠재력 (기획서 6.3: 낮은 범위, 임시값) */
@@ -1126,8 +1259,8 @@ const NEVER_POTENTIAL: [number, number] = [-15, -3];
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
                             entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'>, career: () => CareerIndex): LeaguePlayer {
   const m = matchDraftee(store, d, entryYear, league);
-  const isPitcher = m ? (m.kind === 'P' || (m.kind === 'BP' && d.pos === 'P')) : d.pos === 'P';
-  const masterPos = m?.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null;
+  const isPitcher = m ? masterIsPitcher(m, career) : d.pos === 'P';
+  const masterPos = m?.pos && !PITCHER_POS.includes(m.pos) ? m.pos : null;
   const pos = isPitcher ? null : masterPos ?? (d.pos === 'P' ? 'IF' : d.pos);
   const lastData = Math.max(...store.meta.years);
   let potential: number;
@@ -1140,15 +1273,16 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
     const f = (index + 0.5) / DRAFT_POOL;
     potential = -10 + 8 * (-Math.log(Math.min(1, f))) ** 1.2 + (rng.next() + rng.next() - 1) * 12;
   }
-  const age = m?.birthYear ? entryYear - m.birthYear : d.univ ? 22 : 18;
+  const age = m ? entryYear - (m.birthYear ?? estimatedBirthYear(m)) : d.univ ? 22 : 18;
   const start = Math.max(-15, potential - growthRoom(age) * rng.range(0.7, 1.3));
   const p = makeVirtual(league, view, rng, taken, {
     foreign: false, asia: false, age, runs: start, potential,
     real: true, name: m?.name ?? d.name, isPitcher, pos, id: m?.id ?? `d${entryYear}-${index + 1}`,
-    birthYear: m?.birthYear, bats: m?.bats, throws: m?.throws,
+    birthYear: m ? m.birthYear ?? estimatedBirthYear(m) : undefined, bats: m?.bats, throws: m?.throws,
     starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
   }, entryYear - 1);
   p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
+  if (m && !m.birthYear) p.birthYearEstimated = true;
   p.scoutPotential = Math.round(potential + rng.range(-8, 8));
   view.ctx.potential?.set(p.id, aiPotential(league, p));
   p.contract = { kind: 'rookie', salary: MIN_SALARY, until: entryYear };

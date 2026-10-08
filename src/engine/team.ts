@@ -2,6 +2,7 @@
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
 import type { Rates } from '../data/types';
+import { eraPitching } from './eras';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
@@ -65,6 +66,8 @@ export interface TeamSeason {
   lineupCache?: Map<string, { p: SimPlayer; slot: Slot }[]>;
   /** 플레이어가 정한 기용표 (주전 자리, 선발 로테이션, 마무리). 없으면 AI 감독이 정한다 */
   plan?: DepthPlan | null;
+  /** 선발 등판 사이 최소 휴식일 (시대별, eras.ts). 없으면 params.starterRestDays */
+  restDays?: number;
 }
 
 /**
@@ -265,19 +268,22 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(world.rules.rosterSize);
   const nHit = manual ? Number.MAX_SAFE_INTEGER : world.rules.rosterSize - nPit;
 
-  // 투수: 선발 5명, 나머지 구원. 기용표가 있으면 그 로테이션부터
+  // 투수: 선발 로테이션(시대별 4~5명), 나머지 구원. 기용표가 있으면 그 로테이션부터
+  const era = eraPitching(world.year);
+  const nRot = era.rotation;
+  ts.restDays = era.restDays;
   const pitchers = avail.filter((p) => p.isPitcher);
   const plan = manual ? ts.plan ?? null : null;
   const inAvail = new Set(pitchers.map((p) => p.idx));
   const planned = plan ? plan.rotation.filter((i) => inAvail.has(i)).map((i) => pitchers.find((p) => p.idx === i)!) : [];
   const starters = pitchers.filter((p) => p.pit!.startShare >= 0.5 && !planned.includes(p) && p.idx !== plan?.closer).sort((a, b) => a.value - b.value);
-  const rotation = plan && plan.rotation.length ? [...planned] : starters.slice(0, 5);
-  if (plan && plan.rotation.length && rotation.length < MIN_PLAN_ROTATION) rotation.push(...starters.slice(0, 5 - rotation.length));
-  if (rotation.length < 5) {
+  const rotation = plan && plan.rotation.length ? [...planned] : starters.slice(0, nRot);
+  if (plan && plan.rotation.length && rotation.length < MIN_PLAN_ROTATION) rotation.push(...starters.slice(0, nRot - rotation.length));
+  if (rotation.length < nRot) {
     const extra = pitchers
       .filter((p) => !rotation.includes(p))
       .sort((a, b) => b.pit!.startShare - a.pit!.startShare || a.value - b.value);
-    rotation.push(...extra.slice(0, 5 - rotation.length));
+    rotation.push(...extra.slice(0, nRot - rotation.length));
   }
   const bullpen = pitchers
     .filter((p) => !rotation.includes(p))
@@ -359,7 +365,7 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
 export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams): SimPlayer {
   let best: SimPlayer | null = null;
   for (const p of ts.rotation) {
-    if (day - st.lastStartDay[p.idx] < params.starterRestDays) continue;
+    if (day - st.lastStartDay[p.idx] < (ts.restDays ?? params.starterRestDays)) continue;
     if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) best = p;
   }
   if (best) return best;

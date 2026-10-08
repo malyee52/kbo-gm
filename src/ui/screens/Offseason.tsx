@@ -1,7 +1,7 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { useState } from 'react';
 import { OfferPanel } from './Club';
-import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import {
   ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
@@ -322,6 +322,7 @@ function ForeignPanel({ act }: { act: Act }) {
   const info = useInfo();
   const players = new Map(session.league.players.map((p) => [p.id, p]));
   const slots = foreignSlots(session.league, session.teamIdx, off);
+  const lim = foreignLimits(off);
   const myTurn = f.order[f.pointer] === session.teamIdx;
   const pool = f.pool.map((id) => players.get(id)!).sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id));
   const expiringMine = Object.keys(f.keep).map((id) => players.get(id)!);
@@ -332,11 +333,11 @@ function ForeignPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>외국인 선수</h2>
         <p className="muted small">
-          보유 한도: 아시아쿼터를 빼고 {3}명 + 아시아쿼터 1명. 신규 계약은 {dollarText(FOREIGN_NEW_CAP)}, 아시아쿼터 신규는 {dollarText(ASIA_NEW_CAP)}까지,
+          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(FOREIGN_NEW_CAP)}, 아시아쿼터 신규는 {dollarText(ASIA_NEW_CAP)}까지,
           아시아쿼터를 뺀 3명 총액은 {dollarText(FOREIGN_TOTAL_CAP)}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
-          우리 외국인: {slots.regular}/3명 (총액 {dollarText(slots.regularPay)}) · 아시아쿼터 {slots.asia}/1명
+          우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}
         </p>
         {!myTurn && <p className="muted small">다음 단계로 넘기면 남은 구단이 고릅니다.</p>}
@@ -572,7 +573,7 @@ function OffLog() {
   const { session } = useGame();
   const off = session.offseason!;
   const [all, setAll] = useState(false);
-  const rows = off.log.filter((l) => all || l.mine || l.text.includes('→')).slice().reverse();
+  const rows = off.log.filter((l) => all || l.mine || l.major || l.text.includes('→')).slice().reverse();
   return (
     <section>
       <div className="row-between">
