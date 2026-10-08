@@ -10,7 +10,16 @@
   seasons/<연도>.json   그 해의 구단, 리그 합계, 타자·투수 시즌 기록
   meta.json             연도 목록, 구단 계보, 연도별 규칙, 능력 산출용 사전 평균
   contracts.json        FA·비FA 다년 계약 (2000~2025 계약 시작, 금액 미검증 보조자료)
+  drafts.json           입단 연도별 신인 지명 (1982~2027, 원년 멤버·육성선수 포함)
+
+함께 읽는 파일
+  data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
+                                 자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
+  data-src/baseballchart/kbo_draft_1982-2027.csv
+                                 입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
+                                 같은 폴더의 SOURCE.md 참조.
 """
+import csv
 import json
 import re
 import sys
@@ -21,6 +30,49 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
+FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
+DRAFTS = ROOT / 'data-src' / 'baseballchart' / 'kbo_draft_1982-2027.csv'
+DRAFT_POS = {'투수': 'P', '포수': 'C', '내야수': 'IF', '외야수': 'OF', '지명타자': 'DH'}
+
+
+def draft_pos(text):
+    """포지션 표기 → (P·C·IF·OF·DH, 투타겸업 여부). '투수/외야수'처럼 둘이면 앞의 것. 투타겸업은 투수로 본다"""
+    if not text:
+        return 'IF', False
+    if text == '투타겸업':
+        return 'P', True
+    first = re.split(r'[/,·]', text)[0].strip()
+    return DRAFT_POS.get(first, 'IF'), len(re.split(r'[/,·]', text)) > 1
+
+
+def draft_rows():
+    """baseballchart.kr 원본 → 입단 연도별 지명 목록 (원본 순서 그대로)"""
+    out = defaultdict(list)
+    if not DRAFTS.exists():
+        return out
+    with DRAFTS.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            kind = r['갈래'].strip()
+            rnd = None
+            m = re.fullmatch(r'(\d+)라운드', kind)
+            if m:
+                kind, rnd = '라운드', int(m.group(1))
+            overall = re.search(r'(\d+)순위', r['자리'] or '')
+            pos, two_way = draft_pos(r['포지션'].strip())
+            career = [x.strip() for x in (r['이력'] or '').split('-') if x.strip()]
+            name = re.sub(r'\s*\(.*\)$', '', r['선수']).strip()  # '김바위 (김용윤)' → 김바위
+            row = {
+                'kind': kind, 'round': rnd, 'overall': int(overall.group(1)) if overall else None,
+                'team': r['지명 구단'].strip(), 'name': name, 'pos': pos,
+                'school': career[0] if career else '',
+                # 이력에 대학(…대, …대학교)이 있으면 대졸로 본다
+                'univ': any(x.endswith('대') or '대학' in x for x in career),
+                'games': int(r['통산 경기'] or 0),
+            }
+            if two_way:
+                row['twoWay'] = True
+            out[str(r['연도'])].append(row)
+    return out
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'public' / 'data'
 
 POS = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격수': 'SS', '좌익수': 'LF', '중견수': 'CF',
@@ -121,6 +173,25 @@ def main():
     for p in players:
         for k in [k for k, v in p.items() if v is None]:
             del p[k]
+
+    # ---- 외국인 개막 명단 (CSV)
+    foreign_opening = defaultdict(lambda: defaultdict(list))
+    asia_ids = set()
+    if FOREIGN_OPENING.exists():
+        with FOREIGN_OPENING.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if r['구분'] == '제외':
+                    continue
+                asia = r['구분'] == '아시아쿼터'
+                foreign_opening[str(r['연도'])][r['구단']].append({'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] == '확인'})
+                if asia:
+                    asia_ids.add(str(r['선수ID']))
+    for p in players:
+        if p['id'] in asia_ids:
+            p['asia'] = True
+
+    # ---- 신인 지명 (baseballchart.kr 원본)
+    drafts = draft_rows()
 
     # ---- 계약 (FA계약 시트)
     contracts = []
@@ -230,6 +301,8 @@ def main():
     (OUT / 'seasons').mkdir(parents=True, exist_ok=True)
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     dump({'version': 1, 'players': players}, OUT / 'players.json')
+    dump({'version': 1, 'source': 'baseballchart.kr/draft (나무위키 「(연도) KBO 신인 드래프트」 문서 정리, 2026-09-21 수집)',
+          'license': 'CC BY-NC-SA 2.0 KR', 'years': drafts}, OUT / 'drafts.json')
     dump({'version': 1, 'note': '보조자료의 FA 계약 목록. 금액은 구단 발표와 대조하지 않았다. 옵션 제외 보장액(억 원)', 'contracts': contracts},
          OUT / 'contracts.json')
     for y in years:
@@ -250,11 +323,14 @@ def main():
         'version': 1, 'source': SRC.name, 'years': years, 'inProgress': [years[-1]],
         'franchises': franchises, 'successors': {'쌍방울': 'SSG', '현대계': '히어로즈'},
         'rules': {y: rules_for(y) for y in years}, 'priors': priors,
+        **({'foreignOpening': foreign_opening} if foreign_opening else {}),
     }, OUT / 'meta.json')
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')
     print(f'계약 {len(contracts)}건, 학력 구분 {sum(1 for p in players if p.get("school"))}명')
+    print(f'신인 지명: {len(drafts)}개 연도 {sum(len(v) for v in drafts.values()):,}명 ({min(drafts, default="-")}~{max(drafts, default="-")} 입단)')
+    print(f'외국인 개막 명단: {", ".join(f"{y}년 {sum(len(v) for v in t.values())}명" for y, t in foreign_opening.items()) or "없음"}, 아시아쿼터 {len(asia_ids)}명')
     print(f'사전 평균(타자): {priors["batter"]}')
     print(f'사전 평균(투수): {priors["pitcher"]}')
     print(f'출력: {OUT} ({total / 1e6:.1f} MB)')

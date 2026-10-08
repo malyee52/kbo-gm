@@ -1,7 +1,6 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { currentRuns, playerValue } from '../src/ai/value';
-import { horizonWeights } from '../src/ai/trade';
+import { currentRuns } from '../src/ai/value';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession } from '../src/game/session';
@@ -16,7 +15,13 @@ function newGame(seed = 'trade') {
 }
 const teamIdx = (g: GameSession, name: string) => g.world.teams.findIndex((t) => t.name === name);
 const nowRuns = (g: GameSession) => (p: SimPlayer) => currentRuns(p, g.values);
-const byNow = (g: GameSession, ps: SimPlayer[]) => [...ps].sort((a, b) => nowRuns(g)(b) - nowRuns(g)(a) || a.idx - b.idx);
+/** 국내 선수를 지금 기여 순으로 (외국인은 트레이드할 수 없어 시나리오에서 뺀다) */
+const byNow = (g: GameSession, ps: SimPlayer[]) => ps.filter((p) => !p.foreign).sort((a, b) => nowRuns(g)(b) - nowRuns(g)(a) || a.idx - b.idx);
+/**
+ * 주축: 30세 이하 국내 선수 중 지금 기여 순. 외국인 스타가 빠진 뒤 그냥 1위를 고르면 30대 후반 고액 포수가 뽑혀
+ * "주축을 준다"는 시나리오 뜻과 달라진다 (AI가 나이·연봉을 보고 낮게 치는 것은 맞는 판단).
+ */
+const prime = (g: GameSession, ps: SimPlayer[]) => byNow(g, ps.filter((p) => (p.age ?? 99) <= 30));
 
 beforeAll(() => {
   store = loadDataStore();
@@ -41,7 +46,7 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
 
   it('E2 노장 떠넘기기: 대체 수준 노장을 공짜로 주거나, 둘로 젊은 백업을 달라고 하면 거절', () => {
     const g = newGame();
-    const oldies = g.team.org.filter((p) => (p.age ?? 0) >= 33).sort((a, b) => nowRuns(g)(a) - nowRuns(g)(b)).slice(0, 2);
+    const oldies = g.team.org.filter((p) => (p.age ?? 0) >= 33 && !p.foreign).sort((a, b) => nowRuns(g)(a) - nowRuns(g)(b)).slice(0, 2);
     expect(oldies.length).toBe(2);
     for (const t of g.world.teams) {
       if (t.idx === g.teamIdx) continue;
@@ -53,15 +58,16 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
 
   it('E3 다대일 묶음: 백업급 4명으로 상대 최고 선수를 달라고 하면 거절 (선수 가치 합은 더 커도)', () => {
     const g = newGame();
-    // 한 시즌 3~12런짜리 백업·플래툰급 선수 중 나은 4명
-    const bench = byNow(g, g.team.org.filter((p) => nowRuns(g)(p) >= 3 && nowRuns(g)(p) <= 12)).slice(0, 4);
+    // 주전이 아닌(서브) 야수 중 기여가 큰 4명. 투수를 섞으면 상대의 약한 불펜을 채우는 정당한 거래가 될 수 있다
+    // (2026-10-08: 롯데가 구원 3명 + 야수 1명을 받고 2루 여유 자원 고승민을 내주는 것을 받아들임. 전력 +17런으로 타당한 판단)
+    const bench = byNow(g, g.team.org.filter((p) => !p.isPitcher && g.slotOf(p) === null && nowRuns(g)(p) > 0)).slice(0, 4);
     expect(bench).toHaveLength(4);
     let sumBeatsStar = 0;
     for (const t of g.world.teams) {
       if (t.idx === g.teamIdx) continue;
-      const star = byNow(g, t.org)[0];
-      const w = horizonWeights(g.tendency(t.idx), 1);
-      if (bench.reduce((s, p) => s + Math.max(0, playerValue(p, g.values, w)), 0) > playerValue(star, g.values, w)) sumBeatsStar++;
+      const star = prime(g, t.org)[0];
+      // 이번 시즌 기여의 단순 합 (주전 자리가 9개뿐이라 전력에는 그대로 더해지지 않는다)
+      if (bench.reduce((s, p) => s + Math.max(0, nowRuns(g)(p)), 0) > nowRuns(g)(star)) sumBeatsStar++;
       expect(g.evaluateTrade(t.idx, bench, [star]).verdict, `${t.name} ${star.name}`).not.toBe('accept');
     }
     // 단순 합으로는 넘는 경우가 있어야 이 시나리오가 의미가 있다
@@ -71,7 +77,7 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
   it('E4 왕복 되팔기: 성사된 트레이드를 곧바로 거꾸로 제안하면 거절', () => {
     const g = newGame();
     const other = teamIdx(g, '롯데');
-    const myStar = byNow(g, g.team.org)[0];
+    const myStar = prime(g, g.team.org)[0];
     const theirs = byNow(g, g.world.teams[other].org)[6];
     const ev = g.proposeTrade(other, [myStar], [theirs]);
     expect(ev.verdict).toBe('accept');
@@ -86,7 +92,7 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
       const cs = t.org.filter((p) => p.pos === 'C');
       const want = cs.slice(0, Math.min(4, cs.length - 1));
       if (cs.length - want.length >= 2) continue; // 4명을 데려와도 2명 넘게 남는 구단은 건너뜀
-      const star = byNow(g, g.team.org)[0];
+      const star = prime(g, g.team.org.filter((p) => p.pos !== 'C'))[0];
       expect(g.evaluateTrade(t.idx, [star], want).verdict, t.name).toBe('reject-roster');
     }
   });
@@ -94,7 +100,7 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
   it('E6 마감 뒤 거래: 트레이드 마감 다음 날부터는 받지 않는다', () => {
     const g = newGame('deadline');
     const other = teamIdx(g, '두산');
-    const myStar = byNow(g, g.team.org)[0];
+    const myStar = prime(g, g.team.org)[0];
     const theirs = byNow(g, g.world.teams[other].org)[10];
     g.advance(g.tradeDeadlineDay);
     expect(g.tradeOpen).toBe(true);
@@ -123,21 +129,36 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
     const g = newGame();
     const kt = teamIdx(g, 'KT');
     const ssg = teamIdx(g, 'SSG');
-    const ktP = g.world.teams[kt].org[0];
-    const ssgP = g.world.teams[ssg].org[0];
-    const mine = g.team.org;
+    const ktP = byNow(g, g.world.teams[kt].org)[0];
+    const ssgP = byNow(g, g.world.teams[ssg].org)[0];
+    const mine = byNow(g, g.team.org);
     expect(g.evaluateTrade(kt, [ssgP], [ktP]).verdict).toBe('reject-invalid');
     expect(g.evaluateTrade(kt, [mine[0]], [ssgP]).verdict).toBe('reject-invalid');
     expect(g.evaluateTrade(kt, [mine[0], mine[0]], [ktP]).verdict).toBe('reject-invalid');
     expect(g.evaluateTrade(kt, mine.slice(0, 5), [ktP]).verdict).toBe('reject-invalid');
     expect(g.evaluateTrade(g.teamIdx, [mine[0]], [mine[1]]).verdict).toBe('reject-invalid');
   });
+
+  it('E8 외국인 트레이드: 외국인 선수를 주거나 받는 제안은 규정 위반으로 거절하고, 요구안에도 넣지 않는다', () => {
+    const g = newGame();
+    const kt = teamIdx(g, 'KT');
+    const myForeign = g.team.org.find((p) => p.foreign)!;
+    const theirForeign = g.world.teams[kt].org.find((p) => p.foreign)!;
+    const theirs = byNow(g, g.world.teams[kt].org)[8];
+    const mine = byNow(g, g.team.org);
+    // 아무리 후한 조건이라도 거절
+    expect(g.evaluateTrade(kt, [myForeign, mine[0]], [theirs]).verdict).toBe('reject-invalid');
+    expect(g.evaluateTrade(kt, mine.slice(0, 3), [theirForeign]).verdict).toBe('reject-invalid');
+    expect(g.askPackage(kt, [theirForeign])).toBeNull();
+    const pkg = g.askPackage(kt, [theirs]);
+    if (pkg) expect(pkg.some((p) => p.foreign)).toBe(false);
+  });
 });
 
 describe('AI가 받아들일 거래는 받아들인다', () => {
   it('S1 플레이어가 손해 보는 거래(주축을 주고 백업을 받음)는 수락', () => {
     const g = newGame();
-    const myStar = byNow(g, g.team.org)[0];
+    const myStar = prime(g, g.team.org)[0];
     let accepted = 0;
     for (const t of g.world.teams) {
       if (t.idx === g.teamIdx) continue;
@@ -166,8 +187,19 @@ describe('트레이드 뒤 상태', () => {
   it('받은 선수는 2군, 내준 선수는 1군 명단에서 빠지고 양 구단 엔트리가 규정을 지킨다', () => {
     const g = newGame();
     const other = teamIdx(g, '한화');
-    const give = byNow(g, g.registered())[0];
-    const get = byNow(g, g.world.teams[other].org)[3];
+    // 1군 주축 한 명을 주고 상대가 받아들이는 선수를 받는다 (수락 여부가 아니라 트레이드 뒤 상태를 보는 시험)
+    let give: SimPlayer | undefined;
+    let get: SimPlayer | undefined;
+    search: for (const x of prime(g, g.registered()).slice(0, 5)) {
+      for (const y of byNow(g, g.world.teams[other].org).slice(3, 20)) {
+        if (g.evaluateTrade(other, [x], [y]).verdict === 'accept') {
+          give = x;
+          get = y;
+          break search;
+        }
+      }
+    }
+    if (!give || !get) throw new Error('성사되는 트레이드를 찾지 못했습니다');
     expect(g.proposeTrade(other, [give], [get]).verdict).toBe('accept');
     expect(g.manualEntry!.has(give.idx)).toBe(false);
     expect(g.manualEntry!.has(get.idx)).toBe(false);

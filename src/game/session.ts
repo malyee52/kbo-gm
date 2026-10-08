@@ -6,8 +6,8 @@
 
 import type { DataStore } from '../data/types';
 import {
-  DEFAULT_PARAMS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
-  type EngineParams, type SeasonSave, type SimPlayer, type TeamSeason, type World,
+  absenceLabel, assignSlots, DEFAULT_PARAMS, isVirtual, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  type Absence, type DepthPlan, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -23,7 +23,17 @@ export interface NewGameOptions {
   seed: string;
 }
 
-export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason';
+export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason' | 'plan';
+
+/** 기용표를 선수 id로 적은 것 (조작 기록용) */
+export interface PlanIds {
+  starters: Partial<Record<Slot, string>>;
+  rotation: string[];
+  closer: string | null;
+}
+
+export type PitcherRole = 'SP' | 'RP' | 'CL';
+export const PITCHER_ROLE_LABEL: Record<PitcherRole, string> = { SP: '선발', RP: '중계', CL: '마무리' };
 
 export interface NewsItem {
   /** 시즌 연도 (없으면 시작 연도. 형식 1 저장 호환) */
@@ -41,6 +51,7 @@ export interface NewsItem {
 export type GameAction =
   | { year?: number; day: number; type: 'entry'; ids: string[] | null }
   | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[] }
+  | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
   | { year: number; type: 'begin-off' }
   | { year: number; type: 'fa-offer'; id: string; salary: number; years: number }
   | { year: number; type: 'fa-withdraw'; id: string }
@@ -240,6 +251,7 @@ export class GameSession {
     const byId = new Map(this.world.players.map((p) => [p.id, p.idx]));
     const idxs = (ids: string[]) => ids.map((id) => byId.get(id)).filter((x): x is number => x !== undefined);
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
+    else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get));
     this.actions.push(clone(a));
   }
@@ -288,6 +300,32 @@ export class GameSession {
 
   isAbsent(p: SimPlayer): boolean {
     return this.season.states.absentUntil[p.idx] > this.season.day;
+  }
+
+  /** 지금 결장의 기록 (개막부터의 결장이면 null) */
+  absenceOf(p: SimPlayer): Absence | null {
+    if (!this.isAbsent(p)) return null;
+    for (let i = this.season.absences.length - 1; i >= 0; i--) {
+      const a = this.season.absences[i];
+      if (a.idx === p.idx) return a.until === this.season.states.absentUntil[p.idx] ? a : null;
+    }
+    return null;
+  }
+
+  /** 결장 까닭 (짧은 문구). 실존 선수의 이탈은 중립 문구만 나온다 (eventLabel이 막는다) */
+  absenceReason(p: SimPlayer): string | null {
+    if (!this.isAbsent(p)) return null;
+    const a = this.absenceOf(p);
+    if (a) return absenceLabel(a, p, a.until >= this.season.schedule.length);
+    const lp = this.leaguePlayer(p.id);
+    if (lp?.startAbsentReason === 'military') return '군 복무 (전역 전)';
+    if (lp?.startAbsentReason === 'injury') return isVirtual(p) ? '지난 시즌 부상 재활' : '지난 시즌부터 결장';
+    return '결장';
+  }
+
+  /** 우리 구단의 복무 중인 선수 (월드에 없다) */
+  servingPlayers(): LeaguePlayer[] {
+    return this.league.players.filter((p) => p.team === this.teamIdx && p.military?.state === 'serving');
   }
 
   /** 결장 중이면 복귀하는 날짜 색인, 아니면 null */
@@ -343,6 +381,110 @@ export class GameSession {
     this.season.setManualEntry(this.teamIdx, idxs);
   }
 
+  // ---- 기용표 (주전 자리, 선발 로테이션, 마무리)
+
+  /** 플레이어가 정한 기용표. AI 감독에게 맡긴 상태면 null */
+  get plan(): DepthPlan | null {
+    return this.season.teamSeasons[this.teamIdx].plan ?? null;
+  }
+
+  /** 화면에 보일 기용표: 정한 기용표가 있으면 그것, 없으면 지금 AI 감독의 배치 */
+  effectivePlan(): DepthPlan {
+    if (this.plan) return this.plan;
+    const ts = this.activeTeam();
+    const starters: DepthPlan['starters'] = {};
+    for (const { p, slot } of assignSlots(ts.hitters)) starters[slot] = p.idx;
+    return { starters, rotation: ts.rotation.map((p) => p.idx), closer: ts.closer?.idx ?? null };
+  }
+
+  /** 야수의 지금 자리 (기용표 기준). 주전이 아니면 null (서브) */
+  slotOf(p: SimPlayer): Slot | null {
+    const st = this.effectivePlan().starters;
+    return LINEUP_SLOTS.find((s) => st[s] === p.idx) ?? null;
+  }
+
+  pitcherRole(p: SimPlayer): PitcherRole {
+    const pl = this.effectivePlan();
+    return pl.closer === p.idx ? 'CL' : pl.rotation.includes(p.idx) ? 'SP' : 'RP';
+  }
+
+  /** 야수를 주전 자리에 세우거나(slot) 서브로 돌린다(null). 그 자리에 있던 선수는 서브가 된다 */
+  setHitterSlot(p: SimPlayer, slot: Slot | null): EntryCheck {
+    const pl = structuredClone(this.effectivePlan());
+    for (const s of LINEUP_SLOTS) if (pl.starters[s] === p.idx) delete pl.starters[s];
+    if (slot) pl.starters[slot] = p.idx;
+    return this.setPlan(pl);
+  }
+
+  /** 투수 보직을 바꾼다. 마무리는 한 명이라, 새로 정하면 기존 마무리는 중계로 간다 */
+  setPitcherRole(p: SimPlayer, role: PitcherRole): EntryCheck {
+    const pl = structuredClone(this.effectivePlan());
+    pl.rotation = pl.rotation.filter((i) => i !== p.idx);
+    if (pl.closer === p.idx) pl.closer = null;
+    if (role === 'SP') pl.rotation.push(p.idx);
+    if (role === 'CL') pl.closer = p.idx;
+    return this.setPlan(pl);
+  }
+
+  /** 기용표 검사: 주전·로테이션·마무리는 지금 1군에 등록된 우리 선수여야 한다 */
+  checkPlan(plan: DepthPlan): EntryCheck {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const reg = new Map(this.registered().map((p) => [p.idx, p]));
+    const seen = new Set<number>();
+    for (const s of LINEUP_SLOTS) {
+      const i = plan.starters[s];
+      if (i === undefined) continue;
+      const p = reg.get(i);
+      if (!p || p.isPitcher) errors.push(`${s} 주전은 1군 야수여야 합니다`);
+      if (seen.has(i)) errors.push(`${p?.name ?? i}이(가) 두 자리에 들어 있습니다`);
+      seen.add(i);
+    }
+    for (const i of plan.rotation) {
+      const p = reg.get(i);
+      if (!p || !p.isPitcher) errors.push('선발 로테이션은 1군 투수여야 합니다');
+    }
+    if (plan.closer !== null) {
+      const p = reg.get(plan.closer);
+      if (!p || !p.isPitcher) errors.push('마무리는 1군 투수여야 합니다');
+      if (plan.rotation.includes(plan.closer)) errors.push('선발 투수를 마무리로 함께 쓸 수 없습니다');
+    }
+    const nStart = LINEUP_SLOTS.filter((s) => plan.starters[s] !== undefined).length;
+    if (nStart < 9) warnings.push(`주전이 ${9 - nStart}자리 비어 있어 그 자리는 AI 감독이 채웁니다`);
+    if (plan.rotation.length < 4) warnings.push(`선발이 ${plan.rotation.length}명이라 AI 감독이 선발을 더 채웁니다`);
+    if (plan.rotation.length > 6) warnings.push(`선발이 ${plan.rotation.length}명입니다. 등판 간격이 길어집니다`);
+    return { errors, warnings };
+  }
+
+  /** 기용표를 정한다. null이면 AI 감독에게 맡긴다 */
+  setPlan(plan: DepthPlan | null): EntryCheck {
+    if (this.done) return { errors: ['시즌이 끝났습니다'], warnings: [] };
+    if (!this.manualEntry) return { errors: ['1군을 직접 관리할 때만 기용표를 정할 수 있습니다'], warnings: [] };
+    const check = plan ? this.checkPlan(plan) : { errors: [], warnings: [] };
+    if (check.errors.length) return check;
+    this.season.setPlan(this.teamIdx, plan);
+    this.actions.push({ year: this.year, day: this.day, type: 'plan', plan: plan ? this.planToIds(plan) : null });
+    return check;
+  }
+
+  private planToIds(plan: DepthPlan): PlanIds {
+    const id = (i: number) => this.world.players[i].id;
+    const starters: PlanIds['starters'] = {};
+    for (const s of LINEUP_SLOTS) if (plan.starters[s] !== undefined) starters[s] = id(plan.starters[s]!);
+    return { starters, rotation: plan.rotation.map(id), closer: plan.closer === null ? null : id(plan.closer) };
+  }
+
+  private planFromIds(ids: PlanIds): DepthPlan {
+    const byId = new Map(this.world.players.map((p) => [p.id, p.idx]));
+    const starters: DepthPlan['starters'] = {};
+    for (const s of LINEUP_SLOTS) {
+      const i = ids.starters[s] === undefined ? undefined : byId.get(ids.starters[s]!);
+      if (i !== undefined) starters[s] = i;
+    }
+    const rotation = ids.rotation.map((x) => byId.get(x)).filter((x): x is number => x !== undefined);
+    return { starters, rotation, closer: ids.closer === null ? null : byId.get(ids.closer) ?? null };
+  }
+
   // ---- 시즌 진행
 
   /** days일 진행한다 (시즌이 끝나면 멈춤). 실제로 진행한 날 수를 돌려준다 */
@@ -386,8 +528,10 @@ export class GameSession {
       const until = s.states.absentUntil[p.idx];
       if (until > day && until !== before[i]) {
         const inFirst = !manual || manual.has(p.idx);
-        // 실존 선수에게는 사유를 붙이지 않는다 (기획서 7장)
-        this.addNews(day, 'absence', `${p.name} 결장. 복귀 예정 ${formatDate(year, until)} (${until - day}일).${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}`);
+        // 이탈 사유는 실존 선수에게 중립 문구만 쓴다 (기획서 7장, absenceReason → eventLabel)
+        const reason = this.absenceReason(p) ?? '결장';
+        const back = until >= s.schedule.length ? '이번 시즌 복귀 어려움' : `복귀 예정 ${formatDate(year, until)} (${until - day}일)`;
+        this.addNews(day, 'absence', `${p.name}: ${reason}. ${back}.${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}`);
       }
     });
 
@@ -494,6 +638,8 @@ export class GameSession {
       return { verdict: 'reject-invalid', message: why, detail: none };
     }
     if (give.some((p) => p.teamIdx !== this.teamIdx)) return { verdict: 'reject-invalid', message: '우리 구단 선수만 내줄 수 있습니다.', detail: none };
+    const foreign = [...give, ...get].filter((p) => p.foreign);
+    if (foreign.length) return { verdict: 'reject-invalid', message: `외국인 선수는 트레이드할 수 없습니다 (${foreign.map((p) => p.name).join(', ')}).`, detail: none };
     return evaluateTrade({ aiTeam, receive: give, give: get }, this.world.teams[aiTeam].org, this.situation(aiTeam), this.values);
   }
 
@@ -510,7 +656,7 @@ export class GameSession {
 
   /** AI 구단에게 "이 선수를 주려면 무엇을 원하나"를 묻는다. 수락할 만한 조합이 없으면 null */
   askPackage(aiTeam: number, want: SimPlayer[]): SimPlayer[] | null {
-    if (!this.tradeOpen || want.length === 0 || want.some((p) => p.teamIdx !== aiTeam)) return null;
+    if (!this.tradeOpen || want.length === 0 || want.some((p) => p.teamIdx !== aiTeam || p.foreign)) return null;
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
     return suggestPackage(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
   }
@@ -561,6 +707,12 @@ export class GameSession {
         this.startEntry();
         this.actions.push(clone(a));
         this.addNews(0, 'season', `${this.year} 시즌을 시작합니다. 개막일은 ${formatDate(this.year, 0)}입니다.`);
+        for (const p of this.team.org) {
+          const until = this.season.states.absentUntil[p.idx];
+          if (until > 0) this.addNews(0, 'absence', `${p.name}: ${this.absenceReason(p)}. 복귀 예정 ${formatDate(this.year, until)}.`);
+        }
+        const serving = this.servingPlayers();
+        if (serving.length) this.addNews(0, 'season', `군 복무 중: ${serving.map((p) => `${p.name}(${p.military?.returnYear}년 복귀)`).join(', ')}`);
         return res;
       }
     }
@@ -608,7 +760,7 @@ export class GameSession {
     const off = this.offseason;
     if (!off) return;
     for (const l of off.log.slice(from)) {
-      if (l.mine || (l.stage === 'fa' && l.text.includes('→'))) this.addOffNews(l.text);
+      if (l.mine || l.major || (l.stage === 'fa' && l.text.includes('→'))) this.addOffNews(l.text);
     }
   }
 

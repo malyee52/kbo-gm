@@ -5,6 +5,7 @@
 // K가 클수록 표본이 적은 선수가 사전 평균(출전이 적은 선수들의 평균) 쪽으로 강하게 당겨진다.
 
 import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import { makeDefense } from './defense';
 import type { EngineParams } from './params';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -16,10 +17,12 @@ export const LINEAR_WEIGHTS = { bb: 0.69, hbp: 0.72, s1: 0.89, d2: 1.27, t3: 1.6
 
 const DEFAULT_SB_PCT = 0.7;
 
-interface Weighted<T> {
+export interface Weighted<T> {
   row: T;
   w: number;
   lg: Rates;
+  /** 노화 보정: 사건별로 그 시즌 횟수에 곱하는 배율 (그 시즌 나이 → 목표 시즌 나이). 없으면 1 */
+  aging?: Partial<Record<string, number>>;
 }
 
 function batCounts(r: BatRow) {
@@ -31,10 +34,10 @@ export function batSkillFrom(rows: Weighted<BatRow>[], priors: Rates, p: EngineP
   for (const e of BAT_EVENTS) {
     let num = 0;
     let den = 0;
-    for (const { row, w, lg } of rows) {
+    for (const { row, w, lg, aging } of rows) {
       const c = batCounts(row)[e];
       if (c === null || c === undefined || row.pa <= 0) continue; // 그 시즌에 이 항목 기록이 없으면 건너뜀
-      num += (w * c) / lg[e];
+      num += (w * c * (aging?.[e] ?? 1)) / lg[e];
       den += w * row.pa;
     }
     const k = p.batRegress[e];
@@ -72,11 +75,11 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
   for (const e of PIT_EVENTS) {
     let num = 0;
     let den = 0;
-    for (const { row, w, lg } of rows) {
+    for (const { row, w, lg, aging } of rows) {
       if (row.tbf <= 0) continue;
       const c = e === 'hit' ? row.h - row.hr : row[e];
       const lgRate = e === 'hit' ? lg.s1 + lg.d2 + lg.t3 : lg[e];
-      num += (w * c) / lgRate;
+      num += (w * c * (aging?.[e] ?? 1)) / lgRate;
       den += w * row.tbf;
     }
     const k = p.pitRegress[e];
@@ -105,8 +108,11 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
     }
   }
   skill.startShare = g > 0 ? gs / g : 0;
-  skill.stamina = Math.min(29, Math.max(16, (bfStart + 5 * 22) / (gStart + 5)));
   skill.reliefStint = Math.min(9, Math.max(3, (bfRelief + 10 * 5) / (gRelief + 10)));
+  // 선발 체력의 사전값: 구원으로 한 번에 길게 던지는 투수(롱릴리프)는 선발로도 더 길게 던진다고 본다.
+  // 구원 평균(5명)이면 리그 기본 22명. 선발 기록이 쌓일수록 실제 기록 쪽으로 간다 (임시값, 2026-10-08)
+  const staminaPrior = Math.min(26, Math.max(16, 12 + 2 * skill.reliefStint));
+  skill.stamina = Math.min(29, Math.max(16, (bfStart + 5 * staminaPrior) / (gStart + 5)));
   return skill;
 }
 
@@ -196,8 +202,20 @@ export function buildWorld(input: BuildWorldInput): World {
       }
       bat = batSkillFrom(rows, meta.priors.batter, params);
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
-      const recent = histBat.map((h) => h?.get(id)?.pos).find((x) => x && x !== 'IF' && x !== 'OF');
+      // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
+      // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다
+      const posPa = new Map<string, number>();
+      for (const h of histBat) {
+        const r = h?.get(id);
+        if (r?.pos && r.pos !== 'IF' && r.pos !== 'OF') posPa.set(r.pos, (posPa.get(r.pos) ?? 0) + Math.max(1, r.pa));
+      }
+      const totalPa = [...posPa.values()].reduce((a, b) => a + b, 0);
+      const field = [...posPa.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+      const recent = (posPa.get('DH') ?? 0) > 0.7 * totalPa ? 'DH' : field?.[0] ?? (posPa.has('DH') ? 'DH' : undefined);
       pos = recent ?? (m.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null) ?? bRow?.pos ?? null;
+      // 수비: 직전 시즌들에 맡은 포지션(멀티 포지션 이력)과 주력·나이로 만든 추정값 (기록 없음)
+      bat.def = makeDefense(id, pos, histBat.map((h) => h?.get(id)?.pos ?? null), bat.speed, m.birthYear ? year - m.birthYear : null,
+        pos ? posPa.get(pos) ?? 0 : 0);
     }
 
     const p: SimPlayer = {
@@ -216,6 +234,7 @@ export function buildWorld(input: BuildWorldInput): World {
       lastSaves,
       value: bat ? batValue(bat, lg) : pitValue(pit!, lg),
       debutEstimate,
+      real: m.real,
     };
     players.push(p);
     teams[team].org.push(p);

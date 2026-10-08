@@ -23,6 +23,8 @@ export interface PlayerMaster {
   school?: 'HS' | 'UNIV';
   /** 실존 선수 여부. 구체적 사건 이벤트는 false인 선수에게만 걸린다. */
   real: boolean;
+  /** 아시아쿼터 대상 (data-src/외국인_개막명단.csv에서. 없으면 일반 외국인으로 본다) */
+  asia?: boolean;
 }
 
 export interface TeamRow {
@@ -162,6 +164,36 @@ export interface Meta {
     pitcher: { hit: number; hr: number; bb: number; hbp: number; so: number };
     note: string;
   };
+  /**
+   * 시작 연도 개막 때 구단별 외국인 (연도 → 구단 이름 → 선수). data-src/외국인_개막명단.csv에서 만든다.
+   * 그 해 기록에는 시즌 중 교체된 외국인까지 있어서, 새 게임은 이 명단에 있는 외국인만 넣는다. 없는 해는 기록 그대로.
+   */
+  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean }[]>>;
+}
+
+/**
+ * 신인 지명 한 명 (drafts.json, baseballchart.kr 원본 → tools/build_data.py). 연도는 입단 시즌.
+ * 원본 순서(지명 순)를 그대로 둔다.
+ */
+export interface DraftRow {
+  /** 갈래: 라운드, 1차, 고졸연고, 우선, 특별, 해외, 육성선수, 원년 멤버 */
+  kind: string;
+  /** kind가 '라운드'일 때 라운드 */
+  round: number | null;
+  /** 전체 지명 순위 (라운드 지명만) */
+  overall: number | null;
+  /** 실제 지명 구단 (그 시절 이름) */
+  team: string;
+  name: string;
+  /** P 투수, C 포수, IF 내야수, OF 외야수, DH 지명타자 (세부 내야·외야 포지션 없음) */
+  pos: 'P' | 'C' | 'IF' | 'OF' | 'DH';
+  /** 원본 포지션이 둘 (투타겸업 등). pos는 앞의 것, 투타겸업은 투수 */
+  twoWay?: boolean;
+  school: string;
+  /** 이력에 대학이 있음 (대졸) */
+  univ: boolean;
+  /** 1군 통산 경기 (원본 작성 시점) */
+  games: number;
 }
 
 /** FA·비FA 다년 계약 (자료집 FA계약 시트, 금액 미검증) */
@@ -187,6 +219,8 @@ export interface DataStore {
   season(year: number): SeasonData | undefined;
   /** 계약 기록. 불러오지 않았으면 빈 배열 */
   contracts?: ContractRow[];
+  /** 신인 지명 (입단 연도 → 지명 순). drafts.json. 없으면 가상 신인만 쓴다 */
+  drafts?: Record<string, DraftRow[]>;
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */

@@ -3,7 +3,8 @@
 import type { Rates } from '../data/types';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
-import { currentFatigue, FATIGUE_AVAILABLE_BELOW, type PlayerStates, type TeamSeason } from './team';
+import { defenseAt } from './defense';
+import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, PitSkill, SimPlayer } from './types';
 
 /** 시즌 전체 리그 합계 (검증용) */
@@ -86,6 +87,10 @@ interface Side {
   isHome: boolean;
   /** 라인업 가치의 중앙값 (희생번트를 누가 대는지 정할 때 쓴다) */
   medianValue: number;
+  /** 수비 8명의 수비 런 합 (defense.ts) */
+  def: number;
+  /** 포수의 수비 런 */
+  catcherDef: number;
 }
 
 export interface GameResult {
@@ -184,7 +189,23 @@ function platoonEdge(b: SimPlayer, p: SimPlayer, size: number): number {
   return b.bats === p.throws ? -size : size;
 }
 
-function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext): Ev {
+/** 수비 배치에서 팀 수비 런과 포수 수비 런 */
+function fieldDefense(ts: TeamSeason, lineup: SimPlayer[]): { def: number; catcherDef: number } {
+  const slots = ts.field && lineup.every((p) => ts.field!.has(p.idx))
+    ? lineup.map((p) => ({ p, slot: ts.field!.get(p.idx)! }))
+    : assignSlots(lineup);
+  let def = 0;
+  let catcherDef = 0;
+  for (const { p, slot } of slots) {
+    const r = defenseAt(p, slot);
+    def += r;
+    if (slot === 'C') catcherDef = r;
+  }
+  return { def, catcherDef };
+}
+
+/** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
+function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0): Ev {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
@@ -201,7 +222,7 @@ function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boole
   const pBb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
   const pHbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
   const pHr = combine(bs.hr * cal.hr * lg.hr * up, ps.hr * lg.hr * worse, lg.hr);
-  const hitP = ps.hit * worse;
+  const hitP = ps.hit * worse * Math.max(0.5, 1 - fieldDef * params.defenseHitPerRun);
   const pS1 = combine(bs.s1 * cal.s1 * lg.s1 * up, hitP * lg.s1, lg.s1);
   const pD2 = combine(bs.d2 * cal.d2 * lg.d2 * up, hitP * lg.d2, lg.d2);
   const pT3 = combine(bs.t3 * cal.t3 * lg.t3 * up, hitP * lg.t3, lg.t3);
@@ -230,7 +251,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
-    return { ts, lineup, spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue };
+    const fd = fieldDefense(ts, lineup);
+    return { ts, lineup, spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
@@ -285,7 +307,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       const r1 = bases[0];
       if (r1 && !bases[1] && rng.chance(r1.p.bat!.sbAtt * params.stealScale)) {
         const line = ctx.bat[r1.p.idx];
-        if (rng.chance(r1.p.bat!.sbPct)) {
+        if (rng.chance(r1.p.bat!.sbPct - fld.catcherDef * params.catcherStealPerRun)) {
           line.sb++;
           totals.sb++;
           bases[1] = r1;
@@ -300,7 +322,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       }
 
       // 폭투·포일·보크: 주자 전원 한 베이스씩
-      if ((bases[0] || bases[1] || bases[2]) && rng.chance(ctx.env.wildPitch)) {
+      if ((bases[0] || bases[1] || bases[2]) && rng.chance(ctx.env.wildPitch * Math.max(0.3, 1 - fld.catcherDef * params.catcherWildPitchPerRun))) {
         totals.wildPitches++;
         if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
         if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
@@ -328,7 +350,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           continue;
         }
       }
-      const ev = samplePlateAppearance(batter, pg, bat.isHome, ctx);
+      const ev = samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def);
       const me: Runner = { p: batter, resp: pg, earned: true };
       const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
       const twoOut = outs === 2 ? params.twoOutBonus : 0;
@@ -413,7 +435,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
         default: {
           // 인플레이 아웃이 될 타구
           bl.ab++; totals.ab++;
-          if (rng.chance(ctx.env.roe)) {
+          if (rng.chance(ctx.env.roe * Math.max(0.3, 1 - fld.def * params.defenseHitPerRun * 3))) {
             // 실책 출루: 주자는 한 베이스씩, 타자 주자는 비자책
             totals.roe++;
             me.earned = false;

@@ -197,7 +197,7 @@ function PickList({ title, org, selected, onToggle, disabled, showEntry = false 
               }
               return (
                 <tr key={p.idx} className={on ? 'me' : ''}>
-                  <td><input type="checkbox" checked={on} onChange={() => onToggle(p)} disabled={disabled} aria-label={`${p.name} 선택`} /></td>
+                  <td><input type="checkbox" checked={on} onChange={() => onToggle(p)} disabled={disabled || p.foreign} title={p.foreign ? '외국인 선수는 트레이드할 수 없습니다' : undefined} aria-label={`${p.name} 선택`} /></td>
                   <td className="l"><PlayerLink p={p} /></td>
                   <td>{p.isPitcher ? (p.pit!.startShare >= 0.5 ? '선발' : '구원') : posName(p.pos)}</td>
                   <td>{p.age ?? '-'}</td>

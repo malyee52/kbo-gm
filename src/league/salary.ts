@@ -22,7 +22,7 @@ export const CAP_TOP_N = 40;
 
 export function capPayroll(players: LeaguePlayer[], team: number): number {
   return players
-    .filter((p) => p.team === team && !p.foreign && p.contract.kind !== 'rookie')
+    .filter((p) => p.team === team && !p.foreign && p.contract.kind !== 'rookie' && p.military?.state !== 'serving')
     .map((p) => p.contract.salary)
     .sort((a, b) => b - a)
     .slice(0, CAP_TOP_N)
@@ -81,7 +81,7 @@ export const SERVICE_SHARE = 0.6;
 
 /** year 시즌이 끝난 뒤 FA 자격이 있는가 */
 export function faEligible(p: LeaguePlayer, year: number): boolean {
-  if (p.foreign || p.team < 0) return false;
+  if (p.foreign || p.team < 0 || p.military?.state === 'serving') return false;
   if (p.contract.until > year) return false;
   const need = p.faCount === 0 ? serviceNeeded(p.school, p.entryYear, p.birthYear) : FA_RE_ELIGIBLE;
   return p.service >= need;

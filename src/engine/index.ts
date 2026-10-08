@@ -13,9 +13,16 @@ export {
   type SeasonResult, type SeasonSave, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
-  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, LINEUP_SLOTS, assignLineup, positionFit, todaysStarter, currentFatigue, type Slot, type TeamSeason,
+  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, assignLineup, assignSlots, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine } from './types';
+export {
+  FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
+} from './defense';
+export {
+  ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
+  type Absence, type AbsenceKind, type EventCode, type InjuryParams,
+} from './injury';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
 export type * from './types';
 

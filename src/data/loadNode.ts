@@ -1,8 +1,8 @@
 // Node용 데이터 로더. 검증 스크립트와 테스트에서만 쓴다 (브라우저에서는 loadBrowser.ts).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSeason, type ContractRow, type DataStore, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
 
 export type { DataStore } from './types';
 
@@ -20,6 +20,7 @@ export function loadDataStore(): DataStore {
     meta,
     players,
     contracts: read<{ contracts: ContractRow[] }>('contracts.json').contracts,
+    drafts: existsSync(join(DATA_DIR, 'drafts.json')) ? read<{ years: Record<string, DraftRow[]> }>('drafts.json').years : undefined,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);

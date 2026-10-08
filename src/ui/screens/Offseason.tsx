@@ -1,6 +1,6 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { useState } from 'react';
-import { DRAFT_ROUNDS, FA_ROUNDS, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
 import {
   ASIA_NEW_CAP, capPayroll, dollarText, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
 } from '../../league/salary';
@@ -74,7 +74,7 @@ export function Offseason() {
       <section className="row-between wrap">
         <div>
           <h1>{off.year} 오프시즌</h1>
-          <p className="muted small">결산(성장 판정, 1군 연차)은 끝났습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
+          <p className="muted small">결산(성장 판정, 1군 연차, 부상 후유증, 은퇴, 병역)은 끝났습니다. 결산 소식은 아래 "오프시즌 소식"에 있습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
         </div>
         {off.stage !== 'ready' && (
           <button type="button" onClick={() => void next()} disabled={busy}>{busy ? '처리 중' : nextLabel}</button>
@@ -299,7 +299,12 @@ function DraftPanel({ act }: { act: Act }) {
             ? <strong>우리 차례입니다: {Math.floor(d.pick / n) + 1}라운드 {(d.pick % n) + 1}순위</strong>
             : `지명 진행 중 (${d.pick + 1}/${total})`}
         </p>
-        <p className="muted small">잠재는 스카우트 평가라 실제와 다를 수 있습니다. 모든 구단이 같은 평가를 봅니다. 지명 선수는 모두 가상 선수입니다.</p>
+        <p className="muted small">
+          잠재는 스카우트 평가라 실제와 다를 수 있습니다. 모든 구단이 같은 평가를 봅니다.{' '}
+          {[...d.pool, ...d.picks.map((x) => x.id)].some((id) => players.get(id)?.real)
+            ? `후보는 ${off.year + 1}년 입단 실제 신인 지명 선수입니다 (출처: baseballchart.kr, 나무위키 신인 드래프트 문서 정리, CC BY-NC-SA 2.0 KR). 지명은 게임 속 순위로 다시 하므로 실제 구단과 다를 수 있고, 아직 프로 기록이 없어 능력은 실제 지명 순번으로 가늠한 추정값입니다.`
+            : '지명 선수는 모두 가상 선수입니다.'}
+        </p>
         <div className="actions">
           <button type="button" className="ghost" disabled={done} onClick={() => act(session.autoDraft(), '남은 지명을 자동으로 했습니다.')}>남은 지명 자동</button>
         </div>
@@ -453,7 +458,7 @@ function OffLog() {
       {rows.length === 0 ? <p className="muted">아직 소식이 없습니다.</p> : (
         <ul className="news">
           {rows.map((l, k) => (
-            <li key={k} className={l.mine ? 'news-season' : ''}><span className="muted small">{STAGE_LABEL[l.stage]}</span><span>{l.text}</span></li>
+            <li key={k} className={l.mine ? 'news-season' : ''}><span className="muted small">{LOG_LABEL[l.stage]}</span><span>{l.text}</span></li>
           ))}
         </ul>
       )}

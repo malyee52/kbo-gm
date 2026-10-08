@@ -14,8 +14,10 @@ export interface PitcherGrades {
   stuff: number;
   control: number;
   hrSuppression: number;
-  /** 선발 투수만. 구원 투수는 null */
+  /** 선발로 나왔을 때의 체력 (한 경기에 상대하는 타자 수 기준) */
   stamina: number | null;
+  /** 구원 체력: 한 번 등판에 상대하는 타자 수. 높으면 롱릴리프로 길게 던진다 */
+  reliefStamina: number;
 }
 
 /** 등급의 기준 집단에 넣을 최소 표본 (가중 타석 / 가중 상대 타자) */
@@ -42,6 +44,7 @@ function pitcherRaw(p: SimPlayer, lg: Rates) {
     control: -s.bb * lg.bb,
     hrSuppression: -s.hr * lg.hr,
     stamina: s.stamina,
+    reliefStamina: s.reliefStint,
   };
 }
 
@@ -64,6 +67,7 @@ export function computeGrades(world: World): DisplayGrades {
   const refB = hitters.filter((p) => p.bat!.sample >= MIN_BAT_SAMPLE).map((p) => batterRaw(p, lg));
   const refP = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE).map((p) => pitcherRaw(p, lg));
   const refStarters = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && p.pit!.startShare >= 0.5).map((p) => pitcherRaw(p, lg));
+  const refRelievers = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && p.pit!.startShare < 0.5).map((p) => pitcherRaw(p, lg));
 
   const sb = {
     contact: scaler(refB.map((r) => r.contact)), power: scaler(refB.map((r) => r.power)),
@@ -72,6 +76,7 @@ export function computeGrades(world: World): DisplayGrades {
   const sp = {
     stuff: scaler(refP.map((r) => r.stuff)), control: scaler(refP.map((r) => r.control)),
     hrSuppression: scaler(refP.map((r) => r.hrSuppression)), stamina: scaler(refStarters.map((r) => r.stamina)),
+    relief: scaler(refRelievers.map((r) => r.reliefStamina)),
   };
 
   const batters = new Map<string, BatterGrades>();
@@ -83,7 +88,8 @@ export function computeGrades(world: World): DisplayGrades {
   for (const p of pitchers) {
     const r = pitcherRaw(p, lg);
     out.set(p.id, { stuff: sp.stuff(r.stuff), control: sp.control(r.control), hrSuppression: sp.hrSuppression(r.hrSuppression),
-      stamina: p.pit!.startShare >= 0.5 ? sp.stamina(r.stamina) : null,
+      stamina: sp.stamina(r.stamina),
+      reliefStamina: sp.relief(r.reliefStamina),
     });
   }
   return { batters, pitchers: out };

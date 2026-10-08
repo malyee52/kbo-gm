@@ -1,4 +1,5 @@
 import type { Hand, Rates, YearRules } from '../data/types';
+import type { Defense } from './defense';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -17,6 +18,8 @@ export interface BatSkill {
   speed: number;
   /** 능력 산출에 쓴 가중 타석 수 */
   sample: number;
+  /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
+  def?: Defense;
 }
 
 /** 투수 능력: 상대 타석 결과별 리그 대비 비율 (1.00 = 리그 평균, 삼진은 클수록 좋고 나머지는 작을수록 좋다) */
@@ -63,6 +66,10 @@ export interface SimPlayer {
    * 검증에서 실제 출전량을 재현할 때 쓴다.
    */
   availability?: number;
+  /** 실존 선수 여부. false면 가상 선수. 값이 없으면 실존 선수로 본다 (구체적 사건 이벤트를 막는 쪽) */
+  real?: boolean;
+  /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
+  startAbsent?: number;
 }
 
 export interface SimTeam {

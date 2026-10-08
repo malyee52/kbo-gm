@@ -1,6 +1,7 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 실제 기록, 계약.
 import { useEffect, useRef } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
+import { absenceLabel, defenseAt, defenseGrade, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText, wonText } from '../../league/salary';
@@ -53,7 +54,9 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             </p>
             <p className="small">
               {mine ? (registered ? '1군' : '2군') : '다른 구단'}
-              {back !== null && <span className="status out"> 결장 · {shortDate(year, back)} 복귀 예정</span>}
+              {back !== null && (
+                <span className="status out"> {session.absenceReason(p)} · {back >= session.season.schedule.length ? '이번 시즌 복귀 어려움' : `${shortDate(year, back)} 복귀 예정`}</span>
+              )}
             </p>
           </div>
           <button type="button" className="ghost" onClick={() => ref.current?.close()} aria-label="닫기">닫기</button>
@@ -65,7 +68,8 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             {p.isPitcher && pg ? (
               <>
                 <GradeBar label="구위" v={pg.stuff} /><GradeBar label="제구" v={pg.control} />
-                <GradeBar label="장타 억제" v={pg.hrSuppression} /><GradeBar label="체력" v={pg.stamina} />
+                <GradeBar label="장타 억제" v={pg.hrSuppression} /><GradeBar label="선발 체력" v={pg.stamina} />
+                <GradeBar label="구원 체력" v={pg.reliefStamina} />
               </>
             ) : bg ? (
               <>
@@ -74,6 +78,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
               </>
             ) : null}
           </div>
+          {!p.isPitcher && <DefenseInfo p={p} />}
           {p.debutEstimate && <p className="note small">직전 기록이 없어 {year}년 기록을 크게 보정해 능력을 추정한 선수입니다 (잠재력 모델 도입 전 임시 처리).</p>}
         </section>
 
@@ -98,6 +103,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         </section>
 
         <ContractInfo id={p.id} />
+        <CareerInfo p={p} />
 
         {mine && !session.done && (
           <div className="actions">
@@ -125,6 +131,60 @@ function ContractInfo({ id }: { id: string }) {
         {!lp.foreign && <><dt>FA</dt><dd>1군 연차 {lp.service}년{lp.faCount ? ` · FA 계약 ${lp.faCount}회` : ''}</dd></>}
       </dl>
       {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}
+    </section>
+  );
+}
+
+/** 포지션별 수비 등급 (20~80, 50 = 그 자리 평균 수비수) */
+function DefenseInfo({ p }: { p: SimPlayer }) {
+  const playable = playablePositions(p.bat?.def);
+  return (
+    <div className="defense">
+      <h4 className="small">수비 <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span></h4>
+      <div className="grades">
+        {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} v={defenseGrade(defenseAt(p, q))} />)}
+      </div>
+      <p className="muted small">수비 기록이 자료에 없어, 직전 시즌들에 맡은 포지션·주력·나이로 만든 추정값입니다.</p>
+    </div>
+  );
+}
+
+const MILITARY_LABEL: Record<string, string> = { pending: '미필', serving: '복무 중', done: '마침', exempt: '면제' };
+
+/** 몸 상태와 병역: 이번 시즌 부상·이탈, 지난 시즌 부상 이력, 병역 */
+function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
+  const { session } = useGame();
+  const lp = session.leaguePlayer(p.id);
+  const year = session.world.year;
+  const len = session.season.schedule.length;
+  const now = session.season.absences.filter((a) => a.idx === p.idx);
+  const past = lp?.injuries ?? [];
+  return (
+    <section>
+      <h3>{isVirtual(p) ? '몸 상태와 병역' : '결장과 병역'}</h3>
+      <dl className="facts">
+        {lp && !lp.foreign && (
+          <>
+            <dt>병역</dt>
+            <dd>
+              {MILITARY_LABEL[lp.military?.state ?? 'done']}
+              {lp.military?.state === 'pending' && lp.real && year === session.league.startYear && <span className="muted small"> (병역 자료가 없어 나이·기록 공백으로 가늠한 값)</span>}
+            </dd>
+          </>
+        )}
+        <dt>{year} 시즌</dt>
+        <dd>
+          {now.length === 0 ? (isVirtual(p) ? '부상·이탈 없음' : '결장 없음') : now.map((a, i) => (
+            <span key={i}>{i > 0 && ', '}{shortDate(year, a.day)} {absenceLabel(a, p, a.until >= len)}{a.until >= len ? '' : ` ${a.until - a.day}일`}</span>
+          ))}
+        </dd>
+        {past.length > 0 && (
+          <>
+            <dt>장기 결장 이력</dt>
+            <dd>{past.map((x) => `${x.year} ${absenceLabel({ kind: x.kind }, p)} ${x.days}일${x.seasonOut ? '(시즌 아웃)' : ''}`).join(', ')}</dd>
+          </>
+        )}
+      </dl>
     </section>
   );
 }

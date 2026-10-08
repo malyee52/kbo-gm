@@ -48,7 +48,7 @@ export function SeasonEnd() {
           <h2><TeamName idx={me} /></h2>
           <p className="big">{verdict}</p>
           <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
-          <p className="muted small">포스트시즌 경기는 아직 치르지 않습니다. 결산하면 성장 판정과 1군 연차가 반영되고 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다.</p>
+          <p className="muted small">포스트시즌 경기는 아직 치르지 않습니다. 결산하면 성장 판정·1군 연차·부상 후유증이 반영되고 은퇴와 입대가 정해진 뒤 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다.</p>
         </div>
       </section>
 
