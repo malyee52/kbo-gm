@@ -1,8 +1,8 @@
 // 저장·설정: 저장 칸, 파일 내보내기·가져오기, 버그 보고용 재현 정보.
 import { useEffect, useState } from 'react';
-import { AUTO_SLOT, deleteSave, listSaves, type SaveRecord } from '../../game/storage';
+import { deleteSave, isAutoSlot, listSaves, type SaveRecord } from '../../game/storage';
 import { useGame } from '../context';
-import { exportSession, saveSession, whenText } from '../saving';
+import { autoSlotFor, exportSession, saveSession, whenText } from '../saving';
 
 const SLOTS = ['저장 1', '저장 2', '저장 3'];
 
@@ -51,16 +51,16 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
 
       <section className="panel">
         <h2>브라우저에 저장</h2>
-        <p className="muted small">진행 버튼을 누를 때마다 "자동 저장" 칸에 덮어씁니다. 브라우저 데이터를 지우면 저장도 사라지므로 중요한 게임은 파일로 내보내 두세요.</p>
+        <p className="muted small">진행 버튼을 누를 때마다 이 게임의 "자동 저장" 칸에 덮어씁니다 (게임마다 따로 두고 최근 3개까지 남깁니다). 브라우저 데이터를 지우면 저장도 사라지므로 중요한 게임은 파일로 내보내 두세요.</p>
         <div className="scroll">
           <table>
             <thead><tr><th className="l">칸</th><th className="l">구단</th><th className="l">진행</th><th className="l">성적</th><th className="l">저장 시각</th><th /></tr></thead>
             <tbody>
-              {[AUTO_SLOT, ...SLOTS].map((slot) => {
+              {[autoSlotFor(session), ...SLOTS].map((slot) => {
                 const s = bySlot.get(slot);
                 return (
                   <tr key={slot}>
-                    <td className="l">{slot === AUTO_SLOT ? '자동 저장' : slot}</td>
+                    <td className="l">{isAutoSlot(slot) ? '자동 저장' : slot}</td>
                     {s ? (
                       <>
                         <td className="l">{s.year} {s.teamName}</td>
@@ -70,8 +70,8 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
                       </>
                     ) : <td className="l muted" colSpan={4}>비어 있음</td>}
                     <td className="r-actions">
-                      {slot !== AUTO_SLOT && <button type="button" onClick={() => void saveTo(slot)}>{s ? '덮어쓰기' : '저장'}</button>}
-                      {s && slot !== AUTO_SLOT && (
+                      {!isAutoSlot(slot) && <button type="button" onClick={() => void saveTo(slot)}>{s ? '덮어쓰기' : '저장'}</button>}
+                      {s && !isAutoSlot(slot) && (
                         <button type="button" className="ghost danger" onClick={() => void deleteSave(slot).then(refresh)}>지우기</button>
                       )}
                     </td>

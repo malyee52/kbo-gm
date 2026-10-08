@@ -216,6 +216,8 @@ export function buildWorld(input: BuildWorldInput): World {
       const field = [...posPa.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
       const recent = (posPa.get('DH') ?? 0) > 0.7 * totalPa ? 'DH' : field?.[0] ?? (posPa.has('DH') ? 'DH' : undefined);
       pos = recent ?? (m.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null) ?? bRow?.pos ?? null;
+      // 세부 포지션이 어디에도 없으면 직전 시즌의 내야·외야 구분이라도, 그것도 없으면 내야로 본다 (1980~90년대 자료. 빈 자료는 추정치, 2026-10-09 QA)
+      if (!pos) pos = histBat.map((h) => h?.get(id)?.pos).find((q) => q === 'IF' || q === 'OF') ?? 'IF';
       // 수비: 직전 시즌들에 맡은 포지션(멀티 포지션 이력)과 주력·나이로 만든 추정값 (기록 없음)
       bat.def = makeDefense(id, pos, histBat.map((h) => h?.get(id)?.pos ?? null), bat.speed, m.birthYear ? year - m.birthYear : null,
         pos ? posPa.get(pos) ?? 0 : 0);

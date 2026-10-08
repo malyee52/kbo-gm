@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/owner';
 import type { BrowserStore } from '../data/loadBrowser';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
+import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
 import { teamColor } from './teams';
 
@@ -165,7 +165,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             {saves.map((s) => (
               <div key={s.slot} className="save-item">
                 <div>
-                  <span className="muted small">{s.slot === 'auto' ? '자동 저장' : s.slot} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
+                  <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
                   <br />
                   <strong>{s.year} {s.teamName}</strong> <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
                 </div>

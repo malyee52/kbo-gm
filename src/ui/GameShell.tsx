@@ -4,9 +4,8 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { computeGrades } from '../engine';
 import { formatDate } from '../game/calendar';
 import type { GameSession } from '../game/session';
-import { AUTO_SLOT } from '../game/storage';
 import { GameProvider, type GameUi, type Screen } from './context';
-import { saveSession, summaryOf } from './saving';
+import { autosaveSession, summaryOf } from './saving';
 import { Home } from './screens/Home';
 import { Leaders } from './screens/Leaders';
 import { PlayerDetail } from './screens/PlayerDetail';
@@ -60,7 +59,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
 
   const autosave = useCallback(async () => {
     try {
-      await saveSession(session, AUTO_SLOT);
+      await autosaveSession(session);
       setSaveError(null);
     } catch (e) {
       setSaveError(`자동 저장 실패: ${(e as Error).message}`);

@@ -3,7 +3,7 @@
 
 import { Rng } from '../engine';
 import type { PostseasonResult } from './postseason';
-import { capPayroll, salaryCap } from './salary';
+import { capPayroll, salaryCap, PRE_CAP_BUDGET } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 
 // ---- 난이도
@@ -54,8 +54,8 @@ export function parentGrade(league: LeagueState, team: number): ParentGrade {
  * 샐러리캡 × 등급 배율 × 성적 연동 (지난 시즌 상위 3팀 +5%, 하위 3팀 -5%, 임시값). 캡보다 커지지는 않는다.
  */
 export function budgetFor(league: LeagueState, team: number, year: number): number | null {
-  const cap = salaryCap(year);
-  if (cap === null) return null;
+  // 캡 도입 전에도 예산은 있다 (2023년 캡 값 기준, 임시값). 전에는 null이라 2022년 이전 FA 제시에 상한이 없었다 (2026-10-09 QA)
+  const cap = salaryCap(year) ?? PRE_CAP_BUDGET;
   let f = GRADE_FACTOR[parentGrade(league, team)];
   const st = league.lastSeason?.standings;
   if (st) {
@@ -65,6 +65,7 @@ export function budgetFor(league: LeagueState, team: number, year: number): numb
   }
   return Math.round(cap * Math.min(1, f));
 }
+
 
 /** FA 계약 등 연봉 지출의 상한: 샐러리캡과 예산 중 작은 쪽. 둘 다 없으면 null */
 export function spendLimit(league: LeagueState, team: number, year: number): number | null {
@@ -206,6 +207,8 @@ export interface OwnerRecord {
   trustAfter: number;
   champion: boolean;
   capOver: boolean;
+  /** 그 시즌의 구단 이름 (명칭 변경·승계 뒤에도 그대로). 없으면 지금 이름 */
+  teamName?: string;
 }
 
 export interface OwnerState {

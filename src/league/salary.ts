@@ -18,6 +18,30 @@ export function salaryCap(year: number): number | null {
   for (let y = 2029; y <= year; y++) v = Math.round(v * 1.05);
   return v;
 }
+/** 샐러리캡 도입 전(2022년까지)의 구단 예산 기준: 2023년 캡 값을 그대로 쓴다 (임시값. 내부 연봉은 2026년 물가라 캡 값과 같은 단위다) */
+export const PRE_CAP_BUDGET = 1142638;
+
+/**
+ * 시대별 물가 계수 (2026년 = 1). KBO 평균 연봉(신인·외국인 제외)의 대략적인 흐름을 따른 근사값으로, 자료집에서 확인하지 않았다 (임시값).
+ * 내부 연봉은 모두 2026년 물가로 계산·비교하고(캡·예산·가치 함수), 화면에 보여 줄 때와 입력받을 때만 이 계수를 곱하고 나눈다 (기획서 8장 "시대별 물가 계수").
+ */
+const PRICE_ANCHORS: [number, number][] = [
+  [1982, 0.08], [1985, 0.1], [1990, 0.14], [1995, 0.21], [2000, 0.3], [2005, 0.45], [2010, 0.56], [2015, 0.72], [2020, 0.93], [2023, 0.95], [2026, 1],
+];
+export function priceIndex(year: number): number {
+  const a = PRICE_ANCHORS;
+  if (year <= a[0][0]) return a[0][1];
+  if (year >= a[a.length - 1][0]) return a[a.length - 1][1];
+  for (let i = 1; i < a.length; i++) {
+    if (year <= a[i][0]) {
+      const [y0, v0] = a[i - 1];
+      const [y1, v1] = a[i];
+      return v0 + ((v1 - v0) * (year - y0)) / (y1 - y0);
+    }
+  }
+  return 1;
+}
+
 /** 샐러리캡 대상: 외국인·신인을 뺀 구단별 연봉 상위 40명 합계 (출처 확인) */
 export const CAP_TOP_N = 40;
 
@@ -137,7 +161,9 @@ export const FOREIGN_ASIA = 1;
 /** 외국인 연봉 (달러, 임시값): 기여에 따라 */
 export function foreignSalary(runs: number, isNew: boolean, asia: boolean): number {
   if (asia) return Math.min(ASIA_NEW_CAP, Math.round((80_000 + 6_000 * Math.max(0, runs)) / 10_000) * 10_000);
-  const v = Math.round((400_000 + 25_000 * Math.max(0, runs)) / 50_000) * 50_000;
+  // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
+  const r = Math.max(0, runs);
+  const v = Math.round((isNew ? 250_000 + 22_000 * r : 400_000 + 25_000 * r) / 50_000) * 50_000;
   return isNew ? Math.min(FOREIGN_NEW_CAP, v) : Math.min(2_000_000, v);
 }
 
@@ -145,9 +171,11 @@ export function foreignSalary(runs: number, isNew: boolean, asia: boolean): numb
 export const ORG_LIMIT = 68;
 
 /** 금액 표시: 만 원 → "3억 2,000만 원" */
-export function wonText(man: number): string {
-  const eok = Math.floor(man / 10000);
-  const rest = Math.round(man % 10000);
+/** 연봉 표기. year를 주면 그 해 물가(priceIndex)로 바꿔 보여 준다 */
+export function wonText(man: number, year?: number): string {
+  const v = year === undefined ? man : man * priceIndex(year);
+  const eok = Math.floor(v / 10000);
+  const rest = Math.round(v % 10000);
   if (eok && rest) return `${eok}억 ${rest.toLocaleString('ko-KR')}만 원`;
   if (eok) return `${eok}억 원`;
   return `${rest.toLocaleString('ko-KR')}만 원`;

@@ -5,8 +5,18 @@ import type { GameSave } from './session';
 
 const DB_NAME = 'kbo-gm';
 const STORE = 'saves';
-/** 진행할 때마다 덮어쓰는 자동 저장 칸 */
+/**
+ * 자동 저장 칸. 예전(1.0)에는 'auto' 하나라 같은 브라우저에서 두 게임(두 탭)을 하면 서로 덮어썼다 (2026-10-09 QA).
+ * 이제 게임마다 'auto:<시작 연도>:<시드>' 칸을 쓰고, 최근 AUTO_KEEP개만 남긴다. 예전 'auto' 칸은 자동 저장으로 보되 자동으로 지우지 않는다.
+ */
 export const AUTO_SLOT = 'auto';
+export const AUTO_KEEP = 3;
+export function autoSlotOf(startYear: number, seed: string): string {
+  return `auto:${startYear}:${seed}`;
+}
+export function isAutoSlot(slot: string): boolean {
+  return slot === AUTO_SLOT || slot.startsWith('auto:');
+}
 
 export interface SaveRecord {
   slot: string;
