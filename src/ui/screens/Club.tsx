@@ -1,13 +1,14 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
-import { capPayroll, salaryCap, wonText } from '../../league/salary';
+import { capPayroll, salaryCap } from '../../league/salary';
 import {
   ACHIEVEMENTS, budgetFor, DIFFICULTY_LABEL, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
-import { useGame } from '../context';
+import { useGame, useWon } from '../context';
 
 export function Club() {
   const { session, go } = useGame();
+  const won = useWon();
   const L = session.league;
   const o = session.owner;
   const me = session.teamIdx;
@@ -58,10 +59,10 @@ export function Club() {
           <h2>예산 <span className="muted small">{year} 시즌</span></h2>
           <dl className="facts">
             <dt>구단</dt><dd>{team.name} (모기업 등급 {parentGrade(L, me)})</dd>
-            <dt>연봉 총액</dt><dd>{wonText(payroll)} <span className="muted small">외국인·신인 제외 상위 40명</span></dd>
-            <dt>샐러리캡</dt><dd>{cap === null ? '없음' : wonText(cap)}</dd>
-            <dt>구단 예산</dt><dd>{budget === null ? '-' : wonText(budget)}</dd>
-            <dt>남은 여유</dt><dd>{budget === null ? '-' : wonText(Math.min(budget, cap ?? budget) - payroll)}</dd>
+            <dt>연봉 총액</dt><dd>{won(payroll)} <span className="muted small">외국인·신인 제외 상위 40명</span></dd>
+            <dt>샐러리캡</dt><dd>{cap === null ? '없음' : won(cap)}</dd>
+            <dt>구단 예산</dt><dd>{budget === null ? '-' : won(budget)}</dd>
+            <dt>남은 여유</dt><dd>{budget === null ? '-' : won(Math.min(budget, cap ?? budget) - payroll)}</dd>
             {strikes > 0 && <><dt>캡 초과</dt><dd className="error-text">{strikes}회 연속 초과 (2회부터 1라운드 지명권 9단계 하락)</dd></>}
           </dl>
           <p className="muted small">
@@ -87,7 +88,7 @@ export function Club() {
               ))}
             </tbody>
           </table>
-          <p className="muted small">* 와일드카드 결정전은 4위가 1승을 안고 시작합니다. 시리즈 길이·어드밴티지는 임시값입니다.</p>
+          <p className="muted small">{ps.series.some((x) => x.round === 'wc') ? '* 와일드카드 결정전은 4위가 1승을 안고 시작합니다. ' : ''}시리즈 길이·어드밴티지는 임시값입니다.</p>
         </section>
       )}
 
@@ -99,7 +100,7 @@ export function Club() {
             <tbody>
               {o.history.map((h) => (
                 <tr key={`${h.year}-${h.team}`}>
-                  <td>{h.year}</td><td className="l">{name(h.team)}</td><td className="l">{GOAL_LABEL[h.goal]}</td>
+                  <td>{h.year}</td><td className="l">{h.teamName ?? name(h.team)}</td><td className="l">{GOAL_LABEL[h.goal]}</td>
                   <td className="l">{h.result}{h.capOver ? ' · 캡 초과' : ''}</td>
                   <td>{h.achieved ? '달성' : '미달'}</td><td>{h.trustBefore} → {h.trustAfter}</td>
                 </tr>
@@ -131,6 +132,7 @@ export function Club() {
 /** 해고된 뒤 받은 영입 제의. 하나를 받아들여야 오프시즌을 이어갈 수 있다 */
 export function OfferPanel() {
   const { session, changed, autosave } = useGame();
+  const won = useWon();
   const o = session.owner;
   if (!o.offers?.length) return null;
   const L = session.league;
@@ -153,7 +155,7 @@ export function OfferPanel() {
               <td className="l"><strong>{L.teams[t].name}</strong></td>
               <td>{st.indexOf(t) + 1}위</td>
               <td>{parentGrade(L, t)}</td>
-              <td>{(() => { const b = budgetFor(L, t, year); return b === null ? '-' : wonText(b); })()}</td>
+              <td>{(() => { const b = budgetFor(L, t, year); return b === null ? '-' : won(b); })()}</td>
               <td><button type="button" onClick={() => void accept(t)}>부임</button></td>
             </tr>
           ))}

@@ -4,6 +4,7 @@ import type { BrowserStore } from '../data/loadBrowser';
 import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
 import { teamColor } from './teams';
+import { priceIndex, wonText } from '../league/salary';
 
 export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'save' | 'season-end' | 'offseason';
 
@@ -30,6 +31,23 @@ export function useGame(): GameUi {
   const v = useContext(Ctx);
   if (!v) throw new Error('GameProvider 밖에서 useGame을 불렀습니다');
   return v;
+}
+
+/** 화면이 연봉을 보여 줄 때 쓰는 물가 연도: 시즌 중이면 그 해, 오프시즌이면 다음 시즌 */
+export function usePriceYear(): number {
+  const { session } = useGame();
+  return session.phase === 'offseason' ? session.year + 1 : session.year;
+}
+
+/** 그 해 물가 계수 (연봉 입력을 내부 단위로 바꿀 때 나눈다) */
+export function usePriceIndex(): number {
+  return priceIndex(usePriceYear());
+}
+
+/** 연봉 표기 (그 해 물가로). 내부 값은 2026년 물가 */
+export function useWon(): (man: number) => string {
+  const year = usePriceYear();
+  return (man) => wonText(man, year);
 }
 
 /** 구단 이름 + 색 표시 */

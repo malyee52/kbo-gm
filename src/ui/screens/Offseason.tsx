@@ -4,10 +4,10 @@ import { OfferPanel } from './Club';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import {
-  ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
+  ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap,
 } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
-import { posName, TeamName, useGame } from '../context';
+import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
@@ -118,6 +118,7 @@ type Act = (r: { ok: boolean; message: string }, okText?: string) => void;
 /** FA 보상선수 (2026-10-08): 영입 구단은 보호선수 명단을, 원 소속 구단은 보상선수 또는 보상금만을 고른다 */
 function CompPanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const won = useWon();
   const off = session.offseason!;
   const info = useInfo();
   const me = session.teamIdx;
@@ -147,14 +148,14 @@ function CompPanel({ act }: { act: Act }) {
         return (
           <div className="panel mine" key={c.fa}>
             <h2>
-              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {c.grade}등급 · 직전 연봉 {wonText(c.prevSalary)}</span>
+              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {c.grade}등급 · 직전 연봉 {won(c.prevSalary)}</span>
             </h2>
             <p className="small">
-              지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${wonText(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${wonText(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
+              지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${won(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${won(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
             </p>
             <div className="actions">
               <button type="button" className={c.pick === 'cash' ? '' : 'ghost'} onClick={() => act(session.pickComp(c.fa, 'cash'))}>
-                보상금만 받기 ({wonText(FA_COMP[c.grade].cashOnly * c.prevSalary)})
+                보상금만 받기 ({won(FA_COMP[c.grade].cashOnly * c.prevSalary)})
               </button>
               <button type="button" className="ghost" onClick={() => act(session.autoComp(), '추천 기준으로 골랐습니다.')}>추천대로 고르기</button>
             </div>
@@ -166,7 +167,7 @@ function CompPanel({ act }: { act: Act }) {
                   return (
                     <tr key={p.id} className={c.pick === p.id ? 'me' : ''}>
                       <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td>
-                      <td>{wonText(p.contract.salary)}</td>
+                      <td>{won(p.contract.salary)}</td>
                       <td><button type="button" className="small-btn" onClick={() => act(session.pickComp(c.fa, p.id))}>지명</button></td>
                     </tr>
                   );
@@ -193,6 +194,7 @@ function CompPanel({ act }: { act: Act }) {
 
 function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
   const { session } = useGame();
+  const won = useWon();
   const off = session.offseason!;
   const info = useInfo();
   const limit = FA_COMP[c.grade].protect!;
@@ -220,7 +222,7 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
             return (
               <tr key={p.id} className={on ? 'me' : ''}>
                 <td><input type="checkbox" checked={on} disabled={!on && c.protect.length >= limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
-                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td><td>{wonText(p.contract.salary)}</td>
+                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td><td>{won(p.contract.salary)}</td>
               </tr>
             );
           })}
@@ -232,18 +234,21 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
 
 function CapLine() {
   const { session } = useGame();
+  const won = useWon();
   const cap = salaryCap(session.year + 1);
   const pay = capPayroll(session.league.players, session.teamIdx);
   const size = session.league.players.filter((p) => p.team === session.teamIdx).length;
   return (
     <p className="muted small">
-      {session.year + 1} 샐러리캡 대상 연봉(외국인·신인 제외 상위 40명) {wonText(pay)}{cap ? ` / 상한 ${wonText(cap)}` : ''} · 소속 선수 {size}/{ORG_LIMIT}명
+      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 40명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''} · 소속 선수 {size}/{ORG_LIMIT}명
     </p>
   );
 }
 
 function FaPanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const px = usePriceIndex();
+  const won = useWon();
   const off = session.offseason!;
   const info = useInfo();
   const [draft, setDraft] = useState<Record<string, { salary: string; years: string }>>({});
@@ -279,28 +284,28 @@ function FaPanel({ act }: { act: Act }) {
               const mine = off.fa.userOffers[e.id];
               // 제시 연봉은 억 원 단위로 입력한다 (소수 한 자리). 내부 계산은 만 원 단위.
               // 기본값은 요구액을 0.1억 단위로 올림 (내림하면 요구액보다 모자라 1라운드에서 거절된다)
-              const d = draft[e.id] ?? { salary: (Math.ceil(e.ask / 1000) / 10).toFixed(1), years: String(e.years) };
+              const d = draft[e.id] ?? { salary: (Math.ceil((e.ask * px) / 1000) / 10).toFixed(1), years: String(e.years) };
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td>{i.pot}</td><td>{e.grade}</td><td>{wonText(e.prevSalary)}</td><td>{wonText(e.ask)}</td><td>{e.years}년</td>
+                  <td>{i.now}</td><td>{i.pot}</td><td>{e.grade}</td><td>{won(e.prevSalary)}</td><td>{won(e.ask)}</td><td>{e.years}년</td>
                   <td className="l">
                     {e.status === 'signed' ? (
-                      <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {wonText(e.salary!)}</span>
+                      <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
                     ) : e.status === 'left' ? (
                       <span className="muted">미계약 (리그 이탈)</span>
                     ) : mine ? (
-                      <span className="inline">제시함: {mine.years}년 연 {wonText(mine.salary)}
+                      <span className="inline">제시함: {mine.years}년 연 {won(mine.salary)}
                         <button type="button" className="small-btn" onClick={() => act(session.withdrawFa(e.id), '제시를 거뒀습니다.')}>거두기</button>
                       </span>
                     ) : (
                       <span className="inline">
-                        <input type="number" min={MIN_SALARY / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+                        <input type="number" min={(MIN_SALARY * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
                           onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
                         <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
                           {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
                         </select>
-                        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Math.round(Number(d.salary) * 10000), Number(d.years)))}>제시</button>
+                        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Math.round((Number(d.salary) * 10000) / px), Number(d.years)))}>제시</button>
                       </span>
                     )}
                   </td>
@@ -334,7 +339,7 @@ function ForeignPanel({ act }: { act: Act }) {
         <h2>외국인 선수</h2>
         <p className="muted small">
           보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(FOREIGN_NEW_CAP)}, 아시아쿼터 신규는 {dollarText(ASIA_NEW_CAP)}까지,
-          아시아쿼터를 뺀 3명 총액은 {dollarText(FOREIGN_TOTAL_CAP)}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
+          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(FOREIGN_TOTAL_CAP)}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
           우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
@@ -478,6 +483,8 @@ function DraftPanel({ act }: { act: Act }) {
 
 function SalaryPanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const px = usePriceIndex();
+  const won = useWon();
   const off = session.offseason!;
   const s = off.salary!;
   const info = useInfo();
@@ -494,7 +501,7 @@ function SalaryPanel({ act }: { act: Act }) {
           선수 요구액은 기여와 연차로 정해집니다. 요구액 이상을 제시하면 그대로 계약하고, 모자라면 조정을 거쳐 제시액과 요구액의 가운데로 정합니다.
           다음 단계로 넘길 때 확정합니다.
         </p>
-        <p className="small">제시 합계 {wonText(total)}</p>
+        <p className="small">제시 합계 {won(total)}</p>
         <CapLine />
       </div>
       <div className="scroll">
@@ -506,18 +513,18 @@ function SalaryPanel({ act }: { act: Act }) {
               const i = info(p);
               // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
               // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
-              const shown = (Math.ceil(s.offers[id] / 100) / 100).toFixed(2);
+              const shown = (Math.ceil((s.offers[id] * px) / 100) / 100).toFixed(2);
               const v = edit[id] ?? shown;
               const low = s.offers[id] < s.demands[id];
               return (
                 <tr key={id}>
                   <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td>
-                  <td>{wonText(p.contract.salary)}</td><td>{wonText(s.demands[id])}</td>
+                  <td>{won(p.contract.salary)}</td><td>{won(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={MIN_SALARY / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
+                      <input type="number" min={(MIN_SALARY * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
-                        onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round(Number(v) * 10000))); }} />억 원
+                        onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
                     </span>
                   </td>
@@ -533,6 +540,7 @@ function SalaryPanel({ act }: { act: Act }) {
 
 function ReleasePanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const won = useWon();
   const info = useInfo();
   const mine = session.league.players.filter((p) => p.team === session.teamIdx)
     .sort((a, b) => session.nextRuns(a.id) - session.nextRuns(b.id) || a.id.localeCompare(b.id));
@@ -557,7 +565,7 @@ function ReleasePanel({ act }: { act: Act }) {
                 <tr key={p.id}>
                   <td className="l">{p.name}{p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}</td>
                   <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot}</td>
-                  <td className="small">{p.foreign ? dollarText(p.contract.salary) : wonText(p.contract.salary)}</td>
+                  <td className="small">{p.foreign ? dollarText(p.contract.salary) : won(p.contract.salary)}</td>
                   <td><button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button></td>
                 </tr>
               );

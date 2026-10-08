@@ -1,9 +1,21 @@
 // 가을야구 (M7): 대진표, 시리즈별 경기 결과, 박스스코어. 진행은 위쪽 버튼으로 한 경기씩.
 import { useState } from 'react';
 import { formatDate } from '../../game/calendar';
-import { currentSeries, ROUND_LABEL, RULES, stillAlive, type SeriesGame } from '../../league/postseason';
+import { currentSeries, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
 import { TeamName, useGame } from '../context';
 import { BoxView } from './Schedule';
+
+/** 진출 팀 수에 맞는 대진 설명 (1988년까지 2팀, 2014년까지 4팀, 2015년부터 5팀) */
+function bracketText(n: number): string {
+  const rounds = roundsFor(n);
+  const desc = (r: SeriesRound, i: number): string => {
+    const rule = RULES[r];
+    const high = n - 1 - i; // 이 라운드의 상위 시드 순위 (postseason.ts openSeries와 같은 규칙)
+    const len = r === 'wc' ? `${high}위 ${rule.highHeadStart}승 어드밴티지, 최대 ${rule.maxGames}경기` : `${rule.need * 2 - 1}전 ${rule.need}선승`;
+    return i === 0 ? `${high}위 대 ${n}위 ${ROUND_LABEL[r]}(${len})` : `${ROUND_LABEL[r]}(${high}위, ${len})`;
+  };
+  return rounds.map(desc).join(' → ') + '.';
+}
 
 export function Postseason() {
   const { session } = useGame();
@@ -48,7 +60,7 @@ export function Postseason() {
         <h2>대진</h2>
         <p className="small">{seeds.map((t, i) => <span key={t} className={t === me ? 'me-text' : ''}>{i > 0 && ' · '}{i + 1}위 <TeamName idx={t} /></span>)}</p>
         <p className="muted small">
-          4위 대 5위 와일드카드(4위 1승 어드밴티지, 최대 2경기) → 준플레이오프(3위, 5전 3선승) → 플레이오프(2위, 5전 3선승) → 한국시리즈(1위, 7전 4선승).
+          {bracketText(seeds.length)}
           시리즈 길이·어드밴티지는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다.
         </p>
       </section>

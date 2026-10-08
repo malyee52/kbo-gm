@@ -92,7 +92,7 @@ export interface PostseasonState {
 }
 
 /** 진출 팀 수에 따른 라운드 순서 (낮은 라운드부터). 5팀이면 와일드카드부터 */
-function roundsFor(n: number): SeriesRound[] {
+export function roundsFor(n: number): SeriesRound[] {
   if (n >= 5) return ['wc', 'semi', 'po', 'ks'];
   if (n === 4) return ['semi', 'po', 'ks'];
   if (n === 3) return ['po', 'ks'];

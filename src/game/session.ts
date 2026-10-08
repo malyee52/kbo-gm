@@ -927,7 +927,8 @@ export class GameSession {
     o.trust = Math.max(0, Math.min(100, before + delta));
     o.history.push({
       year: this.year, team, goal: goal.kind, projectedRank: goal.projectedRank, rank: outcome.rank, result: outcomeLabel(outcome),
-      achieved, trustBefore: before, trustAfter: o.trust, champion: outcome.champion, capOver,
+      // 구단 이름은 막 끝난 시즌의 월드에서 (결산 때 승계·명칭 변경이 먼저 적용돼 리그 상태는 이미 새 이름이다)
+      achieved, trustBefore: before, trustAfter: o.trust, champion: outcome.champion, capOver, teamName: this.world.teams[team].name,
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
     say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}). 신뢰도 ${before} → ${o.trust}.`);
