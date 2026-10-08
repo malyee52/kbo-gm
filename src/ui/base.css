@@ -1,60 +1,129 @@
-/* 엔진 시험 화면용 기본 스타일. 게임 화면의 디자인은 M3에서 따로 잡는다. */
+/* 디자인 토큰과 공통 부품. 게임 화면과 엔진 시험 화면이 함께 쓴다.
+   방향: "스코어보드" — 어두운 사이드바에 구단 색 한 줄, 따뜻한 회백색 바탕, 숫자는 고정폭(tabular). 구단 로고·사진은 쓰지 않는다. */
 :root {
-  --bg: #f6f7f4;
+  --bg: #f2f3ef;
   --panel: #ffffff;
-  --fg: #1c2420;
-  --muted: #68736c;
-  --line: #dde2dc;
-  --accent: #1f6b4a;
+  --panel-2: #f7f8f5;
+  --fg: #16201b;
+  --muted: #65716a;
+  --faint: #9aa59e;
+  --line: #e0e4de;
+  --line-strong: #c6cdc5;
+  --accent: #176b47;
+  --accent-hover: #125a3b;
   --accent-fg: #ffffff;
-  --warn-bg: #fdf3d7;
+  --accent-soft: #e2f0e8;
+  --warn-bg: #fff3d1;
+  --warn-fg: #6b4a00;
   --error: #b3261e;
+  --error-bg: #fbe7e5;
+  --info-bg: #e4edfb;
+  --nav-bg: #131a16;
+  --nav-fg: #e8ece9;
+  --nav-muted: #8f9b94;
+  --nav-line: rgba(255, 255, 255, 0.08);
+  --nav-hover: rgba(255, 255, 255, 0.06);
+  --nav-on: rgba(255, 255, 255, 0.1);
+  --team: #176b47;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(20, 30, 25, 0.06), 0 1px 1px rgba(20, 30, 25, 0.04);
+  --shadow-md: 0 4px 14px rgba(20, 30, 25, 0.08);
+  --shadow-lg: 0 18px 50px rgba(20, 30, 25, 0.28);
+  --font: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #141916;
-    --panel: #1c2320;
-    --fg: #e6ebe7;
-    --muted: #96a39b;
-    --line: #2d3832;
+    --bg: #0f1411;
+    --panel: #171d19;
+    --panel-2: #1c2420;
+    --fg: #e7ece8;
+    --muted: #94a199;
+    --faint: #66736b;
+    --line: #27312b;
+    --line-strong: #3a463f;
     --accent: #4fb286;
-    --accent-fg: #0d1511;
-    --warn-bg: #3a3219;
+    --accent-hover: #67c398;
+    --accent-fg: #07130c;
+    --accent-soft: #1a3328;
+    --warn-bg: #3a3119;
+    --warn-fg: #f1d48a;
     --error: #f2a39d;
+    --error-bg: #46231f;
+    --info-bg: #1c2e45;
+    --nav-bg: #0a0e0c;
+    --nav-fg: #e8ece9;
+    --nav-muted: #7f8c85;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.7);
     color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.55 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  font: 14px/1.55 var(--font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
 }
-.lab { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px; padding-inline: 20px; display: flex; flex-direction: column; gap: 22px; }
-h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
-h1 span { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 8px; }
-h2 { font-size: 15px; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
+
+/* ---- 글 */
+h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; letter-spacing: -0.02em; line-height: 1.25; }
+h1 span { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
+h2 { font-size: 15px; font-weight: 700; margin: 0 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; letter-spacing: -0.01em; }
+h2 .small, h2 .muted { font-weight: 500; }
+h3 { font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
 header p { margin: 0; color: var(--muted); max-width: 64ch; }
-.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
-.controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-select, input, button { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
-button { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; cursor: pointer; }
-button:disabled { opacity: 0.6; cursor: default; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .muted { color: var(--muted); }
+.faint { color: var(--faint); }
 p.muted { margin: 0 0 8px; }
-.note { margin: 0; padding: 8px 12px; background: var(--warn-bg); border-radius: 6px; }
+.small { font-size: 12px; }
+code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- 입력과 버튼 */
+select, input, button, textarea { font: inherit; color: var(--fg); }
+select, input {
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 10px; min-height: 34px;
+}
+select:hover, input:hover { border-color: var(--faint); }
+select:focus, input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+input[type='checkbox'] { min-height: 0; width: 15px; height: 15px; accent-color: var(--accent); margin: 0; vertical-align: -2px; }
+input[type='number'] { text-align: right; }
+button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--accent); color: var(--accent-fg); border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 7px 14px; min-height: 34px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.06s;
+}
+button:hover:not(:disabled) { background: var(--accent-hover); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- 알림 문단 */
+.note { margin: 0; padding: 10px 14px; background: var(--warn-bg); color: var(--warn-fg); border-radius: var(--radius-sm); border-left: 3px solid color-mix(in srgb, var(--warn-fg) 40%, transparent); }
 .error { margin: 0; color: var(--error); }
-.scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+
+/* ---- 표 */
+.scroll { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
 .scroll.fit { width: fit-content; max-width: 100%; }
-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
 table.narrow { width: auto; min-width: 320px; }
-th, td { padding: 6px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
-th { font-size: 12px; font-weight: 600; color: var(--muted); }
+th, td { padding: 7px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; background: var(--panel-2); }
 tbody tr:last-child td { border-bottom: 0; }
 .l { text-align: left; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 18px; }
 .two > * { min-width: 0; }
+
+/* ---- 엔진 시험 화면 */
+.lab { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px; padding-inline: 20px; display: flex; flex-direction: column; gap: 22px; }
+.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }

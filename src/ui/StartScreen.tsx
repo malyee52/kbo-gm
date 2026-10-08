@@ -80,14 +80,16 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
 
   return (
     <main className="start">
-      <header>
+      <header className="start-hero">
+        <span className="eyebrow">단장 시뮬레이션 · 비영리 팬 프로젝트</span>
         <h1>KBO 단장 게임</h1>
-        <p className="muted">실제 선수와 구단으로 하는 단장 시뮬레이션. 선수단을 꾸리면 경기는 AI 감독이 치릅니다.</p>
+        <p>실제 선수와 구단으로 하는 단장 시뮬레이션. 선수단을 꾸리면 경기는 AI 감독이 치릅니다.</p>
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p className="note" role="status">{busy}</p>}
 
+      <div className="start-grid">
       <section className="panel">
         <h2>새 게임</h2>
         <div className="form-row">
@@ -134,7 +136,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                   role="radio"
                   aria-checked={teamIdx === i}
                   className={`team-card${teamIdx === i ? ' on' : ''}`}
-                  style={{ borderLeftColor: teamColor(t.franchise) }}
+                  style={{ ['--c' as string]: teamColor(t.franchise) }}
                   onClick={() => setTeamIdx(i)}
                   disabled={!!busy}
                 >
@@ -159,26 +161,22 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         ) : saves.length === 0 ? (
           <p className="muted">브라우저에 저장한 게임이 없습니다.</p>
         ) : (
-          <div className="scroll">
-            <table>
-              <thead><tr><th className="l">칸</th><th className="l">구단</th><th className="l">진행</th><th className="l">성적</th><th className="l">저장 시각</th><th /></tr></thead>
-              <tbody>
-                {saves.map((s) => (
-                  <tr key={s.slot}>
-                    <td className="l">{s.slot === 'auto' ? '자동 저장' : s.slot}</td>
-                    <td className="l">{s.year} {s.teamName}</td>
-                    <td className="l">{whenText(s, isSeasonDone(s))}</td>
-                    <td className="l">{s.summary}</td>
-                    <td className="l muted">{new Date(s.savedAt).toLocaleString('ko-KR')}</td>
-                    <td className="r-actions">
-                      <button type="button" onClick={() => void load(s.data)} disabled={!!busy}>불러오기</button>
-                      <button type="button" className="ghost danger" disabled={!!busy}
-                        onClick={() => void deleteSave(s.slot).then(refreshSaves)}>지우기</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="save-list">
+            {saves.map((s) => (
+              <div key={s.slot} className="save-item">
+                <div>
+                  <span className="muted small">{s.slot === 'auto' ? '자동 저장' : s.slot} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
+                  <br />
+                  <strong>{s.year} {s.teamName}</strong> <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
+                </div>
+                <div className="r-actions">
+                  <button type="button" onClick={() => void load(s.data)} disabled={!!busy}>불러오기</button>
+                  <button type="button" className="ghost danger" disabled={!!busy}
+                    onClick={() => void deleteSave(s.slot).then(refreshSaves)}>지우기</button>
+                </div>
+                <span className="small">{s.summary}</span>
+              </div>
+            ))}
           </div>
         )}
         <div className="actions">
@@ -188,8 +186,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </label>
         </div>
       </section>
+      </div>
 
-      <footer className="muted small">
+      <footer className="small">
         <p>
           KBO 및 각 구단과 관련 없는 비영리 팬 프로젝트입니다. 구단 로고와 선수 사진은 쓰지 않습니다.
           {import.meta.env.DEV && <> · <a href="?lab">엔진 시험 화면</a></>}

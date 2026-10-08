@@ -6,6 +6,7 @@ import { formatDate, shortDate } from '../../game/calendar';
 import { TRADE_DEADLINE } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame } from '../context';
+import { teamColor } from '../teams';
 
 type Kind = 'all' | 'hit' | 'pit';
 
@@ -95,7 +96,7 @@ export function Trade() {
       <div className="team-grid compact" role="radiogroup" aria-label="상대 구단">
         {others.map((t) => (
           <button key={t.idx} type="button" role="radio" aria-checked={other === t.idx}
-            className={`team-card${other === t.idx ? ' on' : ''}`} onClick={() => pickTeam(t.idx)}>
+            className={`team-card${other === t.idx ? ' on' : ''}`} style={{ ['--c' as string]: teamColor(t.franchise) }} onClick={() => pickTeam(t.idx)}>
             <TeamName idx={t.idx} />
             <span className="muted small">{info.get(t.idx)!.rank} · {TENDENCY_LABEL[info.get(t.idx)!.tendency]}</span>
           </button>
