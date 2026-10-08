@@ -9,7 +9,7 @@
 import { assignSlots, batValue, defenseAt, fieldPosOf, pitValue, type SimPlayer, type Slot, type World } from '../engine';
 
 /** 선형 가중치(wOBA 계열)를 득점으로 바꾸는 배율. 공개된 세이버메트릭스 상수의 근사값 */
-const WOBA_SCALE = 1.2;
+export const WOBA_SCALE = 1.2;
 /** 한 시즌 출전량 (임시값) */
 const FULL_PA = 600;
 const STARTS_PER_SEASON = 28;
