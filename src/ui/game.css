@@ -261,3 +261,10 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 /* 가을야구 */
 .panel.mine { border-left: 4px solid var(--team, var(--accent)); }
 .me-text { font-weight: 600; }
+
+/* 선수 성장 */
+.up { color: var(--win); font-weight: 600; }
+.down { color: var(--loss); font-weight: 600; }
+
+/* 시상식 */
+.big-name { font-size: 1.4em; }

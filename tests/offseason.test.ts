@@ -163,6 +163,27 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(delta(34, 45)).toBeLessThan(0.35);
   });
 
+  it('성장 결과 화면 자료: 소속 선수마다 전후 기여가 남고, 은퇴한 선수는 없으며, 젊은 선수는 대체로 오르고 노장은 대체로 내린다', () => {
+    const list = g.offseason!.growth!;
+    expect(list.filter((x) => x.team === lgIdx).length).toBeGreaterThan(40);
+    const ids = new Set(list.map((x) => x.id));
+    expect(ids.size).toBe(list.length);
+    for (const x of list) {
+      expect(Number.isFinite(x.before) && Number.isFinite(x.after)).toBe(true);
+      expect(g.league.players.find((p) => p.id === x.id)!.team).toBeGreaterThanOrEqual(0);
+    }
+    const retired = new Set((g.league.retired ?? []).filter((r) => r.year === 2026).map((r) => r.id));
+    expect(list.some((x) => retired.has(x.id))).toBe(false);
+    const upShare = (lo: number, hi: number) => {
+      const xs = list.filter((x) => x.age !== null && x.age >= lo && x.age <= hi && !x.tags?.includes('입대'));
+      return xs.filter((x) => x.after > x.before).length / xs.length;
+    };
+    expect(upShare(18, 23)).toBeGreaterThan(0.6);
+    expect(upShare(34, 45)).toBeLessThan(0.4);
+    // 저장했다 불러와도 남는다
+    expect(GameSession.load(store, roundTrip(g.toSave()), FAST).offseason!.growth).toEqual(list);
+  });
+
   it('FA 제시 검사: 최저 연봉 미만, 샐러리캡 초과는 받지 않는다', () => {
     const e = g.offseason!.fa.entries.find((x) => x.from !== g.teamIdx)!;
     expect(g.offerFa(e.id, MIN_SALARY - 1, 2).ok).toBe(false);

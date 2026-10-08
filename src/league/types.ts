@@ -2,6 +2,7 @@
 // 시즌 중에는 이 상태가 "그 시즌 개막 때"의 모습으로 고정되고, 시즌 중 변화(트레이드, 기록)는 Season이 가진다.
 // 시즌이 끝나면 결산(commitSeason)에서 리그 상태에 반영한다.
 
+import type { SeasonAwards } from './awards';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -169,4 +170,6 @@ export interface LeagueState {
   capStrikes?: number[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
+  /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
+  awards?: SeasonAwards[];
 }

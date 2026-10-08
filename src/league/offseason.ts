@@ -4,6 +4,7 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
+import { seasonAwards } from './awards';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import { ageDefense, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -125,6 +126,20 @@ export interface OffseasonState {
   } | null;
   /** 이 오프시즌의 주요 사건 (알림용). major: 리그 전체에 알릴 만한 소식 */
   log: { stage: LogStage; text: string; mine: boolean; major?: boolean }[];
+  /** 시즌 뒤 성장·하락 결과 (2026-10-08 추가, 예전 저장에는 없다) */
+  growth?: GrowthEntry[];
+}
+
+/** 한 선수의 성장 판정 결과. before·after는 같은 기준(다음 시즌 나이 반영 전)의 한 시즌 기여(런) */
+export interface GrowthEntry {
+  id: string;
+  team: number;
+  /** 다음 시즌 나이 */
+  age: number | null;
+  before: number;
+  after: number;
+  /** 변화 원인 표시: 부상 후유증, 입대, 조기 노쇠(우리 구단만), 복무 중 */
+  tags?: string[];
 }
 
 // ---- 리그 보기: 다음 시즌 기준의 가치 계산 도구
@@ -212,12 +227,16 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   for (const a of season.absences) (absences.get(a.idx) ?? absences.set(a.idx, []).get(a.idx)!).push(a);
   const runsAt = (p: LeaguePlayer, y: number) => currentRuns(asSim(p, world.league, y), ctxNow);
   ensureMilitary(league);
+  // 시상 (history에 이 시즌이 들어가기 전에: 신인 자격 판정)
+  league.awards = [...(league.awards ?? []).filter((a) => a.year !== year), seasonAwards(world, season, league, store)];
   for (const p of league.players) {
     delete p.slump;
     delete p.startAbsent;
     delete p.startAbsentReason;
   }
 
+  const growth = new Map<string, GrowthEntry>();
+  const servingBefore = new Set(league.players.filter((p) => isServing(p)).map((p) => p.id));
   for (const sp of world.players) {
     const p = lp.get(sp.id)!;
     const b = season.bat[sp.idx];
@@ -246,6 +265,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
 
     // 성장 판정: 잠재력과의 격차, 나이, 출전 기회, 소폭의 운 (기획서 6.3). 슬럼프는 그 시즌만의 일이라 원래 능력에서 판정한다
     const runs = runsAt(p, year);
+    growth.set(p.id, { id: p.id, team: sp.teamIdx, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs,
+      ...(eff.runsDrop > 0 || eff.potentialCut > 0 ? { tags: ['부상 후유증'] } : {}) });
     const share = sp.isPitcher
       ? pt.bf / ((sp.pit!.startShare >= 0.5 ? 650 : 280))
       : b.pa / 550;
@@ -266,6 +287,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   // 복무 중인 선수: 퓨처스리그에서 뛰는 것으로 보고 출전 기회 40%로 성장 판정 (임시값)
   for (const p of league.players) {
     if (!isServing(p) || p.team < 0) continue;
+    growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runsAt(p, year), after: 0, tags: ['복무 중'] });
     const next = growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 0.4,
       new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher);
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
@@ -284,7 +306,11 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const p = lp.get(sp.id)!;
     if (p.foreign) continue;
     const form = rollForm(p, nextRuns(p), ctxNow, year + 1, new Rng(`${league.seed}/form/${year}/${p.id}`));
-    if (form.decline && p.team === userTeam) log(off, 'settle', `${p.name}: 기량이 예상보다 빨리 떨어지기 시작했습니다 (조기 노쇠)`, true);
+    if (form.decline && p.team === userTeam) {
+      log(off, 'settle', `${p.name}: 기량이 예상보다 빨리 떨어지기 시작했습니다 (조기 노쇠)`, true);
+      const g = growth.get(p.id);
+      if (g) g.tags = [...(g.tags ?? []), '조기 노쇠'];
+    }
   }
   const news: CareerNews[] = [];
   const c = { league, year, nextRuns };
@@ -292,6 +318,16 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   news.push(...militaryStep(c, (p) => Object.assign(p, skillForRuns({ ...p }, nextRuns(p) - MILITARY_RUST, ctxNow, year + 1))));
   if (isAsianGamesYear(year)) news.push(...asianGames(league, year, nextRuns, new Rng(`${league.seed}/asiad/${year}`)));
   for (const n of news) log(off, 'settle', n.text, n.team === userTeam, n.major);
+
+  // 성장·하락 결과: 은퇴한 선수는 빼고, 입대한 선수는 표시한다
+  off.growth = [];
+  for (const g of growth.values()) {
+    const p = lp.get(g.id)!;
+    if (p.team < 0) continue;
+    g.after = runsAt(p, year);
+    if (isServing(p) && !servingBefore.has(p.id)) g.tags = [...(g.tags ?? []), '입대'];
+    off.growth.push(g);
+  }
 
   openFaMarket(league, off, store, params);
   return off;

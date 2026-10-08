@@ -19,6 +19,8 @@ import { Trade } from './screens/Trade';
 import { Offseason } from './screens/Offseason';
 import { Club } from './screens/Club';
 import { Postseason } from './screens/Postseason';
+import { Growth } from './screens/Growth';
+import { Awards } from './screens/Awards';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 
@@ -135,6 +137,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             {session.done && (
               <button type="button" className={screen === 'season-end' ? 'on' : ''} onClick={() => go('season-end')}>시즌 결과</button>
             )}
+            {!!session.league.awards?.length && (
+              <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
+            )}
+            {off && session.offseason?.growth && (
+              <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
+            )}
           </nav>
           <button type="button" className="ghost quit" onClick={onQuit}>시작 화면으로</button>
         </aside>
@@ -175,6 +183,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             {screen === 'offseason' && <Offseason />}
             {screen === 'club' && <Club />}
             {screen === 'postseason' && <Postseason />}
+            {screen === 'growth' && <Growth />}
+            {screen === 'awards' && <Awards />}
           </main>
         </div>
         {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}

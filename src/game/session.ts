@@ -805,6 +805,7 @@ export class GameSession {
         this.offVersion++;
         this.offNews(0);
         this.actions.push(clone(a));
+        this.awardNews();
         this.addOffNews(`${this.year} 오프시즌 시작. FA 신청 ${this.offseason.fa.entries.length}명.`);
         return res;
       }
@@ -955,6 +956,19 @@ export class GameSession {
     for (const l of off.log.slice(from)) {
       if (l.mine || l.major || (l.stage === 'fa' && l.text.includes('→'))) this.addOffNews(l.text);
     }
+  }
+
+  /** 시상 알림: MVP·신인상, 우리 구단 수상 */
+  private awardNews(): void {
+    const aw = this.league.awards?.at(-1);
+    if (!aw || aw.year !== this.year) return;
+    const name = (t: number) => this.league.teams[t].name;
+    if (aw.mvp) this.addOffNews(`${aw.year} MVP: ${aw.mvp.name} (${name(aw.mvp.team)}) — ${aw.mvp.line}`);
+    if (aw.rookie) this.addOffNews(`${aw.year} 신인상: ${aw.rookie.name} (${name(aw.rookie.team)})`);
+    const gg = aw.goldenGlove.filter((x) => x.winner.team === this.teamIdx).map((x) => x.winner.name);
+    if (gg.length) this.addOffNews(`골든글러브 수상: ${gg.join(', ')}`);
+    const tt = aw.titles.flatMap((t) => t.winners.filter((w) => w.team === this.teamIdx).map((w) => `${w.name} ${t.label}`));
+    if (tt.length) this.addOffNews(`타이틀 홀더: ${tt.join(', ')}`);
   }
 
   private addOffNews(text: string): void {
