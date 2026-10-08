@@ -3,6 +3,8 @@
 // - 표시가 없는 주루·병살·희생플라이·도루·홈 이점·휴식·결장 값: 2012·2016·2019·2022·2024년 실제 리그 값에
 //   tools/validate_engine.ts 결과를 맞춰 정한 값. 근거와 검증 결과는 docs/engine.md 참조.
 
+import type { InjuryParams } from './injury';
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -61,10 +63,16 @@ export interface EngineParams {
   restChance: number;
   /** 주전 포수가 하루 쉴 확률 */
   catcherRestChance: number;
-  /** 선수가 하루에 결장 기간(부상 등)에 들어갈 확률. 부상 모델(M6) 도입 전 임시 처리 */
-  absenceChance: number;
-  /** 결장 기간 최소·최대 일수 */
-  absenceDays: [number, number];
+  /** 부상과 이탈 이벤트 (injury.ts) */
+  injury: InjuryParams;
+
+  // ---- 수비 (defense.ts)
+  /** 팀 수비 1런당 인플레이 안타·실책 출루 확률이 줄어드는 비율. 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값) */
+  defenseHitPerRun: number;
+  /** 포수 수비 1런당 폭투·포일이 줄어드는 비율 (임시값) */
+  catcherWildPitchPerRun: number;
+  /** 포수 수비 1런당 상대 도루 성공률이 줄어드는 값 (임시값) */
+  catcherStealPerRun: number;
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
 
@@ -102,8 +110,19 @@ export const DEFAULT_PARAMS: EngineParams = {
 
   restChance: 0.2,
   catcherRestChance: 0.25,
-  absenceChance: 0.006,
-  absenceDays: [10, 40],
+  injury: {
+    base: 0.008,
+    minor: { share: 0.7, days: [3, 14] },
+    long: { share: 0.24, days: [15, 59] },
+    major: { share: 0.06, days: [60, 240] },
+    eventChance: 0.00005,
+    specificShare: 0.5,
+    offseasonDays: 150,
+  },
+
+  defenseHitPerRun: 1 / 880,
+  catcherWildPitchPerRun: 0.02,
+  catcherStealPerRun: 0.004,
   starterRestDays: 5,
 
   pilotSeasons: 3,

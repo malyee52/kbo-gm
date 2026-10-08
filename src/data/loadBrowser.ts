@@ -1,5 +1,5 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
-import { decodeSeason, type ContractRow, type DataStore, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type Meta, type PlayerMaster, type RawSeason, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -17,7 +17,10 @@ export interface BrowserStore extends DataStore {
 }
 
 export async function loadBrowserStore(): Promise<BrowserStore> {
-  const [meta, pl] = await Promise.all([get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json')]);
+  // 신인 지명(drafts.json)은 오프시즌 드래프트와 새 게임에 필요해서 처음부터 불러온다 (약 640KB, 압축 전송)
+  const [meta, pl, dr] = await Promise.all([
+    get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json'), get<{ years: Record<string, DraftRow[]> }>('drafts.json'),
+  ]);
   const seasons = new Map<number, SeasonData>();
   const load = async (years: number[]) => {
     const need = years.filter((y) => meta.years.includes(y) && !seasons.has(y));
@@ -29,6 +32,7 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     players: new Map(pl.players.map((p) => [p.id, p])),
     season: (year) => seasons.get(year),
     contracts: [],
+    drafts: dr.years,
     async ensureYear(year) {
       await load([year, year - 1, year - 2, year - 3]);
     },

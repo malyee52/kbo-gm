@@ -129,6 +129,61 @@ def main():
         if nopos:
             warn(f'{y}: 30타석 이상인데 시즌 포지션이 없는 타자 {nopos}행')
 
+    # ---- 외국인 개막 명단 (data-src/외국인_개막명단.csv)
+    for y, teams in meta.get('foreignOpening', {}).items():
+        s = load(DATA / 'seasons' / f'{y}.json')
+        bf = {k: i for i, k in enumerate(s['batFields'])}
+        pf = {k: i for i, k in enumerate(s['pitFields'])}
+        team_of = {r[bf['id']]: r[bf['team']] for r in s['bat']}
+        team_of.update({r[pf['id']]: r[pf['team']] for r in s['pit']})
+        unconfirmed = 0
+        for t, lst in teams.items():
+            regular = sum(1 for x in lst if not x['asia'])
+            asia = sum(1 for x in lst if x['asia'])
+            if regular > 3:
+                err(f'외국인 개막 명단 {y} {t}: 일반 외국인 {regular}명 (3명까지)')
+            if asia > 1:
+                err(f'외국인 개막 명단 {y} {t}: 아시아쿼터 {asia}명 (1명까지)')
+            for x in lst:
+                pl = by_id.get(x['id'])
+                if not pl:
+                    err(f'외국인 개막 명단 {y} {t}: 없는 선수 ID {x["id"]}')
+                    continue
+                if not pl.get('foreign'):
+                    err(f'외국인 개막 명단 {y} {t}: {pl["name"]}은(는) 외국인이 아님')
+                if team_of.get(x['id']) != t:
+                    err(f'외국인 개막 명단 {y} {t}: {pl["name"]}의 {y}년 기록 소속이 {team_of.get(x["id"])}')
+                unconfirmed += not x.get('confirmed')
+        if unconfirmed:
+            warn(f'외국인 개막 명단 {y}: 미확인 {unconfirmed}명 (출전량·이름으로 추정한 값)')
+
+    # ---- 신인 지명 (drafts.json, baseballchart.kr 원본)
+    drafts_path = DATA / 'drafts.json'
+    if drafts_path.exists():
+        drafts = load(drafts_path)['years']
+        known = set()
+        for y in meta['years']:
+            known.update(t['name'] for t in load(DATA / 'seasons' / f'{y}.json')['teams'])
+        for y, lst in drafts.items():
+            for d in lst:
+                if d['team'] not in known:
+                    err(f'신인 지명 {y}: 모르는 구단 {d["team"]} ({d["name"]})')
+                if d['pos'] not in ('P', 'C', 'IF', 'OF', 'DH'):
+                    err(f'신인 지명 {y}: 포지션 {d["pos"]} ({d["name"]})')
+                if d['kind'] == '라운드' and not d['round']:
+                    err(f'신인 지명 {y}: 라운드 없음 ({d["name"]})')
+            overall = [d['overall'] for d in lst if d['overall']]
+            if len(overall) != len(set(overall)):
+                warn(f'신인 지명 {y}: 전체 순위가 겹침')
+        two_way = sum(1 for lst in drafts.values() for d in lst if d.get('twoWay'))
+        if two_way:
+            warn(f'신인 지명: 포지션이 둘인 선수 {two_way}명 (앞의 포지션, 투타겸업은 투수로 봄)')
+
+    # ---- 특별 엔트리 (새 게임에서 빼는 선수, 규칙으로 고른 값이라 확인용으로 보여 준다)
+    for y, ids in sorted(meta.get('specialEntries', {}).items()):
+        if int(y) >= 2015:
+            warn(f'특별 엔트리로 보고 새 게임에서 뺌 {y}: ' + ', '.join(by_id[i]['name'] for i in ids if i in by_id))
+
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
     for w in warnings:

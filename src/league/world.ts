@@ -4,9 +4,10 @@
 
 import type { DataStore, Rates } from '../data/types';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, pitValue,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
+import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
@@ -32,7 +33,17 @@ export function projectedEnvironment(store: Store, params: EngineParams = DEFAUL
   return { rates, env, games: last.games, rules: store.meta.rules[String(lastYear)] };
 }
 
-export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS): World {
+export interface WorldOptions {
+  /** 슬럼프(그 시즌만의 기량 저하)를 반영한다. 기본 true. 오프시즌 가치 계산처럼 미래를 내다볼 때는 끈다 */
+  form?: boolean;
+}
+
+/**
+ * 리그 상태 → 그 해 월드. 무소속과 복무 중인 선수는 빠진다.
+ * 슬럼프는 능력을 그 시즌만 옮기고, 넘어온 부상·병역 복귀는 개막부터의 결장(startAbsent)이 된다.
+ */
+export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS, opts: WorldOptions = {}): World {
+  const form = opts.form ?? true;
   const year = league.year;
   const data = store.season(year);
   let lg: Rates;
@@ -56,7 +67,13 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const teams: SimTeam[] = league.teams.map((t, idx) => ({ idx, name: t.name, franchise: t.franchise, org: [] }));
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
-    if (lp.team < 0) continue;
+    if (lp.team < 0 || lp.military?.state === 'serving') continue;
+    const slump = form && lp.slump ? lp.slump : 0;
+    const base = lp.bat && !lp.bat.def
+      ? { ...lp.bat, def: makeDefense(lp.id, lp.pos, [], lp.bat.speed, lp.birthYear ? year - lp.birthYear : null) }
+      : lp.bat;
+    const bat = base && slump ? shiftBat(base, slump) : base;
+    const pit = lp.pit && slump ? shiftPit(lp.pit, slump) : lp.pit;
     const p: SimPlayer = {
       idx: players.length,
       id: lp.id,
@@ -68,11 +85,13 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       throws: lp.throws,
       foreign: lp.foreign,
       age: lp.birthYear ? year - lp.birthYear : null,
-      bat: lp.bat,
-      pit: lp.pit,
+      bat,
+      pit,
       lastSaves: lp.lastSaves,
-      value: lp.isPitcher ? pitValue(lp.pit!, lg) : batValue(lp.bat!, lg),
+      value: lp.isPitcher ? pitValue(pit!, lg) : batValue(bat!, lg),
       debutEstimate: lp.estimated,
+      real: lp.real,
+      ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
     };
     players.push(p);
     teams[lp.team].org.push(p);

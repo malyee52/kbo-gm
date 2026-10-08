@@ -143,7 +143,8 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
  */
 export function suggestPackage(want: SimPlayer[], aiTeam: number, aiOrg: SimPlayer[], userOrg: SimPlayer[], situation: TeamSituation,
                                ctx: ValueContext, userWeights: number[]): SimPlayer[] | null {
-  const pool = [...userOrg]
+  // 외국인 선수는 트레이드할 수 없다 (규정, 2026-10-08 사용자 지시)
+  const pool = userOrg.filter((p) => !p.foreign)
     .map((p) => ({ p, v: playerValue(p, ctx, userWeights) }))
     .sort((a, b) => a.v - b.v || a.p.idx - b.p.idx);
   const ok = (receive: SimPlayer[]) => evaluateTrade({ aiTeam, give: want, receive }, aiOrg, situation, ctx).verdict === 'accept';

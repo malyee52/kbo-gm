@@ -3,10 +3,11 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
-import { emptyLeagueCounters, simulateGame, type GameContext, type LeagueCounters } from './game';
+import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters } from './game';
+import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
-import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type PlayerStates, type TeamSeason } from './team';
+import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -178,6 +179,12 @@ export interface SeasonSave {
   transfers?: [number, number, number][];
   /** 선수별 1군 등록 경기일 수 (FA 연차 산정용) */
   activeDays?: number[];
+  /** 부상·이탈 기록 (M6) */
+  absences?: Absence[];
+  /** 이탈 이벤트 난수 위치 (M6) */
+  rngEvents?: number;
+  /** 구단별 기용표 (선수 색인) */
+  plans?: (DepthPlan | null)[];
 }
 
 /** 월드의 선수 구성 지문 (FNV-1a) */
@@ -216,7 +223,11 @@ export class Season {
   readonly boxes = new Map<number, BoxScore>();
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
+  /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
+  private eventRng: Rng;
   private ctx: GameContext;
+  /** 이번 시즌 부상·이탈 기록 (발생 순) */
+  readonly absences: Absence[] = [];
   private fixedAbsence = new Map<number, FixedAbsence[]>();
   /** 이적 전 월드의 선수 구성 지문 (저장 호환 확인용) */
   readonly baseRoster: string;
@@ -244,11 +255,14 @@ export class Season {
     }));
     this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
     this.dayRng = rng.fork('days');
+    this.eventRng = rng.fork('events');
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: rng.fork('games'),
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals,
     };
 
+    // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다
+    for (const p of world.players) if (p.startAbsent && p.startAbsent > 0) this.states.absentUntil[p.idx] = p.startAbsent;
     // 출전 가능 비율이 지정된 선수: 시즌 중 한 구간을 통째로 비운다
     for (const p of world.players) {
       if (p.availability === undefined || p.availability >= 0.97) continue;
@@ -275,6 +289,13 @@ export class Season {
     return rankTeams(this.teams);
   }
 
+  /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */
+  setPlan(teamIdx: number, plan: DepthPlan | null): void {
+    const ts = this.teamSeasons[teamIdx];
+    ts.plan = plan ? { starters: { ...plan.starters }, rotation: [...plan.rotation], closer: plan.closer } : null;
+    ts.dirty = true;
+  }
+
   /** 플레이어가 정한 1군 명단을 바꾼다. null이면 AI에게 맡긴다 */
   setManualEntry(teamIdx: number, idxs: Iterable<number> | null): void {
     const ts = this.teamSeasons[teamIdx];
@@ -296,15 +317,21 @@ export class Season {
     this.world.teams[toTeam].org.push(p);
     p.teamIdx = toTeam;
     this.teamSeasons[from].manual?.delete(playerIdx);
+    const plan = this.teamSeasons[from].plan;
+    if (plan) {
+      for (const k of Object.keys(plan.starters) as (keyof DepthPlan['starters'])[]) if (plan.starters[k] === playerIdx) delete plan.starters[k];
+      plan.rotation = plan.rotation.filter((i) => i !== playerIdx);
+      if (plan.closer === playerIdx) plan.closer = null;
+    }
     this.teamSeasons[from].dirty = true;
     this.teamSeasons[toTeam].dirty = true;
     this.transfers.push([this.day, playerIdx, toTeam]);
   }
 
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
-  refresh(teamIdx: number): TeamSeason {
+  refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, this.day);
+    refreshActive(ts, this.world, this.states, day);
     return ts;
   }
 
@@ -315,21 +342,25 @@ export class Season {
     const day = this.day;
     const games = this.schedule[day];
     const season = this.teamSeasons;
-    const [minAbs, maxAbs] = params.absenceDays;
     ctx.day = day;
 
     for (const a of this.fixedAbsence.get(day) ?? []) {
       states.absentUntil[a.p] = a.until;
       season[a.team].dirty = true;
     }
-    // 결장 발생 (부상 모델 도입 전 임시 처리)
+    // 부상과 이탈 이벤트 (injury.ts). 부상은 하루·선수당 난수 한 번, 이벤트는 따로 둔 난수에서
     if (games.length) {
+      const ip = params.injury;
+      const len = this.schedule.length;
       for (const ts of season) {
         for (const p of ts.team.org) {
-          if (p.availability !== undefined) continue;
-          if (states.absentUntil[p.idx] <= day && dayRng.chance(params.absenceChance)) {
-            states.absentUntil[p.idx] = day + minAbs + dayRng.int(maxAbs - minAbs + 1);
-            ts.dirty = true;
+          if (p.availability !== undefined || states.absentUntil[p.idx] > day) continue;
+          if (dayRng.chance(injuryChance(p, this.pit[p.idx], day, len, ip))) {
+            const inj = drawInjury(dayRng, ip);
+            this.addAbsence({ day, idx: p.idx, until: day + inj.days, kind: inj.kind }, ts);
+          } else if (this.eventRng.chance(ip.eventChance)) {
+            const ev = pickEvent(p, this.eventRng, ip);
+            this.addAbsence({ day, idx: p.idx, until: day + ev.days, kind: 'event', event: ev.event }, ts);
           }
         }
       }
@@ -391,6 +422,30 @@ export class Season {
     this.day++;
   }
 
+  private addAbsence(a: Absence, ts: TeamSeason): void {
+    this.states.absentUntil[a.idx] = a.until;
+    this.absences.push(a);
+    ts.dirty = true;
+  }
+
+  /**
+   * 시즌이 끝난 뒤 경기 하나 (포스트시즌). 정규시즌 기록·순위·경기 로그에는 남기지 않고, 주어진 기록 배열(rec)에만 쌓는다.
+   * 1군은 그날 기준으로 다시 짜고(부상 선수는 계속 빠진다), 주전 휴식은 없다. 난수는 넘겨받은 rng만 쓴다.
+   */
+  playExtraGame(home: number, away: number, day: number, rng: Rng, maxInnings: number,
+                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[] } {
+    const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals };
+    const h = this.teamSeasons[home];
+    const a = this.teamSeasons[away];
+    refreshActive(h, this.world, this.states, day);
+    refreshActive(a, this.world, this.states, day);
+    const hl = todaysLineup(h, this.world.league, params, rng);
+    const al = todaysLineup(a, this.world.league, params, rng);
+    const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
+    return { result, home: hl, away: al };
+  }
+
   private snapshotPitchers(sides: TeamSeason[]): Map<number, PitLine> {
     const m = new Map<number, PitLine>();
     for (const ts of sides) for (const p of ts.team.org) if (p.isPitcher) m.set(p.idx, { ...this.pit[p.idx] });
@@ -434,6 +489,9 @@ export class Season {
       fixedAbsence: [...this.fixedAbsence.entries()],
       transfers: this.transfers.map((t) => [...t] as [number, number, number]),
       activeDays: Array.from(this.activeDays),
+      absences: this.absences.map((a) => ({ ...a })),
+      rngEvents: this.eventRng.state(),
+      plans: this.teamSeasons.map((ts) => (ts.plan ? structuredClone(ts.plan) : null)),
     };
   }
 
@@ -452,6 +510,8 @@ export class Season {
     }
     s.day = save.day;
     s.dayRng = Rng.fromState(root.fork('days').seed, save.rngDays);
+    if (save.rngEvents !== undefined) s.eventRng = Rng.fromState(root.fork('events').seed, save.rngEvents);
+    s.absences.push(...(save.absences ?? []).map((a) => ({ ...a })));
     s.ctx.rng = Rng.fromState(root.fork('games').seed, save.rngGames);
     if (save.activeDays) s.activeDays.set(save.activeDays);
     s.states.absentUntil.set(save.absentUntil);
@@ -465,6 +525,7 @@ export class Season {
     s.log.push(...save.log.map((g) => ({ ...g })));
     for (const [k, v] of save.boxes) s.boxes.set(k, v);
     save.manual.forEach((m, i) => { s.teamSeasons[i].manual = m ? new Set(m) : null; });
+    (save.plans ?? []).forEach((pl, i) => { s.teamSeasons[i].plan = pl ? structuredClone(pl) : null; });
     s.fixedAbsence = new Map(save.fixedAbsence);
     return s;
   }

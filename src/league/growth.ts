@@ -49,8 +49,8 @@ export function runsOf(p: SkillHolder, ctx: ValueContext, year: number): number 
   return currentRuns(asSim(p, ctx.world.league, year), ctx);
 }
 
-/** 목표 런이 되도록 능력을 옮긴 새 능력. 이분법으로 이동량을 찾는다 */
-export function skillForRuns<T extends SkillHolder>(p: T, target: number, ctx: ValueContext, year: number): Pick<T, 'bat' | 'pit'> {
+/** 목표 런이 되는 이동량 (shiftBat·shiftPit의 d). 이분법으로 찾는다 */
+export function shiftForRuns(p: SkillHolder, target: number, ctx: ValueContext, year: number): number {
   const at = (d: number) => runsOf({ ...p, bat: p.bat && shiftBat(p.bat, d), pit: p.pit && shiftPit(p.pit, d) }, ctx, year);
   let lo = -2;
   let hi = 2;
@@ -63,7 +63,12 @@ export function skillForRuns<T extends SkillHolder>(p: T, target: number, ctx: V
       else hi = mid;
     }
   }
-  const d = (lo + hi) / 2;
+  return (lo + hi) / 2;
+}
+
+/** 목표 런이 되도록 능력을 옮긴 새 능력 */
+export function skillForRuns<T extends SkillHolder>(p: T, target: number, ctx: ValueContext, year: number): Pick<T, 'bat' | 'pit'> {
+  const d = shiftForRuns(p, target, ctx, year);
   return { bat: p.bat && shiftBat(p.bat, d), pit: p.pit && shiftPit(p.pit, d) };
 }
 
@@ -144,8 +149,8 @@ const GROWTH_NOISE = 3;
  * share: 지난 시즌 출전 기회 (0~1, 주전 출전량 대비). 27세 이하는 기회가 적으면 덜 자란다.
  * 반환값: 새 능력 기여 (런)
  */
-export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng): number {
-  let d = expectedGrowth(age, runs, potential);
+export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng, isPitcher = false): number {
+  let d = expectedGrowth(age, runs, potential, isPitcher);
   if (age <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
   // 균등 분포 둘의 합으로 가운데가 두꺼운 운을 만든다
   const noise = (rng.next() + rng.next() - 1) * GROWTH_NOISE * 1.7;

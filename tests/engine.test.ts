@@ -84,10 +84,15 @@ describe('월드 구성 (2025년)', () => {
 
   it('능력치에 비정상 값이 없다', () => {
     for (const p of world.players) {
-      const skill = (p.bat ?? p.pit) as unknown as Record<string, number>;
-      for (const [k, v] of Object.entries(skill)) {
+      const { def, ...rest } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number> };
+      for (const [k, v] of Object.entries(rest)) {
         expect(Number.isFinite(v), `${p.name} ${k}`).toBe(true);
         expect(v, `${p.name} ${k}`).toBeGreaterThanOrEqual(0);
+      }
+      // 수비 런은 음수일 수 있다 (그 자리 평균 대비). 야수는 8개 자리 모두 있어야 한다
+      if (!p.isPitcher) {
+        expect(Object.keys(def ?? {}).length, `${p.name} 수비`).toBe(8);
+        for (const v of Object.values(def ?? {})) expect(Number.isFinite(v)).toBe(true);
       }
       expect(p.value).toBeGreaterThan(0);
     }

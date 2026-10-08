@@ -48,7 +48,7 @@ export function SeasonEnd() {
           <h2><TeamName idx={me} /></h2>
           <p className="big">{verdict}</p>
           <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
-          <p className="muted small">포스트시즌 경기는 아직 치르지 않습니다. 결산하면 성장 판정과 1군 연차가 반영되고 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다.</p>
+          <p className="muted small">결산하면 먼저 포스트시즌(와일드카드~한국시리즈)을 치르고 구단주 평가를 받습니다. 이어서 성장 판정·1군 연차·부상 후유증이 반영되고 은퇴와 입대가 정해진 뒤 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다.</p>
         </div>
       </section>
 
@@ -122,13 +122,14 @@ export function SeasonEnd() {
       </section>
 
       <div className="actions">
+        {session.postseasonRunning && <button type="button" onClick={() => go('postseason')}>가을야구 진행하기</button>}
         {session.phase === 'season' && (
-          <button type="button" onClick={() => {
+          <button type="button" className={session.postseasonRunning ? 'ghost' : undefined} onClick={() => {
             session.beginOffseason();
             changed();
             void autosave();
-            go('offseason');
-          }}>오프시즌 시작 (결산)</button>
+            go('club'); // 포스트시즌 결과와 구단주 평가(해고되면 영입 제의)를 먼저 보여 준다
+          }}>{session.postseasonRunning ? '남은 가을야구 자동 진행 후 결산 → 오프시즌' : '결산 (구단주 평가) → 오프시즌'}</button>
         )}
         {session.phase === 'offseason' && <button type="button" onClick={() => go('offseason')}>오프시즌으로</button>}
         <button type="button" className="ghost" onClick={() => go('leaders')}>기록 전체 보기</button>

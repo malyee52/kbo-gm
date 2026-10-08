@@ -1,9 +1,10 @@
 // M5 오프시즌: 리그 상태, 잠재력·성장, FA, 외국인, 드래프트, 연봉, 정원, 2027 개막까지.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, rosterFingerprint, worldForYear } from '../src/engine';
+import { DEFAULT_PARAMS, worldForYear } from '../src/engine';
 import { GameSession, type GameSave } from '../src/game/session';
-import { createLeague } from '../src/league/create';
+import { isServing } from '../src/league/careers';
+import { createLeague, openingForeigners } from '../src/league/create';
 import * as Off from '../src/league/offseason';
 import {
   ASIA_NEW_CAP, COMPENSATION, faEligible, faGrade, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
@@ -40,11 +41,52 @@ function finishOffseason(g: GameSession): void {
 }
 
 describe('리그 상태 만들기', () => {
-  it('시작 연도 월드는 worldForYear와 선수 구성·능력이 같다 (M3·M4 저장 호환)', () => {
+  it('시작 연도 월드는 worldForYear에서 개막 명단에 없는 외국인과 특별 엔트리 선수만 뺀 것이다 (나머지 구성·능력은 같다)', () => {
     const { world } = createLeague(store, 2026, 's', FAST);
     const ref = worldForYear(store, 2026, FAST);
-    expect(rosterFingerprint(world)).toBe(rosterFingerprint(ref));
-    expect(world.players.map((p) => p.value)).toEqual(ref.players.map((p) => p.value));
+    const opening = openingForeigners(store, 2026)!;
+    const special = new Set(store.meta.specialEntries?.['2026'] ?? []);
+    const kept = ref.players.filter((p) => (!p.foreign || opening.has(p.id)) && !special.has(p.id));
+    // 특별 엔트리(은퇴식 등으로 하루 등록된 선수)는 빠진다
+    expect(world.players.some((p) => p.name === '박병호')).toBe(false);
+    // 1군 기록 없는 2026 신인(d2026-)은 따로 더해진다 (다음 테스트)
+    const recorded = world.players.filter((p) => !p.id.startsWith('d2026-'));
+    expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${p.teamIdx}`));
+    expect(recorded.map((p) => p.value)).toEqual(kept.map((p) => p.value));
+    expect(ref.players.length - recorded.length).toBeGreaterThan(20);
+  });
+
+  it('2026년 입단 신인 중 1군 기록이 없는 선수도 실제 지명 구단에 들어온다 (baseballchart.kr 지명 자료)', () => {
+    const { league, world } = createLeague(store, 2026, 's', FAST);
+    const rows = store.drafts!['2026'].filter((d) => d.games === 0);
+    const added = league.players.filter((p) => p.id.startsWith('d2026-'));
+    expect(added.length).toBeGreaterThan(50);
+    expect(added.length).toBeLessThanOrEqual(rows.length);
+    for (const p of added) {
+      // 같은 이름이 여럿일 수 있다 (2026년 김현수: KIA·롯데)
+      expect(rows.some((x) => x.name === p.name && x.team === league.teams[p.team].name), `${p.name} ${league.teams[p.team].name}`).toBe(true);
+      expect(p.real).toBe(true);
+      expect(p.entryYear).toBe(2026);
+      expect(world.players.some((w) => w.id === p.id)).toBe(true);
+    }
+    // 1군 기록이 있는 신인은 두 번 들어오지 않는다: 구단·이름별 인원이 지명 명단의 인원을 넘지 않는다
+    // (동명이인은 있다: 2026년 삼성 이서준 투수·포수 2명)
+    const count = (xs: string[]) => xs.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<string, number>());
+    const inLeague = count(league.players.filter((p) => p.entryYear === 2026 && !p.foreign).map((p) => `${league.teams[p.team].name}/${p.name}`));
+    const inDraft = count(store.drafts!['2026'].map((d) => `${d.team}/${d.name}`));
+    for (const [k, n] of inLeague) if (inDraft.has(k)) expect(n, k).toBeLessThanOrEqual(inDraft.get(k)!);
+  });
+
+  it('2026 개막 외국인은 구단마다 일반 3명·아시아쿼터 1명 이하이고, 아시아쿼터 표시가 붙는다', () => {
+    const { league } = createLeague(store, 2026, 's', FAST);
+    for (let t = 0; t < league.teams.length; t++) {
+      const f = league.players.filter((p) => p.team === t && p.foreign);
+      expect(f.filter((p) => !p.asia).length, league.teams[t].name).toBeLessThanOrEqual(3);
+      expect(f.filter((p) => p.asia).length, league.teams[t].name).toBeLessThanOrEqual(1);
+    }
+    expect(league.players.filter((p) => p.asia).length).toBeGreaterThanOrEqual(9);
+    const ssg = league.teams.findIndex((t) => t.name === 'SSG');
+    expect(league.players.find((p) => p.name === '아빌라')?.team).toBe(ssg);
   });
 
   it('잠재력은 지금 능력 이상이고, 같은 시드면 같다', () => {
@@ -163,7 +205,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     }
   });
 
-  it('드래프트: 11라운드, 전년도 순위 역순, 구단마다 11명, 지명된 신인은 가상 선수', () => {
+  it('드래프트: 11라운드, 전년도 순위 역순, 구단마다 11명, 2027 입단은 실제 지명 명단의 선수', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     while (h.offseason!.stage !== 'draft') h.nextStage();
     expect(h.nextStage().ok).toBe(false); // 우리 차례에 멈춰 있다
@@ -176,8 +218,45 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     for (let t = 0; t < 10; t++) expect(d.picks.filter((p) => p.team === t)).toHaveLength(11);
     // 같은 라운드 안 순서는 직전 시즌 성적 역순
     expect(d.picks.slice(0, 10).map((p) => p.team)).toEqual([...st].reverse());
-    const realNames = new Set([...store.players.values()].map((m) => m.name));
+    // 풀은 실제 2027 지명 명단 110명 그대로 (지명 구단은 게임 속 순위로 다시 정해진다)
+    const list = Off.draftPool(store, 2027);
+    expect(list).toHaveLength(110);
+    expect(new Set(d.picks.map((pk) => h.leaguePlayer(pk.id)!.name))).toEqual(new Set(list.map((x) => x.name)));
     for (const pk of d.picks) {
+      const p = h.leaguePlayer(pk.id)!;
+      expect(p.real).toBe(true);
+      expect(p.id.startsWith('d2027-')).toBe(true);
+      expect(p.military?.state).toBe('pending');
+    }
+    const first = h.leaguePlayer('d2027-1')!; // 실제 전체 1순위 하현승 (부산고, 투수)
+    expect(first.name).toBe('하현승');
+    expect(first.isPitcher).toBe(true);
+    expect(first.school).toBe('HS');
+  });
+
+  it('과거 연도 드래프트: 실제 기록이 있는 지명자는 실존 선수 id로 연결되고 잠재력이 실제 커리어를 따른다 (2005 시작, 류현진)', () => {
+    const h = GameSession.create(store, { year: 2005, teamIdx: 0, seed: 'ryu' }, FAST);
+    h.advance(100000);
+    h.beginOffseason();
+    while (h.offseason!.stage !== 'draft') h.nextStage();
+    const ryu = h.leaguePlayer('76715')!; // 류현진: 실제 선수 id
+    expect(ryu.name).toBe('류현진');
+    expect(ryu.birthYear).toBe(1987);
+    expect(ryu.potential).toBeGreaterThan(40); // 실제 전성기 기여 (지명 순번으로 만들면 10런 안팎이었다)
+    // 1군에 오르지 못한 과거 지명자는 낮은 잠재력
+    const ids = [...h.offseason!.draft!.pool, ...h.offseason!.draft!.picks.map((x) => x.id)];
+    const never = ids.map((id) => h.leaguePlayer(id)!).filter((p) => p.id.startsWith('d2006-'));
+    expect(never.length).toBeGreaterThan(0);
+    for (const p of never) expect(p.potential).toBeLessThanOrEqual(0);
+  }, 60_000);
+
+  it('지명 명단이 없는 해의 드래프트는 실존 선수와 이름이 겹치지 않는 가상 신인', () => {
+    const noList = { ...store, drafts: undefined };
+    const h = GameSession.load(noList, roundTrip(g.toSave()), FAST);
+    while (h.offseason!.stage !== 'draft') h.nextStage();
+    h.autoDraft();
+    const realNames = new Set([...store.players.values()].map((m) => m.name));
+    for (const pk of h.offseason!.draft!.picks) {
       const p = h.leaguePlayer(pk.id)!;
       expect(p.real).toBe(false);
       expect(realNames.has(p.name), p.name).toBe(false);
@@ -201,17 +280,17 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(h.leaguePlayer(id)!.contract.until).toBe(2027);
   });
 
-  it('정원: 우리 구단이 68명을 넘으면 다음 단계로 못 가고, 정리하면 모든 구단이 68명 이하', () => {
+  it('정원: 우리 구단이 68명을 넘으면 다음 단계로 못 가고, 정리하면 모든 구단이 68명 이하 (복무 중인 선수는 세지 않음)', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     while (h.offseason!.stage !== 'release') {
       if (h.offseason!.stage === 'draft') h.autoDraft();
       h.nextStage();
     }
-    const mine = () => h.league.players.filter((p) => p.team === h.teamIdx).length;
+    const mine = () => h.league.players.filter((p) => p.team === h.teamIdx && !isServing(p)).length;
     if (mine() > ORG_LIMIT) expect(h.nextStage().ok).toBe(false);
     h.autoRelease();
     expect(h.nextStage().ok).toBe(true);
-    for (let t = 0; t < 10; t++) expect(h.league.players.filter((p) => p.team === t).length).toBeLessThanOrEqual(ORG_LIMIT);
+    for (let t = 0; t < 10; t++) expect(h.league.players.filter((p) => p.team === t && !isServing(p)).length).toBeLessThanOrEqual(ORG_LIMIT);
   });
 });
 

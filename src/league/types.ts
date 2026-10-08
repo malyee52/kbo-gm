@@ -4,6 +4,8 @@
 
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
+import type { Difficulty, OwnerState } from './owner';
+import type { PostseasonResult } from './postseason';
 
 export type School = 'HS' | 'UNIV';
 
@@ -62,6 +64,59 @@ export interface LeaguePlayer {
   lastSaves: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
+  // ---- M6 (없으면 기본값. M5 저장 호환)
+  /** 병역. 외국인은 없음. 국내 선수인데 없으면 careers.ts의 ensureMilitary가 채운다 */
+  military?: Military;
+  /** 조기 노쇠: 노화 판정 때 이만큼 나이를 더 먹은 것으로 본다 */
+  decline?: number;
+  /** 다음 시즌 슬럼프: 그 시즌 동안만 능력을 이만큼 옮긴다 (shiftBat·shiftPit의 d, 음수) */
+  slump?: number;
+  /** 다음 시즌 개막부터 결장하는 일수 (넘어온 부상, 병역 복귀 전) */
+  startAbsent?: number;
+  /** 개막부터 결장하는 까닭 */
+  startAbsentReason?: 'injury' | 'military';
+  /** 부상 이력 (게임 안에서 치른 시즌만, 장기·큰 부상) */
+  injuries?: InjuryLine[];
+}
+
+export type MilitaryState =
+  /** 아직 복무하지 않음 */
+  | 'pending'
+  /** 복무 중 (월드에서 빠진다) */
+  | 'serving'
+  /** 마침 (또는 시작 때 마친 것으로 본 선수) */
+  | 'done'
+  /** 면제 (아시안게임 금메달 등) */
+  | 'exempt';
+
+export interface Military {
+  state: MilitaryState;
+  /** 복무 중일 때: 입대한 해(이 시즌이 끝나고 입대) */
+  enlisted?: number;
+  /** 복무 중일 때: 복귀하는 시즌 */
+  returnYear?: number;
+}
+
+export interface InjuryLine {
+  year: number;
+  kind: 'long' | 'major';
+  days: number;
+  /** 시즌 끝까지 이어졌는가 */
+  seasonOut: boolean;
+}
+
+/** 은퇴한 선수 (리그 상태에서는 빠지고 여기만 남는다) */
+export interface RetiredRecord {
+  id: string;
+  name: string;
+  real: boolean;
+  /** 마지막 시즌 */
+  year: number;
+  age: number | null;
+  /** 마지막 소속 구단 색인 */
+  team: number;
+  /** 은퇴 사유 */
+  reason: 'age' | 'performance';
 }
 
 export interface SeasonLine {
@@ -99,8 +154,19 @@ export interface LeagueState {
   teams: LeagueTeam[];
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[] } | null;
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
+  /** 은퇴한 선수 (M6) */
+  retired?: RetiredRecord[];
+  // ---- M7 (없으면 기본값. M6 이전 저장 호환)
+  /** 난이도 (AI의 잠재력 평가 오차). 없으면 보통 */
+  difficulty?: Difficulty;
+  /** 플레이어(단장)의 구단주 평가 상태 */
+  owner?: OwnerState;
+  /** 구단별 샐러리캡 연속 초과 횟수 */
+  capStrikes?: number[];
+  /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
+  draftPenalty?: (number | null)[];
 }

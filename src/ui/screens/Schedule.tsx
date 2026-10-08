@@ -135,7 +135,7 @@ function lastMyGame(log: GameLog[], me: number): number | undefined {
   return undefined;
 }
 
-function BoxView({ log, box }: { log: GameLog; box: BoxScore }) {
+export function BoxView({ log, box }: { log: GameLog; box: BoxScore }) {
   const { session } = useGame();
   const n = Math.max(box.lineScore.away.length, 9);
   const cell = (v: number | undefined) => (v === undefined ? '' : v < 0 ? 'X' : String(v));

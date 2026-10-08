@@ -1,6 +1,7 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { useState } from 'react';
-import { DRAFT_ROUNDS, FA_ROUNDS, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
+import { OfferPanel } from './Club';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignSlots } from '../../league/offseason';
 import {
   ASIA_NEW_CAP, capPayroll, dollarText, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, wonText,
 } from '../../league/salary';
@@ -71,10 +72,11 @@ export function Offseason() {
 
   return (
     <div className="stack">
+      <OfferPanel />
       <section className="row-between wrap">
         <div>
           <h1>{off.year} 오프시즌</h1>
-          <p className="muted small">결산(성장 판정, 1군 연차)은 끝났습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
+          <p className="muted small">결산(성장 판정, 1군 연차, 부상 후유증, 은퇴, 병역)은 끝났습니다. 결산 소식은 아래 "오프시즌 소식"에 있습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
         </div>
         {off.stage !== 'ready' && (
           <button type="button" onClick={() => void next()} disabled={busy}>{busy ? '처리 중' : nextLabel}</button>
@@ -158,7 +160,9 @@ function FaPanel({ act }: { act: Act }) {
               const p = players.get(e.id)!;
               const i = info(p);
               const mine = off.fa.userOffers[e.id];
-              const d = draft[e.id] ?? { salary: String(Math.round(e.ask / 100) * 100), years: String(e.years) };
+              // 제시 연봉은 억 원 단위로 입력한다 (소수 한 자리). 내부 계산은 만 원 단위.
+              // 기본값은 요구액을 0.1억 단위로 올림 (내림하면 요구액보다 모자라 1라운드에서 거절된다)
+              const d = draft[e.id] ?? { salary: (Math.ceil(e.ask / 1000) / 10).toFixed(1), years: String(e.years) };
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
@@ -174,12 +178,12 @@ function FaPanel({ act }: { act: Act }) {
                       </span>
                     ) : (
                       <span className="inline">
-                        <input type="number" min={MIN_SALARY} step={100} value={d.salary} aria-label={`${p.name} 제시 연봉(만 원)`}
-                          onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '8em' }} />만 원
+                        <input type="number" min={MIN_SALARY / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+                          onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
                         <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
                           {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
                         </select>
-                        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Number(d.salary), Number(d.years)))}>제시</button>
+                        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Math.round(Number(d.salary) * 10000), Number(d.years)))}>제시</button>
                       </span>
                     )}
                   </td>
@@ -189,7 +193,7 @@ function FaPanel({ act }: { act: Act }) {
           </tbody>
         </table>
       </div>
-      <p className="muted small">현재·잠재는 한 시즌 기여를 20~80으로 바꾼 값입니다 (50 = 리그 평균 주전). 연봉은 만 원 단위로 입력합니다 (1억 = 10000).</p>
+      <p className="muted small">현재·잠재는 한 시즌 기여를 20~80으로 바꾼 값입니다 (50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
     </section>
   );
 }
@@ -299,7 +303,12 @@ function DraftPanel({ act }: { act: Act }) {
             ? <strong>우리 차례입니다: {Math.floor(d.pick / n) + 1}라운드 {(d.pick % n) + 1}순위</strong>
             : `지명 진행 중 (${d.pick + 1}/${total})`}
         </p>
-        <p className="muted small">잠재는 스카우트 평가라 실제와 다를 수 있습니다. 모든 구단이 같은 평가를 봅니다. 지명 선수는 모두 가상 선수입니다.</p>
+        <p className="muted small">
+          잠재는 스카우트 평가라 실제와 다를 수 있습니다. 모든 구단이 같은 평가를 봅니다.{' '}
+          {[...d.pool, ...d.picks.map((x) => x.id)].some((id) => players.get(id)?.real)
+            ? `후보는 ${off.year + 1}년 입단 실제 신인 지명 선수입니다 (출처: baseballchart.kr, 나무위키 신인 드래프트 문서 정리, CC BY-NC-SA 2.0 KR). 지명은 게임 속 순위로 다시 하므로 실제 구단과 다를 수 있고, 아직 프로 기록이 없어 능력은 실제 지명 순번으로 가늠한 추정값입니다.`
+            : '지명 선수는 모두 가상 선수입니다.'}
+        </p>
         <div className="actions">
           <button type="button" className="ghost" disabled={done} onClick={() => act(session.autoDraft(), '남은 지명을 자동으로 했습니다.')}>남은 지명 자동</button>
         </div>
@@ -372,12 +381,15 @@ function SalaryPanel({ act }: { act: Act }) {
       </div>
       <div className="scroll">
         <table>
-          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th>요구액</th><th className="l">제시액 (만 원)</th></tr></thead>
+          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th>요구액</th><th className="l">제시액 (억 원)</th></tr></thead>
           <tbody>
             {ids.map((id) => {
               const p = players.get(id)!;
               const i = info(p);
-              const v = edit[id] ?? String(s.offers[id]);
+              // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
+              // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
+              const shown = (Math.ceil(s.offers[id] / 100) / 100).toFixed(2);
+              const v = edit[id] ?? shown;
               const low = s.offers[id] < s.demands[id];
               return (
                 <tr key={id}>
@@ -385,9 +397,9 @@ function SalaryPanel({ act }: { act: Act }) {
                   <td>{wonText(p.contract.salary)}</td><td>{wonText(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={MIN_SALARY} step={100} value={v} aria-label={`${p.name} 제시액`} style={{ width: '8em' }}
+                      <input type="number" min={MIN_SALARY / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
-                        onBlur={() => act(session.setSalaryOffer(id, Number(v)))} />
+                        onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round(Number(v) * 10000))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
                     </span>
                   </td>
@@ -453,7 +465,7 @@ function OffLog() {
       {rows.length === 0 ? <p className="muted">아직 소식이 없습니다.</p> : (
         <ul className="news">
           {rows.map((l, k) => (
-            <li key={k} className={l.mine ? 'news-season' : ''}><span className="muted small">{STAGE_LABEL[l.stage]}</span><span>{l.text}</span></li>
+            <li key={k} className={l.mine ? 'news-season' : ''}><span className="muted small">{LOG_LABEL[l.stage]}</span><span>{l.text}</span></li>
           ))}
         </ul>
       )}
