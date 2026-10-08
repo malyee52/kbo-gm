@@ -19,6 +19,7 @@ import {
   FOREIGN_TOTAL_CAP, foreignSalary, marketSalary, MIN_SALARY, nextReserveSalary, ORG_LIMIT, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, WON_PER_RUN, type FaGrade,
 } from './salary';
+import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 
@@ -109,6 +110,8 @@ export interface OffseasonState {
   } | null;
   draft: {
     order: number[];
+    /** 전체 지명 순 구단 (샐러리캡 제재로 1라운드 순서가 바뀔 수 있다, M7). 없으면 order를 라운드마다 반복 */
+    slots?: number[];
     /** 다음 지명 번호 (0부터) */
     pick: number;
     pool: string[];
@@ -138,7 +141,8 @@ export function leagueView(league: LeagueState, store: Store, params: EnginePara
   const next = { ...league, year: league.year + 1 };
   const world = worldFromLeague(next, store, params, { form: false });
   const ctx = valueContext(world);
-  ctx.potential = new Map(league.players.map((p) => [p.id, p.scoutPotential ?? p.potential]));
+  // AI 구단이 보는 잠재력 (난이도에 따른 오차, owner.ts)
+  ctx.potential = new Map(league.players.map((p) => [p.id, aiPotential(league, p)]));
   const sim = new Map(world.players.map((p) => [p.id, p]));
   let k = 0;
   for (const lp of league.players) {
@@ -335,17 +339,19 @@ export interface OfferCheck {
 export function offerFa(league: LeagueState, off: OffseasonState, id: string, salary: number, years: number): OfferCheck {
   const e = off.fa.entries.find((x) => x.id === id);
   if (off.stage !== 'fa' || !e || e.status !== 'open') return { ok: false, message: '지금 제시할 수 없는 선수입니다.' };
-  if (!Number.isFinite(salary) || salary < MIN_SALARY) return { ok: false, message: `연봉은 최저 연봉(${MIN_SALARY.toLocaleString('ko-KR')}만 원) 이상이어야 합니다.` };
+  if (!Number.isFinite(salary) || salary < MIN_SALARY) return { ok: false, message: `연봉은 최저 연봉 ${(MIN_SALARY / 10000).toFixed(1)}억 원(${MIN_SALARY.toLocaleString('ko-KR')}만 원) 이상이어야 합니다.` };
   if (!Number.isInteger(years) || years < 1 || years > 6) return { ok: false, message: '계약 기간은 1~6년입니다.' };
   const t = off.userTeam;
   if (e.from !== t && off.fa.signings[t] >= MAX_FA_SIGNINGS) return { ok: false, message: `외부 FA는 한 오프시즌에 ${MAX_FA_SIGNINGS}명까지 데려올 수 있습니다.` };
-  const cap = salaryCap(off.year + 1);
-  if (cap !== null) {
+  const limit = spendLimit(league, t, off.year + 1);
+  if (limit !== null) {
     const p = league.players.find((x) => x.id === id)!;
     const others = Object.entries(off.fa.userOffers).filter(([k]) => k !== id).reduce((s, [, o]) => s + o.salary, 0);
     const base = capPayroll(league.players, t) - (p.team === t ? p.contract.salary : 0);
-    if (base + others + salary > cap) {
-      return { ok: false, message: `샐러리캡(${Math.round(cap / 10000)}억 원)을 넘습니다. 지금 다른 제시를 포함한 합계로 검사합니다.` };
+    if (base + others + salary > limit) {
+      const cap = salaryCap(off.year + 1);
+      const what = cap !== null && limit < cap ? '구단 예산' : '샐러리캡';
+      return { ok: false, message: `${what}(${Math.round(limit / 10000)}억 원)을 넘습니다. 지금 다른 제시를 포함한 합계로 검사합니다.` };
     }
   }
   off.fa.userOffers[id] = { team: t, salary: Math.round(salary), years };
@@ -362,7 +368,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
   const view = leagueView(league, store, params);
   const players = byId(league);
   const round = off.fa.round;
-  const cap = salaryCap(off.year + 1);
+  // 구단별 지출 상한: 샐러리캡과 모기업 예산 중 작은 쪽 (owner.ts)
+  const limits = league.teams.map((_, t) => spendLimit(league, t, off.year + 1));
   const tendency = league.teams.map((_, t) => tendencyFor(league, view, t));
 
   for (const e of off.fa.entries) {
@@ -377,7 +384,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       const home = t === e.from;
       if (!home && off.fa.signings[t] >= MAX_FA_SIGNINGS) continue;
       const base = e.ask * FA_AI_OFFER[round - 1];
-      if (cap !== null && capPayroll(league.players, t) - (home ? p.contract.salary : 0) + base > cap) continue;
+      if (limits[t] !== null && capPayroll(league.players, t) - (home ? p.contract.salary : 0) + base > limits[t]!) continue;
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
       const comp = home ? 0 : COMPENSATION[e.grade] * e.prevSalary;
       const cost = costRuns(base, e.years, comp) * FA_WILLINGNESS;
@@ -414,7 +421,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       const worth = marketSalary(gain / FA_WILLINGNESS) - (home ? 0 : COMPENSATION[e.grade] * e.prevSalary);
       if (!home && worth < MIN_SALARY) continue;
       const salary = Math.max(MIN_SALARY, Math.round(Math.min(e.ask * 0.8, worth)));
-      if (cap !== null && capPayroll(league.players, t) - (home ? p.contract.salary : 0) + salary > cap) continue;
+      if (limits[t] !== null && capPayroll(league.players, t) - (home ? p.contract.salary : 0) + salary > limits[t]!) continue;
       if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years: 1 };
     }
     if (best) {
@@ -685,26 +692,36 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     p.school = univ ? 'UNIV' : 'HS';
     // 스카우트 평가: 실제 잠재력에 오차 (모든 구단이 같은 평가를 본다. 난이도별 오차는 M7)
     p.scoutPotential = Math.round(potential + rng.range(-8, 8));
-    view.ctx.potential?.set(p.id, p.scoutPotential);
+    view.ctx.potential?.set(p.id, aiPotential(league, p));
     p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 1 };
     pool.push(p.id);
   }
   const order = [...(league.lastSeason?.standings ?? league.teams.map((_, i) => i))].reverse();
-  off.draft = { order, pick: 0, pool, picks: [] };
+  // 샐러리캡 2회 이상 연속 초과 구단은 1라운드 지명권이 9단계 밀린다 (owner.ts, 제도연표)
+  const penalized = new Set(league.teams.map((_, t) => t).filter((t) => league.draftPenalty?.[t] === year));
+  for (const t of penalized) log(off, 'draft', `${league.teams[t].name}: 샐러리캡 연속 초과로 1라운드 지명권 9단계 하락`, t === off.userTeam, true);
+  off.draft = { order, slots: draftSlots(order, DRAFT_ROUNDS, penalized), pick: 0, pool, picks: [] };
   runDraftUntilUser(league, off);
 }
 
 export function draftTeamAt(off: OffseasonState, pick: number): number {
-  return off.draft!.order[pick % off.draft!.order.length];
+  const d = off.draft!;
+  return d.slots ? d.slots[pick] : d.order[pick % d.order.length];
 }
 
 export function draftTotal(off: OffseasonState): number {
-  return off.draft ? off.draft.order.length * DRAFT_ROUNDS : 0;
+  if (!off.draft) return 0;
+  return off.draft.slots ? off.draft.slots.length : off.draft.order.length * DRAFT_ROUNDS;
 }
 
-function bestProspect(league: LeagueState, off: OffseasonState): LeaguePlayer {
+/**
+ * 남은 후보 중 가장 좋아 보이는 선수. AI 구단은 난이도 오차가 들어간 잠재력(aiPotential)으로,
+ * 플레이어의 자동 지명은 스카우트 평가로 고른다.
+ */
+function bestProspect(league: LeagueState, off: OffseasonState, forUser = false): LeaguePlayer {
   const ps = off.draft!.pool.map((id) => league.players.find((x) => x.id === id)!);
-  return ps.sort((a, b) => (b.scoutPotential ?? 0) - (a.scoutPotential ?? 0) || a.id.localeCompare(b.id))[0];
+  const score = (p: LeaguePlayer) => (forUser ? p.scoutPotential ?? p.potential : aiPotential(league, p));
+  return ps.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))[0];
 }
 
 function makePick(league: LeagueState, off: OffseasonState, p: LeaguePlayer): void {
@@ -732,7 +749,7 @@ export function draftByUser(league: LeagueState, off: OffseasonState, id: string
   const d = off.draft;
   if (off.stage !== 'draft' || !d) return { ok: false, message: '지금은 드래프트 단계가 아닙니다.' };
   if (d.pick >= draftTotal(off) || draftTeamAt(off, d.pick) !== off.userTeam) return { ok: false, message: '우리 차례가 아닙니다.' };
-  const p = id ? league.players.find((x) => x.id === id && d.pool.includes(x.id)) : bestProspect(league, off);
+  const p = id ? league.players.find((x) => x.id === id && d.pool.includes(x.id)) : bestProspect(league, off, true);
   if (!p) return { ok: false, message: '지명할 수 없는 선수입니다.' };
   makePick(league, off, p);
   runDraftUntilUser(league, off);
@@ -742,7 +759,7 @@ export function draftByUser(league: LeagueState, off: OffseasonState, id: string
 /** 남은 우리 지명을 모두 자동으로 한다 */
 export function autoDraftRest(league: LeagueState, off: OffseasonState): void {
   while (off.stage === 'draft' && off.draft && off.draft.pick < draftTotal(off) && off.draft.pool.length) {
-    if (draftTeamAt(off, off.draft.pick) === off.userTeam) makePick(league, off, bestProspect(league, off));
+    if (draftTeamAt(off, off.draft.pick) === off.userTeam) makePick(league, off, bestProspect(league, off, true));
     runDraftUntilUser(league, off);
   }
 }
@@ -946,7 +963,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   }, entryYear - 1);
   p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
   p.scoutPotential = Math.round(potential + rng.range(-8, 8));
-  view.ctx.potential?.set(p.id, p.scoutPotential);
+  view.ctx.potential?.set(p.id, aiPotential(league, p));
   p.contract = { kind: 'rookie', salary: MIN_SALARY, until: entryYear };
   return p;
 }
@@ -1025,6 +1042,6 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
   league.players.push(p);
   const sim = { ...asSim(p, view.ctx.world.league, nextYear), idx: 2_000_000 + league.nextVirtualId, name: p.name, foreign: p.foreign, teamIdx: -1 };
   view.sim.set(p.id, sim);
-  view.ctx.potential?.set(p.id, p.scoutPotential ?? p.potential);
+  view.ctx.potential?.set(p.id, aiPotential(league, p));
   return p;
 }

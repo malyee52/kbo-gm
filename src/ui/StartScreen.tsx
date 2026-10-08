@@ -1,5 +1,6 @@
 // 시작 화면: 새 게임(연도, 구단, 시드)과 불러오기.
 import { useEffect, useState } from 'react';
+import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/owner';
 import type { BrowserStore } from '../data/loadBrowser';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
@@ -21,6 +22,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [year, setYear] = useState(years.includes(DEFAULT_YEAR) ? DEFAULT_YEAR : years[0]);
   const [teamIdx, setTeamIdx] = useState<number | null>(null);
   const [seed, setSeed] = useState(randomSeed);
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       await store.ensureAll();
       setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
       await nextFrame();
-      onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim() }));
+      onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -103,7 +105,16 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             </span>
           </label>
         </div>
-        <p className="muted small">같은 연도·구단·시드에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
+        <div className="form-row">
+          <label>
+            난이도
+            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} disabled={!!busy}>
+              {(Object.keys(DIFFICULTY_LABEL) as Difficulty[]).map((d) => <option key={d} value={d}>{DIFFICULTY_LABEL[d]}</option>)}
+            </select>
+          </label>
+          <span className="muted small">{DIFFICULTY_NOTE[difficulty]}</span>
+        </div>
+        <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
         {year < 2001 && <p className="note small">2000년 이전은 선발 투수 기용 방식이 지금과 달라 득점이 실제보다 높게 나옵니다 (M8에서 보정 예정).</p>}
         {store.meta.inProgress.includes(year) && (
           <p className="note small">{year}년 선수단은 시즌 중 자료(정규시즌 종료 전 스냅샷)로 만듭니다. 능력은 직전 3시즌 기록에서 뽑습니다.</p>

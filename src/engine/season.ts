@@ -3,7 +3,7 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
-import { emptyLeagueCounters, simulateGame, type GameContext, type LeagueCounters } from './game';
+import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
@@ -329,9 +329,9 @@ export class Season {
   }
 
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
-  refresh(teamIdx: number): TeamSeason {
+  refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, this.day);
+    refreshActive(ts, this.world, this.states, day);
     return ts;
   }
 
@@ -426,6 +426,24 @@ export class Season {
     this.states.absentUntil[a.idx] = a.until;
     this.absences.push(a);
     ts.dirty = true;
+  }
+
+  /**
+   * 시즌이 끝난 뒤 경기 하나 (포스트시즌). 정규시즌 기록·순위·경기 로그에는 남기지 않고, 주어진 기록 배열(rec)에만 쌓는다.
+   * 1군은 그날 기준으로 다시 짜고(부상 선수는 계속 빠진다), 주전 휴식은 없다. 난수는 넘겨받은 rng만 쓴다.
+   */
+  playExtraGame(home: number, away: number, day: number, rng: Rng, maxInnings: number,
+                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[] } {
+    const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals };
+    const h = this.teamSeasons[home];
+    const a = this.teamSeasons[away];
+    refreshActive(h, this.world, this.states, day);
+    refreshActive(a, this.world, this.states, day);
+    const hl = todaysLineup(h, this.world.league, params, rng);
+    const al = todaysLineup(a, this.world.league, params, rng);
+    const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
+    return { result, home: hl, away: al };
   }
 
   private snapshotPitchers(sides: TeamSeason[]): Map<number, PitLine> {

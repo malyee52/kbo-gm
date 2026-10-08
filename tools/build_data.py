@@ -297,6 +297,32 @@ def main():
         'note': '타자 100타석 미만, 투수 상대 타자 150명 미만 선수-시즌의 리그 대비 비율',
     }
 
+    # ---- 특별 엔트리 (은퇴식 등으로 하루 1군에 등록된 선수)
+    # 그 해 1~2경기, 3타석·상대 타자 3명 이하, 34세 이상, 그 해가 마지막 1군 시즌인 선수 (규칙으로 고른 값).
+    # 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다 (현역이 아니다). 진행 중 시즌은 "마지막 시즌" 조건이 늘 참이다.
+    bi, pi = BAT_FIELDS.index, PIT_FIELDS.index
+    pmap = {p['id']: p for p in players}
+    special = {}
+    for y in years:
+        use = defaultdict(lambda: [0, 0, 0])  # 경기, 타석, 상대 타자
+        for r in bat[y]:
+            u = use[r[bi('id')]]
+            u[0] = max(u[0], r[bi('g')] or 0)
+            u[1] += r[bi('pa')] or 0
+        for r in pit[y]:
+            u = use[r[pi('id')]]
+            u[0] = max(u[0], r[pi('g')] or 0)
+            u[2] += r[pi('tbf')] or 0
+        ids = []
+        for pid, (g, pa, bf) in use.items():
+            m = pmap.get(pid)
+            if not m or not m.get('birthYear'):
+                continue
+            if g <= 2 and pa <= 3 and bf <= 3 and y - m['birthYear'] >= 34 and m.get('last') == y:
+                ids.append(pid)
+        if ids:
+            special[str(y)] = sorted(ids)
+
     # ---- 쓰기
     (OUT / 'seasons').mkdir(parents=True, exist_ok=True)
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
@@ -324,6 +350,7 @@ def main():
         'franchises': franchises, 'successors': {'쌍방울': 'SSG', '현대계': '히어로즈'},
         'rules': {y: rules_for(y) for y in years}, 'priors': priors,
         **({'foreignOpening': foreign_opening} if foreign_opening else {}),
+        'specialEntries': special,
     }, OUT / 'meta.json')
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '

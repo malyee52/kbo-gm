@@ -3,6 +3,7 @@ import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
 import { PlayerLink, TeamName, useGame } from '../context';
+import { GOAL_LABEL } from '../../league/owner';
 
 export function Home() {
   const { session, go } = useGame();
@@ -24,8 +25,14 @@ export function Home() {
     <div className="stack">
       {session.done && (
         <div className="note row-between">
-          <span>정규시즌이 끝났습니다. 최종 {rank}위.</span>
-          <button type="button" onClick={() => go('season-end')}>시즌 결과 보기</button>
+          <span>
+            정규시즌이 끝났습니다. 최종 {rank}위.
+            {session.postseasonRunning ? ' 가을야구가 진행 중입니다 (위쪽 버튼으로 한 경기씩).' : session.postseason?.done ? ' 가을야구가 끝났습니다. 시즌 결과에서 결산하세요.' : ''}
+          </span>
+          <span className="inline">
+            {session.postseason && <button type="button" onClick={() => go('postseason')}>가을야구</button>}
+            <button type="button" className="ghost" onClick={() => go('season-end')}>시즌 결과</button>
+          </span>
         </div>
       )}
       <section className="cards">
@@ -37,6 +44,12 @@ export function Home() {
             최근 10경기 {form.w}승 {form.l}패{form.t ? ` ${form.t}무` : ''}{form.streak && ` · ${form.streak}`} · 득점 {rec.rs} 실점 {rec.ra}
           </p>
           <p className="muted small">포스트시즌 진출권: 상위 {cut}팀</p>
+          {session.owner.goal?.year === year && (
+            <p className="small">
+              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust}{' '}
+              <button type="button" className="link" onClick={() => go('club')}>구단 현황</button>
+            </p>
+          )}
         </div>
         <div className="card">
           <h2>다음 경기</h2>

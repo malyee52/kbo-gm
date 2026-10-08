@@ -94,7 +94,8 @@ export function Roster() {
     setMsg({ ...res, who: res.errors.length ? undefined : who });
     changed();
   };
-  const canPlan = !!view.manual && !session.done;
+  // 가을야구 중에도 탈락 전까지는 엔트리·기용표를 바꿀 수 있다
+  const canPlan = !!view.manual && session.canManage;
   const roleCell = (p: SimPlayer, inFirst: boolean, roleText: string) => {
     if (!inFirst || !canPlan) return roleText;
     if (!p.isPitcher) {
@@ -152,7 +153,7 @@ export function Roster() {
             {view.manual ? '엔트리 직접 관리' : '엔트리 AI가 관리'}
           </p>
         </div>
-        <button type="button" className="ghost" onClick={toggleAuto} disabled={session.done}>
+        <button type="button" className="ghost" onClick={toggleAuto} disabled={!session.canManage}>
           {view.manual ? 'AI에게 엔트리 맡기기' : '엔트리 직접 관리하기'}
         </button>
       </section>
@@ -234,7 +235,7 @@ export function Roster() {
                         <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
                         {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
                         <td>
-                          <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={session.done}>
+                          <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage}>
                             {inFirst ? '2군으로' : '1군으로'}
                           </button>
                         </td>

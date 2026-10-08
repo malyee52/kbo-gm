@@ -43,7 +43,9 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const ctx = valueContext(recorded);
   const opening = openingForeigners(store, startYear);
   // 외국인: 개막 명단이 있으면 그 명단의 선수만 (시즌 중 교체된 선수는 아직 오지 않은 선수다)
-  const startPlayers = recorded.players.filter((p) => !p.foreign || !opening || opening.has(p.id));
+  // 특별 엔트리(은퇴식 등으로 하루 등록된 선수, 예: 2026 박병호)는 현역이 아니라서 뺀다
+  const special = new Set(store.meta.specialEntries?.[String(startYear)] ?? []);
+  const startPlayers = recorded.players.filter((p) => (!p.foreign || !opening || opening.has(p.id)) && !special.has(p.id));
   const idx = careerIndex(store);
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
   for (const c of store.contracts ?? []) (contractsById.get(c.id) ?? contractsById.set(c.id, []).get(c.id)!).push(c);
@@ -90,7 +92,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     players, lastSeason: null, ledger: [], nextVirtualId: 1,
   };
   const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx);
-  const world = opening || added ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  const world = opening || added || special.size ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
 

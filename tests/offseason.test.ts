@@ -41,11 +41,14 @@ function finishOffseason(g: GameSession): void {
 }
 
 describe('리그 상태 만들기', () => {
-  it('시작 연도 월드는 worldForYear에서 개막 명단에 없는 외국인만 뺀 것이다 (국내 선수 구성·능력은 같다)', () => {
+  it('시작 연도 월드는 worldForYear에서 개막 명단에 없는 외국인과 특별 엔트리 선수만 뺀 것이다 (나머지 구성·능력은 같다)', () => {
     const { world } = createLeague(store, 2026, 's', FAST);
     const ref = worldForYear(store, 2026, FAST);
     const opening = openingForeigners(store, 2026)!;
-    const kept = ref.players.filter((p) => !p.foreign || opening.has(p.id));
+    const special = new Set(store.meta.specialEntries?.['2026'] ?? []);
+    const kept = ref.players.filter((p) => (!p.foreign || opening.has(p.id)) && !special.has(p.id));
+    // 특별 엔트리(은퇴식 등으로 하루 등록된 선수)는 빠진다
+    expect(world.players.some((p) => p.name === '박병호')).toBe(false);
     // 1군 기록 없는 2026 신인(d2026-)은 따로 더해진다 (다음 테스트)
     const recorded = world.players.filter((p) => !p.id.startsWith('d2026-'));
     expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${p.teamIdx}`));

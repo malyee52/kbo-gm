@@ -4,6 +4,8 @@
 
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
+import type { Difficulty, OwnerState } from './owner';
+import type { PostseasonResult } from './postseason';
 
 export type School = 'HS' | 'UNIV';
 
@@ -152,10 +154,19 @@ export interface LeagueState {
   teams: LeagueTeam[];
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[] } | null;
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
   /** 은퇴한 선수 (M6) */
   retired?: RetiredRecord[];
+  // ---- M7 (없으면 기본값. M6 이전 저장 호환)
+  /** 난이도 (AI의 잠재력 평가 오차). 없으면 보통 */
+  difficulty?: Difficulty;
+  /** 플레이어(단장)의 구단주 평가 상태 */
+  owner?: OwnerState;
+  /** 구단별 샐러리캡 연속 초과 횟수 */
+  capStrikes?: number[];
+  /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
+  draftPenalty?: (number | null)[];
 }

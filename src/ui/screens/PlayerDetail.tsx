@@ -105,7 +105,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         <ContractInfo id={p.id} />
         <CareerInfo p={p} />
 
-        {mine && !session.done && (
+        {mine && session.canManage && (
           <div className="actions">
             <button type="button" onClick={move}>{registered ? '2군으로 내리기' : '1군에 등록하기'}</button>
           </div>

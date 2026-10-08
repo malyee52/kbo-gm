@@ -93,8 +93,10 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
     expect(g.done).toBe(true);
     for (const t of g.season.teams) expect(t.g).toBe(144);
     expect(g.advance(7)).toBe(0); // 끝난 시즌은 더 진행하지 않는다
-    expect(g.news.at(-1)?.kind).toBe('season');
-    expect(g.news.at(-1)?.text).toMatch(/최종 \d+위/);
+    // 정규시즌 종료 알림 뒤에 가을야구 대진 알림이 붙는다 (M7)
+    expect(g.news.at(-2)?.text).toMatch(/최종 \d+위/);
+    expect(g.news.at(-1)?.text).toMatch(/^가을야구 대진/);
+    expect(g.postseasonRunning).toBe(true);
   });
 
   it('플레이어 구단 경기는 모두 박스스코어가 있고 점수와 맞는다', () => {

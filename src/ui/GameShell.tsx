@@ -17,6 +17,9 @@ import { SeasonEnd } from './screens/SeasonEnd';
 import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Offseason } from './screens/Offseason';
+import { Club } from './screens/Club';
+import { Postseason } from './screens/Postseason';
+import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 
 const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean }[] = [
@@ -27,6 +30,7 @@ const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean }[] 
   { id: 'standings', label: '순위', offLabel: '지난 시즌 순위' },
   { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록' },
   { id: 'trade', label: '트레이드', season: true },
+  { id: 'club', label: '구단' },
   { id: 'save', label: '저장·설정' },
 ];
 
@@ -75,7 +79,22 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
-    if (session.done) go('season-end');
+    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
+  };
+
+  /** 가을야구 진행 (경기 수, 또는 '우리 경기까지'·'시리즈 끝까지') */
+  const advancePs = async (how: 'one' | 'ours' | 'series' | 'all', label: string) => {
+    if (busy || !session.postseasonRunning) return;
+    setBusy(label);
+    await nextFrame();
+    if (how === 'one') session.advancePostseason(1);
+    else if (how === 'ours') session.advanceToOurPostseasonGame();
+    else if (how === 'series') session.advanceSeries();
+    else session.advancePostseason(10_000);
+    changed();
+    await autosave();
+    setBusy(null);
+    go('postseason');
   };
 
   const advanceNextGame = async () => {
@@ -86,13 +105,14 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
-    if (session.done) go('season-end');
+    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
 
   const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave };
   const team = session.team;
   const off = session.phase === 'offseason';
   const nav = NAV.filter((n) => (off ? !n.season : n.id !== 'offseason'));
+  const psCur = session.postseasonRunning ? currentSeries(session.postseason!) : null;
   const left = session.season.schedule.slice(session.day).filter((d) => d.some((g) => g.home === session.teamIdx || g.away === session.teamIdx)).length;
 
   return (
@@ -109,6 +129,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {off && n.offLabel ? n.offLabel : n.label}
               </button>
             ))}
+            {(session.done || off) && (session.postseason || session.league.lastSeason?.postseason) && (
+              <button type="button" className={screen === 'postseason' ? 'on' : ''} onClick={() => go('postseason')}>가을야구</button>
+            )}
             {session.done && (
               <button type="button" className={screen === 'season-end' ? 'on' : ''} onClick={() => go('season-end')}>시즌 결과</button>
             )}
@@ -119,12 +142,19 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
         <div className="main">
           <header className="topbar">
             <div className="when">
-              <strong>{off ? `${session.world.year} 오프시즌` : session.done ? `${session.world.year} 정규시즌 종료` : formatDate(session.world.year, session.day, true)}</strong>
+              <strong>{off ? `${session.world.year} 오프시즌` : psCur ? `${session.world.year} 가을야구 · ${ROUND_LABEL[psCur.round]} ${psCur.games.length + 1}차전` : session.done ? `${session.world.year} ${session.postseason?.done ? '가을야구 종료' : '정규시즌 종료'}` : formatDate(session.world.year, session.day, true)}</strong>
               <span className="muted small">
                 {summaryOf(session)}{!session.done && ` · 남은 경기 ${left}`}
               </span>
             </div>
-            {!off && <div className="advance">
+            {!off && session.postseasonRunning && <div className="advance">
+              {busy && <span className="muted small" role="status">{busy}</span>}
+              <button type="button" onClick={() => void advancePs('one', '경기 진행 중')} disabled={!!busy}>다음 경기</button>
+              <button type="button" onClick={() => void advancePs('ours', '우리 경기까지 진행 중')} disabled={!!busy}>우리 경기까지</button>
+              <button type="button" onClick={() => void advancePs('series', '시리즈 진행 중')} disabled={!!busy}>시리즈 끝까지</button>
+              <button type="button" className="ghost" onClick={() => void advancePs('all', '가을야구 진행 중')} disabled={!!busy}>가을야구 끝까지</button>
+            </div>}
+            {!off && !session.done && <div className="advance">
               {busy && <span className="muted small" role="status">{busy}</span>}
               <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
               <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done}>하루</button>
@@ -143,6 +173,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             {screen === 'save' && <SaveScreen onQuit={onQuit} />}
             {screen === 'season-end' && <SeasonEnd />}
             {screen === 'offseason' && <Offseason />}
+            {screen === 'club' && <Club />}
+            {screen === 'postseason' && <Postseason />}
           </main>
         </div>
         {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}

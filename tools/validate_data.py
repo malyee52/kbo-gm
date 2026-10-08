@@ -179,6 +179,11 @@ def main():
         if two_way:
             warn(f'신인 지명: 포지션이 둘인 선수 {two_way}명 (앞의 포지션, 투타겸업은 투수로 봄)')
 
+    # ---- 특별 엔트리 (새 게임에서 빼는 선수, 규칙으로 고른 값이라 확인용으로 보여 준다)
+    for y, ids in sorted(meta.get('specialEntries', {}).items()):
+        if int(y) >= 2015:
+            warn(f'특별 엔트리로 보고 새 게임에서 뺌 {y}: ' + ', '.join(by_id[i]['name'] for i in ids if i in by_id))
+
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
     for w in warnings:
