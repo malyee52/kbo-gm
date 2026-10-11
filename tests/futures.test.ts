@@ -4,6 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { ensureEvents } from '../src/league/events';
+import { FUT_FULL, futuresForm, futuresOpportunity } from '../src/league/futures';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -52,5 +53,51 @@ describe('퓨처스리그', () => {
     for (let i = 0; i < 40; i++) { ensureEvents(b.league).chance = 0; b.advance(1); b.futures(); }
     expect([...b.futures().lines.entries()]).toEqual([...a.futures().lines.entries()]);
     expect(b.futures().teams).toEqual(a.futures().teams);
+  }, 300_000);
+});
+
+describe('퓨처스 기록을 성장 판정에 쓰기, 창단 퓨처스 구단 성적 (2026-10-12)', () => {
+  it('출전 기회는 타석·상대 타자 수에 비례하고, 활약도는 운 × 표본 신뢰도다', () => {
+    const lines = [...full.futures().lines.values()];
+    for (const l of lines) {
+      const o = futuresOpportunity(l);
+      expect(o).toBeGreaterThanOrEqual(0);
+      expect(o).toBeLessThanOrEqual(1);
+      expect(Math.abs(futuresForm(l))).toBeLessThanOrEqual(o + 1e-9);
+    }
+    const regular = lines.filter((l) => l.bat && l.bat.pa >= FUT_FULL.bat);
+    expect(regular.length).toBeGreaterThan(0);
+    expect(regular.every((l) => futuresOpportunity(l) === 1)).toBe(true);
+  });
+
+  it('결산 때 퓨처스 활약·부진이 성장 판정에 태그로 남고, 지난 시즌 퓨처스 순위가 보관된다', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'fut-grow' }, FAST);
+    g.advance(100000);
+    g.advancePostseason(10_000);
+    const before = g.futures().teams;
+    g.beginOffseason();
+    expect(g.league.lastFutures?.year).toBe(2026);
+    expect(g.league.lastFutures!.teams).toEqual(before);
+    expect(g.futures().teams).toEqual(before);
+    const tags = [...g.offseason!.growth!.values()].flatMap((e) => e.tags ?? []);
+    expect(tags).toContain('퓨처스 활약');
+    expect(tags).toContain('퓨처스 부진');
+  }, 300_000);
+
+  it('2012 시작: 1군 진입 전 NC도 퓨처스리그 순위에 있고, 선수들이 퓨처스 성적을 낸다', () => {
+    const sk = store.season(2012)!.teams.findIndex((t) => t.name === 'SK');
+    const g = GameSession.create(store, { year: 2012, teamIdx: sk, seed: 'nc-fut' }, FAST);
+    ensureEvents(g.league).chance = 0;
+    g.advance(60);
+    const nc = g.league.teams.findIndex((t) => t.name === 'NC');
+    const f = g.futures();
+    expect(f.teams).toHaveLength(9);
+    const row = f.teams.find((t) => t.team === nc)!;
+    expect(row.g).toBeGreaterThan(0);
+    expect(row.w + row.l).toBe(row.g);
+    expect(row.rs).toBeGreaterThan(0);
+    expect([...f.lines.values()].filter((l) => l.teamIdx === nc).length).toBeGreaterThan(10);
+    // 1군 구단 선수의 기록 색인과 겹치지 않는다
+    for (const [idx, l] of f.lines) if (l.teamIdx !== nc) expect(g.world.players[idx].teamIdx).toBe(l.teamIdx);
   }, 300_000);
 });

@@ -187,6 +187,8 @@ export interface LeagueState {
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
   lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
+  /** 지난 시즌 퓨처스리그 순위 (futures.ts, 결산 때). 오프시즌 순위 화면 */
+  lastFutures?: { year: number; teams: { team: number; g: number; w: number; l: number; rs: number; ra: number }[] };
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
