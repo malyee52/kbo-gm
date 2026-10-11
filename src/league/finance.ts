@@ -82,17 +82,18 @@ export const MARKETING_SPONSOR = [1, 1.05, 1.1, 1.15];
 export const SCOUT_NOISE = [8, 6, 4, 2];
 /** 스카우트: AI 구단의 드래프트 판단 오차 배율 (난이도 오차에 곱한다) */
 export const AI_SCOUT_SCALE = [1.2, 1, 0.75, 0.5];
-/** 육성: 25세 이하 성장 폭 배율 가산, 2군 유망주 출전 몫 가산 */
+/** 육성: DEVELOP_AGE(30세) 이하 성장 폭 배율 가산, 2군 유망주 출전 몫 가산 */
 export const DEVELOP_BONUS = [0, 0.06, 0.12, 0.2];
 export const DEVELOP_SHARE = [0, 0.05, 0.1, 0.15];
-export const DEVELOP_AGE = 25;
+/** 육성 투자 효과를 받는 나이 (이하). 2026-10-11 사용자 결정으로 25세 → 30세 */
+export const DEVELOP_AGE = 30;
 /** 의료·트레이닝: 부상 확률 배율, 결장 기간 배율 */
 export const MEDICAL_RATE = [1, 0.92, 0.85, 0.78];
 export const MEDICAL_DAYS = [1, 0.93, 0.87, 0.8];
 /** 투자 효과 설명 (화면용) */
 export const INVEST_EFFECT: Record<InvestKind, string[]> = {
   scout: SCOUT_NOISE.map((n, i) => `후보 잠재력 평가 오차 ±${n}${i ? '' : ' (기본)'}`),
-  develop: DEVELOP_BONUS.map((b, i) => (i ? `25세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
+  develop: DEVELOP_BONUS.map((b, i) => (i ? `${DEVELOP_AGE}세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
   medical: MEDICAL_RATE.map((r, i) => (i ? `부상 확률 −${Math.round((1 - r) * 100)}%, 결장 기간 −${Math.round((1 - MEDICAL_DAYS[i]) * 100)}%` : '효과 없음')),
   marketing: MARKETING_FILL.map((f, i) => (i ? `관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}%` : '효과 없음')),
 };

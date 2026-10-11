@@ -142,7 +142,7 @@ npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진
 - 입대: 구단당 한 해 4명(`MILITARY_TEAM_CAP`, 강제 입대 28세는 상한 밖), 27세는 상한 안에서 먼저, 주전급(10런)은 27세 전 확률 입대 없음. 플레이어는 시즌 결과 화면의 "입대 선택" 탭에서 고르고, 결산 조작(`begin-off`의 `enlist`)에 남는다. 모두 임시값.
 - 2026년에 복무 중인 실존 선수는 그 해 기록이 없어 게임에 없다.
 - 장기 진행 기량 하락 (20년 -16~-27%)은 2026-10-11 고침 (`docs/longterm-plan.md` 7장, `reports/flow-longterm.md`): 정원을 80명으로 늘려도 그대로라 원인은 방출이 아니라 신인 잠재력이었다. 가상 신인 잠재력 배율 8 → 9(`DRAFT_POTENTIAL_SCALE`), 2군 성장 기회 0.5(`FUTURES_SHARE`, 25세 이하), 방출은 8시즌 가치·입단 2년 유예·포수 3명/투수·야수 18명 최소(`releaseOrder`), 방출 선수 시장(`releaseMarket`·`claimByUser`). 3시드 20시즌에서 2043~2045년 상위 270명 기여 합이 시작값의 -2.6~+6.2%. 남은 것: 2033~2036년 +18~27% 언덕 (시작 때 실존 유망주 잠재력이 높다).
-- **기량 하락 나이는 33세** (`DECLINE_START_AGE`, engine/params.ts, 2026-10-11 사용자 결정). 실제 기록 추정(`tools/fit_aging.ts`)은 31세였고 하락 폭(31~35세 추정값)은 그대로 2년 뒤로 옮겼다. 능력·수비·조기 노쇠·노화 특수능력이 같은 값을 쓴다. 바꾸면 `DRAFT_POTENTIAL_SCALE`을 `tools/flow_longterm.ts`로 다시 맞춘다 (31세일 때 9.5).
+- **기량 하락 나이는 35세** (`DECLINE_START_AGE`, engine/params.ts, 2026-10-11 사용자 결정으로 31 → 33 → 35). 실제 기록 추정(`tools/fit_aging.ts`)은 31세였고 하락 폭(31~35세 추정값)은 그대로 4년 뒤로 옮겼다. 능력·수비·조기 노쇠·노화 특수능력이 같은 값을 쓴다. 바꾸면 `DRAFT_POTENTIAL_SCALE`을 `tools/flow_longterm.ts`로 다시 맞춘다 (35세 8.5, 33세 9, 31세 9.5). 육성 투자 효과는 30세 이하 (`DEVELOP_AGE`).
 - 대체 선수 기준은 고정 비율(`REPL_BAT_RATIO`·`REPL_PIT_RATIO`)이다. 선수 표본으로 해마다 재면 가상 선수만 남을 때 무너진다.
 
 ### M8 과거 시대 확장

@@ -17,7 +17,7 @@ export const TRAIT_INFO: Record<Trait, { label: string; note: string; who: 'bat'
   october: { label: '가을 사나이', note: '포스트시즌 경기에서 좋아진다', who: 'both' },
   escape: { label: '위기 탈출', note: '주자가 있을 때 투구가 좋아진다', who: 'pit' },
   ironman: { label: '철인', note: '부상 확률이 낮다', who: 'both' },
-  evergreen: { label: '늦게 지는 꽃', note: '31세 이후 노화 하락이 완만하다', who: 'both' },
+  evergreen: { label: '늦게 지는 꽃', note: '기량이 떨어지는 나이(35세)부터 노화 하락이 완만하다', who: 'both' },
   stamina: { label: '에이스 체력', note: '한계 투구 수를 넘긴 뒤 피로 누적이 느리다', who: 'pit' },
   homer: { label: '안방 사나이', note: '홈 경기에서 좋아진다', who: 'both' },
   vsLeft: { label: '좌완 킬러', note: '좌투수를 상대로 타격이 좋아진다', who: 'bat' },
@@ -39,7 +39,7 @@ export interface TraitParams {
   fatigueScale: number;
   /** 철인: 부상 확률 배율 (임시값) */
   injuryScale: number;
-  /** 늦게 지는 꽃: 31세 이후 노화 하락 배율 (임시값) */
+  /** 늦게 지는 꽃: 기량 하락 나이(DECLINE_START_AGE) 이후 노화 하락 배율 (임시값) */
   agingScale: number;
 }
 
@@ -101,7 +101,7 @@ export function injuryScale(p: Pick<SimPlayer, 'traits'>, tp: TraitParams): numb
   return hasTrait(p, 'ironman') ? tp.injuryScale : 1;
 }
 
-/** 31세 이후 노화 하락 배율 */
+/** 기량 하락 나이 이후 노화 하락 배율 */
 export function agingScale(traits: readonly Trait[] | undefined, tp: TraitParams): number {
   return traits?.includes('evergreen') ? tp.agingScale : 1;
 }

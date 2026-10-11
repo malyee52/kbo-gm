@@ -28,7 +28,7 @@ import type { LeaguePlayer, LeagueState } from './types';
 import { isFuturesTeam, worldFromLeague } from './world';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
-  signingBonus, transferFeeUsd, WON_PER_USD,
+  settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
 } from './finance';
 import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
 import { estimatedBirthYear } from './create';
@@ -66,10 +66,11 @@ export const DRAFT_ROUNDS = 11;
 /**
  * 가상 신인 잠재력 식의 배율: -10 + 배율 × (-ln u)^1.2. M6에서 실제 입단 동기의 전성기 분포에 맞춘 8은 장기 진행에서
  * 주전급 기여가 20년 동안 16~27% 줄었다 (실제 전성기는 한두 시즌의 좋은 기록이라 잠재력보다 높게 잡힌다).
- * 2026-10-11 tools/flow_longterm.ts 3시드 20시즌으로 다시 맞춘 값 (8 → 9, 임시값. 기량 하락 나이 33세 기준. 31세일 때는 9.5).
+ * 2026-10-11 tools/flow_longterm.ts 3시드 20시즌으로 다시 맞춘 값 (임시값). 기량 하락 나이 35세·육성 투자 30세 이하·재정 결산 기준 8.5
+ * (2045년 상위 270명 기여 합이 시작 대비 +5~9%, 중간 정점 +25~30%). 33세일 때 9, 31세일 때 9.5.
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
  */
-const DRAFT_POTENTIAL_SCALE = 9;
+const DRAFT_POTENTIAL_SCALE = 8.5;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
 /** 외국인 후보 인원 (임시값) */
@@ -272,6 +273,11 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   for (const a of season.absences) (absences.get(a.idx) ?? absences.set(a.idx, []).get(a.idx)!).push(a);
   const runsAt = (p: LeaguePlayer, y: number) => currentRuns(asSim(p, world.league, y), ctxNow);
   ensureMilitary(league);
+  // 재정 결산: 게임 세션은 가을야구·트레이드를 넣어 먼저 결산한다. 아직이면(장기 진행 도구 등) 기본값으로 (finance.ts)
+  if (!league.finance?.some((f) => f.history.some((h) => h.year === year))) {
+    const standings = season.standings();
+    settleSeason({ league, world, season, standings, champion: null, postseasonDepth: () => 0, trust: () => 50 });
+  }
   // 시상 (history에 이 시즌이 들어가기 전에: 신인 자격 판정)
   league.awards = [...(league.awards ?? []).filter((a) => a.year !== year), seasonAwards(world, season, league, store)];
   for (const p of league.players) {
@@ -316,7 +322,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       ? pt.bf / ((sp.pit!.startShare >= 0.5 ? 650 : 280))
       : b.pa / 550;
     // 2군 유망주는 퓨처스리그에서 뛴다: 1군 기회가 적어도 FUTURES_SHARE만큼은 본다 (복무 중인 선수의 0.4와 같은 취지)
-    // 육성 투자: 2군 유망주 출전 몫과 25세 이하 성장 폭 (finance.ts)
+    // 육성 투자: 2군 유망주 출전 몫과 30세 이하 성장 폭 (finance.ts)
     const dev = activeLevel(league, sp.teamIdx, 'develop');
     const share = ageIn(p, year + 1) <= FUTURES_AGE ? Math.max(firstTeam, FUTURES_SHARE + DEVELOP_SHARE[dev]) : firstTeam;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);

@@ -1,6 +1,7 @@
 // 숨겨진 특수능력 (2026-10-08): 데이터 키, 엔진 효과, 숨김(화면·AI·저장에 나오지 않음).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { DECLINE_START_AGE } from '../src/engine';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import {
@@ -73,10 +74,11 @@ describe('엔진 효과', () => {
     expect(traitEdge(b, p, SIT, tp)).toBeCloseTo(-tp.homerEdge);
   });
 
-  it('늦게 지는 꽃은 31세 이후 하락만 줄이고 성장은 그대로 둔다', () => {
+  it('늦게 지는 꽃은 기량 하락 나이 이후 하락만 줄이고 성장은 그대로 둔다', () => {
     const rng = () => new Rng('aging');
-    const old = growthRuns(34, 20, 20, 1, rng(), false);
-    const oldEver = growthRuns(34, 20, 20, 1, rng(), false, 0.6);
+    const age = DECLINE_START_AGE + 1;
+    const old = growthRuns(age, 20, 20, 1, rng(), false);
+    const oldEver = growthRuns(age, 20, 20, 1, rng(), false, 0.6);
     expect(oldEver).toBeGreaterThan(old);
     const young = growthRuns(23, 5, 25, 1, rng(), false);
     const youngEver = growthRuns(23, 5, 25, 1, rng(), false, 0.6);
