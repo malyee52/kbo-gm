@@ -376,3 +376,14 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
   .save-item { grid-template-columns: 1fr; }
   .save-item .r-actions { grid-row: auto; justify-content: flex-start; }
 }
+
+/* 무작위 이벤트 (EventDialog) */
+.event-panel { border-left: 4px solid var(--accent); margin-bottom: 14px; }
+.event-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; margin: 10px 0 6px; }
+.event-choices button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 10px 12px; }
+
+/* 역사 시나리오 */
+.scenario-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 10px; }
+.scenario-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.scenario-card h3 { margin: 0; }
+.scenario-card button { margin-top: auto; align-self: flex-start; }

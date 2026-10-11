@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/owner';
 import type { BrowserStore } from '../data/loadBrowser';
+import { SCENARIOS, scenarioById } from '../league/scenarios';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
@@ -50,6 +51,23 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
       await nextFrame();
       onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty }));
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  /** 역사 시나리오로 시작: 그 해 그 구단 */
+  const startScenario = async (id: string) => {
+    const sc = scenarioById(id)!;
+    setBusy(`「${sc.title}」 시나리오를 준비하는 중입니다`);
+    setError(null);
+    try {
+      await store.ensureAll();
+      const t = store.season(sc.year)!.teams.findIndex((x) => x.name === sc.team);
+      if (t < 0) throw new Error(`${sc.year}년 자료에서 ${sc.team}을 찾을 수 없습니다`);
+      await nextFrame();
+      onStart(GameSession.create(store, { year: sc.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, scenario: sc.id }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -151,6 +169,22 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <button type="button" onClick={() => void start()} disabled={teamIdx === null || !seed.trim() || !!busy}>
             {teamIdx === null ? '구단을 고르세요' : `${current?.teams[teamIdx]?.name ?? ''} 단장으로 시작`}
           </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>역사 시나리오 <span className="muted small">구단별 아픈 손가락</span></h2>
+        <p className="muted small">실제로 우승 문턱에서 멈춘 시즌의 개막에서 그 구단 단장으로 시작합니다. 목표는 그 해 한국시리즈 우승입니다. 위의 난이도·시드를 그대로 씁니다.</p>
+        <div className="scenario-grid">
+          {SCENARIOS.map((sc) => (
+            <div key={sc.id} className="scenario-card">
+              <div className="row-between"><strong>{sc.year} {sc.team}</strong><span className="muted small">목표: 우승</span></div>
+              <h3>{sc.title}</h3>
+              <p className="small">{sc.intro}</p>
+              <details className="small muted"><summary>실제로는</summary>{sc.real}</details>
+              <button type="button" onClick={() => void startScenario(sc.id)} disabled={!!busy}>이 시나리오로 시작</button>
+            </div>
+          ))}
         </div>
       </section>
 

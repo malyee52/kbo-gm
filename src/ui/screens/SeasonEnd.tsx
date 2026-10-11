@@ -1,4 +1,5 @@
 // 시즌 종료 결과: 최종 순위, 우리 구단 성적과 주요 선수, 부문별 1위. 입대 선택은 따로 탭.
+import { ScenarioBanner } from '../ScenarioBanner';
 import { useState } from 'react';
 import type { BatLine, PitLine } from '../../engine';
 import { winPct } from '../../engine';
@@ -32,6 +33,7 @@ export function SeasonEnd() {
     );
   }
 
+  const scenarioBanner = <ScenarioBanner />;
   const verdict = rank === 1 ? '정규시즌 1위' : rank <= cut ? `포스트시즌 진출권 (${rank}위)` : rank === order.length ? '최하위' : `${rank}위, 포스트시즌 진출 실패`;
   const org = session.team.org;
   // 타석이 적은 선수는 OPS를 깎아서 줄 세운다 (300타석 미만 비례)
@@ -65,6 +67,7 @@ export function SeasonEnd() {
   return (
     <div className="stack">
       <h1>{year} 정규시즌 결과</h1>
+      {scenarioBanner}
       {tabs}
       <section className="cards">
         <div className="card hero">

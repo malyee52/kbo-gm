@@ -1,4 +1,5 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
+import { ScenarioBanner } from '../ScenarioBanner';
 import { FinancePanel } from './Finance';
 import { capPayroll, salaryCap } from '../../league/salary';
 import {
@@ -36,6 +37,7 @@ export function Club() {
         </div>
       )}
 
+      <ScenarioBanner />
       <FinancePanel />
 
       <section className="cards">

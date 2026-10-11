@@ -1,4 +1,5 @@
 // 홈: 우리 구단 요약, 다음 경기, 최근 결과, 알림, 순위 요약.
+import { ScenarioBanner } from '../ScenarioBanner';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
@@ -47,6 +48,7 @@ export function Home() {
             <div className="stat"><span className="stat-label">최근 10경기</span><span className="stat-value">{form.w}-{form.l}{form.t ? `-${form.t}` : ''}{form.streak && <small>{form.streak}</small>}</span></div>
             <div className="stat"><span className="stat-label">득점 / 실점</span><span className="stat-value">{rec.rs}<small>/ {rec.ra}</small></span></div>
           </div>
+          <ScenarioBanner />
           {session.owner.goal?.year === year && (
             <p className="small">
               구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong>{won(session.cashNow())}</strong>{' '}

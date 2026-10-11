@@ -16,6 +16,8 @@ import * as Off from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
+import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { judgeScenario, scenarioById } from '../league/scenarios';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
@@ -37,6 +39,8 @@ export interface NewGameOptions {
   seed: string;
   /** 난이도 (AI의 잠재력 평가 오차, M7). 없으면 보통 */
   difficulty?: Difficulty;
+  /** 역사 시나리오 id (league/scenarios.ts). 있으면 그 해 한국시리즈 우승이 목표 */
+  scenario?: string;
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -48,7 +52,7 @@ export interface ReproInfo {
   actions: GameAction[];
 }
 
-export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason' | 'plan' | 'owner';
+export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason' | 'plan' | 'owner' | 'event';
 
 /** 기용표를 선수 id로 적은 것 (조작 기록용) */
 export interface PlanIds {
@@ -77,6 +81,7 @@ export type GameAction =
   | { year?: number; day: number; type: 'entry'; ids: string[] | null }
   | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number }
   | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
+  | { year: number; day: number; type: 'event'; choice: number }
   /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장) */
   | { year: number; type: 'begin-off'; enlist?: string[] }
   | { year: number; type: 'fa-offer'; id: string; salary: number; years: number }
@@ -215,10 +220,17 @@ export class GameSession {
     const g = new GameSession(store, params, opts.teamIdx, league, world, season);
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
+    const sc = opts.scenario ? scenarioById(opts.scenario) : undefined;
+    if (sc) {
+      league.scenario = { id: sc.id, year: sc.year, team: opts.teamIdx };
+      g.addNews(0, 'season', `역사 시나리오 「${sc.title}」: ${sc.intro} 목표는 ${sc.year} 한국시리즈 우승입니다.`);
+    }
     for (const e of league.expansions ?? []) {
       g.addNews(0, 'season', `${league.teams[e.team].name}: 창단 구단으로 ${world.year} 시즌은 퓨처스리그에서 뛰고 ${e.firstYear}년 1군에 들어옵니다.`);
     }
     g.setSeasonGoal();
+    // 시나리오: 구단주 목표도 한국시리즈 우승
+    if (sc && g.owner.goal) g.owner.goal = { ...g.owner.goal, kind: 'champion' };
     return g;
   }
 
@@ -310,6 +322,7 @@ export class GameSession {
     const idxs = (ids: string[]) => ids.map((id) => byId.get(id)).filter((x): x is number => x !== undefined);
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
+    else if (a.type === 'event') this.applyEventChoice(a.choice);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0);
     this.actions.push(clone(a));
   }
@@ -349,7 +362,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal' },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}) },
       at: { year: this.year, day: this.day, phase: this.phase },
       actions: clone(this.actions),
     };
@@ -587,11 +600,20 @@ export class GameSession {
   // ---- 시즌 진행
 
   /** days일 진행한다 (시즌이 끝나면 멈춤). 실제로 진행한 날 수를 돌려준다 */
-  advance(days: number): number {
+  /**
+   * days일 진행한다. stopOnEvent면 이벤트가 생긴 날 멈추고, 답을 기다리는 이벤트가 있으면 진행하지 않는다 (화면).
+   * 아니면(테스트·장기 진행) 답을 기다리는 이벤트를 첫 번째 선택지로 자동 처리하고 계속 간다 (events.ts).
+   */
+  advance(days: number, stopOnEvent = false): number {
     let n = 0;
     while (n < days && this.phase === 'season' && !this.season.done) {
+      if (this.league.events?.pending) {
+        if (stopOnEvent) break;
+        this.applyEventChoice(0, true);
+      }
       this.stepDay();
       n++;
+      if (stopOnEvent && this.league.events?.pending) break;
     }
     return n;
   }
@@ -646,7 +668,65 @@ export class GameSession {
       const t = s.teams[this.teamIdx];
       this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rank}위 (${t.w}승 ${t.l}패 ${t.t}무).`);
       this.openPostseason();
+    } else {
+      // 무작위 이벤트 (정규시즌 중, events.ts)
+      const ev = rollEvent(ensureEvents(this.league), this.eventContext());
+      if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
     }
+  }
+
+  // ---- 무작위 이벤트 (events.ts)
+
+  /** 답을 기다리는 이벤트 */
+  get pendingEvent(): PendingEvent | null {
+    return this.league.events?.pending ?? null;
+  }
+
+  /** 이벤트 효과를 적용할 도구 */
+  eventContext(): EventContext {
+    const L = this.league;
+    const s = this.season;
+    const st = s.standings();
+    const rec = s.teams[this.teamIdx];
+    const day = s.day;
+    const year = this.world.year;
+    const team = this.teamIdx;
+    return {
+      league: L, team, teamName: this.team.name, year, day, seasonDays: s.schedule.length,
+      rank: st.indexOf(team) + 1, teams: st.length,
+      winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
+      cash: this.cashNow(),
+      roster: L.players.filter((p) => p.team === team),
+      addCash: (amount, note) => {
+        if (!amount) return;
+        L.ledger.push(amount > 0
+          ? { year, from: -1, to: team, amount, note, kind: 'event' }
+          : { year, from: team, to: -1, amount: -amount, note, kind: 'event' });
+      },
+      addTrust: (d) => { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + d)); },
+      addFill: (fill, days, note) => { ensureEvents(L).buffs.push({ team, year, from: day, until: day + days, fill, note }); },
+    };
+  }
+
+  /** 이벤트에 답한다 (화면). 조작 기록에 남는다 */
+  answerEvent(choice: number): { ok: boolean; message: string } {
+    const ev = this.pendingEvent;
+    if (!ev) return { ok: false, message: '답할 이벤트가 없습니다.' };
+    const def = eventDef(ev.id)!;
+    if (!def.choices[choice]) return { ok: false, message: '없는 선택지입니다.' };
+    const result = this.applyEventChoice(choice);
+    this.actions.push({ year: this.year, day: this.day, type: 'event', choice });
+    return { ok: true, message: result };
+  }
+
+  /** auto: 답하지 않고 진행해 첫 번째 선택지로 자동 처리 (조작 기록에 남기지 않는다. 다시 돌려도 같은 자리에서 자동 처리된다) */
+  private applyEventChoice(choice: number, auto = false): string {
+    const ev = this.pendingEvent;
+    if (!ev) return '';
+    const def = eventDef(ev.id)!;
+    const result = resolveEvent(ensureEvents(this.league), this.eventContext(), choice);
+    this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
+    return result;
   }
 
   private addNews(day: number, kind: NewsKind, text: string): void {
@@ -896,6 +976,15 @@ export class GameSession {
         this.enlistChoice = null;
         L.lastSeason!.postseason = ps;
         this.evaluateOwner(standings, ps, prevStandings, fin[this.teamIdx]);
+        // 역사 시나리오 판정 (scenarios.ts)
+        const was = L.scenario?.result;
+        const sc = judgeScenario(L, this.year, ps.champion ?? null);
+        const def = sc ? scenarioById(sc.id) : undefined;
+        if (sc && def && !was && sc.result) {
+          this.news.push({ year: this.year, day: -1, kind: 'owner', text: sc.result === 'success'
+            ? `역사 시나리오 「${def.title}」 성공! ${def.year} 한국시리즈 우승으로 역사를 바꿨습니다. (${def.real})`
+            : `역사 시나리오 「${def.title}」 실패. ${def.real} 이 게임은 그대로 이어서 할 수 있습니다.` });
+        }
         this.phase = 'offseason';
         this.valueCtx = null;
         this.offVersion++;
