@@ -239,9 +239,15 @@ export function Roster() {
                         {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
                         {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
                         <td>
-                          <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage}>
-                            {inFirst ? '2군으로' : '1군으로'}
-                          </button>
+                          {(() => {
+                            const rd = !inFirst && view.manual ? session.reregisterDay(p) : null;
+                            return (
+                              <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage || rd !== null}
+                                title={rd !== null ? `말소 뒤 10일 규정: ${shortDate(session.world.year, rd)}부터 등록 가능` : inFirst ? '1군에서 말소하면 10일 동안 다시 등록할 수 없습니다' : undefined}>
+                                {rd !== null ? `${shortDate(session.world.year, rd)}부터` : inFirst ? '2군으로' : '1군으로'}
+                              </button>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

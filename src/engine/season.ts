@@ -183,6 +183,8 @@ export interface SeasonSave {
   transfers?: [number, number, number][];
   /** 선수별 1군 등록 경기일 수 (FA 연차 산정용) */
   activeDays?: number[];
+  /** 직접 관리 1군에서 말소된 날 (선수 색인별, 없으면 −1). 2026-10-11 추가 */
+  demotedDay?: number[];
   /** 부상·이탈 기록 (M6) */
   absences?: Absence[];
   /** 이탈 이벤트 난수 위치 (M6) */
@@ -238,6 +240,8 @@ export class Season {
   readonly transfers: [number, number, number][] = [];
   /** 선수별로 1군에 등록돼 있던 경기일 수 (자기 팀 경기가 있는 날만 센다) */
   readonly activeDays: Int32Array;
+  /** 직접 관리 1군에서 마지막으로 말소된 날 (−1 = 없음) */
+  readonly demotedDay: Int32Array;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
   constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
@@ -249,6 +253,7 @@ export class Season {
     const n = world.players.length;
     this.states = newPlayerStates(n);
     this.activeDays = new Int32Array(n);
+    this.demotedDay = new Int32Array(n).fill(-1);
     this.bat = Array.from({ length: n }, emptyBatLine);
     this.pit = Array.from({ length: n }, emptyPitLine);
     this.teams = world.teams.map(emptyTeamRecord);
@@ -303,7 +308,10 @@ export class Season {
   /** 플레이어가 정한 1군 명단을 바꾼다. null이면 AI에게 맡긴다 */
   setManualEntry(teamIdx: number, idxs: Iterable<number> | null): void {
     const ts = this.teamSeasons[teamIdx];
-    ts.manual = idxs ? new Set(idxs) : null;
+    const next = idxs ? new Set(idxs) : null;
+    // 직접 관리하는 1군에서 빠진 선수는 말소한 날을 남긴다 (10일 재등록 제한, game/session.ts)
+    if (ts.manual && next) for (const i of ts.manual) if (!next.has(i)) this.demotedDay[i] = this.day;
+    ts.manual = next;
     ts.dirty = true;
   }
 
@@ -514,6 +522,7 @@ export class Season {
       fixedAbsence: [...this.fixedAbsence.entries()],
       transfers: this.transfers.map((t) => [...t] as [number, number, number]),
       activeDays: Array.from(this.activeDays),
+      demotedDay: Array.from(this.demotedDay),
       absences: this.absences.map((a) => ({ ...a })),
       rngEvents: this.eventRng.state(),
       plans: this.teamSeasons.map((ts) => (ts.plan ? structuredClone(ts.plan) : null)),
@@ -539,6 +548,7 @@ export class Season {
     s.absences.push(...(save.absences ?? []).map((a) => ({ ...a })));
     s.ctx.rng = Rng.fromState(root.fork('games').seed, save.rngGames);
     if (save.activeDays) s.activeDays.set(save.activeDays);
+    if (save.demotedDay) s.demotedDay.set(save.demotedDay);
     s.states.absentUntil.set(save.absentUntil);
     s.states.fatigue.set(save.fatigue);
     s.states.fatigueDay.set(save.fatigueDay);
