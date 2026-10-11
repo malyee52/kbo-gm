@@ -968,7 +968,8 @@ function enterFa(league: LeagueState, off: OffseasonState, store: Store, params:
 }
 
 /** 외국인·드래프트 지명 순서: 지난 시즌 순위 역순. 지난 시즌에 없던 구단(창단)은 맨 앞 */
-function pickOrder(league: LeagueState): number[] {
+/** 다음 드래프트 라운드 순서 (지난 시즌 역순, 순위가 없는 구단이 맨 앞). 캡 제재·창단 특례는 빼고 본 기본 순서 */
+export function pickOrder(league: LeagueState): number[] {
   const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
   const missing = league.teams.map((_, i) => i).filter((i) => !st.includes(i));
   return [...missing, ...[...st].reverse()];

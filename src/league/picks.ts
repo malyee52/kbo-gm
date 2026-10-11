@@ -56,6 +56,31 @@ export function ownedPicks(league: Pick<LeagueState, 'pickOwners'>, team: number
   return out;
 }
 
+/** 한 드래프트·라운드에서 그 구단의 지명권 상황 (오프시즌 화면 "우리 지명권") */
+export interface PickLedgerRow {
+  draft: number;
+  round: number;
+  /** 자기 지명권을 아직 가지고 있나 */
+  own: boolean;
+  /** 자기 지명권을 넘겨받은 구단 (own이 false일 때) */
+  givenTo: number | null;
+  /** 받아 온 다른 구단의 지명권 (원래 구단 색인) */
+  extra: number[];
+}
+
+/** 그 구단의 라운드 지명권 장부 (트레이드 대상 라운드 1~PICK_MAX_ROUND) */
+export function pickLedger(league: Pick<LeagueState, 'pickOwners'>, team: number, drafts: number[], teams: number[]): PickLedgerRow[] {
+  const out: PickLedgerRow[] = [];
+  for (const draft of drafts) {
+    for (let round = 1; round <= PICK_MAX_ROUND; round++) {
+      const owner = pickOwner(league, { draft, round, from: team });
+      const extra = teams.filter((t) => t !== team && pickOwner(league, { draft, round, from: t }) === team);
+      out.push({ draft, round, own: owner === team, givenTo: owner === team ? null : owner, extra });
+    }
+  }
+  return out;
+}
+
 /** 트레이드 가능한 지명권인가 (시즌 year 중) */
 export function tradablePick(p: DraftPick, year: number): boolean {
   return Number.isInteger(p.round) && p.round >= 1 && p.round <= PICK_MAX_ROUND && p.draft >= year + 1 && p.draft <= year + PICK_YEARS_AHEAD;
