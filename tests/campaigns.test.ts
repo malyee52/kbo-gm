@@ -1,4 +1,4 @@
-// 기획안 도전 (league/campaigns.ts, 2026-10-12): 시즌 도전 30개 + 장기 캠페인 10개, 단계 판정, 자체 육성, 예산.
+// 기획안 도전 (league/campaigns.ts, 2026-10-12): 시즌 도전 30개 + 장기 캠페인 10개 + 클래식 캠페인 10개, 단계 판정, 자체 육성, 예산, 시놉시스.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
@@ -6,6 +6,7 @@ import { GameSession } from '../src/game/session';
 import { condStatus, PLAN_CHALLENGES, stageStatus, type Cond, type SeasonMark } from '../src/league/campaigns';
 import { challengeById, CHALLENGES, planTeam } from '../src/league/challenges';
 import { spendLimit } from '../src/league/owner';
+import { PLAN_SYNOPSIS } from '../src/league/synopses';
 import { capPayroll } from '../src/league/salary';
 
 let store: DataStore;
@@ -20,9 +21,10 @@ const start = (id: string, seed = `cp-${id}`) => {
 };
 
 describe('기획안 도전 목록', () => {
-  it('하·중·상 각 10개와 장기 캠페인 10개, 모든 시작 구단이 그 해 자료에 있다', () => {
-    expect(PLAN_CHALLENGES).toHaveLength(40);
-    for (const t of ['하', '중', '상', '장기']) expect(PLAN_CHALLENGES.filter((p) => p.tier === t)).toHaveLength(10);
+  it('하·중·상 각 10개와 장기·클래식 캠페인 10개씩, 모든 시작 구단이 그 해 자료에 있고 시놉시스가 있다', () => {
+    expect(PLAN_CHALLENGES).toHaveLength(50);
+    for (const p of PLAN_CHALLENGES) expect(PLAN_SYNOPSIS[p.no]?.text.length, p.no).toBeGreaterThan(80);
+    for (const t of ['하', '중', '상', '장기', '클래식']) expect(PLAN_CHALLENGES.filter((p) => p.tier === t)).toHaveLength(10);
     // 같은 난이도 안에서 구단이 겹치지 않는다
     for (const t of ['하', '중', '상']) expect(new Set(PLAN_CHALLENGES.filter((p) => p.tier === t).map((p) => p.franchise)).size).toBe(10);
     for (const c of CHALLENGES.filter((x) => x.plan)) expect(planTeam(store, c), c.id).not.toBeNull();
@@ -30,8 +32,9 @@ describe('기획안 도전 목록', () => {
   });
 
   it('배경의 승수는 시즌 자료와 같다', () => {
+    // 클래식 캠페인 배경에는 선수 승수(장명부 30승 등)가 섞여 있어 '정규시즌 N승'만 본다
     for (const p of PLAN_CHALLENGES) {
-      const m = p.background.match(/(\d+)승/);
+      const m = p.tier === '클래식' ? p.background.match(/정규시즌 (\d+)승/) : p.background.match(/(\d+)승/);
       if (!m) continue;
       expect(store.season(p.year)!.teams.find((t) => t.franchise === p.franchise)!.w, `${p.no}`).toBe(Number(m[1]));
     }
@@ -39,6 +42,15 @@ describe('기획안 도전 목록', () => {
 });
 
 describe('조건 판정', () => {
+  it('클래식: 전·후기 1위(반기 1위)와 승수 조건', () => {
+    const half: Cond = { t: 'in', year: 1983, m: { k: 'half' } };
+    expect(condStatus(half, [mk(1983, { half: true })], 1983)).toBe(1);
+    expect(condStatus(half, [mk(1983)], 1983)).toBe(2);
+    const h06: Cond = { t: 'same', from: 1992, to: 1992, ms: [{ k: 'wins', n: 80 }, { k: 'champ' }] };
+    expect(condStatus(h06, [mk(1992, { w: 81, champ: true })], 1992)).toBe(1);
+    expect(condStatus(h06, [mk(1992, { w: 79, champ: true })], 1992)).toBe(2);
+  });
+
   it('in·by: 그 해 / 그 해까지, 지나면 실패', () => {
     const c: Cond = { t: 'by', year: 2009, m: { k: 'ps' } };
     expect(condStatus(c, [mk(2007)], 2007)).toBe(0);
@@ -120,5 +132,19 @@ describe('게임에서', () => {
     g.beginOffseason();
     const rep = GameSession.replay(store, g.reproInfo().opts, g.actions, undefined, FAST);
     expect(rep.league.challenge).toEqual(g.league.challenge);
+  }, 240_000);
+});
+
+describe('클래식 캠페인', () => {
+  it('H01 1983 삼미: 그 시절 구단으로 시작하고, 결산 때 반기 1위를 판정한다', () => {
+    const g = start('plan-h01');
+    expect(g.year).toBe(1983);
+    expect(g.team.name).toBe('삼미');
+    g.advance(100000);
+    g.beginOffseason();
+    const m = g.league.challenge!.marks![0];
+    expect(typeof m.half).toBe('boolean');
+    expect(m.w).toBeGreaterThan(0);
+    expect(g.league.challenge!.result).toBe(m.half ? 'success' : 'fail');
   }, 240_000);
 });

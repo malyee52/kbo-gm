@@ -455,7 +455,32 @@ export class GameSession {
     return {
       year: this.year, rank: standings.indexOf(team) + 1, teams: standings.length, pct: r && r.w + r.l ? r.w / (r.w + r.l) : 0,
       ps: ps.seeds.includes(team), ks: ps.champion === team || ps.runnerUp === team, champ: ps.champion === team, home,
+      w: r?.w ?? 0, half: this.halfWinner(team),
     };
+  }
+
+  /**
+   * 전기 또는 후기 1위인가 (클래식 캠페인, 1982~1988년 전·후기리그). 게임에는 전·후기 제도가 없어
+   * 정규시즌 일정을 날짜 절반으로 나눈 반기 승률(무승부 제외)로 본다. 같은 승률이면 함께 1위
+   */
+  private halfWinner(team: number): boolean {
+    const mid = Math.floor(this.season.schedule.length / 2);
+    const n = this.season.teams.length;
+    for (const first of [true, false]) {
+      const w = new Array(n).fill(0);
+      const l = new Array(n).fill(0);
+      for (const g of this.season.log) {
+        if ((g.day < mid) !== first || g.homeRuns === g.awayRuns) continue;
+        const win = g.homeRuns > g.awayRuns ? g.home : g.away;
+        const lose = win === g.home ? g.away : g.home;
+        w[win]++;
+        l[lose]++;
+      }
+      const pct = (t: number) => (w[t] + l[t] ? w[t] / (w[t] + l[t]) : 0);
+      const best = Math.max(...Array.from({ length: n }, (_, t) => pct(t)));
+      if (w[team] + l[team] > 0 && pct(team) >= best - 1e-9) return true;
+    }
+    return false;
   }
 
   /** 감독 작전 배율을 이번 시즌 팀에 건다 (managers.ts). 감독은 오프시즌에만 바뀌므로 시즌을 만들 때 한 번 */
