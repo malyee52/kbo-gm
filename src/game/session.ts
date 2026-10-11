@@ -20,7 +20,9 @@ import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, typ
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
+  seasonBests,
 } from '../league/history';
+import { addArticle, crossed, josa, MILESTONES, STREAK_FROM } from '../league/articles';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
@@ -158,6 +160,20 @@ export interface GameSaveV2 {
 
 export type GameSave = GameSaveV1 | GameSaveV2;
 
+/** 기사 판정용 (세션 메모리) */
+type Tot = { h: number; hr: number; w: number; sv: number; so: number };
+interface ArticleState {
+  year: number;
+  base: Map<string, Tot>;
+  prev: Map<string, Tot>;
+  records: Record<string, number>;
+  broken: Set<string>;
+  streak: number[];
+  logIdx: number;
+}
+const SEASON_KEYS = ['hr', 'h', 'rbi', 'sb', 'w', 'sv', 'so'];
+const SEASON_LABEL: Record<string, string> = { hr: '홈런', h: '안타', rbi: '타점', sb: '도루', w: '승', sv: '세이브', so: '탈삼진' };
+
 export interface EntryCheck {
   /** 지켜야 하는 규정 위반. 있으면 바꾸지 않는다 */
   errors: string[];
@@ -196,6 +212,8 @@ export class GameSession {
   /** 시즌이 끝난 뒤 플레이어가 고른 입대 명단 (결산 때 쓴다). null이면 추천대로 */
   enlistChoice: string[] | null = null;
   private lastCallUps = new Set<number>();
+  /** 기사 판정용 기준값 (메모리에만, 불러오기·재현 때 같은 규칙으로 다시 만든다) */
+  private articleState: ArticleState | null = null;
   private valueCtx: ValueContext | null = null;
   /** 오프시즌 화면용 가치 계산 (조작할 때마다 다시 만든다) */
   private viewCache: { version: number; view: Off.LeagueView } | null = null;
@@ -673,6 +691,7 @@ export class GameSession {
       this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rank}위 (${t.w}승 ${t.l}패 ${t.t}무).`);
       this.openPostseason();
     } else {
+      this.dailyArticles();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
       if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
@@ -980,6 +999,20 @@ export class GameSession {
         this.enlistChoice = null;
         L.lastSeason!.postseason = ps;
         this.evaluateOwner(standings, ps, prevStandings, fin[this.teamIdx]);
+        // 기사: 우승·MVP (articles.ts)
+        {
+          const champ = ps.champion ?? null;
+          if (champ !== null) {
+            const t = this.world.teams[champ];
+            addArticle(L, { year: this.year, day: -1, kind: 'title', franchise: t.franchise, title: `${t.name}, ${this.year} 한국시리즈 우승`,
+              body: `${josa(t.name, '이', '가')} 한국시리즈에서 ${josa(this.world.teams[ps.runnerUp].name, '을', '를')} 꺾고 ${this.year} 시즌 정상에 올랐다.` });
+          }
+          const aw = L.awards?.find((a) => a.year === this.year);
+          if (aw?.mvp) {
+            const t = this.world.teams[aw.mvp.team];
+            addArticle(L, { year: this.year, day: -1, kind: 'award', franchise: t?.franchise, title: `${this.year} MVP ${aw.mvp.name}`, body: `${t?.name ?? ''} ${aw.mvp.name}: ${aw.mvp.line}.` });
+          }
+        }
         // 연표 (history.ts)
         recordYear(L, this.year, this.world.teams, this.season.teams, standings, ps.champion ?? null, ps.runnerUp ?? null);
         recordSeasonBests(L, this.year, this.world.gamesPerTeam, this.world.players.map((p) => ({
@@ -995,6 +1028,9 @@ export class GameSession {
           this.news.push({ year: this.year, day: -1, kind: 'owner', text: sc.result === 'success'
             ? `역사 시나리오 「${def.title}」 성공! ${def.year} 한국시리즈 우승으로 역사를 바꿨습니다. (${def.real})`
             : `역사 시나리오 「${def.title}」 실패. ${def.real} 이 게임은 그대로 이어서 할 수 있습니다.` });
+          addArticle(L, { year: this.year, day: -1, kind: 'scenario', franchise: this.team.franchise,
+            title: `「${def.title}」 ${sc.result === 'success' ? '성공' : '실패'}`,
+            body: sc.result === 'success' ? `${josa(this.team.name, '이', '가')} ${def.year} 한국시리즈 우승으로 역사를 바꿨다. ${def.real}` : `${def.real}` });
         }
         this.phase = 'offseason';
         this.valueCtx = null;
@@ -1157,6 +1193,90 @@ export class GameSession {
     }
   }
 
+  // ---- 기사 (articles.ts)
+
+  /** 기사 판정 기준값: 시즌 시작 통산, 지금까지 본 통산, 역대 시즌 최고, 연승·연패 */
+  private articleBase(): ArticleState {
+    const year = this.world.year;
+    if (this.articleState?.year === year) return this.articleState;
+    const all = careers(this.league, this.store);
+    const base = new Map<string, Tot>();
+    for (const p of this.world.players) {
+      const c = all.get(p.id);
+      base.set(p.id, c ? { h: c.bat.h, hr: c.bat.hr, w: c.pit.w, sv: c.pit.sv, so: c.pit.so } : { h: 0, hr: 0, w: 0, sv: 0, so: 0 });
+    }
+    const records: Record<string, number> = {};
+    for (const k of SEASON_KEYS) records[k] = seasonBests(this.league, this.store, k, 1)[0]?.value ?? 0;
+    const st: ArticleState = { year, base, prev: new Map(), records, broken: new Set(), streak: this.world.teams.map(() => 0), logIdx: 0 };
+    // 지금까지(불러오기·재현) 이미 지난 일은 기사를 다시 내지 않는다
+    for (const p of this.world.players) st.prev.set(p.id, this.totalNow(st, p.idx, p.id));
+    for (const k of SEASON_KEYS) if (this.world.players.some((p) => this.seasonValue(k, p.idx) > records[k])) st.broken.add(k);
+    this.advanceStreaks(st, false);
+    this.articleState = st;
+    return st;
+  }
+
+  private totalNow(st: ArticleState, idx: number, id: string): Tot {
+    const b = st.base.get(id) ?? { h: 0, hr: 0, w: 0, sv: 0, so: 0 };
+    const bat = this.season.bat[idx];
+    const pit = this.season.pit[idx];
+    return { h: b.h + bat.h, hr: b.hr + bat.hr, w: b.w + pit.w, sv: b.sv + pit.sv, so: b.so + pit.so };
+  }
+
+  private seasonValue(k: string, idx: number): number {
+    const bat = this.season.bat[idx];
+    const pit = this.season.pit[idx];
+    return k === 'hr' ? bat.hr : k === 'h' ? bat.h : k === 'rbi' ? bat.rbi : k === 'sb' ? bat.sb : k === 'w' ? pit.w : k === 'sv' ? pit.sv : pit.so;
+  }
+
+  /** 경기 기록에서 연승·연패를 따라가고, announce면 기준을 넘을 때 기사를 낸다 */
+  private advanceStreaks(st: ArticleState, announce: boolean): void {
+    const log = this.season.log;
+    for (; st.logIdx < log.length; st.logIdx++) {
+      const g = log[st.logIdx];
+      const res: [number, number][] = g.homeRuns === g.awayRuns ? [[g.home, 0], [g.away, 0]] : g.homeRuns > g.awayRuns ? [[g.home, 1], [g.away, -1]] : [[g.home, -1], [g.away, 1]];
+      for (const [t, r] of res) {
+        const s0 = st.streak[t];
+        st.streak[t] = r === 0 ? 0 : Math.sign(s0) === r ? s0 + r : r;
+        const n = Math.abs(st.streak[t]);
+        if (announce && r !== 0 && n >= STREAK_FROM && (n - STREAK_FROM) % 2 === 0) {
+          const team = this.world.teams[t];
+          addArticle(this.league, { year: this.year, day: g.day, kind: 'streak', franchise: team.franchise,
+            title: `${team.name} ${n}${r > 0 ? '연승' : '연패'}`, body: `${josa(team.name, '이', '가')} ${formatDate(this.year, g.day)} 경기까지 ${josa(`${n}${r > 0 ? '연승' : '연패'}`, '을', '를')} 기록했다.` });
+        }
+      }
+    }
+  }
+
+  /** 하루 경기 뒤 기사: 통산 마일스톤, 시즌 신기록, 연승·연패 */
+  private dailyArticles(): void {
+    const st = this.articleBase();
+    const day = this.season.day - 1;
+    const date = formatDate(this.year, day);
+    for (const p of this.world.players) {
+      const now = this.totalNow(st, p.idx, p.id);
+      const prev = st.prev.get(p.id) ?? now;
+      const team = this.world.teams[p.teamIdx];
+      for (const m of MILESTONES) {
+        for (const t of crossed(prev[m.key], now[m.key], m.every, m.from)) {
+          addArticle(this.league, { year: this.year, day, kind: 'milestone', franchise: team.franchise,
+            title: `${p.name}, ${m.label} ${t.toLocaleString('ko-KR')}${m.unit}`, body: `${team.name} ${josa(p.name, '이', '가')} ${date} 경기에서 ${m.label} ${josa(`${t.toLocaleString('ko-KR')}${m.unit}`, '을', '를')} 기록했다.` });
+        }
+      }
+      st.prev.set(p.id, now);
+      for (const k of SEASON_KEYS) {
+        if (st.broken.has(k)) continue;
+        const v = this.seasonValue(k, p.idx);
+        if (v > st.records[k] && st.records[k] > 0) {
+          st.broken.add(k);
+          addArticle(this.league, { year: this.year, day, kind: 'record', franchise: team.franchise,
+            title: `${p.name}, 시즌 최다 ${SEASON_LABEL[k]} 신기록`, body: `${team.name} ${josa(p.name, '이', '가')} ${date} 경기에서 시즌 ${josa(`${v}${SEASON_LABEL[k]}`, '으로', '로')} 종전 시즌 최다(${st.records[k]})를 넘어섰다.` });
+        }
+      }
+    }
+    this.advanceStreaks(st, true);
+  }
+
   // ---- 역사: 명예의 전당, 구단 레전드, 은퇴식 (history.ts)
 
   private applyLegend(id: string): { ok: boolean; message: string } {
@@ -1177,6 +1297,7 @@ export class GameSession {
     const leftNow = new Set((L.archive ?? []).filter((a) => a.lastYear === lastYear).map((a) => a.id));
     for (const h of hallOfFame(L, all).filter((x) => leftNow.has(x.c.id))) {
       this.addNews(0, 'season', `명예의 전당 헌액: ${h.c.name} (${h.reasons.join(', ')}).`);
+      addArticle(L, { year: L.year, day: 0, kind: 'retire', franchise: undefined, title: `${h.c.name}, 명예의 전당 헌액`, body: `${h.c.firstYear}~${h.c.lastYear}년. 기준: ${h.reasons.join(', ')}.` });
     }
     // 은퇴식: 막 은퇴한 프랜차이즈 스타(farewellWorthy)가 있으면 그 구단 개막 사흘 동안 관중이 는다
     const ev = ensureEvents(L);
@@ -1189,6 +1310,7 @@ export class GameSession {
         if (t < 0) continue;
         ev.buffs.push({ team: t, year: L.year, from: 0, until: FAREWELL_DAYS, fill: FAREWELL_FILL, note: `${c.name} 은퇴식` });
         this.addNews(0, 'season', `${L.teams[t].name}, ${c.name} 은퇴식 (${n}시즌). 개막 첫 홈 경기들에 팬이 몰릴 것으로 보입니다.`);
+        addArticle(L, { year: L.year, day: 0, kind: 'retire', franchise: fr, title: `${L.teams[t].name} ${c.name} 은퇴식`, body: `${L.teams[t].name}에서 ${n}시즌을 뛴 ${josa(c.name, '이', '가')} 개막 홈 경기에서 은퇴식을 연다.` });
       }
     }
   }

@@ -6,7 +6,7 @@ import type { GameSession } from '../game/session';
 import { teamColor } from './teams';
 import { priceIndex, wonText } from '../league/salary';
 
-export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'save' | 'season-end' | 'offseason';
+export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason';
 
 export interface GameUi {
   store: BrowserStore;

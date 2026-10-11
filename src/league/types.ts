@@ -7,6 +7,7 @@ import type { TeamFinance } from './finance';
 import type { EventState } from './events';
 import type { ScenarioState } from './scenarios';
 import type { ArchivedPlayer, SeasonBest, YearRecord } from './history';
+import type { Article } from './articles';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -200,6 +201,8 @@ export interface LeagueState {
   seasonBests?: Record<string, SeasonBest[]>;
   /** 구단 레전드 (영구결번 대신, history.ts) */
   legends?: { franchise: string; id: string; name: string; year: number }[];
+  /** 규칙으로 만든 기사 (articles.ts, 최근 400건) */
+  articles?: Article[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

@@ -1,5 +1,6 @@
 // 홈: 우리 구단 요약, 다음 경기, 최근 결과, 알림, 순위 요약.
 import { ScenarioBanner } from '../ScenarioBanner';
+import { Headlines } from './Articles';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
@@ -108,6 +109,8 @@ export function Home() {
           </div>
         </div>
       </section>
+
+      <Headlines />
 
       <section>
         <h2>알림</h2>
