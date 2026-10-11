@@ -45,16 +45,25 @@ export function agingDelta(age: number, isPitcher = false): number {
 export const DEFAULT_AGE = 28;
 
 /**
- * 한 해 동안의 기대 성장 (런). 성장 판정(league/growth.ts)이 여기에 출전 기회와 운을 더한다.
- * 27세까지는 잠재력과의 격차를 빠르게, 28세부터 하락 나이 전까지는 천천히 좁히고, 하락 나이(DECLINE_START_AGE)부터 떨어진다 (임시값).
- * 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
+ * 한 해 성장의 상한 (런, 임시값). 등급으로 25세 이하 약 +4, 26~27세 +3.5, 28세 이상 +2.5.
+ * 2026-10-12 사용자: "10이 넘는 과도한 성장은 있을 수는 있지만 매번 일어나는 일은 아니다" → 잠재력이 높아도 해마다 조금씩 큰다.
+ * 상한을 넘는 급성장은 성장 판정(league/growth.ts)의 '터지는 해'로만 가끔 생긴다
  */
-export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false): number {
+export function growthCap(age: number): number {
+  return age <= 25 ? 6.5 : age <= 27 ? 5.5 : 4;
+}
+
+/**
+ * 한 해 동안의 기대 성장 (런). 성장 판정(league/growth.ts)이 여기에 출전 기회와 운을 더한다.
+ * 잠재력과의 격차를 나이에 따라 좁히되(27세까지 빠르게, 28세부터 천천히) 한 해 상한(growthCap)을 넘지 않고,
+ * 하락 나이(DECLINE_START_AGE)부터 떨어진다 (임시값). 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
+ */
+export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false, cap = true): number {
   if (age >= DECLINE_START_AGE) return agingDelta(age, isPitcher);
   const gap = potential - runs;
   if (gap < 0) return gap * 0.2;
-  const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.2 : 0.1;
-  return gap * rate;
+  const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.25 : 0.15;
+  return cap ? Math.min(gap * rate, growthCap(age)) : gap * rate;
 }
 /** 앞으로 몇 시즌을 내다보는지 (이번 시즌 포함) */
 export const HORIZON = 4;
