@@ -209,6 +209,8 @@ export function Roster() {
 
       <ServingList />
 
+      {kind === 'hit' && view.manual && <BattingOrderPanel onResult={(r, who) => { setMsg({ ...r, who }); changed(); }} />}
+
       {page === 'saber' && (
         <p className="muted small">
           세이버 기록은 이번 시즌 리그 전체 시뮬레이션 기록이 기준입니다 (리그 wOBA {rate3(lg.woba)}, FIP 상수 {fixed2(lg.fipConst)}).
@@ -401,4 +403,43 @@ export function futuresText(l: FuturesLine | undefined): string {
     return `${l.pit.gs ? `${x.gs}선발 ` : `${x.g}경기 `}${ipText(x.outs)}이닝 평균자책 ${fixed2((x.er * 27) / Math.max(1, x.outs))} ${x.so}삼진`;
   }
   return '-';
+}
+
+/** 타순 (자리 순서로 정한다: 그 자리에 나온 선수가 그 타순. 결장 때는 서브가 그 타순에 선다) */
+function BattingOrderPanel({ onResult }: { onResult: (r: EntryCheck, who?: string) => void }) {
+  const { session } = useGame();
+  const { order, manual } = session.battingOrderSlots();
+  const plan = session.effectivePlan();
+  const name = (s: Slot) => {
+    const i = plan.starters[s];
+    return i === undefined ? '(AI가 채움)' : session.world.players[i].name;
+  };
+  const move = (k: number, d: -1 | 1) => {
+    const next = [...order];
+    const j = k + d;
+    if (j < 0 || j >= next.length) return;
+    [next[k], next[j]] = [next[j], next[k]];
+    const r = session.setBattingOrder(next);
+    onResult(r, r.errors.length ? undefined : '타순을 바꿨습니다.');
+  };
+  return (
+    <section className="panel">
+      <div className="row-between">
+        <h2>타순 <span className="muted small">{manual ? '직접 정함' : 'AI 감독 (바꾸면 직접 정한 타순이 됩니다)'}</span></h2>
+        {manual && <button type="button" className="ghost small-btn" onClick={() => { const r = session.setBattingOrder(null); onResult(r, r.errors.length ? undefined : '타순을 AI 감독에게 맡겼습니다.'); }}>AI에게 타순 맡기기</button>}
+      </div>
+      <ol className="order-list">
+        {order.map((s, k) => (
+          <li key={s}>
+            <span className="muted small">{k + 1}번</span> <strong>{posName(s)}</strong> {name(s)}
+            <span className="order-btns">
+              <button type="button" className="small-btn ghost" disabled={k === 0 || !session.canManage} onClick={() => move(k, -1)} aria-label={`${k + 1}번 위로`}>▲</button>
+              <button type="button" className="small-btn ghost" disabled={k === order.length - 1 || !session.canManage} onClick={() => move(k, 1)} aria-label={`${k + 1}번 아래로`}>▼</button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="muted small">타순은 자리 기준입니다. 그 자리 주전이 빠지면 대신 나온 선수가 같은 타순에 섭니다.</p>
+    </section>
+  );
 }

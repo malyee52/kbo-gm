@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type DepthPlan, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -75,6 +75,7 @@ export interface PlanIds {
   starters: Partial<Record<Slot, string>>;
   rotation: string[];
   closer: string | null;
+  order?: Slot[];
 }
 
 export type PitcherRole = 'SP' | 'RP' | 'CL';
@@ -650,6 +651,35 @@ export class GameSession {
     return this.setPlan(pl);
   }
 
+  /**
+   * 화면에 보일 타순 (자리 순서): 정한 타순이 있으면 그것, 없으면 AI 감독이 지금 주전으로 짤 타순.
+   * 어느 자리가 몇 번인지로 정하므로, 그 자리 주전이 빠지면 대신 나온 선수가 그 타순에 선다
+   */
+  battingOrderSlots(): { order: Slot[]; manual: boolean } {
+    const plan = this.plan;
+    if (plan?.order?.length === 9) return { order: [...plan.order], manual: true };
+    const ts = this.activeTeam();
+    const fixed = new Map<Slot, SimPlayer>();
+    for (const s of LINEUP_SLOTS) {
+      const i = plan?.starters[s];
+      const p = i === undefined ? undefined : ts.hitters.find((x) => x.idx === i);
+      if (p) fixed.set(s, p);
+    }
+    const placed = assignSlots(ts.hitters, fixed.size ? fixed : undefined);
+    const bySlot = new Map(placed.map((x) => [x.p.idx, x.slot]));
+    const ai = battingOrder(placed.map((x) => x.p), this.world.league).map((p) => bySlot.get(p.idx)!).filter(Boolean);
+    const rest = LINEUP_SLOTS.filter((s) => !ai.includes(s));
+    return { order: [...ai, ...rest].slice(0, 9), manual: false };
+  }
+
+  /** 타순을 정한다 (자리 순서). null이면 AI 감독에게 맡긴다. 기용표를 직접 정한 상태로 바뀐다 */
+  setBattingOrder(order: Slot[] | null): EntryCheck {
+    const pl = structuredClone(this.effectivePlan());
+    if (order) pl.order = [...order];
+    else delete pl.order;
+    return this.setPlan(pl);
+  }
+
   /** 투수 보직을 바꾼다. 마무리는 한 명이라, 새로 정하면 기존 마무리는 중계로 간다 */
   setPitcherRole(p: SimPlayer, role: PitcherRole): EntryCheck {
     const pl = structuredClone(this.effectivePlan());
@@ -683,6 +713,9 @@ export class GameSession {
       if (!p || !p.isPitcher) errors.push('마무리는 1군 투수여야 합니다');
       if (plan.rotation.includes(plan.closer)) errors.push('선발 투수를 마무리로 함께 쓸 수 없습니다');
     }
+    if (plan.order && (plan.order.length !== 9 || new Set(plan.order).size !== 9 || plan.order.some((s) => !LINEUP_SLOTS.includes(s)))) {
+      errors.push('타순은 아홉 자리를 한 번씩 넣어야 합니다');
+    }
     const nStart = LINEUP_SLOTS.filter((s) => plan.starters[s] !== undefined).length;
     if (nStart < 9) warnings.push(`주전이 ${9 - nStart}자리 비어 있어 그 자리는 AI 감독이 채웁니다`);
     if (plan.rotation.length < 4) warnings.push(`선발이 ${plan.rotation.length}명이라 AI 감독이 선발을 더 채웁니다`);
@@ -705,7 +738,7 @@ export class GameSession {
     const id = (i: number) => this.world.players[i].id;
     const starters: PlanIds['starters'] = {};
     for (const s of LINEUP_SLOTS) if (plan.starters[s] !== undefined) starters[s] = id(plan.starters[s]!);
-    return { starters, rotation: plan.rotation.map(id), closer: plan.closer === null ? null : id(plan.closer) };
+    return { starters, rotation: plan.rotation.map(id), closer: plan.closer === null ? null : id(plan.closer), ...(plan.order ? { order: [...plan.order] } : {}) };
   }
 
   private planFromIds(ids: PlanIds): DepthPlan {
@@ -716,7 +749,7 @@ export class GameSession {
       if (i !== undefined) starters[s] = i;
     }
     const rotation = ids.rotation.map((x) => byId.get(x)).filter((x): x is number => x !== undefined);
-    return { starters, rotation, closer: ids.closer === null ? null : byId.get(ids.closer) ?? null };
+    return { starters, rotation, closer: ids.closer === null ? null : byId.get(ids.closer) ?? null, ...(ids.order ? { order: [...ids.order] } : {}) };
   }
 
   // ---- 시즌 진행
