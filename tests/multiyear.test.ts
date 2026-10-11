@@ -77,7 +77,8 @@ describe('실존 인물 규칙 (기획서 7장): 구체적 사건은 가상 선�
 });
 
 describe('부상', () => {
-  it('결장 비율이 바꾸기 전 무작위 결장(약 10.7%)과 비슷하다', () => {
+  // 2026-10-12 사용자 "부상 빈도가 너무 잦다"로 발생 확률을 0.008 → 0.0045로 낮췄다 (예전 기준: 무작위 결장 약 10.7%와 비슷)
+  it('결장 비율은 6~9% (부상 빈도를 낮춘 뒤)', () => {
     let absent = 0;
     let total = 0;
     const kinds = new Set<string>();
@@ -95,8 +96,8 @@ describe('부상', () => {
       }
       for (const a of s.absences) kinds.add(a.kind);
     }
-    expect(absent / total).toBeGreaterThan(0.09);
-    expect(absent / total).toBeLessThan(0.13);
+    expect(absent / total).toBeGreaterThan(0.06);
+    expect(absent / total).toBeLessThan(0.09);
     expect([...kinds].sort()).toEqual(['event', 'long', 'major', 'minor']);
   });
 

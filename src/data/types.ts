@@ -197,6 +197,10 @@ export interface DraftRow {
   school: string;
   /** 이력에 대학이 있음 (대졸) */
   univ: boolean;
+  /** 이 지명으로 입단한 실제 선수 ID (tools/build_data.py defer_unsigned가 붙인다). 있으면 이름 대신 이것으로 맞춘다 */
+  pid?: string;
+  /** 지명받고 몇 해 뒤 입단해 입단 해로 옮긴 행의 원래 지명 연도 (해외 진출·대학 진학) */
+  drafted?: number;
   /** 1군 통산 경기 (원본 작성 시점) */
   games: number;
 }

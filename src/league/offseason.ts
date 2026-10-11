@@ -1248,7 +1248,9 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     const asia = i >= FOREIGN_POOL_REGULAR;
     const p = makeVirtual(league, view, rng, taken, {
       foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(8),
-      runs: asia ? 2 + rng.range(-4, 12) : 14 + rng.range(-8, 22),
+      // 능력: 실제 KBO 외국인 첫 시즌 수준 (2026-10-12 사용자 "외국인들이 너무 구리다"). 일반 20~46런(평균 33, 리그 상위 30~80위권),
+      // 아시아쿼터 0~16런. 예전 값은 일반 6~36런(평균 21)이라 보통 주전에 그쳤다
+      runs: asia ? 4 + rng.range(-4, 12) : 30 + rng.range(-10, 16),
     }, year);
     p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia), until: year + 1 };
     p.scoutPotential = scoutView(league, p.potential, rng);
@@ -1990,9 +1992,14 @@ const PITCHER_POS = ['SP', 'RP', 'CL', 'P'];
  * 지명 포지션과 실제 커리어가 다른 선수가 있어, 포지션이 다르다고 연결을 끊지 않는다 (2026-10-08 수정).
  */
 export function matchDraftee(store: Pick<DataStore, 'players'>, d: DraftRow, entryYear: number, league: LeagueState): PlayerMaster | null {
+  const inLeague = new Set(league.players.map((p) => p.id));
+  // 자료 단계에서 이은 선수 (해외 진출·대학 진학으로 늦게 입단한 선수도 정확히, 2026-10-12)
+  if (d.pid) {
+    const m = store.players.get(d.pid);
+    return m && !m.foreign && !inLeague.has(m.id) ? m : null;
+  }
   // 마스터에는 1군 기록이 있는 선수만 있다. 지명 자료에서 1군 0경기인 선수를 맞추면 같은 이름의 다른 선수가 걸린다
   if (d.games === 0) return null;
-  const inLeague = new Set(league.players.map((p) => p.id));
   const cands = [...store.players.values()].filter((m) =>
     m.name === d.name && !m.foreign && Math.abs(m.entryYear - entryYear) <= 1 && m.first >= entryYear - 1 && !inLeague.has(m.id));
   const pick = (list: PlayerMaster[]): PlayerMaster | null => (list.length === 1 ? list[0] : null);
@@ -2057,6 +2064,8 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   p.scoutPotential = scoutView(league, potential, rng);
   view.ctx.potential?.set(p.id, aiPotential(league, p));
   p.contract = { kind: 'rookie', salary: MIN_SALARY, until: entryYear };
+  // 해외 프로에서 뛰다 들어온 선수 (해외파 특별지명, 해외 진출 뒤 늦게 입단): 신인상 자격이 없고 다시 포스팅을 요청하지 않는다
+  if (d.kind === '해외' || (d.drafted !== undefined && entryYear - d.drafted >= 3 && !d.univ)) p.returnedFromAbroad = entryYear;
   return p;
 }
 

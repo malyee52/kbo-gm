@@ -56,6 +56,23 @@ describe('시상식', () => {
     }
   });
 
+  it('신인 자격은 입단(그해 포함) 5년 이내: 2군에 오래 있다 늦게 1군에 오른 선수는 아니다, 해외 복귀 선수도 아니다 (2026-10-12 사용자)', () => {
+    const base = { entryYear: 2021, history: [] } as never as Parameters<typeof isRookie>[0];
+    expect(isRookie({ ...base, entryYear: 2022 }, 2026)).toBe(true);
+    expect(isRookie({ ...base, entryYear: 2021 }, 2026)).toBe(false);
+    if (aw.rookie) {
+      const r = g.league.players.find((p) => p.id === aw.rookie!.id)!;
+      expect(2026 - r.entryYear).toBeLessThan(5);
+      expect(r.returnedFromAbroad).toBeUndefined();
+    }
+  });
+
+  it('진행 요약의 비교 순위: 개막 전이면 지난 시즌 최종 순위 (2025 LG 정규시즌 1위)', () => {
+    const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+    const h = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'last-rank' }, FAST);
+    expect(h.lastSeasonRank()).toBe(1);
+  });
+
   it('우리 구단 수상과 MVP는 알림으로 나온다', () => {
     expect(g.news.some((n) => n.text.startsWith('2026 MVP'))).toBe(true);
   });

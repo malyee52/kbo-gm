@@ -403,6 +403,23 @@ export class GameSession {
     return { ok: true, message: '경기를 마쳤습니다.' };
   }
 
+  /**
+   * 우리 구단의 지난 시즌 정규시즌 최종 순위 (1부터). 게임 안에서 치른 시즌이 있으면 그것, 첫 시즌이면 실제 자료.
+   * 지난 시즌에 없던 구단(창단)이면 null
+   */
+  lastSeasonRank(): number | null {
+    const L = this.league;
+    if (L.lastSeason && L.lastSeason.year === this.world.year - 1) {
+      const k = L.lastSeason.standings.indexOf(this.teamIdx);
+      return k >= 0 ? k + 1 : null;
+    }
+    const prev = this.store.season(this.world.year - 1);
+    if (!prev) return null;
+    const order = [...prev.teams].sort((a, b) => b.pct - a.pct || b.w - a.w);
+    const k = order.findIndex((t) => t.franchise === this.team.franchise);
+    return k >= 0 ? k + 1 : null;
+  }
+
   /** 우리 구단 경기 (fromDay 일정 색인부터, 날짜 순). 가을야구 경기도 뒤에 붙는다 */
   ourGames(fromDay = 0): CastGame[] {
     const me = this.teamIdx;
