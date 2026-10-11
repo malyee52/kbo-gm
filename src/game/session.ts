@@ -24,8 +24,8 @@ import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm
 import { settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { ORG_LIMIT } from '../league/salary';
-import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
+import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
@@ -60,8 +60,6 @@ export interface NewGameOptions {
   seed: string;
   /** 난이도 (AI의 잠재력 평가 오차, M7). 없으면 보통 */
   difficulty?: Difficulty;
-  /** 역사 시나리오 id (league/scenarios.ts). 있으면 그 해 한국시리즈 우승이 목표 */
-  scenario?: string;
   /** 도전 모드 id (league/challenges.ts). 구단 조건(직전 시즌 꼴찌 등)은 시작 화면이 맞춰 teamIdx로 넘긴다 */
   challenge?: string;
   /** 세부 난이도 (사용자 설정, league/difficulty.ts). 없으면 difficulty 묶음 */
@@ -281,6 +279,21 @@ export class GameSession {
     this.applyTactics();
   }
 
+  /** 기획안 도전의 한 시즌 결과 (campaigns.ts SeasonMark): 정규시즌 순위·승률·가을야구·자체 육성 주전 */
+  private challengeMark(team: number, standings: number[], ps: { seeds: number[]; champion?: number | null; runnerUp?: number | null }): SeasonMark {
+    const r = this.season.teams[team];
+    const ids = new Set(this.league.challenge?.homegrown ?? []);
+    const home = this.world.players.filter((p) => p.teamIdx === team && ids.has(p.id)).filter((p) => {
+      const b = this.season.bat[p.idx];
+      const q = this.season.pit[p.idx];
+      return b.pa >= HOMEGROWN.pa || q.outs >= HOMEGROWN.outs || q.g - q.gs >= HOMEGROWN.relief;
+    }).length;
+    return {
+      year: this.year, rank: standings.indexOf(team) + 1, teams: standings.length, pct: r && r.w + r.l ? r.w / (r.w + r.l) : 0,
+      ps: ps.seeds.includes(team), ks: ps.champion === team || ps.runnerUp === team, champ: ps.champion === team, home,
+    };
+  }
+
   /** 감독 작전 배율을 이번 시즌 팀에 건다 (managers.ts). 감독은 오프시즌에만 바뀌므로 시즌을 만들 때 한 번 */
   private applyTactics(): void {
     for (const ts of this.season.teamSeasons) {
@@ -308,22 +321,17 @@ export class GameSession {
     g.refreshRivals();
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
-    const sc = opts.scenario ? scenarioById(opts.scenario) : undefined;
-    if (sc) {
-      league.scenario = { id: sc.id, year: sc.year, team: opts.teamIdx };
-      g.addNews(0, 'season', `역사 시나리오 「${sc.title}」: ${sc.intro} 목표는 ${sc.year} 한국시리즈 우승입니다.`);
-    }
     const ch = opts.challenge ? challengeById(opts.challenge) : undefined;
     if (ch) {
-      league.challenge = newChallenge(ch, opts.teamIdx, world.year);
-      g.addNews(0, 'season', `도전 「${ch.title}」: ${ch.intro} 기한은 ${league.challenge.until} 시즌까지입니다.`);
+      // 기획안 도전: 시작 때 만 23세 이하 우리 선수가 자체 육성 후보 (campaigns.ts HOMEGROWN)
+      const young = ch.plan ? league.players.filter((p) => p.team === opts.teamIdx && (p.birthYear ? world.year - p.birthYear : 99) <= HOMEGROWN.age).map((p) => p.id) : [];
+      league.challenge = newChallenge(ch, opts.teamIdx, world.year, young);
+      g.addNews(0, 'season', `도전 「${ch.title}」: ${ch.intro}. ${ch.plan ? `${ch.plan.stages.length > 1 ? `단계 목표: ${ch.plan.stages.slice(0, -1).map((x) => x.label).join(' → ')}. ` : ''}` : ''}기한은 ${league.challenge.until} 시즌까지입니다.`);
     }
     for (const e of league.expansions ?? []) {
       g.addNews(0, 'season', `${league.teams[e.team].name}: 창단 구단으로 ${world.year} 시즌은 퓨처스리그에서 뛰고 ${e.firstYear}년 1군에 들어옵니다.`);
     }
     g.setSeasonGoal();
-    // 시나리오: 구단주 목표도 한국시리즈 우승
-    if (sc && g.owner.goal) g.owner.goal = { ...g.owner.goal, kind: 'champion' };
     return g;
   }
 
@@ -461,7 +469,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}), ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}) },
       at: { year: this.year, day: this.day, phase: this.phase },
       actions: clone(this.actions),
     };
@@ -1438,27 +1446,16 @@ export class GameSession {
           bat: this.season.bat[p.idx].pa > 0 ? Object.values(this.season.bat[p.idx]) : undefined,
           pit: this.season.pit[p.idx].bf > 0 ? Object.values(this.season.pit[p.idx]) : undefined,
         })));
-        // 역사 시나리오 판정 (scenarios.ts)
-        const was = L.scenario?.result;
-        const sc = judgeScenario(L, this.year, ps.champion ?? null);
-        const def = sc ? scenarioById(sc.id) : undefined;
-        if (sc && def && !was && sc.result) {
-          this.news.push({ year: this.year, day: -1, kind: 'owner', text: sc.result === 'success'
-            ? `역사 시나리오 「${def.title}」 성공! ${def.year} 한국시리즈 우승으로 역사를 바꿨습니다. (${def.real})`
-            : `역사 시나리오 「${def.title}」 실패. ${def.real} 이 게임은 그대로 이어서 할 수 있습니다.` });
-          addArticle(L, { year: this.year, day: -1, kind: 'scenario', franchise: this.team.franchise,
-            title: `「${def.title}」 ${sc.result === 'success' ? '성공' : '실패'}`,
-            body: sc.result === 'success' ? `${josa(this.team.name, '이', '가')} ${def.year} 한국시리즈 우승으로 역사를 바꿨다. ${def.real}` : `${def.real}` });
-        }
         // 도전 모드 판정 (challenges.ts)
         const chWas = L.challenge?.result;
         const chs = judgeChallenge(L, this.year, {
           userTeam: this.teamIdx, champion: ps.champion ?? null, first: standings[0] ?? null, postseason: ps.seeds, rescue: fin[L.challenge?.team ?? this.teamIdx]?.rescue ?? 0,
+          ...(L.challenge?.homegrown ? { mark: this.challengeMark(L.challenge.team, standings, ps) } : {}),
         });
         const chDef = chs ? challengeById(chs.id) : undefined;
         if (chs && chDef && !chWas && chs.result) {
           const text = chs.result === 'success'
-            ? `도전 「${chDef.title}」 성공! (${chs.from}~${this.year}, ${challengeProgress(chs, this.year)})`
+            ? `도전 「${chDef.title}」 ${chs.complete ? '완전 클리어' : '성공'}! (${chs.from}~${this.year}, ${challengeProgress(chs, this.year)})`
             : `도전 「${chDef.title}」 실패: ${chs.why ?? ''}. 이 게임은 그대로 이어서 할 수 있습니다.`;
           this.news.push({ year: this.year, day: -1, kind: 'owner', text });
           addArticle(L, { year: this.year, day: -1, kind: 'scenario', franchise: L.teams[chs.team]?.franchise, title: `도전 「${chDef.title}」 ${chs.result === 'success' ? '성공' : '실패'}`, body: text });

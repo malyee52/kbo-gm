@@ -5,7 +5,6 @@
 import type { SeasonAwards } from './awards';
 import type { TeamFinance } from './finance';
 import type { EventState } from './events';
-import type { ScenarioState } from './scenarios';
 import type { ArchivedPlayer, SeasonBest, YearRecord } from './history';
 import type { Article } from './articles';
 import type { RivalPair } from './rivals';
@@ -220,8 +219,6 @@ export interface LeagueState {
   finance?: TeamFinance[];
   /** 시즌 중 무작위 이벤트: 오늘 확률, 답을 기다리는 이벤트, 기록, 관중 효과 (events.ts, 2026-10-11) */
   events?: EventState;
-  /** 역사 시나리오로 시작한 게임 (scenarios.ts, 2026-10-11) */
-  scenario?: ScenarioState;
   /** 리그를 떠난 선수의 게임 안 통산 (history.ts, 2026-10-11) */
   archive?: ArchivedPlayer[];
   /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
