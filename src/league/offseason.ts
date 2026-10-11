@@ -722,7 +722,7 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
     const base = capPayroll(league.players, t) - (p.team === t ? p.contract.salary : 0);
     if (base + others + salary > limit) {
       const cap = salaryCap(off.year + 1);
-      const what = cap !== null && limit < cap ? '구단 예산' : '샐러리캡';
+      const what = cap === null || limit < cap ? '구단 예산' : '샐러리캡';
       return { ok: false, message: `${what}(${Math.round(limit / 10000)}억 원)을 넘습니다. 지금 다른 제시를 포함한 합계로 검사합니다.` };
     }
   }
@@ -1519,6 +1519,9 @@ function makePick(league: LeagueState, off: OffseasonState, p: LeaguePlayer): vo
   if (orig !== team) p.noTradeYear = off.year + 1;
   d.pool = d.pool.filter((x) => x !== p.id);
   d.picks.push({ team, id: p.id, round });
+  // 기획안 도전의 자체 육성 후보: 도전 구단이 직접 지명한 선수 (challenges.ts)
+  const ch = league.challenge;
+  if (ch?.homegrown && !ch.result && ch.team === team) ch.homegrown.push(p.id);
   d.pick++;
   if (team === off.userTeam || orig === off.userTeam || round <= 1) {
     const where = round >= 1 ? `${round}라운드 ${no}순위` : pickKindLabel(round);

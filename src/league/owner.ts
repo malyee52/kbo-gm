@@ -5,6 +5,7 @@ import { Rng } from '../engine';
 import type { PostseasonResult } from './postseason';
 import { capPayroll, salaryCap, PRE_CAP_BUDGET } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
+import { challengeBudget } from './challenges';
 
 // ---- 난이도
 
@@ -70,9 +71,13 @@ export function budgetFor(league: LeagueState, team: number, year: number): numb
 /**
  * FA 계약 등 연봉 지출의 상한: 샐러리캡(2023~). 캡이 없으면 null.
  * 재정 상세형(2026-10-11)부터 "예산 = 캡 × 모기업 등급" 상한은 쓰지 않고, 구단 자금(계약금·이적료를 낼 수 있는가)이 대신한다 (finance.ts)
+ * 기획안 도전의 예산 규칙(넥센 캠페인: 리그 평균 연봉의 85%)이 있으면 그것과 캡 가운데 작은 쪽 (challenges.ts)
  */
-export function spendLimit(_league: LeagueState, _team: number, year: number): number | null {
-  return salaryCap(year);
+export function spendLimit(league: LeagueState, team: number, year: number): number | null {
+  const cap = salaryCap(year);
+  const budget = league.challenge ? challengeBudget(league, team, year, (t) => capPayroll(league.players, t)) : null;
+  if (budget === null) return cap;
+  return cap === null ? budget : Math.min(cap, budget);
 }
 
 // ---- 샐러리캡 제재 (제도연표, 출처 확인)

@@ -4,8 +4,8 @@ import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/ow
 import { PRESETS, type DifficultySettings } from '../league/difficulty';
 import { DifficultyEditor } from './DifficultyEditor';
 import type { BrowserStore } from '../data/loadBrowser';
-import { SCENARIOS, scenarioById } from '../league/scenarios';
-import { CHALLENGES, challengeById, lastPlaceTeam } from '../league/challenges';
+import { CHALLENGES, challengeById, lastPlaceTeam, planTeam } from '../league/challenges';
+import { condText, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
@@ -34,6 +34,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saves, setSaves] = useState<SaveRecord[] | null>(null);
+  const [tier, setTier] = useState<Tier>('하');
 
   useEffect(() => {
     let alive = true;
@@ -63,22 +64,25 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     }
   };
 
-  /** 역사 시나리오로 시작: 그 해 그 구단 */
-  const startScenario = async (id: string) => {
-    const sc = scenarioById(id)!;
-    setBusy(`「${sc.title}」 시나리오를 준비하는 중입니다`);
+  /** 기획안 도전으로 시작: 정해진 시즌·구단 (league/campaigns.ts). 난이도·시드는 위에서 고른 값 */
+  const startPlan = async (id: string) => {
+    const ch = challengeById(id)!;
+    const plan = ch.plan!;
+    setBusy(`「${ch.title}」을 준비하는 중입니다`);
     setError(null);
     try {
       await store.ensureAll();
-      const t = store.season(sc.year)!.teams.findIndex((x) => x.name === sc.team);
-      if (t < 0) throw new Error(`${sc.year}년 자료에서 ${sc.team}을 찾을 수 없습니다`);
+      const t = planTeam(store, ch);
+      if (t === null) throw new Error(`${plan.year}년 자료에서 구단을 찾을 수 없습니다`);
       await nextFrame();
-      onStart(GameSession.create(store, { year: sc.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, scenario: sc.id, ...extra }));
+      onStart(GameSession.create(store, { year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
     }
   };
+  /** 그 해 계보의 구단 이름 (시즌 자료를 불러오기 전에도 meta로) */
+  const nameIn = (franchise: string, y: number) => store.meta.franchises[franchise]?.find((x) => x.from <= y && y <= x.to)?.name ?? franchise;
 
   /** 도전 모드로 시작: 위에서 고른 연도·구단 (꼴찌 조건이면 직전 시즌 최하위 구단) */
   const challengeTeam = (id: string): number | null => {
@@ -210,7 +214,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         <h2>도전 모드 <span className="muted small">{year}년 시작</span></h2>
         <p className="muted small">위에서 고른 시작 연도·구단·난이도·시드로 시작합니다. "직전 시즌 최하위" 도전은 구단이 정해집니다. 결산 때마다 판정하고, 끝난 뒤에도 그대로 이어서 할 수 있습니다.</p>
         <div className="scenario-grid">
-          {CHALLENGES.map((ch) => {
+          {CHALLENGES.filter((c) => !c.plan).map((ch) => {
             const t = challengeTeam(ch.id);
             const name = t !== null ? current?.teams[t]?.name : undefined;
             return (
@@ -226,18 +230,36 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       </section>
 
       <section className="panel">
-        <h2>역사 시나리오 <span className="muted small">구단별 아픈 손가락</span></h2>
-        <p className="muted small">실제로 우승 문턱에서 멈춘 시즌의 개막에서 그 구단 단장으로 시작합니다. 목표는 그 해 한국시리즈 우승입니다. 위의 난이도·시드를 그대로 씁니다.</p>
-        <div className="scenario-grid">
-          {SCENARIOS.map((sc) => (
-            <div key={sc.id} className="scenario-card">
-              <div className="row-between"><strong>{sc.year} {sc.team}</strong><span className="muted small">목표: 우승</span></div>
-              <h3>{sc.title}</h3>
-              <p className="small">{sc.intro}</p>
-              <details className="small muted"><summary>실제로는</summary>{sc.real}</details>
-              <button type="button" onClick={() => void startScenario(sc.id)} disabled={!!busy}>이 시나리오로 시작</button>
-            </div>
+        <h2>도전 시나리오 <span className="muted small">실제 구단의 그 시즌 개막에서 시작</span></h2>
+        <p className="muted small">
+          시즌 도전 30개(난이도 하·중·상)와 장기 캠페인 10개입니다. 위의 난이도·시드를 그대로 씁니다. 실제 시즌 배경은 참고 문구이고 목표·기한은 게임용 설정입니다.
+          여러 단계가 있으면 마지막 단계가 클리어 조건이고, 모든 단계를 기한 안에 이루면 완전 클리어입니다. 자체 육성 주전은 시작 때 만 23세 이하이거나 그 뒤 직접 지명한 선수 가운데 그 시즌 300타석·80이닝·구원 40경기를 넘긴 선수입니다.
+        </p>
+        <div className="seg" role="tablist" aria-label="난이도">
+          {(['하', '중', '상', '장기'] as Tier[]).map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={tier === k} className={tier === k ? 'on' : ''} onClick={() => setTier(k)}>{k === '장기' ? '장기 캠페인' : `난이도 ${k}`}</button>
           ))}
+        </div>
+        <div className="scenario-grid">
+          {CHALLENGES.filter((c) => c.plan?.tier === tier).map((ch) => {
+            const p = ch.plan!;
+            return (
+              <div key={ch.id} className="scenario-card">
+                <div className="row-between"><strong>{p.no} · {p.year} {nameIn(p.franchise, p.year)}</strong><span className="muted small">{ch.years}시즌</span></div>
+                <h3>{p.title}</h3>
+                <p className="small muted">{p.tier === '장기' ? '기간' : '실제'}: {p.background}</p>
+                {p.stages.length === 1
+                  ? <p className="small" title={p.stages[0].conds.map(condText).join(', ')}>목표: {p.stages[0].label}</p>
+                  : (
+                    <ol className="small plain-ol">
+                      {p.stages.map((st, i) => <li key={i} title={st.conds.map(condText).join(', ')}>{i === p.stages.length - 1 ? <strong>최종: {st.label}</strong> : st.label}</li>)}
+                    </ol>
+                  )}
+                <p className="small muted">{p.fun}{p.budget ? ` · 연봉 상한: 리그 평균의 ${Math.round(p.budget * 100)}%` : ''}</p>
+                <button type="button" onClick={() => void startPlan(ch.id)} disabled={!!busy}>이 도전으로 시작</button>
+              </div>
+            );
+          })}
         </div>
       </section>
 
