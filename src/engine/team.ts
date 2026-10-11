@@ -344,7 +344,10 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   const resting = new Set<number>();
   // 주전 중 가치 상위 3명은 덜 쉬고 하위 3명은 더 쉰다 (하위 타선의 플래툰·교체 출전 몫)
   const byValue = [...regulars].sort((a, b) => b.value - a.value);
+  // 플레이어가 직접 정한 주전은 AI가 쉬게 하지 않는다 (2026-10-11 사용자: 직접 짠 라인업을 AI가 무단으로 바꾸지 않게). 결장 때만 서브가 채운다
+  const planned = ts.plan && ts.manual ? new Set(Object.values(ts.plan.starters)) : null;
   byValue.forEach((p, rank) => {
+    if (planned?.has(p.idx)) return;
     const factor = rank < 3 ? 0.4 : rank < 6 ? 1 : 1.8;
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
     if (rng.chance(Math.min(0.6, base * factor))) resting.add(p.idx);
