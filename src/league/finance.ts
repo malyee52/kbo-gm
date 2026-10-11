@@ -16,6 +16,7 @@ import { fillBuff } from './events';
 import { legendFill } from './history';
 import { rivalFill } from './rivals';
 import { coachPayroll } from './coaches';
+import { gmStyle } from './gm';
 
 // ---- 수치 (임시값, docs/finance.md 2~4장)
 
@@ -514,6 +515,11 @@ export function lockInvestments(league: LeagueState, userTeam: number): void {
       const plan = startInvest();
       if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; }
       else if (r >= 0 && r >= (2 * n) / 3) { plan.scout = 2; plan.develop = 2; }
+      // 단장 성향 (gm.ts)
+      const style = gmStyle(league, t);
+      if (style === 'develop') { plan.develop = Math.min(3, plan.develop + 1); plan.scout = Math.min(3, plan.scout + 1); }
+      if (style === 'winnow') plan.medical = Math.min(3, plan.medical + 1);
+      if (style === 'frugal') for (const k of Object.keys(plan) as InvestKind[]) plan[k] = Math.max(0, plan[k] - 1);
       const room = Math.max(0, cashOf(league, t) * 0.6);
       const order: InvestKind[] = ['marketing', 'medical', 'scout', 'develop'];
       for (let guard = 0; guard < 12 && investCost({ invest: plan, history: [] }, true) > room; guard++) {

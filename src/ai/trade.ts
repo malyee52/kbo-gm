@@ -46,6 +46,8 @@ export interface TeamSituation {
   coreAge: number;
   /** 남은 정규시즌 비율 (0~1) */
   remaining: number;
+  /** AI 단장 성향 (league/gm.ts). 없으면 균형형 */
+  style?: 'winnow' | 'develop' | 'frugal' | 'balanced';
 }
 
 /**
@@ -53,6 +55,9 @@ export interface TeamSituation {
  * 그 밖은 리빌딩 (임시 규칙).
  */
 export function tendencyOf(s: TeamSituation): Tendency {
+  // 단장 성향 (league/gm.ts): 윈나우형은 진출권 3계단 밖까지 우승 도전, 육성형은 2위 안이 아니면 리빌딩
+  if (s.style === 'winnow') return s.rank <= s.cut + 3 ? 'contend' : 'rebuild';
+  if (s.style === 'develop') return s.rank <= 2 ? 'contend' : 'rebuild';
   if (s.rank <= s.cut) return 'contend';
   if (s.rank <= s.cut + 2 && s.coreAge >= 30) return 'contend';
   return 'rebuild';
@@ -126,7 +131,8 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const before = teamValue(org, ctx, weights);
   const afterV = teamValue(after, ctx, weights);
   const pay = (ps: SimPlayer[]) => ps.reduce((s, p) => s + (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0)), 0);
-  const salaryCost = (pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN;
+  // 짠돌이형 단장은 연봉 부담을 두 배로 본다 (league/gm.ts)
+  const salaryCost = ((pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN) * (situation.style === 'frugal' ? 2 : 1);
   // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
   const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0);
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0) + (prop.picks?.give ?? 0);

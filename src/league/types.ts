@@ -11,6 +11,7 @@ import type { Article } from './articles';
 import type { RivalPair } from './rivals';
 import type { ChallengeState } from './challenges';
 import type { Coach } from './coaches';
+import type { AiTradeRecord, GmStyle } from './gm';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -218,6 +219,10 @@ export interface LeagueState {
   challenge?: ChallengeState;
   /** 구단별 코치 (coaches.ts) */
   coaches?: Coach[][];
+  /** 구단별 AI 단장 성향 (gm.ts) */
+  gm?: GmStyle[];
+  /** AI 구단끼리 트레이드 기록 (gm.ts) */
+  aiTrades?: AiTradeRecord[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

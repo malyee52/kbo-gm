@@ -252,7 +252,8 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     h.autoDraft();
     const d = h.offseason!.draft!;
     expect(d.picks).toHaveLength(110);
-    for (let t = 0; t < 10; t++) expect(d.picks.filter((p) => p.team === t)).toHaveLength(11);
+    // 원래 구단 기준으로 11장씩 (AI 구단끼리 지명권을 주고받으면 실제로 뽑는 구단은 달라진다, league/gm.ts)
+    for (let t = 0; t < 10; t++) expect(d.picks.filter((p, i) => (d.orig?.[i] ?? p.team) === t)).toHaveLength(11);
     // 같은 라운드 안 순서는 직전 시즌 성적 역순
     expect(d.picks.slice(0, 10).map((p) => p.team)).toEqual([...st].reverse());
     // 풀은 실제 2027 지명 명단 110명 그대로 (지명 구단은 게임 속 순위로 다시 정해진다)
