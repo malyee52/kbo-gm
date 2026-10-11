@@ -16,7 +16,6 @@ export function Leaders() {
 
   return (
     <div className="stack">
-      <h1>기록</h1>
       <div className="toolbar">
         <div className="seg" role="tablist" aria-label="부문">
           <button type="button" role="tab" aria-selected={kind === 'bat'} className={kind === 'bat' ? 'on' : ''} onClick={() => setKind('bat')}>타자</button>

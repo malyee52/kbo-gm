@@ -1,4 +1,3 @@
-import { useState } from 'react';
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
@@ -13,10 +12,10 @@ import {
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
 
-type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
-const CLUB_TABS: [ClubTab, string][] = [['overview', '개요'], ['finance', '재정'], ['stadium', '구장·팬'], ['coach', '감독·코치'], ['history', '이력·업적']];
+// 2026-10-12 UI 개편: 탭(개요·재정·구장·팬·감독·코치·이력·업적)은 위쪽 '구단' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
+export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
 
-export function Club() {
+export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
   const { session, go } = useGame();
   const won = useWon();
   const L = session.league;
@@ -30,7 +29,6 @@ export function Club() {
   const ps = L.lastSeason?.postseason;
   const name = (t: number) => L.teams[t].name;
   const strikes = L.capStrikes?.[me] ?? 0;
-  const [tab, setTab] = useState<ClubTab>('overview');
 
   return (
     <div className="stack">
@@ -47,12 +45,6 @@ export function Club() {
       )}
 
       <ScenarioBanner />
-
-      <div className="seg" role="tablist" aria-label="구단 운영">
-        {CLUB_TABS.map(([k, label]) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
-        ))}
-      </div>
 
       {tab === 'finance' && <FinancePanel />}
       {tab === 'stadium' && <StadiumPanel />}

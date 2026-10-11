@@ -16,7 +16,6 @@ export function Articles() {
     <div className="stack">
       <section className="row-between wrap">
         <div>
-          <h1>기사</h1>
           <p className="muted small">통산 기록 달성, 시즌 신기록, 연승·연패, 우승·MVP, 명예의 전당·은퇴식 소식입니다. 최근 400건까지 남습니다.</p>
         </div>
         <div className="toolbar">

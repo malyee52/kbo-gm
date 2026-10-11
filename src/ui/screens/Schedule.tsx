@@ -58,12 +58,12 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
 
   return (
     <div className="stack">
-      <h1>일정·결과</h1>
       <div className="seg" role="tablist" aria-label="월">
         {months.map((m) => (
           <button key={m} type="button" role="tab" aria-selected={m === month} className={m === month ? 'on' : ''} onClick={() => setMonth(m)}>{m}월</button>
         ))}
       </div>
+      <div className="sched-split">
       <div className="calendar" role="grid" aria-label={`${month}월 일정`}>
         {WEEKDAYS.map((w) => <div key={w} className="cal-head" role="columnheader">{w}</div>)}
         {cells.map((c, k) => {
@@ -94,7 +94,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
         })}
       </div>
 
-      <section>
+      <section className="card sched-day">
         <h2>{formatDate(year, selDay)} 경기</h2>
         {s.schedule[selDay]?.length === 0 && <p className="muted">경기가 없는 날입니다.</p>}
         {dayGames.length === 0 && s.schedule[selDay]?.length > 0 && (
@@ -105,31 +105,31 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
           </ul>
         )}
         {dayGames.length > 0 && (
-          <div className="scroll">
-            <table>
-              <thead><tr><th className="l">원정</th><th>점수</th><th className="l">홈</th><th className="l">승리</th><th className="l">패전</th><th className="l">세이브</th><th /></tr></thead>
-              <tbody>
-                {dayGames.map((i) => {
-                  const g = s.log[i];
-                  const P = (x: number | null) => (x === null ? <span className="muted">-</span> : <PlayerLink p={session.world.players[x]} />);
-                  return (
-                    <tr key={i} className={g.home === me || g.away === me ? 'me' : ''}>
-                      <td className="l"><TeamName idx={g.away} /></td>
-                      <td>{g.awayRuns} : {g.homeRuns}{g.innings !== 9 ? <span className="muted small"> ({g.innings}회)</span> : null}</td>
-                      <td className="l"><TeamName idx={g.home} /></td>
-                      <td className="l">{P(g.win)}</td><td className="l">{P(g.loss)}</td><td className="l">{P(g.save)}</td>
-                      <td>
-                        {s.boxes.has(i) ? <button type="button" className="link" onClick={() => setSelGame(i)}>박스스코어</button> : null}
-                        {s.plays.has(i) ? <> <button type="button" className="link" onClick={() => setCast(session.ourGames().find((x) => x.key === `${year}-${i}`) ?? null)}>중계</button></> : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ul className="day-games">
+            {dayGames.map((i) => {
+              const g = s.log[i];
+              const P = (x: number | null) => (x === null ? null : <PlayerLink p={session.world.players[x]} />);
+              const w = P(g.win);
+              const l = P(g.loss);
+              const sv = P(g.save);
+              return (
+                <li key={i} className={g.home === me || g.away === me ? 'me' : ''}>
+                  <div className="dg-score">
+                    <TeamName idx={g.away} /> <strong>{g.awayRuns} : {g.homeRuns}</strong> <TeamName idx={g.home} />
+                    {g.innings !== 9 && <span className="muted small"> ({g.innings}회)</span>}
+                    <span className="dg-links">
+                      {s.boxes.has(i) && <button type="button" className="link small" onClick={() => setSelGame(i)}>박스</button>}
+                      {s.plays.has(i) && <button type="button" className="link small" onClick={() => setCast(session.ourGames().find((x) => x.key === `${year}-${i}`) ?? null)}>중계</button>}
+                    </span>
+                  </div>
+                  <div className="small muted">{w && <>승 {w}</>}{l && <> · 패 {l}</>}{sv && <> · 세 {sv}</>}</div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
+      </div>
 
       {box && selGame !== undefined && <BoxView log={s.log[selGame]} box={box} />}
       {cast && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}

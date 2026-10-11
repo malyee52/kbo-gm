@@ -1,5 +1,6 @@
 // 시즌 뒤 성장·하락 결과 (2026-10-08 사용자 요청). 오프시즌을 시작할 때 판정한 능력 변화를 보여 준다.
 import { useState } from 'react';
+import { FlowNext } from '../FlowNext';
 import type { GrowthEntry } from '../../league/offseason';
 import { posName, TeamName, useGame } from '../context';
 import { runsGrade } from '../grades';
@@ -7,7 +8,7 @@ import { runsGrade } from '../grades';
 type Scope = 'mine' | 'league';
 
 export function Growth() {
-  const { session, openPlayer } = useGame();
+  const { session, openPlayer, go } = useGame();
   const off = session.offseason;
   const [scope, setScope] = useState<Scope>('mine');
   const list = off?.growth;
@@ -65,6 +66,7 @@ export function Growth() {
 
   return (
     <div className="stack">
+      {off.stage === 'fa' && <FlowNext step="선수 성장" label="다음: 오프시즌" onNext={() => go('offseason')} />}
       <section className="row-between wrap">
         <div>
           <h1>{off.year} 시즌 뒤 선수 성장</h1>
