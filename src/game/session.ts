@@ -33,7 +33,7 @@ import {
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM } from '../league/articles';
 import {
   MAX_PICKS_PER_TRADE, ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
-  tradablePick, transferPick, type DraftPick,
+  pickLedger, tradablePick, transferPick, type DraftPick, type PickLedgerRow,
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
@@ -1261,6 +1261,17 @@ export class GameSession {
   /** 그 구단이 가진 트레이드 가능한 지명권 */
   ownedPicks(team: number): DraftPick[] {
     return ownedPicks(this.league, team, this.year, this.world.teams.map((t) => t.idx));
+  }
+
+  /** 우리 구단의 지명권 장부: 다음 두 드래프트의 1~PICK_MAX_ROUND라운드 (오프시즌 화면) */
+  pickLedger(): PickLedgerRow[] {
+    const teams = this.league.teams.map((_, i) => i);
+    return pickLedger(this.league, this.teamIdx, [this.year + 1, this.year + 2], teams);
+  }
+
+  /** 다음 드래프트에서 우리 1라운드 예상 순번 (1부터. 지난 시즌 역순 기준, 제재·창단 특례 전) */
+  nextDraftSlot(team = this.teamIdx): number {
+    return Off.pickOrder(this.league).indexOf(team) + 1;
   }
 
   /** "2027 1라운드 (LG)": 원래 구단 이름 */

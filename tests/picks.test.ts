@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { applyPickOwners, expectedPotential, ownedPicks, pickId, pickOwner, transferPick, type DraftPick } from '../src/league/picks';
+import { applyPickOwners, expectedPotential, ownedPicks, pickId, pickLedger, pickOwner, PICK_MAX_ROUND, transferPick, type DraftPick } from '../src/league/picks';
 import type { LeagueState } from '../src/league/types';
 
 let store: DataStore;
@@ -28,6 +28,17 @@ describe('지명권 기록', () => {
     const r = applyPickOwners(L, 2027, [3, 3, 5, 3], [0, 1, 1, 2]);
     expect(r.slots).toEqual([3, 5, 5, 3]);
     expect(r.orig).toEqual([3, 3, 5, 3]);
+  });
+
+  it('지명권 장부(오프시즌 화면): 넘긴 라운드는 받은 구단을, 받아 온 지명권은 원래 구단을 보여 준다', () => {
+    const L = { pickOwners: [] } as unknown as LeagueState;
+    transferPick(L, { draft: 2027, round: 2, from: 3 }, 5);
+    transferPick(L, { draft: 2028, round: 1, from: 7 }, 3);
+    const rows = pickLedger(L, 3, [2027, 2028], [3, 5, 7]);
+    expect(rows).toHaveLength(2 * PICK_MAX_ROUND);
+    expect(rows.find((r) => r.draft === 2027 && r.round === 2)).toMatchObject({ own: false, givenTo: 5, extra: [] });
+    expect(rows.find((r) => r.draft === 2028 && r.round === 1)).toMatchObject({ own: true, givenTo: null, extra: [7] });
+    expect(rows.filter((r) => !r.own || r.extra.length)).toHaveLength(2);
   });
 
   it('기대 잠재력은 앞 순번일수록 크고 40번째 근처에서 0에 가깝다', () => {

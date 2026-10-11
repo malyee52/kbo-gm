@@ -1,6 +1,7 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
+import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import {
@@ -98,6 +99,7 @@ export function Offseason() {
 
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
 
+      {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
       <PostingPanel act={act} />
       {off.stage !== 'ready' && <ExtensionPanel act={act} />}
 
@@ -781,6 +783,47 @@ function ReleasePanel({ act }: { act: Act }) {
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+/** 우리 지명권: 다음 두 드래프트의 트레이드 대상 라운드 (넘긴 것·받은 것) */
+function PickPanel() {
+  const { session } = useGame();
+  const rows = session.pickLedger();
+  const drafts = [...new Set(rows.map((r) => r.draft))];
+  const traded = rows.some((r) => !r.own || r.extra.length);
+  const slot = session.nextDraftSlot();
+  return (
+    <section className="panel">
+      <div className="row-between wrap">
+        <h2>우리 지명권</h2>
+        <span className="muted small">
+          {drafts[0]} 입단 드래프트 1라운드 예상 {slot}순위 (지난 시즌 역순){!session.pickTradeOpen && ` · 지명권 트레이드는 ${PICK_TRADE_FROM}년부터`}
+        </span>
+      </div>
+      <div className="scroll">
+        <table>
+          <thead><tr><th className="l">드래프트</th>{rows.filter((r) => r.draft === drafts[0]).map((r) => <th key={r.round}>{r.round}라운드</th>)}</tr></thead>
+          <tbody>
+            {drafts.map((d) => (
+              <tr key={d}>
+                <td className="l">{d} 입단</td>
+                {rows.filter((r) => r.draft === d).map((r) => (
+                  <td key={r.round}>
+                    {r.own ? '우리' : <span className="down">→ <TeamName idx={r.givenTo!} /></span>}
+                    {r.extra.map((t) => <div key={t} className="up small">+ <TeamName idx={t} /></div>)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small">
+        {traded ? '→ 는 트레이드로 넘긴 지명권, + 는 받아 온 다른 구단 지명권입니다. ' : ''}
+        {PICK_MAX_ROUND + 1}라운드부터 {DRAFT_ROUNDS}라운드까지는 트레이드 대상이 아니라 늘 우리 지명권입니다.
+      </p>
     </section>
   );
 }
