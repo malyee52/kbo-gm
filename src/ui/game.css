@@ -750,3 +750,14 @@ td .inline { flex-wrap: nowrap; }
 .team-grid.start-teams .team-card { padding: 10px 10px 10px 16px; }
 .team-grid.start-teams .team-card strong { font-size: 15px; }
 @media (max-width: 760px) { .team-grid.start-teams { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 휴대폰: 스크롤 틀 없이 패널·카드에 바로 들어간 표는 가로로 넘겨 본다. 오프시즌 단계 표시는 한 줄 */
+@media (max-width: 760px) {
+  .panel > table, .card > table, section > table { display: block; overflow-x: auto; max-width: 100%; }
+  .steps { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .steps::-webkit-scrollbar { display: none; }
+  .steps li { flex: none; }
+  .flow-next { padding: 10px 12px; }
+  .flow-next ol { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; }
+  .flow-next button { width: 100%; margin-left: 0; }
+}
