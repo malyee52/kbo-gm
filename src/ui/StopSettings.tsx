@@ -54,6 +54,10 @@ export function StopSettings({ value, onChange }: { value: StopRules; onChange: 
             {check('deadline', '트레이드 마감일 (7월 31일)')}
             {check('devDay', '육성선수 등록 가능일 (5월 1일)', '육성선수가 있을 때만')}
           </fieldset>
+          <fieldset>
+            <legend>중계</legend>
+            {check('cast', '다음 경기는 중계로 보기', '다음 경기·가을야구 한 경기 진행 뒤 우리 경기를 문자 중계로 보여 줍니다')}
+          </fieldset>
           <div className="row-between">
             <button type="button" className="small-btn" onClick={() => onChange({ ...DEFAULT_STOPS })}>기본값</button>
             <button type="button" className="small-btn" onClick={() => setOpen(false)}>닫기</button>

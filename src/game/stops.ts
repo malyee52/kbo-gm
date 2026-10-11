@@ -17,16 +17,18 @@ export interface StopRules {
   deadline: boolean;
   /** 육성선수 정식 등록이 되는 첫날(5월 1일)에 멈춘다 (육성선수가 있을 때) */
   devDay: boolean;
+  /** "다음 경기"·가을야구 한 경기 진행 뒤 우리 경기를 중계 화면으로 보여 준다 (GameCast) */
+  cast: boolean;
 }
 
 /** 기본값: 예전 동작 그대로 (이벤트·1군 선수 3일 이상 이탈에서 멈춤) */
 export const DEFAULT_STOPS: StopRules = {
-  event: true, tradeOffer: true, injury: true, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false,
+  event: true, tradeOffer: true, injury: true, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: true,
 };
 
 /** 아무 데서도 멈추지 않는다 (시즌 끝까지, 테스트·장기 진행) */
 export const NO_STOPS: StopRules = {
-  event: false, tradeOffer: false, injury: false, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false,
+  event: false, tradeOffer: false, injury: false, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: false,
 };
 
 export type AttentionKind = 'injury' | 'losing' | 'deadline' | 'dev';

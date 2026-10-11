@@ -4,6 +4,8 @@ import type { BoxScore, BoxSide, GameLog } from '../../engine';
 import { dateOf, formatDate, WEEKDAYS } from '../../game/calendar';
 import { ipText } from '../../game/stats';
 import { PlayerLink, TeamName, useGame } from '../context';
+import { GameCast } from '../GameCast';
+import type { CastGame } from '../../game/session';
 
 interface Cell {
   day: number;
@@ -45,6 +47,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
     cells.push({ day: d, date: dt.date, game: g ? { ...g, logIdx } : undefined });
   }
 
+  const [cast, setCast] = useState<CastGame | null>(null);
   const pick = (c: Cell) => {
     setSelDay(c.day);
     setSelGame(c.game?.logIdx);
@@ -115,7 +118,10 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
                       <td>{g.awayRuns} : {g.homeRuns}{g.innings !== 9 ? <span className="muted small"> ({g.innings}회)</span> : null}</td>
                       <td className="l"><TeamName idx={g.home} /></td>
                       <td className="l">{P(g.win)}</td><td className="l">{P(g.loss)}</td><td className="l">{P(g.save)}</td>
-                      <td>{s.boxes.has(i) ? <button type="button" className="link" onClick={() => setSelGame(i)}>박스스코어</button> : null}</td>
+                      <td>
+                        {s.boxes.has(i) ? <button type="button" className="link" onClick={() => setSelGame(i)}>박스스코어</button> : null}
+                        {s.plays.has(i) ? <> <button type="button" className="link" onClick={() => setCast(session.ourGames().find((x) => x.key === `${year}-${i}`) ?? null)}>중계</button></> : null}
+                      </td>
                     </tr>
                   );
                 })}
@@ -126,6 +132,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
       </section>
 
       {box && selGame !== undefined && <BoxView log={s.log[selGame]} box={box} />}
+      {cast && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
     </div>
   );
 }

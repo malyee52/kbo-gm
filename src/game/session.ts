@@ -26,6 +26,7 @@ import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { ORG_LIMIT } from '../league/salary';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
+import type { BoxScore, Play } from '../engine';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
@@ -53,6 +54,24 @@ import { dateOf, formatDate, shortDate } from './calendar';
 import { FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
+
+/** 중계·하이라이트용 우리 경기 (정규시즌 또는 가을야구) */
+export interface CastGame {
+  key: string;
+  year: number;
+  /** 일정 색인 */
+  day: number;
+  home: number;
+  away: number;
+  homeRuns: number;
+  awayRuns: number;
+  innings: number;
+  /** 중계 기록 (최근 경기만 메모리에 남는다. 불러온 게임의 지난 경기는 없음) */
+  plays?: Play[];
+  box?: BoxScore;
+  /** 가을야구 시리즈 이름 */
+  label?: string;
+}
 
 export interface NewGameOptions {
   year: number;
@@ -277,6 +296,27 @@ export class GameSession {
     this.season = season;
     ensureManagers(league, store);
     this.applyTactics();
+  }
+
+  /** 우리 구단 경기 (fromDay 일정 색인부터, 날짜 순). 가을야구 경기도 뒤에 붙는다 */
+  ourGames(fromDay = 0): CastGame[] {
+    const me = this.teamIdx;
+    const s = this.season;
+    const out: CastGame[] = [];
+    s.log.forEach((g, i) => {
+      if (g.day < fromDay || (g.home !== me && g.away !== me)) return;
+      out.push({
+        key: `${this.world.year}-${i}`, year: this.world.year, day: g.day, home: g.home, away: g.away, homeRuns: g.homeRuns, awayRuns: g.awayRuns,
+        innings: g.innings, plays: s.plays.get(i), box: s.boxes.get(i),
+      });
+    });
+    for (const x of this.postseason?.series ?? []) {
+      x.games.forEach((g, i) => {
+        if (g.day < fromDay || (g.home !== me && g.away !== me)) return;
+        out.push({ ...g, key: `${this.world.year}-ps-${x.round}-${i}`, year: this.world.year, label: `${ROUND_LABEL[x.round]} ${i + 1}차전` });
+      });
+    }
+    return out;
   }
 
   /** 기획안 도전의 한 시즌 결과 (campaigns.ts SeasonMark): 정규시즌 순위·승률·가을야구·자체 육성 주전 */

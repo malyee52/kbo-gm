@@ -1,6 +1,6 @@
 // 여러 날 진행(일주일·한 달·시즌 끝까지)한 뒤의 요약 창 (2026-10-11 사용자 요청).
 // 진행 직전 상태를 찍어 두고(takeSnapshot), 진행이 끝나면 그동안의 성적·순위·선수·소식·자금 변화를 보여 준다.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BatLine, PitLine } from '../engine';
 import { formatDate, shortDate } from '../game/calendar';
 import type { GameSession } from '../game/session';
@@ -9,6 +9,9 @@ import type { Screen } from './context';
 import { fixed2, ipText, ops, rate3 } from '../game/stats';
 import { PlayerLink, useGame, useWon } from './context';
 import { teamColor } from './teams';
+import { GameCast } from './GameCast';
+import { highlights } from '../game/highlights';
+import type { CastGame } from '../game/session';
 
 export interface AdvanceSnapshot {
   year: number;
@@ -60,6 +63,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
   const { session } = useGame();
   const won = useWon();
   const ref = useRef<HTMLDialogElement>(null);
+  const [cast, setCast] = useState<CastGame | null>(null);
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
@@ -92,6 +96,11 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
   const news = session.news.slice(snap.news).filter((n) => NEWS_KINDS.has(n.kind) && (n.year ?? year) === year);
   const articles = (session.league.articles ?? []).slice(snap.articles);
   const cash = session.cashNow();
+
+  // 이 기간 우리 경기와 하이라이트 (중계 기록은 최근 경기만 남는다)
+  const games = session.ourGames(snap.day);
+  const nameOf = (idx: number) => session.world.players[idx]?.name ?? '?';
+  const teamName = (t: number) => session.teamInfo(t).name;
 
   const close = () => { ref.current?.close(); onClose(); };
   return (
@@ -151,6 +160,28 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
           </section>
         )}
 
+        {games.length > 0 && (
+          <section>
+            <h3>우리 경기 <span className="muted small">{games.length}경기</span></h3>
+            <ul className="plain small game-list">
+              {games.slice(-10).reverse().map((g) => {
+                const home = g.home === me;
+                const mine = home ? g.homeRuns : g.awayRuns;
+                const theirs = home ? g.awayRuns : g.homeRuns;
+                const res = mine > theirs ? '승' : mine < theirs ? '패' : '무';
+                const hs = g.plays ? highlights(g.plays, nameOf, home ? 'home' : 'away', 2) : [];
+                return (
+                  <li key={g.key}>
+                    <span className={`res res-${res}`}>{res}</span> <span className="muted">{g.label ?? shortDate(year, g.day)}</span> {home ? 'vs' : '@'} {teamName(home ? g.away : g.home)} <strong>{mine}:{theirs}</strong>
+                    {g.plays && <button type="button" className="link" onClick={() => setCast(g)}>중계</button>}
+                    {hs.length > 0 && <div className="muted">{hs.map((m) => m.text).join(' · ')}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
         {articles.length > 0 && (
           <section>
             <h3>기사 <span className="muted small">{articles.length}건</span></h3>
@@ -166,6 +197,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
         </section>
         <div className="actions"><button type="button" onClick={close}>확인</button></div>
       </div>
+      {cast && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
     </dialog>
   );
 }

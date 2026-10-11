@@ -3,7 +3,7 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
-import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters } from './game';
+import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters, type Play } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
@@ -137,6 +137,9 @@ const UNIT: Rates = { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 };
 const BAT_KEYS = Object.keys(emptyBatLine()) as (keyof BatLine)[];
 const PIT_KEYS = Object.keys(emptyPitLine()) as (keyof PitLine)[];
 
+/** 메모리에 남기는 중계 기록 경기 수 */
+export const PLAYS_KEEP = 32;
+
 export function winPct(t: TeamRecord): number {
   return t.w + t.l > 0 ? t.w / (t.w + t.l) : 0;
 }
@@ -227,6 +230,8 @@ export class Season {
   readonly log: GameLog[] = [];
   /** 경기 로그 색인 → 박스스코어 */
   readonly boxes = new Map<number, BoxScore>();
+  /** 박스스코어 구단 경기의 중계 기록 (경기 로그 색인 → 기록). 저장하지 않고 최근 PLAYS_KEEP경기만 메모리에 둔다 */
+  readonly plays = new Map<number, Play[]>();
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
   /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
@@ -395,7 +400,10 @@ export class Season {
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       const batBefore = wantBox ? [...homeLineup, ...awayLineup].map((p) => ({ ...this.bat[p.idx] })) : null;
+      ctx.plays = wantBox ? [] : null;
       const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
+      const plays = ctx.plays;
+      ctx.plays = null;
       const ht = this.teams[g.home];
       const at = this.teams[g.away];
       ht.g++; at.g++;
@@ -425,6 +433,10 @@ export class Season {
             bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr,
           };
         });
+        if (plays) {
+          this.plays.set(this.log.length - 1, plays);
+          for (const k of this.plays.keys()) if (this.plays.size > PLAYS_KEEP) this.plays.delete(k);
+        }
         this.boxes.set(this.log.length - 1, {
           lineScore: res.lineScore,
           home: { batters: boxBat(homeLineup, 0), pitchers: boxPit(res.homeStaff) },
@@ -465,9 +477,10 @@ export class Season {
    * 1군은 그날 기준으로 다시 짜고(부상 선수는 계속 빠진다), 주전 휴식은 없다. 난수는 넘겨받은 rng만 쓴다.
    */
   playExtraGame(home: number, away: number, day: number, rng: Rng, maxInnings: number,
-                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[] } {
+                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[]; plays?: Play[] } {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true };
+    const plays = this.boxTeams.has(home) || this.boxTeams.has(away) ? [] as Play[] : null;
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     refreshActive(h, this.world, this.states, day);
@@ -475,7 +488,7 @@ export class Season {
     const hl = todaysLineup(h, this.world.league, params, rng);
     const al = todaysLineup(a, this.world.league, params, rng);
     const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
-    return { result, home: hl, away: al };
+    return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 
   private snapshotPitchers(sides: TeamSeason[]): Map<number, PitLine> {
