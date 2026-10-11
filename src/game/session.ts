@@ -136,6 +136,9 @@ export interface TradeRecord {
   pr?: string[];
 }
 
+/** 진행을 멈출 만한 1군 선수 이탈 기간 (일, 임시값) */
+export const ATTENTION_DAYS = 3;
+
 /** 육성선수 정식 등록이 되는 첫날 (KBO 규정 5월 1일) */
 export const DEV_REGISTER_FROM = { month: 5, date: 1 };
 
@@ -723,8 +726,13 @@ export class GameSession {
    * days일 진행한다. stopOnEvent면 이벤트가 생긴 날 멈추고, 답을 기다리는 이벤트가 있으면 진행하지 않는다 (화면).
    * 아니면(테스트·장기 진행) 답을 기다리는 이벤트를 첫 번째 선택지로 자동 처리하고 계속 간다 (events.ts).
    */
-  advance(days: number, stopOnEvent = false): number {
+  /**
+   * days일 진행. stopOnEvent: 이벤트가 생기면 그날 멈춘다 (아니면 첫 선택지로 자동).
+   * stopOnAttention: 플레이어가 손봐야 할 일(직접 관리하는 1군 선수의 ATTENTION_DAYS일 이상 이탈)이 생기면 그날 멈춘다 (attention에 남는다)
+   */
+  advance(days: number, stopOnEvent = false, stopOnAttention = false): number {
     let n = 0;
+    this.attention = [];
     while (n < days && this.phase === 'season' && !this.season.done) {
       if (this.league.events?.pending) {
         if (stopOnEvent) break;
@@ -733,9 +741,13 @@ export class GameSession {
       this.stepDay();
       n++;
       if (stopOnEvent && this.league.events?.pending) break;
+      if (stopOnAttention && this.attention.length) break;
     }
     return n;
   }
+
+  /** 마지막 진행에서 생긴, 플레이어가 손봐야 할 일 (화면이 진행을 멈추고 보여 준다) */
+  attention: string[] = [];
 
   /** 다음 경기일까지 진행한다 (중간의 휴식일 포함) */
   advanceToNextGameDay(): number {
@@ -773,6 +785,8 @@ export class GameSession {
         // 이탈 사유는 실존 선수에게 중립 문구만 쓴다 (기획서 7장, absenceReason → eventLabel)
         const reason = this.absenceReason(p) ?? '결장';
         const back = until >= s.schedule.length ? '이번 시즌 복귀 어려움' : `복귀 예정 ${formatDate(year, until)} (${until - day}일)`;
+        // 직접 관리하는 1군 선수가 며칠 이상 빠지면 진행을 멈추고 알린다 (엔트리·기용표를 손볼 수 있게)
+        if (manual?.has(p.idx) && until - day >= ATTENTION_DAYS) this.attention.push(`${p.name}: ${reason}, ${back}`);
         this.addNews(day, 'absence', `${p.name}: ${reason}. ${back}.${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}`);
       }
     });

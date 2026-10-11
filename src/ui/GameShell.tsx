@@ -26,6 +26,7 @@ import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
+import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 
 /** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
 const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '운영' | '리그' | '시스템' }[] = [
@@ -78,10 +79,15 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (busy || session.done) return;
     setBusy(label);
     await nextFrame();
+    // 여러 날 진행이면 끝나고 요약 창을 띄운다 (AdvanceSummary)
+    const snap = days >= 7 ? takeSnapshot(session) : null;
     let left = days;
+    let attention: string[] = [];
     while (left > 0 && !session.done) {
-      const did = session.advance(Math.min(7, left), !autoEvents);
+      // 직접 관리하는 1군 선수가 다치는 등 손볼 일이 생기면 시즌 끝까지 진행 중이라도 멈춘다
+      const did = session.advance(Math.min(7, left), !autoEvents, true);
       left -= did;
+      if (session.attention.length) { attention = [...session.attention]; break; }
       if ((!autoEvents && session.pendingEvent) || did === 0) break; // 이벤트가 생기면 그날 멈춘다
       if (left > 0) {
         setVersion((v) => v + 1);
@@ -93,8 +99,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
+    if (snap || attention.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention });
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
+  /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
+  const takeSnapshotAfter = () => takeSnapshot(session);
+  const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: string[] } | null>(null);
 
   /** 가을야구 진행 (경기 수, 또는 '우리 경기까지'·'시리즈 끝까지') */
   const advancePs = async (how: 'one' | 'ours' | 'series' | 'all', label: string) => {
@@ -201,6 +211,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           <main className="content" aria-busy={!!busy}>
             <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>
               <EventDialog />
+              {summary && !session.pendingEvent && (
+                <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
+              )}
               {screen === 'home' && <Home />}
               {screen === 'roster' && <Roster />}
               {screen === 'schedule' && <Schedule focusGame={screenArg} />}
