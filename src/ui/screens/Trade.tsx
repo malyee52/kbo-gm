@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { MAX_PER_SIDE, TENDENCY_LABEL, type TradeEvaluation } from '../../ai/trade';
 import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
-import { TRADE_DEADLINE } from '../../game/session';
+import { TRADE_DEADLINE, type ShopOffer } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { currentRuns } from '../../ai/value';
@@ -240,7 +240,11 @@ function ShopPanel({ open }: { open: boolean }) {
   const { session, changed } = useGame();
   const won = useWon();
   const [sel, setSel] = useState<Set<number>>(new Set());
-  const [offers, setOffers] = useState<{ team: number; get: SimPlayer[] }[] | null>(null);
+  const [offers, setOffers] = useState<ShopOffer[] | null>(null);
+  // 얹을 현금 (억 원, 그 해 물가로 보이는 금액). 2026-10-12 사용자: 선수 내놓기에 현금을 더할 수 있게
+  const [cashText, setCashText] = useState('0');
+  const px = usePriceIndex();
+  const cashMan = Math.max(0, Math.round((Number(cashText) || 0) * 10000 / px));
   const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const ctx = session.values;
@@ -259,18 +263,19 @@ function ShopPanel({ open }: { open: boolean }) {
     setBusy(true);
     setMsg({ text: '다른 구단 단장들에게 알리는 중입니다' });
     await new Promise((r) => setTimeout(r, 30));
-    const list = session.shopOffers([...sel].map((i) => session.world.players[i]));
+    const list = session.shopOffers([...sel].map((i) => session.world.players[i]), cashMan);
     setBusy(false);
     setOffers(list);
     setMsg(list.length ? null : { text: '지금은 이 조건에 관심을 보이는 구단이 없습니다.' });
   };
-  const take = (o: { team: number; get: SimPlayer[] }) => {
+  const take = (o: ShopOffer) => {
     const give = [...sel].map((i) => session.world.players[i]);
-    const ev = session.proposeTrade(o.team, give, o.get);
+    const ev = session.proposeTrade(o.team, give, o.get, cashMan, { give: [], get: o.picks });
     if (ev.verdict === 'accept') {
       setMsg({ text: `${session.world.teams[o.team].name}와 트레이드가 성사됐습니다. 받은 선수는 2군에 있습니다.`, ok: true });
       setSel(new Set());
       setOffers(null);
+      setCashText('0');
       changed();
     } else {
       setMsg({ text: `${session.world.teams[o.team].name}: "${ev.message}" (그사이 조건이 바뀌었습니다)` });
@@ -289,8 +294,14 @@ function ShopPanel({ open }: { open: boolean }) {
       <section className="panel">
         <div className="row-between wrap">
           <h2>내놓을 선수 <span className="muted small">{sel.size}/{MAX_PER_SIDE}명 · 외국인·육성선수 제외</span></h2>
-          <button type="button" onClick={() => void ask()} disabled={!open || busy || sel.size === 0}>{busy ? '알리는 중' : '다른 구단에 알리기'}</button>
+          <span className="inline">
+            <label className="inline small">현금 얹기
+              <input type="number" min={0} step={0.5} value={cashText} onChange={(e) => { setCashText(e.target.value); setOffers(null); }} style={{ width: 80 }} aria-label="얹을 현금(억 원)" /> 억 원
+            </label>
+            <button type="button" onClick={() => void ask()} disabled={!open || busy || (sel.size === 0 && cashMan <= 0)}>{busy ? '알리는 중' : '다른 구단에 알리기'}</button>
+          </span>
         </div>
+        <p className="muted small">선수 없이 현금만 걸면 현금으로 선수·지명권을 사 옵니다. 지금 자금 {won(session.cashNow())}.</p>
         <div className="scroll flat shop-list">
           <table>
             <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th>현재</th><th className="l">올해</th><th>연봉</th></tr></thead>
@@ -319,6 +330,7 @@ function ShopPanel({ open }: { open: boolean }) {
               {o.get.map((p) => (
                 <li key={p.idx}><PlayerLink p={p} /> <span className="muted small">{p.isPitcher ? '투수' : posName(p.pos)} · {p.age ?? '-'}세 · 연봉 {salary(p)}</span> {grade(p)} <span className="small muted">{line(p)}</span></li>
               ))}
+              {o.picks.map((k) => <li key={pickId(k)}>지명권 <strong>{session.pickLabel(k)}</strong></li>)}
             </ul>
           </div>
         ))}

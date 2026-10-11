@@ -65,7 +65,9 @@ describe('트레이드에 지명권 넣기', () => {
     const a = g.world.teams[1].org.find((p) => !p.foreign)!;
     const mine = g.ownedPicks(0);
     expect(mine).toHaveLength(2 * 5); // 다음 두 드래프트 × 5라운드
-    expect(g.evaluateTrade(1, [], [], 0, { give: [mine[0]], get: [] }).message).toContain('선수와 함께');
+    expect(g.evaluateTrade(1, [], [], 0, { give: [mine[0]], get: [] }).message).toContain('선수나 현금과 함께');
+    // 현금 ↔ 지명권은 된다 (2026-10-12 사용자 요청): 판정까지 가서 '함께' 규정에 막히지 않는다
+    expect(g.evaluateTrade(1, [], [], 10_000, { give: [mine[0]], get: [] }).message).not.toContain('함께');
     expect(g.evaluateTrade(1, [], [a], 0, { give: mine.slice(0, 3), get: [] }).message).toContain('2장까지');
     expect(g.evaluateTrade(1, [], [a], 0, { give: [{ draft: 2027, round: 1, from: 1 }], get: [] }).message).toContain('가진 지명권만');
     expect(g.evaluateTrade(1, [], [a], 0, { give: [{ draft: 2029, round: 1, from: 0 }], get: [] }).verdict).toBe('reject-invalid');

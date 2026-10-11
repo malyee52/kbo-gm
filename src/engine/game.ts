@@ -813,6 +813,15 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       save = last.p.idx;
     }
   }
+  // 홀드 (2026-10-12): 3점 차 이내 리드에서 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
+  // 경기를 끝낸 투수와 승리 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
+  for (const side of [home, away]) {
+    const fin = side.staff[side.staff.length - 1];
+    for (const pg of side.staff) {
+      if (pg.isStarter || pg === fin || pg.p.idx === win) continue;
+      if (pg.enteredLead >= 1 && pg.enteredLead <= 3 && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
+    }
+  }
   return {
     homeRuns: home.runs, awayRuns: away.runs, innings: inning, win, loss, save, lineScore,
     homeStaff: home.staff.map((x) => x.p.idx), awayStaff: away.staff.map((x) => x.p.idx),

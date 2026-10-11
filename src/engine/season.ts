@@ -573,7 +573,7 @@ export class Season {
     if (save.streak) s.states.streak.set(save.streak);
     s.states.lastStartDay.set(save.lastStartDay);
     save.bat.forEach((row, i) => BAT_KEYS.forEach((k, j) => { s.bat[i][k] = row[j]; }));
-    save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j]; }));
+    save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j] ?? 0; })); // 예전 저장에는 뒤에 붙인 항목(홀드)이 없다
     save.teams.forEach((t, i) => Object.assign(s.teams[i], t));
     Object.assign(s.totals, save.totals);
     s.log.push(...save.log.map((g) => ({ ...g })));

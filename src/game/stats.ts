@@ -72,6 +72,10 @@ export const PIT_CATEGORIES: LeaderCategory<PitLine>[] = [
   { key: 'so', label: '탈삼진', show: (p) => String(p.so), score: (p) => p.so },
   { key: 'ip', label: '이닝', show: (p) => ipText(p.outs), score: (p) => p.outs },
   { key: 'whip', label: 'WHIP', show: (p) => fixed2(whip(p)), score: (p) => -whip(p), qualified: true },
+  // 2026-10-12: 타자(WAR 포함 10개)와 같은 5×2 배치가 되게 셋을 더했다
+  { key: 'k9', label: '9이닝당 탈삼진', show: (p) => fixed2((p.so * 27) / Math.max(1, p.outs)), score: (p) => (p.outs > 0 ? (p.so * 27) / p.outs : -1), qualified: true },
+  { key: 'wpct', label: '승률 (10승 이상)', show: (p) => (p.w + p.l > 0 ? rate3(p.w / (p.w + p.l)) : '-'), score: (p) => (p.w >= 10 ? p.w / (p.w + p.l) : -1) },
+  { key: 'hld', label: '홀드', show: (p) => String(p.hld ?? 0), score: (p) => p.hld ?? 0 },
 ];
 
 export interface LeaderRow<L> {

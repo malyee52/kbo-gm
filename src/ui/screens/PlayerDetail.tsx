@@ -9,6 +9,7 @@ import { dollarText } from '../../league/salary';
 import { Grade, gradeClass, HAND, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { teamVars } from '../teams';
+import { seasonWar } from '../../league/awards';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -95,7 +96,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         </section>
 
         <section>
-          <h3>{year} 시즌 기록 (시뮬레이션)</h3>
+          <h3>{year} 시즌 기록 (시뮬레이션){(() => { const w = session.phase === 'season' ? seasonWar(session.world, session.season).get(p.idx) : undefined; return w !== undefined ? <span className="muted small"> · WAR {w.toFixed(1)}</span> : null; })()}</h3>
           <div className="scroll">
             {p.isPitcher ? <PitTable rows={[{ label: String(year), l: session.season.pit[p.idx] }]} /> : <BatTable rows={[{ label: String(year), l: session.season.bat[p.idx] }]} />}
           </div>
@@ -217,7 +218,7 @@ export function GradeBar({ label, v }: { label: string; v: number | null }) {
 }
 
 type BatLike = { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; rbi: number; r: number; bb: number; hbp: number; so: number; sb: number; sf: number };
-type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number };
+type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number };
 
 function batFromRow(r: BatRow): BatLike {
   return { g: r.g, pa: r.pa, ab: r.ab, h: r.h, d: r.d, t: r.t, hr: r.hr, rbi: r.rbi, r: r.r, bb: r.bb ?? 0, hbp: r.hbp ?? 0, so: r.so ?? 0, sb: r.sb ?? 0, sf: r.sf ?? 0 };
@@ -249,13 +250,13 @@ function BatTable({ rows }: { rows: { label: string; l: BatLike }[] }) {
 function PitTable({ rows }: { rows: { label: string; l: PitLike }[] }) {
   return (
     <table>
-      <thead><tr><th className="l">시즌</th><th>경기</th><th>선발</th><th>승</th><th>패</th><th>세이브</th><th>이닝</th><th>평균자책</th><th>WHIP</th><th>피안타</th><th>피홈런</th><th>볼넷</th><th>탈삼진</th></tr></thead>
+      <thead><tr><th className="l">시즌</th><th>경기</th><th>선발</th><th>승</th><th>패</th><th>세이브</th><th>홀드</th><th>이닝</th><th>평균자책</th><th>WHIP</th><th>피안타</th><th>피홈런</th><th>볼넷</th><th>탈삼진</th></tr></thead>
       <tbody>
         {rows.map(({ label, l }) => {
-          const p = { ...l, bf: 0, hbp: 0, r: 0 };
+          const p = { ...l, bf: 0, hbp: 0, r: 0, hld: l.hld ?? 0 };
           return (
             <tr key={label}>
-              <td className="l">{label}</td><td>{l.g}</td><td>{l.gs}</td><td>{l.w}</td><td>{l.l}</td><td>{l.sv}</td><td>{ipText(l.outs)}</td>
+              <td className="l">{label}</td><td>{l.g}</td><td>{l.gs}</td><td>{l.w}</td><td>{l.l}</td><td>{l.sv}</td><td>{l.hld ?? '-'}</td><td>{ipText(l.outs)}</td>
               <td>{fixed2(era(p))}</td><td>{fixed2(whip(p))}</td><td>{l.h}</td><td>{l.hr}</td><td>{l.bb}</td><td>{l.so}</td>
             </tr>
           );

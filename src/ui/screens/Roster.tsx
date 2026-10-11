@@ -2,6 +2,7 @@
 // 2026-10-12 개편: 1군/2군을 탭으로 나눠 한 번에 한 표만, 줄을 누르면 오른쪽에 선수 요약(좁은 화면은 바로 상세 창).
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar } from './PlayerDetail';
+import { seasonWar } from '../../league/awards';
 import { runsGrade } from '../grades';
 import { defenseAt, defenseGrade, fieldPosOf, LINEUP_SLOTS, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
@@ -75,6 +76,9 @@ export function Roster() {
 
   // 세이버 기록의 리그 기준값 (이번 시즌 리그 전체 시뮬레이션 기록)
   const lg = useMemo(() => leagueBase(session.season.bat, session.season.pit), [session, version]);
+  // WAR (근사, league/awards.ts seasonWar)
+  const war = useMemo(() => seasonWar(session.world, session.season), [session, version]);
+  const warCol: Column = { h: 'WAR', title: '대체 선수보다 몇 승을 더 벌었나 (근사, 시상과 같은 계산)', v: (p) => (war.has(p.idx) ? war.get(p.idx)!.toFixed(1) : '-') };
   const org = session.team.org;
   const first = org.filter((p) => view.registered.has(p.idx));
   const foreign = first.filter((p) => p.foreign).length;
@@ -288,7 +292,7 @@ export function Roster() {
           </div>
         </section>
 
-        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, inFirst, true)} />}
+        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, inFirst, true)} war={war.get(picked.idx)} />}
       </div>
 
       {kind === 'hit' && inFirst && view.manual && <BattingOrderPanel onResult={(r, who) => { setMsg({ ...r, who }); changed(); }} />}
@@ -319,11 +323,11 @@ export function Roster() {
           bat('경기', (b) => b.g), bat('타석', (b) => b.pa), bat('타수', (b) => b.ab), bat('안타', (b) => b.h), bat('2루타', (b) => b.d),
           bat('3루타', (b) => b.t), bat('홈런', (b) => b.hr), bat('타점', (b) => b.rbi), bat('득점', (b) => b.r), bat('볼넷', (b) => b.bb),
           bat('삼진', (b) => b.so), bat('도루', (b) => b.sb), bat('타율', (b) => rate3(avg(b))), bat('출루율', (b) => rate3(obp(b))),
-          bat('장타율', (b) => rate3(slg(b))), bat('OPS', (b) => rate3(ops(b))),
+          bat('장타율', (b) => rate3(slg(b))), bat('OPS', (b) => rate3(ops(b))), warCol,
         ];
       }
       return [
-        bat('타석', (b) => b.pa), bat('wOBA', (b) => rate3(woba(b)), '가중 출루율: 타석 결과별 득점 가치로 가중한 출루율'),
+        warCol, bat('타석', (b) => b.pa), bat('wOBA', (b) => rate3(woba(b)), '가중 출루율: 타석 결과별 득점 가치로 가중한 출루율'),
         bat('wRC+', (b) => int0(wrcPlus(b, lg)), '조정 득점 창출력: 100 = 리그 평균'),
         bat('wRAA', (b) => fixed1(wraa(b, lg)), '리그 평균 타자보다 더 낸 득점'),
         bat('ISO', (b) => rate3(iso(b)), '순수 장타력: 장타율 - 타율'), bat('BABIP', (b) => rate3(babip(b)), '인플레이 타구 타율'),
@@ -344,14 +348,14 @@ export function Roster() {
     }
     if (pg === 'classic') {
       return [
-        pit('경기', (x) => x.g), pit('선발', (x) => x.gs), pit('승', (x) => x.w), pit('패', (x) => x.l), pit('세이브', (x) => x.sv),
+        pit('경기', (x) => x.g), pit('선발', (x) => x.gs), pit('승', (x) => x.w), pit('패', (x) => x.l), pit('세이브', (x) => x.sv), pit('홀드', (x) => x.hld ?? 0),
         pit('이닝', (x) => ipText(x.outs)), pit('피안타', (x) => x.h), pit('피홈런', (x) => x.hr), pit('볼넷', (x) => x.bb),
         pit('탈삼진', (x) => x.so), pit('실점', (x) => x.r), pit('자책', (x) => x.er), pit('평균자책', (x) => fixed2(era(x))),
-        pit('WHIP', (x) => fixed2(whip(x)), '이닝당 출루 허용: (피안타 + 볼넷) ÷ 이닝'),
+        pit('WHIP', (x) => fixed2(whip(x)), '이닝당 출루 허용: (피안타 + 볼넷) ÷ 이닝'), warCol,
       ];
     }
     return [
-      pit('이닝', (x) => ipText(x.outs)), pit('FIP', (x) => fixed2(fip(x, lg)), '수비 무관 평균자책: 삼진·볼넷·사구·홈런만으로 본 평균자책'),
+      warCol, pit('이닝', (x) => ipText(x.outs)), pit('FIP', (x) => fixed2(fip(x, lg)), '수비 무관 평균자책: 삼진·볼넷·사구·홈런만으로 본 평균자책'),
       pit('ERA-FIP', (x) => fixed2(era(x) - fip(x, lg)), '평균자책 - FIP. 크면 운·수비 덕을 덜 본 것'),
       pit('K/9', (x) => fixed2(per9(x.so, x))), pit('BB/9', (x) => fixed2(per9(x.bb, x))), pit('HR/9', (x) => fixed2(per9(x.hr, x))),
       pit('K%', (x) => pct1(pitKPct(x))), pit('BB%', (x) => pct1(pitBbPct(x))), pit('K-BB%', (x) => pct1(pitKPct(x) - pitBbPct(x))),
@@ -400,7 +404,7 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
 }
 
 /** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
-function RosterSide({ p, inFirst, status, moveBtn }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode }) {
+function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number }) {
   const { session, grades, openPlayer } = useGame();
   const won = useWon();
   const lp = session.leaguePlayer(p.id);
@@ -432,7 +436,7 @@ function RosterSide({ p, inFirst, status, moveBtn }: { p: SimPlayer; inFirst: bo
             </>
           ) : null}
         </div>
-        <p className="small">{session.world.year} {line}</p>
+        <p className="small">{session.world.year} {line}{war !== undefined ? ` · WAR ${war.toFixed(1)}` : ''}</p>
         {lp && (
           <p className="small muted">
             {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential)} />
