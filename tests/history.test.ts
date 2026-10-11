@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { careerLeaders, careers, franchiseHistory, realYearbook, seasonBests, yearbook } from '../src/league/history';
+import { careerLeaders, careers, FAREWELL_DAYS, farewellWorthy, franchiseHistory, hallOfFame, LEGEND_SEASONS, legendCandidates, legendFill, realYearbook, seasonBests, yearbook } from '../src/league/history';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -103,5 +103,40 @@ describe('단일 시즌 기록과 구단 역사', () => {
     expect(kia.titles.filter((y) => y < 2026)).toHaveLength(12);
     expect(kia.titles.length).toBe(12 + gameTitles);
     expect(kia.name).toBe('KIA');
+  });
+});
+
+describe('명예의 전당과 구단 레전드', () => {
+  it('명예의 전당: 시작 전에 은퇴한 실제 명선수는 기록 기준으로 들어가고, 현역은 빠진다', () => {
+    const hof = hallOfFame(g.league, careers(g.league, store));
+    const names = new Set(hof.map((h) => h.c.name));
+    for (const n of ['이승엽', '양준혁', '송진우']) expect(names.has(n), n).toBe(true);
+    expect(hof.some((h) => h.c.name === '최정' && h.c.active)).toBe(false);
+    expect(hof.find((h) => h.c.name === '이승엽')!.reasons).toContain('300홈런');
+  });
+
+  it('구단 레전드: 시즌 중에는 지정할 수 없고, 오프시즌에 후보(우리 구단 8시즌 이상, 은퇴)를 지정하면 관중률 보정이 생긴다', () => {
+    const s = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'legend' }, FAST);
+    const fr = s.team.franchise;
+    const cand = legendCandidates(careers(s.league, store), fr);
+    expect(cand.length).toBeGreaterThan(0);
+    expect(cand.every((c) => !c.active && (c.franchiseSeasons[fr] ?? 0) >= LEGEND_SEASONS)).toBe(true);
+    expect(s.designateLegend(cand[0].id).ok).toBe(false); // 시즌 중
+    s.advance(100000);
+    s.beginOffseason();
+    expect(s.designateLegend('없는-선수').ok).toBe(false);
+    expect(s.designateLegend(cand[0].id).ok).toBe(true);
+    expect(s.designateLegend(cand[0].id).ok).toBe(false); // 이미 레전드
+    expect(s.league.legends).toEqual([{ franchise: fr, id: cand[0].id, name: cand[0].name, year: 2027 }]);
+    expect(legendFill(s.league, fr)).toBeCloseTo(0.01, 10);
+  });
+
+  it('은퇴식: 한 구단에서 10시즌 이상 뛴 프랜차이즈 스타가 은퇴하면 다음 시즌 개막 사흘 동안 그 구단 관중 효과가 생긴다', () => {
+    const retired = (g.league.archive ?? []).filter((a) => a.why === 'retired' && a.lastYear === 2026);
+    const all = careers(g.league, store);
+    const long = retired.filter((a) => Object.keys(all.get(a.id)!.franchiseSeasons).some((f) => farewellWorthy(all.get(a.id)!, f)));
+    const buffs = (g.league.events?.buffs ?? []).filter((b) => b.year === 2027 && b.note.endsWith('은퇴식'));
+    expect(buffs.length).toBeGreaterThanOrEqual(long.length);
+    for (const b of buffs) expect(b.until - b.from).toBe(FAREWELL_DAYS);
   });
 });

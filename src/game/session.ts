@@ -18,7 +18,9 @@ import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { judgeScenario, scenarioById } from '../league/scenarios';
-import { recordSeasonBests, recordYear } from '../league/history';
+import {
+  careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
+} from '../league/history';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
@@ -96,6 +98,7 @@ export type GameAction =
   | { year: number; type: 'comp-pick'; fa: string; pick: string }
   | { year: number; type: 'comp-auto' }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
+  | { year: number; type: 'legend'; id: string }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
@@ -1007,6 +1010,7 @@ export class GameSession {
         const changes = off.changes ?? [];
         Off.closeOffseason(L, off);
         this.postseason = null;
+        this.hallOfFameAndFarewells(L.year - 1);
         const sanctions = applyCapSanctions(L, L.year);
         this.offseason = null;
         this.finishedLeague = null;
@@ -1054,6 +1058,7 @@ export class GameSession {
       case 'comp-pick': res = Off.pickCompByUser(L, off, a.fa, a.pick); break;
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
+      case 'legend': res = this.applyLegend(a.id); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
@@ -1152,6 +1157,42 @@ export class GameSession {
     }
   }
 
+  // ---- 역사: 명예의 전당, 구단 레전드, 은퇴식 (history.ts)
+
+  private applyLegend(id: string): { ok: boolean; message: string } {
+    const L = this.league;
+    const fr = L.teams[this.teamIdx].franchise;
+    if ((L.legends ?? []).some((l) => l.franchise === fr && l.id === id)) return { ok: false, message: '이미 구단 레전드입니다.' };
+    const c = legendCandidates(careers(L, this.store), fr).find((x) => x.id === id);
+    if (!c) return { ok: false, message: `은퇴했고 우리 구단에서 ${LEGEND_SEASONS}시즌 이상 뛴 선수만 레전드로 지정할 수 있습니다.` };
+    (L.legends ??= []).push({ franchise: fr, id, name: c.name, year: this.year + 1 });
+    this.addOffNews(`${c.name}, ${L.teams[this.teamIdx].name} 구단 레전드로 지정`);
+    return { ok: true, message: `${c.name} 선수를 구단 레전드로 지정했습니다.` };
+  }
+
+  /** 새 시즌 개막 때: 막 은퇴한 선수의 명예의 전당 헌액과 프랜차이즈 선수 은퇴식 (lastYear: 막 끝난 시즌) */
+  private hallOfFameAndFarewells(lastYear: number): void {
+    const L = this.league;
+    const all = careers(L, this.store);
+    const leftNow = new Set((L.archive ?? []).filter((a) => a.lastYear === lastYear).map((a) => a.id));
+    for (const h of hallOfFame(L, all).filter((x) => leftNow.has(x.c.id))) {
+      this.addNews(0, 'season', `명예의 전당 헌액: ${h.c.name} (${h.reasons.join(', ')}).`);
+    }
+    // 은퇴식: 막 은퇴한 프랜차이즈 스타(farewellWorthy)가 있으면 그 구단 개막 사흘 동안 관중이 는다
+    const ev = ensureEvents(L);
+    for (const a of (L.archive ?? []).filter((x) => x.lastYear === lastYear && x.why === 'retired')) {
+      const c = all.get(a.id);
+      if (!c) continue;
+      for (const [fr, n] of Object.entries(c.franchiseSeasons)) {
+        if (!farewellWorthy(c, fr)) continue;
+        const t = L.teams.findIndex((x) => x.franchise === fr);
+        if (t < 0) continue;
+        ev.buffs.push({ team: t, year: L.year, from: 0, until: FAREWELL_DAYS, fill: FAREWELL_FILL, note: `${c.name} 은퇴식` });
+        this.addNews(0, 'season', `${L.teams[t].name}, ${c.name} 은퇴식 (${n}시즌). 개막 첫 홈 경기들에 팬이 몰릴 것으로 보입니다.`);
+      }
+    }
+  }
+
   // ---- 재정 (finance.ts)
 
   /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 월말 연봉 계산용) */
@@ -1232,6 +1273,8 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /** 은퇴 선수를 우리 구단 레전드로 지정 (오프시즌) */
+  designateLegend(id: string) { return this.dispatchOff({ year: this.year, type: 'legend', id }); }
   release(id: string) { return this.dispatchOff({ year: this.year, type: 'release', id }); }
   autoRelease() { return this.dispatchOff({ year: this.year, type: 'release-auto' }); }
   /** 정원 정리: 우리 구단 방출 순서 (자동 방출과 같은 기준)와 최소 인원 때문에 뒤로 미룬 선수 */

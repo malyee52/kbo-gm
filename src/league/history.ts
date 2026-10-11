@@ -17,8 +17,10 @@ export interface ArchivedPlayer {
   birthYear: number | null;
   /** 게임 안 마지막 시즌 */
   lastYear: number;
-  /** 게임 안에서 뛴 구단 (계보, 순서대로) */
+  /** 게임 안에서 뛴 구단 (이름, 순서대로) */
   franchises: string[];
+  /** 게임 안에서 구단 계보별로 뛴 시즌 수 */
+  franchiseSeasons?: Record<string, number>;
   /** 마지막 소속 구단 이름 */
   lastTeam: string;
   why: 'retired' | 'left';
@@ -66,6 +68,10 @@ export interface Career {
   pit: CareerPit;
   /** 시작 전 실제 기록이 들어 있나 */
   hasReal: boolean;
+  /** 구단 계보별로 뛴 시즌 수 (1군 기록이 있는 시즌) */
+  franchiseSeasons: Record<string, number>;
+  /** 마지막 소속 구단 이름 */
+  lastTeam: string;
 }
 
 const emptyBat = (): CareerBat => ({ g: 0, pa: 0, ab: 0, r: 0, h: 0, d: 0, t: 0, hr: 0, rbi: 0, bb: 0, so: 0, sb: 0 });
@@ -94,19 +100,36 @@ export function archiveDeparting(league: LeagueState, year: number): void {
   league.archive ??= [];
   for (const p of league.players) {
     if (p.team >= 0 || !p.history.some((h) => h.bat || h.pit)) continue; // 1군 기록이 하나도 없으면 남길 것이 없다
-    league.archive.push(archiveOf(p, retired.has(p.id) ? 'retired' : 'left'));
+    league.archive.push(archiveOf(league, p, retired.has(p.id) ? 'retired' : 'left'));
   }
 }
 
-function archiveOf(p: LeaguePlayer, why: ArchivedPlayer['why']): ArchivedPlayer {
+/** 게임 안 시즌 줄의 구단 이름 → 계보 (그 해 연표, 없으면 지금 구단 목록) */
+function gameFranchise(league: LeagueState, year: number, name: string): string {
+  return league.yearbook?.find((y) => y.year === year)?.teams.find((t) => t.name === name)?.franchise
+    ?? league.teams.find((t) => t.name === name)?.franchise ?? name;
+}
+
+function archiveOf(league: LeagueState, p: LeaguePlayer, why: ArchivedPlayer['why']): ArchivedPlayer {
   const h = p.history;
   const franchises: string[] = [];
-  for (const s of h) if (franchises[franchises.length - 1] !== s.team) franchises.push(s.team);
+  const franchiseSeasons: Record<string, number> = {};
+  for (const s of h) {
+    if (franchises[franchises.length - 1] !== s.team) franchises.push(s.team);
+    if (s.bat || s.pit) { const f = gameFranchise(league, s.year, s.team); franchiseSeasons[f] = (franchiseSeasons[f] ?? 0) + 1; }
+  }
   return {
     id: p.id, name: p.name, real: p.real, isPitcher: p.isPitcher, birthYear: p.birthYear,
-    lastYear: h[h.length - 1].year, franchises, lastTeam: h[h.length - 1].team, why, seasons: h.length,
+    lastYear: h[h.length - 1].year, franchises, franchiseSeasons, lastTeam: h[h.length - 1].team, why, seasons: h.length,
     bat: sumLines(h.map((s) => s.bat)), pit: sumLines(h.map((s) => s.pit)),
   };
+}
+
+/** 실제 자료의 구단 이름 → 계보 (그 해 이름) */
+function realFranchise(store: Pick<DataStore, 'meta'>, name: string, year: number): string {
+  const fr = store.meta.franchises;
+  return Object.keys(fr).find((k) => fr[k].some((x) => x.name === name && x.from <= year && year <= x.to))
+    ?? Object.keys(fr).find((k) => fr[k].some((x) => x.name === name)) ?? name;
 }
 
 /** 양대 리그 시대(1999·2000)는 자료의 최종 순위에 리그별 1위가 둘이라 한국시리즈 결과를 따로 둔다 */
@@ -166,7 +189,7 @@ function realCareers(store: Store, before: number): Map<string, Career> {
     let c = out.get(id);
     if (!c) {
       const m = store.players.get(id);
-      c = { id, name: m?.name ?? id, real: true, isPitcher: m ? m.kind === 'P' : false, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: true };
+      c = { id, name: m?.name ?? id, real: true, isPitcher: m ? m.kind === 'P' : false, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: true, franchiseSeasons: {}, lastTeam: '' };
       out.set(id, c);
     }
     c.firstYear = Math.min(c.firstYear, year);
@@ -177,6 +200,17 @@ function realCareers(store: Store, before: number): Map<string, Career> {
     if (y >= before) continue;
     const sd = store.season(y);
     if (!sd) continue;
+    // 구단별 시즌 수: 그 해 뛴 구단마다 한 번 (타격·투구 중복 제외)
+    const seen = new Set<string>();
+    for (const r of [...sd.bat, ...sd.pit]) {
+      const key = `${r.id}/${r.team}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const c = get(r.id, y);
+      const f = realFranchise(store, r.team, y);
+      c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + 1;
+      if (y >= c.lastYear) c.lastTeam = r.team;
+    }
     for (const r of sd.bat) {
       const c = get(r.id, y).bat;
       c.g += r.g; c.pa += r.pa; c.ab += r.ab; c.r += r.r; c.h += r.h; c.d += r.d; c.t += r.t; c.hr += r.hr; c.rbi += r.rbi;
@@ -196,11 +230,11 @@ function realCareers(store: Store, before: number): Map<string, Career> {
  */
 export function careers(league: LeagueState, store: Store, current?: Map<string, SeasonLine>): Map<string, Career> {
   const out = new Map<string, Career>();
-  for (const [id, c] of realCareers(store, league.startYear)) out.set(id, { ...c, bat: { ...c.bat }, pit: { ...c.pit } });
+  for (const [id, c] of realCareers(store, league.startYear)) out.set(id, { ...c, bat: { ...c.bat }, pit: { ...c.pit }, franchiseSeasons: { ...c.franchiseSeasons } });
   const get = (id: string, name: string, real: boolean, isPitcher: boolean, year: number): Career => {
     let c = out.get(id);
     if (!c) {
-      c = { id, name, real, isPitcher, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: false };
+      c = { id, name, real, isPitcher, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: false, franchiseSeasons: {}, lastTeam: '' };
       out.set(id, c);
     }
     c.name = name;
@@ -213,6 +247,8 @@ export function careers(league: LeagueState, store: Store, current?: Map<string,
     const c = get(a.id, a.name, a.real, a.isPitcher, a.lastYear);
     if (a.bat) addBatLine(c.bat, a.bat);
     if (a.pit) addPitLine(c.pit, a.pit);
+    for (const [f, n] of Object.entries(a.franchiseSeasons ?? {})) c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + n;
+    c.lastTeam = a.lastTeam;
   }
   for (const p of league.players) {
     const lines = [...p.history, ...(current?.get(p.id) ? [current.get(p.id)!] : [])];
@@ -222,6 +258,7 @@ export function careers(league: LeagueState, store: Store, current?: Map<string,
     for (const s of lines) {
       if (s.bat) addBatLine(c.bat, s.bat);
       if (s.pit) addPitLine(c.pit, s.pit);
+      if (s.bat || s.pit) { const f = gameFranchise(league, s.year, s.team); c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + 1; c.lastTeam = s.team; }
     }
   }
   return out;
@@ -371,4 +408,64 @@ export function franchiseHistory(league: LeagueState, store: Store): FranchiseHi
     });
   }
   return [...out.values()].sort((a, b) => b.titles.length - a.titles.length || b.postseasons - a.postseasons);
+}
+
+// ---- 명예의 전당과 구단 레전드 (임시 기준)
+
+/** 헌액 기준 (하나라도 넘으면). 게임 안 MVP 2회 이상도 */
+export const HOF_RULES: { label: string; test: (c: Career) => boolean }[] = [
+  { label: '2,000안타', test: (c) => c.bat.h >= 2000 },
+  { label: '300홈런', test: (c) => c.bat.hr >= 300 },
+  { label: '1,200타점', test: (c) => c.bat.rbi >= 1200 },
+  { label: '150승', test: (c) => c.pit.w >= 150 },
+  { label: '300세이브', test: (c) => c.pit.sv >= 300 },
+  { label: '2,000탈삼진', test: (c) => c.pit.so >= 2000 },
+];
+export const HOF_MVP = 2;
+/** 구단 레전드·은퇴식 대상: 그 구단에서 뛴 시즌 수 */
+export const LEGEND_SEASONS = 8;
+/** 구단 레전드 한 명당 관중률, 최대 */
+export const LEGEND_FILL = 0.01;
+export const LEGEND_FILL_MAX = 0.03;
+/** 은퇴식 대상: 그 구단에서 FAREWELL_SEASONS 시즌 이상 뛰고 통산 기록이 뚜렷한 선수 (프랜차이즈 스타, 임시값) */
+export const FAREWELL_SEASONS = 10;
+export function farewellWorthy(c: Career, franchise: string): boolean {
+  if ((c.franchiseSeasons[franchise] ?? 0) < FAREWELL_SEASONS) return false;
+  return c.bat.h >= 1000 || c.pit.w >= 60 || c.pit.sv >= 100 || HOF_RULES.some((r) => r.test(c));
+}
+/** 은퇴식: 다음 시즌 개막 사흘 동안 관중률 */
+export const FAREWELL_FILL = 0.15;
+export const FAREWELL_DAYS = 3;
+
+export interface HofEntry {
+  c: Career;
+  /** 헌액 연도 (은퇴 다음 해) */
+  year: number;
+  reasons: string[];
+}
+
+/** 명예의 전당: 은퇴(지금 리그에 없는) 선수 중 기준을 넘은 선수. 기록에서 바로 계산하므로 저장할 것이 없다 */
+export function hallOfFame(league: LeagueState, all: Map<string, Career>): HofEntry[] {
+  const mvps = new Map<string, number>();
+  for (const a of league.awards ?? []) if (a.mvp) mvps.set(a.mvp.id, (mvps.get(a.mvp.id) ?? 0) + 1);
+  const out: HofEntry[] = [];
+  for (const c of all.values()) {
+    if (c.active) continue;
+    const reasons = HOF_RULES.filter((r) => r.test(c)).map((r) => r.label);
+    if ((mvps.get(c.id) ?? 0) >= HOF_MVP) reasons.push(`MVP ${mvps.get(c.id)}회`);
+    if (reasons.length) out.push({ c, year: c.lastYear + 1, reasons });
+  }
+  return out.sort((a, b) => b.year - a.year || b.reasons.length - a.reasons.length || a.c.name.localeCompare(b.c.name));
+}
+
+/** 그 구단의 레전드 후보: 은퇴했고 그 구단에서 LEGEND_SEASONS 시즌 이상 뛴 선수 */
+export function legendCandidates(all: Map<string, Career>, franchise: string): Career[] {
+  return [...all.values()].filter((c) => !c.active && (c.franchiseSeasons[franchise] ?? 0) >= LEGEND_SEASONS)
+    .sort((a, b) => (b.franchiseSeasons[franchise] ?? 0) - (a.franchiseSeasons[franchise] ?? 0) || a.name.localeCompare(b.name));
+}
+
+/** 구단 레전드가 주는 관중률 보정 */
+export function legendFill(league: Pick<LeagueState, 'legends'>, franchise: string): number {
+  const n = (league.legends ?? []).filter((l) => l.franchise === franchise).length;
+  return Math.min(LEGEND_FILL_MAX, n * LEGEND_FILL);
 }

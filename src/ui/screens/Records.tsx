@@ -2,16 +2,17 @@
 // 통산은 게임 시작 전 실제 기록 + 게임 안 기록. 시즌 중이면 진행 중인 시즌도 더한다.
 import { useMemo, useState } from 'react';
 import {
-  CAREER_STATS, careerLeaders, careers, franchiseHistory, SEASON_STATS, seasonBests, yearbook,
+  CAREER_STATS, careerLeaders, careers, franchiseHistory, hallOfFame, LEGEND_SEASONS, legendCandidates, SEASON_STATS, seasonBests, yearbook,
 } from '../../league/history';
 import type { SeasonLine } from '../../league/types';
 import { useGame } from '../context';
 
-type Tab = 'years' | 'career' | 'season' | 'teams';
-const TABS: [Tab, string][] = [['years', '연표'], ['career', '통산 순위'], ['season', '단일 시즌 기록'], ['teams', '구단 역사']];
+type Tab = 'years' | 'career' | 'season' | 'teams' | 'hof';
+const TABS: [Tab, string][] = [['years', '연표'], ['career', '통산 순위'], ['season', '단일 시즌 기록'], ['teams', '구단 역사'], ['hof', '명예의 전당']];
 
 export function Records() {
-  const { session, store, version } = useGame();
+  const { session, store, version, changed, autosave } = useGame();
+  const [msg, setMsg] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('years');
   const [stat, setStat] = useState('hr');
   const [sstat, setSstat] = useState('hr');
@@ -133,6 +134,64 @@ export function Records() {
           <p className="muted small">타율·평균자책은 규정(타석: 경기 수 × 3.1, 이닝: 경기 수)을 채운 시즌만. 강조한 줄은 이 게임에서 나온 기록입니다. 게임 안 기록은 결산 때 반영됩니다.</p>
         </section>
       )}
+
+      {tab === 'hof' && (() => {
+        const hof = hallOfFame(L, all);
+        const fr = session.team.franchise;
+        const legends = (L.legends ?? []).filter((l) => l.franchise === fr);
+        const cands = legendCandidates(all, fr).filter((c) => !legends.some((l) => l.id === c.id));
+        return (
+          <>
+            <section className="panel">
+              <h2>명예의 전당 <span className="muted small">{hof.length}명</span></h2>
+              <p className="muted small">은퇴한 선수 가운데 통산 2,000안타·300홈런·1,200타점·150승·300세이브·2,000탈삼진 또는 게임 안 MVP 2회 이상 (기록 기준, 임시값). 헌액 연도는 은퇴 다음 해입니다.</p>
+              <div className="scroll">
+                <table>
+                  <thead><tr><th>헌액</th><th className="l">선수</th><th>기간</th><th className="l">기준</th><th className="l">대표 기록</th></tr></thead>
+                  <tbody>
+                    {hof.map((h) => (
+                      <tr key={h.c.id} className={(h.c.franchiseSeasons[fr] ?? 0) >= LEGEND_SEASONS ? 'me' : ''}>
+                        <td>{h.year}</td>
+                        <td className="l">{h.c.name}{!h.c.hasReal && <span className="tag">게임</span>}</td>
+                        <td className="small">{h.c.firstYear}~{h.c.lastYear}</td>
+                        <td className="l small">{h.reasons.join(', ')}</td>
+                        <td className="l small">
+                          {h.c.bat.pa > 1000 ? `${h.c.bat.h.toLocaleString('ko-KR')}안타 ${h.c.bat.hr}홈런 ${h.c.bat.rbi.toLocaleString('ko-KR')}타점` : ''}
+                          {h.c.pit.outs > 900 ? ` ${h.c.pit.w}승 ${h.c.pit.sv}세이브 ${h.c.pit.so.toLocaleString('ko-KR')}탈삼진` : ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section className="panel">
+              <h2>{session.team.name} 구단 레전드 <span className="muted small">{legends.length}명</span></h2>
+              <p className="muted small">
+                우리 구단에서 {LEGEND_SEASONS}시즌 이상 뛰고 은퇴한 선수를 레전드로 지정할 수 있습니다 (영구결번 대신, 오프시즌에).
+                레전드 한 명당 홈 관중률 +1%p (최대 +3%p). 한 구단에서 10시즌 이상 뛰고 통산 기록이 뚜렷한 선수(1,000안타·60승·100세이브 등)가 은퇴하면 다음 시즌 개막 사흘 동안 은퇴식으로 관중이 늡니다.
+              </p>
+              {legends.length > 0 && <p className="small">{legends.map((l) => `${l.name} (${l.year})`).join(' · ')}</p>}
+              {msg && <p className="note small" role="status">{msg}</p>}
+              <table>
+                <thead><tr><th className="l">후보</th><th>우리 구단 시즌</th><th>기간</th><th /></tr></thead>
+                <tbody>
+                  {cands.slice(0, 30).map((c) => (
+                    <tr key={c.id}>
+                      <td className="l">{c.name}</td><td>{c.franchiseSeasons[fr]}</td><td className="small">{c.firstYear}~{c.lastYear}</td>
+                      <td>
+                        <button type="button" className="small-btn" disabled={session.phase !== 'offseason'} title={session.phase !== 'offseason' ? '오프시즌에 지정할 수 있습니다' : ''}
+                          onClick={() => { const r = session.designateLegend(c.id); setMsg(r.message); if (r.ok) { changed(); void autosave(); } }}>레전드 지정</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {cands.length === 0 && <tr><td className="muted small" colSpan={4}>후보가 없습니다.</td></tr>}
+                </tbody>
+              </table>
+            </section>
+          </>
+        );
+      })()}
 
       {tab === 'teams' && (
         <section className="panel">

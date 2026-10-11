@@ -198,6 +198,8 @@ export interface LeagueState {
   yearbook?: YearRecord[];
   /** 게임 안 시즌의 단일 시즌 기록 부문별 상위 (history.ts) */
   seasonBests?: Record<string, SeasonBest[]>;
+  /** 구단 레전드 (영구결번 대신, history.ts) */
+  legends?: { franchise: string; id: string; name: string; year: number }[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
