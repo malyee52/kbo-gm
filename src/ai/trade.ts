@@ -87,6 +87,8 @@ export interface TradeProposal {
   cash?: number;
   /** 지명권 가치 (런, league/picks.ts pickValue): AI가 받는 것과 내주는 것 */
   picks?: { receive: number; give: number };
+  /** 수락 기준 배율 (플레이어 제안에 세부 난이도, league/difficulty.ts). 없으면 1 */
+  strict?: number;
 }
 
 export type TradeVerdict =
@@ -136,7 +138,7 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
   const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0);
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0) + (prop.picks?.give ?? 0);
-  const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE);
+  const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE) * (prop.strict ?? 1);
   const detail = { gain, need, before, after: afterV, tendency };
   if (gain >= need) return { verdict: 'accept', message: '좋습니다. 그 조건으로 하죠.', detail };
 

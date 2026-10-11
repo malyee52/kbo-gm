@@ -1,10 +1,11 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
+import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
 import { ScenarioBanner } from '../ScenarioBanner';
 import { FinancePanel } from './Finance';
 import { capPayroll, salaryCap } from '../../league/salary';
 import {
-  ACHIEVEMENTS, budgetFor, DIFFICULTY_LABEL, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
+  ACHIEVEMENTS, budgetFor, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
@@ -58,7 +59,7 @@ export function Club() {
             목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.
             달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
           </p>
-          <p className="muted small">난이도: {DIFFICULTY_LABEL[L.difficulty ?? 'normal']}</p>
+          <p className="muted small">난이도: {settingsLabel(L)}</p>
         </div>
 
         <div className="card">

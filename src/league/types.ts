@@ -13,6 +13,7 @@ import type { ChallengeState } from './challenges';
 import type { Coach } from './coaches';
 import type { AiTradeRecord, GmStyle } from './gm';
 import type { AbroadState } from './overseas';
+import type { DifficultySettings } from './difficulty';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -194,6 +195,10 @@ export interface LeagueState {
   // ---- M7 (없으면 기본값. M6 이전 저장 호환)
   /** 난이도 (AI의 잠재력 평가 오차). 없으면 보통 */
   difficulty?: Difficulty;
+  /** 세부 난이도 (사용자 설정, difficulty.ts). 없으면 difficulty 묶음 */
+  settings?: DifficultySettings;
+  /** 시작 때의 세부 난이도 (재현 정보용. 게임 중 바꾼 것은 조작 기록에 남는다) */
+  startSettings?: DifficultySettings;
   /** 플레이어(단장)의 구단주 평가 상태 */
   owner?: OwnerState;
   /** 구단별 샐러리캡 연속 초과 횟수 */

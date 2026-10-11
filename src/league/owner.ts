@@ -11,9 +11,9 @@ import type { LeaguePlayer, LeagueState } from './types';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = { easy: '쉬움', normal: '보통', hard: '어려움' };
 export const DIFFICULTY_NOTE: Record<Difficulty, string> = {
-  easy: 'AI 구단이 선수 잠재력을 크게 잘못 본다 (오차 약 ±12런)',
-  normal: 'AI 구단의 잠재력 평가에 보통 오차 (약 ±6런)',
-  hard: 'AI 구단이 잠재력을 거의 정확히 본다 (약 ±2런)',
+  easy: 'AI 잠재력 평가 오차 ±12런, 트레이드 후함, 부상 적게, 구단주 너그러움, 수입 넉넉함',
+  normal: '모든 항목 보통',
+  hard: 'AI 잠재력 평가 오차 ±2런, 트레이드 깐깐함, 부상 많이, FA 더 요구, 구단주 엄격함, 수입 빠듯함',
 };
 /** AI 잠재력 평가 오차의 표준편차 (런, 임시값). 기획서 10장: 쉬움은 오차가 크고 어려움은 거의 정확 */
 export const DIFFICULTY_NOISE: Record<Difficulty, number> = { easy: 12, normal: 6, hard: 2 };
@@ -22,8 +22,8 @@ export const DIFFICULTY_NOISE: Record<Difficulty, number> = { easy: 12, normal: 
  * AI 구단이 보는 잠재력: 실제 잠재력 + 선수마다 고정된 오차 (게임 시드·선수 id로 정해져 해마다 같다).
  * 플레이어는 실제 잠재력(가상 신인은 스카우트 평가)을 본다.
  */
-export function aiPotential(league: Pick<LeagueState, 'seed' | 'difficulty'>, p: Pick<LeaguePlayer, 'id' | 'potential'>): number {
-  const sd = DIFFICULTY_NOISE[league.difficulty ?? 'normal'];
+export function aiPotential(league: Pick<LeagueState, 'seed' | 'difficulty' | 'settings'>, p: Pick<LeaguePlayer, 'id' | 'potential'>): number {
+  const sd = league.settings?.scoutNoise ?? DIFFICULTY_NOISE[league.difficulty ?? 'normal'];
   const r = new Rng(`${league.seed}/aipot/${p.id}`);
   // 균등 분포 4개의 합으로 만든 표준정규 근사
   const z = (r.next() + r.next() + r.next() + r.next() - 2) * Math.sqrt(3);
