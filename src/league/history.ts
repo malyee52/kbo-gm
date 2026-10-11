@@ -45,6 +45,8 @@ export interface YearRecord {
   runnerUp: string | null;
   /** 게임 안에서 치른 시즌인가 (아니면 실제 기록) */
   inGame: boolean;
+  /** 게임 안 가을야구 시리즈 (구단 계보). 실제 시즌은 없음 (rivals.ts) */
+  series?: { a: string; b: string; winner: string; ks: boolean }[];
 }
 
 // BatLine: g, pa, ab, r, h, d, t, hr, rbi, bb, hbp, so, sb, cs, gdp, sf, sac
@@ -140,7 +142,8 @@ const TWO_LEAGUE_FINAL: Record<number, { champion: string; runnerUp: string }> =
 
 /** 게임 안 시즌의 연표 한 줄을 남긴다 (결산 때). standings: 정규시즌 순위 (구단 색인) */
 export function recordYear(league: LeagueState, year: number, teams: { name: string; franchise: string }[],
-                           records: { w: number; l: number; t: number }[], standings: number[], champion: number | null, runnerUp: number | null): void {
+                           records: { w: number; l: number; t: number }[], standings: number[], champion: number | null, runnerUp: number | null,
+                           series: { high: number; low: number; winner: number; ks: boolean }[] = []): void {
   league.yearbook ??= [];
   league.yearbook = league.yearbook.filter((y) => y.year !== year);
   league.yearbook.push({
@@ -148,6 +151,7 @@ export function recordYear(league: LeagueState, year: number, teams: { name: str
     teams: standings.map((t) => ({ name: teams[t].name, franchise: teams[t].franchise, w: records[t].w, l: records[t].l, t: records[t].t })),
     champion: champion === null ? null : teams[champion].name,
     runnerUp: runnerUp === null ? null : teams[runnerUp].name,
+    series: series.filter((s) => s.winner >= 0).map((s) => ({ a: teams[s.high].franchise, b: teams[s.low].franchise, winner: teams[s.winner].franchise, ks: s.ks })),
   });
 }
 

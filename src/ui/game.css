@@ -393,3 +393,4 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 .articles li { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .articles li.mine { border-left: 3px solid var(--accent); padding-left: 8px; }
 .articles p { margin: 4px 0 0; }
+.tag.rival { margin-left: 8px; background: var(--loss-bg); color: var(--loss); font-size: 0.6em; vertical-align: middle; }

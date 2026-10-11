@@ -8,6 +8,7 @@ import type { EventState } from './events';
 import type { ScenarioState } from './scenarios';
 import type { ArchivedPlayer, SeasonBest, YearRecord } from './history';
 import type { Article } from './articles';
+import type { RivalPair } from './rivals';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -203,6 +204,8 @@ export interface LeagueState {
   legends?: { franchise: string; id: string; name: string; year: number }[];
   /** 규칙으로 만든 기사 (articles.ts, 최근 400건) */
   articles?: Article[];
+  /** 그 시즌의 라이벌 쌍 (개막 때 연표로 계산, rivals.ts) */
+  rivals?: { year: number; pairs: RivalPair[] };
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

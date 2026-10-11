@@ -20,9 +20,10 @@ import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, typ
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
-  seasonBests,
+  seasonBests, yearbook,
 } from '../league/history';
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM } from '../league/articles';
+import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
@@ -240,6 +241,7 @@ export class GameSession {
     league.owner = newOwner(opts.teamIdx);
     const season = Season.start(world, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
     const g = new GameSession(store, params, opts.teamIdx, league, world, season);
+    g.refreshRivals();
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
     const sc = opts.scenario ? scenarioById(opts.scenario) : undefined;
@@ -999,13 +1001,22 @@ export class GameSession {
         this.enlistChoice = null;
         L.lastSeason!.postseason = ps;
         this.evaluateOwner(standings, ps, prevStandings, fin[this.teamIdx]);
-        // 기사: 우승·MVP (articles.ts)
+        // 연표 (history.ts)
+        recordYear(L, this.year, this.world.teams, this.season.teams, standings, ps.champion ?? null, ps.runnerUp ?? null,
+          ps.series.map((x) => ({ high: x.high, low: x.low, winner: x.winner, ks: x === ps.series[ps.series.length - 1] })));
+        // 기사: 우승(연속 우승·왕조)·MVP (articles.ts)
         {
           const champ = ps.champion ?? null;
           if (champ !== null) {
             const t = this.world.teams[champ];
-            addArticle(L, { year: this.year, day: -1, kind: 'title', franchise: t.franchise, title: `${t.name}, ${this.year} 한국시리즈 우승`,
-              body: `${josa(t.name, '이', '가')} 한국시리즈에서 ${josa(this.world.teams[ps.runnerUp].name, '을', '를')} 꺾고 ${this.year} 시즌 정상에 올랐다.` });
+            const yb = yearbook(L, this.store);
+            const streak = titleStreak(yb, this.year);
+            const dyn = dynasties(yb).find((d) => d.franchise === t.franchise && d.to === this.year);
+            addArticle(L, { year: this.year, day: -1, kind: 'title', franchise: t.franchise,
+              title: `${t.name}, ${this.year} 한국시리즈 우승${streak >= 2 ? ` (${streak}년 연속)` : ''}`,
+              body: `${josa(t.name, '이', '가')} 한국시리즈에서 ${josa(this.world.teams[ps.runnerUp].name, '을', '를')} 꺾고 ${this.year} 시즌 정상에 올랐다.`
+                + (streak >= 2 ? ` ${streak}년 연속 우승이다.` : '')
+                + (dyn ? ` ${dyn.from}년부터 ${dyn.titles.length}번째 우승으로 왕조를 ${dyn.titles.length === DYNASTY_TITLES ? '열었다' : '이어 가고 있다'}.` : '') });
           }
           const aw = L.awards?.find((a) => a.year === this.year);
           if (aw?.mvp) {
@@ -1013,8 +1024,6 @@ export class GameSession {
             addArticle(L, { year: this.year, day: -1, kind: 'award', franchise: t?.franchise, title: `${this.year} MVP ${aw.mvp.name}`, body: `${t?.name ?? ''} ${aw.mvp.name}: ${aw.mvp.line}.` });
           }
         }
-        // 연표 (history.ts)
-        recordYear(L, this.year, this.world.teams, this.season.teams, standings, ps.champion ?? null, ps.runnerUp ?? null);
         recordSeasonBests(L, this.year, this.world.gamesPerTeam, this.world.players.map((p) => ({
           id: p.id, name: p.name, team: this.world.teams[p.teamIdx].name,
           bat: this.season.bat[p.idx].pa > 0 ? Object.values(this.season.bat[p.idx]) : undefined,
@@ -1051,6 +1060,7 @@ export class GameSession {
         this.offseason = null;
         this.finishedLeague = null;
         this.phase = 'season';
+        this.refreshRivals();
         this.world = worldFromLeague(clone(L), this.store, this.params);
         this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx] });
         this.trades = [];
@@ -1190,6 +1200,20 @@ export class GameSession {
       o.firedYears.push(this.year);
       o.offers = offersFor(standings, team);
       say(`해고되었습니다. 신뢰도 ${o.trust}. 영입 제의: ${o.offers.map((t) => L.teams[t].name).join(', ')}. 구단 화면에서 고르세요.`);
+    }
+  }
+
+  // ---- 라이벌 (rivals.ts)
+
+  /** 시즌 개막 때 라이벌 쌍을 다시 계산하고 우리 구단 라이벌을 알린다 */
+  private refreshRivals(): void {
+    const L = this.league;
+    L.rivals = { year: L.year, pairs: computeRivals(yearbook(L, this.store), L.year) };
+    const me = L.teams[this.teamIdx];
+    const mine = rivalsOf(L, me.franchise);
+    if (mine.length) {
+      const names = mine.map((p) => L.teams.find((t) => t.franchise === (p.a === me.franchise ? p.b : p.a))?.name ?? '').filter(Boolean);
+      if (names.length) this.addNews(0, 'season', `${L.year} 시즌 라이벌: ${names.join(', ')}. 라이벌전 홈 경기는 관중이 더 듭니다.`);
     }
   }
 

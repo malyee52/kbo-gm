@@ -4,11 +4,12 @@ import { useMemo, useState } from 'react';
 import {
   CAREER_STATS, careerLeaders, careers, franchiseHistory, hallOfFame, LEGEND_SEASONS, legendCandidates, SEASON_STATS, seasonBests, yearbook,
 } from '../../league/history';
+import { DYNASTY_GAP, DYNASTY_TITLES, dynasties, RIVAL_FILL, RIVAL_MIN, RIVAL_YEARS } from '../../league/rivals';
 import type { SeasonLine } from '../../league/types';
 import { useGame } from '../context';
 
-type Tab = 'years' | 'career' | 'season' | 'teams' | 'hof';
-const TABS: [Tab, string][] = [['years', '연표'], ['career', '통산 순위'], ['season', '단일 시즌 기록'], ['teams', '구단 역사'], ['hof', '명예의 전당']];
+type Tab = 'years' | 'career' | 'season' | 'teams' | 'dynasty' | 'hof';
+const TABS: [Tab, string][] = [['years', '연표'], ['career', '통산 순위'], ['season', '단일 시즌 기록'], ['teams', '구단 역사'], ['dynasty', '왕조·라이벌'], ['hof', '명예의 전당']];
 
 export function Records() {
   const { session, store, version, changed, autosave } = useGame();
@@ -134,6 +135,50 @@ export function Records() {
           <p className="muted small">타율·평균자책은 규정(타석: 경기 수 × 3.1, 이닝: 경기 수)을 채운 시즌만. 강조한 줄은 이 게임에서 나온 기록입니다. 게임 안 기록은 결산 때 반영됩니다.</p>
         </section>
       )}
+
+      {tab === 'dynasty' && (() => {
+        const dyn = dynasties(yearbook(L, store));
+        const nameOf = (f: string) => L.teams.find((t) => t.franchise === f)?.name ?? f;
+        const pairs = L.rivals?.pairs ?? [];
+        return (
+          <>
+            <section className="panel">
+              <h2>왕조</h2>
+              <p className="muted small">우승 사이 간격이 {DYNASTY_GAP}시즌 이내로 이어지며 {DYNASTY_TITLES}번 이상 우승한 시기입니다.</p>
+              <table>
+                <thead><tr><th className="l">구단</th><th>기간</th><th>우승</th><th>최다 연속</th><th className="l">우승 연도</th></tr></thead>
+                <tbody>
+                  {dyn.map((d) => (
+                    <tr key={`${d.franchise}-${d.from}`} className={d.franchise === me ? 'me' : ''}>
+                      <td className="l">{d.name}</td><td>{d.from}~{d.to}</td><td><strong>{d.titles.length}</strong></td><td>{d.streak}</td>
+                      <td className="l small">{d.titles.join(', ')}{d.to >= L.startYear ? <span className="tag">게임</span> : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+            <section className="panel">
+              <h2>{L.rivals?.year ?? session.year} 시즌 라이벌</h2>
+              <p className="muted small">
+                최근 {RIVAL_YEARS}시즌 동안 한국시리즈 맞대결 3점, 다른 가을야구 시리즈 2점, 정규시즌 1·2위 접전(3경기 차 이내) 1점.
+                {RIVAL_MIN}점 이상이고 두 시즌 이상에 걸치면 라이벌입니다. 라이벌전 홈 경기 관중률 +{Math.round(RIVAL_FILL * 100)}%p. 개막 때 다시 정합니다.
+              </p>
+              {pairs.length === 0 ? <p className="muted">지금은 라이벌 관계가 없습니다.</p> : (
+                <table>
+                  <thead><tr><th className="l">라이벌</th><th>점수</th><th className="l">근거</th></tr></thead>
+                  <tbody>
+                    {pairs.map((p) => (
+                      <tr key={`${p.a}-${p.b}`} className={p.a === me || p.b === me ? 'me' : ''}>
+                        <td className="l">{nameOf(p.a)} · {nameOf(p.b)}</td><td>{p.score}</td><td className="l small">{p.notes.join(', ')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          </>
+        );
+      })()}
 
       {tab === 'hof' && (() => {
         const hof = hallOfFame(L, all);
