@@ -58,6 +58,10 @@ describe('시즌을 진행하면 기사가 나온다', () => {
     // 실존 선수 기사는 기록 사실만: 본문에 숫자가 있다
     for (const a of arts.filter((x) => x.kind === 'milestone')) expect(a.body).toMatch(/\d/);
     expect(arts.some((a) => /\(가\)|\(를\)/.test(a.body))).toBe(false);
+    // 잡다한 기사 (2026-10-12): 경기·순위·월간 MVP·인터뷰가 한 시즌에 나오고, 인터뷰 말은 이름 없는 관계자·팬·단장뿐
+    for (const k of ['game', 'rank', 'monthly', 'interview', 'injury'] as const) expect(arts.some((x) => x.kind === k), k).toBe(true);
+    expect(arts.some((a) => /은\(는\)|이\(가\)/.test(a.body))).toBe(false);
+    for (const a of arts.filter((x) => /라고 말했다/.test(x.body))) expect(a.body).toMatch(/(구단 관계자|현장을 찾은 팬|단장)[은는] "/);
 
     const h = GameSession.load(store, mid, FAST);
     h.advance(100000);
