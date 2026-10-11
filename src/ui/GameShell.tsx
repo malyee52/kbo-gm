@@ -56,9 +56,18 @@ const NAV: NavItem[] = [
   { id: 'postseason', label: '가을야구', hub: '리그' },
   { id: 'season-end', label: '시즌 결과', hub: '리그' },
   { id: 'awards', label: '시상식', hub: '리그' },
-  { id: 'club', label: '구단 운영', hub: '구단' },
+  { id: 'club', label: '개요', hub: '구단' },
+  { id: 'finance', label: '재정', hub: '구단' },
+  { id: 'stadium', label: '구장·팬', hub: '구단' },
+  { id: 'staff', label: '감독·코치', hub: '구단' },
+  { id: 'club-history', label: '이력·업적', hub: '구단' },
   { id: 'save', label: '저장·설정', hub: '구단' },
-  { id: 'records', label: '기록실', hub: '기록실' },
+  { id: 'records', label: '연표', hub: '기록실' },
+  { id: 'rec-career', label: '통산 순위', hub: '기록실' },
+  { id: 'rec-season', label: '단일 시즌 기록', hub: '기록실' },
+  { id: 'rec-teams', label: '구단 역사', hub: '기록실' },
+  { id: 'rec-dynasty', label: '왕조·라이벌', hub: '기록실' },
+  { id: 'rec-hof', label: '명예의 전당', hub: '기록실' },
 ];
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
@@ -138,7 +147,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     const rest = attention.filter((x) => x.kind !== 'crisis');
     if (session.crisis) setCmd(session.crisis);
     else if (snap || rest.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention: rest });
-    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
+    if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
   const takeSnapshotAfter = () => takeSnapshot(session);
@@ -182,7 +191,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     if (!done) return;
     await autosave();
-    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
+    if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
   /** 진행 전 경기 수를 받아, 그 뒤 우리 경기 가운데 마지막 것 (중계 기록이 있을 때) */
   const castAfter = (before: number) => {
@@ -223,7 +232,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.crisis) setCmd(session.crisis);
     else if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
     else castAfter(before);
-    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
+    if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
 
   const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave, command: () => void startCommand() };
@@ -341,10 +350,19 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'season-end' && <SeasonEnd />}
               {screen === 'offseason' && <Offseason />}
               {screen === 'club' && <Club />}
+              {screen === 'finance' && <Club tab="finance" />}
+              {screen === 'stadium' && <Club tab="stadium" />}
+              {screen === 'staff' && <Club tab="coach" />}
+              {screen === 'club-history' && <Club tab="history" />}
               {screen === 'postseason' && <Postseason />}
               {screen === 'growth' && <Growth />}
               {screen === 'awards' && <Awards />}
               {screen === 'records' && <Records />}
+              {screen === 'rec-career' && <Records tab="career" />}
+              {screen === 'rec-season' && <Records tab="season" />}
+              {screen === 'rec-teams' && <Records tab="teams" />}
+              {screen === 'rec-dynasty' && <Records tab="dynasty" />}
+              {screen === 'rec-hof' && <Records tab="hof" />}
               {screen === 'articles' && <Articles />}
               </div>
             </ErrorBoundary>

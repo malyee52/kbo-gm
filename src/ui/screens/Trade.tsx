@@ -97,7 +97,6 @@ export function Trade() {
     <div className="stack">
       <section className="row-between wrap">
         <div>
-          <h1>트레이드</h1>
           <p className="muted small">
             {open
               ? `마감: ${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일 (${formatDate(year, session.tradeDeadlineDay)} 경기 전까지)`

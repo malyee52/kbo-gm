@@ -1,5 +1,6 @@
 // 가을야구 (M7): 대진표, 시리즈별 경기 결과, 박스스코어. 진행은 위쪽 버튼으로 한 경기씩.
 import { useState } from 'react';
+import { FlowNext } from '../FlowNext';
 import { formatDate } from '../../game/calendar';
 import { currentSeries, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
 import { TeamName, useGame } from '../context';
@@ -18,7 +19,7 @@ function bracketText(n: number): string {
 }
 
 export function Postseason() {
-  const { session } = useGame();
+  const { session, go } = useGame();
   const st = session.postseason;
   const last = session.league.lastSeason?.postseason;
   const [sel, setSel] = useState<{ round: number; game: number } | null>(null);
@@ -43,6 +44,7 @@ export function Postseason() {
 
   return (
     <div className="stack">
+      {done && st && session.phase === 'season' && <FlowNext step="가을야구" label="시즌 결산" onNext={() => go('season-end')} />}
       <section className="row-between wrap">
         <div>
           <h1>{year} 가을야구</h1>

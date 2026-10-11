@@ -1,10 +1,11 @@
 // 시상식 (2026-10-08 사용자 요청): MVP, 신인상, 골든글러브, 타이틀 홀더. 게임 안에서 치른 시즌마다 남는다.
 import { useState } from 'react';
+import { FlowNext } from '../FlowNext';
 import { GG_LABEL, type AwardWinner } from '../../league/awards';
 import { TeamName, useGame } from '../context';
 
 export function Awards() {
-  const { session, openPlayer } = useGame();
+  const { session, openPlayer, go } = useGame();
   const all = session.league.awards ?? [];
   const [year, setYear] = useState<number | null>(null);
 
@@ -46,8 +47,10 @@ export function Awards() {
     </section>
   );
 
+  const fresh = session.phase === 'offseason' && session.offseason?.year === aw.year;
   return (
     <div className="stack">
+      {fresh && <FlowNext step="시상식" label="다음: 선수 성장" onNext={() => go('growth')} />}
       <section className="row-between wrap">
         <div>
           <h1>{aw.year} 시상식</h1>

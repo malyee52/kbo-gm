@@ -82,7 +82,7 @@ export function Offseason() {
       <section className="row-between wrap">
         <div>
           <h1>{off.year} 오프시즌</h1>
-          <p className="muted small">결산(성장 판정, 1군 연차, 부상 후유증, 은퇴, 병역)은 끝났습니다. 결산 소식은 아래 "오프시즌 소식"에 있습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
+          <p className="muted small">결산(성장·연차·은퇴·병역)은 끝났습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
         </div>
         {off.stage !== 'ready' && (
           <button type="button" onClick={() => void next()} disabled={busy}>{busy ? '처리 중' : nextLabel}</button>
@@ -99,10 +99,9 @@ export function Offseason() {
 
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
 
-      {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
-      <PostingPanel act={act} />
-      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
-
+      {/* 2026-10-12 UI 개편: 지금 단계와 다년 계약은 본문, 지명권·포스팅·소식은 오른쪽 곁 칸 (좁으면 아래로) */}
+      <div className="off-split">
+      <div className="stack off-main">
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'foreign' && <ForeignPanel act={act} />}
@@ -116,8 +115,14 @@ export function Offseason() {
           <div className="actions"><button type="button" onClick={() => void open()} disabled={busy}>{busy ? '준비 중' : `${off.year + 1} 시즌 개막`}</button></div>
         </section>
       )}
-
-      <OffLog />
+      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
+      </div>
+      <aside className="stack off-side">
+        {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
+        <PostingPanel act={act} />
+        <OffLog />
+      </aside>
+      </div>
     </div>
   );
 }

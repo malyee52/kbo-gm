@@ -1,6 +1,7 @@
 // 시즌 종료 결과: 최종 순위, 우리 구단 성적과 주요 선수, 부문별 1위. 입대 선택은 따로 탭.
 import { ScenarioBanner } from '../ScenarioBanner';
 import { useState } from 'react';
+import { FlowNext, useSettle } from '../FlowNext';
 import type { BatLine, PitLine } from '../../engine';
 import { winPct } from '../../engine';
 import {
@@ -23,6 +24,7 @@ export function SeasonEnd() {
   const cut = session.world.rules.postseasonTeams;
   const leader = s.teams[order[0]];
   const [tab, setTab] = useState<'result' | 'enlist'>('result');
+  const settle = useSettle();
 
   if (!session.done) {
     return (
@@ -34,6 +36,9 @@ export function SeasonEnd() {
   }
 
   const scenarioBanner = <ScenarioBanner />;
+  const flow = session.phase === 'season' && !session.postseasonRunning
+    ? <FlowNext step="시즌 결산" label="결산하고 시상식으로" onNext={settle} note={`입대 선택 ${session.enlistOptions().chosen.length}명 · 결산하면 구단주 평가·시상·성장 판정을 합니다`} />
+    : null;
   const verdict = rank === 1 ? '정규시즌 1위' : rank <= cut ? `포스트시즌 진출권 (${rank}위)` : rank === order.length ? '최하위' : `${rank}위, 포스트시즌 진출 실패`;
   const org = session.team.org;
   // 타석이 적은 선수는 OPS를 깎아서 줄 세운다 (300타석 미만 비례)
@@ -56,7 +61,8 @@ export function SeasonEnd() {
   if (tab === 'enlist') {
     return (
       <div className="stack">
-        <h1>{year} 정규시즌 결과</h1>
+        {flow}
+      <h1>{year} 정규시즌 결과</h1>
         {tabs}
         <EnlistPanel />
         <Actions />
@@ -66,6 +72,7 @@ export function SeasonEnd() {
 
   return (
     <div className="stack">
+      {flow}
       <h1>{year} 정규시즌 결과</h1>
       {scenarioBanner}
       {tabs}
@@ -154,17 +161,15 @@ export function SeasonEnd() {
 
 /** 결산·이동 버튼 (두 탭 공통) */
 function Actions() {
-  const { session, go, changed, autosave } = useGame();
+  const { session, go } = useGame();
+  const settle = useSettle();
   return (
     <div className="actions">
       {session.postseasonRunning && <button type="button" onClick={() => go('postseason')}>가을야구 진행하기</button>}
       {session.phase === 'season' && (
-        <button type="button" className={session.postseasonRunning ? 'ghost' : undefined} onClick={() => {
-          session.beginOffseason();
-          changed();
-          void autosave();
-          go('club'); // 포스트시즌 결과와 구단주 평가(해고되면 영입 제의)를 먼저 보여 준다
-        }}>{session.postseasonRunning ? '남은 가을야구 자동 진행 후 결산 → 오프시즌' : '결산 (구단주 평가) → 오프시즌'}</button>
+        <button type="button" className={session.postseasonRunning ? 'ghost' : undefined} onClick={settle}>
+          {session.postseasonRunning ? '남은 가을야구 자동 진행 후 결산 → 시상식' : '결산하고 시상식으로 →'}
+        </button>
       )}
       {session.phase === 'offseason' && <button type="button" onClick={() => go('offseason')}>오프시즌으로</button>}
       <button type="button" className="ghost" onClick={() => go('leaders')}>기록 전체 보기</button>

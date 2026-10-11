@@ -8,13 +8,12 @@ import { DYNASTY_GAP, DYNASTY_TITLES, dynasties, RIVAL_FILL, RIVAL_MIN, RIVAL_YE
 import type { SeasonLine } from '../../league/types';
 import { useGame } from '../context';
 
-type Tab = 'years' | 'career' | 'season' | 'teams' | 'dynasty' | 'hof';
-const TABS: [Tab, string][] = [['years', '연표'], ['career', '통산 순위'], ['season', '단일 시즌 기록'], ['teams', '구단 역사'], ['dynasty', '왕조·라이벌'], ['hof', '명예의 전당']];
+// 2026-10-12 UI 개편: 탭은 위쪽 '기록실' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
+export type RecordsTab = 'years' | 'career' | 'season' | 'teams' | 'dynasty' | 'hof';
 
-export function Records() {
+export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
   const { session, store, version, changed, autosave } = useGame();
   const [msg, setMsg] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('years');
   const [stat, setStat] = useState('hr');
   const [sstat, setSstat] = useState('hr');
   const L = session.league;
@@ -41,20 +40,10 @@ export function Records() {
 
   return (
     <div className="stack">
-      <section className="row-between wrap">
-        <div>
-          <h1>기록실</h1>
-          <p className="muted small">
-            {L.startYear}년 이전은 실제 기록, 그 뒤는 이 게임에서 쌓인 기록입니다. 통산은 둘을 합칩니다
-            {session.phase === 'season' ? ' (진행 중인 시즌 포함)' : ''}.
-          </p>
-        </div>
-        <div className="seg" role="tablist" aria-label="기록실 구분">
-          {TABS.map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
-          ))}
-        </div>
-      </section>
+      <p className="muted small">
+        {L.startYear}년 이전은 실제 기록, 그 뒤는 이 게임에서 쌓인 기록입니다. 통산은 둘을 합칩니다
+        {session.phase === 'season' ? ' (진행 중인 시즌 포함)' : ''}.
+      </p>
 
       {tab === 'years' && (
         <section className="panel">

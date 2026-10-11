@@ -1,7 +1,7 @@
 // 순위표: 승·패·무, 승률, 게임차, 득실, 홈·원정, 최근 10경기, 연속 기록.
 import { winPct } from '../../engine';
 import { gamesBehind, rate3, recentForm } from '../../game/stats';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { TeamName, useGame } from '../context';
 
 export function Standings() {
@@ -11,12 +11,19 @@ export function Standings() {
   const order = s.standings();
   const leader = s.teams[order[0]];
   const cut = session.world.rules.postseasonTeams;
+  // 2026-10-12 UI 개편: 1군과 퓨처스를 한 화면에 쌓지 않고 골라 본다
+  const [league, setLeague] = useState<'kbo' | 'futures'>('kbo');
 
   return (
-    <div className="stack">
-      <h1>순위</h1>
-      <p className="muted small">승률(무승부 제외) 순. 점선 위가 포스트시즌 진출권(상위 {cut}팀)입니다. 정규시즌이 끝나면 가을야구를 치릅니다.</p>
-      <div className="scroll">
+    <div className="stack tight">
+      <div className="row-between wrap">
+        <div className="seg" role="tablist" aria-label="리그">
+          <button type="button" role="tab" aria-selected={league === 'kbo'} className={league === 'kbo' ? 'on' : ''} onClick={() => setLeague('kbo')}>1군</button>
+          <button type="button" role="tab" aria-selected={league === 'futures'} className={league === 'futures' ? 'on' : ''} onClick={() => setLeague('futures')}>퓨처스리그</button>
+        </div>
+        <span className="muted small">{league === 'kbo' ? `승률(무승부 제외) 순 · 점선 위 상위 ${cut}팀이 가을야구 · 홈·원정·최근 10은 승-무-패` : '2군 성적은 능력과 출전 몫으로 만듭니다 (1군 경기 수의 약 80%)'}</span>
+      </div>
+      {league === 'kbo' && <div className="scroll">
         <table>
           <thead>
             <tr>
@@ -42,11 +49,13 @@ export function Standings() {
             })}
           </tbody>
         </table>
-      </div>
-      <p className="muted small">홈·원정·최근 10경기는 승-무-패 순입니다.</p>
+      </div>}
 
-      <h2>퓨처스리그 <span className="muted small">2군</span></h2>
-      <p className="muted small">2군 경기는 한 타석씩 돌리지 않고, 2군에 있는 선수의 능력과 출전 몫으로 성적을 만듭니다 (1군 경기 수의 약 80%). 득점·실점에서 승률을 정합니다. 1군 진입 전 창단 구단도 여기서 뜁니다. 퓨처스 출전량과 활약은 시즌 뒤 성장 판정에 들어갑니다.</p>
+      {league === 'futures' && <>
+      <details className="help small">
+        <summary>퓨처스리그는?</summary>
+        2군 경기는 한 타석씩 돌리지 않고, 2군에 있는 선수의 능력과 출전 몫으로 성적을 만듭니다. 득점·실점에서 승률을 정합니다. 1군 진입 전 창단 구단도 여기서 뜁니다. 퓨처스 출전량과 활약은 시즌 뒤 성장 판정에 들어갑니다.
+      </details>
       <div className="scroll">
         <table>
           <thead><tr><th>순위</th><th className="l">팀</th><th>경기</th><th>승</th><th>패</th><th>승률</th><th>득점</th><th>실점</th></tr></thead>
@@ -60,6 +69,7 @@ export function Standings() {
           </tbody>
         </table>
       </div>
+      </>}
     </div>
   );
 }

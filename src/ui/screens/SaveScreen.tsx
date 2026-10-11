@@ -42,7 +42,6 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
 
   return (
     <div className="stack">
-      <h1>저장·설정</h1>
       {msg && <p className={msg.error ? 'error' : 'note'} role="status">{msg.text}</p>}
 
       <DifficultyPanel />

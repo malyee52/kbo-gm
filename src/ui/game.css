@@ -667,3 +667,43 @@ table.roster tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--team); }
 .season-syn h3 { margin: 2px 0 6px; font-family: var(--font-display); font-weight: 400; font-size: 22px; line-height: 1.25; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .season-syn { animation: none; } }
+.stack > details.help { display: block; }
+
+/* 일정·결과 (Schedule.tsx): 달력 옆에 고른 날 경기. 좁으면 아래로 */
+.sched-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 16px; align-items: start; }
+.card.sched-day { border-radius: 16px; display: flex; flex-direction: column; gap: 8px; }
+.card.sched-day h2 { margin: 0; color: var(--team); font-size: 14px; }
+.card.sched-day .scroll { border: 0; box-shadow: none; }
+.card.sched-day table td, .card.sched-day table th { padding: 6px 6px; }
+@media (max-width: 1100px) { .sched-split { grid-template-columns: minmax(0, 1fr); } }
+.day-games { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.day-games li { padding: 7px 8px; border-bottom: 1px solid var(--line); border-radius: 8px; }
+.day-games li:last-child { border-bottom: 0; }
+.day-games li.me { background: var(--me-bg); }
+.dg-score { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dg-score strong { font-family: var(--font-num); font-size: 16px; }
+.dg-links { margin-left: auto; display: inline-flex; gap: 8px; }
+
+/* 오프시즌 (Offseason.tsx): 지금 단계는 본문, 지명권·포스팅·소식은 곁 칸 */
+.off-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
+.off-main, .off-side { min-width: 0; }
+.off-side .panel { padding: 12px 14px; }
+.off-side .panel h2 { font-size: 14px; }
+.off-side .scroll { max-height: 420px; overflow-y: auto; }
+@media (max-width: 1100px) { .off-split { grid-template-columns: minmax(0, 1fr); } }
+.off-side .news { max-height: 460px; overflow-y: auto; }
+.off-side .news li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+
+/* 시즌 마무리 흐름 (FlowNext.tsx) */
+.flow-next {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 12px 16px; border-radius: 14px;
+  background: var(--me-bg); border: 1px solid color-mix(in srgb, var(--team) 30%, transparent);
+}
+.flow-next ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.flow-next li { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; color: var(--muted); }
+.flow-next li.done { color: var(--fg); }
+.flow-next li.done::before { content: '✓ '; color: var(--win); }
+.flow-next li.now { background: var(--team); color: var(--team-on, #fff); font-weight: 800; }
+.flow-next button { margin-left: auto; min-height: 42px; padding: 8px 18px; border-radius: 10px; font-size: 15px; }
+@media (prefers-color-scheme: dark) { .flow-next li.now { background: var(--team); color: #0e1420; } }
+td .inline { flex-wrap: nowrap; }
