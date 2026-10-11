@@ -49,6 +49,13 @@ const GROUPS = ['우리 구단', '리그', '역사', '시스템'] as const;
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
+/** 지금 화면 이름 (휴대폰 메뉴 버튼) */
+const EXTRA_LABEL: Partial<Record<Screen, string>> = { postseason: '가을야구', 'season-end': '시즌 결과', awards: '시상식', growth: '선수 성장' };
+function screenLabel(s: Screen, off: boolean): string {
+  const n = NAV.find((x) => x.id === s);
+  return n ? (off && n.offLabel ? n.offLabel : n.label) : EXTRA_LABEL[s] ?? '메뉴';
+}
+
 export function GameShell({ store, session, onQuit }: { store: BrowserStore; session: GameSession; onQuit: () => void }) {
   const [version, setVersion] = useState(0);
   const [screen, setScreen] = useState<Screen>(session.phase === 'offseason' ? 'offseason' : session.done ? 'season-end' : 'home');
@@ -61,9 +68,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const grades = useMemo(() => computeGrades(world), [world]);
 
   const changed = useCallback(() => setVersion((v) => v + 1), []);
+  // 휴대폰 화면: 메뉴를 펼쳐 고른다 (game.css 좁은 화면)
+  const [menuOpen, setMenuOpen] = useState(false);
   const go = useCallback((s: Screen, arg?: number) => {
     setScreen(s);
     setScreenArg(arg);
+    setMenuOpen(false);
     window.scrollTo({ top: 0 });
   }, []);
 
@@ -160,7 +170,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   return (
     <GameProvider value={ui}>
       <div className="shell" style={{ ['--team' as string]: teamColor(team.franchise) }}>
-        <aside className="nav">
+        <aside className={`nav${menuOpen ? ' open' : ''}`}>
           <div className="brand">
             <i className="brand-mark" aria-hidden />
             <div>
@@ -168,7 +178,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               <strong>{team.name}</strong>
             </div>
           </div>
-          <nav aria-label="메뉴">
+          <button type="button" className="menu-toggle" aria-expanded={menuOpen} aria-controls="game-menu" onClick={() => setMenuOpen((o) => !o)}>
+            <span>{screenLabel(screen, off)}</span> <span aria-hidden>{menuOpen ? '✕' : '☰'}</span><span className="sr-only">메뉴 {menuOpen ? '닫기' : '열기'}</span>
+          </button>
+          <nav aria-label="메뉴" id="game-menu">
             {GROUPS.map((g) => (
               <div key={g} className="nav-group">
                 <span className="nav-head" aria-hidden>{g}</span>
