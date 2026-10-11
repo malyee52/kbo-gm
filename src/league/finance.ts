@@ -26,17 +26,20 @@ export const TICKET = 1.6;
 export const POSTSEASON_TICKET = 3.0;
 /** 중계권·리그 공동 수익 (구단마다 같은 몫, 만 원) */
 export const BROADCAST = 1_000_000;
-/** 스폰서·상품 기본액 (인기도 1일 때, 만 원) */
-export const SPONSOR_BASE = 900_000;
-/** 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원) */
-export const OPS_COST = 2_000_000;
+/** 스폰서·상품 기본액 (인기도 1일 때, 만 원). 2026-10-11 90억 → 75억 (사용자: 돈이 너무 넉넉하다) */
+export const SPONSOR_BASE = 750_000;
+/** 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원). 2026-10-11 200억 → 220억 */
+export const OPS_COST = 2_200_000;
 /** 모기업 지원금 기본액 (등급별, 한 해, 만 원) */
 export const PARENT_BASE: Record<ParentGrade, number> = { A: 600_000, B: 450_000, C: 0 };
 /** 구단 이름 스폰서 (모기업 없는 히어로즈, 한 해, 만 원) */
 export const NAMING_SPONSOR: Record<string, number> = { 히어로즈: 500_000 };
 /** 자금이 이만큼을 넘으면 모기업 지원금을 넘는 금액의 PARENT_CLAWBACK만큼 줄인다 (자금이 끝없이 쌓이지 않게) */
-export const PARENT_RESERVE = 1_500_000;
-export const PARENT_CLAWBACK = 0.2;
+export const PARENT_RESERVE = 800_000;
+export const PARENT_CLAWBACK = 0.5;
+/** 결산 뒤 자금이 이만큼을 넘으면 넘는 금액의 DIVIDEND_SHARE를 모기업에 돌려준다 (실제 구단은 흑자를 쌓아 두지 않는다, 임시값) */
+export const DIVIDEND_RESERVE = 1_000_000;
+export const DIVIDEND_SHARE = 0.5;
 /** 우승 보너스 (리그 배분, 만 원) */
 export const CHAMPION_BONUS = 200_000;
 /** 새 게임 시작 자금 (만 원) */
@@ -122,18 +125,20 @@ export interface FinanceYear {
   cash: number;
   /** 모기업 긴급 지원 (적자 보전) */
   rescue: number;
+  /** 모기업 환원 (결산 뒤 자금이 DIVIDEND_RESERVE를 넘은 몫의 일부, 수지에는 넣지 않는다) */
+  dividend?: number;
 }
 
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest'
-  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'other';
+  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
-  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', other: '기타',
+  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
@@ -455,7 +460,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
-    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start') items[k] = other[k];
+    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start' && k !== 'dividend') items[k] = other[k];
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
     let cash = cashOf(league, t);
     let rescue = 0;
@@ -464,7 +469,13 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       league.ledger.push({ year, from: -1, to: t, amount: rescue, note: `${year} 모기업 긴급 지원 (적자 보전)`, kind: 'rescue' });
       cash = 0;
     }
-    const y: FinanceYear = { year, items, net, cash, rescue };
+    let dividend = 0;
+    if (cash > DIVIDEND_RESERVE) {
+      dividend = Math.round((cash - DIVIDEND_RESERVE) * DIVIDEND_SHARE);
+      league.ledger.push({ year, from: t, to: -1, amount: dividend, note: `${year} 모기업 환원 (쌓인 자금)`, kind: 'dividend' });
+      cash -= dividend;
+    }
+    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}) };
     league.finance![t].history.push(y);
     out.push(y);
   }

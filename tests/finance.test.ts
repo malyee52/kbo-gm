@@ -213,3 +213,32 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     expect(r.world.players.find((p) => p.id === target.id)!.teamIdx).toBe(lg);
   });
 });
+
+describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 너무 넉넉하다)', () => {
+  it('세 시즌 동안 결산 뒤 자금이 100억 원을 넘으면 넘는 몫의 절반을 모기업에 돌려주고, 어느 구단도 200억 원을 넘지 않는다', () => {
+    const g = GameSession.create(store, opts('fin-cap'), FAST);
+    for (let y = 0; y < 3; y++) {
+      g.advance(100000);
+      g.beginOffseason();
+      for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
+        const st = g.offseason!.stage;
+        if (st === 'draft') g.autoDraft(); if (st === 'comp') g.autoComp(); if (st === 'release') g.autoRelease();
+        g.nextStage();
+      }
+      expect(g.openNextSeason().ok).toBe(true);
+    }
+    const L = g.league;
+    let paid = 0;
+    for (let t = 0; t < L.teams.length; t++) {
+      for (const y of L.finance![t].history) {
+        expect(y.cash, `${L.teams[t].name} ${y.year}`).toBeLessThan(2_000_000);
+        if (y.dividend) {
+          paid++;
+          expect(y.cash).toBeGreaterThanOrEqual(1_000_000);
+          expect(y.cash + y.dividend - 1_000_000).toBeCloseTo(y.dividend * 2, -1);
+        }
+      }
+    }
+    expect(paid).toBeGreaterThan(0);
+  }, 400_000);
+});

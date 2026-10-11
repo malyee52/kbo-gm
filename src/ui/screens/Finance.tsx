@@ -120,7 +120,7 @@ export function FinancePanel() {
         <>
           <h3>지난 결산</h3>
           <table>
-            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th><th>결산 뒤 자금</th></tr></thead>
+            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th><th title="결산 뒤 자금이 100억 원을 넘으면 넘는 금액의 절반을 모기업에 돌려준다">모기업 환원</th><th>결산 뒤 자금</th></tr></thead>
             <tbody>
               {[...fin.history].reverse().map((y) => {
                 const vals = Object.values(y.items).map((v) => v ?? 0);
@@ -131,6 +131,7 @@ export function FinancePanel() {
                     <td>{won(-vals.filter((v) => v < 0).reduce((s, v) => s + v, 0))}</td>
                     <td className={y.net < 0 ? 'down' : 'up'}>{won(y.net)}</td>
                     <td>{y.rescue ? won(y.rescue) : '-'}</td>
+                    <td>{y.dividend ? won(y.dividend) : '-'}</td>
                     <td>{won(y.cash)}</td>
                   </tr>
                 );
