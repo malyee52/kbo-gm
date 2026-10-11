@@ -68,6 +68,8 @@ export interface TeamSeason {
   plan?: DepthPlan | null;
   /** 선발 등판 사이 최소 휴식일 (시대별, eras.ts). 없으면 params.starterRestDays */
   restDays?: number;
+  /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
+  tactics?: { steal: number; bunt: number; hook: number };
 }
 
 /**

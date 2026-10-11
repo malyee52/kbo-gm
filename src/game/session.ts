@@ -51,6 +51,7 @@ import {
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
 import { FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
+import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 
 export interface NewGameOptions {
@@ -122,6 +123,9 @@ export type GameAction =
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string }
+  /** 감독 해임·선임 (managers.ts) */
+  | { year: number; type: 'mgr-fire' }
+  | { year: number; type: 'mgr-hire'; name: string }
   | { year: number; type: 'legend'; id: string }
   | { year: number; type: 'to-dev'; id: string }
   | { year: number; type: 'sign-dev'; id: string }
@@ -228,7 +232,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers'>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -273,6 +277,16 @@ export class GameSession {
     this.league = league;
     this.world = world;
     this.season = season;
+    ensureManagers(league, store);
+    this.applyTactics();
+  }
+
+  /** 감독 작전 배율을 이번 시즌 팀에 건다 (managers.ts). 감독은 오프시즌에만 바뀌므로 시즌을 만들 때 한 번 */
+  private applyTactics(): void {
+    for (const ts of this.season.teamSeasons) {
+      const m = managerOf(this.league, ts.team.idx);
+      ts.tactics = m ? tacticsOf(infoOf(this.store, m.name)) : undefined;
+    }
   }
 
   /**
@@ -1464,6 +1478,9 @@ export class GameSession {
         if (!off || off.stage !== 'ready') return { ok: false, message: '오프시즌 단계를 모두 마쳐야 개막할 수 있습니다.' };
         const changes = off.changes ?? [];
         Off.closeOffseason(L, off);
+        // 감독: 재계약·실제 개막 감독·교체 (managers.ts). 지난 시즌 순위로 판단한다
+        const mgrNews = openManagers(L, this.store, this.teamIdx, L.lastSeason?.standings ?? [],
+          this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5);
         this.postseason = null;
         this.hallOfFameAndFarewells(L.year - 1);
         const sanctions = applyCapSanctions(L, L.year);
@@ -1473,11 +1490,13 @@ export class GameSession {
         this.refreshRivals();
         this.world = worldFromLeague(clone(L), this.store, this.params);
         this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx] });
+        this.applyTactics();
         this.trades = [];
         this.lastCallUps = new Set();
         this.valueCtx = null;
         this.startEntry();
         for (const c of changes) this.addNews(0, 'season', `${L.year} 시즌: ${changeText(c)}.`);
+        for (const t of mgrNews) this.addNews(0, 'season', `${L.year} 시즌: ${t}.`);
         // 창단 구단: 1군 진입 2년 전 창단해 1년 동안 퓨처스리그를 뛴다 (2026-10-11)
         for (const e of L.expansions ?? []) {
           const name = L.teams[e.team].name;
@@ -1515,6 +1534,8 @@ export class GameSession {
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow()); break;
+      case 'mgr-fire': res = fireManager(L, this.teamIdx, this.year); break;
+      case 'mgr-hire': res = hireManager(L, this.store, this.teamIdx, this.year, a.name); break;
       case 'legend': res = this.applyLegend(a.id); break;
       case 'to-dev': res = Off.toDevByUser(L, off!, a.id); break;
       case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
@@ -1900,6 +1921,8 @@ export class GameSession {
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
   orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
+  fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
+  hireManager(name: string) { return this.dispatchOff({ year: this.year, type: 'mgr-hire', name }); }
   /**
    * 세부 난이도를 바꾼다 (게임 중에도, 조작 기록에 남는다). 부상 빈도는 다음 경기부터
    */

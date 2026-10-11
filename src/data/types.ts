@@ -230,6 +230,34 @@ export interface DataStore {
   traits?: Record<string, string[]>;
   /** 실제 병역 자료: 선수 ID → 상무·경찰 복무, 국제대회 금메달 면제. military.json. 없으면 나이·기록 공백으로 짐작한다 */
   military?: Record<string, MilitaryRecord>;
+  /** 연도별 구단 감독과 감독 경력·운영 경향 (managers.json). 없으면 감독 기능을 쓰지 않는다 */
+  managers?: ManagerData;
+}
+
+/** 감독 자료 (tools/build_data.py build_managers, data-src/감독.csv) */
+export interface ManagerData {
+  /** 연도 → 계보 → 그 해 감독 (개막 감독이 먼저, mid는 시즌 중 바뀐 감독) */
+  seasons: Record<string, Record<string, { name: string; kind: string; mid?: boolean }[]>>;
+  people: Record<string, ManagerInfo>;
+}
+
+/** 감독 한 사람의 실제 경력과 운영 경향 (기록 사실) */
+export interface ManagerInfo {
+  first: number;
+  last: number;
+  /** 정식 감독으로 맡은 시즌 수, 대행 횟수 */
+  seasons: number;
+  acting: number;
+  /** 맡은 계보 */
+  teams: string[];
+  /** 시즌 내내 맡아 최종 1위(한국시리즈 우승)한 횟수 */
+  titles: number;
+  /** 운영 경향 계산에 쓴 시즌 수 (개막부터 끝까지 맡은 해) */
+  full: number;
+  /** 리그 평균 대비 팀 도루 시도, 희생번트, 구원 등판 배율 (시즌이 적으면 1 쪽으로 당김) */
+  steal: number;
+  bunt: number;
+  relief: number;
 }
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */

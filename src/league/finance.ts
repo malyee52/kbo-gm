@@ -16,6 +16,7 @@ import { fillBuff } from './events';
 import { legendFill } from './history';
 import { rivalFill } from './rivals';
 import { coachPayroll } from './coaches';
+import { managerPayroll } from './managers';
 import { gmStyle } from './gm';
 import { settingsOf, userTeamOf } from './difficulty';
 import {
@@ -144,7 +145,7 @@ export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
-  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', other: '기타',
+  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
@@ -384,7 +385,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const n = pays.length;
     const parts: [FinanceKind, number][] = [
       ['payroll', -Math.round(dom / n)], ['foreign', -Math.round(fgn / n)],
-      ['ops', -Math.round((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) / n)], ['invest', -Math.round(investCost(fin) / n)], ['coach', -Math.round(coachPayroll(league, team) / n)],
+      ['ops', -Math.round((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) / n)], ['invest', -Math.round(investCost(fin) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
       ['broadcast', Math.round(yearly.broadcast / n)], ['parent', Math.round(yearly.parent / n)], ['sponsor', Math.round(yearly.sponsor / n)],
     ];
     for (const [k, v] of parts) { add(k, v); byMonth.set(pd.month, (byMonth.get(pd.month) ?? 0) + v); }
