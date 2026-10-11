@@ -124,6 +124,7 @@ export type GameAction =
   | { year: number; type: 'promote-dev'; id: string }
   | { year: number; type: 'hire-coach'; id: string }
   | { year: number; type: 'posting'; id: string; accept: boolean }
+  | { year: number; type: 'extend'; id: string; years: number }
   | { year?: number; day: number; type: 'convert'; id: string }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
@@ -1442,6 +1443,7 @@ export class GameSession {
       case 'promote-dev': res = Off.promoteDevByUser(L, off!, a.id); break;
       case 'hire-coach': res = this.applyHireCoach(a.id); break;
       case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
+      case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
@@ -1843,6 +1845,20 @@ export class GameSession {
 
   /** 우리 선수의 포스팅(해외 진출) 요청에 답한다 */
   answerPosting(id: string, accept: boolean) { return this.dispatchOff({ year: this.year, type: 'posting', id, accept }); }
+
+  /** 비FA 다년 계약 (오프시즌, 요구 연봉 그대로) */
+  extend(id: string, years: number) { return this.dispatchOff({ year: this.year, type: 'extend', id, years }); }
+
+  /** 다년 계약 후보와 기간별 요구 연봉 (화면용) */
+  extensionOffers(): { p: LeaguePlayer; toFa: number; demands: { years: number; salary: number }[] }[] {
+    const off = this.offseason;
+    if (!off) return [];
+    const view = Off.leagueView(this.league, this.store, this.params);
+    const ys = Array.from({ length: Off.EXT_MAX_YEARS - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
+    return Off.extensionCandidates(this.league, off).map((p) => ({
+      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.extensionDemand(view, p, off.year, years) })),
+    }));
+  }
 
   /** 해외에 있는 선수 (overseas.ts) */
   abroadPlayers(): LeaguePlayer[] {
