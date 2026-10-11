@@ -19,19 +19,21 @@ export interface StopRules {
   devDay: boolean;
   /** "다음 경기"·가을야구 한 경기 진행 뒤 우리 경기를 중계 화면으로 보여 준다 (GameCast) */
   cast: boolean;
+  /** 자동 진행 중 우리 경기의 위기·승부처(7회 이후 2점 차 안, 득점권 주자)에서 멈춰 직접 지휘한다 */
+  crisis: boolean;
 }
 
 /** 기본값: 예전 동작 그대로 (이벤트·1군 선수 3일 이상 이탈에서 멈춤) */
 export const DEFAULT_STOPS: StopRules = {
-  event: true, tradeOffer: true, injury: true, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: true,
+  event: true, tradeOffer: true, injury: true, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: true, crisis: false,
 };
 
 /** 아무 데서도 멈추지 않는다 (시즌 끝까지, 테스트·장기 진행) */
 export const NO_STOPS: StopRules = {
-  event: false, tradeOffer: false, injury: false, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: false,
+  event: false, tradeOffer: false, injury: false, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: false, crisis: false,
 };
 
-export type AttentionKind = 'injury' | 'losing' | 'deadline' | 'dev';
+export type AttentionKind = 'injury' | 'losing' | 'deadline' | 'dev' | 'crisis';
 
 /** 진행을 멈춘 까닭 (화면이 요약 창 맨 위에 보여 준다) */
 export interface Attention {

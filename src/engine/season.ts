@@ -3,7 +3,7 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
-import { emptyLeagueCounters, simulateGame, type GameContext, type GameResult, type LeagueCounters, type Play } from './game';
+import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type LeagueCounters, type Play } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
@@ -232,6 +232,8 @@ export class Season {
   readonly boxes = new Map<number, BoxScore>();
   /** 박스스코어 구단 경기의 중계 기록 (경기 로그 색인 → 기록). 저장하지 않고 최근 PLAYS_KEEP경기만 메모리에 둔다 */
   readonly plays = new Map<number, Play[]>();
+  /** 직접 지휘 (경기 개입): 있으면 그 구단 경기에 건다. 저장하지 않는다 (조작 기록이 다시 채운다) */
+  commander: GameCommand | null = null;
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
   /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
@@ -401,9 +403,11 @@ export class Season {
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       const batBefore = wantBox ? [...homeLineup, ...awayLineup].map((p) => ({ ...this.bat[p.idx] })) : null;
       ctx.plays = wantBox ? [] : null;
+      ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
       const plays = ctx.plays;
       ctx.plays = null;
+      ctx.command = null;
       const ht = this.teams[g.home];
       const at = this.teams[g.away];
       ht.g++; at.g++;

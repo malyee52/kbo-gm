@@ -57,6 +57,7 @@ export function StopSettings({ value, onChange }: { value: StopRules; onChange: 
           <fieldset>
             <legend>중계</legend>
             {check('cast', '다음 경기는 중계로 보기', '다음 경기·가을야구 한 경기 진행 뒤 우리 경기를 문자 중계로 보여 줍니다')}
+            {check('crisis', '위기·승부처에서 직접 지휘', '7회 이후 2점 차 안에서 득점권 주자가 있으면 멈춰 직접 지휘합니다 (정규시즌)')}
           </fieldset>
           <div className="row-between">
             <button type="button" className="small-btn" onClick={() => onChange({ ...DEFAULT_STOPS })}>기본값</button>
