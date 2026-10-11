@@ -308,7 +308,7 @@ export class Season {
   /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */
   setPlan(teamIdx: number, plan: DepthPlan | null): void {
     const ts = this.teamSeasons[teamIdx];
-    ts.plan = plan ? { starters: { ...plan.starters }, rotation: [...plan.rotation], closer: plan.closer, ...(plan.order ? { order: [...plan.order] } : {}) } : null;
+    ts.plan = plan ? { starters: { ...plan.starters }, rotation: [...plan.rotation], closer: plan.closer, ...(plan.order ? { order: [...plan.order] } : {}), ...(plan.pen ? { pen: { ...plan.pen } } : {}) } : null;
     ts.dirty = true;
   }
 
@@ -341,6 +341,7 @@ export class Season {
       for (const k of Object.keys(plan.starters) as (keyof DepthPlan['starters'])[]) if (plan.starters[k] === playerIdx) delete plan.starters[k];
       plan.rotation = plan.rotation.filter((i) => i !== playerIdx);
       if (plan.closer === playerIdx) plan.closer = null;
+      if (plan.pen) delete plan.pen[playerIdx];
     }
     this.teamSeasons[from].dirty = true;
     this.teamSeasons[toTeam].dirty = true;

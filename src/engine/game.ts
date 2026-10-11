@@ -228,6 +228,9 @@ function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameC
   return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead };
 }
 
+/** 직접 정한 롱릴리프가 이른 이닝에 나왔을 때 한계 타자 수 배율 (임시값) */
+const LONG_RELIEF_STRETCH = 1.6;
+
 /** 쓸 수 있는 구원 투수: 이번 경기에 안 나왔고, 쉴 만큼 쉬었고, 3연투가 아닌 투수 */
 function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
   const st = ctx.states;
@@ -237,7 +240,9 @@ function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
 
 /**
  * 구원 투수 고르기 (2026-10-08 사용자 지적 "투수 교체가 비현실적"으로 다시 짬).
- * 불펜을 좋은 순으로 줄 세워 역할을 나눈다: 마무리, 필승조(좋은 순 1·2번째 = 8회·7회 셋업), 추격조(그다음), 롱릴리프·패전조(나머지).
+ * 역할: 마무리, 필승조(SU), 추격조(역할 없음), 롱릴리프(LR), 패전조(MOP).
+ * 플레이어가 기용표에서 불펜 역할을 정했으면 그대로(2026-10-12), 아니면 불펜을 좋은 순으로 줄 세워
+ * 좋은 순 1·2번째를 필승조(8회·7회 셋업), 나머지를 추격조로 본다 (롱릴리프는 그중 가장 길게 던지는 투수).
  * 역할 나누기와 점수 차 기준은 임시값.
  */
 function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext): SimPlayer | null {
@@ -260,30 +265,37 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
   const avail = order.filter((p) => pool.includes(p));
   if (avail.length === 0) return closerOk ? closer : null;
   const rank = (p: SimPlayer) => order.indexOf(p);
+  // 역할: 직접 정한 기용표에 있으면 그것. 역할을 하나라도 정했으면 나머지는 추격조, 아무것도 안 정했으면 서열 1·2번째가 필승조
+  const pen = ts.manual && ts.plan?.pen && Object.keys(ts.plan.pen).length ? ts.plan.pen : null;
+  const role = (p: SimPlayer): 'SU' | 'LR' | 'MOP' | 'MR' => (pen ? pen[p.idx] ?? 'MR' : rank(p) < 2 ? 'SU' : 'MR');
+  const of = (...rs: string[]) => avail.filter((p) => rs.includes(role(p)));
   const close = lead >= -2 && lead <= 3; // 이기고 있거나 근소하게 지는 접전
   const late = inning >= 7;
   if (late && close && lead >= 0) {
-    // 필승조: 8회 이후는 1번 셋업, 7회는 2번 셋업부터. 없으면 다음으로 좋은 투수
+    // 필승조: 8회 이후는 1번 셋업, 7회는 2번 셋업부터. 필승조가 다 지쳤으면 추격조 → 롱릴리프 → 패전조
+    // 필승조 안의 순서는 지친 투수까지 포함한 서열 (7회에 1번 셋업이 지쳐 있어도 2번 셋업부터 쓰는 것은 같다)
+    const suAll = order.filter((p) => role(p) === 'SU');
     const want = inning >= 8 ? 0 : 1;
-    const cands = avail.filter((p) => rank(p) >= want);
-    const list = cands.length ? cands : avail;
+    const su = of('SU');
+    const main = [...su.filter((p) => suAll.indexOf(p) >= want), ...of('MR'), ...of('LR'), ...of('MOP')];
+    const list = main.length ? main : su;
     // 어제 던졌으면 확률적으로 아끼고 다음 투수를 쓴다
     const pick = list.find((p) => st.fatigueDay[p.idx] !== ctx.day - 1 || !ctx.rng.chance(SPARE_YESTERDAY));
     return pick ?? list[0];
   }
   if (late && close) {
-    // 근소하게 지는 후반: 필승조는 아끼고 추격조(3~5번째)부터
-    return avail.find((p) => rank(p) >= 2) ?? avail[avail.length - 1];
+    // 근소하게 지는 후반: 필승조는 아끼고 추격조부터
+    return of('MR')[0] ?? of('LR')[0] ?? of('MOP')[0] ?? avail[avail.length - 1];
   }
   if (inning <= 5) {
-    // 이른 강판: 아래쪽 절반 중 가장 길게 던질 투수 (롱릴리프)
-    const low = avail.filter((p) => rank(p) >= 2);
-    const cands = low.length ? low : avail;
+    // 이른 강판: 롱릴리프. 정하지 않았으면 필승조를 뺀 투수 중 가장 길게 던질 투수
+    const lr = of('LR');
+    const cands = lr.length ? lr : of('MR', 'MOP').length ? of('MR', 'MOP') : avail;
     return cands.reduce((a, b) => (b.pit!.reliefStint > a.pit!.reliefStint ? b : a));
   }
-  // 점수 차가 큰 경기나 중반: 필승조를 빼고 아래쪽에서 고른다
-  const low = avail.filter((p) => rank(p) >= 2);
-  const cands = low.length ? low : avail;
+  // 점수 차가 큰 경기나 중반: 패전조. 정하지 않았으면 필승조를 빼고 아래쪽에서 고른다
+  const mop = of('MOP');
+  const cands = mop.length ? mop : of('MR', 'LR').length ? of('MR', 'LR') : avail;
   return cands[ctx.rng.int(cands.length)];
 }
 
@@ -324,6 +336,8 @@ function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEmpty: bo
   if (!next) return;
   fld.usedIdx.add(next.idx);
   fld.pitcher = enterPitcher(next, false, lead, ctx);
+  // 직접 정한 롱릴리프가 이른 이닝에 나오면 평소보다 길게 맡긴다 (임시값). AI 감독 배치에는 쓰지 않는다
+  if (inning <= 6 && fld.ts.manual && fld.ts.plan?.pen?.[next.idx] === 'LR') fld.pitcher.limit *= LONG_RELIEF_STRETCH;
   fld.staff.push(fld.pitcher);
 }
 

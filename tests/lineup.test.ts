@@ -144,6 +144,30 @@ describe('기용표 (주전 자리, 선발·중계·마무리)', () => {
     if (!g.isAbsent(newCloser)) expect(g.season.pit[newCloser.idx].sv).toBeGreaterThan(0);
   });
 
+  it('불펜 역할: 필승조·롱릴리프·패전조를 정하면 그대로 쓰이고, 처음 하나 정해도 기존 필승조는 남는다 (2026-10-12 사용자 요청)', () => {
+    const g = lgGame('pen-roles');
+    const ts = g.activeTeam();
+    const pen = ts.bullpen.filter((p) => p !== ts.closer).sort((a, b) => a.value - b.value);
+    const [su1, su2] = pen;
+    const worst = pen[pen.length - 1];
+    const long = pen.slice(2, -1).sort((a, b) => b.pit!.reliefStint - a.pit!.reliefStint)[0];
+    expect(g.pitcherRole(su1)).toBe('SU');
+    expect(g.setPitcherRole(worst, 'MOP').errors).toEqual([]);
+    expect(g.pitcherRole(su1)).toBe('SU'); // 처음 정할 때 보이던 필승조를 옮겨 적는다
+    expect(g.pitcherRole(su2)).toBe('SU');
+    expect(g.setPitcherRole(long, 'LR').errors).toEqual([]);
+    expect(g.pitcherRole(worst)).toBe('MOP');
+    expect(g.pitcherRole(long)).toBe('LR');
+    g.advance(60);
+    // 패전조는 접전 리드에 거의 안 나오고, 롱릴리프는 한 번에 길게 던진다
+    const outsPerG = (i: number) => g.season.pit[i].outs / Math.max(1, g.season.pit[i].g);
+    if (g.season.pit[long.idx].g >= 3 && g.season.pit[su1.idx].g >= 3) expect(outsPerG(long.idx)).toBeGreaterThan(outsPerG(su1.idx));
+    // 저장·불러오기에도 역할이 남는다
+    const b = GameSession.load(store, JSON.parse(JSON.stringify(g.toSave())) as GameSave, FAST);
+    expect(b.pitcherRole(b.world.players[long.idx])).toBe('LR');
+    expect(b.pitcherRole(b.world.players[worst.idx])).toBe('MOP');
+  });
+
   it('로테이션 투수를 2군으로 내려도 다른 자리(포수 등)를 바꿀 수 있고, 빠진 투수는 기용표에서 빠진다 (2026-10-12 사용자 보고)', () => {
     const g = lgGame('stale-plan');
     const sp = g.effectivePlan().rotation[0];

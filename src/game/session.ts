@@ -7,7 +7,7 @@
 import type { DataStore } from '../data/types';
 import {
   absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
-  type Absence, type DepthPlan, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
+  type Absence, type DepthPlan, type PenRole, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -125,10 +125,12 @@ export interface PlanIds {
   rotation: string[];
   closer: string | null;
   order?: Slot[];
+  pen?: Record<string, PenRole>;
 }
 
-export type PitcherRole = 'SP' | 'RP' | 'CL';
-export const PITCHER_ROLE_LABEL: Record<PitcherRole, string> = { SP: '선발', RP: '중계', CL: '마무리' };
+/** 투수 보직. RP는 역할을 정하지 않은 구원 (AI 감독이 서열대로 추격조 등으로 쓴다) */
+export type PitcherRole = 'SP' | 'SU' | 'RP' | 'LR' | 'MOP' | 'CL';
+export const PITCHER_ROLE_LABEL: Record<PitcherRole, string> = { SP: '선발', CL: '마무리', SU: '필승조', RP: '추격조', LR: '롱릴리프', MOP: '패전조' };
 
 export interface NewsItem {
   /** 시즌 연도 (없으면 시작 연도. 형식 1 저장 호환) */
@@ -858,7 +860,18 @@ export class GameSession {
 
   pitcherRole(p: SimPlayer): PitcherRole {
     const pl = this.effectivePlan();
-    return pl.closer === p.idx ? 'CL' : pl.rotation.includes(p.idx) ? 'SP' : 'RP';
+    if (pl.closer === p.idx) return 'CL';
+    if (pl.rotation.includes(p.idx)) return 'SP';
+    const r = pl.pen?.[p.idx];
+    if (r) return r;
+    // 역할을 아무것도 정하지 않았으면 AI 감독처럼 마무리를 뺀 불펜 서열 1·2번째를 필승조로 보인다 (game.ts pickReliever)
+    if (!pl.pen || !Object.keys(pl.pen).length) {
+      const ts = this.activeTeam();
+      const order = ts.bullpen.filter((x) => x.idx !== pl.closer && !pl.rotation.includes(x.idx)).sort((a, b) => a.value - b.value);
+      const k = order.findIndex((x) => x.idx === p.idx);
+      if (k >= 0 && k < 2) return 'SU';
+    }
+    return 'RP';
   }
 
   /**
@@ -876,6 +889,7 @@ export class GameSession {
     }
     pl.rotation = pl.rotation.filter((i) => (reg.get(i)?.isPitcher ? true : (dropped.add(i), false)));
     if (pl.closer !== null && !reg.get(pl.closer)?.isPitcher) { dropped.add(pl.closer); pl.closer = null; }
+    if (pl.pen) for (const k of Object.keys(pl.pen)) if (!reg.get(Number(k))?.isPitcher) { dropped.add(Number(k)); delete pl.pen[Number(k)]; }
     edit(pl);
     const r = this.setPlan(pl);
     if (!r.errors.length && dropped.size) {
@@ -921,13 +935,25 @@ export class GameSession {
     });
   }
 
-  /** 투수 보직을 바꾼다. 마무리는 한 명이라, 새로 정하면 기존 마무리는 중계로 간다 */
+  /**
+   * 투수 보직을 바꾼다. 마무리는 한 명이라, 새로 정하면 기존 마무리는 추격조로 간다.
+   * 불펜 역할(필승조·롱릴리프·패전조)을 처음 하나 정할 때는 지금 화면에 보이던 필승조(AI 서열 1·2번째)를 그대로 옮겨 적어,
+   * 하나 바꿨다고 나머지 필승조가 추격조로 떨어지지 않게 한다
+   */
   setPitcherRole(p: SimPlayer, role: PitcherRole): EntryCheck {
+    const shown = new Map(this.registered().filter((x) => x.isPitcher).map((x) => [x.idx, this.pitcherRole(x)]));
     return this.editPlan((pl) => {
+      if (!pl.pen || !Object.keys(pl.pen).length) {
+        pl.pen = {};
+        for (const [i, r] of shown) if (r === 'SU') pl.pen[i] = 'SU';
+      }
       pl.rotation = pl.rotation.filter((i) => i !== p.idx);
       if (pl.closer === p.idx) pl.closer = null;
+      delete pl.pen[p.idx];
       if (role === 'SP') pl.rotation.push(p.idx);
       if (role === 'CL') pl.closer = p.idx;
+      if (role === 'SU' || role === 'LR' || role === 'MOP') pl.pen[p.idx] = role;
+      if (!Object.keys(pl.pen).length) delete pl.pen;
     });
   }
 
@@ -954,6 +980,11 @@ export class GameSession {
       if (!p || !p.isPitcher) errors.push('마무리는 1군 투수여야 합니다');
       if (plan.rotation.includes(plan.closer)) errors.push('선발 투수를 마무리로 함께 쓸 수 없습니다');
     }
+    for (const k of Object.keys(plan.pen ?? {})) {
+      const i = Number(k);
+      if (!reg.get(i)?.isPitcher) errors.push('불펜 역할은 1군 투수에게만 줄 수 있습니다');
+      if (plan.rotation.includes(i) || plan.closer === i) errors.push('선발·마무리에게 불펜 역할을 함께 줄 수 없습니다');
+    }
     if (plan.order && (plan.order.length !== 9 || new Set(plan.order).size !== 9 || plan.order.some((s) => !LINEUP_SLOTS.includes(s)))) {
       errors.push('타순은 아홉 자리를 한 번씩 넣어야 합니다');
     }
@@ -979,7 +1010,8 @@ export class GameSession {
     const id = (i: number) => this.world.players[i].id;
     const starters: PlanIds['starters'] = {};
     for (const s of LINEUP_SLOTS) if (plan.starters[s] !== undefined) starters[s] = id(plan.starters[s]!);
-    return { starters, rotation: plan.rotation.map(id), closer: plan.closer === null ? null : id(plan.closer), ...(plan.order ? { order: [...plan.order] } : {}) };
+    const pen = plan.pen ? Object.fromEntries(Object.entries(plan.pen).map(([i, r]) => [id(Number(i)), r])) : undefined;
+    return { starters, rotation: plan.rotation.map(id), closer: plan.closer === null ? null : id(plan.closer), ...(plan.order ? { order: [...plan.order] } : {}), ...(pen ? { pen } : {}) };
   }
 
   private planFromIds(ids: PlanIds): DepthPlan {
@@ -990,7 +1022,9 @@ export class GameSession {
       if (i !== undefined) starters[s] = i;
     }
     const rotation = ids.rotation.map((x) => byId.get(x)).filter((x): x is number => x !== undefined);
-    return { starters, rotation, closer: ids.closer === null ? null : byId.get(ids.closer) ?? null, ...(ids.order ? { order: [...ids.order] } : {}) };
+    const pen: Record<number, PenRole> = {};
+    for (const [id, r] of Object.entries(ids.pen ?? {})) { const i = byId.get(id); if (i !== undefined) pen[i] = r; }
+    return { starters, rotation, closer: ids.closer === null ? null : byId.get(ids.closer) ?? null, ...(ids.order ? { order: [...ids.order] } : {}), ...(Object.keys(pen).length ? { pen } : {}) };
   }
 
   // ---- 시즌 진행
