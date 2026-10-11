@@ -250,6 +250,11 @@ export interface LeagueState {
    * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)
    */
   eventTrades?: { year: number; day: number; team: number; give: string[]; get: string[] }[];
+  /**
+   * 월간 MVP 기사의 기준점: 그 달이 시작될 때의 선수별 시즌 기록 (선수 ID → [타석, 타수, 안타, 2루타, 3루타, 홈런, 볼넷, 사구, 희생플라이, 타점, 아웃, 자책, 승, 탈삼진, 세이브]).
+   * 저장했다 불러와도 같은 기사가 나오게 리그 상태에 둔다 (2026-10-12)
+   */
+  storyMonth?: { year: number; month: number; lines: Record<string, number[]> };
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

@@ -7,7 +7,7 @@
 import type { DataStore } from '../data/types';
 import {
   absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
-  type Absence, type DepthPlan, type PenRole, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
+  type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, MAX_PER_SIDE, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -16,8 +16,9 @@ import * as Off from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
+import { quoteLine, voice } from '../league/voices';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
-import { ops } from './stats';
+import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
@@ -31,7 +32,7 @@ import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
 } from '../league/history';
-import { addArticle, crossed, josa, MILESTONES, STREAK_FROM } from '../league/articles';
+import { addArticle, crossed, josa, MILESTONES, STREAK_FROM, type ArticleKind } from '../league/articles';
 import {
   MAX_PICKS_PER_TRADE, ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
   pickLedger, tradablePick, transferPick, type DraftPick, type PickLedgerRow,
@@ -272,7 +273,22 @@ interface ArticleState {
   broken: Set<string>;
   streak: number[];
   logIdx: number;
+  // ---- 잡다한 기사 (2026-10-12): 경기·데뷔 첫 기록·순위·부상·월간 MVP·인터뷰
+  /** 경기 기사를 어디까지 봤나 (season.log 색인) */
+  gameIdx: number;
+  /** 지난번 선두 (20경기 전에는 -1) */
+  leader: number;
+  /** 우리 구단이 가을야구권에 있었나 */
+  psIn: boolean;
+  /** 부상 기사를 어디까지 봤나 (season.absences 색인) */
+  absSeen: number;
+  /** 월간 MVP: 이번 달 */
+  month: number;
 }
+/** 단장 인터뷰 간격 (일, 임시값) */
+const GM_INTERVIEW_EVERY = 21;
+/** 다른 구단 화제 경기 기사를 내는 하루 확률 (임시값) */
+const LEAGUE_GAME_CHANCE = 0.3;
 const SEASON_KEYS = ['hr', 'h', 'rbi', 'sb', 'w', 'sv', 'so'];
 const SEASON_LABEL: Record<string, string> = { hr: '홈런', h: '안타', rbi: '타점', sb: '도루', w: '승', sv: '세이브', so: '탈삼진' };
 
@@ -1174,6 +1190,8 @@ export class GameSession {
     const year = this.world.year;
     const org = this.team.org;
     const manual = this.manualEntry;
+    // 기사 기준점은 그날 경기 전에 잡는다 (새 게임이든 불러온 게임이든 같은 시점이라 같은 기사가 나온다)
+    if (!s.done) this.articleBase();
 
     // 오늘 복귀하는 선수
     if (day > 0) {
@@ -2068,9 +2086,24 @@ export class GameSession {
     }
     const records: Record<string, number> = {};
     for (const k of SEASON_KEYS) records[k] = seasonBests(this.league, this.store, k, 1)[0]?.value ?? 0;
-    const st: ArticleState = { year, base, prev: new Map(), records, broken: new Set(), streak: this.world.teams.map(() => 0), logIdx: 0 };
+    const s = this.season;
+    const order = s.standings();
+    const st: ArticleState = {
+      year, base, prev: new Map(), records, broken: new Set(), streak: this.world.teams.map(() => 0), logIdx: 0,
+      gameIdx: s.log.length, leader: s.teams[order[0]].g >= 20 ? order[0] : -1,
+      psIn: order.indexOf(this.teamIdx) < this.world.rules.postseasonTeams, absSeen: s.absences.length,
+      month: dateOf(year, s.day).month,
+    };
+    // 월간 MVP 기준점: 저장에 남아 있으면 그것, 없으면(새 시즌·예전 저장) 지금
+    if (this.league.storyMonth?.year !== year) this.league.storyMonth = { year, month: st.month, lines: this.lineSnapshot() };
     // 지금까지(불러오기·재현) 이미 지난 일은 기사를 다시 내지 않는다
     for (const p of this.world.players) st.prev.set(p.id, this.totalNow(st, p.idx, p.id));
+    for (const p of this.world.players) {
+      const b0 = base.get(p.id)!;
+      if (b0.hr === 0 && s.bat[p.idx].hr > 0) st.broken.add(`${p.id}/홈런`);
+      if (b0.w === 0 && s.pit[p.idx].w > 0) st.broken.add(`${p.id}/승`);
+      if (b0.sv === 0 && s.pit[p.idx].sv > 0) st.broken.add(`${p.id}/세이브`);
+    }
     for (const k of SEASON_KEYS) if (this.world.players.some((p) => this.seasonValue(k, p.idx) > records[k])) st.broken.add(k);
     this.advanceStreaks(st, false);
     this.articleState = st;
@@ -2136,6 +2169,158 @@ export class GameSession {
       }
     }
     this.advanceStreaks(st, true);
+    this.storyArticles(st, day);
+  }
+
+  /** 지금 시즌 기록 (월간 MVP 기준점, 기록이 있는 선수만) */
+  private lineSnapshot(): Record<string, number[]> {
+    const out: Record<string, number[]> = {};
+    for (const p of this.world.players) {
+      const b = this.season.bat[p.idx];
+      const q = this.season.pit[p.idx];
+      if (b.pa === 0 && q.bf === 0) continue;
+      out[p.id] = [b.pa, b.ab, b.h, b.d, b.t, b.hr, b.bb, b.hbp, b.sf, b.rbi, q.outs, q.er, q.w, q.so, q.sv];
+    }
+    return out;
+  }
+
+  /**
+   * 잡다한 기사 (2026-10-12 사용자 요청: 기사·인터뷰로 현실감). 그날 경기 뒤에 부른다.
+   * 실존 선수·감독은 기록 사실만 쓰고, 인터뷰는 이름 없는 관계자·팬과 플레이어인 단장의 말만 (voices.ts)
+   */
+  private storyArticles(st: ArticleState, day: number): void {
+    const L = this.league;
+    const s = this.season;
+    const year = this.year;
+    const me = this.teamIdx;
+    const W = this.world;
+    const P = W.players;
+    const rng = new Rng(`${L.seed}/story/${year}/${day}`);
+    const date = formatDate(year, day);
+    const tname = (t: number) => W.teams[t].name;
+    const fr = (t: number) => W.teams[t].franchise;
+    const put = (kind: ArticleKind, team: number | undefined, title: string, body: string) =>
+      addArticle(L, { year, day, kind, title, body, ...(team !== undefined ? { franchise: fr(team) } : {}) });
+
+    // 경기: 우리 경기의 완봉승·두 자릿수 득점·연장·대패, 다른 구단 화제 경기 하나
+    let leagueDone = false;
+    for (; st.gameIdx < s.log.length; st.gameIdx++) {
+      const g = s.log[st.gameIdx];
+      const mine = g.home === me || g.away === me;
+      const us = g.home === me ? g.homeRuns : g.awayRuns;
+      const them = g.home === me ? g.awayRuns : g.homeRuns;
+      if (mine) {
+        const opp = g.home === me ? g.away : g.home;
+        const wp = g.win !== null ? P[g.win] : null;
+        const score = `${us}:${them}`;
+        if (us > them && them === 0) {
+          const pl = wp ? ` 승리 투수는 ${wp.name}.` : '';
+          put('game', me, `${tname(me)}, ${tname(opp)} 상대 ${score} 완봉승`, `${josa(tname(me), '이', '가')} ${date} ${josa(tname(opp), '을', '를')} ${josa(score, '으로', '로')} 꺾었다.${pl}${quoteLine('shutout', rng)}`);
+        } else if (g.innings > 9 && us !== them) {
+          const win = us > them;
+          put('game', me, `연장 ${g.innings}회 혈투, ${tname(me)} ${win ? '승리' : '패배'}`, `${josa(tname(me), '과', '와')} ${josa(tname(opp), '이', '가')} ${date} 연장 ${g.innings}회까지 가는 접전을 벌였다. 최종 ${score}.${quoteLine(win ? 'extra-win' : 'extra-loss', rng)}`);
+        } else if (us >= 10 && us > them) {
+          put('game', me, `${tname(me)} 타선 폭발, ${tname(opp)}에 ${score}`, `${josa(tname(me), '이', '가')} ${date} ${tname(opp)}전에서 ${us}점을 몰아쳤다. 최종 ${score}.${quoteLine('win-big', rng)}`);
+        } else if (them - us >= 8) {
+          put('game', me, `${tname(me)}, ${tname(opp)}에 ${score} 대패`, `${josa(tname(me), '이', '가')} ${date} ${tname(opp)}전에서 ${them}점을 내줬다.${quoteLine('loss-big', rng)}`);
+        }
+      } else if (!leagueDone && rng.chance(LEAGUE_GAME_CHANCE)) {
+        const hi = Math.max(g.homeRuns, g.awayRuns);
+        const lo = Math.min(g.homeRuns, g.awayRuns);
+        const winT = g.homeRuns > g.awayRuns ? g.home : g.away;
+        const loseT = winT === g.home ? g.away : g.home;
+        if (hi >= 15) { put('game', winT, `${tname(winT)}, ${tname(loseT)} 상대 ${hi}득점`, `${josa(tname(winT), '이', '가')} ${date} ${tname(loseT)}전에서 ${hi}:${lo} 대승을 거뒀다.`); leagueDone = true; }
+        else if (g.innings >= 12) { put('game', undefined, `${tname(g.away)}·${tname(g.home)}, 연장 ${g.innings}회 승부`, `${date} ${josa(tname(g.away), '과', '와')} ${tname(g.home)}의 경기가 연장 ${g.innings}회까지 이어졌다. 최종 ${g.awayRuns}:${g.homeRuns}.`); leagueDone = true; }
+        else if (hi === 1 && lo === 0) { const wp = g.win !== null ? P[g.win] : null; put('game', winT, `${tname(winT)}, 1:0 투수전 승리`, `${josa(tname(winT), '이', '가')} ${date} ${josa(tname(loseT), '을', '를')} 1:0으로 눌렀다.${wp ? ` 승리 투수는 ${wp.name}.` : ''}`); leagueDone = true; }
+      }
+    }
+
+    // 데뷔 첫 기록: 통산 0이던 선수의 첫 홈런·첫 승·첫 세이브 (우리 선수는 모두, 다른 구단은 일부)
+    for (const p of P) {
+      if (p.teamIdx < 0) continue;
+      const b0 = st.base.get(p.id);
+      if (!b0) continue;
+      const firsts: [number, number, string][] = [[b0.hr, s.bat[p.idx].hr, '홈런'], [b0.w, s.pit[p.idx].w, '승'], [b0.sv, s.pit[p.idx].sv, '세이브']];
+      for (const [career0, now, label] of firsts) {
+        if (career0 !== 0 || now !== 1) continue;
+        const key = `${p.id}/${label}`;
+        if (st.broken.has(key)) continue;
+        st.broken.add(key);
+        if (p.teamIdx !== me && !rng.chance(0.25)) continue;
+        put('debut', p.teamIdx, `${p.name}, 프로 첫 ${label}`, `${tname(p.teamIdx)} ${josa(p.name, '이', '가')} ${date} 경기에서 1군 무대 첫 ${josa(label, '을', '를')} 기록했다.`);
+      }
+    }
+
+    // 순위: 선두 교체, 우리 구단의 가을야구권 진입·이탈 (20경기부터)
+    const order = s.standings();
+    if (s.teams[order[0]].g >= 20) {
+      const lead = order[0];
+      if (st.leader >= 0 && lead !== st.leader) {
+        put('rank', lead, `선두 교체: ${tname(lead)} 1위`, `${josa(tname(lead), '이', '가')} ${date} 경기 뒤 ${josa(tname(st.leader), '을', '를')} 끌어내리고 1위에 올랐다.${lead === me ? quoteLine('first', rng) : ''}`);
+      }
+      st.leader = lead;
+      const cut = W.rules.postseasonTeams;
+      const inNow = order.indexOf(me) < cut;
+      if (inNow !== st.psIn) {
+        const rank = order.indexOf(me) + 1;
+        put('rank', me, inNow ? `${tname(me)}, 가을야구권 진입 (${rank}위)` : `${tname(me)}, 가을야구권 밖으로 (${rank}위)`,
+          `${josa(tname(me), '이', '가')} ${date} 경기 뒤 ${rank}위가 됐다.${quoteLine(inNow ? 'ps-in' : 'ps-out', rng)}`);
+        st.psIn = inNow;
+      }
+    }
+
+    // 부상: 우리 선수 열흘 넘는 이탈은 모두, 다른 구단은 주전급(기여 30런 이상)만
+    for (; st.absSeen < s.absences.length; st.absSeen++) {
+      const a = s.absences[st.absSeen];
+      if (a.kind === 'event' || a.until - a.day < 10) continue;
+      const p = P[a.idx];
+      if (!p || p.teamIdx < 0) continue;
+      const mine = p.teamIdx === me;
+      if (!mine && currentRuns(p, this.values) < 30) continue;
+      const out = a.until >= s.schedule.length ? '시즌 아웃' : `${formatDate(year, a.until)}께 복귀 예정`;
+      put('injury', p.teamIdx, `${tname(p.teamIdx)} ${p.name}, 부상으로 이탈`, `${tname(p.teamIdx)} ${josa(p.name, '이', '가')} 부상으로 1군에서 빠졌다. ${out}.${mine ? quoteLine('injury', rng) : ''}`);
+    }
+
+    // 월간 MVP: 그 달 마지막 경기일 다음 날 (달이 바뀌면)
+    const nextMonth = dateOf(year, Math.min(day + 1, s.schedule.length - 1)).month;
+    const done = day + 1 >= s.schedule.length;
+    if (nextMonth !== st.month || done) {
+      const snap = L.storyMonth?.lines ?? {};
+      const d = (idx: number) => {
+        const z = snap[P[idx].id] ?? [];
+        const v = (i: number) => z[i] ?? 0;
+        const b = s.bat[idx];
+        const q = s.pit[idx];
+        const bat: BatLine = { ...b, pa: b.pa - v(0), ab: b.ab - v(1), h: b.h - v(2), d: b.d - v(3), t: b.t - v(4), hr: b.hr - v(5), bb: b.bb - v(6), hbp: b.hbp - v(7), sf: b.sf - v(8), rbi: b.rbi - v(9) };
+        const pit: PitLine = { ...q, outs: q.outs - v(10), er: q.er - v(11), w: q.w - v(12), so: q.so - v(13), sv: q.sv - v(14) };
+        return { bat, pit };
+      };
+      const hitters = P.filter((p) => p.teamIdx >= 0 && !p.isPitcher).map((p) => ({ p, ...d(p.idx) })).filter((x) => x.bat.pa >= 60);
+      const pitchers = P.filter((p) => p.teamIdx >= 0 && p.isPitcher).map((p) => ({ p, ...d(p.idx) })).filter((x) => x.pit.outs >= 60);
+      const bh = hitters.sort((a, b) => ops(b.bat) - ops(a.bat) || a.p.idx - b.p.idx)[0];
+      const bp = pitchers.sort((a, b) => era(a.pit) - era(b.pit) || b.pit.outs - a.pit.outs || a.p.idx - b.p.idx)[0];
+      if (bh || bp) {
+        const m = st.month;
+        const parts: string[] = [];
+        if (bh) parts.push(`타자 부문 ${tname(bh.p.teamIdx)} ${bh.p.name} (${bh.bat.pa}타석 타율 ${rate3(avg(bh.bat))}, ${bh.bat.hr}홈런, OPS ${rate3(ops(bh.bat))})`);
+        if (bp) parts.push(`투수 부문 ${tname(bp.p.teamIdx)} ${bp.p.name} (${ipText(bp.pit.outs)}이닝 평균자책 ${fixed2(era(bp.pit))}, ${bp.pit.w}승 ${bp.pit.so}탈삼진)`);
+        addArticle(L, { year, day, kind: 'monthly', title: `${m}월 MVP: ${[bh?.p.name, bp?.p.name].filter(Boolean).join('·')}`, body: `${m}월 기록으로 본 이달의 선수. ${parts.join(', ')}.`,
+          ...(bh && bh.p.teamIdx === me ? { franchise: fr(me) } : bp && bp.p.teamIdx === me ? { franchise: fr(me) } : {}) });
+      }
+      st.month = nextMonth;
+      L.storyMonth = { year, month: nextMonth, lines: this.lineSnapshot() };
+    }
+
+    // 단장 인터뷰: 3주마다 (일정 날짜로 정해 불러오기와 상관없이 같은 날), 순위·흐름에 따라
+    if (day > 0 && day % GM_INTERVIEW_EVERY === 0 && s.teams[me].g >= 15) {
+      const rank = order.indexOf(me) + 1;
+      const n = order.length;
+      const streak = st.streak[me];
+      const sit = streak >= 4 ? 'gm-hot' : streak <= -4 ? 'gm-cold' : rank <= 2 ? 'gm-top' : rank >= n - 2 ? 'gm-low' : 'gm-mid';
+      const t = s.teams[me];
+      put('interview', me, `[인터뷰] ${tname(me)} 단장 "${voice(sit, rng).say.split('.')[0]}"`,
+        `${josa(tname(me), '은', '는')} ${date} 현재 ${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}로 ${rank}위다.${quoteLine(sit, rng, tname(me))}`);
+    }
   }
 
   // ---- 역사: 명예의 전당, 구단 레전드, 은퇴식 (history.ts)
