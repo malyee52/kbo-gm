@@ -1,5 +1,5 @@
-// 도전형 시나리오: 시즌 도전 30개(난이도 하·중·상)와 장기 캠페인 10개 (2026-10-12 사용자 기획안
-// "KBO_도전형_시나리오_기획안.md"). 실제 구단의 그 시즌 개막에서 시작한다. 목표·기한·예산 조건은 게임용 설정이고,
+// 도전형 시나리오: 시즌 도전 30개(난이도 하·중·상), 장기 캠페인 10개, 2000년 이전 클래식 캠페인 10개 (2026-10-12 사용자 기획안
+// "KBO_도전형_시나리오_기획안.md", 같은 날 고친 판: SK 장기 캠페인 2012년 시작, 클래식 캠페인, 선택 화면 시놉시스 synopses.ts). 실제 구단의 그 시즌 개막에서 시작한다. 목표·기한·예산 조건은 게임용 설정이고,
 // '실제 시즌 배경'은 기획안의 참고 문구다.
 //
 // 목표는 단계(stage)로 적는다. 마지막 단계가 최종 클리어 조건이고, 앞 단계는 "완전 클리어" 조건이다 (기획안 5.4):
@@ -20,11 +20,19 @@ export interface SeasonMark {
   champ: boolean;
   /** 자체 육성 주전 수 */
   home: number;
+  /** 정규시즌 승수 (예전 저장에는 없다) */
+  w?: number;
+  /** 전기 또는 후기 1위 (시즌을 일정 절반으로 나눈 반기 승률 1위). 예전 저장에는 없다 */
+  half?: boolean;
 }
 
 export type Metric =
   | { k: 'champ' } | { k: 'ks' } | { k: 'ps' } | { k: 'notLast' }
-  | { k: 'rank'; n: number } | { k: 'pct'; v: number } | { k: 'home'; n: number };
+  | { k: 'rank'; n: number } | { k: 'pct'; v: number } | { k: 'home'; n: number }
+  /** 정규시즌 n승 이상 */
+  | { k: 'wins'; n: number }
+  /** 전기 또는 후기 1위 (1982~1988년 전·후기리그. 게임은 한 시즌을 일정 절반으로 나눠 판정하고, 가을야구는 지금 방식 그대로다) */
+  | { k: 'half' };
 
 export type Cond =
   /** 그 해에 */
@@ -43,7 +51,7 @@ export interface Stage {
   conds: Cond[];
 }
 
-export type Tier = '하' | '중' | '상' | '장기';
+export type Tier = '하' | '중' | '상' | '장기' | '클래식';
 
 export interface PlanChallenge {
   id: string;
@@ -58,6 +66,8 @@ export interface PlanChallenge {
   stages: Stage[];
   /** 우리 구단 연봉 상한: 게임 안 리그 평균 연봉(캡 계산 기준)의 비율 (넥센 캠페인 0.85) */
   budget?: number;
+  /** 클래식 캠페인의 난이도 (기획안 10.1) */
+  level?: '하' | '중' | '상';
 }
 
 export const STAGE_STATUS = ['진행', '달성', '실패'] as const;
@@ -79,6 +89,8 @@ function metricText(m: Metric): string {
     case 'rank': return `정규시즌 ${m.n}위 이내`;
     case 'pct': return `승률 ${m.v.toFixed(3).replace(/^0/, '')} 이상`;
     case 'home': return `자체 육성 주전 ${m.n}명`;
+    case 'wins': return `정규시즌 ${m.n}승 이상`;
+    case 'half': return '전기 또는 후기 1위';
   }
 }
 
@@ -151,9 +163,10 @@ const LONG: Short[] = [
   ['L04', 2022, '두산', '다음 세대의 베어스', '2022~2029, 8시즌', '경쟁력 회복과 자체 육성 선수로의 주전 교체',
     byGoal(2024, ps), byGoal(2026, ks),
     fin('2029년까지 우승 1회 + 우승 시즌 자체 육성 주전 4명', { t: 'same', from: 2022, to: 2029, ms: [champ, home(4)] })],
-  ['L05', 2000, 'SSG', '비룡의 건국', '2000~2009, 10시즌', '신생팀 선수층 확보부터 우승 이후 경쟁력 유지까지',
-    byGoal(2002, pct(0.45)), byGoal(2005, ks),
-    fin('2009년까지 누적 우승 2회, 마지막 3시즌 모두 PS 진출', { t: 'count', from: 2000, to: 2009, m: champ, n: 2 }, { t: 'all', from: 2007, to: 2009, m: ps })],
+  ['L05', 2012, 'SSG', '그들이 떠난 자리에도, 야구는 계속된다', '2012~2020, 9시즌', '왕조의 주축과 경쟁력을 이어 가며 다음 세대로 전환',
+    one('2012~2014년 중 한국시리즈 진출 1회', { t: 'count', from: 2012, to: 2014, m: ks, n: 1 }),
+    one('2015~2017년 중 PS 진출 2회', { t: 'count', from: 2015, to: 2017, m: ps, n: 2 }),
+    fin('2018~2020년 중 우승 1회 + 그 우승 시즌 자체 육성 주전 3명', { t: 'same', from: 2018, to: 2020, ms: [champ, home(3)] })],
   ['L06', 2015, 'KT', '열 번째 구단의 첫 왕조', '2015~2024, 10시즌', '신생팀의 첫 우승 이후 두 번째 우승에 도전',
     byGoal(2017, { k: 'notLast' }), byGoal(2020, ps),
     fin('2024년까지 누적 우승 2회 + 2024년 자체 육성 주전 4명', { t: 'count', from: 2015, to: 2024, m: champ, n: 2 }, { t: 'in', year: 2024, m: home(4) })],
@@ -173,12 +186,30 @@ const LONG: Short[] = [
       { t: 'same', from: 2011, to: 2018, ms: [champ, home(4)] }, { t: 'count', from: 2011, to: 2018, m: ps, n: 4 })],
 ];
 
+// 클래식 캠페인 (기획안 10장): 2000년 이전의 그 시절 구단. 전·후기 1위(H01·H03)는 반기 승률로 판정한다 (게임에는 전·후기리그 제도가 없다)
+const HALF_NOTE = '게임은 전·후기리그 대신 한 시즌을 일정 절반으로 나눠 반기 1위를 판정하고, 가을야구는 지금 방식으로 치릅니다';
+const CLASSIC: Short[] = [
+  ['H01', 1983, '현대계', '슈퍼스타즈라는 이름으로', '장명부의 30승에도 전·후기 모두 2위로 한국시리즈 진출 실패', HALF_NOTE, seasonGoal(1983, { k: 'half' })],
+  ['H02', 1984, '롯데', '부산의 어깨', '최동원의 한국시리즈 4승, 롯데 첫 우승', '', seasonGoal(1984, champ)],
+  ['H03', 1985, '삼성', '대구의 여름을 되찾아라', '전·후기 모두 우승해 한국시리즈 없이 시즌 우승 확정', HALF_NOTE, seasonGoal(1985, { k: 'half' })],
+  ['H04', 1986, 'KIA', '무등에 켜진 불', '한국시리즈 우승, 이후 4연속 우승의 출발점', '', seasonGoal(1986, ks)],
+  ['H05', 1990, 'LG', '처음 입은 줄무늬', 'LG라는 이름으로 맞은 첫 시즌에 한국시리즈 우승', '', seasonGoal(1990, champ)],
+  ['H06', 1992, '한화', '이번에는 마지막까지', '정규시즌 81승, 한국시리즈 준우승', '',
+    one('1992년 정규시즌 80승 이상 + 한국시리즈 우승', { t: 'same', from: 1992, to: 1992, ms: [{ k: 'wins', n: 80 }, champ] })],
+  ['H07', 1995, '두산', '불사조의 두 번째 가을', '김인식 감독 부임 첫해 우승, 원년 멤버 박철순과 함께한 정상', '', seasonGoal(1995, champ)],
+  ['H08', 1996, '쌍방울', '전주에도 우승의 밤을', '정규시즌 2위와 창단 첫 PS 진출, 한국시리즈 진출은 실패', '', seasonGoal(1996, champ)],
+  ['H09', 1998, '현대계', '인천의 오래된 기다림', '현대의 첫 한국시리즈 우승', '', seasonGoal(1998, ks)],
+  ['H10', 1999, '한화', '독수리의 첫 우승', '이희수 감독 지휘 아래 첫 한국시리즈 우승', '', seasonGoal(1999, champ)],
+];
+const CLASSIC_TIER: Record<string, '하' | '중' | '상'> = { H01: '상', H02: '중', H03: '하', H04: '하', H05: '중', H06: '상', H07: '중', H08: '상', H09: '하', H10: '중' };
+
 const build = (tier: Tier, list: Short[]): PlanChallenge[] => list.map(([no, year, franchise, title, background, fun, ...stages]) => ({
   id: `plan-${no.toLowerCase()}`, tier, no, year, franchise, title, background, fun, stages,
   ...(no === 'L10' ? { budget: 0.85 } : {}),
+  ...(CLASSIC_TIER[no] ? { level: CLASSIC_TIER[no] } : {}),
 }));
 
-export const PLAN_CHALLENGES: PlanChallenge[] = [...build('하', LOW), ...build('중', MID), ...build('상', HIGH), ...build('장기', LONG)];
+export const PLAN_CHALLENGES: PlanChallenge[] = [...build('하', LOW), ...build('중', MID), ...build('상', HIGH), ...build('장기', LONG), ...build('클래식', CLASSIC)];
 
 export const planById = (id: string) => PLAN_CHALLENGES.find((c) => c.id === id);
 
@@ -202,6 +233,8 @@ function hit(m: Metric, s: SeasonMark): boolean {
     case 'rank': return s.rank <= m.n;
     case 'pct': return s.pct >= m.v - 1e-9;
     case 'home': return s.home >= m.n;
+    case 'wins': return (s.w ?? 0) >= m.n;
+    case 'half': return !!s.half;
   }
 }
 
