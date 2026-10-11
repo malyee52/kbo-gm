@@ -6,6 +6,7 @@ import type { SeasonAwards } from './awards';
 import type { TeamFinance } from './finance';
 import type { EventState } from './events';
 import type { ScenarioState } from './scenarios';
+import type { ArchivedPlayer, YearRecord } from './history';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -191,6 +192,10 @@ export interface LeagueState {
   events?: EventState;
   /** 역사 시나리오로 시작한 게임 (scenarios.ts, 2026-10-11) */
   scenario?: ScenarioState;
+  /** 리그를 떠난 선수의 게임 안 통산 (history.ts, 2026-10-11) */
+  archive?: ArchivedPlayer[];
+  /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
+  yearbook?: YearRecord[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

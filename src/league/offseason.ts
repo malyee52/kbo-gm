@@ -5,6 +5,7 @@
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
 import { seasonAwards } from './awards';
+import { archiveDeparting } from './history';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
   ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, traitsOf,
@@ -1521,6 +1522,8 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
 export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   if (off.stage !== 'ready') throw new Error('오프시즌이 끝나지 않았습니다');
   league.year = off.year + 1;
+  // 떠나는 선수의 게임 안 통산을 남긴다 (history.ts)
+  archiveDeparting(league, off.year);
   league.players = league.players.filter((p) => p.team >= 0);
   // 투자 확정 (AI 구단은 이때 계획을 정한다, finance.ts)
   lockInvestments(league, off.userTeam);
