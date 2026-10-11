@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { deleteSave, isAutoSlot, listSaves, type SaveRecord } from '../../game/storage';
 import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
+import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
+import { DifficultyEditor } from '../DifficultyEditor';
 import { autoSlotFor, exportSession, reproOf, saveSession, whenText } from '../saving';
 
 const SLOTS = ['저장 1', '저장 2', '저장 3'];
@@ -42,6 +44,8 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
     <div className="stack">
       <h1>저장·설정</h1>
       {msg && <p className={msg.error ? 'error' : 'note'} role="status">{msg.text}</p>}
+
+      <DifficultyPanel />
 
       <section className="panel">
         <h2>브라우저에 저장</h2>
@@ -106,5 +110,32 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
         </div>
       </section>
     </div>
+  );
+}
+
+/** 세부 난이도 (게임 중 바꾸기, league/difficulty.ts) */
+function DifficultyPanel() {
+  const { session, changed, autosave } = useGame();
+  const [note, setNote] = useState<string | null>(null);
+  const cur = settingsOf(session.league);
+  const apply = (s: typeof cur) => {
+    const r = session.setDifficulty(s);
+    setNote(r.message);
+    if (r.ok) { changed(); void autosave(); }
+  };
+  return (
+    <section className="panel">
+      <div className="row-between wrap">
+        <h2>난이도 <span className="muted small">{settingsLabel(session.league)}</span></h2>
+        <span className="inline">
+          {(['easy', 'normal', 'hard'] as const).map((d) => (
+            <button key={d} type="button" className="small-btn ghost" onClick={() => apply({ ...PRESETS[d] })}>{d === 'easy' ? '쉬움' : d === 'normal' ? '보통' : '어려움'}으로</button>
+          ))}
+        </span>
+      </div>
+      <p className="muted small">항목마다 바꿀 수 있습니다. 모두 우리 구단에만 걸리고(AI 구단끼리는 그대로), 바꾼 기록은 재현 정보에 남습니다. 부상 빈도는 다음 경기부터, 수입은 다음 지급부터 적용됩니다.</p>
+      <DifficultyEditor value={cur} onChange={apply} />
+      {note && <p className="note small" role="status">{note}</p>}
+    </section>
   );
 }

@@ -1,6 +1,8 @@
 // 시작 화면: 새 게임(연도, 구단, 시드)과 불러오기.
 import { useEffect, useState } from 'react';
 import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/owner';
+import { PRESETS, type DifficultySettings } from '../league/difficulty';
+import { DifficultyEditor } from './DifficultyEditor';
 import type { BrowserStore } from '../data/loadBrowser';
 import { SCENARIOS, scenarioById } from '../league/scenarios';
 import { CHALLENGES, challengeById, lastPlaceTeam } from '../league/challenges';
@@ -25,6 +27,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [teamIdx, setTeamIdx] = useState<number | null>(null);
   const [seed, setSeed] = useState(randomSeed);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  // 사용자 설정 (세부 난이도). null이면 difficulty 묶음
+  const [custom, setCustom] = useState<DifficultySettings | null>(null);
+  const extra = custom ? { settings: custom } : {};
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +56,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       await store.ensureAll();
       setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
       await nextFrame();
-      onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty }));
+      onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty, ...extra }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -68,7 +73,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       const t = store.season(sc.year)!.teams.findIndex((x) => x.name === sc.team);
       if (t < 0) throw new Error(`${sc.year}년 자료에서 ${sc.team}을 찾을 수 없습니다`);
       await nextFrame();
-      onStart(GameSession.create(store, { year: sc.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, scenario: sc.id }));
+      onStart(GameSession.create(store, { year: sc.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, scenario: sc.id, ...extra }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -90,7 +95,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     try {
       await store.ensureAll();
       await nextFrame();
-      onStart(GameSession.create(store, { year, teamIdx: t, seed: seed.trim(), difficulty, challenge: ch.id }));
+      onStart(GameSession.create(store, { year, teamIdx: t, seed: seed.trim(), difficulty, challenge: ch.id, ...extra }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -151,12 +156,18 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         <div className="form-row">
           <label>
             난이도
-            <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as Difficulty)} disabled={!!busy}>
+            <select value={custom ? 'custom' : difficulty} disabled={!!busy} onChange={(e) => {
+              const v = e.target.value;
+              if (v === 'custom') setCustom({ ...PRESETS[difficulty] });
+              else { setCustom(null); setDifficulty(v as Difficulty); }
+            }}>
               {(Object.keys(DIFFICULTY_LABEL) as Difficulty[]).map((d) => <option key={d} value={d}>{DIFFICULTY_LABEL[d]}</option>)}
+              <option value="custom">사용자 설정</option>
             </select>
           </label>
-          <span className="muted small">{DIFFICULTY_NOTE[difficulty]}</span>
+          <span className="muted small">{custom ? '항목마다 고릅니다. 게임 중에도 저장·설정 화면에서 바꿀 수 있습니다.' : `${DIFFICULTY_NOTE[difficulty]} 등. 게임 중에도 저장·설정 화면에서 바꿀 수 있습니다.`}</span>
         </div>
+        {custom && <DifficultyEditor value={custom} onChange={setCustom} disabled={!!busy} />}
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
         {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
         {store.meta.inProgress.includes(year) && (

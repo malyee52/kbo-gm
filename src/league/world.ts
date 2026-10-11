@@ -2,6 +2,7 @@
 // 자료가 있는 해(2026년까지)는 그 해 리그 평균·환경을 쓰고, 그 뒤는 마지막 5시즌 평균을 쓴다 (기획서 11장).
 // 시작 연도의 월드는 worldForYear와 선수 순서·능력이 같아야 한다 (저장 호환, 같은 시드 같은 결과).
 
+import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import {
   batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
@@ -82,7 +83,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   if (futures.some((i) => i < kept)) throw new Error('퓨처스 구단이 구단 목록 끝에 있지 않습니다');
   const teams: SimTeam[] = league.teams.slice(0, kept).map((t, idx) => {
     const med = activeLevel(league, idx, 'medical');
-    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med ? { injuryRate: MEDICAL_RATE[med], injuryDays: MEDICAL_DAYS[med] } : {}) };
+    // 세부 난이도의 부상 빈도는 플레이어 구단에만 (difficulty.ts)
+    const inj = idx === userTeamOf(league) ? settingsOf(league).injury : 1;
+    const rate = (med ? MEDICAL_RATE[med] : 1) * inj;
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {

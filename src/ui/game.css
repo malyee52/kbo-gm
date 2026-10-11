@@ -404,3 +404,7 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 .order-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); }
 .order-btns { margin-left: auto; display: inline-flex; gap: 2px; }
 .stars { color: var(--accent); letter-spacing: 1px; white-space: nowrap; }
+
+/* 세부 난이도 */
+.difficulty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px; margin: 8px 0; }
+.difficulty-grid label { display: flex; flex-direction: column; gap: 3px; }

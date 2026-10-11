@@ -17,6 +17,7 @@ import { legendFill } from './history';
 import { rivalFill } from './rivals';
 import { coachPayroll } from './coaches';
 import { gmStyle } from './gm';
+import { settingsOf, userTeamOf } from './difficulty';
 
 // ---- 수치 (임시값, docs/finance.md 2~4장)
 
@@ -401,7 +402,8 @@ export function seasonIncome(league: LeagueState, world: World, team: number): {
 
 /** 스폰서·상품 수입 (인기도 × 기본액 + 구단 이름 스폰서) */
 function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number): number {
-  return Math.round(SPONSOR_BASE * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + (NAMING_SPONSOR[league.teams[team].franchise] ?? 0);
+  const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
+  return Math.round(SPONSOR_BASE * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + (NAMING_SPONSOR[league.teams[team].franchise] ?? 0);
 }
 
 // ---- 결산
@@ -421,7 +423,8 @@ export function parentSupport(league: LeagueState, team: number, trust: number, 
   const base = PARENT_BASE[parentGrade(league, team)];
   const prevRescue = league.finance?.[team]?.history.at(-1)?.rescue ?? 0;
   const clawback = Math.max(0, cash - PARENT_RESERVE) * PARENT_CLAWBACK;
-  return Math.max(0, Math.round(base * (0.85 + 0.003 * trust) - prevRescue / 2 - clawback));
+  const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
+  return Math.max(0, Math.round(base * inc * (0.85 + 0.003 * trust) - prevRescue / 2 - clawback));
 }
 
 export interface SettleInput extends SeasonInput {

@@ -28,6 +28,7 @@ import {
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
+import { settingsOf } from './difficulty';
 import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, postingFee, returnDecision, sendAbroad } from './overseas';
 import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
@@ -664,7 +665,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       const eager = Math.min(2, Math.max(0, gain / cost - 1));
       offers.push({ team: t, salary: Math.round(Math.min(e.ask * 1.15, base * (1 + 0.05 * eager))), years: e.years });
     }
-    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1]);
+    const faDemand = settingsOf(league).faDemand;
+    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand : 1));
     if (!ok.length) continue;
     const score = (o: FaOffer) => o.salary * (1 + 0.04 * (o.years - 1)) * (o.team === e.from ? 1.05 : 1);
     ok.sort((a, b) => score(b) - score(a) || (a.team === off.userTeam ? -1 : 1));

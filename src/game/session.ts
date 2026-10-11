@@ -21,6 +21,8 @@ import { ops } from './stats';
 import { futuresSeason } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
+import { settingsOf, type DifficultySettings } from '../league/difficulty';
+import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { ORG_LIMIT } from '../league/salary';
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
@@ -59,6 +61,8 @@ export interface NewGameOptions {
   scenario?: string;
   /** 도전 모드 id (league/challenges.ts). 구단 조건(직전 시즌 꼴찌 등)은 시작 화면이 맞춰 teamIdx로 넘긴다 */
   challenge?: string;
+  /** 세부 난이도 (사용자 설정, league/difficulty.ts). 없으면 difficulty 묶음 */
+  settings?: DifficultySettings;
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -121,6 +125,8 @@ export type GameAction =
   | { year: number; type: 'hire-coach'; id: string }
   | { year: number; type: 'posting'; id: string; accept: boolean }
   | { year?: number; day: number; type: 'convert'; id: string }
+  | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
+  | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
@@ -272,12 +278,14 @@ export class GameSession {
     const { league, world } = createLeague(store, opts.year, opts.seed, params);
     if (!world.teams[opts.teamIdx]) throw new Error(`구단 색인이 잘못됐습니다: ${opts.teamIdx}`);
     league.difficulty = opts.difficulty ?? 'normal';
+    if (opts.settings) { league.settings = { ...opts.settings }; league.startSettings = { ...opts.settings }; }
     applyCapSanctions(league, league.year);
     league.owner = newOwner(opts.teamIdx);
     const season = Season.start(world, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
     ensureCoaches(league);
     ensureGm(league);
     const g = new GameSession(store, params, opts.teamIdx, league, world, season);
+    g.refreshInjury(); // 월드를 만들 때는 아직 구단주(우리 구단)가 없었다
     g.refreshRivals();
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
@@ -394,6 +402,7 @@ export class GameSession {
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else if (a.type === 'event') this.applyEventChoice(a.choice);
     else if (a.type === 'convert') this.applyConvert(a.id);
+    else if (a.type === 'settings') this.applySettings(a.s);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -433,7 +442,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}), ...(L.challenge ? { challenge: L.challenge.id } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}), ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}) },
       at: { year: this.year, day: this.day, phase: this.phase },
       actions: clone(this.actions),
     };
@@ -1178,7 +1187,7 @@ export class GameSession {
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
-    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals }, this.world.teams[aiTeam].org, sit, this.values);
+    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict }, this.world.teams[aiTeam].org, sit, this.values);
   }
 
   /** 트레이드를 제안한다. AI가 수락하면 바로 실행한다 */
@@ -1433,6 +1442,7 @@ export class GameSession {
       case 'promote-dev': res = Off.promoteDevByUser(L, off!, a.id); break;
       case 'hire-coach': res = this.applyHireCoach(a.id); break;
       case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
+      case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
@@ -1498,7 +1508,9 @@ export class GameSession {
     const goal = o.goal?.year === this.year ? o.goal : { year: this.year, kind: goalFor(5, this.world.rules.postseasonTeams), projectedRank: 5 };
     const capOver = (L.capStrikes?.[team] ?? 0) > 0;
     const outcome = outcomeOf(team, standings, ps, this.world.rules.postseasonTeams, capOver);
-    const { achieved, delta } = trustDelta(goal.kind, outcome);
+    const td = trustDelta(goal.kind, outcome);
+    const achieved = td.achieved;
+    const delta = td.delta < 0 ? Math.round(td.delta * settingsOf(this.league).ownerPressure) : td.delta;
     const before = o.trust;
     o.trust = Math.max(0, Math.min(100, before + delta));
     o.history.push({
@@ -1805,6 +1817,30 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /**
+   * 세부 난이도를 바꾼다 (게임 중에도, 조작 기록에 남는다). 부상 빈도는 다음 경기부터
+   */
+  setDifficulty(s: DifficultySettings): { ok: boolean; message: string } {
+    if (this.phase === 'season') {
+      this.applySettings(s);
+      this.actions.push({ year: this.year, day: this.currentDay, type: 'settings', s: { ...s } });
+      return { ok: true, message: '난이도를 바꿨습니다.' };
+    }
+    return this.dispatchOff({ year: this.year, type: 'settings-off', s: { ...s } });
+  }
+
+  private applySettings(s: DifficultySettings): void {
+    this.league.settings = { ...s };
+    this.refreshInjury();
+  }
+
+  /** 세부 난이도의 부상 빈도를 지금 시즌 우리 구단에 (의료 투자 배율과 곱한다) */
+  private refreshInjury(): void {
+    const med = activeLevel(this.league, this.teamIdx, 'medical');
+    const t = this.world.teams[this.teamIdx];
+    if (t) t.injuryRate = (med ? MEDICAL_RATE[med] : 1) * settingsOf(this.league).injury;
+  }
+
   /** 우리 선수의 포스팅(해외 진출) 요청에 답한다 */
   answerPosting(id: string, accept: boolean) { return this.dispatchOff({ year: this.year, type: 'posting', id, accept }); }
 
