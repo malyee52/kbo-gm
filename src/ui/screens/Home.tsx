@@ -7,6 +7,7 @@ import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
 import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
+import { CountUp, useRankMoves } from '../Motion';
 
 export function Home() {
   const won = useWon();
@@ -24,6 +25,7 @@ export function Home() {
   const recent = myGames.slice(-5).reverse();
   const news = [...session.news].reverse().slice(0, 14);
   const cut = session.world.rules.postseasonTeams;
+  const moves = useRankMoves(order);
 
   return (
     <div className="stack">
@@ -42,7 +44,7 @@ export function Home() {
       <section className="cards">
         <div className="card hero">
           <h2>우리 구단 <span className="muted small">{year} · 포스트시즌 진출권 상위 {cut}팀</span></h2>
-          <p className="big">{rec.g === 0 ? '개막 전' : <>{rank}위 <span className="muted">/ {s.teams.length}</span></>}</p>
+          <p className="big">{rec.g === 0 ? '개막 전' : <><CountUp value={rank} />위 <span className="muted">/ {s.teams.length}</span></>}</p>
           <div className="stats">
             <div className="stat"><span className="stat-label">승-패-무</span><span className="stat-value">{rec.w}-{rec.l}-{rec.t}</span></div>
             <div className="stat"><span className="stat-label">승률</span><span className="stat-value">{rec.g === 0 ? '-' : rate3(winPct(rec))}</span></div>
@@ -53,7 +55,7 @@ export function Home() {
           <ScenarioBanner />
           {session.owner.goal?.year === year && (
             <p className="small">
-              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong>{won(session.cashNow())}</strong>{' '}
+              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong><CountUp value={session.cashNow()} format={(v) => won(Math.round(v))} /></strong>{' '}
               <button type="button" className="link" onClick={() => go('club')}>구단 현황</button>
             </p>
           )}
@@ -99,8 +101,8 @@ export function Home() {
               <thead><tr><th>순위</th><th className="l">팀</th><th>승</th><th>패</th><th>무</th><th>게임차</th></tr></thead>
               <tbody>
                 {order.map((t, k) => (
-                  <tr key={t} className={`${t === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}`}>
-                    <td>{k + 1}</td><td className="l"><TeamName idx={t} /></td>
+                  <tr key={t} className={`${t === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}${moves.has(t) ? ' moved' : ''}`}>
+                    <td>{k + 1}{moves.has(t) && <span className={`move ${moves.get(t)! > 0 ? 'up' : 'down'}`}>{moves.get(t)! > 0 ? '▲' : '▼'}{Math.abs(moves.get(t)!)}</span>}</td><td className="l"><TeamName idx={t} /></td>
                     <td>{s.teams[t].w}</td><td>{s.teams[t].l}</td><td>{s.teams[t].t}</td>
                     <td>{k === 0 ? '-' : gamesBehind(leader, s.teams[t]).toFixed(1)}</td>
                   </tr>

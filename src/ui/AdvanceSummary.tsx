@@ -10,6 +10,7 @@ import { fixed2, ipText, ops, rate3 } from '../game/stats';
 import { PlayerLink, useGame, useWon } from './context';
 import { teamColor } from './teams';
 import { GameCast } from './GameCast';
+import { CountUp } from './Motion';
 import { highlights } from '../game/highlights';
 import type { CastGame } from '../game/session';
 
@@ -143,7 +144,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
           <div className="stat"><span className="stat-label">시즌 성적</span><strong className="stat-value">{r.w}승 {r.l}패 {r.t}무</strong></div>
           <div className="stat">
             <span className="stat-label">자금</span>
-            <strong className="stat-value">{won(cash)}</strong>
+            <strong className="stat-value"><CountUp value={cash} format={(v) => won(Math.round(v))} /></strong>
             <span className={`small ${cash >= snap.cash ? 'up' : 'down'}`}>{cash >= snap.cash ? '+' : '−'}{won(Math.abs(cash - snap.cash))}</span>
           </div>
         </section>
