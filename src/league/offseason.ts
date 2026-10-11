@@ -28,6 +28,8 @@ import {
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
+import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, postingFee, returnDecision, sendAbroad } from './overseas';
+import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
 import {
@@ -102,6 +104,8 @@ export interface FaEntry {
   ask: number;
   years: number;
   status: 'open' | 'signed' | 'left';
+  /** 해외에서 돌아온 FA (보상 없음, overseas.ts). from은 원 소속 구단(없으면 −1) */
+  returnee?: boolean;
   /** 계약한 구단 (원 소속 포함) */
   team?: number;
   salary?: number;
@@ -138,6 +142,10 @@ export interface OffseasonState {
   } | null;
   /** 코치 후보 (coaches.ts). 2026-10-11 추가 */
   coachMarket?: Coach[];
+  /** 해외에서 FA로 돌아온 선수 (FA 시장에 들어간다, overseas.ts) */
+  returnees?: string[];
+  /** 우리 구단 선수의 포스팅 요청 (보내면 이적료, overseas.ts). decided 없으면 붙잡은 것으로 본다 */
+  postings?: { id: string; fee: number; decided?: 'accept' | 'decline' }[];
   /** 실제 육성선수 계약 신인 (드래프트 풀 밖, 정원 정리 때 육성선수로 데려온다). 2026-10-11 추가 */
   devExtra?: string[];
   draft: {
@@ -352,6 +360,13 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       p.bat = { ...p.bat, def: ageDefense(def, ageIn(p, year + 1)) };
     }
   }
+  // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
+  for (const p of league.players) {
+    if (!isAbroad(p)) continue;
+    const next = growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 1,
+      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits));
+    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+  }
   // 복무 중인 선수: 퓨처스리그에서 뛰는 것으로 보고 출전 기회 40%로 성장 판정 (임시값)
   for (const p of league.players) {
     if (!isServing(p) || p.team < 0) continue;
@@ -413,8 +428,100 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   }
 
   applyTeamChanges(league, off, store, params);
+  overseasOffseason(league, off, store, params);
   enterFa(league, off, store, params);
   return off;
+}
+
+// ---- 해외 진출과 복귀 (overseas.ts)
+
+/**
+ * 오프시즌 시작 때: 해외 선수의 복귀·은퇴, 정상급 선수의 포스팅 요청.
+ * 복귀: 포스팅으로 나간 선수는 원 소속 구단으로 (다년 계약), FA로 나간 선수는 FA 시장으로 (off.returnees → openFaMarket).
+ * 포스팅 요청: KBO 연차 POSTING_SERVICE 이상, 23~31세, 국내 선수 가운데 현재 가치 상위 12명 안, 확률 POSTING_CHANCE(10%), 해외에서 돌아온 선수 제외, 한 해 DEPARTURES_PER_YEAR명까지.
+ * AI 구단은 이적료를 받고 보내고, 우리 구단 선수는 off.postings에 올려 플레이어가 정한다 (정원 정리 단계 전까지)
+ */
+function overseasOffseason(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  const year = off.year;
+  const view = leagueView(league, store, params);
+  off.returnees = [];
+  for (const p of league.players) {
+    if (!isAbroad(p) || !p.abroad) continue;
+    const d = returnDecision(league, p, year + 1);
+    if (d === 'retire') {
+      p.team = -1;
+      (league.retired ??= []).push({ id: p.id, name: p.name, real: p.real, year, age: p.birthYear ? year - p.birthYear : null, team: p.abroad.origin, reason: 'age' });
+      log(off, 'settle', `${p.name}, 해외에서 은퇴`, false, true);
+      addArticle(league, { year, day: -1, kind: 'overseas', title: `${p.name}, 해외에서 은퇴`, body: `${p.name}이(가) 해외 무대에서 선수 생활을 마쳤다.` });
+      continue;
+    }
+    if (d !== 'return') continue;
+    const origin = p.abroad.origin;
+    const away = year + 1 - p.abroad.since;
+    const sp = view.sim.get(p.id);
+    const runs = sp ? currentRuns(sp, view.ctx) : 0;
+    if (p.abroad.mode === 'posting' && league.teams[origin] && !isFuturesTeam(league, origin, year + 1)) {
+      // 보류권: 원 소속 구단으로 돌아온다 (다년 계약)
+      const age = ageIn(p, year + 1);
+      const yrs = age <= 32 ? 4 : 2;
+      p.team = origin;
+      p.contract = { kind: 'nonFA', salary: Math.max(MIN_SALARY, marketSalary(runs)), until: year + yrs };
+      delete p.abroad;
+      p.returnedFromAbroad = year + 1;
+      log(off, 'settle', `${p.name}, ${away}년 만에 해외에서 돌아와 ${league.teams[origin].name} 복귀 (${yrs}년, 연 ${(p.contract.salary / 10000).toFixed(1)}억 원)`, origin === off.userTeam, true);
+      addArticle(league, { year, day: -1, kind: 'overseas', franchise: league.teams[origin].franchise, title: `${p.name}, ${away}년 만에 KBO 복귀`,
+        body: `해외에서 뛰던 ${p.name}이(가) 원 소속 ${league.teams[origin].name}로 돌아온다. ${yrs}년 계약.` });
+    } else {
+      p.team = -1;
+      off.returnees.push(p.id);
+      addArticle(league, { year, day: -1, kind: 'overseas', title: `${p.name}, ${away}년 만에 KBO 복귀 추진`, body: `해외에서 뛰던 ${p.name}이(가) FA로 KBO 복귀를 추진한다. 보상 없이 어느 구단과도 계약할 수 있다.` });
+    }
+  }
+  // 포스팅 요청
+  off.postings = [];
+  if (year + 1 < 1999) return; // 한미 선수계약협정(포스팅) 전
+  const domestic = league.players.filter((p) => p.team >= 0 && !p.foreign && !p.dev && !isServing(p) && !isFuturesTeam(league, p.team, year + 1));
+  const now = (p: LeaguePlayer) => { const sp = view.sim.get(p.id); return sp ? currentRuns(sp, view.ctx) : 0; };
+  const top = domestic.map((p) => ({ p, r: now(p) })).sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id)).slice(0, 12);
+  let n = 0;
+  for (const { p, r } of top) {
+    if (n >= DEPARTURES_PER_YEAR) break;
+    const age = ageIn(p, year + 1);
+    if (age < 23 || age > 31 || p.service + (p.faCount ? 9 : 0) < POSTING_SERVICE || faEligible(p, year) || p.returnedFromAbroad) continue;
+    if (!new Rng(`${league.seed}/posting/${year}/${p.id}`).chance(POSTING_CHANCE)) continue;
+    const fee = postingFee(r);
+    n++;
+    if (p.team === off.userTeam) {
+      off.postings.push({ id: p.id, fee });
+      log(off, 'settle', `${p.name}이(가) 해외 진출(포스팅)을 요청했습니다. 보내면 이적료 약 ${(fee / 10000).toFixed(0)}억 원 (정원 정리 단계 전까지 결정)`, true, true);
+      continue;
+    }
+    const from = p.team;
+    league.ledger.push({ year: year + 1, from: -1, to: from, amount: fee, note: `${p.name} 포스팅 이적료`, kind: 'posting' });
+    sendAbroad(p, year + 1, from, 'posting');
+    log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (${league.teams[from].name}, 이적료 ${(fee / 10000).toFixed(0)}억 원)`, false, true);
+    addArticle(league, { year, day: -1, kind: 'overseas', franchise: league.teams[from].franchise, title: `${p.name}, 해외 진출`,
+      body: `${league.teams[from].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+  }
+}
+
+/** 플레이어가 우리 선수의 포스팅 요청에 답한다 (보내면 이적료를 받고 해외로) */
+export function answerPosting(league: LeagueState, off: OffseasonState, id: string, accept: boolean): OfferCheck {
+  const req = off.postings?.find((x) => x.id === id);
+  const p = league.players.find((x) => x.id === id);
+  if (!req || !p || req.decided || p.team !== off.userTeam) return { ok: false, message: '답할 포스팅 요청이 없습니다.' };
+  if (off.stage === 'release' || off.stage === 'ready') return { ok: false, message: '포스팅은 정원 정리 단계 전까지 정해야 합니다.' };
+  req.decided = accept ? 'accept' : 'decline';
+  if (!accept) {
+    log(off, 'settle', `${p.name}의 포스팅 요청을 거절했습니다.`, true);
+    return { ok: true, message: `${p.name}을(를) 붙잡았습니다.` };
+  }
+  league.ledger.push({ year: off.year + 1, from: -1, to: off.userTeam, amount: req.fee, note: `${p.name} 포스팅 이적료`, kind: 'posting' });
+  sendAbroad(p, off.year + 1, off.userTeam, 'posting');
+  log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (이적료 ${(req.fee / 10000).toFixed(0)}억 원)`, true, true);
+  addArticle(league, { year: off.year, day: -1, kind: 'overseas', franchise: league.teams[off.userTeam].franchise, title: `${p.name}, 해외 진출`,
+    body: `${league.teams[off.userTeam].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+  return { ok: true, message: `${p.name}을(를) 해외로 보냈습니다 (이적료 ${(req.fee / 10000).toFixed(0)}억 원).` };
 }
 
 // ---- FA
@@ -436,10 +543,35 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     if (age >= 34 && ask < p.contract.salary * 0.9) continue;
     off.fa.entries.push({ id: p.id, from: p.team, grade: faGrade(p, league.players, year), prevSalary: p.contract.salary, ask, years, status: 'open' });
   }
+  // 해외에서 FA로 돌아온 선수 (보상 없음)
+  for (const id of off.returnees ?? []) {
+    const p = league.players.find((x) => x.id === id && x.team === -1);
+    const sp = p && view.sim.get(p.id);
+    if (!p || !sp) continue;
+    const years = faYears(ageIn(p, year + 1));
+    let sum = 0;
+    for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
+    const ask = marketSalary(sum / years);
+    off.fa.entries.push({ id, from: p.abroad?.origin ?? -1, grade: 'C', prevSalary: ask, ask, years, status: 'open', returnee: true });
+  }
   off.fa.entries.sort((a, b) => b.ask - a.ask || a.id.localeCompare(b.id));
+  // 정상급 FA 일부는 국내 FA 대신 해외로 간다 (overseas.ts): A등급, 31세 이하, 한 해 1명까지, 확률 20%
+  const departing = new Set<string>();
   for (const e of off.fa.entries) {
+    if (departing.size >= 1 || e.returnee || e.grade !== 'A') continue;
     const p = league.players.find((x) => x.id === e.id)!;
-    log(off, 'fa', `${p.name} FA 신청 (${e.grade}등급, ${league.teams[e.from].name})`, e.from === off.userTeam);
+    if (p.foreign || ageIn(p, year + 1) > 31) continue;
+    if (!new Rng(`${league.seed}/fa-abroad/${year}/${p.id}`).chance(0.2)) continue;
+    e.status = 'left';
+    sendAbroad(p, year + 1, e.from, 'fa');
+    departing.add(p.id);
+    log(off, 'fa', `${p.name}, FA로 해외 진출 (${league.teams[e.from].name})`, e.from === off.userTeam, true);
+  }
+  for (const e of off.fa.entries) {
+    if (departing.has(e.id)) continue;
+    const p = league.players.find((x) => x.id === e.id)!;
+    log(off, 'fa', e.returnee ? `${p.name} 해외에서 복귀, FA 시장에 나옴 (보상 없음${league.teams[e.from] ? `, 원 소속 ${league.teams[e.from].name}` : ''})`
+      : `${p.name} FA 신청 (${e.grade}등급, ${league.teams[e.from].name})`, e.from === off.userTeam || !!e.returnee);
   }
 }
 
@@ -523,7 +655,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (limits[t] !== null && capPayroll(league.players, t) - (home ? p.contract.salary : 0) + base > limits[t]!) continue;
       if (cashOf(league, t) < signingBonus(base * 1.15, e.years)) continue; // 계약금을 낼 자금
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
-      const comp = home ? 0 : COMPENSATION[e.grade] * e.prevSalary;
+      const comp = home || e.returnee ? 0 : COMPENSATION[e.grade] * e.prevSalary;
       // 단장 성향 (gm.ts): 윈나우형은 적극적, 짠돌이형은 소극적, 육성형은 28세 이하만 적극적
       const style = gmStyle(league, t);
       const young = style === 'develop' && p.birthYear !== null && off.year + 1 - p.birthYear <= 28;
@@ -613,7 +745,7 @@ export function compCandidates(league: LeagueState, off: OffseasonState, c: Comp
 function enterComp(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   const cases: CompCase[] = [];
   for (const e of off.fa.entries) {
-    if (e.status !== 'signed' || e.team === undefined || e.team === e.from || FA_COMP[e.grade].withPlayer === null) continue;
+    if (e.status !== 'signed' || e.team === undefined || e.team === e.from || e.returnee || FA_COMP[e.grade].withPlayer === null) continue;
     cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
   }
   if (!cases.length) {
@@ -718,7 +850,12 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
   moveInView(view, view.sim.get(p.id)!, o.team);
   const mine = o.team === off.userTeam || e.from === off.userTeam;
   const money = `${o.years}년, 연 ${(o.salary / 10000).toFixed(1)}억 원, 계약금 ${(bonus / 10000).toFixed(1)}억 원`;
-  if (o.team === e.from) {
+  if (e.returnee) {
+    delete p.abroad;
+    p.returnedFromAbroad = year + 1;
+    if (o.team !== e.from) off.fa.signings[o.team]++;
+    log(off, 'fa', `${p.name}, 해외에서 돌아와 ${league.teams[o.team].name}와(과) 계약 (${money})`, mine, true);
+  } else if (o.team === e.from) {
     log(off, 'fa', `${p.name}, ${league.teams[o.team].name} 잔류 (${money})`, mine);
   } else {
     off.fa.signings[o.team]++;
@@ -1691,8 +1828,9 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   if (off.stage !== 'ready') throw new Error('오프시즌이 끝나지 않았습니다');
   league.year = off.year + 1;
   // 떠나는 선수의 게임 안 통산을 남긴다 (history.ts)
+  // 포스팅 요청에 답하지 않았으면 붙잡은 것으로 본다
   archiveDeparting(league, off.year);
-  league.players = league.players.filter((p) => p.team >= 0);
+  league.players = league.players.filter((p) => p.team >= 0 || isAbroad(p));
   // 코치 빈자리: AI 구단은 자금에 맞춰, 플레이어 구단은 가장 싼 후보로 임시로 채운다 (coaches.ts)
   const left = aiHireCoaches(league, off.coachMarket ?? [], off.year, off.userTeam, (t) => cashOf(league, t));
   if (off.userTeam >= 0) {

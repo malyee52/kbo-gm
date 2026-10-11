@@ -12,6 +12,7 @@ import type { RivalPair } from './rivals';
 import type { ChallengeState } from './challenges';
 import type { Coach } from './coaches';
 import type { AiTradeRecord, GmStyle } from './gm';
+import type { AbroadState } from './overseas';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -42,6 +43,10 @@ export interface Contract {
 }
 
 export interface LeaguePlayer {
+  /** 해외에서 돌아온 시즌 (다시 포스팅을 요청하지 않는다, overseas.ts) */
+  returnedFromAbroad?: number;
+  /** 해외에 있다 (team = ABROAD, overseas.ts) */
+  abroad?: AbroadState;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */

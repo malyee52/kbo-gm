@@ -3,9 +3,9 @@
 
 import type { LeagueState } from './types';
 
-export type ArticleKind = 'milestone' | 'record' | 'streak' | 'title' | 'award' | 'retire' | 'scenario' | 'trade';
+export type ArticleKind = 'milestone' | 'record' | 'streak' | 'title' | 'award' | 'retire' | 'scenario' | 'trade' | 'overseas';
 export const ARTICLE_LABEL: Record<ArticleKind, string> = {
-  milestone: '통산 기록', record: '신기록', streak: '연승·연패', title: '우승', award: '시상', retire: '은퇴', scenario: '시나리오', trade: '트레이드',
+  milestone: '통산 기록', record: '신기록', streak: '연승·연패', title: '우승', award: '시상', retire: '은퇴', scenario: '시나리오', trade: '트레이드', overseas: '해외',
 };
 
 export interface Article {

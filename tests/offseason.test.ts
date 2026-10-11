@@ -178,7 +178,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(ids.size).toBe(list.length);
     for (const x of list) {
       expect(Number.isFinite(x.before) && Number.isFinite(x.after)).toBe(true);
-      expect(g.league.players.find((p) => p.id === x.id)!.team).toBeGreaterThanOrEqual(0);
+      expect(g.league.players.find((p) => p.id === x.id)!.team).toBeGreaterThanOrEqual(-2); // −2: 이번 오프시즌 해외 진출 (overseas.ts)
     }
     const retired = new Set((g.league.retired ?? []).filter((r) => r.year === 2026).map((r) => r.id));
     expect(list.some((x) => retired.has(x.id))).toBe(false);
