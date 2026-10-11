@@ -27,6 +27,7 @@ import {
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
+import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
 import {
@@ -228,7 +229,7 @@ function tendencyFor(league: LeagueState, view: LeagueView, team: number): Tende
   const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
   return tendencyOf({
     teamIdx: team, rank: (st.indexOf(team) < 0 ? st.length : st.indexOf(team)) + 1, nTeams: league.teams.length, cut: 5,
-    coreAge: coreAge(view.orgs[team], view.ctx), remaining: 1,
+    coreAge: coreAge(view.orgs[team], view.ctx), remaining: 1, style: gmStyle(league, team),
   });
 }
 
@@ -523,7 +524,10 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (cashOf(league, t) < signingBonus(base * 1.15, e.years)) continue; // 계약금을 낼 자금
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
       const comp = home ? 0 : COMPENSATION[e.grade] * e.prevSalary;
-      const cost = costRuns(base, e.years, comp) * FA_WILLINGNESS;
+      // 단장 성향 (gm.ts): 윈나우형은 적극적, 짠돌이형은 소극적, 육성형은 28세 이하만 적극적
+      const style = gmStyle(league, t);
+      const young = style === 'develop' && p.birthYear !== null && off.year + 1 - p.birthYear <= 28;
+      const cost = costRuns(base, e.years, comp) * FA_WILLINGNESS * GM_FA_COST[style] * (young ? GM_FA_YOUNG : 1);
       if (gain < cost) continue;
       const eager = Math.min(2, Math.max(0, gain / cost - 1));
       offers.push({ team: t, salary: Math.round(Math.min(e.ask * 1.15, base * (1 + 0.05 * eager))), years: e.years });

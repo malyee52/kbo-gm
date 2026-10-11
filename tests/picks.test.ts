@@ -82,7 +82,8 @@ describe('트레이드에 지명권 넣기', () => {
     expect(h.league.pickOwners).toEqual(g.league.pickOwners);
     const r = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'pk-deal' }, g.actions, undefined, FAST);
     expect(r.league.pickOwners).toEqual(g.league.pickOwners);
-    expect(GameSession.load(store, mid, FAST).league.pickOwners ?? []).toEqual([]);
+    // 우리 구단 지명권은 트레이드 전 저장에서 그대로 (AI 구단끼리 주고받은 지명권은 따로 있을 수 있다)
+    expect((GameSession.load(store, mid, FAST).league.pickOwners ?? []).filter((x) => x.from === lg || x.owner === lg)).toEqual([]);
 
     // 드래프트: 우리 1라운드 순번을 상대가 쓴다
     g.advance(100000);

@@ -8,6 +8,7 @@ import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { teamColor } from '../teams';
 import { MAX_PICKS_PER_TRADE, parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
+import { GM_STYLE_LABEL, GM_STYLE_NOTE, gmStyle } from '../../league/gm';
 
 type Kind = 'all' | 'hit' | 'pit';
 
@@ -112,11 +113,13 @@ export function Trade() {
             className={`team-card${other === t.idx ? ' on' : ''}`} style={{ ['--c' as string]: teamColor(t.franchise) }} onClick={() => pickTeam(t.idx)}>
             <TeamName idx={t.idx} />
             <span className="muted small">{info.get(t.idx)!.rank} · {TENDENCY_LABEL[info.get(t.idx)!.tendency]}</span>
+            <span className="muted small" title={GM_STYLE_NOTE[gmStyle(session.league, t.idx)]}>단장: {GM_STYLE_LABEL[gmStyle(session.league, t.idx)]}</span>
           </button>
         ))}
       </div>
       <p className="muted small">
         우승 도전 구단은 당장 쓸 선수를, 리빌딩 구단은 젊은 선수를 높게 칩니다. AI 구단은 트레이드 뒤 자기 전력이 좋아질 때만 받아들입니다.
+        단장 성향: 윈나우형은 순위가 조금 밀려도 우승을 노리고, 육성형은 상위권이 아니면 리빌딩, 짠돌이형은 연봉 부담을 크게 봅니다. 구단 카드에 마우스를 올리면 설명이 보입니다.
       </p>
 
       <section className="trade-bar panel">
@@ -173,6 +176,25 @@ export function Trade() {
         <PickList title={`${session.team.name} 선수`} org={session.team.org} selected={give} onToggle={(p) => toggle(give, setGive, p)} disabled={!open} showEntry />
         <PickList title={`${session.world.teams[other].name} 선수`} org={session.world.teams[other].org} selected={get} onToggle={(p) => toggle(get, setGet, p)} disabled={!open} />
       </div>
+
+      {(() => {
+        const league = (session.league.aiTrades ?? []).filter((t) => t.year === year);
+        if (!league.length) return null;
+        const nm = (id: string) => players.find((p) => p.id === id)?.name ?? id;
+        return (
+          <section>
+            <h2>리그 트레이드 <span className="muted small">AI 구단끼리 {league.length}건</span></h2>
+            <ul className="plain small">
+              {[...league].reverse().map((t, k) => (
+                <li key={k}>
+                  <span className="muted">{shortDate(year, t.day)}</span> <TeamName idx={t.buyer} /> ← {t.got.map(nm).join(', ')} · <TeamName idx={t.seller} /> ← {t.gave.map(nm).join(', ')}
+                  {t.picks?.length ? `, ${t.picks.map((id) => session.pickLabel(parsePick(id))).join(', ')}` : ''}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })()}
 
       <section>
         <h2>트레이드 기록</h2>

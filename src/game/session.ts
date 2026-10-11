@@ -20,6 +20,7 @@ import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventC
 import { ops } from './stats';
 import { futuresSeason } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
+import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { ORG_LIMIT } from '../league/salary';
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
@@ -274,6 +275,7 @@ export class GameSession {
     league.owner = newOwner(opts.teamIdx);
     const season = Season.start(world, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
     ensureCoaches(league);
+    ensureGm(league);
     const g = new GameSession(store, params, opts.teamIdx, league, world, season);
     g.refreshRivals();
     g.startEntry();
@@ -320,6 +322,7 @@ export class GameSession {
     g.ensureOwner();
     ensureFinance(g.league);
     ensureCoaches(g.league);
+    ensureGm(g.league);
     g.rebuildTrades();
     g.lastCallUps = new Set(season.teamSeasons[save.teamIdx].callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -332,6 +335,7 @@ export class GameSession {
     if (!team || team.name !== save.teamName) throw new Error('저장한 구단을 지금 데이터에서 찾을 수 없습니다');
     const season = Season.restore(world, params, save.season);
     ensureCoaches(league);
+    ensureGm(league);
     const g = new GameSession(store, params, save.teamIdx, league, world, season);
     g.news.push(...save.news.map((n) => ({ ...n, year: n.year ?? save.year })));
     g.ensureOwner();
@@ -854,6 +858,7 @@ export class GameSession {
       this.openPostseason();
     } else {
       this.dailyArticles();
+      this.aiTradeDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
       if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
@@ -1140,6 +1145,7 @@ export class GameSession {
       teamIdx, rank, nTeams: n, cut: this.world.rules.postseasonTeams,
       coreAge: coreAge(this.world.teams[teamIdx].org, this.values),
       remaining: 1 - played / this.world.gamesPerTeam,
+      ...(teamIdx !== this.teamIdx ? { style: gmStyle(this.league, teamIdx) } : {}),
     };
   }
 
@@ -1523,6 +1529,60 @@ export class GameSession {
     }
   }
 
+  // ---- AI 구단끼리 트레이드 (gm.ts)
+
+  /**
+   * 트레이드 마감 전 AI_TRADE_EVERY일마다: 우승 도전 AI 구단이 리빌딩 AI 구단의 28세 이상 주축을 원하고,
+   * 25세 이하 선수 한 명(모자라면 다음 드래프트 2라운드 지명권을 얹어)을 내준다. 양쪽 AI 평가가 모두 수락일 때만.
+   * 난수는 리그 시드·날짜에서 가르므로 재현·불러오기와 같다
+   */
+  private aiTradeDay(): void {
+    const day = this.season.day - 1;
+    const year = this.world.year;
+    if (day <= 0 || day % AI_TRADE_EVERY !== 0 || day > this.tradeDeadlineDay) return;
+    const rng = new Rng(`${this.league.seed}/ai-trade/${year}/${day}`);
+    if (!rng.chance(AI_TRADE_CHANCE)) return;
+    const ai = this.world.teams.filter((t) => t.idx !== this.teamIdx);
+    const sit = new Map(ai.map((t) => [t.idx, this.situation(t.idx)]));
+    const buyers = ai.filter((t) => tendencyOf(sit.get(t.idx)!) === 'contend');
+    const sellers = ai.filter((t) => tendencyOf(sit.get(t.idx)!) === 'rebuild');
+    if (!buyers.length || !sellers.length) return;
+    const A = buyers[rng.int(buyers.length)];
+    const B = sellers[rng.int(sellers.length)];
+    const ctx = this.values;
+    const ok = (p: SimPlayer) => !p.foreign && !p.dev && this.leaguePlayer(p.id)?.noTradeYear !== year;
+    const now = (p: SimPlayer) => playerValue(p, ctx, [1]);
+    const future = (p: SimPlayer) => playerValue(p, ctx, horizonWeights('rebuild', 1));
+    // 파는 쪽의 얼굴(현재 가치 상위 2명)과 34세 이상 베테랑·레전드는 AI끼리 거래하지 않는다 (실제로 거의 없는 일)
+    const core = new Set([...B.org].sort((a, b) => now(b) - now(a) || a.idx - b.idx).slice(0, 2).map((p) => p.idx));
+    const targets = B.org.filter((p) => ok(p) && !core.has(p.idx) && (p.age ?? 28) >= 28 && (p.age ?? 28) <= 33)
+      .sort((a, b) => now(b) - now(a) || a.idx - b.idx).slice(0, 5);
+    const youngA = A.org.filter((p) => ok(p) && (p.age ?? 28) <= 25).sort((a, b) => future(a) - future(b) || a.idx - b.idx);
+    const pick = this.pickTradeOpen ? this.ownedPicks(A.idx).find((p) => p.draft === year + 1 && p.round === 2) : undefined;
+    const sA = sit.get(A.idx)!;
+    const sB = sit.get(B.idx)!;
+    for (const x of targets) {
+      for (const withPick of pick ? [false, true] : [false]) {
+        const pv = withPick && pick ? { b: this.pickValueFor(pick, tendencyOf(sB)), a: this.pickValueFor(pick, tendencyOf(sA)) } : null;
+        for (const y of youngA) {
+          const evB = evaluateTrade({ aiTeam: B.idx, receive: [y], give: [x], ...(pv ? { picks: { receive: pv.b, give: 0 } } : {}) }, B.org, sB, ctx);
+          if (evB.verdict !== 'accept') continue;
+          const evA = evaluateTrade({ aiTeam: A.idx, receive: [x], give: [y], ...(pv ? { picks: { receive: 0, give: pv.a } } : {}) }, A.org, sA, ctx);
+          if (evA.verdict !== 'accept') continue;
+          this.season.transfer(x.idx, A.idx);
+          this.season.transfer(y.idx, B.idx);
+          if (pv && pick) transferPick(this.league, pick, B.idx);
+          (this.league.aiTrades ??= []).push({ year, day, buyer: A.idx, seller: B.idx, got: [x.id], gave: [y.id], ...(pv && pick ? { picks: [pickId(pick)] } : {}) });
+          const pickText = pv && pick ? `, ${this.pickLabel(pick)}` : '';
+          const body = `${josa(A.name, '이', '가')} ${josa(B.name, '으로부터', '로부터')} ${josa(x.name, '을', '를')} 받고 ${josa(y.name, '을', '를')} 내줬다${pickText ? ` (${pickText.slice(2)} 포함)` : ''}.`;
+          this.addNews(day, 'trade', `[리그 트레이드] ${body}`);
+          addArticle(this.league, { year, day, kind: 'trade', franchise: A.franchise, title: `${A.name}·${B.name} 트레이드`, body });
+          return;
+        }
+      }
+    }
+  }
+
   // ---- 라이벌 (rivals.ts)
 
   /** 시즌 개막 때 라이벌 쌍을 다시 계산하고 우리 구단 라이벌을 알린다 */
@@ -1664,7 +1724,11 @@ export class GameSession {
   /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 월말 연봉 계산용) */
   tradeMoves(): TradeMove[] {
     const W = this.world.players;
-    return this.trades.map((t) => ({ day: t.day, from: this.teamIdx, to: t.team, give: t.give.map((i) => W[i].id), get: t.get.map((i) => W[i].id) }));
+    const mine = this.trades.map((t) => ({ day: t.day, from: this.teamIdx, to: t.team, give: t.give.map((i) => W[i].id), get: t.get.map((i) => W[i].id) }));
+    // AI 구단끼리 트레이드도 연봉 귀속에 넣는다 (gm.ts)
+    const ai = (this.league.aiTrades ?? []).filter((t) => t.year === this.world.year)
+      .map((t) => ({ day: t.day, from: t.buyer, to: t.seller, give: [...t.gave], get: [...t.got] }));
+    return [...mine, ...ai].sort((a, b) => a.day - b.day);
   }
 
   /** 진행 중인 시즌의 수입·지출 (오프시즌이면 null) */
