@@ -4,9 +4,13 @@
 // 출전 몫은 그 구단 2군 안의 순위로 (주전급 2군 야수는 매 경기 4타석, 2군 선발은 로테이션 5명 ...).
 // 결과는 능력(리그 평균 대비 비율)을 2군 수준의 평균 상대와 맞붙인 기대값에, 선수마다 시즌 운(시드)을 곱한다.
 // 필요할 때 계산하므로(재정 seasonFlows처럼) 저장할 것이 없고, 며칠씩 나눠 진행해도 결과가 같다.
-// 창단 뒤 1군 진입 전 퓨처스 구단은 시즌 월드에 없어 아직 성적을 만들지 않는다.
+// 창단 뒤 1군 진입 전 퓨처스 구단은 시즌 월드에 없어 따로 받는다 (extra: 모든 선수가 2군, 경기 수는 리그 평균).
+// 오프시즌 성장 판정은 이 성적의 출전량(기회)과 시즌 운(활약·부진)을 쓴다 (futuresGrowth, 2026-10-12).
 
-import { Rng, type Season, type SimPlayer, type World } from '../engine';
+import { DEFAULT_PARAMS, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
+import type { DataStore } from '../data/types';
+import type { LeagueState } from './types';
+import { isFuturesTeam, worldFromLeague } from './world';
 
 /** 1군 경기 수 대비 퓨처스리그 경기 수 (임시값: 1군 144경기, 퓨처스 약 115경기) */
 export const FUT_GAME_RATIO = 0.8;
@@ -29,7 +33,8 @@ const PIT_REST_APPS = 0.08;
 
 export interface FuturesBat { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; so: number }
 export interface FuturesPit { g: number; gs: number; outs: number; bf: number; h: number; hr: number; bb: number; so: number; r: number; er: number }
-export interface FuturesLine { idx: number; teamIdx: number; bat?: FuturesBat; pit?: FuturesPit }
+/** form: 시즌 운 (−1 부진 ~ +1 활약). 능력에서 기대한 만큼보다 잘했나 */
+export interface FuturesLine { idx: number; teamIdx: number; bat?: FuturesBat; pit?: FuturesPit; form: number; starter?: boolean }
 export interface FuturesTeam { team: number; g: number; w: number; l: number; rs: number; ra: number }
 
 /** 지금까지 그 선수가 결장한 날 수 (시즌 시작 결장 + 결장 기록) */
@@ -55,21 +60,35 @@ function baseRuns(h: number, d: number, t: number, hr: number, bb: number, ab: n
  * 지금까지(정규시즌 경과 날짜까지)의 퓨처스리그 성적: 선수별 줄과 구단 순위.
  * registered: 구단별 지금 1군 명단 (2군 안 순위를 정할 때 뺀다)
  */
-export function futuresSeason(world: World, season: Season, seed: string, registered: (team: number) => Set<number>): { lines: Map<number, FuturesLine>; teams: FuturesTeam[] } {
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'>;
+
+/** 퓨처스 구단(1군 진입 전 창단 구단)의 선수. idx는 시즌 월드 선수 뒤로 붙인다 (시즌 기록 색인과 겹치지 않게) */
+export interface FuturesExtra {
+  team: number;
+  org: SimPlayer[];
+}
+
+export function futuresSeason(world: World, season: Season, seed: string, registered: (team: number) => Set<number>,
+                              extra: FuturesExtra[] = []): { lines: Map<number, FuturesLine>; teams: FuturesTeam[] } {
   const lg = world.league;
   const today = Math.min(season.day, season.schedule.length);
   const rng = (p: SimPlayer) => new Rng(`${seed}/futures/${world.year}/${p.id}`);
+  const avgG = world.teams.length ? world.teams.reduce((x, t) => x + season.teams[t.idx].g, 0) / world.teams.length : 0;
+  const units = [
+    ...world.teams.map((t) => ({ team: t.idx, org: t.org, tg: season.teams[t.idx].g, extra: false })),
+    ...extra.map((e) => ({ team: e.team, org: e.org, tg: Math.round(avgG), extra: true })),
+  ];
 
   // 1) 출전량: 야수 타석, 투수 상대 타자 (구단 2군 안의 순위로)
   const batPA = new Map<number, { p: SimPlayer; pa: number; g: number }>();
   const pitBF = new Map<number, { p: SimPlayer; bf: number; apps: number; st: boolean }>();
   const futGames = new Map<number, number>();
-  for (const team of world.teams) {
-    const tg = season.teams[team.idx].g;
-    futGames.set(team.idx, Math.round(tg * FUT_GAME_RATIO));
-    const reg = registered(team.idx);
+  for (const team of units) {
+    const tg = team.tg;
+    futGames.set(team.team, Math.round(tg * FUT_GAME_RATIO));
+    const reg = team.extra ? new Set<number>() : registered(team.team);
     const perDay = today > 0 ? tg / today : 0;
-    const games = (p: SimPlayer) => Math.max(0, tg - season.activeDays[p.idx] - absentDays(season, p, today) * perDay) * FUT_GAME_RATIO;
+    const games = (p: SimPlayer) => (team.extra ? tg : Math.max(0, tg - season.activeDays[p.idx] - absentDays(season, p, today) * perDay)) * FUT_GAME_RATIO;
     const hitters = team.org.filter((p) => !p.isPitcher && p.bat && !reg.has(p.idx)).sort((a, b) => b.value - a.value || a.idx - b.idx);
     hitters.forEach((p, i) => {
       const n = games(p);
@@ -105,7 +124,8 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
   const rs = new Map<number, { runs: number; pa: number }>();
   const ra = new Map<number, { runs: number; bf: number }>();
   for (const { p, pa, g } of batPA.values()) {
-    const luck = Math.exp((rng(p).next() - 0.5) * 0.3); // 시즌 운 ±15% 안팎
+    const u = rng(p).next();
+    const luck = Math.exp((u - 0.5) * 0.3); // 시즌 운 ±15% 안팎
     const rate = (k: (typeof KB)[number]) => lg[k] * FUT_ENV[k] * (p.bat![k] / mb[k]);
     const so = Math.round(pa * rate('so') / luck);
     const bb = Math.round(pa * rate('bb') * luck);
@@ -116,7 +136,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
     const s1 = Math.round(pa * rate('s1') * luck);
     const h = s1 + d + t + hr;
     const ab = Math.max(h, pa - bb - hbp);
-    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, bat: { g, pa, ab, h, d, t, hr, bb: bb + hbp, so: Math.min(so, ab - h) } });
+    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, bat: { g, pa, ab, h, d, t, hr, bb: bb + hbp, so: Math.min(so, ab - h) }, form: (u - 0.5) * 2 });
     const r = rs.get(p.teamIdx) ?? { runs: 0, pa: 0 };
     r.runs += baseRuns(h, d, t, hr, bb + hbp, ab);
     r.pa += pa;
@@ -124,7 +144,8 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
   }
   for (const { p, bf, apps, st } of pitBF.values()) {
     const ps = p.pit!;
-    const luck = Math.exp((rng(p).next() - 0.5) * 0.3);
+    const u = rng(p).next();
+    const luck = Math.exp((u - 0.5) * 0.3);
     const rel = (k: (typeof KP)[number]) => ps[k] / mp[k];
     const so = Math.round(bf * lg.so * FUT_ENV.so * rel('so') * luck);
     const bb = Math.round(bf * (lg.bb * FUT_ENV.bb * rel('bb') + lg.hbp * FUT_ENV.hbp * rel('hbp')) / luck);
@@ -136,7 +157,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
     const outs = Math.max(0, bf - h - bb);
     const runs = baseRuns(h, d, 0, hr, bb, ab);
     const rr = Math.round(runs);
-    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, pit: { g: Math.round(apps), gs: st ? Math.round(apps) : 0, outs, bf, h, hr, bb, so, r: rr, er: Math.round(rr * 0.92) } });
+    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, pit: { g: Math.round(apps), gs: st ? Math.round(apps) : 0, outs, bf, h, hr, bb, so, r: rr, er: Math.round(rr * 0.92) }, form: (u - 0.5) * 2, starter: st });
     const x = ra.get(p.teamIdx) ?? { runs: 0, bf: 0 };
     x.runs += runs;
     x.bf += bf;
@@ -144,16 +165,53 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
   }
 
   // 4) 순위: 득점·실점을 타석당으로 바꿔 같은 양(경기 수 × PA_PER_GAME)으로 맞추고 피타고리안 승률
-  const teams: FuturesTeam[] = world.teams.map((team) => {
-    const futG = futGames.get(team.idx) ?? 0;
+  const teams: FuturesTeam[] = units.map(({ team: idx }) => {
+    const futG = futGames.get(idx) ?? 0;
     const vol = futG * PA_PER_GAME;
-    const r = rs.get(team.idx);
-    const a = ra.get(team.idx);
+    const r = rs.get(idx);
+    const a = ra.get(idx);
     const runsFor = r && r.pa ? (r.runs / r.pa) * vol : 0;
     const runsAg = a && a.bf ? (a.runs / a.bf) * vol : 0;
     const pct = runsFor + runsAg > 0 ? runsFor ** 1.83 / (runsFor ** 1.83 + runsAg ** 1.83) : 0.5;
     const w = Math.round(futG * pct);
-    return { team: team.idx, g: futG, w, l: futG - w, rs: Math.round(runsFor), ra: Math.round(runsAg) };
+    return { team: idx, g: futG, w, l: futG - w, rs: Math.round(runsFor), ra: Math.round(runsAg) };
   });
   return { lines, teams: teams.sort((a, b) => b.w / Math.max(1, b.g) - a.w / Math.max(1, a.g) || a.team - b.team) };
+}
+
+/** 퓨처스 구단(그 해 1군 진입 전 창단 구단)의 선수를 시즌 월드 선수 뒤 색인으로 만든다. 없으면 [] */
+export function futuresExtras(league: LeagueState, store: Store, world: World, params: EngineParams = DEFAULT_PARAMS): FuturesExtra[] {
+  const teams = league.teams.map((_, i) => i).filter((i) => isFuturesTeam(league, i, world.year));
+  if (!teams.length) return [];
+  const all = worldFromLeague(league, store, params, { includeFutures: true });
+  let k = world.players.length;
+  return teams.map((team) => ({ team, org: (all.teams[team]?.org ?? []).map((p) => ({ ...p, idx: k++ })) }));
+}
+
+/** 구단의 지금 1군 명단 (직접 관리하면 그 명단, 아니면 AI 엔트리). 화면과 결산이 같은 기준을 쓴다 */
+export function registeredOf(season: Season, team: number): Set<number> {
+  const ts = season.teamSeasons[team];
+  return ts.manual ? new Set(ts.manual) : new Set([...ts.hitters, ...ts.rotation, ...ts.bullpen].map((p) => p.idx));
+}
+
+// ---- 성장 판정 (offseason.ts beginOffseason)
+
+/** 퓨처스 출전을 "한 시즌 다 뛴 것"으로 보는 양 (임시값): 야수 400타석, 선발 450타자, 구원 180타자 */
+export const FUT_FULL = { bat: 400, sp: 450, rp: 180 };
+/** 퓨처스에서 꽉 채워 뛴 시즌을 1군 출전 기회 몇으로 치나 (임시값. 예전에는 25세 이하 2군 선수 모두 0.5로 쳤다) */
+export const FUTURES_WEIGHT = 0.7;
+/** 퓨처스 활약·부진이 성장에 주는 폭 (런, 임시값). 시즌 운 ±1 × 표본 신뢰도 */
+export const FUT_FORM_RUNS = 0.4;
+
+/** 퓨처스 출전 기회 (0~1) */
+export function futuresOpportunity(line: FuturesLine | undefined): number {
+  if (!line) return 0;
+  if (line.bat) return Math.min(1, line.bat.pa / FUT_FULL.bat);
+  if (line.pit) return Math.min(1, line.pit.bf / (line.starter ? FUT_FULL.sp : FUT_FULL.rp));
+  return 0;
+}
+
+/** 퓨처스 활약도 (−1~+1): 시즌 운 × 표본 신뢰도 (출전 기회) */
+export function futuresForm(line: FuturesLine | undefined): number {
+  return line ? line.form * futuresOpportunity(line) : 0;
 }

@@ -18,7 +18,7 @@ import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { ops } from './stats';
-import { futuresSeason } from '../league/futures';
+import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { settingsOf, type DifficultySettings } from '../league/difficulty';
@@ -460,10 +460,19 @@ export class GameSession {
 
   /** 지금까지의 퓨처스리그(2군) 성적과 순위 (league/futures.ts, 필요할 때 계산). AI 구단 1군은 지금 명단을 읽기만 한다 */
   futures(): ReturnType<typeof futuresSeason> {
-    const mine = new Set(this.registered().map((p) => p.idx));
-    return futuresSeason(this.world, this.season, this.league.seed, (t) =>
-      (t === this.teamIdx ? mine : new Set(activeOf(this.season.teamSeasons[t]).map((p) => p.idx))));
+    const off = this.phase === 'offseason';
+    const r = futuresSeason(this.world, this.season, this.league.seed, (t) => registeredOf(this.season, t), off ? [] : this.futuresExtras());
+    // 오프시즌: 결산 때 남긴 순위 (창단 퓨처스 구단 포함. 결산 뒤 리그 상태가 바뀌어 다시 계산하지 않는다)
+    const last = this.league.lastFutures;
+    return off && last?.year === this.year ? { ...r, teams: last.teams } : r;
   }
+
+  /** 1군 진입 전 창단 구단의 선수 (퓨처스리그 성적용, 시즌 중 리그 상태는 개막 모습 그대로라 해마다 한 번 만든다) */
+  private futuresExtras(): FuturesExtra[] {
+    if (this.futExtra?.year !== this.year) this.futExtra = { year: this.year, extra: futuresExtras(this.league, this.store, this.world, this.params) };
+    return this.futExtra.extra;
+  }
+  private futExtra: { year: number; extra: FuturesExtra[] } | null = null;
 
   /** 다음 경기일 기준 1군 (엔진이 실제로 쓸 명단). 플레이어가 정한 명단에서 결장 선수는 빠지고 임시 승격 선수가 들어간다 */
   activeTeam(): TeamSeason {

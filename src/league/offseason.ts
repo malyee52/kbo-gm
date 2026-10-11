@@ -33,6 +33,7 @@ import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, posting
 import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
+import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
@@ -305,6 +306,14 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     delete p.startAbsentReason;
   }
 
+  // 퓨처스리그 성적 (futures.ts): 2군 선수의 출전 기회와 활약을 성장 판정에 쓴다. 시즌 마지막 1군 명단 기준
+  const extras = futuresExtras(league, store, world, params);
+  const fut = futuresSeason(world, season, league.seed, (t) => registeredOf(season, t), extras);
+  const futById = new Map<string, ReturnType<typeof fut.lines.get>>();
+  for (const sp of world.players) futById.set(sp.id, fut.lines.get(sp.idx));
+  for (const e of extras) for (const sp of e.org) futById.set(sp.id, fut.lines.get(sp.idx));
+  league.lastFutures = { year, teams: fut.teams };
+
   const growth = new Map<string, GrowthEntry>();
   const servingBefore = new Set(league.players.filter((p) => isServing(p)).map((p) => p.id));
   for (const sp of world.players) {
@@ -340,13 +349,22 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const firstTeam = sp.isPitcher
       ? pt.bf / ((sp.pit!.startShare >= 0.5 ? 650 : 280))
       : b.pa / 550;
-    // 2군 유망주는 퓨처스리그에서 뛴다: 1군 기회가 적어도 FUTURES_SHARE만큼은 본다 (복무 중인 선수의 0.4와 같은 취지)
+    // 2군 유망주는 퓨처스리그에서 뛴다 (2026-10-12부터 실제 퓨처스 출전량으로, 예전에는 모두 FUTURES_SHARE):
+    // 퓨처스에서 꽉 채워 뛰면 1군 기회 FUTURES_WEIGHT만큼. 퓨처스 활약·부진은 성장에 ±FUT_FORM_RUNS (futures.ts)
     // 육성 투자: 2군 유망주 출전 몫과 30세 이하 성장 폭 (finance.ts)
     const dev = activeLevel(league, sp.teamIdx, 'develop');
-    const share = ageIn(p, year + 1) <= FUTURES_AGE ? Math.max(firstTeam, FUTURES_SHARE + DEVELOP_SHARE[dev]) : firstTeam;
+    const young = ageIn(p, year + 1) <= FUTURES_AGE;
+    const fl = futById.get(p.id);
+    const futOpp = young ? futuresOpportunity(fl) : 0;
+    const share = young && futOpp > 0 ? Math.max(firstTeam, firstTeam + FUTURES_WEIGHT * futOpp + DEVELOP_SHARE[dev]) : firstTeam;
+    const form = young ? futuresForm(fl) : 0;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
     const grown = developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
-      agingScale(traitsOf(store.traits, p.id), params.traits)), dev);
+      agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * form, dev);
+    if (Math.abs(form) >= 0.5) {
+      const g = growth.get(p.id)!;
+      g.tags = [...(g.tags ?? []), form > 0 ? '퓨처스 활약' : '퓨처스 부진'];
+    }
     // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
     const next = coachGrowth(league, sp.teamIdx, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE) - eff.runsDrop;
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
@@ -376,14 +394,16 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits));
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
-  // 퓨처스 구단(창단 뒤 1군 진입 전) 선수: 시즌 월드에 없으므로 퓨처스리그 출전 몫(FUTURES_SHARE)으로 성장 판정
+  // 퓨처스 구단(창단 뒤 1군 진입 전) 선수: 시즌 월드에 없어 퓨처스리그 성적(extras)으로 성장 판정. 나이와 상관없이 퓨처스가 주 무대다
   for (const p of league.players) {
     if (p.team < 0 || isServing(p) || !isFuturesTeam(league, p.team, year)) continue;
     const runs = runsAt(p, year);
     growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs, tags: ['퓨처스'] });
     const dev = activeLevel(league, p.team, 'develop');
-    const next = developed(ageIn(p, year + 1), runs, growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runs, p.potential, FUTURES_SHARE + DEVELOP_SHARE[dev],
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits)), dev);
+    const fl = futById.get(p.id);
+    const share = fl ? FUTURES_WEIGHT * futuresOpportunity(fl) + DEVELOP_SHARE[dev] : FUTURES_SHARE + DEVELOP_SHARE[dev];
+    const next = developed(ageIn(p, year + 1), runs, growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runs, p.potential, share,
+      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * futuresForm(fl), dev);
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };
