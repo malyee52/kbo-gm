@@ -286,5 +286,9 @@ describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
     const plus = g.shopOffers(offer, 200_000);
     const best = (xs: { value: number }[]) => (xs.length ? xs[0].value : 0);
     expect(best(plus)).toBeGreaterThanOrEqual(best(plain));
+    // 받고 싶은 것을 고르면 그것만 (2026-10-12)
+    for (const o of g.shopOffers(offer, 200_000, 'picks')) expect(o.get).toEqual([]);
+    for (const o of g.shopOffers(offer, 200_000, 'players')) expect(o.picks).toEqual([]);
+    expect(g.shopOffers(offer, 200_000, 'picks').length).toBeGreaterThan(0);
   }, 120_000);
 });
