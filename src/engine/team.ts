@@ -79,10 +79,15 @@ export interface TeamSeason {
  * - closer: 마무리. 없거나 못 나오면 AI가 정한다.
  * 타순과 경기 중 투수 교체는 그대로 AI 감독이 한다.
  */
+/** 불펜 역할 (2026-10-12 사용자 요청): 필승조(접전 리드 7~8회), 롱릴리프(선발이 일찍 내려갈 때 길게), 패전조(점수 차 큰 경기) */
+export type PenRole = 'SU' | 'LR' | 'MOP';
+
 export interface DepthPlan {
   starters: Partial<Record<Slot, number>>;
   rotation: number[];
   closer: number | null;
+  /** 불펜 역할 (투수 색인 → 역할). 정하지 않은 구원 투수는 AI 감독이 서열대로 나눈다 */
+  pen?: Record<number, PenRole>;
   /** 타순 (1번부터 자리 순서). 그 자리에 나온 선수(결장 때는 서브)가 그 타순에 선다. 없으면 AI 감독이 정한다 (2026-10-11) */
   order?: Slot[];
 }

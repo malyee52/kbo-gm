@@ -65,7 +65,7 @@ export function Roster() {
     const callUps = new Set((ts.callUps ?? []).map((p) => p.idx));
     const role = new Map<number, string>();
     ts.rotation.forEach((p, i) => role.set(p.idx, `선발 ${i + 1}`));
-    for (const p of ts.bullpen) role.set(p.idx, p === ts.closer ? '마무리' : '구원');
+    for (const p of ts.bullpen) role.set(p.idx, p === ts.closer ? '마무리' : PITCHER_ROLE_LABEL[session.pitcherRole(p)]);
     for (const p of ts.hitters) {
       const s = session.slotOf(p);
       role.set(p.idx, s ? `주전 ${posName(s)}` : '서브');
