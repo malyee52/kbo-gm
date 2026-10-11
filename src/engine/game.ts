@@ -311,6 +311,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   }
   const mkSide = (ts: TeamSeason, lineup: SimPlayer[], starter: SimPlayer, isHome: boolean): Side => {
     const pitcher = enterPitcher(starter, true, 0, ctx);
+    // 감독 작전: 선발을 일찍(작으면)·늦게 바꾸는 정도 (league/managers.ts). 난수를 더 쓰지 않는다
+    if (ts.tactics) pitcher.limit *= ts.tactics.hook;
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
@@ -371,7 +373,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
 
       // 도루: 1루 주자, 2루가 비었을 때
       const r1 = bases[0];
-      if (r1 && !bases[1] && rng.chance(r1.p.bat!.sbAtt * params.stealScale)) {
+      if (r1 && !bases[1] && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))) {
         const line = ctx.bat[r1.p.idx];
         if (rng.chance(r1.p.bat!.sbPct - fld.catcherDef * params.catcherStealPerRun)) {
           line.sb++;
@@ -407,7 +409,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       // 희생번트: 무사, 주자 1루 또는 2루, 3루는 비었을 때. 약한 타자가 주로 댄다
       if (outs === 0 && !bases[2] && (bases[0] || bases[1]) && ctx.env.sac > 0) {
         const weak = batter.value < bat.medianValue ? 1.6 : 0.4;
-        if (rng.chance(ctx.env.sac * params.sacBuntScale * weak)) {
+        if (rng.chance(ctx.env.sac * params.sacBuntScale * weak * (bat.ts.tactics?.bunt ?? 1))) {
           bl.sac++;
           totals.sac++;
           out(1);

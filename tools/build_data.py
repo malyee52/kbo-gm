@@ -21,6 +21,10 @@
   data-src/baseballchart/kbo_draft_1982-2027.csv
                                  입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
                                  같은 폴더의 SOURCE.md 참조.
+  data-src/감독.csv              연도별 구단 감독 실명 (managers.json). 한국어 위키백과 구단별 감독 틀·감독 목록, 2026 보도로 만든 것.
+                                 '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
+                                 감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
+                                 이것만 다시 만들려면: build_data.py --managers-only
 """
 import csv
 import json
@@ -37,6 +41,7 @@ SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
+MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
@@ -199,6 +204,82 @@ def rules_for(year):
     }
 
 
+# ---- 감독 (managers.json)
+
+def build_managers(out_dir):
+    """감독.csv → {seasons: {연도: {계보: [{name, kind, mid}]}}, people: {이름: 경력·운영 경향}}.
+    운영 경향은 그 감독이 개막부터 끝까지 맡은 시즌(중도 교체가 없는 해)의 팀 기록을 그 해 리그 평균과 견준 배율이다.
+      steal: (도루 + 도루자) / (단타 + 볼넷 + 사구), bunt: 희생번트 / 타석, relief: (등판 − 선발) / 경기
+    시즌이 적으면 1 쪽으로 당긴다 (n / (n + 2)). 성격·인물평은 넣지 않는다 (기록 사실만)."""
+    if not MANAGERS_CSV.exists():
+        return
+    meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
+    with MANAGERS_CSV.open(encoding='utf-8-sig', newline='') as f:
+        rows_ = [r for r in csv.DictReader(f)]
+    seasons = defaultdict(lambda: defaultdict(list))
+    for r in rows_:
+        seasons[r['시즌']][r['계보']].append({'name': r['감독'], 'kind': r['구분'], **({'mid': True} if r['시점'] == '중도' else {})})
+
+    def team_stats(y):
+        sd = json.loads((out_dir / 'seasons' / f'{y}.json').read_text(encoding='utf-8'))
+        bi = {k: i for i, k in enumerate(sd['batFields'])}
+        pi = {k: i for i, k in enumerate(sd['pitFields'])}
+        out = {}
+        for t in sd['teams']:
+            b = [r for r in sd['bat'] if r[bi['team']] == t['name']]
+            p = [r for r in sd['pit'] if r[pi['team']] == t['name']]
+            g = lambda rs, k, ix: sum((r[ix[k]] or 0) for r in rs)
+            singles = g(b, 'h', bi) - g(b, 'd', bi) - g(b, 't', bi) - g(b, 'hr', bi)
+            on1 = singles + g(b, 'bb', bi) + g(b, 'hbp', bi)
+            out[t['franchise']] = {
+                'steal': (g(b, 'sb', bi) + g(b, 'cs', bi)), 'on1': on1, 'sac': g(b, 'sac', bi), 'pa': g(b, 'pa', bi),
+                'relief': g(p, 'g', pi) - g(p, 'gs', pi), 'games': t['g'], 'rank': t['rank'],
+            }
+        return out
+
+    acc = defaultdict(lambda: {'steal': [], 'bunt': [], 'relief': []})
+    people = {}
+    for y in meta['years']:
+        ts = team_stats(y)
+        lg = {k: sum(v[k] for v in ts.values()) for k in ('steal', 'on1', 'sac', 'pa', 'relief', 'games')}
+        for fr, ms in seasons.get(str(y), {}).items():
+            for m in ms:
+                pe = people.setdefault(m['name'], {'first': y, 'last': y, 'seasons': 0, 'acting': 0, 'teams': [], 'titles': 0})
+                pe['last'] = y
+                if fr not in pe['teams']:
+                    pe['teams'].append(fr)
+                if m['kind'] == '정식':
+                    pe['seasons'] += 1
+                else:
+                    pe['acting'] += 1
+            full = [m for m in ms if not m.get('mid')]
+            if len(ms) != 1 or not full or fr not in ts:
+                continue
+            name = full[0]['name']
+            t = ts[fr]
+            if t['rank'] == 1 and y not in meta.get('inProgress', []):  # 진행 중인 시즌의 1위는 우승이 아니다
+                people[name]['titles'] += 1
+            ratio = lambda a, b, la, lb: (a / b) / (la / lb) if b and lb and la else None
+            for k, v in (('steal', ratio(t['steal'], t['on1'], lg['steal'], lg['on1'])), ('bunt', ratio(t['sac'], t['pa'], lg['sac'], lg['pa'])),
+                         ('relief', ratio(t['relief'], t['games'], lg['relief'], lg['games']))):
+                if v is not None:
+                    acc[name][k].append(v)
+    for name, pe in people.items():
+        a = acc.get(name)
+        n = len(a['steal']) if a else 0
+        pe['full'] = n
+        for k in ('steal', 'bunt', 'relief'):
+            vs = a[k] if a else []
+            mean = sum(vs) / len(vs) if vs else 1.0
+            pe[k] = round(1 + (mean - 1) * len(vs) / (len(vs) + 2), 3)
+    (out_dir / 'managers.json').write_text(json.dumps({
+        'source': MANAGERS_CSV.name,
+        'seasons': seasons,
+        'people': people,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'감독: {len(rows_)}행, {len(people)}명 → {out_dir / "managers.json"}')
+
+
 # ---- 병역 (military.json)
 
 SERVICE_UNITS = ('상무', '경찰')
@@ -284,6 +365,10 @@ def main():
     if '--military-only' in sys.argv:
         # 병역 자료만 다시 만든다 (다른 JSON은 그대로라 저장 호환에 영향 없음)
         build_military(profiles_of(load_workbook(SRC, read_only=True, data_only=True)), OUT)
+        return
+    if '--managers-only' in sys.argv:
+        # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
+        build_managers(OUT)
         return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
@@ -520,6 +605,7 @@ def main():
         'specialEntries': special,
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
+    build_managers(OUT)
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')
