@@ -111,6 +111,8 @@ export function Home() {
         </div>
       </section>
 
+      <ActiveEffects />
+
       <Headlines />
 
       <section>
@@ -151,5 +153,39 @@ function NextGame({ next }: { next: { day: number; home: number; away: number } 
         {' '}대 {oppSp ? <PlayerLink p={oppSp} /> : '-'} <span>({line(oppSp?.idx)})</span>
       </p>
     </>
+  );
+}
+
+/** 무작위 이벤트로 지금 걸려 있는 효과 (경기력·관중률) */
+function ActiveEffects() {
+  const { session } = useGame();
+  const ev = session.league.events;
+  const year = session.world.year;
+  const day = session.day;
+  if (!ev || session.phase !== 'season') return null;
+  const name = (id: string) => session.world.players.find((p) => p.id === id)?.name ?? id;
+  const rows = [
+    ...(ev.forms ?? []).filter((f) => f.year === year && f.team === session.teamIdx && day < f.until).map((f) => ({
+      key: `f-${f.from}-${f.note}-${f.player ?? f.side ?? ''}`,
+      who: f.player ? name(f.player) : f.side === 'bat' ? '타자진' : f.side === 'pit' ? '투수진' : '선수단',
+      what: `경기력 ${f.edge > 0 ? '+' : ''}${(f.edge * 100).toFixed(1)}`, up: f.edge > 0, note: f.note, from: f.from, until: f.until,
+    })),
+    ...ev.buffs.filter((b) => b.year === year && b.team === session.teamIdx && day < b.until).map((b) => ({
+      key: `b-${b.from}-${b.note}`, who: '관중', what: `관중률 ${b.fill > 0 ? '+' : ''}${Math.round(b.fill * 100)}%p`, up: b.fill > 0, note: b.note, from: b.from, until: b.until,
+    })),
+  ].sort((x, y) => x.until - y.until);
+  if (!rows.length) return null;
+  return (
+    <section>
+      <h2>진행 중인 효과 <span className="muted small">경기력은 타석마다 유리한 정도 (%p, 홈 이점 1.3)</span></h2>
+      <ul className="news">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <span className="muted small">{r.from > day ? `${r.from - day}일 뒤부터 ` : ''}{r.until - Math.max(day, r.from)}일</span>
+            <span><strong className={r.up ? 'up' : 'down'}>{r.who} {r.what}</strong> · {r.note}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

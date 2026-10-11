@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/owner';
 import type { BrowserStore } from '../data/loadBrowser';
 import { SCENARIOS, scenarioById } from '../league/scenarios';
+import { CHALLENGES, challengeById, lastPlaceTeam } from '../league/challenges';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
@@ -68,6 +69,28 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       if (t < 0) throw new Error(`${sc.year}년 자료에서 ${sc.team}을 찾을 수 없습니다`);
       await nextFrame();
       onStart(GameSession.create(store, { year: sc.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, scenario: sc.id }));
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(null);
+    }
+  };
+
+  /** 도전 모드로 시작: 위에서 고른 연도·구단 (꼴찌 조건이면 직전 시즌 최하위 구단) */
+  const challengeTeam = (id: string): number | null => {
+    const ch = challengeById(id)!;
+    if (ch.team === 'last') return current ? lastPlaceTeam(store, year) : null;
+    return teamIdx;
+  };
+  const startChallenge = async (id: string) => {
+    const ch = challengeById(id)!;
+    const t = challengeTeam(id);
+    if (t === null || !seed.trim()) return;
+    setBusy(`도전 「${ch.title}」을 준비하는 중입니다`);
+    setError(null);
+    try {
+      await store.ensureAll();
+      await nextFrame();
+      onStart(GameSession.create(store, { year, teamIdx: t, seed: seed.trim(), difficulty, challenge: ch.id }));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -169,6 +192,25 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <button type="button" onClick={() => void start()} disabled={teamIdx === null || !seed.trim() || !!busy}>
             {teamIdx === null ? '구단을 고르세요' : `${current?.teams[teamIdx]?.name ?? ''} 단장으로 시작`}
           </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>도전 모드 <span className="muted small">{year}년 시작</span></h2>
+        <p className="muted small">위에서 고른 시작 연도·구단·난이도·시드로 시작합니다. "직전 시즌 최하위" 도전은 구단이 정해집니다. 결산 때마다 판정하고, 끝난 뒤에도 그대로 이어서 할 수 있습니다.</p>
+        <div className="scenario-grid">
+          {CHALLENGES.map((ch) => {
+            const t = challengeTeam(ch.id);
+            const name = t !== null ? current?.teams[t]?.name : undefined;
+            return (
+              <div key={ch.id} className="scenario-card">
+                <div className="row-between"><strong>{ch.title}</strong><span className="muted small">{ch.years}시즌</span></div>
+                <p className="small">{ch.intro}</p>
+                <p className="muted small">{ch.team === 'last' ? (name ? `구단: ${name} (${year - 1} 최하위)` : `${year - 1}년 자료가 없어 고를 수 없습니다`) : name ? `구단: ${name}` : '위에서 구단을 고르세요'}</p>
+                <button type="button" onClick={() => void startChallenge(ch.id)} disabled={!!busy || t === null || !seed.trim()}>이 도전으로 시작</button>
+              </div>
+            );
+          })}
         </div>
       </section>
 

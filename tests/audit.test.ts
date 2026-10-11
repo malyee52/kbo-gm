@@ -90,6 +90,8 @@ describe('H6: 외부 FA 영입 한도는 플레이어에게도 지켜진다', ()
     g.nextStage(); // FA 1라운드
     const off = g.offseason!;
     expect(off.stage).toBe('fa');
+    // 한도만 본다: 자금이 모자라 제시가 막히지 않게 넉넉히 넣는다 (무작위 이벤트로 시즌 자금이 시드마다 달라진다)
+    g.league.ledger.push({ year: 2026, from: -1, to: kiwoom, amount: 1_000_000, note: '테스트 자금', kind: 'event' });
     const external = off.fa.entries.filter((e) => e.from !== kiwoom && e.status === 'open').sort((a, b) => a.ask - b.ask).slice(0, 6);
     expect(external.length).toBe(6);
     const results = external.map((e) => g.offerFa(e.id, Math.round(e.ask * 1.3), e.years));

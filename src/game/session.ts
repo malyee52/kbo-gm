@@ -6,18 +6,20 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, DEFAULT_PARAMS, isVirtual, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type DepthPlan, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
-import { currentRuns, teamStrength, valueContext, type ValueContext } from '../ai/value';
+import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
-import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { ops } from './stats';
 import { judgeScenario, scenarioById } from '../league/scenarios';
+import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
@@ -51,6 +53,8 @@ export interface NewGameOptions {
   difficulty?: Difficulty;
   /** 역사 시나리오 id (league/scenarios.ts). 있으면 그 해 한국시리즈 우승이 목표 */
   scenario?: string;
+  /** 도전 모드 id (league/challenges.ts). 구단 조건(직전 시즌 꼴찌 등)은 시작 화면이 맞춰 teamIdx로 넘긴다 */
+  challenge?: string;
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -260,6 +264,11 @@ export class GameSession {
       league.scenario = { id: sc.id, year: sc.year, team: opts.teamIdx };
       g.addNews(0, 'season', `역사 시나리오 「${sc.title}」: ${sc.intro} 목표는 ${sc.year} 한국시리즈 우승입니다.`);
     }
+    const ch = opts.challenge ? challengeById(opts.challenge) : undefined;
+    if (ch) {
+      league.challenge = newChallenge(ch, opts.teamIdx, world.year);
+      g.addNews(0, 'season', `도전 「${ch.title}」: ${ch.intro} 기한은 ${league.challenge.until} 시즌까지입니다.`);
+    }
     for (const e of league.expansions ?? []) {
       g.addNews(0, 'season', `${league.teams[e.team].name}: 창단 구단으로 ${world.year} 시즌은 퓨처스리그에서 뛰고 ${e.firstYear}년 1군에 들어옵니다.`);
     }
@@ -397,7 +406,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.scenario ? { scenario: L.scenario.id } : {}), ...(L.challenge ? { challenge: L.challenge.id } : {}) },
       at: { year: this.year, day: this.day, phase: this.phase },
       actions: clone(this.actions),
     };
@@ -678,6 +687,8 @@ export class GameSession {
       }
     }
     const before = org.map((p) => s.states.absentUntil[p.idx]);
+    // 무작위 이벤트의 경기력 효과 (events.ts formToday)
+    s.setForm(formToday(this.league, year, day, this.world.players));
     s.simulateDay();
 
     org.forEach((p, i) => {
@@ -741,7 +752,99 @@ export class GameSession {
       },
       addTrust: (d) => { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + d)); },
       addFill: (fill, days, note) => { ensureEvents(L).buffs.push({ team, year, from: day, until: day + days, fill, note }); },
+      // ---- 경기에 영향을 주는 도구
+      players: this.team.org.map((p) => {
+        const b = s.bat[p.idx];
+        const pt = s.pit[p.idx];
+        return {
+          id: p.id, name: p.name, isPitcher: p.isPitcher, starter: !!p.pit && p.pit.startShare >= 0.5, age: p.age, foreign: p.foreign,
+          pa: b.pa, ops: b.pa ? ops(b) : 0, outs: pt.outs, era: pt.outs ? (pt.er * 27) / pt.outs : 0,
+          fatigue: currentFatigue(s.states, p.idx, day),
+        };
+      }),
+      recent: this.recentRecord(10),
+      streak: this.currentStreak(),
+      month: dateOf(year, Math.min(day, s.schedule.length - 1)).month,
+      hasRival: rivalsOf(L, this.team.franchise).length > 0,
+      tradeOpen: this.tradeOpen,
+      addForm: (edge, days, note, opts) => {
+        const from = day + (opts?.delay ?? 0);
+        (ensureEvents(L).forms ??= []).push({ team, year, from, until: from + days, edge, note,
+          ...(opts?.player ? { player: opts.player } : {}), ...(opts?.side && opts.side !== 'all' ? { side: opts.side } : {}) });
+      },
+      restPitchers: (all) => {
+        for (const p of this.team.org) if (p.isPitcher && (all || !p.pit || p.pit.startShare < 0.5)) s.clearFatigue(p.idx);
+      },
+      rest: (id, days) => {
+        const p = this.world.players.find((x) => x.id === id && x.teamIdx === team);
+        if (p) s.restPlayer(p.idx, day + days);
+      },
+      tradeOffer: (rng) => this.aiTradeOffer(rng),
+      trade: (ai, giveId, getId) => {
+        const give = this.world.players.find((x) => x.id === giveId);
+        const get = this.world.players.find((x) => x.id === getId);
+        if (!give || !get || give.teamIdx !== team || get.teamIdx !== ai) return '선수 소속이 바뀌어 트레이드가 무산됐습니다.';
+        const ev = this.evaluateTrade(ai, [give], [get]);
+        if (ev.verdict !== 'accept') return `조건이 바뀌어 트레이드가 무산됐습니다 (${ev.message})`;
+        this.applyTrade(ai, [give.idx], [get.idx]);
+        this.addNews(this.day, 'trade', `트레이드 성사: ${this.world.teams[ai].name}에 ${give.name}을(를) 내주고 ${get.name}을(를) 받았습니다. 받은 선수는 2군에 등록됩니다.`);
+        return `${give.name} ↔ ${get.name} 트레이드가 성사됐습니다.`;
+      },
     };
+  }
+
+  /** 우리 구단 최근 n경기 승패 */
+  private recentRecord(n: number): { w: number; l: number } {
+    let w = 0;
+    let l = 0;
+    const log = this.season.log;
+    for (let i = log.length - 1; i >= 0 && w + l < n; i--) {
+      const g = log[i];
+      if (g.home !== this.teamIdx && g.away !== this.teamIdx) continue;
+      const mine = g.home === this.teamIdx ? g.homeRuns - g.awayRuns : g.awayRuns - g.homeRuns;
+      if (mine > 0) w++; else if (mine < 0) l++;
+    }
+    return { w, l };
+  }
+
+  /** 지금 연승(+)·연패(−). 무승부는 끊는다 */
+  private currentStreak(): number {
+    let k = 0;
+    const log = this.season.log;
+    for (let i = log.length - 1; i >= 0; i--) {
+      const g = log[i];
+      if (g.home !== this.teamIdx && g.away !== this.teamIdx) continue;
+      const mine = Math.sign(g.home === this.teamIdx ? g.homeRuns - g.awayRuns : g.awayRuns - g.homeRuns);
+      if (mine === 0 || (k !== 0 && Math.sign(k) !== mine)) break;
+      k += mine;
+    }
+    return k;
+  }
+
+  /**
+   * AI 구단이 먼저 거는 1대1 트레이드 제안: 우리 구단의 쓸 만한 선수(가치 8~25위) 하나를 원하고,
+   * AI가 받아들이는 조건 안에서 우리에게 가장 가치 있는 선수를 준다. 우리 쪽 손해가 크면(받는 가치 < 주는 가치의 85%) 내지 않는다.
+   */
+  private aiTradeOffer(rng: Rng): { team: number; teamName: string; give: string; giveName: string; get: string; getName: string } | null {
+    if (!this.tradeOpen) return null;
+    const w = [1, 0.6];
+    const val = (p: SimPlayer) => playerValue(p, this.values, w);
+    const ok = (p: SimPlayer) => !p.foreign && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
+    const mine = this.team.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx).slice(7, 25);
+    const others = this.world.teams.filter((t) => t.idx !== this.teamIdx);
+    if (!mine.length || !others.length) return null;
+    for (let tries = 0; tries < 4; tries++) {
+      const ai = others[rng.int(others.length)];
+      const give = mine[rng.int(mine.length)];
+      const cands = ai.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx);
+      for (const get of cands) {
+        if (val(get) < val(give) * 0.85) break;
+        if (this.evaluateTrade(ai.idx, [give], [get]).verdict === 'accept') {
+          return { team: ai.idx, teamName: ai.name, give: give.id, giveName: give.name, get: get.id, getName: get.name };
+        }
+      }
+    }
+    return null;
   }
 
   /** 이벤트에 답한다 (화면). 조작 기록에 남는다 */
@@ -774,6 +877,7 @@ export class GameSession {
   /** 정규시즌이 끝나면 대진을 정한다 (난수를 쓰지 않는다) */
   private openPostseason(): void {
     if (this.postseason) return;
+    this.season.setForm(null);
     const st = this.season.standings();
     this.postseason = startPostseason(this.season, st, this.world.rules.postseasonTeams, seasonSeed(this.league));
     const name = (t: number) => this.world.teams[t].name;
@@ -1099,6 +1203,21 @@ export class GameSession {
           addArticle(L, { year: this.year, day: -1, kind: 'scenario', franchise: this.team.franchise,
             title: `「${def.title}」 ${sc.result === 'success' ? '성공' : '실패'}`,
             body: sc.result === 'success' ? `${josa(this.team.name, '이', '가')} ${def.year} 한국시리즈 우승으로 역사를 바꿨다. ${def.real}` : `${def.real}` });
+        }
+        // 도전 모드 판정 (challenges.ts)
+        const chWas = L.challenge?.result;
+        const chs = judgeChallenge(L, this.year, {
+          userTeam: this.teamIdx, champion: ps.champion ?? null, first: standings[0] ?? null, postseason: ps.seeds, rescue: fin[L.challenge?.team ?? this.teamIdx]?.rescue ?? 0,
+        });
+        const chDef = chs ? challengeById(chs.id) : undefined;
+        if (chs && chDef && !chWas && chs.result) {
+          const text = chs.result === 'success'
+            ? `도전 「${chDef.title}」 성공! (${chs.from}~${this.year}, ${challengeProgress(chs, this.year)})`
+            : `도전 「${chDef.title}」 실패: ${chs.why ?? ''}. 이 게임은 그대로 이어서 할 수 있습니다.`;
+          this.news.push({ year: this.year, day: -1, kind: 'owner', text });
+          addArticle(L, { year: this.year, day: -1, kind: 'scenario', franchise: L.teams[chs.team]?.franchise, title: `도전 「${chDef.title}」 ${chs.result === 'success' ? '성공' : '실패'}`, body: text });
+        } else if (chs && chDef && !chs.result) {
+          this.news.push({ year: this.year, day: -1, kind: 'owner', text: `도전 「${chDef.title}」 진행: ${challengeProgress(chs, this.year + 1)}.` });
         }
         this.phase = 'offseason';
         this.valueCtx = null;
