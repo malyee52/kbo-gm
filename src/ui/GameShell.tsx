@@ -23,7 +23,8 @@ import { Awards } from './screens/Awards';
 import { Records } from './screens/Records';
 import { Articles } from './screens/Articles';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
-import { teamColor } from './teams';
+import { teamVars } from './teams';
+import { gamesBehind, recentForm } from '../game/stats';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
@@ -35,31 +36,32 @@ import type { CastGame, CommandPreview } from '../game/session';
 import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type StopRules } from '../game/stops';
 import { StopSettings } from './StopSettings';
 
-/** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
-// 메뉴 묶음 (2026-10-12 정리): 우리 구단 / 리그(이번 시즌) / 역사 / 시스템
-const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '우리 구단' | '리그' | '역사' | '시스템' }[] = [
-  { id: 'home', label: '홈', group: '우리 구단' },
-  { id: 'offseason', label: '오프시즌', group: '우리 구단' },
-  { id: 'roster', label: '선수단', season: true, group: '우리 구단' },
-  { id: 'trade', label: '트레이드', season: true, group: '우리 구단' },
-  { id: 'club', label: '구단 운영', group: '우리 구단' },
-  { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정', group: '리그' },
-  { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', group: '리그' },
-  { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록', group: '리그' },
-  { id: 'records', label: '기록실', group: '역사' },
-  { id: 'articles', label: '기사', group: '역사' },
-  { id: 'save', label: '저장·설정', group: '시스템' },
+/**
+ * 메뉴 (2026-10-12 UI 개편): 위쪽 큰 메뉴 5개(묶음) + 그 아래 작은 탭(화면).
+ * season: 시즌 중에만, off: 오프시즌에만. 묶음에 고를 화면이 없으면 그 묶음은 숨긴다.
+ */
+type Hub = '오늘' | '선수단' | '리그' | '구단' | '기록실';
+const HUBS: Hub[] = ['오늘', '선수단', '리그', '구단', '기록실'];
+interface NavItem { id: Screen; label: string; offLabel?: string; season?: boolean; off?: boolean; hub: Hub }
+const NAV: NavItem[] = [
+  { id: 'home', label: '홈', season: true, hub: '오늘' },
+  { id: 'offseason', label: '오프시즌', off: true, hub: '오늘' },
+  { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정', hub: '오늘' },
+  { id: 'articles', label: '기사', hub: '오늘' },
+  { id: 'roster', label: '선수단', season: true, hub: '선수단' },
+  { id: 'trade', label: '트레이드', season: true, hub: '선수단' },
+  { id: 'growth', label: '선수 성장', off: true, hub: '선수단' },
+  { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', hub: '리그' },
+  { id: 'leaders', label: '개인 기록', offLabel: '지난 시즌 기록', hub: '리그' },
+  { id: 'postseason', label: '가을야구', hub: '리그' },
+  { id: 'season-end', label: '시즌 결과', hub: '리그' },
+  { id: 'awards', label: '시상식', hub: '리그' },
+  { id: 'club', label: '구단 운영', hub: '구단' },
+  { id: 'save', label: '저장·설정', hub: '구단' },
+  { id: 'records', label: '기록실', hub: '기록실' },
 ];
-const GROUPS = ['우리 구단', '리그', '역사', '시스템'] as const;
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
-
-/** 지금 화면 이름 (휴대폰 메뉴 버튼) */
-const EXTRA_LABEL: Partial<Record<Screen, string>> = { postseason: '가을야구', 'season-end': '시즌 결과', awards: '시상식', growth: '선수 성장' };
-function screenLabel(s: Screen, off: boolean): string {
-  const n = NAV.find((x) => x.id === s);
-  return n ? (off && n.offLabel ? n.offLabel : n.label) : EXTRA_LABEL[s] ?? '메뉴';
-}
 
 export function GameShell({ store, session, onQuit }: { store: BrowserStore; session: GameSession; onQuit: () => void }) {
   const [version, setVersion] = useState(0);
@@ -73,12 +75,16 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const grades = useMemo(() => computeGrades(world), [world]);
 
   const changed = useCallback(() => setVersion((v) => v + 1), []);
-  // 휴대폰 화면: 메뉴를 펼쳐 고른다 (game.css 좁은 화면)
-  const [menuOpen, setMenuOpen] = useState(false);
+  // 묶음마다 마지막으로 본 화면 (큰 메뉴를 다시 누르면 그 화면으로)
+  const lastInHub = useRef<Partial<Record<Hub, Screen>>>({});
+  // 휴대폰 화면: 진행 버튼 가운데 '다음 경기' 말고는 '더 진행'을 눌러 펼친다 (game.css 좁은 화면)
+  const [moreOpen, setMoreOpen] = useState(false);
   const go = useCallback((s: Screen, arg?: number) => {
     setScreen(s);
     setScreenArg(arg);
-    setMenuOpen(false);
+    setMoreOpen(false);
+    const hub = NAV.find((n) => n.id === s)?.hub;
+    if (hub) lastInHub.current[hub] = s;
     window.scrollTo({ top: 0 });
   }, []);
 
@@ -220,80 +226,100 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
 
-  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave };
+  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave, command: () => void startCommand() };
   const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
-  const nav = NAV.filter((n) => (off ? !n.season : n.id !== 'offseason'));
+  const lastPs = session.league.lastSeason?.postseason;
+  const shown = (n: NavItem): boolean => {
+    if (n.season && off) return false;
+    if (n.off && !off) return false;
+    if (n.id === 'postseason') return (session.done || off) && !!(session.postseason || lastPs);
+    if (n.id === 'season-end') return session.done;
+    if (n.id === 'awards') return !!session.league.awards?.length;
+    if (n.id === 'growth') return !!session.offseason?.growth;
+    return true;
+  };
+  const nav = NAV.filter(shown);
+  const curHub = NAV.find((n) => n.id === screen)?.hub;
+  const hubItems = (h: Hub) => nav.filter((n) => n.hub === h);
+  const goHub = (h: Hub) => {
+    const items = hubItems(h);
+    const last = lastInHub.current[h];
+    go(last && items.some((n) => n.id === last) ? last : items[0].id);
+  };
   const psCur = session.postseasonRunning ? currentSeries(session.postseason!) : null;
   const left = session.season.schedule.slice(session.day).filter((d) => d.some((g) => g.home === session.teamIdx || g.away === session.teamIdx)).length;
+  // 머리 부분 성적: 시즌 중이면 이번 시즌, 오프시즌이면 지난 시즌 순위
+  const recNow = off ? null : session.season.teams[session.teamIdx];
+  const order = off ? session.league.lastSeason?.standings ?? [] : session.season.standings();
+  const rankNow = order.indexOf(session.teamIdx) + 1;
+  const lead = !off && recNow && rankNow > 1 ? session.season.teams[order[0]] : null;
+  const form = !off ? recentForm(session.season.log, session.teamIdx) : null;
+  const disabled = !!busy || session.done || !!session.pendingEvent;
 
   return (
     <GameProvider value={ui}>
-      <div className="shell" style={{ ['--team' as string]: teamColor(team.franchise) }}>
-        <aside className={`nav${menuOpen ? ' open' : ''}`}>
-          <div className="brand">
-            <i className="brand-mark" aria-hidden />
-            <div>
-              <span className="brand-sub">{session.world.year} {off ? '오프시즌' : '시즌'}</span>
-              <strong>{team.name}</strong>
-            </div>
+      <div className="shell tv" style={teamVars(team.franchise, team.name)}>
+        <header className="mast">
+          <div className="mast-top">
+            <span className="mast-brand">KBO 단장</span>
+            <span className="mast-when">
+              {off ? `${session.world.year} 오프시즌` : psCur ? `${session.world.year} 가을야구 · ${ROUND_LABEL[psCur.round]} ${psCur.games.length + 1}차전` : session.done ? `${session.world.year} ${session.postseason?.done ? '가을야구 종료' : '정규시즌 종료'}` : formatDate(session.world.year, session.day, true)}
+              {!off && !session.done && ` · 남은 경기 ${left}`}
+            </span>
+            <span className="mast-tools">
+              <button type="button" className="mast-ghost" onClick={() => go('save')}>저장·설정</button>
+              <button type="button" className="mast-ghost" onClick={onQuit}>시작 화면</button>
+            </span>
           </div>
-          <button type="button" className="menu-toggle" aria-expanded={menuOpen} aria-controls="game-menu" onClick={() => setMenuOpen((o) => !o)}>
-            <span>{screenLabel(screen, off)}</span> <span aria-hidden>{menuOpen ? '✕' : '☰'}</span><span className="sr-only">메뉴 {menuOpen ? '닫기' : '열기'}</span>
-          </button>
-          <nav aria-label="메뉴" id="game-menu">
-            {GROUPS.map((g) => (
-              <div key={g} className="nav-group">
-                <span className="nav-head" aria-hidden>{g}</span>
-                {nav.filter((n) => n.group === g).map((n) => (
-                  <button key={n.id} type="button" className={screen === n.id ? 'on' : ''} aria-current={screen === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
-                    {off && n.offLabel ? n.offLabel : n.label}
-                  </button>
-                ))}
-                {g === '리그' && (session.done || off) && (session.postseason || session.league.lastSeason?.postseason) && (
-                  <button type="button" className={screen === 'postseason' ? 'on' : ''} onClick={() => go('postseason')}>가을야구</button>
-                )}
-                {g === '리그' && session.done && (
-                  <button type="button" className={screen === 'season-end' ? 'on' : ''} onClick={() => go('season-end')}>시즌 결과</button>
-                )}
-                {g === '리그' && !!session.league.awards?.length && (
-                  <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
-                )}
-                {g === '우리 구단' && off && session.offseason?.growth && (
-                  <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
-                )}
-              </div>
-            ))}
-          </nav>
-          <button type="button" className="ghost quit" onClick={onQuit}>시작 화면으로</button>
-        </aside>
-
-        <div className="main">
-          <header className="topbar">
-            <div className="when">
-              <strong>{off ? `${session.world.year} 오프시즌` : psCur ? `${session.world.year} 가을야구 · ${ROUND_LABEL[psCur.round]} ${psCur.games.length + 1}차전` : session.done ? `${session.world.year} ${session.postseason?.done ? '가을야구 종료' : '정규시즌 종료'}` : formatDate(session.world.year, session.day, true)}</strong>
-              <span className="muted small">
-                {summaryOf(session)}{!session.done && ` · 남은 경기 ${left}`}
-              </span>
-            </div>
+          <div className="mast-main">
+            <strong className="mast-team">{team.name}</strong>
+            <span className="mast-score" title={summaryOf(session)}>
+              {recNow && recNow.g > 0 && <span className="mast-rec">{recNow.w}<span className="dim">–{recNow.l}{recNow.t ? `–${recNow.t}` : ''}</span></span>}
+              {rankNow > 0 && (!recNow || recNow.g > 0) && <span className="mast-rank"><b>{rankNow}</b>위{off && <small> 지난 시즌</small>}</span>}
+              {recNow && recNow.g === 0 && <span className="mast-sub">개막 전</span>}
+              {recNow && recNow.g > 0 && <span className="mast-sub">{lead ? `선두와 ${gamesBehind(lead, recNow).toFixed(1)}` : '선두'}{form?.streak ? ` · ${form.streak}` : ''}</span>}
+            </span>
             {!off && session.postseasonRunning && <div className="advance">
-              {busy && <span className="muted small" role="status">{busy}</span>}
-              <button type="button" onClick={() => void advancePs('one', '경기 진행 중')} disabled={!!busy}>다음 경기</button>
-              <button type="button" onClick={() => void advancePs('ours', '우리 경기까지 진행 중')} disabled={!!busy}>우리 경기까지</button>
-              <button type="button" onClick={() => void advancePs('series', '시리즈 진행 중')} disabled={!!busy}>시리즈 끝까지</button>
-              <button type="button" className="ghost" onClick={() => void advancePs('all', '가을야구 진행 중')} disabled={!!busy}>가을야구 끝까지</button>
+              {busy && <span className="mast-busy" role="status">{busy}</span>}
+              <button type="button" className="go" onClick={() => void advancePs('one', '경기 진행 중')} disabled={!!busy}>다음 경기 ▶</button>
+              <button type="button" className="more-toggle" aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>더 진행 {moreOpen ? '▴' : '▾'}</button>
+              <div className={`adv-rest${moreOpen ? ' open' : ''}`}>
+                <button type="button" onClick={() => void advancePs('ours', '우리 경기까지 진행 중')} disabled={!!busy}>우리 경기까지</button>
+                <button type="button" onClick={() => void advancePs('series', '시리즈 진행 중')} disabled={!!busy}>시리즈 끝까지</button>
+                <button type="button" onClick={() => void advancePs('all', '가을야구 진행 중')} disabled={!!busy}>가을야구 끝까지</button>
+              </div>
             </div>}
             {!off && !session.done && <div className="advance">
-              {busy && <span className="muted small" role="status">{busy}</span>}
-              <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done || !!session.pendingEvent} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
-              <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>하루</button>
-              <button type="button" className="ghost" onClick={() => void startCommand()} disabled={!!busy || session.done || !!session.pendingEvent} title="오늘(또는 다음) 우리 경기를 타석마다 직접 지휘합니다: 대타·대주자·작전·투수 교체">직접 지휘</button>
-              <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>일주일</button>
-              <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>한 달</button>
-              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (완전 자동)', true)} disabled={!!busy || session.done || !!session.pendingEvent} title="완전 자동: 무엇이 생겨도 멈추지 않고, 이벤트는 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
-              <StopSettings value={stops} onChange={setStops} />
+              {busy && <span className="mast-busy" role="status">{busy}</span>}
+              <button type="button" className="go" onClick={() => void advanceNextGame()} disabled={disabled} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기 ▶</button>
+              <button type="button" className="more-toggle" aria-expanded={moreOpen} onClick={() => setMoreOpen((o) => !o)}>더 진행 {moreOpen ? '▴' : '▾'}</button>
+              <div className={`adv-rest${moreOpen ? ' open' : ''}`}>
+                <button type="button" onClick={() => void startCommand()} disabled={disabled} title="오늘(또는 다음) 우리 경기를 타석마다 직접 지휘합니다: 대타·대주자·작전·투수 교체">직접 지휘</button>
+                <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={disabled}>하루</button>
+                <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={disabled}>일주일</button>
+                <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={disabled}>한 달</button>
+                <button type="button" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (완전 자동)', true)} disabled={disabled} title="완전 자동: 무엇이 생겨도 멈추지 않고, 이벤트는 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
+                <StopSettings value={stops} onChange={setStops} />
+              </div>
             </div>}
-          </header>
+          </div>
+          <nav className="hubs" aria-label="메뉴">
+            {HUBS.filter((h) => hubItems(h).length).map((h) => (
+              <button key={h} type="button" className={curHub === h ? 'on' : ''} aria-current={curHub === h ? 'page' : undefined} onClick={() => goHub(h)}>{h}</button>
+            ))}
+          </nav>
+        </header>
+        {curHub && hubItems(curHub).length > 1 && (
+          <nav className="subtabs" aria-label={`${curHub} 화면`}>
+            {hubItems(curHub).map((n) => (
+              <button key={n.id} type="button" className={screen === n.id ? 'on' : ''} aria-current={screen === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
+                {off && n.offLabel ? n.offLabel : n.label}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className="main">
           {saveError && <p className="error banner" role="alert">{saveError}</p>}
           <main className="content" aria-busy={!!busy}>
             <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>

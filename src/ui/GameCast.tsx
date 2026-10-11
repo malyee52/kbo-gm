@@ -7,7 +7,7 @@ import { formatDate } from '../game/calendar';
 import { highlights, inningLabel, lineScoreUpTo, playText } from '../game/highlights';
 import type { CastGame } from '../game/session';
 import { useGame } from './context';
-import { teamColor } from './teams';
+import { teamVars } from './teams';
 
 const SPEEDS = [{ label: '느리게', ms: 1300 }, { label: '보통', ms: 650 }, { label: '빠르게', ms: 220 }];
 const SPEED_KEY = 'kbo-gm.cast-speed';
@@ -74,7 +74,7 @@ export function GameCast({ game, onClose }: { game: CastGame; onClose: () => voi
   const result = game.homeRuns === game.awayRuns ? '무승부' : (game.homeRuns > game.awayRuns) === (game.home === me) ? '승리' : '패배';
 
   return (
-    <dialog ref={ref} className="player cast" onClose={onClose} style={{ ['--team' as string]: teamColor(session.team.franchise) }}>
+    <dialog ref={ref} className="player cast tv" onClose={onClose} style={teamVars(session.team.franchise, session.team.name)}>
       <div className="dialog-body">
         <header className="row-between">
           <div>

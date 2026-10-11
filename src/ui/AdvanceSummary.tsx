@@ -8,7 +8,7 @@ import type { Attention, AttentionKind } from '../game/stops';
 import type { Screen } from './context';
 import { fixed2, ipText, ops, rate3 } from '../game/stats';
 import { PlayerLink, useGame, useWon } from './context';
-import { teamColor } from './teams';
+import { teamVars } from './teams';
 import { GameCast } from './GameCast';
 import { CountUp } from './Motion';
 import { highlights } from '../game/highlights';
@@ -109,7 +109,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
 
   const close = () => { ref.current?.close(); onClose(); };
   return (
-    <dialog ref={ref} className="player summary" onClose={onClose} style={{ ['--team' as string]: teamColor(session.team.franchise) }}>
+    <dialog ref={ref} className="player summary tv" onClose={onClose} style={teamVars(session.team.franchise, session.team.name)}>
       <div className="dialog-body">
         <header className="row-between">
           <div>

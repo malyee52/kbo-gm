@@ -110,7 +110,7 @@ export function Trade() {
       <div className="team-grid compact" role="radiogroup" aria-label="상대 구단">
         {others.map((t) => (
           <button key={t.idx} type="button" role="radio" aria-checked={other === t.idx}
-            className={`team-card${other === t.idx ? ' on' : ''}`} style={{ ['--c' as string]: teamColor(t.franchise) }} onClick={() => pickTeam(t.idx)}>
+            className={`team-card${other === t.idx ? ' on' : ''}`} style={{ ['--c' as string]: teamColor(t.franchise, t.name) }} onClick={() => pickTeam(t.idx)}>
             <TeamName idx={t.idx} />
             <span className="muted small">{info.get(t.idx)!.rank} · {TENDENCY_LABEL[info.get(t.idx)!.tendency]}</span>
             <span className="muted small" title={GM_STYLE_NOTE[gmStyle(session.league, t.idx)]}>단장: {GM_STYLE_LABEL[gmStyle(session.league, t.idx)]}</span>

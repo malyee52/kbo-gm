@@ -3,7 +3,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type { BrowserStore } from '../data/loadBrowser';
 import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
-import { teamColor } from './teams';
+import { teamPalette } from './teams';
 import { priceIndex, wonText } from '../league/salary';
 
 export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason';
@@ -19,6 +19,8 @@ export interface GameUi {
   autosave(): Promise<void>;
   go(screen: Screen, arg?: number): void;
   openPlayer(idx: number): void;
+  /** 직접 지휘 시작 (오늘 또는 다음 우리 경기). 시즌 중에만 */
+  command(): void;
 }
 
 const Ctx = createContext<GameUi | null>(null);
@@ -50,6 +52,12 @@ export function useWon(): (man: number) => string {
   return (man) => wonText(man, year);
 }
 
+/** 구단 색 표시 변수: 밝은 모드는 주색(--c), 다크 모드는 밝힌 구단색(--cd) */
+export function chipVars(franchise: string, name?: string): Record<string, string> {
+  const p = teamPalette(franchise, name);
+  return { '--c': p.primary, '--cd': p.dark };
+}
+
 /** 구단 이름 + 색 표시 */
 export function TeamName({ idx, short = false }: { idx: number; short?: boolean }) {
   const { session } = useGame();
@@ -57,7 +65,7 @@ export function TeamName({ idx, short = false }: { idx: number; short?: boolean 
   const mine = idx === session.teamIdx;
   return (
     <span className={`team${mine ? ' mine' : ''}`}>
-      <i className="chip" style={{ background: teamColor(t.franchise) }} aria-hidden />
+      <i className="chip" style={chipVars(t.franchise, t.name)} aria-hidden />
       {short ? t.name : t.name}
     </span>
   );

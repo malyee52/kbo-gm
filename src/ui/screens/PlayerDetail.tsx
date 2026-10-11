@@ -8,7 +8,7 @@ import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game
 import { dollarText } from '../../league/salary';
 import { Grade, gradeClass, HAND, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
-import { teamColor } from '../teams';
+import { teamVars } from '../teams';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -53,7 +53,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   };
 
   return (
-    <dialog ref={ref} className="player" style={{ ['--team' as string]: teamColor(session.teamInfo(p.teamIdx).franchise) }}
+    <dialog ref={ref} className="player tv" style={teamVars(session.teamInfo(p.teamIdx).franchise, session.teamInfo(p.teamIdx).name)}
       onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="row-between">

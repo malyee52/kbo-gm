@@ -68,11 +68,11 @@ export function teamColor(franchise: string, name?: string): string {
   return teamPalette(franchise, name).primary;
 }
 
-/** 화면 틀에 내려 줄 CSS 변수 */
+/** 화면 틀·창에 내려 줄 CSS 변수. 받는 요소에는 class "tv"를 붙인다 (game.css가 밝은/다크 모드에 맞춰 --team·--accent를 고른다) */
 export function teamVars(franchise: string, name?: string): Record<string, string> {
   const t = teamPalette(franchise, name);
   return {
-    '--team': t.primary,
+    '--team-primary': t.primary,
     '--team-on': t.on,
     '--team-2': t.second,
     '--team-tint': t.tint,
