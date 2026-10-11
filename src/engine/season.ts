@@ -427,6 +427,25 @@ export class Season {
     this.day++;
   }
 
+  /** 그 선수를 until 전날까지 쉬게 한다 (무작위 이벤트의 휴식 처방). 부상 기록에는 남기지 않는다 */
+  restPlayer(idx: number, until: number): void {
+    if (this.states.absentUntil[idx] >= until) return;
+    this.states.absentUntil[idx] = until;
+    const ts = this.teamSeasons[this.world.players[idx].teamIdx];
+    if (ts) ts.dirty = true;
+  }
+
+  /** 투수 피로를 없앤다 (무작위 이벤트의 휴식 처방) */
+  clearFatigue(idx: number): void {
+    this.states.fatigue[idx] = 0;
+    this.states.streak[idx] = 0;
+  }
+
+  /** 오늘부터 쓸 선수별 컨디션 (무작위 이벤트 효과). null이면 없앤다. 저장하지 않는다: 세션이 날마다 리그 상태에서 다시 만든다 */
+  setForm(form: Float64Array | null): void {
+    this.ctx.form = form ?? undefined;
+  }
+
   private addAbsence(a: Absence, ts: TeamSeason): void {
     this.states.absentUntil[a.idx] = a.until;
     this.absences.push(a);

@@ -9,6 +9,7 @@ import type { ScenarioState } from './scenarios';
 import type { ArchivedPlayer, SeasonBest, YearRecord } from './history';
 import type { Article } from './articles';
 import type { RivalPair } from './rivals';
+import type { ChallengeState } from './challenges';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -210,6 +211,8 @@ export interface LeagueState {
   rivals?: { year: number; pairs: RivalPair[] };
   /** 넘어간 신인 지명권 (picks.ts). 없으면 원래 구단 것 */
   pickOwners?: { draft: number; round: number; from: number; owner: number }[];
+  /** 도전 모드 진행 (challenges.ts) */
+  challenge?: ChallengeState;
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

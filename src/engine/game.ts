@@ -60,6 +60,8 @@ export interface GameContext {
   postseason?: boolean;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
+  /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
+  form?: Float64Array;
 }
 
 interface PitcherInGame {
@@ -270,7 +272,8 @@ function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boole
   const ps = pg.skill;
   // 타자에게 유리한 정도: 좌우 상성 + 홈 이점 + 숨겨진 특수능력 (둘 다 없으면 0)
   const edge = platoonEdge(b, pg.p, params.platoon) + (batIsHome ? params.homeEdge : -params.homeEdge)
-    + (b.traits || pg.p.traits ? traitEdge(b, pg.p, { ...state, postseason: !!ctx.postseason, home: batIsHome }, params.traits) : 0);
+    + (b.traits || pg.p.traits ? traitEdge(b, pg.p, { ...state, postseason: !!ctx.postseason, home: batIsHome }, params.traits) : 0)
+    + (ctx.form ? ctx.form[b.idx] - ctx.form[pg.p.idx] : 0);
   // 투수 피로: 한계를 넘긴 타자 수에 비례
   const over = pg.bf - pg.limit;
   const fat = over > 0 ? Math.min(0.3, over * params.fatiguePerBatter * fatigueScale(pg.p, params.traits)) : 0;
