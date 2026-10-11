@@ -1,4 +1,4 @@
-"""기획안(KBO_도전형_시나리오_기획안.md) 8장·10.2장의 시놉시스를 src/league/synopses.ts로 옮긴다.
+"""기획안(KBO_도전형_시나리오_기획안.md) 8장·10.2장(도전 시나리오)과 11장(시즌 선택)의 시놉시스를 src/league/synopses.ts로 옮긴다.
 
 쓰는 법: python tools/build_synopses.py [기획안 경로]
 기획안 문구를 고치면 이 스크립트를 다시 돌린다. 머리글 "#### 번호. ..." 아래의 "**상징 인물:**" 줄과 본문 문단을 읽는다.
@@ -47,6 +47,22 @@ lines = [
 ]
 for n in need:
     lines.append(f'  {json.dumps(n)}: {{ figures: {json.dumps(out[n]["figures"], ensure_ascii=False)}, text: {json.dumps(out[n]["text"], ensure_ascii=False)} }},')
+lines.append('};')
+lines.append('')
+
+# 11장: 시즌 선택 화면 (#### 연도 — 제목)
+a = text.index('## 11.')
+seasons = {}
+for m in re.finditer(r'^#### (\d{4}) — ([^\n]+)\n(.*?)(?=^#### |^## |\Z)', text[a:], re.S | re.M):
+    paras = [p.strip() for p in re.split(r'\n\s*\n', m.group(3)) if p.strip()]
+    seasons[int(m.group(1))] = {'title': m.group(2).strip(), 'text': ' '.join(paras)}
+miss = [y for y in range(1982, 2027) if y not in seasons]
+if miss:
+    sys.exit(f'시즌 시놉시스가 없는 해: {miss}')
+lines.append('/** 시즌 선택 화면의 시놉시스 (기획안 11장): 그 해 개막 시점의 리그를 바라보는 소개문 */')
+lines.append('export const SEASON_SYNOPSIS: Record<number, { title: string; text: string }> = {')
+for y in sorted(seasons):
+    lines.append(f'  {y}: {{ title: {json.dumps(seasons[y]["title"], ensure_ascii=False)}, text: {json.dumps(seasons[y]["text"], ensure_ascii=False)} }},')
 lines.append('};')
 lines.append('')
 io.open(ROOT / 'src/league/synopses.ts', 'w', encoding='utf-8', newline='\n').write('\n'.join(lines))
