@@ -23,6 +23,10 @@ import {
   seasonBests, yearbook,
 } from '../league/history';
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM } from '../league/articles';
+import {
+  MAX_PICKS_PER_TRADE, ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
+  tradablePick, transferPick, type DraftPick,
+} from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
@@ -85,7 +89,7 @@ export interface NewsItem {
  */
 export type GameAction =
   | { year?: number; day: number; type: 'entry'; ids: string[] | null }
-  | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number }
+  | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number; pg?: string[]; pr?: string[] }
   | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
   | { year: number; day: number; type: 'event'; choice: number }
   /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장) */
@@ -117,6 +121,9 @@ export interface TradeRecord {
   team: number;
   give: number[];
   get: number[];
+  /** 내준·받은 지명권 (picks.ts pickId) */
+  pg?: string[];
+  pr?: string[];
 }
 
 /** 트레이드 마감: 7월 31일 (임시값. 실제 규정 날짜는 확인 필요) */
@@ -160,6 +167,10 @@ export interface GameSaveV2 {
 }
 
 export type GameSave = GameSaveV1 | GameSaveV2;
+
+/** 트레이드에 넣는 지명권: give = 우리가 내주는 것, get = 받는 것 */
+export interface PickSwap { give: DraftPick[]; get: DraftPick[] }
+const NO_PICKS: PickSwap = { give: [], get: [] };
 
 /** 기사 판정용 (세션 메모리) */
 type Tot = { h: number; hr: number; w: number; sv: number; so: number };
@@ -305,7 +316,7 @@ export class GameSession {
     this.trades = [];
     for (const a of this.actions) {
       if (a.type !== 'trade' || (a.year ?? this.league.startYear) !== this.world.year) continue;
-      this.trades.push({ day: a.day, team: a.team, give: a.give.map((id) => byId.get(id)!), get: a.get.map((id) => byId.get(id)!) });
+      this.trades.push({ day: a.day, team: a.team, give: a.give.map((id) => byId.get(id)!), get: a.get.map((id) => byId.get(id)!), pg: a.pg, pr: a.pr });
     }
   }
 
@@ -347,7 +358,7 @@ export class GameSession {
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else if (a.type === 'event') this.applyEventChoice(a.choice);
-    else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0);
+    else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
 
@@ -898,7 +909,7 @@ export class GameSession {
    * 트레이드 제안을 AI 구단 입장에서 평가만 한다.
    * cash: 우리가 주는 현금 (만 원, 음수면 받는다). 선수를 현금만으로 사고팔 수도 있다 (재정 상세형)
    */
-  evaluateTrade(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0): TradeEvaluation {
+  evaluateTrade(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0, picks: PickSwap = NO_PICKS): TradeEvaluation {
     const none = { gain: 0, need: 0, before: 0, after: 0, tendency: 'rebuild' as const };
     if (aiTeam === this.teamIdx || !this.world.teams[aiTeam]) return { verdict: 'reject-invalid', message: '상대 구단을 고르세요.', detail: none };
     if (!this.tradeOpen) {
@@ -911,19 +922,64 @@ export class GameSession {
     if (!Number.isFinite(cash) || Math.round(cash) !== cash) return { verdict: 'reject-invalid', message: '현금은 만 원 단위 정수여야 합니다.', detail: none };
     if (cash > 0 && cash > this.cashNow()) return { verdict: 'reject-invalid', message: `줄 현금(${(cash / 10000).toFixed(1)}억 원)보다 자금이 모자랍니다.`, detail: none };
     if (cash < 0 && -cash > this.cashNow(aiTeam)) return { verdict: 'reject-value', message: '그만한 현금은 우리 구단 자금으로 감당할 수 없습니다.', detail: none };
-    return evaluateTrade({ aiTeam, receive: give, give: get, cash }, this.world.teams[aiTeam].org, this.situation(aiTeam), this.values);
+    const locked = [...give, ...get].filter((p) => this.leaguePlayer(p.id)?.noTradeYear === this.year);
+    if (locked.length) return { verdict: 'reject-invalid', message: `넘겨받은 지명권으로 입단한 선수는 입단 첫해 트레이드할 수 없습니다 (${locked.map((p) => p.name).join(', ')}).`, detail: none };
+    const pickErr = this.checkPicks(aiTeam, give, get, picks);
+    if (pickErr) return { verdict: 'reject-invalid', message: pickErr, detail: none };
+    const sit = this.situation(aiTeam);
+    const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
+    const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
+    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals }, this.world.teams[aiTeam].org, sit, this.values);
   }
 
   /** 트레이드를 제안한다. AI가 수락하면 바로 실행한다 */
-  proposeTrade(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0): TradeEvaluation {
-    const ev = this.evaluateTrade(aiTeam, give, get, cash);
+  proposeTrade(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0, picks: PickSwap = NO_PICKS): TradeEvaluation {
+    const ev = this.evaluateTrade(aiTeam, give, get, cash, picks);
     if (ev.verdict !== 'accept') return ev;
-    this.applyTrade(aiTeam, give.map((p) => p.idx), get.map((p) => p.idx), cash);
-    this.actions.push({ year: this.year, day: this.day, type: 'trade', team: aiTeam, give: give.map((p) => p.id), get: get.map((p) => p.id), ...(cash ? { cash } : {}) });
-    const names = (ps: SimPlayer[]) => ps.map((p) => p.name).join(', ') || '없음';
+    this.applyTrade(aiTeam, give.map((p) => p.idx), get.map((p) => p.idx), cash, picks);
+    const pg = picks.give.map(pickId);
+    const pr = picks.get.map(pickId);
+    this.actions.push({ year: this.year, day: this.day, type: 'trade', team: aiTeam, give: give.map((p) => p.id), get: get.map((p) => p.id),
+      ...(cash ? { cash } : {}), ...(pg.length ? { pg } : {}), ...(pr.length ? { pr } : {}) });
+    const names = (ps: SimPlayer[], pks: DraftPick[]) => [...ps.map((p) => p.name), ...pks.map((p) => this.pickLabel(p))].join(', ') || '없음';
     const money = cash > 0 ? ` (현금 ${(cash / 10000).toFixed(1)}억 원 지급)` : cash < 0 ? ` (현금 ${(-cash / 10000).toFixed(1)}억 원 받음)` : '';
-    this.addNews(this.day, 'trade', `트레이드 성사: ${this.world.teams[aiTeam].name}에 ${names(give)}을(를) 내주고 ${names(get)}을(를) 받았습니다${money}. 받은 선수는 2군에 등록됩니다.`);
+    this.addNews(this.day, 'trade', `트레이드 성사: ${this.world.teams[aiTeam].name}에 ${names(give, picks.give)}을(를) 내주고 ${names(get, picks.get)}을(를) 받았습니다${money}. 받은 선수는 2군에 등록됩니다.`);
     return ev;
+  }
+
+  // ---- 지명권 (league/picks.ts)
+
+  /** 지명권 트레이드가 되는 시즌인가 */
+  get pickTradeOpen(): boolean {
+    return this.year >= PICK_TRADE_FROM;
+  }
+
+  /** 그 구단이 가진 트레이드 가능한 지명권 */
+  ownedPicks(team: number): DraftPick[] {
+    return ownedPicks(this.league, team, this.year, this.world.teams.map((t) => t.idx));
+  }
+
+  /** "2027 1라운드 (LG)": 원래 구단 이름 */
+  pickLabel(p: DraftPick): string {
+    return `${p.draft} ${p.round}라운드${this.league.teams[p.from] ? ` (${this.league.teams[p.from].name})` : ''}`;
+  }
+
+  /** AI가 보는 지명권 가치 (순번은 원래 구단의 지금 순위로) */
+  private pickValueFor(p: DraftPick, tendency: Tendency): number {
+    return pickValue(p, this.year, this.world.teams.length, (t) => this.situation(t).rank, tendency, Off.DRAFT_POTENTIAL_SCALE);
+  }
+
+  private checkPicks(aiTeam: number, give: SimPlayer[], get: SimPlayer[], picks: PickSwap): string | null {
+    const all = [...picks.give, ...picks.get];
+    if (all.length === 0) return null;
+    if (!this.pickTradeOpen) return `지명권 트레이드는 ${PICK_TRADE_FROM}년부터 할 수 있습니다 (2019년 8월 규약 개정).`;
+    if (all.length > MAX_PICKS_PER_TRADE) return `한 트레이드에 지명권은 ${MAX_PICKS_PER_TRADE}장까지 넣을 수 있습니다.`;
+    if (give.length + get.length === 0) return '지명권은 선수와 함께 트레이드해야 합니다.';
+    if (new Set(all.map(pickId)).size !== all.length) return '같은 지명권이 두 번 들어 있습니다.';
+    if (all.some((p) => !tradablePick(p, this.year) || !this.world.teams[p.from])) return `트레이드할 수 없는 지명권입니다 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지).`;
+    if (picks.give.some((p) => pickOwner(this.league, p) !== this.teamIdx)) return '우리 구단이 가진 지명권만 내줄 수 있습니다.';
+    if (picks.get.some((p) => pickOwner(this.league, p) !== aiTeam)) return '상대 구단이 가진 지명권만 받을 수 있습니다.';
+    return null;
   }
 
   /** AI 구단에게 "이 선수를 주려면 무엇을 원하나"를 묻는다. 수락할 만한 조합이 없으면 null */
@@ -933,14 +989,17 @@ export class GameSession {
     return suggestPackage(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
   }
 
-  private applyTrade(aiTeam: number, give: number[], get: number[], cash = 0): void {
+  private applyTrade(aiTeam: number, give: number[], get: number[], cash = 0, picks: PickSwap = NO_PICKS): void {
+    for (const p of picks.give) transferPick(this.league, p, aiTeam);
+    for (const p of picks.get) transferPick(this.league, p, this.teamIdx);
     if (cash) {
       const [from, to, amount] = cash > 0 ? [this.teamIdx, aiTeam, cash] : [aiTeam, this.teamIdx, -cash];
       this.league.ledger.push({ year: this.year, from, to, amount, note: `트레이드 현금 (${this.world.teams[aiTeam].name})`, kind: 'trade' });
     }
     for (const i of give) this.season.transfer(i, aiTeam);
     for (const i of get) this.season.transfer(i, this.teamIdx);
-    this.trades.push({ day: this.day, team: aiTeam, give: [...give], get: [...get] });
+    this.trades.push({ day: this.day, team: aiTeam, give: [...give], get: [...get],
+      ...(picks.give.length ? { pg: picks.give.map(pickId) } : {}), ...(picks.get.length ? { pr: picks.get.map(pickId) } : {}) });
   }
 
   // ---- 오프시즌

@@ -7,6 +7,7 @@ import { TRADE_DEADLINE } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { teamColor } from '../teams';
+import { MAX_PICKS_PER_TRADE, parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
 
 type Kind = 'all' | 'hit' | 'pit';
 
@@ -18,6 +19,9 @@ export function Trade() {
   const [get, setGet] = useState<Set<number>>(new Set());
   const [reply, setReply] = useState<{ ev?: TradeEvaluation; text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 지명권 (pickId): 내줄 것, 받을 것
+  const [gp, setGp] = useState<Set<string>>(new Set());
+  const [rp, setRp] = useState<Set<string>>(new Set());
   // 현금 (억 원, 그 해 물가로 보이는 금액). 우리가 주면 +, 받으면 −
   const [cashText, setCashText] = useState('0');
   const px = usePriceIndex();
@@ -42,6 +46,7 @@ export function Trade() {
   const pickTeam = (t: number) => {
     setOther(t);
     setGet(new Set());
+    setRp(new Set());
     setReply(null);
   };
 
@@ -58,11 +63,13 @@ export function Trade() {
   };
 
   const propose = () => {
-    const ev = session.proposeTrade(other, giveList, getList, cashMan);
+    const ev = session.proposeTrade(other, giveList, getList, cashMan, { give: [...gp].map(parsePick), get: [...rp].map(parsePick) });
     if (ev.verdict === 'accept') {
       setReply({ ev, text: `${session.world.teams[other].name}: "${ev.message}" 트레이드가 성사됐습니다. 받은 선수는 2군에 있습니다.`, ok: true });
       setGive(new Set());
       setGet(new Set());
+      setGp(new Set());
+      setRp(new Set());
       setCashText('0');
       changed();
     } else {
@@ -117,11 +124,13 @@ export function Trade() {
           <div>
             <h3>내줄 선수 <span className="muted small">{session.team.name}</span></h3>
             {giveList.length ? <ul className="plain">{giveList.map((p) => <li key={p.idx}><PlayerLink p={p} /> <span className="muted small">{p.isPitcher ? '투수' : posName(p.pos)} · {p.age ?? '-'}세</span></li>)}</ul> : <p className="muted small">아래 왼쪽에서 고르세요.</p>}
+            {gp.size > 0 && <p className="small">지명권: {[...gp].map((id) => session.pickLabel(parsePick(id))).join(', ')}</p>}
           </div>
           <div aria-hidden className="trade-arrow">⇄</div>
           <div>
             <h3>받을 선수 <span className="muted small">{session.world.teams[other].name}</span></h3>
             {getList.length ? <ul className="plain">{getList.map((p) => <li key={p.idx}><PlayerLink p={p} /> <span className="muted small">{p.isPitcher ? '투수' : posName(p.pos)} · {p.age ?? '-'}세</span></li>)}</ul> : <p className="muted small">아래 오른쪽에서 고르세요.</p>}
+            {rp.size > 0 && <p className="small">지명권: {[...rp].map((id) => session.pickLabel(parsePick(id))).join(', ')}</p>}
           </div>
         </div>
         <p className="small">
@@ -141,9 +150,24 @@ export function Trade() {
           <button type="button" className="ghost" onClick={() => void ask()} disabled={!open || busy || getList.length === 0} title="받을 선수를 고른 뒤 상대가 원하는 조건을 묻습니다">
             {busy ? '상대가 검토 중' : '상대 요구안 묻기'}
           </button>
-          <button type="button" className="ghost" onClick={() => { setGive(new Set()); setGet(new Set()); setCashText('0'); setReply(null); }}>비우기</button>
+          <button type="button" className="ghost" onClick={() => { setGive(new Set()); setGet(new Set()); setGp(new Set()); setRp(new Set()); setCashText('0'); setReply(null); }}>비우기</button>
         </div>
       </section>
+
+      {session.pickTradeOpen && (
+        <section className="panel">
+          <h2>신인 지명권</h2>
+          <p className="muted small">
+            다음 {PICK_YEARS_AHEAD}번의 드래프트, {PICK_MAX_ROUND}라운드까지. 한 트레이드에 {MAX_PICKS_PER_TRADE}장까지, 선수와 함께만 (2019년 8월 KBO 규약).
+            순번은 그 해 원래 구단의 순위로 정해집니다. 넘겨받은 지명권으로 뽑은 선수는 입단 첫해 트레이드할 수 없습니다.
+            리빌딩 구단일수록, 하위권 구단의 지명권일수록 높게 칩니다.
+          </p>
+          <div className="two">
+            <PickBoxes title={`${session.team.name} 지명권`} team={session.teamIdx} selected={gp} other={rp} setSelected={setGp} disabled={!open} onChange={() => setReply(null)} />
+            <PickBoxes title={`${session.world.teams[other].name} 지명권`} team={other} selected={rp} other={gp} setSelected={setRp} disabled={!open} onChange={() => setReply(null)} />
+          </div>
+        </section>
+      )}
 
       <div className="two">
         <PickList title={`${session.team.name} 선수`} org={session.team.org} selected={give} onToggle={(p) => toggle(give, setGive, p)} disabled={!open} showEntry />
@@ -155,13 +179,13 @@ export function Trade() {
         {session.trades.length === 0 ? <p className="muted">아직 성사된 트레이드가 없습니다.</p> : (
           <div className="scroll">
             <table>
-              <thead><tr><th className="l">날짜</th><th className="l">상대</th><th className="l">내준 선수</th><th className="l">받은 선수</th></tr></thead>
+              <thead><tr><th className="l">날짜</th><th className="l">상대</th><th className="l">내준 것</th><th className="l">받은 것</th></tr></thead>
               <tbody>
                 {[...session.trades].reverse().map((t, k) => (
                   <tr key={k}>
                     <td className="l">{shortDate(year, t.day)}</td><td className="l"><TeamName idx={t.team} /></td>
-                    <td className="l">{t.give.map((i) => players[i].name).join(', ') || '-'}</td>
-                    <td className="l">{t.get.map((i) => players[i].name).join(', ') || '-'}</td>
+                    <td className="l">{[...t.give.map((i) => players[i].name), ...(t.pg ?? []).map((id) => session.pickLabel(parsePick(id)))].join(', ') || '-'}</td>
+                    <td className="l">{[...t.get.map((i) => players[i].name), ...(t.pr ?? []).map((id) => session.pickLabel(parsePick(id)))].join(', ') || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -229,5 +253,39 @@ function PickList({ title, org, selected, onToggle, disabled, showEntry = false 
         </table>
       </div>
     </section>
+  );
+}
+
+/** 그 구단이 가진 지명권 고르기 (양쪽 합 MAX_PICKS_PER_TRADE장까지) */
+function PickBoxes({ title, team, selected, other, setSelected, disabled, onChange }: {
+  title: string; team: number; selected: Set<string>; other: Set<string>; setSelected: (s: Set<string>) => void; disabled: boolean; onChange: () => void;
+}) {
+  const { session } = useGame();
+  const picks = session.ownedPicks(team);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else if (next.size + other.size < MAX_PICKS_PER_TRADE) next.add(id);
+    else return;
+    setSelected(next);
+    onChange();
+  };
+  return (
+    <div>
+      <h3>{title} <span className="muted small">{picks.length}장</span></h3>
+      <ul className="plain picks">
+        {picks.map((p) => {
+          const id = pickId(p);
+          return (
+            <li key={id}>
+              <label className="small">
+                <input type="checkbox" checked={selected.has(id)} disabled={disabled} onChange={() => toggle(id)} /> {session.pickLabel(p)}
+                {p.from !== team && <span className="tag">받은 지명권</span>}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
