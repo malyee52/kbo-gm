@@ -98,6 +98,8 @@ export function Offseason() {
 
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
 
+      <PostingPanel act={act} />
+
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'foreign' && <ForeignPanel act={act} />}
@@ -492,6 +494,52 @@ function DraftPanel({ act }: { act: Act }) {
           </ul>
         </div>
       </div>
+    </section>
+  );
+}
+
+/** 우리 선수의 포스팅(해외 진출) 요청과 해외에서 뛰는 선수 (league/overseas.ts) */
+function PostingPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const off = session.offseason!;
+  const won = useWon();
+  const pending = (off.postings ?? []).filter((x) => !x.decided);
+  const abroad = session.abroadPlayers();
+  const open = off.stage !== 'release' && off.stage !== 'ready';
+  if (!pending.length && !abroad.length) return null;
+  const name = (id: string) => session.league.players.find((p) => p.id === id)?.name ?? id;
+  return (
+    <section className="panel">
+      {pending.length > 0 && (
+        <>
+          <h2>해외 진출 요청</h2>
+          <p className="muted small">보내면 포스팅 이적료를 받고 선수는 해외로 갑니다. 나중에 돌아오면 우리 구단으로 복귀합니다(보류권). 정원 정리 단계 전까지 답하지 않으면 붙잡은 것으로 합니다.</p>
+          <ul className="plain">
+            {pending.map((x) => (
+              <li key={x.id} className="row-between">
+                <span><strong>{name(x.id)}</strong> · 이적료 약 {won(x.fee)}</span>
+                <span className="inline">
+                  <button type="button" className="small-btn" disabled={!open} onClick={() => act(session.answerPosting(x.id, true))}>보낸다</button>
+                  <button type="button" className="small-btn ghost" disabled={!open} onClick={() => act(session.answerPosting(x.id, false))}>붙잡는다</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {abroad.length > 0 && (
+        <details className="small">
+          <summary>해외에서 뛰는 선수 {abroad.length}명</summary>
+          <ul className="plain">
+            {abroad.map((p) => (
+              <li key={p.id}>
+                {p.name} · {p.abroad!.since}년부터 · 원 소속 {session.league.teams[p.abroad!.origin]?.name ?? '-'}
+                · {p.abroad!.mode === 'posting' ? '돌아오면 원 소속 구단으로' : '돌아오면 FA'}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   );
 }

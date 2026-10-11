@@ -5,6 +5,7 @@ import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, t
 import { currentRuns, valueContext } from '../ai/value';
 import { initialMilitary } from './careers';
 import { makeDraftee, takenNames } from './offseason';
+import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
 import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget } from './salary';
@@ -110,6 +111,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const futures = addFuturesTeams(league, store, startYear);
   const recordedIds = new Set(league.players.map((p) => p.id));
   const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx)
+    + addAbroadAtStart(league, store, startYear, params, special, toLeague, idx)
     + addAbsentVeterans(league, store, startYear, params, special, toLeague)
     + addLateDebuts(league, store, ctx, startYear, idx);
   trimToOrgLimit(league, recordedIds);
@@ -141,6 +143,70 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
     const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx);
     p.team = t;
     p.military = { state: 'pending' };
+    n++;
+  }
+  return n;
+}
+
+/** 해외파를 찾을 때 시작 연도 몇 해 전까지 볼지 (류현진 2013~2023 같은 긴 공백, 임시값) */
+const ABROAD_LOOKBACK = 12;
+
+/**
+ * 시작 연도에 해외에 있던 실존 선수 (overseas.ts): 시작 연도에 KBO 기록이 없고(군 복무 아님) 마지막 KBO 시즌에 주전이었던 국내 선수.
+ * 시작 뒤 KBO 기록이 있으면 그 해에 돌아오고, 없으면(자료 끝까지) 최근 ABROAD_UNKNOWN_LOOKBACK년 안에 떠난 선수만 해외에 있는 것으로 본다.
+ * 리그 명단에 team = ABROAD로 넣어 시즌에는 나오지 않는다. 넣은 수를 돌려준다
+ */
+function addAbroadAtStart(league: LeagueState, store: Store, startYear: number, params: EngineParams, special: Set<string>,
+                          toLeague: (p: SimPlayer) => LeaguePlayer, idx: CareerIndex): number {
+  const have = new Set(league.players.map((p) => p.id));
+  const maxYear = Math.max(...store.meta.years);
+  const worlds = new Map<number, World>();
+  const worldAt = (y: number) => worlds.get(y) ?? worlds.set(y, worldForYear(store, y, params)).get(y)!;
+  const yearsOf = (id: string) => [...new Set([...(idx.bat.get(id) ?? []), ...(idx.pit.get(id) ?? [])].map((x) => x.year))].sort((a, b) => a - b);
+  let n = 0;
+  const ids = new Set<string>();
+  for (let y = startYear - ABROAD_LOOKBACK; y < startYear; y++) {
+    const sd = store.season(y);
+    if (!sd) continue;
+    for (const r of [...sd.bat, ...sd.pit]) if (!have.has(r.id) && !special.has(r.id)) ids.add(r.id);
+  }
+  const known = new Map(KNOWN_OVERSEAS.map(([n, b, left]) => [`${n}/${b}`, left]));
+  for (const id of [...ids].sort()) {
+    const m = store.players.get(id);
+    const left = m ? known.get(`${m.name}/${m.birthYear}`) : undefined;
+    if (!m || m.foreign || !m.real || left === undefined || left > startYear) continue;
+    const ys = yearsOf(id);
+    if (ys.includes(startYear)) continue;
+    if (servingAt(store, id, startYear)) continue;
+    const before = ys.filter((y) => y < startYear);
+    const last = before[before.length - 1];
+    // 떠나기 직전 시즌이 마지막 KBO 시즌이어야 한다 (다른 이유의 공백·은퇴를 거른다)
+    if (last === undefined || last !== left - 1) continue;
+    const back = ys.find((y) => y > startYear);
+    const age = m.birthYear ? startYear - m.birthYear : 30;
+    if (back === undefined && (startYear > maxYear || age > 37)) continue;
+    // 사이에 군 복무가 있으면 해외가 아니다
+    let served = false;
+    for (let y = last + 1; y < (back ?? startYear + 1); y++) if (servingAt(store, id, y)) served = true;
+    if (served) continue;
+    const sp = worldAt(last).players.find((x) => x.id === id);
+    if (!sp) continue;
+    const sd = store.season(last)!;
+    const teamName = (sd.bat.find((r) => r.id === id) ?? sd.pit.find((r) => r.id === id))!.team;
+    const origin = leagueTeamFor(league, store, teamName, last);
+    const p = toLeague({ ...sp, teamIdx: Math.max(0, origin), age: m.birthYear ? startYear - m.birthYear : sp.age });
+    p.team = ABROAD;
+    // 떠난 방식: 실제로 돌아온 해의 구단이 원 소속이면 원 소속 복귀(포스팅·보류권처럼), 다른 구단이면 FA 복귀.
+    // 돌아온 기록이 없으면 떠나기 전 KBO 연차로 (FA_DEPARTURE_SEASONS 이상이면 FA)
+    let mode: 'posting' | 'fa' = before.length >= FA_DEPARTURE_SEASONS ? 'fa' : 'posting';
+    if (back !== undefined) {
+      const bd = store.season(back)!;
+      const backTeam = (bd.bat.find((r) => r.id === id) ?? bd.pit.find((r) => r.id === id))!.team;
+      mode = leagueTeamFor(league, store, backTeam, back) === origin ? 'posting' : 'fa';
+    }
+    p.abroad = { since: last + 1, origin, mode, ...(back !== undefined ? { returnYear: back } : {}) };
+    league.players.push(p);
+    special.add(id);
     n++;
   }
   return n;

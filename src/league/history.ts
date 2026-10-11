@@ -101,7 +101,7 @@ export function archiveDeparting(league: LeagueState, year: number): void {
   const retired = new Set((league.retired ?? []).filter((r) => r.year === year).map((r) => r.id));
   league.archive ??= [];
   for (const p of league.players) {
-    if (p.team >= 0 || !p.history.some((h) => h.bat || h.pit)) continue; // 1군 기록이 하나도 없으면 남길 것이 없다
+    if (p.team >= 0 || p.team === -2 || !p.history.some((h) => h.bat || h.pit)) continue; // 해외(−2)는 리그 명단에 남는다. 1군 기록이 하나도 없으면 남길 것이 없다
     league.archive.push(archiveOf(league, p, retired.has(p.id) ? 'retired' : 'left'));
   }
 }

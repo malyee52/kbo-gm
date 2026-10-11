@@ -119,6 +119,7 @@ export type GameAction =
   | { year: number; type: 'sign-dev'; id: string }
   | { year: number; type: 'promote-dev'; id: string }
   | { year: number; type: 'hire-coach'; id: string }
+  | { year: number; type: 'posting'; id: string; accept: boolean }
   | { year?: number; day: number; type: 'convert'; id: string }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
@@ -1431,6 +1432,7 @@ export class GameSession {
       case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
       case 'promote-dev': res = Off.promoteDevByUser(L, off!, a.id); break;
       case 'hire-coach': res = this.applyHireCoach(a.id); break;
+      case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
@@ -1803,6 +1805,14 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /** 우리 선수의 포스팅(해외 진출) 요청에 답한다 */
+  answerPosting(id: string, accept: boolean) { return this.dispatchOff({ year: this.year, type: 'posting', id, accept }); }
+
+  /** 해외에 있는 선수 (overseas.ts) */
+  abroadPlayers(): LeaguePlayer[] {
+    return this.league.players.filter((p) => p.abroad && p.team === -2);
+  }
+
   /** 오프시즌 코치 후보를 고용한다 (같은 역할 코치가 있으면 위약금을 내고 바꾼다) */
   hireCoach(id: string) { return this.dispatchOff({ year: this.year, type: 'hire-coach', id }); }
 
