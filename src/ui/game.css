@@ -165,6 +165,18 @@ button.small-btn.danger:hover:not(:disabled) { background: var(--error-bg); bord
 .advance [role='status'] { margin-right: 4px; }
 .advance [role='status']::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1s infinite ease-in-out; vertical-align: 1px; }
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+/* 진행 멈춤 설정 (StopSettings.tsx) */
+.stop-settings { position: relative; }
+.stop-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; width: min(320px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-md);
+}
+.stop-pop p { margin: 0; }
+.stop-pop fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.stop-pop legend { padding: 0; margin-bottom: 4px; font-size: 11.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
+.stop-pop .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.stop-pop input[type='radio'] { min-height: 0; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.stop-pop input.num { width: 52px; min-height: 26px; padding: 2px 6px; text-align: right; }
 .content { padding: 22px 24px 72px; max-width: 1200px; width: 100%; }
 .content h1 { font-size: 21px; margin: 0; }
 .content > .stack > .row-between > div > h1 + p, .content > .stack > h1 + p { margin-top: 2px; }
