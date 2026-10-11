@@ -263,8 +263,11 @@ export const TRANSFER_SHARE = 0.4;
 export function transferFeeUsd(salaryUsd: number): number {
   return Math.round((salaryUsd * TRANSFER_SHARE) / 10_000) * 10_000;
 }
-/** AI가 현금 1런을 몇 만 원으로 치는가: 시장 단가(연봉 기준 9,000만 원)보다 조금 높게 (현금보다 선수를 아낀다, 임시값) */
-export const CASH_WON_PER_RUN = 12_000;
+/**
+ * AI가 현금 1런을 몇 만 원으로 치는가 (임시값). 2026-10-12 사용자 "트레이드의 현금 값어치를 지금보다 상향" → 12,000에서 6,000으로:
+ * FA 시장 단가(약 4,500만 원/런)와 이미 계약된 연봉 단가(9,000만 원/런, ai/trade.ts) 사이. 현금 1억 원 ≈ 1.7런 (≈ 0.17승)
+ */
+export const CASH_WON_PER_RUN = 6_000;
 
 /** 월말 지급일: 정규시즌 일정 안의 각 달 마지막 날 (그달에 경기가 있는 달만) */
 export function paydays(year: number, seasonDays: number): { day: number; month: number }[] {

@@ -91,6 +91,27 @@ function pitLine(p: PitLine): string {
 /**
  * 시즌 시상. league는 이 시즌 기록이 history에 들어가기 전 상태여야 한다 (신인 자격 판정).
  */
+/**
+ * 이번 시즌 선수별 WAR (근사, 시상과 같은 계산). 선수 색인 → WAR. 기록이 없는 선수는 빠진다.
+ * 타자: 득점 기여(wRAA) + 대체 수준 + 포지션 보정 + 수비. 투수: 평균자책·FIP 반반으로 본 실점 억제 + 대체 수준. 10런 = 1승
+ */
+export function seasonWar(world: World, season: Season): Map<number, number> {
+  const teamGames = Math.max(1, ...season.teams.map((t) => t.g));
+  const lg = leagueBase(season.bat, season.pit);
+  let er = 0;
+  let outs = 0;
+  for (const p of season.pit) { er += p.er; outs += p.outs; }
+  const lgEra = outs > 0 ? (er * 27) / outs : 4.5;
+  const out = new Map<number, number>();
+  for (const sp of world.players) {
+    const b = season.bat[sp.idx];
+    const p = season.pit[sp.idx];
+    if (!b || !p || (b.pa === 0 && p.bf === 0)) continue;
+    out.set(sp.idx, sp.isPitcher ? pitWar(p, lg, lgEra) : b.pa > 0 ? batWar(sp, b, lg, teamGames) : 0);
+  }
+  return out;
+}
+
 export function seasonAwards(world: World, season: Season, league: LeagueState, store: RealStore): SeasonAwards {
   const year = world.year;
   const teamGames = Math.max(...season.teams.map((t) => t.g));

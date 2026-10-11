@@ -52,7 +52,7 @@ export interface YearRecord {
 // BatLine: g, pa, ab, r, h, d, t, hr, rbi, bb, hbp, so, sb, cs, gdp, sf, sac
 const B = { g: 0, pa: 1, ab: 2, r: 3, h: 4, d: 5, t: 6, hr: 7, rbi: 8, bb: 9, hbp: 10, so: 11, sb: 12, cs: 13 } as const;
 // PitLine: g, gs, w, l, sv, outs, bf, h, hr, bb, hbp, so, r, er
-const P = { g: 0, gs: 1, w: 2, l: 3, sv: 4, outs: 5, bf: 6, h: 7, hr: 8, bb: 9, hbp: 10, so: 11, r: 12, er: 13 } as const;
+const P = { g: 0, gs: 1, w: 2, l: 3, sv: 4, outs: 5, bf: 6, h: 7, hr: 8, bb: 9, hbp: 10, so: 11, r: 12, er: 13, hld: 14 } as const;
 
 export interface CareerBat { g: number; pa: number; ab: number; r: number; h: number; d: number; t: number; hr: number; rbi: number; bb: number; so: number; sb: number }
 export interface CareerPit { g: number; gs: number; w: number; l: number; sv: number; outs: number; so: number; er: number; bb: number; h: number }

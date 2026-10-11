@@ -255,14 +255,15 @@ describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
       expect(o.get.length).toBeGreaterThanOrEqual(1);
       expect(o.get.length).toBeLessThanOrEqual(2);
       expect(o.get.every((p) => p.teamIdx === o.team && !p.foreign)).toBe(true);
-      expect(g.evaluateTrade(o.team, offer, o.get).verdict).toBe('accept');
+      expect(o.picks.length).toBeLessThanOrEqual(2);
+      expect(g.evaluateTrade(o.team, offer, o.get, 0, { give: [], get: o.picks }).verdict).toBe('accept');
     }
     for (let i = 1; i < offers.length; i++) expect(offers[i - 1].value).toBeGreaterThanOrEqual(offers[i].value);
     // 외국인은 내놓을 수 없다
     const foreign = g.team.org.find((p) => p.foreign);
     if (foreign) expect(g.shopOffers([foreign])).toEqual([]);
     const o = offers[0];
-    expect(g.proposeTrade(o.team, offer, o.get).verdict).toBe('accept');
+    expect(g.proposeTrade(o.team, offer, o.get, 0, { give: [], get: o.picks }).verdict).toBe('accept');
     expect(offer[0].teamIdx).toBe(o.team);
     expect(o.get.every((p) => p.teamIdx === g.teamIdx)).toBe(true);
     g.advance(10);
@@ -270,5 +271,20 @@ describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
     const r = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'shop' }, g.actions, { year: 2026, day: g.day }, FAST);
     expect(r.team.org.map((p) => p.id).sort()).toEqual(g.team.org.map((p) => p.id).sort());
     expect(r.cashNow()).toBe(g.cashNow());
+  }, 120_000);
+
+  it('현금만 걸어도 선수·지명권을 사 올 수 있고, 현금을 얹으면 제안이 좋아진다 (2026-10-12)', () => {
+    const g = newGame('shop-cash');
+    g.advance(10);
+    const cashOnly = g.shopOffers([], 300_000);
+    expect(cashOnly.length).toBeGreaterThan(0);
+    for (const o of cashOnly) expect(g.evaluateTrade(o.team, [], o.get, 300_000, { give: [], get: o.picks }).verdict).toBe('accept');
+    // 자금보다 많은 현금은 걸 수 없다
+    expect(g.shopOffers([], g.cashNow() + 1)).toEqual([]);
+    const offer = [byNow(g, g.team.org)[12]];
+    const plain = g.shopOffers(offer);
+    const plus = g.shopOffers(offer, 200_000);
+    const best = (xs: { value: number }[]) => (xs.length ? xs[0].value : 0);
+    expect(best(plus)).toBeGreaterThanOrEqual(best(plain));
   }, 120_000);
 });

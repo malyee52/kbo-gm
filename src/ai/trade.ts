@@ -27,7 +27,7 @@ const GAIN_SHARE = 0.08;
  */
 export const SALARY_WON_PER_RUN = 9000;
 /** 현금 1런의 값 (만 원). league/finance.ts의 CASH_WON_PER_RUN과 같다 (ai가 league를 가져오지 않게 숫자로 둔다) */
-const CASH_WON_PER_RUN = 12_000;
+const CASH_WON_PER_RUN = 6_000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
 /** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값) */

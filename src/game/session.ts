@@ -256,6 +256,8 @@ export type GameSave = GameSaveV1 | GameSaveV2;
 
 /** 트레이드에 넣는 지명권: give = 우리가 내주는 것, get = 받는 것 */
 export interface PickSwap { give: DraftPick[]; get: DraftPick[] }
+/** 선수 내놓기 제안 (session.shopOffers): 그 구단이 내줄 선수와 지명권, 우리 쪽에서 본 가치 (런) */
+export interface ShopOffer { team: number; get: SimPlayer[]; picks: DraftPick[]; value: number }
 const NO_PICKS: PickSwap = { give: [], get: [] };
 
 /** 기사 판정용 (세션 메모리) */
@@ -1549,7 +1551,7 @@ export class GameSession {
     if (cash < 0 && -cash > this.cashNow(aiTeam)) return { verdict: 'reject-value', message: '그만한 현금은 우리 구단 자금으로 감당할 수 없습니다.', detail: none };
     const locked = [...give, ...get].filter((p) => this.leaguePlayer(p.id)?.noTradeYear === this.year);
     if (locked.length) return { verdict: 'reject-invalid', message: `넘겨받은 지명권으로 입단한 선수는 입단 첫해 트레이드할 수 없습니다 (${locked.map((p) => p.name).join(', ')}).`, detail: none };
-    const pickErr = this.checkPicks(aiTeam, give, get, picks);
+    const pickErr = this.checkPicks(aiTeam, give, get, picks, cash);
     if (pickErr) return { verdict: 'reject-invalid', message: pickErr, detail: none };
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
@@ -1605,12 +1607,13 @@ export class GameSession {
     return pickValue(p, this.year, this.world.teams.length, (t) => this.situation(t).rank, tendency, Off.DRAFT_POTENTIAL_SCALE);
   }
 
-  private checkPicks(aiTeam: number, give: SimPlayer[], get: SimPlayer[], picks: PickSwap): string | null {
+  private checkPicks(aiTeam: number, give: SimPlayer[], get: SimPlayer[], picks: PickSwap, cash = 0): string | null {
     const all = [...picks.give, ...picks.get];
     if (all.length === 0) return null;
     if (!this.pickTradeOpen) return `지명권 트레이드는 ${PICK_TRADE_FROM}년부터 할 수 있습니다 (2019년 8월 규약 개정, 세부 난이도에서 모든 시대 허용으로 바꿀 수 있습니다).`;
     if (all.length > MAX_PICKS_PER_TRADE) return `한 트레이드에 지명권은 ${MAX_PICKS_PER_TRADE}장까지 넣을 수 있습니다.`;
-    if (give.length + get.length === 0) return '지명권은 선수와 함께 트레이드해야 합니다.';
+    // 2026-10-12 사용자 요청으로 현금 ↔ 지명권 트레이드도 연다 (실제 규약은 선수와 함께였다). 지명권끼리만 바꾸는 것은 막는다
+    if (give.length + get.length === 0 && !cash) return '지명권은 선수나 현금과 함께 트레이드해야 합니다.';
     if (new Set(all.map(pickId)).size !== all.length) return '같은 지명권이 두 번 들어 있습니다.';
     if (all.some((p) => !tradablePick(p, this.year) || !this.world.teams[p.from])) return `트레이드할 수 없는 지명권입니다 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지).`;
     if (picks.give.some((p) => pickOwner(this.league, p) !== this.teamIdx)) return '우리 구단이 가진 지명권만 내줄 수 있습니다.';
@@ -1623,33 +1626,47 @@ export class GameSession {
    * 우리 쪽에서 가장 가치 있는 1~2명 조합을 제안한다. 직접 제안과 같은 판정(evaluateTrade, 세부 난이도 포함)으로 걸러서
    * 그대로 받으면 성사된다. 우리 쪽에서 본 가치가 높은 순. 제안이 없는 구단은 빠진다
    */
-  shopOffers(offer: SimPlayer[]): { team: number; get: SimPlayer[]; value: number }[] {
-    if (!this.tradeOpen || offer.length === 0 || offer.length > MAX_PER_SIDE || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
+  shopOffers(offer: SimPlayer[], cash = 0): ShopOffer[] {
+    if (!this.tradeOpen || offer.length > MAX_PER_SIDE || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
+    if (offer.length === 0 && cash <= 0) return [];
+    if (cash > 0 && cash > this.cashNow()) return [];
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
+    const myTendency = this.tendency(this.teamIdx);
     const ctx = this.values;
     // 우리 쪽에서 본 가치: 기여에서 연봉 부담을 뺀다 (AI가 고액 연봉자를 떠넘기는 제안이 맨 위에 오지 않게, evaluateTrade와 같은 환산)
     const years = mine.reduce((a, b) => a + b, 0);
     const worth = (p: SimPlayer) => playerValue(p, ctx, mine) - (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0) / SALARY_WON_PER_RUN) * years;
-    const out: { team: number; get: SimPlayer[]; value: number }[] = [];
+    type Item = { p?: SimPlayer; k?: DraftPick; v: number };
+    const out: ShopOffer[] = [];
     for (const t of this.world.teams) {
       if (t.idx === this.teamIdx) continue;
-      const ok = (get: SimPlayer[]) => this.evaluateTrade(t.idx, offer, get).verdict === 'accept';
-      // 받을 후보: 외국인·육성·지명권 첫해 선수 제외, 우리 쪽에서 본 가치 순 상위 30명
-      const cands = t.org.filter((p) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year)
-        .map((p) => ({ p, v: worth(p) })).filter((x) => x.v > 0)
-        .sort((a, b) => b.v - a.v || a.p.idx - b.p.idx).slice(0, 30);
-      let best: { get: SimPlayer[]; value: number } | null = null;
-      for (const c of cands) if (ok([c.p])) { best = { get: [c.p], value: c.v }; break; }
-      // 두 명: 상위 15명 안의 조합 가운데 한 명보다 나은 것
+      const ok = (items: Item[]) => {
+        const ps = items.flatMap((x) => (x.p ? [x.p] : []));
+        const ks = items.flatMap((x) => (x.k ? [x.k] : []));
+        return this.evaluateTrade(t.idx, offer, ps, cash, { give: [], get: ks }).verdict === 'accept';
+      };
+      // 받을 후보: 외국인·육성·지명권 첫해 선수 제외, 우리 쪽에서 본 가치 순 상위 30명 + 그 구단이 가진 지명권 (2026-10-12 사용자: AI 제안에 지명권)
+      const players: Item[] = t.org.filter((p) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year)
+        .map((p) => ({ p, v: worth(p) })).filter((x) => x.v > 0);
+      const picks: Item[] = this.pickTradeOpen ? this.ownedPicks(t.idx).map((k) => ({ k, v: this.pickValueFor(k, myTendency) })).filter((x) => x.v > 0) : [];
+      const cands = [...players.sort((a, b) => b.v - a.v).slice(0, 30), ...picks].sort((a, b) => b.v - a.v);
+      let best: { items: Item[]; value: number } | null = null;
+      for (const c of cands) if (ok([c])) { best = { items: [c], value: c.v }; break; }
+      // 두 개: 상위 15개 안의 조합 가운데 한 개보다 나은 것 (지명권은 2장까지, 규약)
       const top = cands.slice(0, 15);
-      const pairs: { ps: SimPlayer[]; v: number }[] = [];
-      for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push({ ps: [top[i].p, top[j].p], v: top[i].v + top[j].v });
+      const pairs: { items: Item[]; v: number }[] = [];
+      for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push({ items: [top[i], top[j]], v: top[i].v + top[j].v });
       pairs.sort((a, b) => b.v - a.v);
       for (const x of pairs) {
         if (best && x.v <= best.value) break;
-        if (ok(x.ps)) { best = { get: x.ps, value: x.v }; break; }
+        if (ok(x.items)) { best = { items: x.items, value: x.v }; break; }
       }
-      if (best) out.push({ team: t.idx, ...best });
+      if (best) {
+        out.push({
+          team: t.idx, value: best.value,
+          get: best.items.flatMap((x) => (x.p ? [x.p] : [])), picks: best.items.flatMap((x) => (x.k ? [x.k] : [])),
+        });
+      }
     }
     return out.sort((a, b) => b.value - a.value);
   }
