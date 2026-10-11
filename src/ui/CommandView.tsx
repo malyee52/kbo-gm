@@ -1,5 +1,6 @@
 // 직접 지휘 (경기 개입, 2026-10-12 사용자 요청: "대주자, 대타 혹은 작전지시, 투수 교체를 직접").
-// 우리 타석마다 멈춰 고른다. 공격: 작전(자동·강공·도루·번트), 대타, 대주자. 수비: 투수 교체·유지, 고의4구.
+// 우리 타석마다 멈춰 고른다. 공격은 두 단계: 주자 작전(투구 전, 1루 주자가 있고 2루가 비었을 때: 대주자·도루)과
+// 타격 작전(도루가 끝난 뒤: 대타·대주자·강공·번트). 수비: 투수 교체·유지, 고의4구.
 // 고른 대로 오늘 경기를 복사본에서 미리 돌려 보여 주고(session.commandPreview), 끝까지 가면 확정해 실제로 진행한다.
 import { useEffect, useRef, useState } from 'react';
 import type { CommandChoice, CommandRequest, Play } from '../engine';
@@ -12,14 +13,17 @@ import { Diamond } from './GameCast';
 import { useGame } from './context';
 import { teamColor } from './teams';
 
-type Tactic = '' | 'swing' | 'steal' | 'bunt';
-const TACTIC_LABEL: Record<Tactic, string> = { '': '자동 (감독)', swing: '강공', steal: '도루', bunt: '희생번트' };
+type Tactic = '' | 'swing' | 'bunt';
+const TACTIC_LABEL: Record<Tactic, string> = { '': '자동 (감독)', swing: '강공', bunt: '희생번트' };
+type Steal = '' | 'go' | 'hold';
+const STEAL_LABEL: Record<Steal, string> = { '': '자동 (감독)', go: '도루 시도', hold: '도루 안 함' };
 
 export function CommandView({ start, onDone, onCancel }: { start: CommandPreview; onDone: () => void; onCancel: () => void }) {
   const { session } = useGame();
   const ref = useRef<HTMLDialogElement>(null);
   const [pv, setPv] = useState(start);
   const [tactic, setTactic] = useState<Tactic>('');
+  const [steal, setSteal] = useState<Steal>('');
   const [ph, setPh] = useState('');
   const [pr, setPr] = useState<[string, string, string]>(['', '', '']);
   const [pitcher, setPitcher] = useState('');
@@ -30,7 +34,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     if (d && !d.open) d.showModal();
   }, []);
   // 물음이 바뀌면 고르던 것을 비운다
-  useEffect(() => { setTactic(''); setPh(''); setPr(['', '', '']); setPitcher(''); setWalk(false); }, [pv.req?.n]);
+  useEffect(() => { setTactic(''); setSteal(''); setPh(''); setPr(['', '', '']); setPitcher(''); setWalk(false); }, [pv.req?.n]);
 
   const s = session.season;
   const W = session.world;
@@ -57,9 +61,13 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const choice = (): CommandChoice => {
     const c: CommandChoice = {};
     if (!req) return c;
-    if (req.side === 'bat') {
+    if (req.step === 'run') {
+      if (steal) c.steal = steal;
+    } else if (req.side === 'bat') {
       if (tactic) c.tactic = tactic;
       if (ph) c.ph = Number(ph);
+    }
+    if (req.side === 'bat') {
       const b = pr.findIndex((x) => x);
       if (b >= 0) c.pr = { base: b as 0 | 1 | 2, idx: Number(pr[b]) };
     } else {
@@ -80,8 +88,6 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
 
   const usedBench = new Set([ph, ...pr].filter(Boolean));
   const benchOpts = (except: string) => req!.bench.filter((i) => !usedBench.has(String(i)) || String(i) === except);
-  const r1 = req ? req.bases[0] >= 0 : false;
-  const canSteal = r1 && req!.bases[1] < 0;
   const canBunt = !!req && req.outs < 2 && req.bases.some((b) => b >= 0);
   const recent = plays.slice(-8).reverse();
   const date = formatDate(W.year, s.day);
@@ -124,7 +130,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
             <div className="cast-field">
               <Diamond play={{ ...(plays.at(-1) ?? {}), bases: req.bases, outs: req.outs } as Play} />
               <div className="cast-now">
-                <p><strong>{inningLabel(req)} · {req.outs}아웃</strong> <span className="muted small">{req.side === 'bat' ? '우리 공격' : '우리 수비'}</span></p>
+                <p><strong>{inningLabel(req)} · {req.outs}아웃</strong> <span className="muted small">{req.step === 'run' ? '우리 공격 · 주자 작전 (투구 전)' : req.step === 'bat' ? '우리 공격 · 타격 작전' : '우리 수비'}</span></p>
                 <p className="outs" aria-hidden>{[0, 1, 2].map((i) => <i key={i} className={i < req.outs ? 'on' : ''} />)}</p>
                 <p>타자 <strong>{name(req.batter)}</strong> <span className="muted small">{batLine(req.batter)}</span></p>
                 <p className="small muted">다음 타자 {name(req.onDeck)}</p>
@@ -136,28 +142,40 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
             <section className="command-panel">
               {req.side === 'bat' ? (
                 <>
-                  <fieldset>
-                    <legend>작전</legend>
-                    {(['', 'swing', 'steal', 'bunt'] as Tactic[]).map((t) => (
-                      <label key={t} className={`check${(t === 'steal' && !canSteal) || (t === 'bunt' && !canBunt) ? ' muted' : ''}`}>
-                        <input type="radio" name="tactic" checked={tactic === t} disabled={(t === 'steal' && !canSteal) || (t === 'bunt' && !canBunt)} onChange={() => setTactic(t)} /> {TACTIC_LABEL[t]}
-                      </label>
-                    ))}
-                    <p className="muted small">도루는 1루 주자·2루가 비었을 때, 번트는 2아웃 전 주자가 있을 때 (성공 {Math.round(BUNT_SUCCESS * 100)}%).</p>
-                  </fieldset>
-                  <fieldset>
-                    <legend>대타 <span className="muted small">{name(req.batter)} 대신</span></legend>
-                    <select value={ph} onChange={(e) => setPh(e.target.value)} disabled={!req.bench.length}>
-                      <option value="">그대로</option>
-                      {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}</option>)}
-                    </select>
-                  </fieldset>
+                  {req.step === 'run' ? (
+                    <fieldset>
+                      <legend>도루 <span className="muted small">1루 {name(req.bases[0])} · 시즌 도루 {s.bat[req.bases[0]]?.sb ?? 0} 실패 {s.bat[req.bases[0]]?.cs ?? 0}</span></legend>
+                      {(['', 'go', 'hold'] as Steal[]).map((t) => (
+                        <label key={t} className="check"><input type="radio" name="steal" checked={steal === t} onChange={() => setSteal(t)} /> {STEAL_LABEL[t]}</label>
+                      ))}
+                      <p className="muted small">도루 결과를 본 뒤 같은 타석의 타격 작전(대타·강공·번트)을 따로 고릅니다.</p>
+                    </fieldset>
+                  ) : (
+                    <>
+                      <fieldset>
+                        <legend>타격 작전</legend>
+                        {(['', 'swing', 'bunt'] as Tactic[]).map((t) => (
+                          <label key={t} className={`check${t === 'bunt' && !canBunt ? ' muted' : ''}`}>
+                            <input type="radio" name="tactic" checked={tactic === t} disabled={t === 'bunt' && !canBunt} onChange={() => setTactic(t)} /> {TACTIC_LABEL[t]}
+                          </label>
+                        ))}
+                        <p className="muted small">번트는 2아웃 전 주자가 있을 때 (성공 {Math.round(BUNT_SUCCESS * 100)}%).</p>
+                      </fieldset>
+                      <fieldset>
+                        <legend>대타 <span className="muted small">{name(req.batter)} 대신</span></legend>
+                        <select value={ph} onChange={(e) => setPh(e.target.value)} disabled={!req.bench.length}>
+                          <option value="">그대로</option>
+                          {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}</option>)}
+                        </select>
+                      </fieldset>
+                    </>
+                  )}
                   {req.bases.some((b) => b >= 0) && (
                     <fieldset>
                       <legend>대주자</legend>
                       {req.bases.map((b, k) => b >= 0 && (
-                        <label key={k} className="check">
-                          {k + 1}루 {name(b)} →{' '}
+                        <label key={k} className="pr-row">
+                          <span>{k + 1}루 {name(b)} 대신</span>
                           <select value={pr[k]} onChange={(e) => setPr((x) => { const y = ['', '', ''] as [string, string, string]; y[k] = e.target.value; return x[k] === e.target.value ? x : y; })} disabled={!req.bench.length}>
                             <option value="">그대로</option>
                             {benchOpts(pr[k]).map((i) => <option key={i} value={i}>{name(i)} — 도루 {s.bat[i].sb}</option>)}
