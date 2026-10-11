@@ -129,6 +129,9 @@ export interface PlanIds {
 }
 
 /** 투수 보직. RP는 역할을 정하지 않은 구원 (AI 감독이 서열대로 추격조 등으로 쓴다) */
+/** AI 구단이 트레이드를 제안해 오는 하루 확률 (트레이드 마감 전, 임시값). 마감까지 약 125일이라 한 시즌 대여섯 번 */
+export const TRADE_OFFER_CHANCE = 0.05;
+
 export type PitcherRole = 'SP' | 'SU' | 'RP' | 'LR' | 'MOP' | 'CL';
 export const PITCHER_ROLE_LABEL: Record<PitcherRole, string> = { SP: '선발', CL: '마무리', SU: '필승조', RP: '추격조', LR: '롱릴리프', MOP: '패전조' };
 
@@ -577,6 +580,12 @@ export class GameSession {
       if (a.type !== 'trade' || (a.year ?? this.league.startYear) !== this.world.year) continue;
       this.trades.push({ day: a.day, team: a.team, give: a.give.map((id) => byId.get(id)!), get: a.get.map((id) => byId.get(id)!), pg: a.pg, pr: a.pr });
     }
+    // 이벤트로 받아들인 트레이드 (조작 기록에는 'event'로만 남는다)
+    for (const t of this.league.eventTrades ?? []) {
+      if (t.year !== this.world.year) continue;
+      this.trades.push({ day: t.day, team: t.team, give: t.give.map((id) => byId.get(id)!), get: t.get.map((id) => byId.get(id)!) });
+    }
+    this.trades.sort((a, b) => a.day - b.day);
   }
 
   /**
@@ -1209,10 +1218,27 @@ export class GameSession {
     } else {
       this.dailyArticles();
       this.aiTradeDay();
+      this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
       if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
     }
+  }
+
+  /**
+   * AI 구단의 트레이드 제안 (2026-10-12): 트레이드 마감 전까지 날마다 TRADE_OFFER_CHANCE 확률로 한 구단이 연락해 온다.
+   * 받아들일 만한 조건이 없으면 그날은 넘어간다. 답을 기다리는 이벤트가 있으면 굴리지 않는다.
+   * 화면·선택지는 이벤트 'trade-offer'를 그대로 쓴다 (멈춤 설정의 '트레이드 제안'에서 멈춘다)
+   */
+  private tradeOfferDay(): void {
+    const st = ensureEvents(this.league);
+    if (st.pending || !this.tradeOpen) return;
+    const rng = new Rng(`${this.league.seed}/trade-offer/${this.year}/${this.season.day}`);
+    if (!rng.chance(TRADE_OFFER_CHANCE)) return;
+    const o = this.aiTradeOffer(rng);
+    if (!o) return;
+    st.pending = { id: 'trade-offer', year: this.year, day: this.season.day, vars: { team: o.team, teamName: o.teamName, give: o.give, giveName: o.giveName, get: o.get, getName: o.getName } };
+    this.addNews(this.season.day, 'event', `이벤트: ${eventDef('trade-offer')!.title} (${o.teamName})`);
   }
 
   // ---- 무작위 이벤트 (events.ts)
@@ -1280,6 +1306,7 @@ export class GameSession {
         const ev = this.evaluateTrade(ai, [give], [get]);
         if (ev.verdict !== 'accept') return `조건이 바뀌어 트레이드가 무산됐습니다 (${ev.message})`;
         this.applyTrade(ai, [give.idx], [get.idx]);
+        (L.eventTrades ??= []).push({ year: this.year, day: this.day, team: ai, give: [give.id], get: [get.id] });
         this.addNews(this.day, 'trade', `트레이드 성사: ${this.world.teams[ai].name}에 ${give.name}을(를) 내주고 ${get.name}을(를) 받았습니다. 받은 선수는 2군에 등록됩니다.`);
         return `${give.name} ↔ ${get.name} 트레이드가 성사됐습니다.`;
       },
