@@ -101,21 +101,27 @@ button.small-btn.danger { color: var(--error); }
 button.small-btn.danger:hover:not(:disabled) { background: var(--error-bg); border-color: var(--error); }
 
 /* ---- 시작 화면 */
-.start { max-width: 1120px; margin: 0 auto; padding: 36px 20px 64px; display: flex; flex-direction: column; gap: 22px; }
+.start { max-width: 1320px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 16px; }
+/* 시작 화면 머리 (2026-10-12 개편): 나이트 게임 남색 + 호박색, 밝은 모드에서도 같은 머리 */
 .start-hero {
-  position: relative; overflow: hidden; padding: 30px 32px 28px; border-radius: 16px; color: #f1f4f1; background: var(--nav-bg);
-  box-shadow: var(--shadow-md);
+  position: relative; overflow: hidden; padding: 26px 30px; border-radius: 18px; color: #eef2f8; background: #0e1420;
+  border-top: 5px solid #ffb547;
 }
-.start-hero::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background:
-    radial-gradient(520px 220px at 88% 0%, rgba(79, 178, 134, 0.35), transparent 70%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 28px);
-}
+.start-hero::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 85% -20%, rgba(255, 181, 71, 0.22), transparent 55%); pointer-events: none; }
 .start-hero > * { position: relative; }
-.start-hero .eyebrow { display: inline-block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #8fd3b2; margin-bottom: 8px; }
-.start-hero h1 { font-size: 34px; margin: 0 0 6px; color: #fff; }
-.start-hero p { color: #b7c2bb; max-width: 60ch; }
+.start-hero .eyebrow { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #ffb547; margin-bottom: 6px; }
+.start-hero h1 { font-family: var(--font-display); font-weight: 400; font-size: 40px; margin: 0 0 4px; color: #fff; letter-spacing: 0; }
+.start-hero p { color: #9aa7bc; max-width: 60ch; margin: 0; }
+.continue-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 14px 18px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-sm); border-left: 5px solid var(--accent);
+}
+.continue-card > div { display: flex; flex-direction: column; gap: 2px; }
+.continue-card strong { font-family: var(--font-display); font-weight: 400; font-size: 22px; }
+.continue-card button { min-height: 44px; padding: 8px 20px; border-radius: 10px; font-size: 15px; }
+.start-tabs { align-self: flex-start; }
+.start-tabs button { min-height: 40px; padding: 6px 18px; font-size: 15px; }
+.start-body { display: flex; flex-direction: column; gap: 16px; }
 .start-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; min-width: 0; box-shadow: var(--shadow-sm); }
 .panel > h2 { margin-bottom: 12px; }
@@ -707,3 +713,36 @@ table.roster tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--team); }
 .flow-next button { margin-left: auto; min-height: 42px; padding: 8px 18px; border-radius: 10px; font-size: 15px; }
 @media (prefers-color-scheme: dark) { .flow-next li.now { background: var(--team); color: #0e1420; } }
 td .inline { flex-wrap: nowrap; }
+
+/* 시작 화면 새 게임: 왼쪽 설정·시놉시스, 오른쪽 구단 선택 */
+.panel.start-new { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
+.new-left, .new-right { min-width: 0; }
+.new-right h3 { margin-top: 0; }
+.new-right .actions button { min-height: 46px; padding: 8px 22px; font-size: 15px; border-radius: 10px; }
+@media (max-width: 900px) { .panel.start-new { grid-template-columns: minmax(0, 1fr); } }
+
+/* 시작 화면 타이틀 메뉴 */
+.title-menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 14px; }
+.title-btn {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 6px; min-height: 150px; padding: 20px 22px;
+  border-radius: 18px; text-align: left; white-space: normal; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm); font-weight: 500; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
+}
+.title-btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.title-btn strong { font-family: var(--font-display); font-weight: 400; font-size: 30px; line-height: 1.1; }
+.title-btn span { font-size: 14px; color: var(--muted); }
+.title-btn small { font-size: 12.5px; color: var(--muted); }
+.title-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.title-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.title-btn.primary span, .title-btn.primary small { color: inherit; opacity: 0.85; }
+.back-btn { align-self: flex-start; }
+.start.title { min-height: calc(100vh / var(--z)); justify-content: center; gap: 20px; }
+.start.title .start-hero { padding: 56px 40px 48px; }
+.start.title .start-hero h1 { font-size: 64px; }
+.start.title .start-hero p { font-size: 16px; }
+.start.title .title-btn { min-height: 190px; }
+@media (max-width: 760px) {
+  .start.title .start-hero { padding: 32px 22px; }
+  .start.title .start-hero h1 { font-size: 40px; }
+  .start.title .title-btn { min-height: 110px; }
+}
