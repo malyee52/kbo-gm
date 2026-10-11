@@ -1,5 +1,5 @@
 // 게임 화면 틀: 왼쪽 메뉴, 위쪽 날짜·진행 버튼, 본문, 선수 상세 창.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserStore } from '../data/loadBrowser';
 import { computeGrades } from '../engine';
 import { formatDate } from '../game/calendar';
@@ -28,6 +28,8 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
+import { Celebration } from './Motion';
+import { achievements, type Achievement } from '../game/celebrate';
 import type { CastGame } from '../game/session';
 import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type StopRules } from '../game/stops';
 import { StopSettings } from './StopSettings';
@@ -134,6 +136,17 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: Attention[] } | null>(null);
   // 경기 중계 (GameCast): 다음 경기·가을야구 한 경기 진행 뒤 우리 경기
   const [cast, setCast] = useState<CastGame | null>(null);
+  // 축하 연출 (celebrate.ts): 이 화면을 연 뒤 새로 이룬 일만. 처음 연 때 이미 이룬 일은 축하하지 않는다
+  const seen = useRef<Set<string> | null>(null);
+  const [party, setParty] = useState<Achievement[]>([]);
+  useEffect(() => {
+    const list = achievements(session);
+    if (!seen.current) { seen.current = new Set(list.map((a) => a.key)); return; }
+    const fresh = list.filter((a) => !seen.current!.has(a.key));
+    for (const a of fresh) seen.current.add(a.key);
+    if (fresh.length) setParty((p) => [...p, ...fresh]);
+  }, [version, session]);
+  const endParty = useCallback(() => setParty([]), []);
   /** 진행 전 경기 수를 받아, 그 뒤 우리 경기 가운데 마지막 것 (중계 기록이 있을 때) */
   const castAfter = (before: number) => {
     if (!stops.cast) return;
@@ -256,6 +269,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
               )}
               {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
+              {party.length > 0 && !cast && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
+              <div key={screen} className="screen-in">
               {screen === 'home' && <Home />}
               {screen === 'roster' && <Roster />}
               {screen === 'schedule' && <Schedule focusGame={screenArg} />}
@@ -271,6 +286,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'awards' && <Awards />}
               {screen === 'records' && <Records />}
               {screen === 'articles' && <Articles />}
+              </div>
             </ErrorBoundary>
           </main>
         </div>

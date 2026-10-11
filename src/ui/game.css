@@ -474,3 +474,29 @@ dialog.cast { width: min(760px, calc(100vw - 32px)); }
 }
 .game-list li { padding: 3px 0; }
 .game-list .link { margin-left: 8px; }
+
+/* ---- 화면 연출 (Motion.tsx) */
+.screen-in { animation: screen-in 0.22s ease-out; }
+@keyframes screen-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.count { font-variant-numeric: tabular-nums; }
+tr.moved td { animation: row-flash 1.4s ease-out; }
+@keyframes row-flash { from { background: color-mix(in srgb, var(--team) 18%, transparent); } to { background: transparent; } }
+.move { margin-left: 4px; font-size: 10.5px; }
+.celebrate { position: fixed; inset: 0; z-index: 50; pointer-events: none; overflow: hidden; }
+.confetti { position: absolute; top: -20px; height: 12px; border-radius: 2px; opacity: 0.95; animation-name: confetti-fall; animation-timing-function: cubic-bezier(0.25, 0.6, 0.5, 1); animation-fill-mode: both; }
+@keyframes confetti-fall { 0% { transform: translate3d(0, 0, 0) rotate(0deg); } 100% { transform: translate3d(40px, 110vh, 0) rotate(540deg); opacity: 0.6; } }
+.celebrate-banner {
+  pointer-events: auto; position: absolute; left: 50%; top: 32%; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 34px; min-width: min(420px, calc(100vw - 32px));
+  border: 0; border-top: 6px solid var(--team); border-radius: 16px; background: var(--panel); color: var(--fg); box-shadow: var(--shadow-lg);
+  animation: banner-in 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.celebrate-banner strong { font-size: 28px; color: var(--team); }
+@keyframes banner-in { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.toasts { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast { pointer-events: auto; padding: 10px 14px; border: 1px solid var(--line); border-left: 4px solid var(--team); border-radius: var(--radius); background: var(--panel); color: var(--fg); box-shadow: var(--shadow-md); text-align: left; animation: toast-in 0.35s ease-out; }
+@keyframes toast-in { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .screen-in, tr.moved td, .celebrate-banner, .toast { animation: none; }
+  .confetti { display: none; }
+}
