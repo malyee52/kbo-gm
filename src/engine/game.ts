@@ -62,6 +62,32 @@ export interface GameContext {
   startLimitScale?: number;
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
+  /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
+  plays?: Play[] | null;
+}
+
+/**
+ * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
+ * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체
+ */
+export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PC';
+
+export interface Play {
+  inn: number;
+  /** 초(원정 공격) */
+  top: boolean;
+  kind: PlayKind;
+  /** 타자 (도루는 주자, 투수 교체는 −1) */
+  bat: number;
+  /** 투수 (투수 교체는 새 투수) */
+  pit: number;
+  /** 플레이 뒤 아웃, 주자(1·2·3루 선수 색인, 없으면 −1), 점수 */
+  outs: number;
+  bases: [number, number, number];
+  away: number;
+  home: number;
+  /** 이 플레이로 난 점수 */
+  runs: number;
 }
 
 interface PitcherInGame {
@@ -365,9 +391,18 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       fld.pitcher.line.outs += n;
       totals.outs += n;
     };
+    const plays = ctx.plays;
+    const note = (kind: PlayKind, who: number, pit: number, r0: number) => {
+      plays?.push({
+        inn: inning, top: !bat.isHome, kind, bat: who, pit, outs: Math.min(3, outs),
+        bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1], away: away.runs, home: home.runs, runs: bat.runs - r0,
+      });
+    };
 
     while (outs < 3) {
+      const was = fld.pitcher;
       maybeChangePitcher(fld, bat, inning, !bases[0] && !bases[1] && !bases[2], first, bat.runs - runsAtStart, ctx);
+      if (plays && fld.pitcher !== was) note('PC', -1, fld.pitcher.p.idx, bat.runs);
       first = false;
       const pg = fld.pitcher;
 
@@ -380,11 +415,13 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           totals.sb++;
           bases[1] = r1;
           bases[0] = null;
+          note('SB', r1.p.idx, pg.p.idx, bat.runs);
         } else {
           line.cs++;
           totals.cs++;
           bases[0] = null;
           out(1);
+          note('CS', r1.p.idx, pg.p.idx, bat.runs);
           if (outs >= 3) break;
         }
       }
@@ -392,9 +429,11 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       // 폭투·포일·보크: 주자 전원 한 베이스씩
       if ((bases[0] || bases[1] || bases[2]) && rng.chance(ctx.env.wildPitch * Math.max(0.3, 1 - fld.catcherDef * params.catcherWildPitchPerRun))) {
         totals.wildPitches++;
+        const r0 = bat.runs;
         if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
         if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
         if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
+        note('WP', -1, pg.p.idx, r0);
         if (walkOff()) return true;
       }
 
@@ -415,6 +454,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           out(1);
           if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
           if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
+          note('SAC', batter.idx, pg.p.idx, bat.runs);
           continue;
         }
       }
@@ -422,6 +462,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
         runnersOn: !!(bases[0] || bases[1] || bases[2]), scoring: !!(bases[1] || bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
       });
       const me: Runner = { p: batter, resp: pg, earned: true };
+      const r0 = bat.runs;
+      let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? 'BB' : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
       const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
       const twoOut = outs === 2 ? params.twoOutBonus : 0;
       /** 추가 진루 시도: 성공이면 true, 주루사면 아웃을 올리고 false */
@@ -508,6 +550,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           if (rng.chance(ctx.env.roe * Math.max(0.3, 1 - fld.def * params.defenseHitPerRun * 3))) {
             // 실책 출루: 주자는 한 베이스씩, 타자 주자는 비자책
             totals.roe++;
+            kind = 'E';
             me.earned = false;
             if (outs === 2) halfUnearned = true;
             if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
@@ -521,6 +564,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
             if (bases[0] && outs < 2) {
               if (rng.chance(params.doublePlay)) {
                 bl.gdp++; totals.gdp++;
+                kind = 'GDP';
                 out(2);
                 bases[0] = null;
                 if (outs < 3) {
@@ -544,6 +588,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
             }
           } else {
             // 뜬공
+            kind = 'FO';
             out(1);
             if (outs < 3) {
               const t = bases[2];
@@ -551,12 +596,14 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
                 score(bat, fld, t, bl);
                 bases[2] = null;
                 bl.ab--; totals.ab--; bl.sf++; totals.sf++;
+                kind = 'SF';
               }
               if (bases[1] && !bases[2] && rng.chance(0.2)) { bases[2] = bases[1]; bases[1] = null; }
             }
           }
         }
       }
+      note(kind, batter.idx, pg.p.idx, r0);
       if (walkOff()) return true;
     }
     return false;

@@ -27,6 +27,8 @@ import { teamColor } from './teams';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
+import { GameCast } from './GameCast';
+import type { CastGame } from '../game/session';
 import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type StopRules } from '../game/stops';
 import { StopSettings } from './StopSettings';
 
@@ -130,12 +132,22 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
   const takeSnapshotAfter = () => takeSnapshot(session);
   const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: Attention[] } | null>(null);
+  // 경기 중계 (GameCast): 다음 경기·가을야구 한 경기 진행 뒤 우리 경기
+  const [cast, setCast] = useState<CastGame | null>(null);
+  /** 진행 전 경기 수를 받아, 그 뒤 우리 경기 가운데 마지막 것 (중계 기록이 있을 때) */
+  const castAfter = (before: number) => {
+    if (!stops.cast) return;
+    const games = session.ourGames();
+    const g = games.slice(before).reverse().find((x) => x.plays?.length);
+    if (g) setCast(g);
+  };
 
   /** 가을야구 진행 (경기 수, 또는 '우리 경기까지'·'시리즈 끝까지') */
   const advancePs = async (how: 'one' | 'ours' | 'series' | 'all', label: string) => {
     if (busy || !session.postseasonRunning) return;
     setBusy(label);
     await nextFrame();
+    const before = session.ourGames().length;
     if (how === 'one') session.advancePostseason(1);
     else if (how === 'ours') session.advanceToOurPostseasonGame();
     else if (how === 'series') session.advanceSeries();
@@ -144,12 +156,14 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     await autosave();
     setBusy(null);
     go('postseason');
+    if (how === 'one' || how === 'ours') castAfter(before);
   };
 
   const advanceNextGame = async () => {
     if (busy || session.done) return;
     setBusy('진행 중');
     await nextFrame();
+    const before = session.ourGames().length;
     session.advanceToNextGameDay(stops);
     const attention = [...session.attention];
     autoAnswer(stops);
@@ -157,6 +171,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     await autosave();
     setBusy(null);
     if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
+    else castAfter(before);
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
 
@@ -240,6 +255,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {summary && !session.pendingEvent && (
                 <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
               )}
+              {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
               {screen === 'home' && <Home />}
               {screen === 'roster' && <Roster />}
               {screen === 'schedule' && <Schedule focusGame={screenArg} />}

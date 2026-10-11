@@ -437,3 +437,40 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 /* 세부 난이도 */
 .difficulty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 16px; margin: 8px 0; }
 .difficulty-grid label { display: flex; flex-direction: column; gap: 3px; }
+
+/* ---- 경기 중계 (GameCast.tsx) */
+dialog.cast { width: min(760px, calc(100vw - 32px)); }
+.cast-score th.now { background: var(--accent-soft); color: var(--accent); }
+.cast-score td.scored { font-weight: 800; color: var(--team); }
+.cast-field { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; margin: 12px 0; }
+.diamond { width: 150px; height: auto; }
+.diamond .infield { fill: color-mix(in srgb, var(--win) 14%, transparent); stroke: var(--line-strong); stroke-width: 1.5; }
+.diamond .base { fill: var(--panel); stroke: var(--line-strong); stroke-width: 1.5; transition: fill 0.25s ease; }
+.diamond .base.on { fill: var(--team); stroke: var(--team); }
+.diamond .base.home { fill: var(--panel-2); }
+.cast-now p { margin: 2px 0; }
+.cast-now .outs { display: flex; gap: 5px; }
+.cast-now .outs i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-strong); transition: background 0.25s ease; }
+.cast-now .outs i.on { background: var(--loss); border-color: var(--loss); }
+.cast-line { font-size: 17px; font-weight: 700; }
+.cast-line.kind-HR { color: var(--team); font-size: 20px; }
+.cast-result { font-size: 16px; margin-top: 6px !important; }
+.cast-controls { flex-wrap: wrap; align-items: center; }
+.cast-feed { margin: 4px 0 0; padding-left: 0; list-style: none; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+.cast-feed li { padding: 4px 2px; border-bottom: 1px solid var(--line); }
+.cast-feed li.scored { font-weight: 700; }
+.cast-feed li.kind-HR { color: var(--team); }
+.cast-feed li.kind-PC { color: var(--muted); }
+.moment.tag-walkoff, .moment.tag-lead { font-weight: 700; }
+.pop { display: inline-block; animation: pop 0.35s ease-out; }
+@keyframes pop { 0% { transform: scale(0.82); } 70% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@media (max-width: 560px) {
+  .cast-field { grid-template-columns: 110px 1fr; }
+  .diamond { width: 110px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pop { animation: none; }
+  .diamond .base, .cast-now .outs i { transition: none; }
+}
+.game-list li { padding: 3px 0; }
+.game-list .link { margin-left: 8px; }

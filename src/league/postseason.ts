@@ -8,7 +8,7 @@
 // 난수 위치를 상태에 담으므로 저장했다 이어 해도 결과가 같다.
 
 import {
-  emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type Season, type SimPlayer,
+  emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type Play, type Season, type SimPlayer,
 } from '../engine';
 
 export type SeriesRound = 'wc' | 'semi' | 'po' | 'ks';
@@ -52,6 +52,8 @@ export interface SeriesGame {
   awayRuns: number;
   innings: number;
   box?: BoxScore;
+  /** 중계 기록 (우리 구단 경기만, 저장하지 않는다) */
+  plays?: Play[];
 }
 
 export interface SeriesResult {
@@ -144,7 +146,7 @@ export function playNextGame(st: PostseasonState, season: Season): SeriesGame | 
   const rng = Rng.fromState(st.seed, st.rng);
   const n = season.world.players.length;
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
-  const { result: r, home: hl, away: al } = season.playExtraGame(home, away, st.day, rng, POSTSEASON_MAX_INNINGS, rec);
+  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, POSTSEASON_MAX_INNINGS, rec);
   st.rng = rng.state();
   const g: SeriesGame = {
     day: st.day, home, away, homeRuns: r.homeRuns, awayRuns: r.awayRuns, innings: r.innings,
@@ -153,6 +155,7 @@ export function playNextGame(st: PostseasonState, season: Season): SeriesGame | 
       home: { batters: boxBat(hl, rec.bat), pitchers: boxPit(r.homeStaff, rec.pit) },
       away: { batters: boxBat(al, rec.bat), pitchers: boxPit(r.awayStaff, rec.pit) },
     },
+    ...(plays ? { plays } : {}),
   };
   x.games.push(g);
   if (r.homeRuns !== r.awayRuns) {
@@ -197,7 +200,7 @@ export function resultOf(st: PostseasonState): PostseasonResult {
   const last = st.series[st.series.length - 1];
   return {
     year: st.year, seeds: st.seeds,
-    series: st.series.map((x) => ({ ...x, games: x.games.map(({ box: _box, ...g }) => g) })),
+    series: st.series.map((x) => ({ ...x, games: x.games.map(({ box: _box, plays: _plays, ...g }) => g) })),
     champion: last.winner, runnerUp: last.winner === last.high ? last.low : last.high,
   };
 }
