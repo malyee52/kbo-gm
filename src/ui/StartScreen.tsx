@@ -4,7 +4,7 @@ import { DIFFICULTY_LABEL, DIFFICULTY_NOTE, type Difficulty } from '../league/ow
 import { PRESETS, type DifficultySettings } from '../league/difficulty';
 import { DifficultyEditor } from './DifficultyEditor';
 import type { BrowserStore } from '../data/loadBrowser';
-import { CHALLENGES, challengeById, lastPlaceTeam, planTeam } from '../league/challenges';
+import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
@@ -36,6 +36,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [error, setError] = useState<string | null>(null);
   const [saves, setSaves] = useState<SaveRecord[] | null>(null);
   const [tier, setTier] = useState<Tier>('하');
+  const [startTab, setStartTab] = useState<'menu' | 'new' | 'challenge' | 'load'>('menu');
 
   useEffect(() => {
     let alive = true;
@@ -45,6 +46,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   }, [store, year]);
 
   const refreshSaves = () => listSaves().then(setSaves, () => setSaves([]));
+  // 가장 최근에 저장한 게임 (이어 하기)
+  const latest = saves?.length ? [...saves].sort((x, y) => y.savedAt.localeCompare(x.savedAt))[0] : null;
   useEffect(() => { void refreshSaves(); }, []);
 
   const current = loadedYear === year ? store.season(year) : undefined;
@@ -85,28 +88,6 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   /** 그 해 계보의 구단 이름 (시즌 자료를 불러오기 전에도 meta로) */
   const nameIn = (franchise: string, y: number) => store.meta.franchises[franchise]?.find((x) => x.from <= y && y <= x.to)?.name ?? franchise;
 
-  /** 도전 모드로 시작: 위에서 고른 연도·구단 (꼴찌 조건이면 직전 시즌 최하위 구단) */
-  const challengeTeam = (id: string): number | null => {
-    const ch = challengeById(id)!;
-    if (ch.team === 'last') return current ? lastPlaceTeam(store, year) : null;
-    return teamIdx;
-  };
-  const startChallenge = async (id: string) => {
-    const ch = challengeById(id)!;
-    const t = challengeTeam(id);
-    if (t === null || !seed.trim()) return;
-    setBusy(`도전 「${ch.title}」을 준비하는 중입니다`);
-    setError(null);
-    try {
-      await store.ensureAll();
-      await nextFrame();
-      onStart(GameSession.create(store, { year, teamIdx: t, seed: seed.trim(), difficulty, challenge: ch.id, ...extra }));
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(null);
-    }
-  };
-
   const load = async (save: GameSave) => {
     setBusy('저장한 게임을 불러오는 중입니다');
     setError(null);
@@ -130,7 +111,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   };
 
   return (
-    <main className="start">
+    <main className={`start${startTab === 'menu' ? ' title' : ''}`}>
       <header className="start-hero">
         <span className="eyebrow">단장 시뮬레이션 · 비영리 팬 프로젝트</span>
         <h1>KBO 단장 게임</h1>
@@ -140,8 +121,37 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p className="note" role="status">{busy}</p>}
 
-      <div className="start-grid">
-      <section className="panel">
+      {/* 2026-10-12 UI 개편: 타이틀 화면처럼 큰 메뉴에서 시작한다 (이어 하기 · 새 게임 · 도전 시나리오 · 불러오기). 고르면 그 화면, '처음으로'로 돌아온다 */}
+      {startTab === 'menu' ? (
+        <nav className="title-menu" aria-label="시작 메뉴">
+          {latest && (
+            <button type="button" className="title-btn primary" onClick={() => void load(latest.data)} disabled={!!busy}>
+              <strong>이어 하기</strong>
+              <span>{latest.year} {latest.teamName} · {whenText(latest, isSeasonDone(latest))}</span>
+              <small>{latest.summary}</small>
+            </button>
+          )}
+          <button type="button" className={`title-btn${latest ? '' : ' primary'}`} onClick={() => setStartTab('new')} disabled={!!busy}>
+            <strong>새 게임</strong>
+            <span>1982~2026, 원하는 해와 구단으로 단장 부임</span>
+          </button>
+          <button type="button" className="title-btn" onClick={() => setStartTab('challenge')} disabled={!!busy}>
+            <strong>도전 시나리오</strong>
+            <span>실제 구단의 그 시즌에서 시작하는 50가지 이야기</span>
+          </button>
+          <button type="button" className="title-btn" onClick={() => setStartTab('load')} disabled={!!busy}>
+            <strong>불러오기</strong>
+            <span>{saves?.length ? `저장 ${saves.length}개 · 파일에서 불러오기` : '파일에서 불러오기'}</span>
+          </button>
+        </nav>
+      ) : (
+        <button type="button" className="ghost back-btn" onClick={() => setStartTab('menu')} disabled={!!busy}>← 처음으로</button>
+      )}
+
+      <div className="start-body">
+      {startTab === 'new' && (
+      <section className="panel start-new">
+        <div className="new-left">
         <h2>새 게임</h2>
         <div className="form-row">
           <label>
@@ -186,11 +196,14 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <p className="note small">{year}년 선수단은 시즌 중 자료(정규시즌 종료 전 스냅샷)로 만듭니다. 능력은 직전 3시즌 기록에서 뽑습니다.</p>
         )}
 
+        </div>
+        <div className="new-right">
         <h3>구단 선택</h3>
         {!current ? (
           <p className="muted">구단 목록을 불러오는 중입니다.</p>
         ) : (
-          <div className="team-grid" role="radiogroup" aria-label="구단">
+          // 구단 수에 맞춰 두 줄로 고르게 (6팀 3×2, 8팀 4×2, 10팀 5×2; 7·9팀은 위 줄이 하나 더). 2026-10-12 사용자: 3·3·3·1 배치가 보기 좋지 않다
+          <div className="team-grid start-teams" role="radiogroup" aria-label="구단" style={{ ['--cols' as string]: String(Math.ceil(current.teams.length / 2)) }}>
             {current.teams.map((t, i) => {
               const last = prev?.teams.find((x) => x.franchise === t.franchise);
               return (
@@ -216,27 +229,11 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             {teamIdx === null ? '구단을 고르세요' : `${current?.teams[teamIdx]?.name ?? ''} 단장으로 시작`}
           </button>
         </div>
-      </section>
-
-      <section className="panel">
-        <h2>도전 모드 <span className="muted small">{year}년 시작</span></h2>
-        <p className="muted small">위에서 고른 시작 연도·구단·난이도·시드로 시작합니다. "직전 시즌 최하위" 도전은 구단이 정해집니다. 결산 때마다 판정하고, 끝난 뒤에도 그대로 이어서 할 수 있습니다.</p>
-        <div className="scenario-grid">
-          {CHALLENGES.filter((c) => !c.plan).map((ch) => {
-            const t = challengeTeam(ch.id);
-            const name = t !== null ? current?.teams[t]?.name : undefined;
-            return (
-              <div key={ch.id} className="scenario-card">
-                <div className="row-between"><strong>{ch.title}</strong><span className="muted small">{ch.years}시즌</span></div>
-                <p className="small">{ch.intro}</p>
-                <p className="muted small">{ch.team === 'last' ? (name ? `구단: ${name} (${year - 1} 최하위)` : `${year - 1}년 자료가 없어 고를 수 없습니다`) : name ? `구단: ${name}` : '위에서 구단을 고르세요'}</p>
-                <button type="button" onClick={() => void startChallenge(ch.id)} disabled={!!busy || t === null || !seed.trim()}>이 도전으로 시작</button>
-              </div>
-            );
-          })}
         </div>
       </section>
 
+      )}
+      {startTab === 'challenge' && (<>
       <section className="panel">
         <h2>도전 시나리오 <span className="muted small">실제 구단의 그 시즌 개막에서 시작</span></h2>
         <details className="help small">
@@ -274,6 +271,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         </div>
       </section>
 
+
+      </>)}
+      {startTab === 'load' && (
       <section className="panel">
         <h2>불러오기</h2>
         {saves === null ? (
@@ -306,6 +306,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </label>
         </div>
       </section>
+      )}
       </div>
 
       <footer className="small">

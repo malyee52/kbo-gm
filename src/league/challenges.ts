@@ -25,6 +25,11 @@ export interface Challenge {
   plan?: PlanChallenge;
 }
 
+/**
+ * 예전 도전 모드 5개 (2026-10-12 사용자 요청으로 시작 화면에서 뺐다). 이 도전으로 시작한 예전 저장의 판정을 위해 정의는 남긴다
+ */
+export const LEGACY_CHALLENGE_IDS = ['underdog', 'last-to-first', 'quick', 'dynasty', 'thrift'];
+
 export const CHALLENGES: Challenge[] = [
   { id: 'underdog', title: '꼴찌의 반란', intro: '직전 시즌 최하위 구단을 맡아 5시즌 안에 한국시리즈 우승.', kind: 'title', years: 5, team: 'last' },
   { id: 'last-to-first', title: '꼴찌에서 1위로', intro: '직전 시즌 최하위 구단으로 2시즌 안에 정규시즌 1위.', kind: 'first', years: 2, team: 'last' },
