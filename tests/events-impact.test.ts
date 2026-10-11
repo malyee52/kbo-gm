@@ -97,4 +97,21 @@ describe('경기에 영향을 주는 이벤트', () => {
     expect(r.league.events!.log).toEqual(g.league.events!.log);
     expect(r.league.events!.forms ?? []).toEqual(g.league.events!.forms ?? []);
   }, 300_000);
+
+  it('시즌 끝까지(자동 선택): 멈추지 않고 첫 번째 선택지로 처리하고, 재현해도 같다', () => {
+    const o = { year: 2026, teamIdx: lg, seed: 'auto-season' };
+    const g = GameSession.create(store, o, FAST);
+    // 화면의 "시즌 끝까지"와 같은 흐름: 일주일씩, 이벤트에서 멈추지 않는다
+    while (!g.done) expect(g.advance(7, false)).toBeGreaterThan(0);
+    if (g.pendingEvent) g.answerEvent(0);
+    expect(g.pendingEvent).toBeFalsy();
+    const log = g.league.events!.log;
+    expect(log.length).toBeGreaterThan(3);
+    expect(log.every((l) => l.choice === 0)).toBe(true);
+    const r = GameSession.replay(store, o, g.actions, g.day, FAST);
+    expect(r.league.events!.log).toEqual(log);
+    expect(r.season.standings()).toEqual(g.season.standings());
+    expect(r.cashNow()).toBe(g.cashNow());
+  }, 300_000);
 });
+

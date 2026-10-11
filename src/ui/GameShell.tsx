@@ -70,21 +70,26 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     }
   }, [session]);
 
-  /** days일 진행. 길면 일주일씩 끊어 화면이 멈추지 않게 한다 */
-  const advance = async (days: number, label: string) => {
+  /**
+   * days일 진행. 길면 일주일씩 끊어 화면이 멈추지 않게 한다.
+   * autoEvents(시즌 끝까지): 이벤트가 생겨도 멈추지 않고 첫 번째(무난한) 선택지로 자동 처리한다
+   */
+  const advance = async (days: number, label: string, autoEvents = false) => {
     if (busy || session.done) return;
     setBusy(label);
     await nextFrame();
     let left = days;
     while (left > 0 && !session.done) {
-      const did = session.advance(Math.min(7, left), true);
+      const did = session.advance(Math.min(7, left), !autoEvents);
       left -= did;
-      if (session.pendingEvent || did === 0) break; // 이벤트가 생기면 그날 멈춘다
+      if ((!autoEvents && session.pendingEvent) || did === 0) break; // 이벤트가 생기면 그날 멈춘다
       if (left > 0) {
         setVersion((v) => v + 1);
         await nextFrame();
       }
     }
+    // 시즌 마지막 날 생긴 이벤트도 자동으로 (조작 기록에 남겨 재현이 맞게)
+    if (autoEvents && session.pendingEvent) session.answerEvent(0);
     changed();
     await autosave();
     setBusy(null);
@@ -189,7 +194,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>하루</button>
               <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>일주일</button>
               <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>한 달</button>
-              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>시즌 끝까지</button>
+              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (이벤트는 자동 선택)', true)} disabled={!!busy || session.done || !!session.pendingEvent} title="이벤트가 생기면 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
             </div>}
           </header>
           {saveError && <p className="error banner" role="alert">{saveError}</p>}
