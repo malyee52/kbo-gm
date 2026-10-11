@@ -22,7 +22,7 @@ import {
 import { foreignName, josa, koreanName } from './names';
 import {
   ASIA_NEW_CAP, capPayroll, COMPENSATION, faEligible, faGrade, faYears, FOREIGN_ASIA, FOREIGN_NEW_CAP, FOREIGN_REGULAR,
-  FOREIGN_TOTAL_CAP, foreignSalary, marketSalary, MIN_SALARY, nextReserveSalary, ORG_LIMIT, reserveTarget, runsForSalary, salaryCap,
+  FA_RE_ELIGIBLE, FOREIGN_TOTAL_CAP, foreignSalary, marketSalary, MIN_SALARY, serviceNeeded, nextReserveSalary, ORG_LIMIT, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
@@ -430,8 +430,92 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
 
   applyTeamChanges(league, off, store, params);
   overseasOffseason(league, off, store, params);
+  aiExtensions(league, off, leagueView(league, store, params));
   enterFa(league, off, store, params);
   return off;
+}
+
+// ---- 비FA 다년 계약 (2026-10-12 사용자 요청)
+
+/** 계약 기간 (년) */
+export const EXT_MIN_YEARS = 2;
+export const EXT_MAX_YEARS = 6;
+/** 계약금: 총액의 이 비율 (FA 30%보다 낮게, 임시값) */
+export const EXT_BONUS_SHARE = 0.2;
+
+/** FA까지 남은 1군 시즌 (이미 FA 계약을 한 적이 있으면 재자격 기준) */
+export function seasonsToFa(p: LeaguePlayer, year: number): number {
+  const need = p.faCount === 0 ? serviceNeeded(p.school, p.entryYear, p.birthYear, year) : FA_RE_ELIGIBLE;
+  return Math.max(0, need - p.service);
+}
+
+/** 다년 계약을 맺을 수 있는 우리 선수: 국내, 보류·신인 계약, 육성선수·복무 중 아님, 이번 FA 시장에 나오지 않음 */
+export function extensionCandidates(league: LeagueState, off: OffseasonState): LeaguePlayer[] {
+  const fa = new Set(off.fa.entries.filter((e) => e.status === 'open').map((e) => e.id));
+  return league.players.filter((p) => p.team === off.userTeam && !p.foreign && !p.dev && !isServing(p) && !fa.has(p.id)
+    && (p.contract.kind === 'reserve' || p.contract.kind === 'rookie'));
+}
+
+/**
+ * 선수가 요구하는 연봉 (만 원): 계약 기간 동안의 예상 기여로 낸 시장 연봉 × 할인.
+ * FA가 가까우면(1시즌 이하) 할인 없음, 2~3시즌 10%, 그보다 멀면 20% (안정을 사는 값). 길수록 해마다 2% 더 할인. 지금 연봉보다 낮게는 받지 않는다
+ */
+export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number, years: number): number {
+  const sp = view.sim.get(p.id);
+  if (!sp) return Math.max(MIN_SALARY, p.contract.salary);
+  let sum = 0;
+  for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
+  const base = marketSalary(sum / years);
+  const toFa = seasonsToFa(p, year);
+  const factor = (toFa <= 1 ? 1 : toFa <= 3 ? 0.9 : 0.8) * (1 - 0.02 * (years - EXT_MIN_YEARS));
+  return Math.max(MIN_SALARY, p.contract.salary, Math.round((base * factor) / 100) * 100);
+}
+
+function signExtension(league: LeagueState, off: OffseasonState, p: LeaguePlayer, salary: number, years: number): number {
+  const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
+  p.contract = { kind: 'nonFA', salary, until: off.year + years, prepaid: Math.round(bonus / years) };
+  if (bonus) league.ledger.push({ year: off.year + 1, from: p.team, to: -1, amount: bonus, note: `${p.name} 비FA 다년 계약금`, kind: 'signing' });
+  if (off.salary) { delete off.salary.demands[p.id]; delete off.salary.offers[p.id]; }
+  return bonus;
+}
+
+/** 우리 선수와 비FA 다년 계약 (요구 연봉 그대로, 정원 정리 단계까지) */
+export function extendByUser(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams, id: string, years: number): OfferCheck {
+  if (off.stage === 'ready') return { ok: false, message: '개막 준비 단계에서는 계약할 수 없습니다.' };
+  if (!Number.isInteger(years) || years < EXT_MIN_YEARS || years > EXT_MAX_YEARS) return { ok: false, message: `계약 기간은 ${EXT_MIN_YEARS}~${EXT_MAX_YEARS}년입니다.` };
+  const p = extensionCandidates(league, off).find((x) => x.id === id);
+  if (!p) return { ok: false, message: '다년 계약을 맺을 수 없는 선수입니다 (국내 보류·신인 계약 선수, FA 시장에 나오지 않은 선수만).' };
+  const view = leagueView(league, store, params);
+  const salary = extensionDemand(view, p, off.year, years);
+  const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
+  if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
+  const limit = spendLimit(league, off.userTeam, off.year + 1);
+  if (limit !== null && capPayroll(league.players, off.userTeam) - p.contract.salary + salary > limit) return { ok: false, message: '이 계약을 하면 샐러리캡 상한을 넘습니다.' };
+  signExtension(league, off, p, salary, years);
+  log(off, 'salary', `${p.name}, 비FA 다년 계약 ${years}년 (연 ${(salary / 10000).toFixed(1)}억 원, 계약금 ${(bonus / 10000).toFixed(1)}억 원)`, true, true);
+  return { ok: true, message: `${p.name}과(와) ${years}년 다년 계약을 맺었습니다.` };
+}
+
+/** AI 구단의 다년 계약: FA까지 1~2시즌 남은 30세 이하 주축(현재 10런 이상) 최대 2명, 단장 성향에 따른 확률로 4년 */
+function aiExtensions(league: LeagueState, off: OffseasonState, view: LeagueView): void {
+  const chance: Record<string, number> = { winnow: 0.5, develop: 0.5, balanced: 0.35, frugal: 0.15 };
+  for (let t = 0; t < league.teams.length; t++) {
+    if (t === off.userTeam || isFuturesTeam(league, t, off.year + 1)) continue;
+    const cands = league.players
+      .filter((p) => p.team === t && !p.foreign && !p.dev && !isServing(p) && p.contract.kind === 'reserve' && p.contract.until <= off.year + 1
+        && ageIn(p, off.year + 1) <= 30 && [1, 2].includes(seasonsToFa(p, off.year)))
+      .map((p) => ({ p, r: (() => { const sp = view.sim.get(p.id); return sp ? currentRuns(sp, view.ctx) : 0; })() }))
+      .filter((x) => x.r >= 10)
+      .sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id))
+      .slice(0, 2);
+    for (const { p } of cands) {
+      if (!new Rng(`${league.seed}/extend/${off.year}/${p.id}`).chance(chance[gmStyle(league, t)] ?? 0.35)) continue;
+      const salary = extensionDemand(view, p, off.year, 4);
+      if (salary * 4 * EXT_BONUS_SHARE > cashOf(league, t)) continue;
+      signExtension(league, off, p, salary, 4);
+      log(off, 'salary', `${league.teams[t].name}, ${p.name}과(와) 비FA 다년 계약 4년 (연 ${(salary / 10000).toFixed(1)}억 원)`, false, true);
+    }
+  }
 }
 
 // ---- 해외 진출과 복귀 (overseas.ts)

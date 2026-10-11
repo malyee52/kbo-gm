@@ -1,5 +1,5 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
@@ -99,6 +99,7 @@ export function Offseason() {
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
 
       <PostingPanel act={act} />
+      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
 
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
@@ -494,6 +495,56 @@ function DraftPanel({ act }: { act: Act }) {
           </ul>
         </div>
       </div>
+    </section>
+  );
+}
+
+/** 비FA 다년 계약 (league/offseason.ts extendByUser): 기간별 요구 연봉을 보고 맺는다 */
+function ExtensionPanel({ act }: { act: Act }) {
+  const { session, version } = useGame();
+  const won = useWon();
+  const info = useInfo();
+  const [open, setOpen] = useState(false);
+  const [years, setYears] = useState<Record<string, number>>({});
+  const rows = useMemo(() => (open ? session.extensionOffers() : []), [session, version, open]);
+  const sorted = [...rows].sort((a, b) => b.p.potential - a.p.potential || a.p.id.localeCompare(b.p.id)).slice(0, 25);
+  return (
+    <section className="panel">
+      <div className="row-between">
+        <h2>비FA 다년 계약 <span className="muted small">FA 전에 묶어 두기</span></h2>
+        <button type="button" className="ghost small-btn" onClick={() => setOpen(!open)}>{open ? '접기' : '후보 보기'}</button>
+      </div>
+      <p className="muted small">
+        보류·신인 계약인 국내 선수와 {Off.EXT_MIN_YEARS}~{Off.EXT_MAX_YEARS}년 계약을 맺습니다. 계약 동안 연봉 협상과 FA가 없고, 총액의 {Off.EXT_BONUS_SHARE * 100}%를 계약금으로 먼저 냅니다.
+        FA가 멀수록 싸게(최대 20% 할인), 길게 맺을수록 해마다 조금 더 쌉니다. AI 구단도 FA가 가까운 주축과 다년 계약을 맺습니다.
+      </p>
+      {open && (
+        <div className="scroll">
+          <table>
+            <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>FA까지</th><th>지금 연봉</th><th>기간</th><th>요구 연봉</th><th /></tr></thead>
+            <tbody>
+              {sorted.map(({ p, toFa, demands }) => {
+                const i = info(p);
+                const y = years[p.id] ?? 4;
+                const d = demands.find((x) => x.years === y)!;
+                return (
+                  <tr key={p.id}>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                    <td>{toFa}시즌</td><td className="small">{won(p.contract.salary)}</td>
+                    <td>
+                      <select value={y} onChange={(e) => setYears({ ...years, [p.id]: Number(e.target.value) })} aria-label={`${p.name} 계약 기간`}>
+                        {demands.map((x) => <option key={x.years} value={x.years}>{x.years}년</option>)}
+                      </select>
+                    </td>
+                    <td className="small">{won(d.salary)} <span className="muted">(계약금 {won(Math.round(d.salary * y * Off.EXT_BONUS_SHARE))})</span></td>
+                    <td><button type="button" className="small-btn" onClick={() => act(session.extend(p.id, y))}>계약</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
