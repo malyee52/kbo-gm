@@ -18,6 +18,9 @@ import { rivalFill } from './rivals';
 import { coachPayroll } from './coaches';
 import { gmStyle } from './gm';
 import { settingsOf, userTeamOf } from './difficulty';
+import {
+  ensureFans, ensureStadiums, fanFill, fanLevel, fansSeasonEnd, fanSponsor, installment, seatsAt, stadiumFill, stadiumYearEnd, ticketScale,
+} from './stadium';
 
 // ---- 수치 (임시값, docs/finance.md 2~4장)
 
@@ -135,13 +138,13 @@ export interface FinanceYear {
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest'
-  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'other';
+  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
-  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '코치 연봉', posting: '포스팅 이적료', other: '기타',
+  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
@@ -153,8 +156,10 @@ export function activeLevel(league: Pick<LeagueState, 'finance'>, team: number, 
   return (f?.active ?? f?.invest)?.[kind] ?? 0;
 }
 
-/** 재정 상태가 없는 리그(새 게임, 예전 저장)에 시작 자금과 기본 투자를 채운다 */
+/** 재정 상태가 없는 리그(새 게임, 예전 저장)에 시작 자금과 기본 투자를 채운다. 구장·팬덤(stadium.ts)도 함께 */
 export function ensureFinance(league: LeagueState): TeamFinance[] {
+  ensureStadiums(league, (t) => parkOf(league, t).capacity);
+  ensureFans(league, (t) => parkOf(league, t).market);
   league.finance ??= [];
   for (let t = 0; t < league.teams.length; t++) {
     if (league.finance[t]) continue;
@@ -236,6 +241,8 @@ export interface SeasonFlows {
 }
 
 const parkOf = (league: LeagueState, team: number) => BALLPARK[league.teams[team].franchise] ?? DEFAULT_PARK;
+/** 연고 시장 보정 (팬덤 기본값, stadium.ts) */
+export const marketOf = (league: LeagueState, team: number) => parkOf(league, team).market;
 
 /** 월말에 나가는 연봉 (만 원, 한 해). 외국인은 달러를 환산하고, FA 계약금으로 미리 낸 몫은 뺀다 */
 export function payOf(p: LeaguePlayer): number {
@@ -313,7 +320,8 @@ export function fillRate(league: LeagueState, team: number, winPct: number, star
   const mk = MARKETING_FILL[activeLevel(league, team, 'marketing')];
   const noise = (new Rng(`${league.seed}/gate/${year}/${day}/${team}`).next() - 0.5) * 0.1;
   const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day)
-    + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp);
+    + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp)
+    + stadiumFill(league.stadiums?.[team], year) + fanFill(fanLevel(league, team, year, day));
   return Math.max(0.15, Math.min(1, v));
 }
 
@@ -334,7 +342,9 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로
   if (team < world.teams.length) {
     const star = starBonus(world)[team] ?? 0;
-    const cap = parkOf(league, team).capacity;
+    const park = league.stadiums?.[team];
+    const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
+    const ticket = TICKET * ticketScale(park);
     const w = new Array(world.teams.length).fill(0);
     const l = new Array(world.teams.length).fill(0);
     for (const g of season.log) {
@@ -344,7 +354,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
         const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year, g.away));
         attendance += fans;
         homeGames++;
-        const v = Math.round(fans * TICKET);
+        const v = Math.round(fans * ticket);
         add('gate', v);
         addM(g.day, v);
       }
@@ -355,7 +365,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       if (g.day >= upToDay || g.home !== team) continue;
       const fans = Math.round(cap * 0.97);
       attendance += fans;
-      const v = Math.round(fans * POSTSEASON_TICKET);
+      const v = Math.round(fans * POSTSEASON_TICKET * ticketScale(park));
       add('postseason', v);
       addM(g.day, v);
     }
@@ -410,7 +420,7 @@ function sponsorAmount(league: LeagueState, team: number, futures: boolean, winP
 
 /** 인기도 (0.6~1.4): 성적·가을야구·연고·스타·마케팅 */
 export function popularity(league: LeagueState, team: number, winPct: number, postseasonRound: number, star: number): number {
-  const mk = MARKETING_SPONSOR[activeLevel(league, team, 'marketing')];
+  const mk = MARKETING_SPONSOR[activeLevel(league, team, 'marketing')] * fanSponsor(fanLevel(league, team, league.year));
   const v = (1 + 1.2 * (winPct - 0.5) + 0.06 * postseasonRound + 2 * parkOf(league, team).market + 2 * star) * mk;
   return Math.max(0.6, Math.min(1.4, v));
 }
@@ -457,6 +467,8 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     // 중계권·모기업 지원금은 시즌 중 월말에 다 받았다. 스폰서는 실제 인기도로 다시 매겨 차액을 정산한다
     items.sponsor = sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0);
     if (input.champion === t) items.champion = CHAMPION_BONUS;
+    const build = installment(league.stadiums?.[t], year);
+    if (build) items.stadium = -build;
     for (const [k, v] of Object.entries(items) as [FinanceKind, number][]) {
       if (!v) continue;
       league.ledger.push(v > 0
@@ -466,6 +478,8 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
     for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start' && k !== 'dividend') items[k] = other[k];
+    // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다
+    if (other.stadium) items.stadium = other.stadium;
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
     let cash = cashOf(league, t);
     let rescue = 0;
@@ -483,7 +497,11 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}) };
     league.finance![t].history.push(y);
     out.push(y);
+    // 팬 만족도 결산 (stadium.ts): 스폰서를 매긴 뒤에
+    fansSeasonEnd(league, t, year, pct, input.postseasonDepth(t), input.champion === t, parkOf(league, t).market);
   }
+  // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
+  league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
   return out;
 }
 

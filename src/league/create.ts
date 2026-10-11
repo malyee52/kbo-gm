@@ -63,8 +63,20 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
   for (const c of store.contracts ?? []) (contractsById.get(c.id) ?? contractsById.set(c.id, []).get(c.id)!).push(c);
 
+  /** 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤, stadium.ts) */
+  const tenure0 = (p: SimPlayer): { franchise: string; seasons: number } | null => {
+    const franchise = recorded.teams[p.teamIdx]?.franchise;
+    if (!franchise) return null;
+    const years = new Set<number>();
+    for (const { year, row } of [...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])]) {
+      if (year < startYear && store.season(year)?.teams.find((t) => t.name === row.team)?.franchise === franchise) years.add(year);
+    }
+    return years.size ? { franchise, seasons: years.size } : null;
+  };
+
   const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
+    const ten = tenure0(p);
     const now = currentRuns(p, ctx);
     const peak = realPeakRuns(p, idx, store, ctx, params);
     const potential = potentialOf(now, peak, p.age, seed, p.id);
@@ -95,7 +107,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
-      service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, history: [],
+      service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, history: [], ...(ten ? { tenure0: ten } : {}),
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };
   };

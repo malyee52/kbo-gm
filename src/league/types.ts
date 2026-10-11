@@ -88,6 +88,8 @@ export interface LeaguePlayer {
   lastSaves: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
+  /** 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다 */
+  tenure0?: { franchise: string; seasons: number };
   // ---- M6 (없으면 기본값. M5 저장 호환)
   /** 병역. 외국인은 없음. 국내 선수인데 없으면 careers.ts의 ensureMilitary가 채운다 */
   military?: Military;
@@ -187,6 +189,12 @@ export interface LeagueState {
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
   lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
+  /** 구장 (stadium.ts, 구단 색인) */
+  stadiums?: import('./stadium').StadiumState[];
+  /** 팬 만족도 (stadium.ts, 구단 색인) */
+  fans?: import('./stadium').FanState[];
+  /** 지난 결산 때 구장 소식 (완공·AI 공사) */
+  stadiumNews?: string[];
   /** 지난 시즌 퓨처스리그 순위 (futures.ts, 결산 때). 오프시즌 순위 화면 */
   lastFutures?: { year: number; teams: { team: number; g: number; w: number; l: number; rs: number; ra: number }[] };
   ledger: LedgerEntry[];

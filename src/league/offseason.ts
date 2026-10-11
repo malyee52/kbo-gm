@@ -33,6 +33,7 @@ import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, posting
 import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
+import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
@@ -946,6 +947,12 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
   e.salary = o.salary;
   e.signedYears = o.years;
   e.round = round;
+  // 팬덤 (stadium.ts): 프랜차이즈 스타가 FA로 떠나면 실망, 붙잡으면 반긴다
+  if (!e.returnee && e.from >= 0) {
+    const runs = currentRuns(view.sim.get(p.id)!, view.ctx);
+    if (o.team === e.from) starStays(league, e.from, year, p, runs);
+    else if (starLeaves(league, e.from, year, -2, p, runs, 'fa')) log(off, 'fa', `${league.teams[e.from].name} 팬들이 프랜차이즈 스타 ${p.name}의 이적에 실망했습니다`, e.from === off.userTeam, true);
+  }
   p.team = o.team;
   const bonus = signingBonus(o.salary, o.years);
   p.contract = { kind: 'fa', salary: o.salary, until: year + o.years, prepaid: Math.round(bonus / o.years) };
