@@ -746,3 +746,7 @@ td .inline { flex-wrap: nowrap; }
   .start.title .start-hero h1 { font-size: 40px; }
   .start.title .title-btn { min-height: 110px; }
 }
+.team-grid.start-teams { grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr)); gap: 8px; }
+.team-grid.start-teams .team-card { padding: 10px 10px 10px 16px; }
+.team-grid.start-teams .team-card strong { font-size: 15px; }
+@media (max-width: 760px) { .team-grid.start-teams { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

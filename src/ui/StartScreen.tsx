@@ -202,7 +202,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         {!current ? (
           <p className="muted">구단 목록을 불러오는 중입니다.</p>
         ) : (
-          <div className="team-grid" role="radiogroup" aria-label="구단">
+          // 구단 수에 맞춰 두 줄로 고르게 (6팀 3×2, 8팀 4×2, 10팀 5×2; 7·9팀은 위 줄이 하나 더). 2026-10-12 사용자: 3·3·3·1 배치가 보기 좋지 않다
+          <div className="team-grid start-teams" role="radiogroup" aria-label="구단" style={{ ['--cols' as string]: String(Math.ceil(current.teams.length / 2)) }}>
             {current.teams.map((t, i) => {
               const last = prev?.teams.find((x) => x.franchise === t.franchise);
               return (
