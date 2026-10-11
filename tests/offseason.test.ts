@@ -40,6 +40,9 @@ function step(g: GameSession): void {
 function finishOffseason(g: GameSession): void {
   let guard = 0;
   while (g.offseason && g.offseason.stage !== 'ready' && guard++ < 50) {
+    // 시드에 따라 해고될 수 있다: 첫 영입 제의를 받아들이고 이어 간다
+    const offers = g.league.owner?.offers;
+    if (offers?.length) g.acceptOffer(offers[0]);
     if (g.offseason.stage === 'draft') g.autoDraft();
     if (g.offseason.stage === 'comp') g.autoComp();
     if (g.offseason.stage === 'release') g.autoRelease();

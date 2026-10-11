@@ -2,14 +2,14 @@
 //
 // - 능력의 크기는 "한 시즌 기여 (대체 선수 대비 런)"로 잰다 (ai/value.ts의 currentRuns와 같은 단위).
 // - 성장은 능력 비율 전체를 한 방향으로 조금씩 옮기는 것(shiftSkill)으로 표현하고, 목표 런에 맞게 이동량을 찾는다.
-// - 잠재력 = 실제 커리어에서 가장 좋았던 두 시즌의 평균(전성기 상한). 젊은 선수는 나이에 따른 여유분을 운으로 더한다.
+// - 잠재력 = 실제 커리어 전성기에 게임이 매겼을 능력(세 시즌 가중, 가장 높은 시점). 젊은 선수는 나이에 따른 여유분을 운으로 더한다.
 
 import type { DataStore, Meta, Rates } from '../data/types';
 import {
   batSkillFrom, batValue, DECLINE_START_AGE, DEFAULT_PARAMS, pitSkillFrom, pitValue, Rng,
   type BatSkill, type EngineParams, type PitSkill, type SimPlayer,
 } from '../engine';
-import { currentRuns, expectedGrowth, type ValueContext } from '../ai/value';
+import { currentRuns, expectedGrowth, growthCap, type ValueContext } from '../ai/value';
 
 /** 성장 방향: 각 사건 비율이 이동량 1당 얼마나 바뀌는지 (지수). 장타·볼넷이 더 많이 는다 (임시값) */
 const BAT_SHIFT = { hr: 1.2, d2: 0.7, t3: 0.3, s1: 0.4, bb: 0.7, hbp: 0, so: -0.6 } as const;
@@ -97,32 +97,46 @@ export function careerIndex(store: Pick<DataStore, 'meta' | 'season'>): CareerIn
 }
 
 /**
- * 실제 커리어의 전성기 기여: 출전이 충분했던 시즌마다 그 시즌만으로 능력을 뽑아 런으로 바꾸고, 좋은 두 시즌을 평균한다.
- * 기록이 없으면 null.
+ * 실제 커리어의 전성기 기여: 출전이 충분했던 시즌마다 그 시즌까지 세 시즌 기록으로(게임 능력 산출과 같은 가중치) 능력을 뽑아
+ * 런으로 바꾸고 가장 높은 값을 쓴다. 기록이 없으면 null.
  */
 export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataStore, 'meta' | 'season'>, ctx: ValueContext,
                              params: EngineParams = DEFAULT_PARAMS): number | null {
-  const seasons: number[] = [];
+  // 2026-10-12 사용자 "실제로 높았던 선수들의 잠재력이 실제보다 낮다": 예전에는 한 시즌씩 따로 능력을 뽑아(한 시즌 표본이라
+  // 평균 쪽으로 크게 당겨진다) 좋은 두 시즌을 평균했다. 이제는 게임이 능력을 매기는 방식 그대로(그 시즌과 앞 두 시즌을
+  // seasonWeights로 가중) 출전이 충분했던 시즌마다 능력을 뽑아 가장 높은 값을 쓴다. "그 선수의 전성기에 게임이 매겼을 능력"
   const meta: Meta = store.meta;
+  let best: number | null = null;
+  const take = (r: number) => { if (best === null || r > best) best = r; };
   if (p.isPitcher) {
-    for (const { year, row } of idx.pit.get(p.id) ?? []) {
+    const list = idx.pit.get(p.id) ?? [];
+    const at = new Map(list.map((x) => [x.year, x.row]));
+    for (const { year, row } of list) {
       const starter = row.gs !== null ? row.gs / Math.max(1, row.g) >= 0.5 : row.outs / Math.max(1, row.g) >= 12;
       if (row.tbf < (starter ? PEAK_MIN_BF_SP : PEAK_MIN_BF_RP)) continue;
-      const lg = store.season(year)!.league.rates;
-      const skill = pitSkillFrom([{ row, w: 1, lg }], meta.priors.pitcher, params);
-      seasons.push(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0));
+      const rows = [0, 1, 2].flatMap((k) => {
+        const r = at.get(year - k);
+        const s = store.season(year - k);
+        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonWeights[k] ?? 0, lg: s.league.rates }] : [];
+      });
+      const skill = pitSkillFrom(rows, meta.priors.pitcher, params);
+      take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0));
     }
   } else {
-    for (const { year, row } of idx.bat.get(p.id) ?? []) {
+    const list = idx.bat.get(p.id) ?? [];
+    const at = new Map(list.map((x) => [x.year, x.row]));
+    for (const { year, row } of list) {
       if (row.pa < PEAK_MIN_PA) continue;
-      const lg = store.season(year)!.league.rates;
-      const skill = batSkillFrom([{ row, w: 1, lg }], meta.priors.batter, params);
-      seasons.push(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0));
+      const rows = [0, 1, 2].flatMap((k) => {
+        const r = at.get(year - k);
+        const s = store.season(year - k);
+        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonWeights[k] ?? 0, lg: s.league.rates }] : [];
+      });
+      const skill = batSkillFrom(rows, meta.priors.batter, params);
+      take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0));
     }
   }
-  if (!seasons.length) return null;
-  seasons.sort((a, b) => b - a);
-  return seasons.length === 1 ? seasons[0] : (seasons[0] + seasons[1]) / 2;
+  return best;
 }
 
 /** 젊은 선수의 성장 여유분 (런, 임시값). 실제로 얼마나 클지는 0.5~1.5배의 운 */
@@ -141,6 +155,9 @@ export function potentialOf(now: number, realPeak: number | null, age: number | 
   return Math.max(now, realPeak ?? -Infinity, now + room);
 }
 
+/** 터지는 해 확률 (27세 이하, 임시값) */
+export const BREAKOUT_CHANCE = 0.07;
+
 /** 성장 판정의 운 크기 (런, 표준편차에 가까운 값. 임시값) */
 const GROWTH_NOISE = 3;
 
@@ -151,8 +168,13 @@ const GROWTH_NOISE = 3;
  * 반환값: 새 능력 기여 (런)
  */
 export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng, isPitcher = false, aging = 1): number {
-  let d = expectedGrowth(age, runs, potential, isPitcher);
+  // 출전 기회가 적으면 덜 자라지만(27세 이하), 격차가 크면 그래도 한 해 상한 가까이는 큰다: 기회를 곱한 뒤 상한을 씌운다
+  let d = expectedGrowth(age, runs, potential, isPitcher, false);
   if (age <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
+  if (d > 0) d = Math.min(d, growthCap(age));
+  // 터지는 해: 27세 이하가 잠재력과 격차가 크면 가끔 상한을 넘어 격차의 40%까지 한 번에 큰다 (난수는 늘 같은 수만큼 쓴다)
+  const breakout = rng.chance(BREAKOUT_CHANCE);
+  if (breakout && age <= 27 && potential - runs > 0) d = Math.max(d, (potential - runs) * 0.4);
   if (age >= DECLINE_START_AGE && d < 0) d *= aging;
   // 균등 분포 둘의 합으로 가운데가 두꺼운 운을 만든다
   const noise = (rng.next() + rng.next() - 1) * GROWTH_NOISE * 1.7;
