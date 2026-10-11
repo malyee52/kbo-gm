@@ -4,6 +4,7 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
+import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
@@ -71,7 +72,7 @@ export const DRAFT_ROUNDS = 11;
  * (2045년 상위 270명 기여 합이 시작 대비 +5~9%, 중간 정점 +25~30%). 33세일 때 9, 31세일 때 9.5.
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
  */
-const DRAFT_POTENTIAL_SCALE = 8.5;
+export const DRAFT_POTENTIAL_SCALE = 8.5;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
 /** 외국인 후보 인원 (임시값) */
@@ -139,6 +140,8 @@ export interface OffseasonState {
     slots?: number[];
     /** 지명권마다 구분: 0 = 우선 지명, -1 = 특별 지명, n = n라운드 (2026-10-11 추가, 예전 저장에는 없다) */
     kinds?: number[];
+    /** 지명권의 원래 구단 (지명권 트레이드, picks.ts). 없거나 slots와 같으면 자기 지명권 */
+    orig?: number[];
     /** 다음 지명 번호 (0부터) */
     pick: number;
     pool: string[];
@@ -1172,7 +1175,12 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
   const firstTimers = new Set(expansions.map((e) => e.team));
   const roundOrder = [...order.filter((t) => !firstTimers.has(t)), ...order.filter((t) => firstTimers.has(t))];
   const built = expansionDraft(draftSlots(roundOrder, DRAFT_ROUNDS, penalized, snakeDraftYear(store, year + 1)), roundOrder.length, expanding);
-  off.draft = { order, slots: built.slots, kinds: built.kinds, pick: 0, pool, picks: [] };
+  const owned = applyPickOwners(league, year + 1, built.slots, built.kinds);
+  for (let i = 0; i < owned.slots.length; i++) {
+    const [t, o] = [owned.slots[i], owned.orig[i]];
+    if (t !== o && (t === off.userTeam || o === off.userTeam)) log(off, 'draft', `${built.kinds[i]}라운드 ${league.teams[o].name} 지명권은 ${league.teams[t].name}이 씁니다 (트레이드)`, true);
+  }
+  off.draft = { order, slots: owned.slots, orig: owned.orig, kinds: built.kinds, pick: 0, pool, picks: [] };
   runDraftUntilUser(league, off);
 }
 
@@ -1222,14 +1230,18 @@ function makePick(league: LeagueState, off: OffseasonState, p: LeaguePlayer): vo
   const team = draftTeamAt(off, d.pick);
   const round = pickKindAt(off, d.pick);
   const no = pickNoAt(off, d.pick);
+  const orig = d.orig?.[d.pick] ?? team;
   p.team = team;
   p.entryYear = off.year + 1;
+  // 넘겨받은 지명권으로 뽑은 선수는 입단 첫해 트레이드할 수 없다 (2019년 규약)
+  if (orig !== team) p.noTradeYear = off.year + 1;
   d.pool = d.pool.filter((x) => x !== p.id);
   d.picks.push({ team, id: p.id, round });
   d.pick++;
-  if (team === off.userTeam || round <= 1) {
+  if (team === off.userTeam || orig === off.userTeam || round <= 1) {
     const where = round >= 1 ? `${round}라운드 ${no}순위` : pickKindLabel(round);
-    log(off, 'draft', `${where} ${league.teams[team].name}: ${p.name} (${p.isPitcher ? '투수' : p.pos}, ${p.school === 'UNIV' ? '대졸' : '고졸'})`, team === off.userTeam);
+    const via = orig !== team ? ` (${league.teams[orig].name} 지명권)` : '';
+    log(off, 'draft', `${where} ${league.teams[team].name}${via}: ${p.name} (${p.isPitcher ? '투수' : p.pos}, ${p.school === 'UNIV' ? '대졸' : '고졸'})`, team === off.userTeam);
   }
 }
 

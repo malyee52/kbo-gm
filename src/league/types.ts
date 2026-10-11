@@ -39,6 +39,8 @@ export interface Contract {
 }
 
 export interface LeaguePlayer {
+  /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */
+  noTradeYear?: number;
   id: string;
   name: string;
   /** 새 외국인 후보의 이적료 (달러). 계약할 때 낸다 (finance.ts) */
@@ -206,6 +208,8 @@ export interface LeagueState {
   articles?: Article[];
   /** 그 시즌의 라이벌 쌍 (개막 때 연표로 계산, rivals.ts) */
   rivals?: { year: number; pairs: RivalPair[] };
+  /** 넘어간 신인 지명권 (picks.ts). 없으면 원래 구단 것 */
+  pickOwners?: { draft: number; round: number; from: number; owner: number }[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

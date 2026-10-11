@@ -80,6 +80,8 @@ export interface TradeProposal {
   give: SimPlayer[];
   /** AI 구단이 받는 현금 (만 원, 음수면 AI가 낸다). 재정 상세형 (2026-10-11) */
   cash?: number;
+  /** 지명권 가치 (런, league/picks.ts pickValue): AI가 받는 것과 내주는 것 */
+  picks?: { receive: number; give: number };
 }
 
 export type TradeVerdict =
@@ -103,7 +105,7 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const base = { gain: 0, need: 0, before: 0, after: 0, tendency };
   const invalid = (message: string): TradeEvaluation => ({ verdict: 'reject-invalid', message, detail: base });
 
-  if (prop.give.length === 0 && prop.receive.length === 0) return invalid('주고받을 선수를 고르세요.');
+  if (prop.give.length === 0 && prop.receive.length === 0 && !prop.cash && !prop.picks) return invalid('주고받을 선수를 고르세요.');
   if (prop.give.length > MAX_PER_SIDE || prop.receive.length > MAX_PER_SIDE) return invalid(`한쪽에서 ${MAX_PER_SIDE}명까지만 주고받을 수 있습니다.`);
   if (prop.give.some((p) => p.teamIdx !== prop.aiTeam)) return invalid('상대 구단 소속이 아닌 선수가 있습니다.');
   if (prop.receive.some((p) => p.teamIdx === prop.aiTeam)) return invalid('상대 구단 선수를 상대에게 줄 수는 없습니다.');
@@ -126,8 +128,8 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const pay = (ps: SimPlayer[]) => ps.reduce((s, p) => s + (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0)), 0);
   const salaryCost = (pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN;
   // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
-  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN;
-  const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0);
+  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0);
+  const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0) + (prop.picks?.give ?? 0);
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE);
   const detail = { gain, need, before, after: afterV, tendency };
   if (gain >= need) return { verdict: 'accept', message: '좋습니다. 그 조건으로 하죠.', detail };
