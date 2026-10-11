@@ -206,7 +206,7 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
   );
 }
 
-function GradeBar({ label, v }: { label: string; v: number | null }) {
+export function GradeBar({ label, v }: { label: string; v: number | null }) {
   return (
     <div className="gbar">
       <span>{label}</span>
