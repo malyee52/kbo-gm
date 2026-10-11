@@ -44,7 +44,7 @@ import {
   currentSeries, playNextGame, resultOf, ROUND_LABEL, startPostseason, stillAlive,
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
-import { dateOf, formatDate } from './calendar';
+import { dateOf, formatDate, shortDate } from './calendar';
 
 export interface NewGameOptions {
   year: number;
@@ -130,6 +130,9 @@ export interface TradeRecord {
   pg?: string[];
   pr?: string[];
 }
+
+/** 1군 말소 뒤 다시 등록할 수 있을 때까지 (KBO 규정 10일) */
+export const REREGISTER_DAYS = 10;
 
 /** 트레이드 마감: 7월 31일 (임시값. 실제 규정 날짜는 확인 필요) */
 export const TRADE_DEADLINE = { month: 7, date: 31 };
@@ -498,12 +501,28 @@ export class GameSession {
     return u > this.currentDay ? u : null;
   }
 
+  /**
+   * 말소된 선수가 다시 1군에 등록될 수 있는 날 (일정 색인). 제한이 없으면 null (KBO: 말소 뒤 10일).
+   * 지금 1군에 있는 선수는 제한이 없다 (AI에게 맡겼다가 다시 직접 관리로 바꿀 때 AI 명단은 그대로 넘어온다)
+   */
+  reregisterDay(p: SimPlayer): number | null {
+    if (this.registered().some((x) => x.idx === p.idx)) return null;
+    const d = this.season.demotedDay[p.idx];
+    if (d < 0) return null;
+    const ok = d + REREGISTER_DAYS;
+    return this.currentDay < ok ? ok : null;
+  }
+
   checkEntry(idxs: Iterable<number>): EntryCheck {
     const set = new Set(idxs);
     const players = this.team.org.filter((p) => set.has(p.idx));
     const { rosterSize, foreignLimit } = this.world.rules;
     const errors: string[] = [];
     const warnings: string[] = [];
+    const blocked = players.filter((p) => this.reregisterDay(p) !== null);
+    if (blocked.length) {
+      errors.push(`1군에서 말소된 선수는 ${REREGISTER_DAYS}일이 지나야 다시 등록할 수 있습니다: ${blocked.map((p) => `${p.name} (${shortDate(this.world.year, this.reregisterDay(p)!)}부터)`).join(', ')}`);
+    }
     if (players.length > rosterSize) errors.push(`1군 엔트리는 최대 ${rosterSize}명입니다 (지금 ${players.length}명)`);
     const foreign = players.filter((p) => p.foreign).length;
     if (foreign > foreignLimit) errors.push(`외국인 선수는 1군에 ${foreignLimit}명까지 등록할 수 있습니다 (지금 ${foreign}명)`);
