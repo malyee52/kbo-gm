@@ -153,6 +153,8 @@ button.small-btn.danger:hover:not(:disabled) { background: var(--error-bg); bord
 .nav nav button.on::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px; border-radius: 0 2px 2px 0; background: var(--team); }
 .nav .quit { margin-top: auto; font-size: 12px; background: transparent; color: var(--nav-muted); border-color: var(--nav-line); box-shadow: none; }
 .nav .quit:hover:not(:disabled) { background: var(--nav-hover); color: var(--nav-fg); border-color: var(--nav-line); }
+.menu-toggle { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
   position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px;
@@ -355,25 +357,38 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 .panel.offer { border: 2px solid var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .panel.mine { border-left: 4px solid var(--team, var(--accent)); }
 
-/* ---- 좁은 화면: 메뉴를 위쪽 가로줄로 */
+/* ---- 좁은 화면(휴대폰): 위쪽 줄에 구단 이름과 메뉴 버튼, 누르면 메뉴를 묶음별로 펼친다. 진행 버튼은 한 줄 가로 스크롤 */
 @media (max-width: 760px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .nav {
-    position: static; height: auto; flex-direction: row; align-items: center; gap: 10px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden;
-    border-right: 0; border-bottom: 1px solid var(--nav-line); scrollbar-width: none;
+    position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 12px;
+    border-right: 0; border-bottom: 1px solid var(--nav-line); overflow: visible;
   }
-  .nav::-webkit-scrollbar { display: none; }
   .nav::before { height: 3px; }
-  .brand { padding: 0 6px 0 0; border-bottom: 0; border-right: 1px solid var(--nav-line); flex: none; gap: 8px; }
+  .brand { padding: 0; border-bottom: 0; flex: 1 1 auto; gap: 8px; min-width: 0; }
   .brand-mark { height: 28px; width: 8px; }
   .brand strong { font-size: 15px; }
-  .nav nav { flex-direction: row; gap: 2px; }
-  .nav-group { flex-direction: row; gap: 2px; }
-  .nav-head { display: none; }
-  .nav nav button { white-space: nowrap; padding: 6px 9px; }
-  .nav nav button.on::before { left: 8px; right: 8px; top: auto; bottom: 0; width: auto; height: 3px; border-radius: 2px 2px 0 0; }
-  .nav .quit { margin-top: 0; flex: none; }
-  .topbar { padding: 8px 16px; }
+  .menu-toggle {
+    display: inline-flex; align-items: center; gap: 8px; flex: none; min-height: 36px; padding: 6px 12px; font-weight: 700;
+    background: var(--nav-hover); color: var(--nav-fg); border: 1px solid var(--nav-line); box-shadow: none;
+  }
+  .menu-toggle:hover:not(:disabled) { background: var(--nav-on); }
+  .nav nav, .nav .quit { display: none; }
+  .nav.open nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 10px; width: 100%; padding: 6px 0 2px; }
+  .nav.open .quit { display: block; width: 100%; margin-top: 0; }
+  .nav-head { padding: 0 10px 4px; }
+  .nav nav button { padding: 9px 10px; min-height: 40px; }
+  .topbar { padding: 6px 12px; gap: 6px; }
+  .when strong { font-size: 15px; }
+  .topbar .advance { flex-wrap: nowrap; width: 100%; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .topbar .advance::-webkit-scrollbar { display: none; }
+  .topbar .advance > button, .stop-settings > button { flex: none; white-space: nowrap; min-height: 32px; padding: 4px 11px; font-size: 13px; }
+  .topbar .advance [role='status'] { flex: none; white-space: nowrap; }
+  /* 진행 버튼 줄이 가로 스크롤이라 팝오버는 화면 폭에 맞춰 띄운다 (.topbar의 backdrop-filter가 fixed의 기준이 된다) */
+  .stop-settings { order: -1; }
+  .stop-pop { position: fixed; top: 100%; left: 12px; right: 12px; width: auto; max-height: 70vh; overflow-y: auto; }
+  .team-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  dialog.player { margin-top: 12px; }
   .content { padding: 16px 16px 56px; }
   .cal-cell { min-height: 56px; padding: 4px 5px; font-size: 11px; gap: 1px; }
   .cal-cell.r-승::before, .cal-cell.r-패::before, .cal-cell.r-무::before { width: 3px; }
