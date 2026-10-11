@@ -19,6 +19,7 @@ import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { ops } from './stats';
 import { futuresSeason } from '../league/futures';
+import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
 import { ORG_LIMIT } from '../league/salary';
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
@@ -116,6 +117,7 @@ export type GameAction =
   | { year: number; type: 'to-dev'; id: string }
   | { year: number; type: 'sign-dev'; id: string }
   | { year: number; type: 'promote-dev'; id: string }
+  | { year: number; type: 'hire-coach'; id: string }
   | { year?: number; day: number; type: 'convert'; id: string }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
@@ -271,6 +273,7 @@ export class GameSession {
     applyCapSanctions(league, league.year);
     league.owner = newOwner(opts.teamIdx);
     const season = Season.start(world, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
+    ensureCoaches(league);
     const g = new GameSession(store, params, opts.teamIdx, league, world, season);
     g.refreshRivals();
     g.startEntry();
@@ -316,6 +319,7 @@ export class GameSession {
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
     g.ensureOwner();
     ensureFinance(g.league);
+    ensureCoaches(g.league);
     g.rebuildTrades();
     g.lastCallUps = new Set(season.teamSeasons[save.teamIdx].callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -327,6 +331,7 @@ export class GameSession {
     const team = world.teams[save.teamIdx];
     if (!team || team.name !== save.teamName) throw new Error('저장한 구단을 지금 데이터에서 찾을 수 없습니다');
     const season = Season.restore(world, params, save.season);
+    ensureCoaches(league);
     const g = new GameSession(store, params, save.teamIdx, league, world, season);
     g.news.push(...save.news.map((n) => ({ ...n, year: n.year ?? save.year })));
     g.ensureOwner();
@@ -779,6 +784,17 @@ export class GameSession {
     return n;
   }
 
+  private formWithCoaches(form: Float64Array | null): Float64Array | null {
+    if (!this.league.coaches) return form;
+    const out = form ?? new Float64Array(this.world.players.length);
+    const edges = this.world.teams.map((t) => coachEdge(this.league, t.idx));
+    for (const p of this.world.players) {
+      const e = edges[p.teamIdx];
+      if (e) out[p.idx] += p.isPitcher ? e.pit : e.bat;
+    }
+    return out;
+  }
+
   /** 마지막 진행에서 생긴, 플레이어가 손봐야 할 일 (화면이 진행을 멈추고 보여 준다) */
   attention: string[] = [];
 
@@ -807,8 +823,8 @@ export class GameSession {
       }
     }
     const before = org.map((p) => s.states.absentUntil[p.idx]);
-    // 무작위 이벤트의 경기력 효과 (events.ts formToday)
-    s.setForm(formToday(this.league, year, day, this.world.players));
+    // 무작위 이벤트의 경기력 효과 (events.ts formToday) + 코치 (coaches.ts coachEdge)
+    s.setForm(this.formWithCoaches(formToday(this.league, year, day, this.world.players)));
     s.simulateDay();
 
     org.forEach((p, i) => {
@@ -1408,6 +1424,7 @@ export class GameSession {
       case 'to-dev': res = Off.toDevByUser(L, off!, a.id); break;
       case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
       case 'promote-dev': res = Off.promoteDevByUser(L, off!, a.id); break;
+      case 'hire-coach': res = this.applyHireCoach(a.id); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
@@ -1722,6 +1739,20 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /** 오프시즌 코치 후보를 고용한다 (같은 역할 코치가 있으면 위약금을 내고 바꾼다) */
+  hireCoach(id: string) { return this.dispatchOff({ year: this.year, type: 'hire-coach', id }); }
+
+  private applyHireCoach(id: string): { ok: boolean; message: string } {
+    const off = this.offseason;
+    const c = off?.coachMarket?.find((x) => x.id === id);
+    if (!off || !c) return { ok: false, message: '고용할 수 없는 코치입니다.' };
+    const buyout = hireCoach(this.league, this.teamIdx, c, off.year);
+    off.coachMarket = off.coachMarket!.filter((x) => x.id !== id);
+    const label = `${COACH_ROLE_LABEL[c.role]} (${c.level}등급·${COACH_STYLE_LABEL[c.style]})`;
+    this.addOffNews(`${label} 고용${buyout ? `, 전임 코치 위약금 ${(buyout / 10000).toFixed(1)}억 원` : ''}`);
+    return { ok: true, message: `${label}를 고용했습니다.` };
+  }
+
   /** 육성선수로 데려올 수 있는 선수 (정원 정리 단계) */
   devPool(): LeaguePlayer[] {
     return this.offseason ? Off.devPool(this.league, this.offseason) : [];

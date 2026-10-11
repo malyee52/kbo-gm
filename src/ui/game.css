@@ -403,3 +403,4 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 .order-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 16px; }
 .order-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--line); }
 .order-btns { margin-left: auto; display: inline-flex; gap: 2px; }
+.stars { color: var(--accent); letter-spacing: 1px; white-space: nowrap; }
