@@ -81,6 +81,8 @@ export interface DepthPlan {
   starters: Partial<Record<Slot, number>>;
   rotation: number[];
   closer: number | null;
+  /** 타순 (1번부터 자리 순서). 그 자리에 나온 선수(결장 때는 서브)가 그 타순에 선다. 없으면 AI 감독이 정한다 (2026-10-11) */
+  order?: Slot[];
 }
 
 /** 기용표 로테이션이 이보다 적게 남으면 AI가 채운다 */
@@ -362,6 +364,13 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
     ts.lineupCache.set(key, placed);
   }
   ts.field = new Map(placed.map((x) => [x.p.idx, x.slot]));
+  // 플레이어가 정한 타순: 자리 순서대로 (그 자리에 나온 선수가 그 타순)
+  const order = ts.plan && ts.manual ? ts.plan.order : undefined;
+  if (order && order.length === 9) {
+    const bySlot = new Map(placed.map((x) => [x.slot, x.p]));
+    const out = order.map((s) => bySlot.get(s)).filter((p): p is SimPlayer => !!p);
+    if (out.length === placed.length) return out;
+  }
   return battingOrder(placed.map((x) => x.p), lg);
 }
 

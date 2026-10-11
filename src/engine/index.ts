@@ -13,7 +13,7 @@ export {
   type SeasonResult, type SeasonSave, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
-  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, assignLineup, assignSlots, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
+  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine } from './types';
 export { emptyLeagueCounters, type GameResult, type LeagueCounters } from './game';

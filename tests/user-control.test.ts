@@ -59,3 +59,34 @@ describe('손볼 일이 생기면 멈춘다', () => {
     expect(stopped).toBe(true);
   }, 300_000);
 });
+
+describe('타순 직접 정하기', () => {
+  it('정한 타순(자리 순서)대로 경기에 나가고, 저장·재현해도 그대로다', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'order' }, FAST);
+    ensureEvents(g.league).chance = 0;
+    const ai = g.battingOrderSlots();
+    expect(ai.manual).toBe(false);
+    const mine = [...ai.order].reverse();
+    expect(g.setBattingOrder(mine).errors).toEqual([]);
+    expect(g.battingOrderSlots()).toEqual({ order: mine, manual: true });
+    expect(g.setBattingOrder(['C', 'C', 'SS', 'CF', '2B', '3B', 'RF', 'LF', '1B']).errors.join()).toContain('아홉 자리');
+    const plan = g.effectivePlan();
+    const n0 = g.season.log.length;
+    for (let i = 0; i < 12; i++) { ensureEvents(g.league).chance = 0; g.advance(1); }
+    let checked = 0;
+    for (let k = n0; k < g.season.log.length; k++) {
+      const box = g.season.boxes.get(k);
+      if (!box) continue;
+      const side = g.season.log[k].home === lg ? box.home : box.away;
+      const expected = mine.map((s) => plan.starters[s]);
+      if (expected.some((i) => i === undefined || g.season.absences.some((a) => a.idx === i))) continue;
+      expect(side.batters.slice(0, 9).map((b) => b.idx)).toEqual(expected);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(3);
+    const r = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'order' }, g.actions, g.day, FAST);
+    expect(r.battingOrderSlots().order).toEqual(mine);
+    expect(g.setBattingOrder(null).errors).toEqual([]);
+    expect(g.battingOrderSlots().manual).toBe(false);
+  });
+});
