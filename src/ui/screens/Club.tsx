@@ -1,3 +1,4 @@
+import { useState } from 'react';
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
@@ -9,6 +10,9 @@ import {
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
+
+type ClubTab = 'overview' | 'finance' | 'coach' | 'history';
+const CLUB_TABS: [ClubTab, string][] = [['overview', '개요'], ['finance', '재정'], ['coach', '코치진'], ['history', '이력·업적']];
 
 export function Club() {
   const { session, go } = useGame();
@@ -24,6 +28,7 @@ export function Club() {
   const ps = L.lastSeason?.postseason;
   const name = (t: number) => L.teams[t].name;
   const strikes = L.capStrikes?.[me] ?? 0;
+  const [tab, setTab] = useState<ClubTab>('overview');
 
   return (
     <div className="stack">
@@ -40,9 +45,17 @@ export function Club() {
       )}
 
       <ScenarioBanner />
-      <FinancePanel />
-      <CoachPanel />
 
+      <div className="seg" role="tablist" aria-label="구단 운영">
+        {CLUB_TABS.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'finance' && <FinancePanel />}
+      {tab === 'coach' && <CoachPanel />}
+
+      {tab === 'overview' && (<>
       <section className="cards">
         <div className="card">
           <h2>구단주 평가</h2>
@@ -99,6 +112,9 @@ export function Club() {
         </section>
       )}
 
+      </>)}
+
+      {tab === 'history' && (<>
       <section className="panel">
         <h2>부임 이력</h2>
         {o.history.length === 0 ? <p className="muted small">아직 마친 시즌이 없습니다.</p> : (
@@ -132,6 +148,7 @@ export function Club() {
           })}
         </ul>
       </section>
+      </>)}
     </div>
   );
 }

@@ -29,18 +29,21 @@ import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 
 /** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
-const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '운영' | '리그' | '시스템' }[] = [
-  { id: 'home', label: '홈', group: '운영' },
-  { id: 'offseason', label: '오프시즌', group: '운영' },
-  { id: 'roster', label: '선수단', season: true, group: '운영' },
-  { id: 'trade', label: '트레이드', season: true, group: '운영' },
-  { id: 'club', label: '구단', group: '운영' },
+// 메뉴 묶음 (2026-10-12 정리): 우리 구단 / 리그(이번 시즌) / 역사 / 시스템
+const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '우리 구단' | '리그' | '역사' | '시스템' }[] = [
+  { id: 'home', label: '홈', group: '우리 구단' },
+  { id: 'offseason', label: '오프시즌', group: '우리 구단' },
+  { id: 'roster', label: '선수단', season: true, group: '우리 구단' },
+  { id: 'trade', label: '트레이드', season: true, group: '우리 구단' },
+  { id: 'club', label: '구단 운영', group: '우리 구단' },
   { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정', group: '리그' },
   { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', group: '리그' },
   { id: 'leaders', label: '기록', offLabel: '지난 시즌 기록', group: '리그' },
+  { id: 'records', label: '기록실', group: '역사' },
+  { id: 'articles', label: '기사', group: '역사' },
   { id: 'save', label: '저장·설정', group: '시스템' },
 ];
-const GROUPS = ['운영', '리그', '시스템'] as const;
+const GROUPS = ['우리 구단', '리그', '역사', '시스템'] as const;
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
@@ -168,13 +171,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {g === '리그' && !!session.league.awards?.length && (
                   <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
                 )}
-                {g === '리그' && (
-                  <button type="button" className={screen === 'records' ? 'on' : ''} onClick={() => go('records')}>기록실</button>
-                )}
-                {g === '리그' && (
-                  <button type="button" className={screen === 'articles' ? 'on' : ''} onClick={() => go('articles')}>기사</button>
-                )}
-                {g === '운영' && off && session.offseason?.growth && (
+                {g === '우리 구단' && off && session.offseason?.growth && (
                   <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
                 )}
               </div>
