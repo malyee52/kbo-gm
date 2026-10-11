@@ -64,13 +64,66 @@ export interface GameContext {
   form?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
   plays?: Play[] | null;
+  /** 직접 지휘 (경기 개입): 이 구단의 타석마다 지휘자에게 묻는다. 고른 것이 '자동'이면 AI 감독과 똑같이 진행한다 */
+  command?: GameCommand | null;
+}
+
+/** 직접 지휘하는 구단과 판단 함수 (game/session.ts가 조작 기록·미리보기로 채운다) */
+export interface GameCommand {
+  team: number;
+  decide: (req: CommandRequest) => CommandChoice;
+}
+
+/** 지휘자에게 묻는 순간 (우리 공격 또는 우리 수비의 타석 직전) */
+export interface CommandRequest {
+  /** 이 경기에서 몇 번째 물음인가 (0부터) */
+  n: number;
+  side: 'bat' | 'field';
+  inn: number;
+  top: boolean;
+  outs: number;
+  bases: [number, number, number];
+  away: number;
+  home: number;
+  batter: number;
+  /** 다음 타자 (대타 판단용) */
+  onDeck: number;
+  pitcher: number;
+  /** 지금 투수가 상대한 타자 수, 내준 점수 */
+  pitcherBf: number;
+  pitcherRuns: number;
+  /** 우리 라인업 (타순) */
+  lineup: number[];
+  /** 우리 공격: 대타·대주자로 쓸 수 있는 선수 */
+  bench: number[];
+  /** 우리 수비: 지금 올릴 수 있는 구원 투수 */
+  bullpen: number[];
+  /** 지금까지의 중계 기록 */
+  plays: Play[];
 }
 
 /**
- * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
- * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체
+ * 지휘 선택. 비우면 자동(AI 감독).
+ * 공격: ph 대타(지금 타자 대신), pr 대주자(그 베이스 주자 대신), tactic swing 강공(도루·번트 없음), steal 도루(1루 주자, 2루 비었을 때), bunt 희생번트.
+ * 수비: pitcher 투수 교체, keep 지금 투수 유지(자동 교체 안 함), walk 고의4구.
  */
-export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PC';
+export interface CommandChoice {
+  ph?: number;
+  pr?: { base: 0 | 1 | 2; idx: number };
+  tactic?: 'swing' | 'steal' | 'bunt';
+  pitcher?: number;
+  keep?: boolean;
+  walk?: boolean;
+}
+
+/** 지휘한 희생번트가 성공할 확률 (임시값) */
+export const BUNT_SUCCESS = 0.85;
+
+/**
+ * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
+ * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자
+ */
+export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR';
 
 export interface Play {
   inn: number;
@@ -124,6 +177,8 @@ interface Side {
   def: number;
   /** 포수의 수비 런 */
   catcherDef: number;
+  /** 교체로 빠진 선수 (다시 나올 수 없다) */
+  removed: Set<number>;
 }
 
 export interface GameResult {
@@ -343,7 +398,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
     const fd = fieldDefense(ts, lineup);
-    return { ts, lineup, spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd };
+    return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set() };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
@@ -352,6 +407,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   const rec: { win: PitcherInGame | null; loss: PitcherInGame | null; leader: Side | null } = { win: null, loss: null, leader: null };
   // 2아웃에서 실책이 나오면 그 이닝의 이후 실점은 비자책
   let halfUnearned = false;
+  // 직접 지휘 물음 번호
+  let cmdN = 0;
 
   const score = (bat: Side, fld: Side, runner: Runner, batterLine: BatLine | null) => {
     const before = bat.runs - fld.runs;
@@ -399,16 +456,57 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       });
     };
 
+    const cmd = ctx.command;
+    const ask = (side: 'bat' | 'field'): CommandChoice => cmd!.decide({
+      n: cmdN++, side, inn: inning, top: !bat.isHome, outs, bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1],
+      away: away.runs, home: home.runs, batter: bat.lineup[bat.spot].idx, onDeck: bat.lineup[(bat.spot + 1) % 9].idx,
+      pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs,
+      lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
+      bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
+      bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
+      plays: plays ? plays.slice() : [],
+    });
+
     while (outs < 3) {
+      // 직접 지휘: 우리 수비면 투수 교체·유지·고의4구, 우리 공격이면 대타·대주자·작전
+      const fc = cmd && fld.ts.team.idx === cmd.team ? ask('field') : null;
       const was = fld.pitcher;
-      maybeChangePitcher(fld, bat, inning, !bases[0] && !bases[1] && !bases[2], first, bat.runs - runsAtStart, ctx);
+      const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
+      if (next) {
+        fld.usedIdx.add(next.idx);
+        fld.pitcher = enterPitcher(next, false, fld.runs - bat.runs, ctx);
+        fld.staff.push(fld.pitcher);
+      } else if (!fc?.keep) {
+        maybeChangePitcher(fld, bat, inning, !bases[0] && !bases[1] && !bases[2], first, bat.runs - runsAtStart, ctx);
+      }
       if (plays && fld.pitcher !== was) note('PC', -1, fld.pitcher.p.idx, bat.runs);
       first = false;
       const pg = fld.pitcher;
+      const bc = cmd && bat.ts.team.idx === cmd.team ? ask('bat') : null;
+      const bench = (idx: number | undefined) => (idx === undefined ? undefined
+        : bat.ts.hitters.find((p) => p.idx === idx && !bat.lineup.includes(p) && !bat.removed.has(p.idx)));
+      const runnerIn = bench(bc?.pr?.idx);
+      const old = bc?.pr ? bases[bc.pr.base] : null;
+      if (runnerIn && old) {
+        const slot = bat.lineup.indexOf(old.p);
+        if (slot >= 0) bat.lineup[slot] = runnerIn;
+        bat.removed.add(old.p.idx);
+        bases[bc!.pr!.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
+        ctx.bat[runnerIn.idx].g++;
+        note('PR', runnerIn.idx, pg.p.idx, bat.runs);
+      }
+      const hitter = bench(bc?.ph);
+      if (hitter) {
+        bat.removed.add(bat.lineup[bat.spot].idx);
+        bat.lineup[bat.spot] = hitter;
+        ctx.bat[hitter.idx].g++;
+        note('PH', hitter.idx, pg.p.idx, bat.runs);
+      }
+      const tactic = bc?.tactic;
 
-      // 도루: 1루 주자, 2루가 비었을 때
+      // 도루: 1루 주자, 2루가 비었을 때 (지휘: 도루면 반드시, 강공·번트면 안 한다)
       const r1 = bases[0];
-      if (r1 && !bases[1] && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))) {
+      if (r1 && !bases[1] && (tactic === 'steal' || (!tactic && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))))) {
         const line = ctx.bat[r1.p.idx];
         if (rng.chance(r1.p.bat!.sbPct - fld.catcherDef * params.catcherStealPerRun)) {
           line.sb++;
@@ -445,8 +543,27 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       pg.bf++;
       pg.line.bf++;
 
+      // 지휘한 희생번트: 2아웃 전, 주자가 있을 때. 실패하면 타자만 아웃
+      if (tactic === 'bunt' && outs < 2 && (bases[0] || bases[1] || bases[2]) && !fc?.walk) {
+        if (rng.chance(BUNT_SUCCESS)) {
+          bl.sac++;
+          totals.sac++;
+          out(1);
+          const r0 = bat.runs;
+          if (bases[2] && outs < 3) { score(bat, fld, bases[2], bl); bases[2] = null; }
+          if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
+          if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
+          note('SAC', batter.idx, pg.p.idx, r0);
+          if (walkOff()) return true;
+        } else {
+          bl.ab++; totals.ab++;
+          out(1);
+          note('BF', batter.idx, pg.p.idx, bat.runs);
+        }
+        continue;
+      }
       // 희생번트: 무사, 주자 1루 또는 2루, 3루는 비었을 때. 약한 타자가 주로 댄다
-      if (outs === 0 && !bases[2] && (bases[0] || bases[1]) && ctx.env.sac > 0) {
+      if (!tactic && !fc?.walk && outs === 0 && !bases[2] && (bases[0] || bases[1]) && ctx.env.sac > 0) {
         const weak = batter.value < bat.medianValue ? 1.6 : 0.4;
         if (rng.chance(ctx.env.sac * params.sacBuntScale * weak * (bat.ts.tactics?.bunt ?? 1))) {
           bl.sac++;
@@ -458,12 +575,12 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
           continue;
         }
       }
-      const ev = samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def, {
+      const ev = fc?.walk ? Ev.BB : samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def, {
         runnersOn: !!(bases[0] || bases[1] || bases[2]), scoring: !!(bases[1] || bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
       });
       const me: Runner = { p: batter, resp: pg, earned: true };
       const r0 = bat.runs;
-      let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? 'BB' : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
+      let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (fc?.walk ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
       const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
       const twoOut = outs === 2 ? params.twoOutBonus : 0;
       /** 추가 진루 시도: 성공이면 true, 주루사면 아웃을 올리고 false */

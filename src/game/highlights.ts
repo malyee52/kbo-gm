@@ -7,6 +7,7 @@ export type NameOf = (idx: number) => string;
 const KIND_TEXT: Record<PlayKind, string> = {
   SO: '삼진', BB: '볼넷', HBP: '몸에 맞는 공', HR: '홈런', '3B': '3루타', '2B': '2루타', '1B': '안타', E: '실책으로 출루',
   GDP: '병살타', GO: '땅볼 아웃', FO: '뜬공 아웃', SF: '희생플라이', SAC: '희생번트', SB: '도루 성공', CS: '도루 실패', WP: '폭투로 주자 진루', PC: '투수 교체',
+  IBB: '고의4구', BF: '번트 실패', PH: '대타', PR: '대주자',
 };
 
 export const isHit = (k: PlayKind) => k === '1B' || k === '2B' || k === '3B' || k === 'HR';
@@ -20,6 +21,7 @@ export function homerLabel(runs: number): string {
 export function playText(p: Play, name: NameOf): string {
   if (p.kind === 'PC') return `투수 교체: ${name(p.pit)}`;
   if (p.kind === 'WP') return `폭투·포일${p.runs ? `, ${p.runs}점` : ''}`;
+  if (p.kind === 'PH' || p.kind === 'PR') return `${KIND_TEXT[p.kind]}: ${name(p.bat)}`;
   const who = name(p.bat);
   if (p.kind === 'HR') return `${who} ${homerLabel(p.runs)}!`;
   const tail = p.runs > 0 ? ` (${p.runs}점)` : '';

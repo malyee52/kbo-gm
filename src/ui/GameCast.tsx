@@ -25,7 +25,7 @@ function loadSpeed(): number {
 /** 움직임을 줄이라는 설정이면 처음부터 끝 장면 */
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-function Diamond({ play }: { play: Play | undefined }) {
+export function Diamond({ play }: { play: Play | undefined }) {
   const on = (i: number) => (play ? play.bases[i] >= 0 && play.outs < 3 : false);
   const base = (x: number, y: number, i: number) => (
     <rect x={x - 9} y={y - 9} width={18} height={18} transform={`rotate(45 ${x} ${y})`} className={`base${on(i) ? ' on' : ''}`} />

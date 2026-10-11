@@ -28,9 +28,10 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
+import { CommandView } from './CommandView';
 import { Celebration } from './Motion';
 import { achievements, type Achievement } from '../game/celebrate';
-import type { CastGame } from '../game/session';
+import type { CastGame, CommandPreview } from '../game/session';
 import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type StopRules } from '../game/stops';
 import { StopSettings } from './StopSettings';
 
@@ -128,7 +129,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
-    if (snap || attention.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention });
+    const rest = attention.filter((x) => x.kind !== 'crisis');
+    if (session.crisis) setCmd(session.crisis);
+    else if (snap || rest.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention: rest });
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
@@ -147,6 +150,34 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (fresh.length) setParty((p) => [...p, ...fresh]);
   }, [version, session]);
   const endParty = useCallback(() => setParty([]), []);
+  // 직접 지휘 (CommandView): 진행 버튼 옆 "직접 지휘", 또는 자동 진행이 위기에서 멈췄을 때
+  const [cmd, setCmd] = useState<CommandPreview | null>(null);
+  const startCommand = async () => {
+    if (busy || session.done || session.phase !== 'season') return;
+    setBusy('직접 지휘 준비 중');
+    await nextFrame();
+    // 오늘 경기가 없으면 경기 날까지 (멈춤 설정대로)
+    let attention: Attention[] = [];
+    while (!session.hasGameToday && !session.done) {
+      session.advance(1, stops);
+      if (session.attention.length) attention = [...session.attention];
+      if (session.stopped) break;
+    }
+    autoAnswer(stops);
+    changed();
+    setBusy(null);
+    if (session.crisis) { setCmd(session.crisis); return; }
+    if (attention.length) { setSummary({ snap: takeSnapshotAfter(), attention }); return; }
+    if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+  };
+  const endCommand = async (done: boolean) => {
+    setCmd(null);
+    session.crisis = null;
+    changed();
+    if (!done) return;
+    await autosave();
+    if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
+  };
   /** 진행 전 경기 수를 받아, 그 뒤 우리 경기 가운데 마지막 것 (중계 기록이 있을 때) */
   const castAfter = (before: number) => {
     if (!stops.cast) return;
@@ -183,7 +214,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
-    if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
+    if (session.crisis) setCmd(session.crisis);
+    else if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
     else castAfter(before);
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
@@ -255,6 +287,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {busy && <span className="muted small" role="status">{busy}</span>}
               <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done || !!session.pendingEvent} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
               <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>하루</button>
+              <button type="button" className="ghost" onClick={() => void startCommand()} disabled={!!busy || session.done || !!session.pendingEvent} title="오늘(또는 다음) 우리 경기를 타석마다 직접 지휘합니다: 대타·대주자·작전·투수 교체">직접 지휘</button>
               <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>일주일</button>
               <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>한 달</button>
               <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (완전 자동)', true)} disabled={!!busy || session.done || !!session.pendingEvent} title="완전 자동: 무엇이 생겨도 멈추지 않고, 이벤트는 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
@@ -269,7 +302,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
               )}
               {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
-              {party.length > 0 && !cast && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
+              {cmd && !session.pendingEvent && <CommandView start={cmd} onDone={() => void endCommand(true)} onCancel={() => void endCommand(false)} />}
+              {party.length > 0 && !cast && !cmd && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
               <div key={screen} className="screen-in">
               {screen === 'home' && <Home />}
               {screen === 'roster' && <Roster />}

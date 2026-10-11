@@ -26,7 +26,7 @@ import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { ORG_LIMIT } from '../league/salary';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import type { BoxScore, Play } from '../engine';
+import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
@@ -71,6 +71,29 @@ export interface CastGame {
   box?: BoxScore;
   /** 가을야구 시리즈 이름 */
   label?: string;
+}
+
+/** 직접 지휘 미리보기 결과 (commandPreview) */
+export interface CommandPreview {
+  /** 다음 물음. 없으면 경기가 끝났다 */
+  req: CommandRequest | null;
+  /** 지금까지의 선택 (자동으로 넘긴 물음은 빈 선택) */
+  choices: CommandChoice[];
+  plays: Play[];
+  home: number;
+  away: number;
+  /** 경기가 끝났을 때 점수 */
+  final?: { away: number; home: number };
+}
+
+/** 미리보기를 멈추는 신호 (엔진 지휘 함수가 던진다) */
+class CommandPause {
+  constructor(readonly req: CommandRequest) {}
+}
+
+/** 위기·승부처: 7회 이후, 2점 차 안, 득점권 주자 (StopRules.crisis) */
+export function isCrisis(req: CommandRequest): boolean {
+  return req.inn >= 7 && Math.abs(req.away - req.home) <= 2 && (req.bases[1] >= 0 || req.bases[2] >= 0);
 }
 
 export interface NewGameOptions {
@@ -125,6 +148,8 @@ export type GameAction =
   | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number; pg?: string[]; pr?: string[] }
   | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
   | { year: number; day: number; type: 'event'; choice: number }
+  /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인 */
+  | { year: number; day: number; type: 'command'; choices: CommandChoice[] }
   /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장) */
   | { year: number; type: 'begin-off'; enlist?: string[] }
   | { year: number; type: 'fa-offer'; id: string; salary: number; years: number }
@@ -298,6 +323,86 @@ export class GameSession {
     this.applyTactics();
   }
 
+  // ---- 직접 지휘 (경기 개입, 2026-10-12 사용자 요청: 대주자·대타·작전·투수 교체)
+
+  /** 조작 기록으로 받은 그날 지휘 선택 (하루 진행 때 쓰고 비운다) */
+  private pendingCommand: { day: number; choices: CommandChoice[] } | null = null;
+  /** 자동 진행이 위기에서 멈췄을 때의 미리보기 (화면이 지휘 창을 연다) */
+  crisis: CommandPreview | null = null;
+  /** 미리보기용 개막 월드 (시즌마다 한 번 만든다. 시즌 중 리그 상태는 개막 때로 고정이다) */
+  private openingWorld: { season: Season; world: World } | null = null;
+
+  /** 오늘(아직 치르지 않은 날) 우리 경기가 있나 */
+  get hasGameToday(): boolean {
+    const s = this.season;
+    return this.phase === 'season' && !s.done && !!s.schedule[s.day]?.some((g) => g.home === this.teamIdx || g.away === this.teamIdx);
+  }
+
+  /** 오늘 우리 경기를 직접 지휘할 수 있나 (정규시즌, 답할 이벤트 없음) */
+  get canCommand(): boolean {
+    return this.hasGameToday && !this.pendingEvent;
+  }
+
+  /** 하루 진행 직전 준비 (실제 진행과 미리보기가 같게) */
+  private prepareDay(s: Season): void {
+    s.setForm(this.formWithCoaches(formToday(this.league, this.world.year, s.day, this.world.players)));
+  }
+
+  /** 실제 시즌을 건드리지 않는 복사본 (개막 월드를 복사해 지금 시즌 상태를 복원한다) */
+  private scratchSeason(): Season {
+    if (this.openingWorld?.season !== this.season) {
+      this.openingWorld = { season: this.season, world: worldFromLeague(clone(this.league), this.store, this.params) };
+    }
+    const base = this.openingWorld.world;
+    const players = base.players.map((p) => ({ ...p }));
+    const world: World = { ...base, players, teams: base.teams.map((t) => ({ ...t, org: t.org.map((p) => players[p.idx]) })) };
+    const s = Season.restore(world, this.params, this.season.toSave());
+    s.teamSeasons.forEach((ts, i) => { ts.tactics = this.season.teamSeasons[i].tactics; });
+    return s;
+  }
+
+  /**
+   * 직접 지휘 미리보기: choices까지 고른 상태로 오늘을 복사본에서 돌려 다음 물음에서 멈춘다. 실제 게임은 그대로다.
+   * mode: next 바로 다음 물음, crisis 위기·승부처까지 자동, inning 이 반 이닝이 끝날 때까지 자동, auto 경기 끝까지 자동
+   */
+  commandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto' = 'next'): CommandPreview {
+    const s = this.scratchSeason();
+    const out = choices.map((c) => ({ ...c }));
+    const me = this.teamIdx;
+    const game = s.schedule[s.day].find((g) => g.home === me || g.away === me);
+    let half: { inn: number; top: boolean } | null = null;
+    s.commander = {
+      team: me,
+      decide: (req) => {
+        if (req.n < choices.length) return choices[req.n];
+        half ??= { inn: req.inn, top: req.top };
+        const stop = mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top));
+        if (stop) throw new CommandPause(req);
+        out.push({});
+        return {};
+      },
+    };
+    this.prepareDay(s);
+    try {
+      s.simulateDay();
+    } catch (e) {
+      if (!(e instanceof CommandPause)) throw e;
+      return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1 };
+    }
+    const i = s.log.findIndex((g, k) => k >= this.season.log.length && (g.home === me || g.away === me));
+    const g = s.log[i];
+    return { req: null, choices: out, plays: s.plays.get(i) ?? [], home: g?.home ?? -1, away: g?.away ?? -1, ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}) };
+  }
+
+  /** 직접 지휘 확정: 고른 대로 오늘을 진행한다 (조작 기록에 남아 다시 돌려도 같다) */
+  commitCommand(choices: CommandChoice[]): { ok: boolean; message: string } {
+    if (!this.canCommand) return { ok: false, message: '오늘 지휘할 경기가 없습니다.' };
+    this.dispatchSeason({ year: this.year, day: this.day, type: 'command', choices: choices.map((c) => ({ ...c })) });
+    this.crisis = null;
+    this.advance(1);
+    return { ok: true, message: '경기를 마쳤습니다.' };
+  }
+
   /** 우리 구단 경기 (fromDay 일정 색인부터, 날짜 순). 가을야구 경기도 뒤에 붙는다 */
   ourGames(fromDay = 0): CastGame[] {
     const me = this.teamIdx;
@@ -468,6 +573,7 @@ export class GameSession {
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else if (a.type === 'event') this.applyEventChoice(a.choice);
+    else if (a.type === 'command') this.pendingCommand = { day: a.day, choices: a.choices.map((c) => ({ ...c })) };
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'settings') this.applySettings(a.s);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
@@ -868,6 +974,16 @@ export class GameSession {
         if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
+      // 위기 멈춤 (직접 지휘): 오늘 우리 경기를 미리 돌려 위기가 오면 그날을 진행하지 않고 멈춘다
+      if (r.crisis && this.hasGameToday && this.pendingCommand?.day !== this.day) {
+        const pv = this.commandPreview([], 'crisis');
+        if (pv.req) {
+          this.crisis = pv;
+          this.attention.push({ kind: 'crisis', text: `오늘 경기 ${pv.req.inn}회${pv.req.top ? '초' : '말'} 위기·승부처입니다. 직접 지휘하세요.` });
+          this.stopped = true;
+          break;
+        }
+      }
       const streak0 = r.losing ? this.currentStreak() : 0;
       this.stepDay();
       n++;
@@ -958,8 +1074,13 @@ export class GameSession {
     const before = org.map((p) => s.states.absentUntil[p.idx]);
     this.absencesToday = [];
     // 무작위 이벤트의 경기력 효과 (events.ts formToday) + 코치 (coaches.ts coachEdge)
-    s.setForm(this.formWithCoaches(formToday(this.league, year, day, this.world.players)));
+    this.prepareDay(s);
+    // 직접 지휘한 경기: 조작 기록의 선택을 물음 순서대로 (모자라면 자동)
+    const cmd = this.pendingCommand?.day === day ? this.pendingCommand : null;
+    s.commander = cmd ? { team: this.teamIdx, decide: (req) => cmd.choices[req.n] ?? {} } : null;
     s.simulateDay();
+    s.commander = null;
+    this.pendingCommand = null;
 
     org.forEach((p, i) => {
       const until = s.states.absentUntil[p.idx];
