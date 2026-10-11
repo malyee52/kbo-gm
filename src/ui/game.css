@@ -761,3 +761,13 @@ td .inline { flex-wrap: nowrap; }
   .flow-next ol { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; }
   .flow-next button { width: 100%; margin-left: 0; }
 }
+
+/* 숫자 칸이 좁을 때 글자가 칸을 뚫고 나오지 않게 (2026-10-12 사용자: 모바일에서 감독 탭 글자가 레이아웃을 뚫고 나온다) */
+.stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)); }
+.stat { overflow: hidden; }
+.stat-value { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .stat-value { font-size: 17px; } }
+/* 시작 화면 새 게임: 1200px 아래에서는 구단 선택을 설정 아래로 (구단 칸이 좁아 글자가 넘쳤다) */
+@media (max-width: 1200px) { .panel.start-new { grid-template-columns: minmax(0, 1fr); } }
+.team-card { min-width: 0; }
+.team-card .small { overflow-wrap: anywhere; }
