@@ -82,6 +82,9 @@ export interface SimTeam {
   franchise: string;
   /** 구단 소속 전체 (1군 + 2군) */
   org: SimPlayer[];
+  /** 의료·트레이닝 투자: 부상 확률 배율, 결장 기간 배율 (없으면 1, league/finance.ts) */
+  injuryRate?: number;
+  injuryDays?: number;
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */

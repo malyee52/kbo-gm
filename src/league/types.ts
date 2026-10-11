@@ -3,6 +3,7 @@
 // 시즌이 끝나면 결산(commitSeason)에서 리그 상태에 반영한다.
 
 import type { SeasonAwards } from './awards';
+import type { TeamFinance } from './finance';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -28,11 +29,15 @@ export interface Contract {
   salary: number;
   /** 계약이 끝나는 마지막 시즌 */
   until: number;
+  /** FA 계약금으로 미리 낸 한 해 몫 (만 원). 월말 연봉에서 빠진다 (finance.ts, 샐러리캡 계산은 salary 그대로) */
+  prepaid?: number;
 }
 
 export interface LeaguePlayer {
   id: string;
   name: string;
+  /** 새 외국인 후보의 이적료 (달러). 계약할 때 낸다 (finance.ts) */
+  transferFee?: number;
   /** 실존 선수. 가상 선수(신인·외국인 후보)는 false */
   real: boolean;
   isPitcher: boolean;
@@ -98,6 +103,10 @@ export interface Military {
   enlisted?: number;
   /** 복무 중일 때: 복귀하는 시즌 */
   returnYear?: number;
+  /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), estimate = 나이·1군 기록 공백으로 짐작 */
+  basis?: 'record' | 'estimate';
+  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달') */
+  note?: string;
 }
 
 export interface InjuryLine {
@@ -135,16 +144,18 @@ export interface LeagueTeam {
   franchise: string;
 }
 
-/** 구단 돈 거래 기록 (보상금 등). 예산 모델(M7) 전에는 기록만 한다 */
+/** 구단 돈 거래 기록. 구단 자금은 장부의 합이다 (finance.ts, 2026-10-11 재정 상세형) */
 export interface LedgerEntry {
   year: number;
-  /** 받는 구단 (-1 = 리그) */
+  /** 받는 구단 (-1 = 리그·모기업·바깥) */
   to: number;
-  /** 내는 구단 */
+  /** 내는 구단 (-1 = 리그·모기업·바깥) */
   from: number;
-  /** 만 원 */
+  /** 만 원 (2026년 돈) */
   amount: number;
   note: string;
+  /** 구분 (finance.ts의 FinanceKind). 예전 장부에는 없다 */
+  kind?: string;
 }
 
 export interface LeagueState {
@@ -172,6 +183,8 @@ export interface LeagueState {
   capStrikes?: number[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
+  /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */
+  finance?: TeamFinance[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

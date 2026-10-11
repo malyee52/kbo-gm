@@ -2,10 +2,11 @@
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
-import { PlayerLink, TeamName, useGame } from '../context';
+import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
 
 export function Home() {
+  const won = useWon();
   const { session, go } = useGame();
   const s = session.season;
   const me = session.teamIdx;
@@ -48,7 +49,7 @@ export function Home() {
           </div>
           {session.owner.goal?.year === year && (
             <p className="small">
-              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust}{' '}
+              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong>{won(session.cashNow())}</strong>{' '}
               <button type="button" className="link" onClick={() => go('club')}>구단 현황</button>
             </p>
           )}

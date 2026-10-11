@@ -22,6 +22,7 @@ import { Growth } from './screens/Growth';
 import { Awards } from './screens/Awards';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
+import { ErrorBoundary } from './ErrorBoundary';
 
 /** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
 const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '운영' | '리그' | '시스템' }[] = [
@@ -112,7 +113,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   };
 
   const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave };
-  const team = session.team;
+  const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
   const nav = NAV.filter((n) => (off ? !n.season : n.id !== 'offseason'));
   const psCur = session.postseasonRunning ? currentSeries(session.postseason!) : null;
@@ -181,19 +182,21 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           </header>
           {saveError && <p className="error banner" role="alert">{saveError}</p>}
           <main className="content" aria-busy={!!busy}>
-            {screen === 'home' && <Home />}
-            {screen === 'roster' && <Roster />}
-            {screen === 'schedule' && <Schedule focusGame={screenArg} />}
-            {screen === 'standings' && <Standings />}
-            {screen === 'leaders' && <Leaders />}
-            {screen === 'trade' && <Trade />}
-            {screen === 'save' && <SaveScreen onQuit={onQuit} />}
-            {screen === 'season-end' && <SeasonEnd />}
-            {screen === 'offseason' && <Offseason />}
-            {screen === 'club' && <Club />}
-            {screen === 'postseason' && <Postseason />}
-            {screen === 'growth' && <Growth />}
-            {screen === 'awards' && <Awards />}
+            <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>
+              {screen === 'home' && <Home />}
+              {screen === 'roster' && <Roster />}
+              {screen === 'schedule' && <Schedule focusGame={screenArg} />}
+              {screen === 'standings' && <Standings />}
+              {screen === 'leaders' && <Leaders />}
+              {screen === 'trade' && <Trade />}
+              {screen === 'save' && <SaveScreen onQuit={onQuit} />}
+              {screen === 'season-end' && <SeasonEnd />}
+              {screen === 'offseason' && <Offseason />}
+              {screen === 'club' && <Club />}
+              {screen === 'postseason' && <Postseason />}
+              {screen === 'growth' && <Growth />}
+              {screen === 'awards' && <Awards />}
+            </ErrorBoundary>
           </main>
         </div>
         {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}

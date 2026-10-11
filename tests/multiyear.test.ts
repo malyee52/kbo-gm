@@ -6,6 +6,7 @@ import {
   type EngineParams, type World,
 } from '../src/engine';
 import { agingDelta, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
+import { DECLINE_START_AGE } from '../src/engine';
 import { initialMilitary, isServing, retireChance } from '../src/league/careers';
 import { createLeague } from '../src/league/create';
 import { careerIndex } from '../src/league/growth';
@@ -125,9 +126,10 @@ describe('부상', () => {
 });
 
 describe('노화와 대체 선수 기준', () => {
-  it('31세부터 떨어지고, 투수가 타자보다 크게 떨어진다 (tools/fit_aging.ts 추정값)', () => {
-    for (let a = 31; a <= 40; a++) expect(agingDelta(a)).toBeLessThan(0);
-    const sum = (pit: boolean) => [31, 32, 33, 34, 35].reduce((s, a) => s + agingDelta(a, pit), 0);
+  it('하락 나이(DECLINE_START_AGE)부터 떨어지고, 투수가 타자보다 크게 떨어진다 (tools/fit_aging.ts 추정값)', () => {
+    expect(agingDelta(DECLINE_START_AGE - 1)).toBe(0);
+    for (let a = DECLINE_START_AGE; a <= DECLINE_START_AGE + 9; a++) expect(agingDelta(a)).toBeLessThan(0);
+    const sum = (pit: boolean) => [0, 1, 2, 3, 4].reduce((s, k) => s + agingDelta(DECLINE_START_AGE + k, pit), 0);
     expect(sum(true)).toBeLessThan(sum(false));
   });
 
@@ -159,15 +161,17 @@ describe('병역', () => {
     expect(initialMilitary({ id: 'x', foreign: false, real: true, birthYear: 1990 }, null, 2026)?.state).toBe('done');
   });
 
-  it('20대 실존 선수 중 기록이 1~2시즌 비었던 선수는 복무한 것으로 본다', () => {
+  it('20대 실존 선수: 실제 자료(상무·경찰)가 없으면 기록이 1~2시즌 비었던 선수를 복무한 것으로 짐작한다', () => {
     const idx = careerIndex(store);
     const { league } = createLeague(store, 2026, 'mil', NO_PILOT);
     const young = league.players.filter((p) => p.real && !p.foreign && p.birthYear && 2026 - p.birthYear < 29);
-    const done = young.filter((p) => p.military?.state === 'done');
+    const done = young.filter((p) => p.military?.state === 'done' && p.military.basis === 'estimate');
     const pending = young.filter((p) => p.military?.state === 'pending');
     expect(done.length).toBeGreaterThan(0);
     expect(pending.length).toBeGreaterThan(0);
-    // 마친 것으로 본 선수는 실제로 기록 공백이 있다
+    // 실제 자료로 마친 선수는 military.json에 복무 기록이 있다
+    for (const p of young.filter((x) => x.military?.state === 'done' && x.military.basis === 'record')) expect(store.military?.[p.id]?.served, p.name).toBeTruthy();
+    // 짐작으로 마친 것으로 본 선수는 실제로 기록 공백이 있다
     for (const p of done.slice(0, 20)) {
       const years = [...new Set([...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].map((x) => x.year))].filter((y) => y < 2026).sort();
       expect(years.some((y, i) => i > 0 && y - years[i - 1] >= 2), p.name).toBe(true);

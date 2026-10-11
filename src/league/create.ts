@@ -5,12 +5,15 @@ import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, t
 import { currentRuns, valueContext } from '../ai/value';
 import { initialMilitary } from './careers';
 import { makeDraftee, takenNames } from './offseason';
+import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
-import { foreignSalary, marketSalary, MIN_SALARY, reserveTarget } from './salary';
+import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
+import { teamChangesFor } from './eras';
+import { addExpansionCapital, ensureFinance } from './finance';
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'>;
 
 /** 1군 연차로 치는 시즌: 100타석 또는 상대 타자 100명 이상 (임시값. 실제 등록일수 자료가 없다) */
 function servedSeason(idx: CareerIndex, id: string, year: number): boolean {
@@ -59,7 +62,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
   for (const c of store.contracts ?? []) (contractsById.get(c.id) ?? contractsById.set(c.id, []).get(c.id)!).push(c);
 
-  const players: LeaguePlayer[] = startPlayers.map((p: SimPlayer) => {
+  const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
     const now = currentRuns(p, ctx);
     const peak = realPeakRuns(p, idx, store, ctx, params);
@@ -92,17 +95,27 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, history: [],
-      ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear) }),
+      ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };
-  });
+  };
+  const players: LeaguePlayer[] = startPlayers.map(toLeague);
 
   const league: LeagueState = {
     format: 1, seed, startYear, year: startYear,
     teams: recorded.teams.map((t) => ({ name: t.name, franchise: t.franchise })),
     players, lastSeason: null, ledger: [], nextVirtualId: 1,
   };
-  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx);
-  const world = opening || added || special.size ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  // 시작 다음 해에 1군에 들어오는 창단 구단은 이미 창단해 퓨처스리그에서 뛰고 있다 (예: 2012 시작의 NC).
+  // 시작 전 드래프트에서 지명한 선수(나성범 등)는 아래 보충에서 이 구단으로 들어간다
+  const futures = addFuturesTeams(league, store, startYear);
+  const recordedIds = new Set(league.players.map((p) => p.id));
+  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx)
+    + addAbsentVeterans(league, store, startYear, params, special, toLeague)
+    + addLateDebuts(league, store, ctx, startYear, idx);
+  trimToOrgLimit(league, recordedIds);
+  ensureFinance(league);
+  for (const e of league.expansions ?? []) addExpansionCapital(league, e.team, startYear);
+  const world = opening || added || special.size || futures ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
 
@@ -128,6 +141,109 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
     const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx);
     p.team = t;
     p.military = { state: 'pending' };
+    n++;
+  }
+  return n;
+}
+
+/** 군 복무가 아닌 공백(2군·부상)으로 보충할 때 앞뒤로 볼 햇수 (임시값) */
+const GAP_YEARS = 2;
+/** 복무 중 선수: 입대 전 마지막 1군 기록이 이 햇수 안에 있어야 한다 (임시값) */
+const SERVICE_LOOKBACK = 3;
+
+/**
+ * 시작 연도에 1군 기록이 없지만 그 앞뒤로 1군에서 뛴 국내 선수를 마지막 1군 구단에 넣는다 (2026-10-11 사용자 요청).
+ * - 군 복무 중 (military.json의 복무 기록, 전역 해가 시작 연도 이후): 복무 중 상태로 넣고 전역 다음 해에 복귀
+ * - 2군·부상 공백 (앞뒤 GAP_YEARS 안에 1군 기록): 2군 선수로 넣는다
+ * 능력은 마지막 1군 기록 해의 월드에서 가져온다. 해외 진출 같은 다른 이유의 공백도 섞이지만, 실제 역사를 따를 필요는 없다는 사용자 결정에 따라
+ * 마지막 구단에 남은 것으로 본다. 넣은 수를 돌려준다.
+ */
+function addAbsentVeterans(league: LeagueState, store: Store, startYear: number, params: EngineParams, special: Set<string>,
+                           toLeague: (p: SimPlayer) => LeaguePlayer): number {
+  const have = new Set(league.players.map((p) => p.id));
+  const worlds = new Map<number, World>();
+  const worldAt = (y: number) => worlds.get(y) ?? worlds.set(y, worldForYear(store, y, params)).get(y)!;
+  const recordYears = (id: string): number[] => {
+    const ys: number[] = [];
+    for (let y = startYear - SERVICE_LOOKBACK; y <= startYear + GAP_YEARS; y++) {
+      const sd = store.season(y);
+      if (sd && (sd.bat.some((r) => r.id === id) || sd.pit.some((r) => r.id === id))) ys.push(y);
+    }
+    return ys;
+  };
+  // 후보: 시작 연도 직전 몇 해 안에 1군 기록이 있는 국내 선수 (시작 연도 명단에 없는)
+  const cand = new Set<string>();
+  for (let y = startYear - SERVICE_LOOKBACK; y < startYear; y++) {
+    const sd = store.season(y);
+    if (!sd) continue;
+    for (const r of [...sd.bat, ...sd.pit]) if (!have.has(r.id) && !special.has(r.id)) cand.add(r.id);
+  }
+  let n = 0;
+  for (const id of [...cand].sort()) {
+    const m = store.players.get(id);
+    if (!m || m.foreign || !m.real || m.last < startYear) continue;
+    const ys = recordYears(id);
+    if (ys.includes(startYear)) continue;
+    const last = Math.max(...ys.filter((y) => y < startYear));
+    const after = ys.filter((y) => y > startYear);
+    const serving = servingAt(store, id, startYear);
+    if (!serving && !(last >= startYear - GAP_YEARS && after.length)) continue;
+    const sp = worldAt(last).players.find((x) => x.id === id);
+    if (!sp) continue;
+    const sd = store.season(last)!;
+    const teamName = (sd.bat.find((r) => r.id === id) ?? sd.pit.find((r) => r.id === id))!.team;
+    const team = leagueTeamFor(league, store, teamName, last);
+    if (team < 0) continue;
+    const p = toLeague({ ...sp, teamIdx: team, age: m.birthYear ? startYear - m.birthYear : sp.age });
+    p.team = team;
+    if (serving) p.military = serving;
+    league.players.push(p);
+    have.add(id);
+    n++;
+  }
+  return n;
+}
+
+/** 시작 전에 지명됐지만 시작 연도까지 1군 기록이 없는 선수를 지명 구단에 넣는다. 지명 구단이 아직 없으면 창단 때 넣는다 (missing.ts) */
+function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex): number {
+  const list = lateDebutDraftees(store, league, startYear);
+  if (!list.length) return 0;
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][] };
+  const taken = takenNames(league, store);
+  let n = 0;
+  for (const x of list) {
+    const team = leagueTeamFor(league, store, x.d.team, x.entry);
+    if (team < 0) continue; // 아직 없는 구단 (창단 때 offseason.ts의 expandTeam이 넣는다)
+    makeLateDraftee(league, view, x, team, startYear, store, () => idx, taken); // makeDraftee가 리그 명단에 넣는다
+    n++;
+  }
+  return n;
+}
+
+/**
+ * 보충한 선수로 정원(ORG_LIMIT, 복무 중 제외)을 넘은 구단은 보충 선수 중 잠재력이 낮은 선수부터 뺀다.
+ * 시작 연도 기록이 있는 선수는 건드리지 않는다. 게임에는 육성선수 구분이 없어, 실제로 육성·2군에 있던 선수까지 모두 넣으면 정원을 크게 넘는다.
+ */
+function trimToOrgLimit(league: LeagueState, recordedIds: Set<string>): void {
+  const counted = (p: LeaguePlayer) => p.military?.state !== 'serving';
+  for (let t = 0; t < league.teams.length; t++) {
+    const org = league.players.filter((p) => p.team === t && counted(p));
+    const over = org.length - ORG_LIMIT;
+    if (over <= 0) continue;
+    const drop = new Set(org.filter((p) => !recordedIds.has(p.id))
+      .sort((a, b) => a.potential - b.potential || a.id.localeCompare(b.id))
+      .slice(0, over).map((p) => p.id));
+    league.players = league.players.filter((p) => !drop.has(p.id));
+  }
+}
+
+/** 시작 다음 해에 1군에 들어오는 창단 구단을 퓨처스 구단으로 넣는다. 넣은 수를 돌려준다 */
+function addFuturesTeams(league: LeagueState, store: Store, startYear: number): number {
+  let n = 0;
+  for (const c of teamChangesFor(store, league.teams, startYear + 1)) {
+    if (c.kind !== 'expand') continue;
+    const t = league.teams.push({ name: c.name, franchise: c.franchise }) - 1;
+    (league.expansions ??= []).push({ team: t, firstYear: startYear + 1 });
     n++;
   }
   return n;

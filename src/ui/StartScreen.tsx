@@ -201,7 +201,11 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
               신인 지명 1982~2027: <a href="https://baseballchart.kr/draft" target="_blank" rel="noreferrer">baseballchart.kr</a>
               {' '}(나무위키 「(연도) KBO 신인 드래프트」 문서 정리), CC BY-NC-SA 2.0 KR. 게임 안에서 지명은 다시 하고 능력은 추정값입니다.
             </li>
-            <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력, 병역 상태는 기록에서 추정한 값입니다.</li>
+            <li>
+              병역: 2026 선수 프로필 경력의 상무·경찰 복무와 국제대회 금메달 대표팀 명단(위키백과 메달리스트 표, 2026 아시안게임은 언론 보도의 면제자 명단).
+              자료에 없는 현역·사회복무는 나이와 1군 기록 공백으로 짐작합니다.
+            </li>
+            <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력은 기록에서 추정한 값입니다.</li>
           </ul>
         </details>
       </footer>

@@ -6,6 +6,7 @@
 // 단위: "그 포지션 평균 수비수 대비 한 시즌(주전 출전) 수비 런". +10이면 리그 정상급, -20이면 그 자리를 맡기 어렵다.
 // 경기 반영: 그날 수비 8명의 합(팀 수비 런)만큼 인플레이 안타·실책 출루가 줄고, 포수 수비는 폭투·포일과 도루 저지에 쓴다.
 
+import { DECLINE_START_AGE } from './params';
 import { Rng } from './rng';
 import type { BatSkill, SimPlayer } from './types';
 
@@ -95,9 +96,9 @@ export function playablePositions(def: Defense | undefined): FieldPos[] {
   return FIELD_POS.filter((q) => (def[q] ?? -99) >= -5).sort((a, b) => (def[b] ?? 0) - (def[a] ?? 0));
 }
 
-/** 수비 나이 변화 (오프시즌, 임시값): 25세 이하는 조금 늘고 31세부터 해마다 0.5런씩 준다 */
+/** 수비 나이 변화 (오프시즌, 임시값): 25세 이하는 조금 늘고 기량 하락 나이(DECLINE_START_AGE)부터 해마다 0.5런씩 준다 */
 export function ageDefense(def: Defense, age: number): Defense {
-  const d = age <= 25 ? 0.4 : age >= 31 ? -0.5 : 0;
+  const d = age <= 25 ? 0.4 : age >= DECLINE_START_AGE ? -0.5 : 0;
   if (!d) return def;
   const out: Defense = {};
   for (const q of FIELD_POS) if (def[q] !== undefined) out[q] = round1(def[q]! + d);

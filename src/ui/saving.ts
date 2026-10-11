@@ -1,6 +1,6 @@
 // 화면에서 쓰는 저장 도우미: 세션 → 저장 기록, 파일 이름.
 import { formatDate } from '../game/calendar';
-import type { GameSession } from '../game/session';
+import type { GameSession, ReproInfo } from '../game/session';
 import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord } from '../game/storage';
 
 export function summaryOf(s: GameSession): string {
@@ -43,7 +43,21 @@ export async function autosaveSession(s: GameSession): Promise<void> {
 }
 
 export function exportSession(s: GameSession): void {
-  exportFile(s.toSave(), `kbo-gm_${s.world.year}_${s.team.name}_${s.day}일차.json`);
+  exportFile(s.toSave(), `kbo-gm_${s.world.year}_${s.teamInfo(s.teamIdx).name}_${s.day}일차.json`);
+}
+
+/** 버그 보고용 재현 정보: 새 게임 조건 + 조작 기록 + 데이터 지문. opts·actions·at을 `GameSession.replay`에 넣으면 된다 */
+export interface ReproReport extends ReproInfo {
+  app: 'kbo-gm';
+  /** 처음 맡은 구단 이름 (지금 이름. 명칭 변경이 있었으면 그 뒤 이름) */
+  team: string;
+  /** 데이터 지문. 다르면 같은 시드로도 재현되지 않는다 */
+  data: string;
+}
+
+export function reproOf(s: GameSession): ReproReport {
+  const info = s.reproInfo();
+  return { app: 'kbo-gm', ...info, team: s.league.teams[info.opts.teamIdx]?.name ?? '', data: s.season.baseRoster };
 }
 
 /** 저장 목록에 보여줄 진행 시점 */

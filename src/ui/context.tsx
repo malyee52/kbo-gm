@@ -53,7 +53,7 @@ export function useWon(): (man: number) => string {
 /** 구단 이름 + 색 표시 */
 export function TeamName({ idx, short = false }: { idx: number; short?: boolean }) {
   const { session } = useGame();
-  const t = session.world.teams[idx];
+  const t = session.teamInfo(idx);
   const mine = idx === session.teamIdx;
   return (
     <span className={`team${mine ? ' mine' : ''}`}>
@@ -70,7 +70,7 @@ export function PlayerLink({ p, showTeam = false }: { p: SimPlayer; showTeam?: b
     <button type="button" className="link" onClick={() => openPlayer(p.idx)}>
       {p.name}
       {p.foreign && <span className="tag" title="외국인 선수">외</span>}
-      {showTeam && <span className="muted small"> {session.world.teams[p.teamIdx].name}</span>}
+      {showTeam && <span className="muted small"> {session.teamInfo(p.teamIdx).name}</span>}
     </button>
   );
 }

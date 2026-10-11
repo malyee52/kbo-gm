@@ -62,3 +62,9 @@
 2. H6 (FA 한도), M13·M14·M16 (저장·재현) — 작은 수정.
 3. H7 + 1차 H1·H5 — 장기 진행 모델은 함께 보정하고 `validate_longterm`으로 전후 비교.
 4. M17, 낮음 항목.
+
+## 7. 처리 상태 (2026-10-11)
+
+- 고침 (`audit-fixes` 브랜치, `tests/audit.test.ts`): C1(`GameSession.teamInfo`), M15(오류 경계 두 겹), M14(`GameSession.reproInfo`), H6(제시·마감 때 외부 FA 한도).
+- 고침 (같은 날 뒤이어): H7·H5와 1차 H1 → `docs/longterm-plan.md` 7장, `tests/longterm.test.ts`, 진단 도구 `tools/flow_longterm.ts`, 결과 `reports/flow-longterm.md`.
+- 남음: M13, M16, M17, 낮음 항목.

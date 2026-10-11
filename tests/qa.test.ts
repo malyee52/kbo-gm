@@ -41,15 +41,13 @@ describe('시대별 물가 표기 (내부 값은 2026년 물가)', () => {
   });
 });
 
-describe('캡 도입 전 예산', () => {
-  it('2022년 이전에도 구단 예산이 있어 FA 제시에 상한이 생긴다 (캡 제재는 없음)', () => {
+describe('캡 도입 전 지출 상한', () => {
+  it('2022년 이전에는 샐러리캡이 없어 연봉 상한이 없고, 대신 FA 계약금을 낼 자금이 있어야 한다 (재정 상세형, 2026-10-11)', () => {
     const { league } = createLeague(store, 1999, 'qa-budget', FAST);
     expect(salaryCap(2000)).toBeNull();
-    const b = budgetFor(league, 0, 2000);
-    expect(b).not.toBeNull();
-    expect(b!).toBeLessThanOrEqual(PRE_CAP_BUDGET);
-    expect(b!).toBeGreaterThan(PRE_CAP_BUDGET * 0.7);
-    expect(spendLimit(league, 0, 2000)).toBe(b);
+    expect(spendLimit(league, 0, 2000)).toBeNull();
+    // 예전 예산식(캡 × 모기업 등급)은 화면 참고용으로만 남는다
+    expect(budgetFor(league, 0, 2000)!).toBeLessThanOrEqual(PRE_CAP_BUDGET);
   });
 });
 

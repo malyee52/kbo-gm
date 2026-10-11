@@ -15,6 +15,9 @@
 함께 읽는 파일
   data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
                                  자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
+  data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
+                                 상무·경찰 복무는 자료집 선수마스터의 '출신교·경력(2026 프로필)'에서 읽는다.
+                                 엑셀의 다른 내용을 바꾸지 않고 이것만 다시 만들려면: build_data.py --military-only
   data-src/baseballchart/kbo_draft_1982-2027.csv
                                  입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
                                  같은 폴더의 SOURCE.md 참조.
@@ -33,6 +36,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
+MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
@@ -195,7 +199,92 @@ def rules_for(year):
     }
 
 
+# ---- 병역 (military.json)
+
+SERVICE_UNITS = ('상무', '경찰')
+
+
+def service_unit(career):
+    """2026 프로필 경력에 상무·경찰 야구단이 있으면 그 이름. 학교 이름(군산상고 등)과 섞이지 않게 '-'로 나눈 칸 단위로 본다"""
+    for part in (career or '').split('-'):
+        part = part.strip()
+        for u in SERVICE_UNITS:
+            if part.startswith(u):
+                return u
+    return None
+
+
+def build_military(profiles, out_dir):
+    """실제 병역 자료 → {선수 ID: {served?, exempt?}}.
+    profiles: 선수 ID → 2026 프로필 경력 문자열. 시즌 기록과 선수 마스터는 out_dir의 JSON에서 읽는다 (같은 빌드에서 만든 것).
+    - served: 프로필 경력에 상무·경찰이 있는 선수. end = 1군 기록이 1~2시즌 빈 마지막 해 (복무를 마친 해 추정, 없으면 생략)
+    - exempt: 병역_면제명단.csv의 금메달 대표팀(미필이었으면 면제)과 2026 새 면제자. year = 대회 연도"""
+    players = json.loads((out_dir / 'players.json').read_text(encoding='utf-8'))['players']
+    meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
+    seen = defaultdict(dict)  # 선수 ID → {연도: 구단}
+    for y in meta['years']:
+        sd = json.loads((out_dir / 'seasons' / f'{y}.json').read_text(encoding='utf-8'))
+        for r in sd['bat'] + sd['pit']:
+            seen[str(r[0])][y] = r[1]
+    table = {}
+    for p in players:
+        if p.get('foreign'):
+            continue
+        unit = service_unit(profiles.get(p['id']))
+        if not unit:
+            continue
+        ys = sorted(seen.get(p['id'], {}))
+        end = None
+        for a, b in zip(ys, ys[1:]):
+            if 2 <= b - a <= 3:  # 1~2시즌 공백
+                end = b - 1
+        table[p['id']] = {'served': {'unit': unit, **({'end': end} if end else {})}}
+    unmatched = []
+    if MILITARY_CSV.exists():
+        by_name = defaultdict(list)
+        for p in players:
+            if not p.get('foreign'):
+                by_name[p['name']].append(p)
+        with MILITARY_CSV.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                y, name, team = int(r['연도']), r['선수명'].strip(), (r['당시소속'] or '').strip()
+                cands = by_name.get(name, [])
+                if team in ('아마추어',):
+                    pick = [p for p in cands if (p.get('first') or 0) >= y]
+                elif team.startswith('해외:'):  # 그 해에는 해외 리그. 다른 해에 뛴 KBO 구단으로 가린다
+                    pick = [p for p in cands if team[3:] in seen[p['id']].values()]
+                elif team in ('', '해외'):
+                    pick = cands
+                else:
+                    pick = [p for p in cands if any(seen[p['id']].get(x) == team for x in (y - 1, y, y + 1))]
+                if len(pick) != 1:
+                    unmatched.append(f"{y} {name}({team or '-'}): 후보 {len(pick)}명")
+                    continue
+                e = table.setdefault(pick[0]['id'], {})
+                if 'exempt' not in e or e['exempt']['year'] > y:
+                    e['exempt'] = {'year': y, 'event': r['대회']}
+    (out_dir / 'military.json').write_text(json.dumps({
+        'version': 1,
+        'note': '실제 병역 자료. served = 2026 프로필 경력의 상무·경찰(end = 1군 공백으로 본 복무 끝 해, 추정), '
+                'exempt = 국제대회 금메달 대표팀(병역_면제명단.csv, year = 대회 연도). 여기 없는 선수는 자료가 없는 것이다.',
+        'players': dict(sorted(table.items())),
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    served = sum(1 for v in table.values() if 'served' in v)
+    exempt = sum(1 for v in table.values() if 'exempt' in v)
+    print(f'병역: 상무·경찰 {served}명, 금메달 면제·대표 {exempt}명 → {out_dir / "military.json"}')
+    for u in unmatched:
+        print(f'  병역_면제명단.csv 연결 못 함: {u}')
+
+
+def profiles_of(wb):
+    return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
+
+
 def main():
+    if '--military-only' in sys.argv:
+        # 병역 자료만 다시 만든다 (다른 JSON은 그대로라 저장 호환에 영향 없음)
+        build_military(profiles_of(load_workbook(SRC, read_only=True, data_only=True)), OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -430,6 +519,7 @@ def main():
         **({'foreignOpening': foreign_opening} if foreign_opening else {}),
         'specialEntries': special,
     }, OUT / 'meta.json')
+    build_military(profiles_of(wb), OUT)
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')

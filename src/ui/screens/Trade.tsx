@@ -5,7 +5,7 @@ import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
 import { TRADE_DEADLINE } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
-import { Grade, PlayerLink, posName, TeamName, useGame } from '../context';
+import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { teamColor } from '../teams';
 
 type Kind = 'all' | 'hit' | 'pit';
@@ -18,6 +18,11 @@ export function Trade() {
   const [get, setGet] = useState<Set<number>>(new Set());
   const [reply, setReply] = useState<{ ev?: TradeEvaluation; text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 현금 (억 원, 그 해 물가로 보이는 금액). 우리가 주면 +, 받으면 −
+  const [cashText, setCashText] = useState('0');
+  const px = usePriceIndex();
+  const won = useWon();
+  const cashMan = Math.round((Number(cashText) || 0) * 10000 / px);
   const year = session.world.year;
 
   // 성향과 순위 (20경기 전에는 전력 순위)
@@ -53,11 +58,12 @@ export function Trade() {
   };
 
   const propose = () => {
-    const ev = session.proposeTrade(other, giveList, getList);
+    const ev = session.proposeTrade(other, giveList, getList, cashMan);
     if (ev.verdict === 'accept') {
       setReply({ ev, text: `${session.world.teams[other].name}: "${ev.message}" 트레이드가 성사됐습니다. 받은 선수는 2군에 있습니다.`, ok: true });
       setGive(new Set());
       setGet(new Set());
+      setCashText('0');
       changed();
     } else {
       setReply({ ev, text: `${session.world.teams[other].name}: "${ev.message}"` });
@@ -118,13 +124,24 @@ export function Trade() {
             {getList.length ? <ul className="plain">{getList.map((p) => <li key={p.idx}><PlayerLink p={p} /> <span className="muted small">{p.isPitcher ? '투수' : posName(p.pos)} · {p.age ?? '-'}세</span></li>)}</ul> : <p className="muted small">아래 오른쪽에서 고르세요.</p>}
           </div>
         </div>
+        <p className="small">
+          <label>
+            현금{' '}
+            <input type="number" step={0.5} value={cashText} onChange={(e) => setCashText(e.target.value)} style={{ width: '6em' }} aria-label="트레이드 현금 (억 원)" />
+            억 원
+          </label>{' '}
+          <span className="muted">
+            {cashMan > 0 ? `우리가 ${won(cashMan)}을 줍니다` : cashMan < 0 ? `상대에게서 ${won(-cashMan)}을 받습니다` : '현금 없음'} · 지금 자금 {won(session.cashNow())}.
+            선수를 현금만으로 사고팔 수도 있습니다 (한쪽 선수 칸을 비우고 현금을 넣으세요). AI는 현금을 선수 가치보다 조금 박하게 쳐줍니다.
+          </span>
+        </p>
         {reply && <p className={reply.ok ? 'note' : reply.ev && reply.ev.verdict !== 'accept' ? 'note error-box' : 'note'} role="status">{reply.text}</p>}
         <div className="actions">
           <button type="button" onClick={propose} disabled={!open || busy || (giveList.length === 0 && getList.length === 0)}>제안하기</button>
           <button type="button" className="ghost" onClick={() => void ask()} disabled={!open || busy || getList.length === 0} title="받을 선수를 고른 뒤 상대가 원하는 조건을 묻습니다">
             {busy ? '상대가 검토 중' : '상대 요구안 묻기'}
           </button>
-          <button type="button" className="ghost" onClick={() => { setGive(new Set()); setGet(new Set()); setReply(null); }}>비우기</button>
+          <button type="button" className="ghost" onClick={() => { setGive(new Set()); setGet(new Set()); setCashText('0'); setReply(null); }}>비우기</button>
         </div>
       </section>
 

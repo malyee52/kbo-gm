@@ -26,6 +26,8 @@ const GAIN_SHARE = 0.08;
  * 시장 단가(약 4,500만 원/런)의 절반으로 둔 까닭: 이미 계약된 연봉은 구단이 어차피 내는 돈이라 새 계약보다 덜 따진다.
  */
 const SALARY_WON_PER_RUN = 9000;
+/** 현금 1런의 값 (만 원). league/finance.ts의 CASH_WON_PER_RUN과 같다 (ai가 league를 가져오지 않게 숫자로 둔다) */
+const CASH_WON_PER_RUN = 12_000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
 /** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값) */
@@ -76,6 +78,8 @@ export interface TradeProposal {
   receive: SimPlayer[];
   /** AI 구단이 내주는 선수 */
   give: SimPlayer[];
+  /** AI 구단이 받는 현금 (만 원, 음수면 AI가 낸다). 재정 상세형 (2026-10-11) */
+  cash?: number;
 }
 
 export type TradeVerdict =
@@ -121,7 +125,8 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const afterV = teamValue(after, ctx, weights);
   const pay = (ps: SimPlayer[]) => ps.reduce((s, p) => s + (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0)), 0);
   const salaryCost = (pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN;
-  const gain = afterV - before - salaryCost;
+  // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
+  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN;
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0);
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE);
   const detail = { gain, need, before, after: afterV, tendency };

@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, eraPitching, type EngineParams } from '../src/engine';
 import { createLeague, estimatedBirthYear } from '../src/league/create';
 import { changeText, faEnabled, faServiceNeeded, foreignRule, teamChangesFor } from '../src/league/eras';
-import { expansionSlots, EXPANSION_MIN } from '../src/league/offseason';
+import { expansionSlots, EXPANSION_MIN, EXPANSION_SPECIAL } from '../src/league/offseason';
 import { GameSession } from '../src/game/session';
 import { runYear } from '../tools/longsim';
 
@@ -45,13 +45,16 @@ describe('시대별 제도', () => {
     expect(estimatedBirthYear({ entryYear: 1995, school: 'UNIV' })).toBe(1973);
   });
 
-  it('창단 구단 추가 지명: 1라운드 앞 2명, 2라운드 뒤 5명', () => {
+  it('창단 구단 추가 지명: 1라운드 앞 우선 2명, 2라운드 뒤 특별 지명 (첫 드래프트 5명, 두 번째 3명, 실제 NC·KT 방식)', () => {
     const base = [0, 1, 2, 0, 1, 2, 0, 1, 2];
-    const slots = expansionSlots(base, 3, [2]);
+    const slots = expansionSlots(base, 3, [{ team: 2, special: EXPANSION_SPECIAL[0] }]);
     expect(slots.slice(0, 2)).toEqual([2, 2]);
     expect(slots.slice(2, 8)).toEqual([0, 1, 2, 0, 1, 2]);
     expect(slots.slice(8, 13)).toEqual([2, 2, 2, 2, 2]);
     expect(slots.length).toBe(base.length + 7);
+    const second = expansionSlots(base, 3, [{ team: 2, special: EXPANSION_SPECIAL[1] }]);
+    expect(second.slice(8, 11)).toEqual([2, 2, 2]);
+    expect(second.length).toBe(base.length + 5);
     expect(expansionSlots(base, 3, [])).toEqual(base);
   });
 });
@@ -72,19 +75,20 @@ describe('구단 변화 (자료의 구단 목록과 계보)', () => {
     expect(changeText({ kind: 'succeed', team: 0, from: '현대', to: '우리', franchise: '히어로즈' })).toContain('승계');
   });
 
-  it('플레이어 게임에서도 창단이 일어난다: 2012년 시작 → 2013년 NC 10번째 구단, 특별 지명과 창단 선수로 최소 인원, 드래프트 추가 지명', () => {
+  it('플레이어 게임에서도 창단이 일어난다: 2012년 시작(NC는 퓨처스 구단) → 2013년 NC 1군 진입, 특별 지명과 창단 선수로 최소 인원, 드래프트 추가 지명', () => {
     const g = GameSession.create(store, { year: 2012, teamIdx: 0, seed: 'era-nc' }, FAST);
     g.advance(100000);
     g.beginOffseason();
     const off = g.offseason!;
-    expect(off.changes).toEqual([{ kind: 'expand', name: 'NC', franchise: 'NC' }]);
+    // NC는 2011년에 창단해 시작 때부터 퓨처스 구단으로 있다. 2012 시즌 뒤에는 1군 진입만 한다 (2026-10-11 사용자 결정)
+    expect(off.changes).toBeUndefined();
     const nc = g.league.teams.length - 1;
     expect(g.league.teams[nc]).toEqual({ name: 'NC', franchise: 'NC' });
     expect(g.league.teams.length).toBe(9);
     const org = g.league.players.filter((p) => p.team === nc);
     expect(org.length).toBeGreaterThanOrEqual(EXPANSION_MIN);
     expect(org.filter((p) => p.real).length).toBeGreaterThanOrEqual(6); // 기존 8구단에서 1명씩 특별 지명
-    expect(off.log.some((l) => l.text.includes('NC 창단'))).toBe(true);
+    expect(off.log.some((l) => l.text.includes('NC 1군 진입'))).toBe(true);
     // 우리 차례(보상 선택·지명·방출)가 막으면 자동으로 처리하고 넘어간다. 넘어가지 못하면 멈추지 말고 실패한다
     const stage = () => g.offseason!.stage;
     const step = () => {
@@ -97,13 +101,13 @@ describe('구단 변화 (자료의 구단 목록과 계보)', () => {
     while (stage() !== 'draft') step();
     const slots = off.draft!.slots!;
     expect(slots.slice(0, 2)).toEqual([nc, nc]);
-    expect(slots.filter((t) => t === nc).length).toBe(11 + 7);
+    expect(slots.filter((t) => t === nc).length).toBe(2 + 11 + 3); // NC 두 번째 드래프트(2013 입단): 우선 2, 특별 3
     for (let guard = 0; stage() !== 'ready' && guard < 10; guard++) step();
     expect(stage()).toBe('ready');
     expect(g.openNextSeason().ok).toBe(true);
     expect(g.world.teams.length).toBe(9);
     expect(g.world.teams[nc].org.length).toBeGreaterThanOrEqual(EXPANSION_MIN);
-    expect(g.news.some((n) => n.text.includes('NC 창단'))).toBe(true);
+    expect(g.news.some((n) => n.text.includes('NC 1군 진입'))).toBe(true);
   }, 120_000);
 });
 
