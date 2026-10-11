@@ -253,3 +253,122 @@ export function careerLeaders(all: Map<string, Career>, key: string, n = 20): { 
     .sort((a, b) => b.v - a.v || a.c.id.localeCompare(b.c.id))
     .slice(0, n);
 }
+
+// ---- 단일 시즌 기록
+
+export interface SeasonBest {
+  id: string;
+  name: string;
+  team: string;
+  year: number;
+  value: number;
+}
+
+/** 단일 시즌 기록 부문. 비율 기록은 규정(타석 3.1×경기, 이닝 1×경기)을 채운 시즌만 */
+export const SEASON_STATS: { key: string; label: string; pitcher: boolean; fmt?: (v: number) => string; low?: boolean }[] = [
+  { key: 'hr', label: '홈런', pitcher: false },
+  { key: 'h', label: '안타', pitcher: false },
+  { key: 'rbi', label: '타점', pitcher: false },
+  { key: 'sb', label: '도루', pitcher: false },
+  { key: 'avg', label: '타율', pitcher: false, fmt: (v) => v.toFixed(3).replace(/^0/, '') },
+  { key: 'w', label: '승', pitcher: true },
+  { key: 'sv', label: '세이브', pitcher: true },
+  { key: 'so', label: '탈삼진', pitcher: true },
+  { key: 'era', label: '평균자책', pitcher: true, fmt: (v) => v.toFixed(2), low: true },
+];
+const BEST_KEEP = 20;
+
+/** 한 시즌 줄(BatLine·PitLine 배열)에서 부문 값. 규정 미달이면 null */
+function seasonValue(key: string, bat: number[] | undefined, pit: number[] | undefined, games: number): number | null {
+  if (key === 'avg') return bat && bat[B.pa] >= games * 3.1 && bat[B.ab] ? bat[B.h] / bat[B.ab] : null;
+  if (key === 'era') return pit && pit[P.outs] >= games * 3 ? (pit[P.er] * 27) / pit[P.outs] : null;
+  const def = SEASON_STATS.find((s) => s.key === key)!;
+  if (def.pitcher) return pit ? pit[key === 'so' ? P.so : key === 'w' ? P.w : P.sv] : null;
+  return bat ? bat[key === 'hr' ? B.hr : key === 'h' ? B.h : key === 'rbi' ? B.rbi : B.sb] : null;
+}
+
+function pushBest(list: SeasonBest[], e: SeasonBest, low: boolean): SeasonBest[] {
+  list.push(e);
+  list.sort((a, b) => (low ? a.value - b.value : b.value - a.value) || a.year - b.year || a.id.localeCompare(b.id));
+  return list.slice(0, BEST_KEEP);
+}
+
+/**
+ * 게임 안 시즌 기록을 부문별 상위 목록에 넣는다 (결산 때). 떠난 선수는 시즌별 줄을 버리므로 여기서 남겨 둔다.
+ * lines: 그 시즌 선수별 기록 (BatLine·PitLine 키 순서 배열), games: 팀당 경기 수
+ */
+export function recordSeasonBests(league: LeagueState, year: number, games: number,
+                                  lines: { id: string; name: string; team: string; bat?: number[]; pit?: number[] }[]): void {
+  league.seasonBests ??= {};
+  for (const def of SEASON_STATS) {
+    let list = (league.seasonBests[def.key] ?? []).filter((e) => e.year !== year);
+    for (const l of lines) {
+      const v = seasonValue(def.key, l.bat, l.pit, games);
+      if (v === null || (!def.low && v <= 0)) continue;
+      list = pushBest(list, { id: l.id, name: l.name, team: l.team, year, value: v }, !!def.low);
+    }
+    league.seasonBests[def.key] = list;
+  }
+}
+
+/** 단일 시즌 기록 (시작 전 실제 + 게임 안) */
+export function seasonBests(league: LeagueState, store: Store, key: string, n = 10): SeasonBest[] {
+  const def = SEASON_STATS.find((s) => s.key === key)!;
+  let list: SeasonBest[] = [...(league.seasonBests?.[key] ?? [])];
+  for (const y of store.meta.years) {
+    if (y >= league.startYear) continue;
+    const sd = store.season(y);
+    if (!sd) continue;
+    const name = (id: string) => store.players.get(id)?.name ?? id;
+    if (def.pitcher) {
+      for (const r of sd.pit) {
+        const pit = [r.g, r.gs ?? 0, r.w, r.l, r.sv, r.outs, r.tbf, r.h, r.hr, r.bb, r.hbp, r.so, r.r, r.er];
+        const v = seasonValue(key, undefined, pit, sd.games);
+        if (v !== null && (def.low || v > 0)) list = pushBest(list, { id: r.id, name: name(r.id), team: r.team, year: y, value: v }, !!def.low);
+      }
+    } else {
+      for (const r of sd.bat) {
+        const bat = [r.g, r.pa, r.ab, r.r, r.h, r.d, r.t, r.hr, r.rbi, r.bb ?? 0, r.hbp ?? 0, r.so ?? 0, r.sb ?? 0, r.cs ?? 0];
+        const v = seasonValue(key, bat, undefined, sd.games);
+        if (v !== null && (def.low || v > 0)) list = pushBest(list, { id: r.id, name: name(r.id), team: r.team, year: y, value: v }, !!def.low);
+      }
+    }
+  }
+  return list.slice(0, n);
+}
+
+// ---- 구단 역사
+
+export interface FranchiseHistory {
+  franchise: string;
+  /** 지금 이름 */
+  name: string;
+  titles: number[];
+  runnerUps: number[];
+  postseasons: number;
+  seasons: number;
+  best: { year: number; name: string; w: number; l: number; t: number } | null;
+  worst: { year: number; name: string; w: number; l: number; t: number } | null;
+}
+
+/** 구단 계보별 역사 (연표에서). 가을야구 진출은 그 해 규정의 진출 구단 수 안의 정규시즌 순위 */
+export function franchiseHistory(league: LeagueState, store: Store): FranchiseHistory[] {
+  const out = new Map<string, FranchiseHistory>();
+  for (const y of yearbook(league, store)) {
+    const cut = Number(store.meta.rules[String(y.year)]?.postseasonTeams ?? store.meta.rules[String(Math.max(...store.meta.years))].postseasonTeams);
+    y.teams.forEach((t, i) => {
+      let f = out.get(t.franchise);
+      if (!f) out.set(t.franchise, (f = { franchise: t.franchise, name: t.name, titles: [], runnerUps: [], postseasons: 0, seasons: 0, best: null, worst: null }));
+      f.name = t.name;
+      f.seasons++;
+      if (i < cut) f.postseasons++;
+      if (y.champion === t.name) f.titles.push(y.year);
+      if (y.runnerUp === t.name) f.runnerUps.push(y.year);
+      const pct = t.w / Math.max(1, t.w + t.l);
+      const pick = { year: y.year, name: t.name, w: t.w, l: t.l, t: t.t };
+      if (!f.best || pct > f.best.w / Math.max(1, f.best.w + f.best.l)) f.best = pick;
+      if (!f.worst || pct < f.worst.w / Math.max(1, f.worst.w + f.worst.l)) f.worst = pick;
+    });
+  }
+  return [...out.values()].sort((a, b) => b.titles.length - a.titles.length || b.postseasons - a.postseasons);
+}

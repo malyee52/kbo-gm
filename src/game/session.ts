@@ -18,7 +18,7 @@ import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { judgeScenario, scenarioById } from '../league/scenarios';
-import { recordYear } from '../league/history';
+import { recordSeasonBests, recordYear } from '../league/history';
 import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
@@ -979,6 +979,11 @@ export class GameSession {
         this.evaluateOwner(standings, ps, prevStandings, fin[this.teamIdx]);
         // 연표 (history.ts)
         recordYear(L, this.year, this.world.teams, this.season.teams, standings, ps.champion ?? null, ps.runnerUp ?? null);
+        recordSeasonBests(L, this.year, this.world.gamesPerTeam, this.world.players.map((p) => ({
+          id: p.id, name: p.name, team: this.world.teams[p.teamIdx].name,
+          bat: this.season.bat[p.idx].pa > 0 ? Object.values(this.season.bat[p.idx]) : undefined,
+          pit: this.season.pit[p.idx].bf > 0 ? Object.values(this.season.pit[p.idx]) : undefined,
+        })));
         // 역사 시나리오 판정 (scenarios.ts)
         const was = L.scenario?.result;
         const sc = judgeScenario(L, this.year, ps.champion ?? null);

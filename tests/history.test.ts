@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { careerLeaders, careers, realYearbook, yearbook } from '../src/league/history';
+import { careerLeaders, careers, franchiseHistory, realYearbook, seasonBests, yearbook } from '../src/league/history';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -83,5 +83,25 @@ describe('통산 기록', () => {
     expect(top).toHaveLength(20);
     for (let i = 1; i < top.length; i++) expect(top[i - 1].v).toBeGreaterThanOrEqual(top[i].v);
     expect(top.some((x) => !x.c.active)).toBe(true);
+  });
+});
+
+describe('단일 시즌 기록과 구단 역사', () => {
+  it('시즌 최다 홈런 1위는 2003 이승엽 56개(실제), 게임 안 시즌 기록도 결산 때 들어온다', () => {
+    const hr = seasonBests(g.league, store, 'hr', 10);
+    expect(hr[0]).toMatchObject({ name: '이승엽', year: 2003, value: 56 });
+    expect(g.league.seasonBests!.hr.every((e) => e.year === 2026)).toBe(true);
+    expect(g.league.seasonBests!.hr.length).toBeGreaterThan(0);
+    const era = seasonBests(g.league, store, 'era', 5);
+    for (let i = 1; i < era.length; i++) expect(era[i - 1].value).toBeLessThanOrEqual(era[i].value);
+  });
+
+  it('구단 역사: 계보별 우승 횟수 (KIA 계보는 시작 전 12번 + 게임 안 우승)', () => {
+    const fh = franchiseHistory(g.league, store);
+    const kia = fh.find((f) => f.franchise === 'KIA')!;
+    const gameTitles = (g.league.yearbook ?? []).filter((y) => y.teams.find((t) => t.name === y.champion)?.franchise === 'KIA').length;
+    expect(kia.titles.filter((y) => y < 2026)).toHaveLength(12);
+    expect(kia.titles.length).toBe(12 + gameTitles);
+    expect(kia.name).toBe('KIA');
   });
 });
