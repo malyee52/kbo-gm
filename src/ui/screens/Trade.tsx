@@ -6,6 +6,8 @@ import { formatDate, shortDate } from '../../game/calendar';
 import { TRADE_DEADLINE } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
+import { currentRuns } from '../../ai/value';
+import { runsGrade } from '../grades';
 import { teamColor } from '../teams';
 import { MAX_PICKS_PER_TRADE, parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
 import { GM_STYLE_LABEL, GM_STYLE_NOTE, gmStyle } from '../../league/gm';
@@ -20,6 +22,8 @@ export function Trade() {
   const [get, setGet] = useState<Set<number>>(new Set());
   const [reply, setReply] = useState<{ ev?: TradeEvaluation; text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 직접 제안 / 선수 내놓기 (2026-10-12 사용자 요청: 선수를 올리면 무엇을 줄 수 있는지 제안이 들어온다)
+  const [mode, setMode] = useState<'deal' | 'shop'>('deal');
   // 지명권 (pickId): 내줄 것, 받을 것
   const [gp, setGp] = useState<Set<string>>(new Set());
   const [rp, setRp] = useState<Set<string>>(new Set());
@@ -106,6 +110,14 @@ export function Trade() {
         </div>
       </section>
 
+      <div className="seg" role="tablist" aria-label="트레이드 방식">
+        <button type="button" role="tab" aria-selected={mode === 'deal'} className={mode === 'deal' ? 'on' : ''} onClick={() => setMode('deal')}>직접 제안</button>
+        <button type="button" role="tab" aria-selected={mode === 'shop'} className={mode === 'shop' ? 'on' : ''} onClick={() => setMode('shop')}>선수 내놓기</button>
+      </div>
+
+      {mode === 'shop' && <ShopPanel open={open} />}
+
+      {mode === 'deal' && (<>
       <div className="team-grid compact" role="radiogroup" aria-label="상대 구단">
         {others.map((t) => (
           <button key={t.idx} type="button" role="radio" aria-checked={other === t.idx}
@@ -176,6 +188,8 @@ export function Trade() {
         <PickList title={`${session.world.teams[other].name} 선수`} org={session.world.teams[other].org} selected={get} onToggle={(p) => toggle(get, setGet, p)} disabled={!open} />
       </div>
 
+      </>)}
+
       {(() => {
         const league = (session.league.aiTrades ?? []).filter((t) => t.year === year);
         if (!league.length) return null;
@@ -213,6 +227,102 @@ export function Trade() {
             </table>
           </div>
         )}
+      </section>
+    </div>
+  );
+}
+
+/**
+ * 선수 내놓기: 우리 선수를 1~3명 고르면 구단마다 받아들일 수 있는 조건 가운데 우리에게 가장 좋은 1~2명 조합을 제안한다 (session.shopOffers).
+ * 제안을 받으면 직접 제안과 같은 판정으로 바로 성사된다
+ */
+function ShopPanel({ open }: { open: boolean }) {
+  const { session, changed } = useGame();
+  const won = useWon();
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [offers, setOffers] = useState<{ team: number; get: SimPlayer[] }[] | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ctx = session.values;
+  const mine = session.team.org.filter((p) => !p.foreign && !session.leaguePlayer(p.id)?.dev)
+    .sort((a, b) => currentRuns(b, ctx) - currentRuns(a, ctx) || a.idx - b.idx);
+  const pick = (p: SimPlayer) => {
+    const next = new Set(sel);
+    if (next.has(p.idx)) next.delete(p.idx);
+    else if (next.size < MAX_PER_SIDE) next.add(p.idx);
+    else { setMsg({ text: `한 번에 ${MAX_PER_SIDE}명까지 내놓을 수 있습니다.` }); return; }
+    setSel(next);
+    setOffers(null);
+    setMsg(null);
+  };
+  const ask = async () => {
+    setBusy(true);
+    setMsg({ text: '다른 구단 단장들에게 알리는 중입니다' });
+    await new Promise((r) => setTimeout(r, 30));
+    const list = session.shopOffers([...sel].map((i) => session.world.players[i]));
+    setBusy(false);
+    setOffers(list);
+    setMsg(list.length ? null : { text: '지금은 이 조건에 관심을 보이는 구단이 없습니다.' });
+  };
+  const take = (o: { team: number; get: SimPlayer[] }) => {
+    const give = [...sel].map((i) => session.world.players[i]);
+    const ev = session.proposeTrade(o.team, give, o.get);
+    if (ev.verdict === 'accept') {
+      setMsg({ text: `${session.world.teams[o.team].name}와 트레이드가 성사됐습니다. 받은 선수는 2군에 있습니다.`, ok: true });
+      setSel(new Set());
+      setOffers(null);
+      changed();
+    } else {
+      setMsg({ text: `${session.world.teams[o.team].name}: "${ev.message}" (그사이 조건이 바뀌었습니다)` });
+    }
+  };
+  const grade = (p: SimPlayer) => <Grade v={runsGrade(currentRuns(p, ctx))} />;
+  const salary = (p: SimPlayer) => { const lp = session.leaguePlayer(p.id); return lp ? won(lp.contract.salary) : '-'; };
+  const line = (p: SimPlayer) => {
+    const b = session.season.bat[p.idx];
+    const x = session.season.pit[p.idx];
+    return p.isPitcher ? (x.bf ? `${ipText(x.outs)}이닝 ${fixed2(era(x))}` : '-') : (b.pa ? `${rate3(avg(b))} OPS ${rate3(ops(b))}` : '-');
+  };
+
+  return (
+    <div className="shop">
+      <section className="panel">
+        <div className="row-between wrap">
+          <h2>내놓을 선수 <span className="muted small">{sel.size}/{MAX_PER_SIDE}명 · 외국인·육성선수 제외</span></h2>
+          <button type="button" onClick={() => void ask()} disabled={!open || busy || sel.size === 0}>{busy ? '알리는 중' : '다른 구단에 알리기'}</button>
+        </div>
+        <div className="scroll flat shop-list">
+          <table>
+            <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th>현재</th><th className="l">올해</th><th>연봉</th></tr></thead>
+            <tbody>
+              {mine.map((p) => (
+                <tr key={p.idx} className={`pick${sel.has(p.idx) ? ' sel' : ''}`} onClick={(e) => { if (!(e.target as HTMLElement).closest('button')) pick(p); }}>
+                  <td><input type="checkbox" checked={sel.has(p.idx)} onChange={() => pick(p)} aria-label={`${p.name} 내놓기`} /></td>
+                  <td className="l"><PlayerLink p={p} /></td><td>{p.isPitcher ? (p.pit!.startShare >= 0.5 ? '선발' : '구원') : posName(p.pos)}</td>
+                  <td>{p.age ?? '-'}</td><td>{grade(p)}</td><td className="l small">{line(p)}</td><td>{salary(p)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="stack tight">
+        {msg && <p className={msg.ok ? 'note' : 'muted'} role="status">{msg.text}</p>}
+        {offers?.map((o) => (
+          <div key={o.team} className="card offer-card">
+            <div className="row-between wrap">
+              <h2><TeamName idx={o.team} /> <span className="muted small">{TENDENCY_LABEL[session.tendency(o.team)]}</span></h2>
+              <button type="button" onClick={() => take(o)} disabled={!open}>이 제안 받기</button>
+            </div>
+            <ul className="plain">
+              {o.get.map((p) => (
+                <li key={p.idx}><PlayerLink p={p} /> <span className="muted small">{p.isPitcher ? '투수' : posName(p.pos)} · {p.age ?? '-'}세 · 연봉 {salary(p)}</span> {grade(p)} <span className="small muted">{line(p)}</span></li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        {offers === null && !msg && <p className="muted small">선수를 고르고 "다른 구단에 알리기"를 누르면, 구단마다 내줄 수 있는 선수를 제안합니다. 우리에게 가치가 큰 제안부터 보입니다.</p>}
       </section>
     </div>
   );

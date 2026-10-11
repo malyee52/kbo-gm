@@ -9,7 +9,7 @@ import {
   absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type DepthPlan, type PenRole, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
-import { coreAge, evaluateTrade, horizonWeights, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
+import { coreAge, evaluateTrade, horizonWeights, MAX_PER_SIDE, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
@@ -1616,6 +1616,42 @@ export class GameSession {
     if (picks.give.some((p) => pickOwner(this.league, p) !== this.teamIdx)) return '우리 구단이 가진 지명권만 내줄 수 있습니다.';
     if (picks.get.some((p) => pickOwner(this.league, p) !== aiTeam)) return '상대 구단이 가진 지명권만 받을 수 있습니다.';
     return null;
+  }
+
+  /**
+   * 선수 내놓기 (2026-10-12 사용자 요청): 우리 선수(offer)를 내놓으면, 구단마다 받아들일 수 있는 조건 가운데
+   * 우리 쪽에서 가장 가치 있는 1~2명 조합을 제안한다. 직접 제안과 같은 판정(evaluateTrade, 세부 난이도 포함)으로 걸러서
+   * 그대로 받으면 성사된다. 우리 쪽에서 본 가치가 높은 순. 제안이 없는 구단은 빠진다
+   */
+  shopOffers(offer: SimPlayer[]): { team: number; get: SimPlayer[]; value: number }[] {
+    if (!this.tradeOpen || offer.length === 0 || offer.length > MAX_PER_SIDE || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
+    const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
+    const ctx = this.values;
+    // 우리 쪽에서 본 가치: 기여에서 연봉 부담을 뺀다 (AI가 고액 연봉자를 떠넘기는 제안이 맨 위에 오지 않게, evaluateTrade와 같은 환산)
+    const years = mine.reduce((a, b) => a + b, 0);
+    const worth = (p: SimPlayer) => playerValue(p, ctx, mine) - (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0) / SALARY_WON_PER_RUN) * years;
+    const out: { team: number; get: SimPlayer[]; value: number }[] = [];
+    for (const t of this.world.teams) {
+      if (t.idx === this.teamIdx) continue;
+      const ok = (get: SimPlayer[]) => this.evaluateTrade(t.idx, offer, get).verdict === 'accept';
+      // 받을 후보: 외국인·육성·지명권 첫해 선수 제외, 우리 쪽에서 본 가치 순 상위 30명
+      const cands = t.org.filter((p) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year)
+        .map((p) => ({ p, v: worth(p) })).filter((x) => x.v > 0)
+        .sort((a, b) => b.v - a.v || a.p.idx - b.p.idx).slice(0, 30);
+      let best: { get: SimPlayer[]; value: number } | null = null;
+      for (const c of cands) if (ok([c.p])) { best = { get: [c.p], value: c.v }; break; }
+      // 두 명: 상위 15명 안의 조합 가운데 한 명보다 나은 것
+      const top = cands.slice(0, 15);
+      const pairs: { ps: SimPlayer[]; v: number }[] = [];
+      for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push({ ps: [top[i].p, top[j].p], v: top[i].v + top[j].v });
+      pairs.sort((a, b) => b.v - a.v);
+      for (const x of pairs) {
+        if (best && x.v <= best.value) break;
+        if (ok(x.ps)) { best = { get: x.ps, value: x.v }; break; }
+      }
+      if (best) out.push({ team: t.idx, ...best });
+    }
+    return out.sort((a, b) => b.value - a.value);
   }
 
   /** AI 구단에게 "이 선수를 주려면 무엇을 원하나"를 묻는다. 수락할 만한 조합이 없으면 null */
