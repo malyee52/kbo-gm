@@ -11,6 +11,7 @@ import { createLeague } from '../src/league/create';
 import { careerIndex, realPeakRuns } from '../src/league/growth';
 import { worldFromLeague } from '../src/league/world';
 import { runYear } from './longsim';
+import { runsGrade } from '../src/ui/grades';
 
 function arg(name: string, d: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -46,8 +47,8 @@ const rows = young.map((p) => {
 }).sort((a, b) => b.peak - a.peak).slice(0, top);
 
 const watch = new Map(rows.map((r) => [r.p.id, [] as number[]]));
-// 모든 선수의 해마다 등급 변화 (등급 = 50 + (런 - 15) / 1.5, ui/grades.ts)
-const grade = (r: number) => Math.max(20, Math.min(80, Math.round(50 + ((r - 15) / 15) * 10)));
+// 모든 선수의 해마다 등급 변화 (ui/grades.ts)
+const grade = runsGrade;
 let prev = new Map(world.players.map((p) => [p.id, currentRuns(p, ctx)]));
 const jumps: number[] = [];
 // 세부 능력치(컨택·파워·선구안·주력 / 구위·제구·장타 억제) 가운데 가장 많이 오른 것
