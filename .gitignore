@@ -2,3 +2,6 @@ node_modules
 dist
 __pycache__
 *.pyc
+
+# 엑셀이 열려 있을 때 생기는 잠금 파일
+~$*
