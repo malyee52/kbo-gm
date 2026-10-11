@@ -27,6 +27,7 @@ import {
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
+import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
@@ -134,6 +135,8 @@ export interface OffseasonState {
     regular?: number;
     asia?: number;
   } | null;
+  /** 코치 후보 (coaches.ts). 2026-10-11 추가 */
+  coachMarket?: Coach[];
   /** 실제 육성선수 계약 신인 (드래프트 풀 밖, 정원 정리 때 육성선수로 데려온다). 2026-10-11 추가 */
   devExtra?: string[];
   draft: {
@@ -332,8 +335,10 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const dev = activeLevel(league, sp.teamIdx, 'develop');
     const share = ageIn(p, year + 1) <= FUTURES_AGE ? Math.max(firstTeam, FUTURES_SHARE + DEVELOP_SHARE[dev]) : firstTeam;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
-    const next = developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
-      agingScale(traitsOf(store.traits, p.id), params.traits)), dev) - eff.runsDrop;
+    const grown = developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits)), dev);
+    // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
+    const next = coachGrowth(league, sp.teamIdx, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE) - eff.runsDrop;
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
@@ -371,6 +376,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     fa: { round: 1, entries: [], userOffers: {}, signings: league.teams.map(() => 0) },
     foreign: null, draft: null, salary: null, log: [],
   };
+  // 코치: 계약이 끝난 코치는 나가고, 올해 후보 시장이 열린다 (coaches.ts)
+  expireCoaches(league, year);
+  off.coachMarket = coachMarket(league, year);
 
   // 조기 노쇠·슬럼프, 은퇴, 병역, 아시안게임 (careers.ts)
   const nextRuns = (p: LeaguePlayer) => runsAt(p, year + 1);
@@ -1681,6 +1689,17 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   // 떠나는 선수의 게임 안 통산을 남긴다 (history.ts)
   archiveDeparting(league, off.year);
   league.players = league.players.filter((p) => p.team >= 0);
+  // 코치 빈자리: AI 구단은 자금에 맞춰, 플레이어 구단은 가장 싼 후보로 임시로 채운다 (coaches.ts)
+  const left = aiHireCoaches(league, off.coachMarket ?? [], off.year, off.userTeam, (t) => cashOf(league, t));
+  if (off.userTeam >= 0) {
+    for (const role of COACH_ROLES) {
+      if (coachOf(league, off.userTeam, role)) continue;
+      const pick = left.filter((c) => c.role === role).sort((a, b) => a.salary - b.salary || a.id.localeCompare(b.id))[0]
+        ?? fallbackCoach(league, role, off.year, off.userTeam);
+      hireCoach(league, off.userTeam, pick, off.year);
+      log(off, 'settle', `${COACH_ROLE_LABEL[role]} 빈자리를 ${pick.level}등급 코치로 채웠습니다`, true);
+    }
+  }
   // 투자 확정 (AI 구단은 이때 계획을 정한다, finance.ts)
   lockInvestments(league, off.userTeam);
 }

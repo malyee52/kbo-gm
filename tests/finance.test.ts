@@ -57,7 +57,7 @@ describe('재정 기반', () => {
     // 결산 직전 자금(시즌 중 흐름 포함) + 결산 때 정산하는 것(스폰서 차액, 우승 배당) = 결산 뒤 자금 (긴급 지원 포함)
     const mine = L.finance![lg].history.at(-1)!;
     const settleOnly = (mine.items.sponsor ?? 0) - monthlySponsor + (mine.items.champion ?? 0);
-    expect(mine.cash).toBe(Math.max(0, before + settleOnly));
+    expect(mine.cash).toBe(Math.max(0, before + settleOnly) - (mine.dividend ?? 0)); // 100억 넘으면 모기업 환원
     expect(mine.items.broadcast).toBeGreaterThan(0); // 월말에 나눠 받은 중계권도 결산표에 있다
     const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
     expect(h.cashNow()).toBe(g.cashNow());
