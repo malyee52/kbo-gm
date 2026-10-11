@@ -484,13 +484,14 @@ function BattingOrderPanel({ onResult }: { onResult: (r: EntryCheck, who?: strin
     const i = plan.starters[s];
     return i === undefined ? '(AI가 채움)' : session.world.players[i].name;
   };
-  const move = (k: number, d: -1 | 1) => {
+  /** k번 타순에 자리 s를 놓는다: 원래 s가 있던 타순과 맞바꾼다 (9번을 1번으로 한 번에) */
+  const put = (k: number, s: Slot) => {
     const next = [...order];
-    const j = k + d;
-    if (j < 0 || j >= next.length) return;
+    const j = next.indexOf(s);
+    if (j < 0 || j === k) return;
     [next[k], next[j]] = [next[j], next[k]];
     const r = session.setBattingOrder(next);
-    onResult(r, r.errors.length ? undefined : '타순을 바꿨습니다.');
+    onResult(r, r.errors.length ? undefined : `${k + 1}번 타자: ${posName(s)} ${name(s)}`);
   };
   return (
     <section className="panel">
@@ -501,15 +502,14 @@ function BattingOrderPanel({ onResult }: { onResult: (r: EntryCheck, who?: strin
       <ol className="order-list">
         {order.map((s, k) => (
           <li key={s}>
-            <span className="muted small">{k + 1}번</span> <strong>{posName(s)}</strong> {name(s)}
-            <span className="order-btns">
-              <button type="button" className="small-btn ghost" disabled={k === 0 || !session.canManage} onClick={() => move(k, -1)} aria-label={`${k + 1}번 위로`}>▲</button>
-              <button type="button" className="small-btn ghost" disabled={k === order.length - 1 || !session.canManage} onClick={() => move(k, 1)} aria-label={`${k + 1}번 아래로`}>▼</button>
-            </span>
+            <span className="muted small order-no">{k + 1}번</span>
+            <select value={s} aria-label={`${k + 1}번 타자`} disabled={!session.canManage} onChange={(e) => put(k, e.target.value as Slot)}>
+              {order.map((x) => <option key={x} value={x}>{posName(x)} · {name(x)}</option>)}
+            </select>
           </li>
         ))}
       </ol>
-      <p className="muted small">타순은 자리 기준입니다. 그 자리 주전이 빠지면 대신 나온 선수가 같은 타순에 섭니다.</p>
+      <p className="muted small">타순 칸에서 선수를 고르면 원래 그 선수가 있던 타순과 서로 바뀝니다. 타순은 자리 기준이라, 그 자리 주전이 빠지면 대신 나온 선수가 같은 타순에 섭니다.</p>
     </section>
   );
 }
