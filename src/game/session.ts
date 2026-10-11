@@ -258,6 +258,8 @@ export type GameSave = GameSaveV1 | GameSaveV2;
 export interface PickSwap { give: DraftPick[]; get: DraftPick[] }
 /** 선수 내놓기 제안 (session.shopOffers): 그 구단이 내줄 선수와 지명권, 우리 쪽에서 본 가치 (런) */
 export interface ShopOffer { team: number; get: SimPlayer[]; picks: DraftPick[]; value: number }
+/** 선수 내놓기에서 받고 싶은 것 */
+export type ShopWant = 'any' | 'players' | 'picks';
 const NO_PICKS: PickSwap = { give: [], get: [] };
 
 /** 기사 판정용 (세션 메모리) */
@@ -1626,7 +1628,7 @@ export class GameSession {
    * 우리 쪽에서 가장 가치 있는 1~2명 조합을 제안한다. 직접 제안과 같은 판정(evaluateTrade, 세부 난이도 포함)으로 걸러서
    * 그대로 받으면 성사된다. 우리 쪽에서 본 가치가 높은 순. 제안이 없는 구단은 빠진다
    */
-  shopOffers(offer: SimPlayer[], cash = 0): ShopOffer[] {
+  shopOffers(offer: SimPlayer[], cash = 0, want: ShopWant = 'any'): ShopOffer[] {
     if (!this.tradeOpen || offer.length > MAX_PER_SIDE || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
     if (offer.length === 0 && cash <= 0) return [];
     if (cash > 0 && cash > this.cashNow()) return [];
@@ -1649,7 +1651,8 @@ export class GameSession {
       const players: Item[] = t.org.filter((p) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year)
         .map((p) => ({ p, v: worth(p) })).filter((x) => x.v > 0);
       const picks: Item[] = this.pickTradeOpen ? this.ownedPicks(t.idx).map((k) => ({ k, v: this.pickValueFor(k, myTendency) })).filter((x) => x.v > 0) : [];
-      const cands = [...players.sort((a, b) => b.v - a.v).slice(0, 30), ...picks].sort((a, b) => b.v - a.v);
+      // 받고 싶은 것 (2026-10-12 사용자: 선수 또는 지명권을 고를 수 있게)
+      const cands = [...(want === 'picks' ? [] : players.sort((a, b) => b.v - a.v).slice(0, 30)), ...(want === 'players' ? [] : picks)].sort((a, b) => b.v - a.v);
       let best: { items: Item[]; value: number } | null = null;
       for (const c of cands) if (ok([c])) { best = { items: [c], value: c.v }; break; }
       // 두 개: 상위 15개 안의 조합 가운데 한 개보다 나은 것 (지명권은 2장까지, 규약)

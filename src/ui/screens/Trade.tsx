@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { MAX_PER_SIDE, TENDENCY_LABEL, type TradeEvaluation } from '../../ai/trade';
 import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
-import { TRADE_DEADLINE, type ShopOffer } from '../../game/session';
+import { TRADE_DEADLINE, type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { currentRuns } from '../../ai/value';
@@ -245,6 +245,8 @@ function ShopPanel({ open }: { open: boolean }) {
   const [cashText, setCashText] = useState('0');
   const px = usePriceIndex();
   const cashMan = Math.max(0, Math.round((Number(cashText) || 0) * 10000 / px));
+  // 받고 싶은 것: 상관없음 / 선수 / 지명권
+  const [want, setWant] = useState<ShopWant>('any');
   const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const ctx = session.values;
@@ -263,7 +265,7 @@ function ShopPanel({ open }: { open: boolean }) {
     setBusy(true);
     setMsg({ text: '다른 구단 단장들에게 알리는 중입니다' });
     await new Promise((r) => setTimeout(r, 30));
-    const list = session.shopOffers([...sel].map((i) => session.world.players[i]), cashMan);
+    const list = session.shopOffers([...sel].map((i) => session.world.players[i]), cashMan, want);
     setBusy(false);
     setOffers(list);
     setMsg(list.length ? null : { text: '지금은 이 조건에 관심을 보이는 구단이 없습니다.' });
@@ -301,7 +303,14 @@ function ShopPanel({ open }: { open: boolean }) {
             <button type="button" onClick={() => void ask()} disabled={!open || busy || (sel.size === 0 && cashMan <= 0)}>{busy ? '알리는 중' : '다른 구단에 알리기'}</button>
           </span>
         </div>
-        <p className="muted small">선수 없이 현금만 걸면 현금으로 선수·지명권을 사 옵니다. 지금 자금 {won(session.cashNow())}.</p>
+        <div className="row-between wrap">
+          <div className="seg" role="tablist" aria-label="받고 싶은 것">
+            {([['any', '상관없음'], ['players', '선수'], ['picks', '지명권']] as const).map(([k, label]) => (
+              <button key={k} type="button" role="tab" aria-selected={want === k} className={want === k ? 'on' : ''} onClick={() => { setWant(k); setOffers(null); }} disabled={k === 'picks' && !session.pickTradeOpen}>받기: {label}</button>
+            ))}
+          </div>
+          <span className="muted small">선수 없이 현금만 걸면 현금으로 사 옵니다. 지금 자금 {won(session.cashNow())}.</span>
+        </div>
         <div className="scroll flat shop-list">
           <table>
             <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th>현재</th><th className="l">올해</th><th>연봉</th></tr></thead>
