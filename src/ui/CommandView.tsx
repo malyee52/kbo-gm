@@ -69,17 +69,12 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     }
     return c;
   };
-  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => {
-    setBusy(true);
-    // 그리기를 먼저 하고 계산한다 (버튼이 눌린 게 보이게)
-    window.setTimeout(() => {
-      setPv(session.commandPreview([...pv.choices, choice()], mode));
-      setBusy(false);
-    }, 10);
-  };
+  // 미리보기는 하루 경기만 돌려 10ms 안팎이라 바로 계산한다
+  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode));
   const commit = () => {
     setBusy(true);
-    window.setTimeout(() => { session.commitCommand(pv.choices); onDone(); }, 10);
+    session.commitCommand(pv.choices);
+    onDone();
   };
   const cancel = () => { ref.current?.close(); onCancel(); };
 
@@ -101,7 +96,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           </div>
           <span className="inline">
             {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 바로 확정합니다"
-              onClick={() => { setBusy(true); window.setTimeout(() => { session.commitCommand(session.commandPreview(pv.choices, 'auto').choices); onDone(); }, 10); }}>나머지 자동으로 확정</button>}
+              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto').choices); onDone(); }}>나머지 자동으로 확정</button>}
             <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>
           </span>
         </header>
