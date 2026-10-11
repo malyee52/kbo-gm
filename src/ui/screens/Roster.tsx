@@ -1,5 +1,8 @@
 // 선수단: 1군·2군 명단과 엔트리 이동. 라인업·로테이션은 AI 감독이 1군 안에서 정한다.
+// 2026-10-12 개편: 1군/2군을 탭으로 나눠 한 번에 한 표만, 줄을 누르면 오른쪽에 선수 요약(좁은 화면은 바로 상세 창).
 import { useMemo, useState, type ReactNode } from 'react';
+import { GradeBar } from './PlayerDetail';
+import { runsGrade } from '../grades';
 import { defenseAt, defenseGrade, fieldPosOf, LINEUP_SLOTS, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type PitcherRole } from '../../game/session';
@@ -8,7 +11,8 @@ import {
   type LeagueBase,
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
-import { Grade, HAND, PlayerLink, posName, useGame } from '../context';
+import { Grade, HAND, posName, useGame, useWon } from '../context';
+import { dollarText } from '../../league/salary';
 import type { FuturesLine } from '../../league/futures';
 import { ORG_LIMIT } from '../../league/salary';
 
@@ -39,8 +43,10 @@ interface Column {
 
 
 export function Roster() {
-  const { session, grades, changed, version } = useGame();
+  const { session, grades, changed, version, openPlayer } = useGame();
   const [kind, setKind] = useState<Kind>('hit');
+  const [inFirst, setInFirst] = useState(true);
+  const [sel, setSel] = useState<number | null>(null);
   const [sort, setSort] = useState<SortKey>('value');
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
   const [page, setPageState] = useState<Page>(savedPage);
@@ -146,32 +152,60 @@ export function Roster() {
     return sortPlayers(rows, sort, kind, session, grades, lg);
   };
 
-  return (
-    <div className="stack">
-      <section className="row-between wrap">
-        <div>
-          <h1>선수단</h1>
-          <p className="muted small">
-            1군 {first.length}/{rules.rosterSize}명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit}명 ·{' '}
-            정식 {session.regularCount()}/{ORG_LIMIT}명{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}명` : ''} ·{' '}
-            {view.manual ? '엔트리 직접 관리' : '엔트리 AI가 관리'}
-          </p>
-        </div>
-        <button type="button" className="ghost" onClick={toggleAuto} disabled={!session.canManage}>
-          {view.manual ? 'AI에게 엔트리 맡기기' : '엔트리 직접 관리하기'}
+  const rows = list(inFirst);
+  const nOther = list(!inFirst).length;
+  // 고른 선수가 지금 표에 없으면 첫 줄
+  const picked = rows.find((p) => p.idx === sel) ?? rows[0];
+  /** 줄 누르기: 넓은 화면은 오른쪽 요약, 좁은 화면은 바로 상세 창 */
+  const pick = (p: SimPlayer) => {
+    if (window.matchMedia('(max-width: 1100px)').matches) openPlayer(p.idx);
+    else setSel(p.idx);
+  };
+  const cols = columnsFor(kind, page);
+  const moveBtn = (p: SimPlayer, inF: boolean, big = false) => {
+    const cls = big ? 'ghost' : 'small-btn';
+    if (p.dev) {
+      const why = session.convertBlock(p);
+      return (
+        <button type="button" className={cls} disabled={!!why} title={why ?? '정식 선수로 등록합니다 (2군에 남고, 1군은 따로 올립니다)'}
+          onClick={(e) => { e.stopPropagation(); const r = session.convertDev(p); setMsg({ errors: r.ok ? [] : [r.message], warnings: [], who: r.ok ? r.message : undefined }); changed(); }}>
+          정식 등록
         </button>
-      </section>
+      );
+    }
+    const rd = !inF && view.manual ? session.reregisterDay(p) : null;
+    return (
+      <button type="button" className={cls} onClick={(e) => { e.stopPropagation(); move(p, !inF); }} disabled={!session.canManage || rd !== null}
+        title={rd !== null ? `말소 뒤 10일 규정: ${shortDate(session.world.year, rd)}부터 등록 가능` : inF ? '1군에서 말소하면 10일 동안 다시 등록할 수 없습니다' : undefined}>
+        {rd !== null ? `${shortDate(session.world.year, rd)}부터` : inF ? '2군으로' : '1군으로'}
+      </button>
+    );
+  };
+
+  return (
+    <div className="stack tight">
       <section className="row-between wrap">
-        <p className="muted small">
-          {view.manual
-            ? session.plan
-              ? '기용: 직접 정함. 1군의 "역할" 드롭다운으로 야수 자리(서브 포함)와 투수 보직(선발·중계·마무리)을 바꿉니다. 직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 서브로 채웁니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
-              : '기용: AI 감독. 1군의 "역할" 드롭다운을 바꾸면 지금 배치에서 시작해 직접 정하게 됩니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
-            : '엔트리를 AI가 관리하는 동안에는 기용도 AI 감독이 정합니다. 역할은 다음 경기 기준 예상입니다.'}
-        </p>
-        {canPlan && session.plan && (
-          <button type="button" className="ghost" onClick={() => afterPlan(session.setPlan(null), '기용을 AI 감독에게 맡겼습니다.')}>AI에게 기용 맡기기</button>
-        )}
+        <div className="muted small roster-sum">
+          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit} ·{' '}
+          정식 {session.regularCount()}/{ORG_LIMIT}{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}` : ''} ·{' '}
+          {view.manual ? '엔트리 직접 관리' : '엔트리 AI 관리'}{view.manual ? (session.plan ? ' · 기용 직접' : ' · 기용 AI 감독') : ''}
+          <details className="help">
+            <summary>도움말</summary>
+            {view.manual
+              ? session.plan
+                ? '기용: 직접 정함. 1군의 "역할" 드롭다운으로 야수 자리(서브 포함)와 투수 보직(선발·중계·마무리)을 바꿉니다. 직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 서브로 채웁니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
+                : '기용: AI 감독. 1군의 "역할" 드롭다운을 바꾸면 지금 배치에서 시작해 직접 정하게 됩니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
+              : '엔트리를 AI가 관리하는 동안에는 기용도 AI 감독이 정합니다. 역할은 다음 경기 기준 예상입니다.'}
+          </details>
+        </div>
+        <span className="inline">
+          {canPlan && session.plan && (
+            <button type="button" className="ghost" onClick={() => afterPlan(session.setPlan(null), '기용을 AI 감독에게 맡겼습니다.')}>AI에게 기용 맡기기</button>
+          )}
+          <button type="button" className="ghost" onClick={toggleAuto} disabled={!session.canManage}>
+            {view.manual ? 'AI에게 엔트리 맡기기' : '엔트리 직접 관리하기'}
+          </button>
+        </span>
       </section>
 
       {msg && (msg.errors.length > 0 || msg.warnings.length > 0 || msg.who) && (
@@ -182,94 +216,82 @@ export function Roster() {
         </div>
       )}
 
-      <div className="toolbar">
-        <div className="seg" role="tablist" aria-label="선수 구분">
-          <button type="button" role="tab" aria-selected={kind === 'hit'} className={kind === 'hit' ? 'on' : ''} onClick={() => setKind('hit')}>야수</button>
-          <button type="button" role="tab" aria-selected={kind === 'pit'} className={kind === 'pit' ? 'on' : ''} onClick={() => setKind('pit')}>투수</button>
-        </div>
-        <div className="seg" role="tablist" aria-label="표 페이지">
-          {PAGES.map(([k, label]) => (
-            <button key={k} type="button" role="tab" aria-selected={page === k} className={page === k ? 'on' : ''} onClick={() => setPage(k)}>{label}</button>
-          ))}
-        </div>
-        <label className="inline small">
-          정렬
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-            <option value="value">능력 종합</option>
-            <option value="name">이름</option>
-            <option value="age">나이</option>
-            {kind === 'hit' ? (
-              <><option value="g1">컨택</option><option value="g2">파워</option><option value="g3">선구안</option><option value="g4">주력</option><option value="stat">OPS</option><option value="saber">wRC+</option></>
-            ) : (
-              <><option value="g1">구위</option><option value="g2">제구</option><option value="g3">장타 억제</option><option value="g4">체력</option><option value="stat">평균자책</option><option value="saber">FIP</option></>
-            )}
-          </select>
-        </label>
-      </div>
-
       <ServingList />
 
-      {kind === 'hit' && view.manual && <BattingOrderPanel onResult={(r, who) => { setMsg({ ...r, who }); changed(); }} />}
-
-      {page === 'saber' && (
-        <p className="muted small">
-          세이버 기록은 이번 시즌 리그 전체 시뮬레이션 기록이 기준입니다 (리그 wOBA {rate3(lg.woba)}, FIP 상수 {fixed2(lg.fipConst)}).
-          wRC+는 100이 리그 평균이고 구장 보정이 없습니다. 피BABIP는 희생타 기록이 없어 근사값입니다.
-        </p>
-      )}
-
-      {[true, false].map((inFirst) => {
-        const cols = columnsFor(kind, page);
-        return (
-          <section key={String(inFirst)}>
-            <h2>{inFirst ? '1군' : '2군'} <span className="muted small">{list(inFirst).length}명</span></h2>
-            <div className="scroll">
-              <table className="roster">
-                <thead>
-                  <tr>
-                    <th className="l">이름</th><th className="l">역할</th>
-                    {cols.map((c) => <th key={c.h} className={c.l ? 'l' : undefined} title={c.title}>{c.h}</th>)}
-                    {!inFirst && <th className="l" title="퓨처스리그(2군) 성적. 능력과 2군 출전 몫으로 만든 값">퓨처스</th>}
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {list(inFirst).map((p) => {
-                    const roleText = inFirst || view.callUps.has(p.idx) ? (view.role.get(p.idx) ?? (session.isAbsent(p) ? '결장' : '-')) : '';
-                    return (
-                      <tr key={p.idx}>
-                        <td className="l"><PlayerLink p={p} />{p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}</td>
-                        <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
-                        {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
-                        {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
-                        <td>
-                          {p.dev ? (() => {
-                            const why = session.convertBlock(p);
-                            return (
-                              <button type="button" className="small-btn" disabled={!!why} title={why ?? '정식 선수로 등록합니다 (2군에 남고, 1군은 따로 올립니다)'}
-                                onClick={() => { const r = session.convertDev(p); setMsg({ errors: r.ok ? [] : [r.message], warnings: [], who: r.ok ? r.message : undefined }); changed(); }}>
-                                정식 등록
-                              </button>
-                            );
-                          })() : (() => {
-                            const rd = !inFirst && view.manual ? session.reregisterDay(p) : null;
-                            return (
-                              <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage || rd !== null}
-                                title={rd !== null ? `말소 뒤 10일 규정: ${shortDate(session.world.year, rd)}부터 등록 가능` : inFirst ? '1군에서 말소하면 10일 동안 다시 등록할 수 없습니다' : undefined}>
-                                {rd !== null ? `${shortDate(session.world.year, rd)}부터` : inFirst ? '2군으로' : '1군으로'}
-                              </button>
-                            );
-                          })()}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+      <div className="roster-split">
+        <section className="card roster-main">
+          <div className="toolbar">
+            <div className="seg" role="tablist" aria-label="선수 구분">
+              <button type="button" role="tab" aria-selected={kind === 'hit'} className={kind === 'hit' ? 'on' : ''} onClick={() => setKind('hit')}>야수</button>
+              <button type="button" role="tab" aria-selected={kind === 'pit'} className={kind === 'pit' ? 'on' : ''} onClick={() => setKind('pit')}>투수</button>
             </div>
-          </section>
-        );
-      })}
+            <div className="seg" role="tablist" aria-label="1군·2군">
+              <button type="button" role="tab" aria-selected={inFirst} className={inFirst ? 'on' : ''} onClick={() => setInFirst(true)}>1군 {inFirst ? rows.length : nOther}</button>
+              <button type="button" role="tab" aria-selected={!inFirst} className={!inFirst ? 'on' : ''} onClick={() => setInFirst(false)}>2군 {inFirst ? nOther : rows.length}</button>
+            </div>
+            <div className="seg" role="tablist" aria-label="표 페이지">
+              {PAGES.map(([k, label]) => (
+                <button key={k} type="button" role="tab" aria-selected={page === k} className={page === k ? 'on' : ''} onClick={() => setPage(k)}>{label}</button>
+              ))}
+            </div>
+            <label className="inline small">
+              정렬
+              <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                <option value="value">능력 종합</option>
+                <option value="name">이름</option>
+                <option value="age">나이</option>
+                {kind === 'hit' ? (
+                  <><option value="g1">컨택</option><option value="g2">파워</option><option value="g3">선구안</option><option value="g4">주력</option><option value="stat">OPS</option><option value="saber">wRC+</option></>
+                ) : (
+                  <><option value="g1">구위</option><option value="g2">제구</option><option value="g3">장타 억제</option><option value="g4">체력</option><option value="stat">평균자책</option><option value="saber">FIP</option></>
+                )}
+              </select>
+            </label>
+          </div>
+
+          {page === 'saber' && (
+            <p className="muted small">
+              세이버 기록은 이번 시즌 리그 전체 시뮬레이션 기록이 기준입니다 (리그 wOBA {rate3(lg.woba)}, FIP 상수 {fixed2(lg.fipConst)}).
+              wRC+는 100이 리그 평균이고 구장 보정이 없습니다. 피BABIP는 희생타 기록이 없어 근사값입니다.
+            </p>
+          )}
+
+          <div className="scroll flat">
+            <table className="roster">
+              <thead>
+                <tr>
+                  <th className="l">이름</th><th className="l">역할</th>
+                  {cols.map((c) => <th key={c.h} className={c.l ? 'l' : undefined} title={c.title}>{c.h}</th>)}
+                  {!inFirst && <th className="l" title="퓨처스리그(2군) 성적. 능력과 2군 출전 몫으로 만든 값">퓨처스</th>}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p) => {
+                  const roleText = inFirst || view.callUps.has(p.idx) ? (view.role.get(p.idx) ?? (session.isAbsent(p) ? '결장' : '-')) : '';
+                  return (
+                    <tr key={p.idx} className={`pick${picked?.idx === p.idx ? ' sel' : ''}`} onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button')) pick(p); }}>
+                      <td className="l">
+                        <button type="button" className="link name-btn" onClick={(e) => { e.stopPropagation(); pick(p); }}>{p.name}</button>
+                        {p.foreign && <span className="tag">외</span>}
+                        {p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}
+                      </td>
+                      <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
+                      {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
+                      {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
+                      <td>{moveBtn(p, inFirst)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, inFirst, true)} />}
+      </div>
+
+      {kind === 'hit' && inFirst && view.manual && <BattingOrderPanel onResult={(r, who) => { setMsg({ ...r, who }); changed(); }} />}
     </div>
   );
 
@@ -375,6 +397,54 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
     saber: (a, b) => saberOf(b) - saberOf(a),
   };
   return [...rows].sort((a, b) => by[key](a, b) || a.idx - b.idx);
+}
+
+/** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
+function RosterSide({ p, inFirst, status, moveBtn }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode }) {
+  const { session, grades, openPlayer } = useGame();
+  const won = useWon();
+  const lp = session.leaguePlayer(p.id);
+  const bg = grades.batters.get(p.id);
+  const pg = grades.pitchers.get(p.id);
+  const b = session.season.bat[p.idx];
+  const x = session.season.pit[p.idx];
+  const line = p.isPitcher
+    ? (x.bf ? `${x.g}경기 ${x.w}승 ${x.l}패${x.sv ? ` ${x.sv}세이브` : ''} · ${ipText(x.outs)}이닝 · 평균자책 ${fixed2(era(x))} · 탈삼진 ${x.so}` : '올해 1군 등판 없음')
+    : (b.pa ? `타율 ${rate3(avg(b))} · OPS ${rate3(ops(b))} · ${b.hr}홈런 · ${b.rbi}타점${b.sb ? ` · ${b.sb}도루` : ''}` : '올해 1군 타석 없음');
+  return (
+    <aside className="card roster-side" aria-label={`${p.name} 요약`}>
+      <header className="side-head">
+        <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
+        <strong>{p.name}{p.foreign && <span className="tag">외국인</span>}</strong>
+      </header>
+      <div className="side-body">
+        {status && <p>{status}</p>}
+        <div className="grades">
+          {p.isPitcher && pg ? (
+            <>
+              <GradeBar label="구위" v={pg.stuff} /><GradeBar label="제구" v={pg.control} />
+              <GradeBar label="장타 억제" v={pg.hrSuppression} /><GradeBar label="선발 체력" v={pg.stamina} />
+            </>
+          ) : bg ? (
+            <>
+              <GradeBar label="컨택" v={bg.contact} /><GradeBar label="파워" v={bg.power} />
+              <GradeBar label="선구안" v={bg.eye} /><GradeBar label="주력" v={bg.speed} />
+            </>
+          ) : null}
+        </div>
+        <p className="small">{session.world.year} {line}</p>
+        {lp && (
+          <p className="small muted">
+            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential)} />
+          </p>
+        )}
+        <p className="inline">
+          <button type="button" onClick={() => openPlayer(p.idx)}>자세히</button>
+          {moveBtn}
+        </p>
+      </div>
+    </aside>
+  );
 }
 
 /** 군 복무 중인 우리 선수 (경기에 나오지 않고 정원에서도 빠진다) */
