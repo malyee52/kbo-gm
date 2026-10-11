@@ -4,6 +4,7 @@ import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
 import { ScenarioBanner } from '../ScenarioBanner';
 import { FinancePanel } from './Finance';
+import { StadiumPanel } from './Stadium';
 import { capPayroll, salaryCap } from '../../league/salary';
 import {
   ACHIEVEMENTS, budgetFor, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
@@ -11,8 +12,8 @@ import {
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
 
-type ClubTab = 'overview' | 'finance' | 'coach' | 'history';
-const CLUB_TABS: [ClubTab, string][] = [['overview', '개요'], ['finance', '재정'], ['coach', '코치진'], ['history', '이력·업적']];
+type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
+const CLUB_TABS: [ClubTab, string][] = [['overview', '개요'], ['finance', '재정'], ['stadium', '구장·팬'], ['coach', '코치진'], ['history', '이력·업적']];
 
 export function Club() {
   const { session, go } = useGame();
@@ -53,6 +54,7 @@ export function Club() {
       </div>
 
       {tab === 'finance' && <FinancePanel />}
+      {tab === 'stadium' && <StadiumPanel />}
       {tab === 'coach' && <CoachPanel />}
 
       {tab === 'overview' && (<>

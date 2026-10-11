@@ -5,8 +5,8 @@ import {
 } from '../../league/finance';
 import { useGame, useWon } from '../context';
 
-const INCOME: FinanceKind[] = ['gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'champion', 'rescue', 'compensation', 'trade', 'event', 'other'];
-const EXPENSE: FinanceKind[] = ['payroll', 'foreign', 'ops', 'invest', 'signing', 'transfer', 'compensation', 'fine', 'trade', 'event', 'other'];
+const INCOME: FinanceKind[] = ['gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'champion', 'rescue', 'compensation', 'posting', 'trade', 'event', 'other'];
+const EXPENSE: FinanceKind[] = ['payroll', 'foreign', 'coach', 'ops', 'invest', 'stadium', 'signing', 'transfer', 'compensation', 'fine', 'trade', 'event', 'other'];
 
 export function FinancePanel() {
   const { session, changed, autosave } = useGame();

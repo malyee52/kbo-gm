@@ -50,6 +50,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
+import { FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 
 export interface NewGameOptions {
@@ -119,6 +120,8 @@ export type GameAction =
   | { year: number; type: 'comp-pick'; fa: string; pick: string }
   | { year: number; type: 'comp-auto' }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
+  /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
+  | { year: number; type: 'stadium'; id: string }
   | { year: number; type: 'legend'; id: string }
   | { year: number; type: 'to-dev'; id: string }
   | { year: number; type: 'sign-dev'; id: string }
@@ -1320,10 +1323,19 @@ export class GameSession {
       const [from, to, amount] = cash > 0 ? [this.teamIdx, aiTeam, cash] : [aiTeam, this.teamIdx, -cash];
       this.league.ledger.push({ year: this.year, from, to, amount, note: `트레이드 현금 (${this.world.teams[aiTeam].name})`, kind: 'trade' });
     }
+    for (const i of give) this.fanStarLeaves(this.teamIdx, this.world.players[i]);
+    for (const i of get) this.fanStarLeaves(aiTeam, this.world.players[i]);
     for (const i of give) this.season.transfer(i, aiTeam);
     for (const i of get) this.season.transfer(i, this.teamIdx);
     this.trades.push({ day: this.day, team: aiTeam, give: [...give], get: [...get],
       ...(picks.give.length ? { pg: picks.give.map(pickId) } : {}), ...(picks.get.length ? { pr: picks.get.map(pickId) } : {}) });
+  }
+
+  /** 프랜차이즈 스타를 트레이드로 내보내면 팬 만족도가 떨어진다 (stadium.ts). 소속이 바뀌기 전에 부른다 */
+  private fanStarLeaves(team: number, sp: SimPlayer): void {
+    const lp = this.league.players.find((p) => p.id === sp.id);
+    if (!lp || !starLeaves(this.league, team, this.year, this.day, lp, currentRuns(sp, this.values), 'trade')) return;
+    if (team === this.teamIdx) this.addNews(this.day, 'owner', `팬들이 실망했습니다: 프랜차이즈 스타 ${sp.name} 트레이드 (팬 만족도 ${FAN_LOSS.trade})`);
   }
 
   // ---- 오프시즌
@@ -1502,6 +1514,7 @@ export class GameSession {
       case 'comp-pick': res = Off.pickCompByUser(L, off, a.fa, a.pick); break;
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow()); break;
       case 'legend': res = this.applyLegend(a.id); break;
       case 'to-dev': res = Off.toDevByUser(L, off!, a.id); break;
       case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
@@ -1650,6 +1663,8 @@ export class GameSession {
           if (evB.verdict !== 'accept') continue;
           const evA = evaluateTrade({ aiTeam: A.idx, receive: [x], give: [y], ...(pv ? { picks: { receive: 0, give: pv.a } } : {}) }, A.org, sA, ctx);
           if (evA.verdict !== 'accept') continue;
+          this.fanStarLeaves(B.idx, x);
+          this.fanStarLeaves(A.idx, y);
           this.season.transfer(x.idx, A.idx);
           this.season.transfer(y.idx, B.idx);
           if (pv && pick) transferPick(this.league, pick, B.idx);
@@ -1884,6 +1899,7 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
   /**
    * 세부 난이도를 바꾼다 (게임 중에도, 조작 기록에 남는다). 부상 빈도는 다음 경기부터
    */
