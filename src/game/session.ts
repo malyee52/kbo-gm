@@ -844,12 +844,35 @@ export class GameSession {
     return pl.closer === p.idx ? 'CL' : pl.rotation.includes(p.idx) ? 'SP' : 'RP';
   }
 
+  /**
+   * 기용표의 한 곳만 고친다. 지금 1군에 없는 선수(2군으로 내렸거나 임시 승격이 끝난 선수)가 기용표에 남아 있으면
+   * 빼고 고친다. 예전에는 그런 선수 하나 때문에 다른 자리도 못 바꿨다 (2026-10-12 사용자: 포수를 고르는데
+   * "선발 로테이션은 1군 투수여야 합니다"). 뺀 선수는 경고로 알린다
+   */
+  private editPlan(edit: (pl: DepthPlan) => void): EntryCheck {
+    const pl = structuredClone(this.effectivePlan());
+    const reg = new Map(this.registered().map((p) => [p.idx, p]));
+    const dropped = new Set<number>();
+    for (const s of LINEUP_SLOTS) {
+      const i = pl.starters[s];
+      if (i !== undefined && (!reg.has(i) || reg.get(i)!.isPitcher)) { delete pl.starters[s]; dropped.add(i); }
+    }
+    pl.rotation = pl.rotation.filter((i) => (reg.get(i)?.isPitcher ? true : (dropped.add(i), false)));
+    if (pl.closer !== null && !reg.get(pl.closer)?.isPitcher) { dropped.add(pl.closer); pl.closer = null; }
+    edit(pl);
+    const r = this.setPlan(pl);
+    if (!r.errors.length && dropped.size) {
+      r.warnings.unshift(`지금 1군에 없는 ${[...dropped].map((i) => this.world.players[i]?.name ?? i).join(', ')}을(를) 기용표에서 뺐습니다`);
+    }
+    return r;
+  }
+
   /** 야수를 주전 자리에 세우거나(slot) 서브로 돌린다(null). 그 자리에 있던 선수는 서브가 된다 */
   setHitterSlot(p: SimPlayer, slot: Slot | null): EntryCheck {
-    const pl = structuredClone(this.effectivePlan());
-    for (const s of LINEUP_SLOTS) if (pl.starters[s] === p.idx) delete pl.starters[s];
-    if (slot) pl.starters[slot] = p.idx;
-    return this.setPlan(pl);
+    return this.editPlan((pl) => {
+      for (const s of LINEUP_SLOTS) if (pl.starters[s] === p.idx) delete pl.starters[s];
+      if (slot) pl.starters[slot] = p.idx;
+    });
   }
 
   /**
@@ -875,20 +898,20 @@ export class GameSession {
 
   /** 타순을 정한다 (자리 순서). null이면 AI 감독에게 맡긴다. 기용표를 직접 정한 상태로 바뀐다 */
   setBattingOrder(order: Slot[] | null): EntryCheck {
-    const pl = structuredClone(this.effectivePlan());
-    if (order) pl.order = [...order];
-    else delete pl.order;
-    return this.setPlan(pl);
+    return this.editPlan((pl) => {
+      if (order) pl.order = [...order];
+      else delete pl.order;
+    });
   }
 
   /** 투수 보직을 바꾼다. 마무리는 한 명이라, 새로 정하면 기존 마무리는 중계로 간다 */
   setPitcherRole(p: SimPlayer, role: PitcherRole): EntryCheck {
-    const pl = structuredClone(this.effectivePlan());
-    pl.rotation = pl.rotation.filter((i) => i !== p.idx);
-    if (pl.closer === p.idx) pl.closer = null;
-    if (role === 'SP') pl.rotation.push(p.idx);
-    if (role === 'CL') pl.closer = p.idx;
-    return this.setPlan(pl);
+    return this.editPlan((pl) => {
+      pl.rotation = pl.rotation.filter((i) => i !== p.idx);
+      if (pl.closer === p.idx) pl.closer = null;
+      if (role === 'SP') pl.rotation.push(p.idx);
+      if (role === 'CL') pl.closer = p.idx;
+    });
   }
 
   /** 기용표 검사: 주전·로테이션·마무리는 지금 1군에 등록된 우리 선수여야 한다 */
