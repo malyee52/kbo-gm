@@ -16,6 +16,15 @@ export interface EngineParams {
   batRegress: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
   /** 투수 사건별 회귀 상수: 상대 타자 수 기준. tools/fit_regression.py로 맞춘 값 */
   pitRegress: { so: number; bb: number; hbp: number; hr: number; hit: number };
+  /**
+   * 외국인(아시아쿼터 제외)의 사전 평균: KBO 첫 시즌을 보낸 외국인의 리그 대비 비율 (2012~2025, 타자 102명·투수 195명 합산).
+   * 기록이 적은 외국인을 국내 저표본 선수 평균(meta.priors: 홈런 0.51배 등) 대신 이쪽으로 당긴다
+   * (2026-10-12 사용자: "실제로 KBO에서 활약하는 외국인들은 대부분 리그 상위권 지표를 차지한다")
+   */
+  foreignPriors: {
+    batter: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
+    pitcher: { so: number; bb: number; hbp: number; hr: number; hit: number };
+  };
 
   // ---- 타석 보정 (game.ts)
   /** 좌우 상성 크기. 반대 손 대결에서 타자의 안타·홈런·볼넷이 이만큼 늘고 삼진이 준다 (임시값) */
@@ -97,6 +106,10 @@ export const DEFAULT_PARAMS: EngineParams = {
   debutSeasonWeight: 0.4,
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
+  foreignPriors: {
+    batter: { s1: 0.934, d2: 1.238, t3: 0.91, hr: 1.747, bb: 1.019, hbp: 0.883, so: 1.049 },
+    pitcher: { hit: 0.99, hr: 0.885, bb: 0.87, hbp: 0.942, so: 1.075 },
+  },
 
   platoon: 0.035,
   homeEdge: 0.013,
@@ -122,7 +135,9 @@ export const DEFAULT_PARAMS: EngineParams = {
   restChance: 0.2,
   catcherRestChance: 0.25,
   injury: {
-    base: 0.008,
+    // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
+    // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md
+    base: 0.0045,
     minor: { share: 0.7, days: [3, 14] },
     long: { share: 0.24, days: [15, 59] },
     major: { share: 0.06, days: [60, 240] },

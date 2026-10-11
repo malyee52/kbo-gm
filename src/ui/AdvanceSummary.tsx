@@ -21,6 +21,8 @@ export interface AdvanceSnapshot {
   l: number;
   t: number;
   rank: number;
+  /** 개막 전(0경기)에 찍었으면 rank는 지난 시즌 최종 순위 (모두 0승 0패라 진행 직전 순위가 의미 없다, 2026-10-12 사용자) */
+  rankFromLastSeason?: boolean;
   cash: number;
   news: number;
   articles: number;
@@ -33,7 +35,8 @@ export function takeSnapshot(session: GameSession): AdvanceSnapshot {
   const me = session.teamIdx;
   const r = s.teams[me];
   return {
-    year: session.world.year, day: s.day, w: r.w, l: r.l, t: r.t, rank: s.standings().indexOf(me) + 1,
+    year: session.world.year, day: s.day, w: r.w, l: r.l, t: r.t,
+    ...(r.g === 0 && session.lastSeasonRank() ? { rank: session.lastSeasonRank()!, rankFromLastSeason: true } : { rank: s.standings().indexOf(me) + 1 }),
     cash: session.cashNow(), news: session.news.length, articles: session.league.articles?.length ?? 0,
     bat: new Map(session.team.org.map((p) => [p.idx, { ...s.bat[p.idx] }])),
     pit: new Map(session.team.org.map((p) => [p.idx, { ...s.pit[p.idx] }])),
@@ -139,7 +142,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
             <span className="stat-label">순위</span>
             <strong className="stat-value">{rank}위</strong>
             <span className={`small ${rank < snap.rank ? 'up' : rank > snap.rank ? 'down' : 'muted'}`}>
-              {rank < snap.rank ? `▲${snap.rank - rank}` : rank > snap.rank ? `▼${rank - snap.rank}` : '변동 없음'} (전 {snap.rank}위)
+              {rank < snap.rank ? `▲${snap.rank - rank}` : rank > snap.rank ? `▼${rank - snap.rank}` : '변동 없음'} ({snap.rankFromLastSeason ? '지난 시즌' : '전'} {snap.rank}위)
             </span>
           </div>
           <div className="stat"><span className="stat-label">시즌 성적</span><strong className="stat-value">{r.w}승 {r.l}패 {r.t}무</strong></div>

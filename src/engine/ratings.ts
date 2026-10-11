@@ -191,7 +191,8 @@ export function buildWorld(input: BuildWorldInput): World {
         rows.push({ row: pRow, w: params.debutSeasonWeight, lg });
         debutEstimate = true;
       }
-      pit = pitSkillFrom(rows, meta.priors.pitcher, params);
+      // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
+      pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, params);
       lastSaves = histPit[0]?.get(id)?.sv ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
     } else {
       const rows: Weighted<BatRow>[] = [];
@@ -203,7 +204,7 @@ export function buildWorld(input: BuildWorldInput): World {
         rows.push({ row: bRow, w: params.debutSeasonWeight, lg });
         debutEstimate = true;
       }
-      bat = batSkillFrom(rows, meta.priors.batter, params);
+      bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, params);
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다

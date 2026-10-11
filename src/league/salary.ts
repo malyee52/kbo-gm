@@ -163,7 +163,8 @@ export function foreignSalary(runs: number, isNew: boolean, asia: boolean): numb
   if (asia) return Math.min(ASIA_NEW_CAP, Math.round((80_000 + 6_000 * Math.max(0, runs)) / 10_000) * 10_000);
   // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
   const r = Math.max(0, runs);
-  const v = Math.round((isNew ? 250_000 + 22_000 * r : 400_000 + 25_000 * r) / 50_000) * 50_000;
+  // 신규: 20런 약 51만, 33런 약 74만, 46런 약 98만 달러 (외국인 능력을 올린 뒤 다시 맞춤, 2026-10-12)
+  const v = Math.round((isNew ? 150_000 + 18_000 * r : 400_000 + 25_000 * r) / 50_000) * 50_000;
   return isNew ? Math.min(FOREIGN_NEW_CAP, v) : Math.min(2_000_000, v);
 }
 

@@ -23,12 +23,22 @@ export function Awards() {
     const sp = session.world.players.find((x) => x.id === w.id);
     return sp ? <button type="button" className="link" onClick={() => openPlayer(sp.idx)}>{w.name}</button> : <>{w.name}</>;
   };
+  // 시상 뒤 FA·트레이드로 옮긴 선수는 지금 팀도 함께 (2026-10-12 사용자: FA로 옮긴 선수가 원소속팀으로만 보인다)
+  const Team = ({ w }: { w: AwardWinner }) => {
+    const now = session.league.players.find((p) => p.id === w.id)?.team;
+    return (
+      <>
+        <TeamName idx={w.team} />
+        {now !== undefined && now >= 0 && now !== w.team && <span className="muted small"> → 지금 <TeamName idx={now} /></span>}
+      </>
+    );
+  };
   const Big = ({ title, w }: { title: string; w: AwardWinner | null }) => (
     <section className={`panel${w?.team === me ? ' mine' : ''}`}>
       <h2>{title}</h2>
       {w ? (
         <>
-          <p><strong className="big-name"><Name w={w} /></strong> <span className="muted"><TeamName idx={w.team} /></span></p>
+          <p><strong className="big-name"><Name w={w} /></strong> <span className="muted"><Team w={w} /></span></p>
           <p className="small">{w.line}</p>
           <p className="muted small">종합 가치(WAR 근사) {w.war.toFixed(1)}</p>
         </>
@@ -67,7 +77,7 @@ export function Awards() {
               <tr key={i} className={x.winner.team === me ? 'me' : ''}>
                 <td className="l">{GG_LABEL[x.pos]}</td>
                 <td className="l"><Name w={x.winner} /></td>
-                <td className="l"><TeamName idx={x.winner.team} /></td>
+                <td className="l"><Team w={x.winner} /></td>
                 <td className="l small">{x.winner.line}</td>
                 <td>{x.winner.war.toFixed(1)}</td>
               </tr>
@@ -85,7 +95,7 @@ export function Awards() {
               <tr key={t.key} className={t.winners.some((w) => w.team === me) ? 'me' : ''}>
                 <td className="l">{t.label}</td>
                 <td className="l">{t.winners.map((w, i) => <span key={w.id}>{i > 0 && ', '}<Name w={w} /></span>)}</td>
-                <td className="l">{t.winners.map((w, i) => <span key={w.id}>{i > 0 && ', '}<TeamName idx={w.team} /></span>)}</td>
+                <td className="l">{t.winners.map((w, i) => <span key={w.id}>{i > 0 && ', '}<Team w={w} /></span>)}</td>
                 <td><strong>{t.value}</strong></td>
               </tr>
             ))}

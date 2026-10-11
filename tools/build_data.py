@@ -20,7 +20,8 @@
                                  엑셀의 다른 내용을 바꾸지 않고 이것만 다시 만들려면: build_data.py --military-only
   data-src/baseballchart/kbo_draft_1982-2027.csv
                                  입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
-                                 같은 폴더의 SOURCE.md 참조.
+                                 같은 폴더의 SOURCE.md 참조. 지명받고 그해 입단하지 않은 선수(해외 진출 등)는 실제 입단 해로 옮긴다 (defer_unsigned).
+                                 이것만 다시 만들려면: build_data.py --drafts-only
   data-src/감독.csv              연도별 구단 감독 실명 (managers.json). 한국어 위키백과 구단별 감독 틀·감독 목록, 2026 보도로 만든 것.
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
@@ -130,6 +131,102 @@ def draft_rows():
             out[str(r['연도'])].append(row)
     return out
 OUT = Path(ARGS[1]) if len(ARGS) > 1 else ROOT / 'public' / 'data'
+
+
+def master_games(out_dir):
+    """선수 ID → 실제 KBO 1군 통산 경기 (시즌마다 타자·투수 기록 중 많은 쪽)"""
+    meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
+    total = defaultdict(int)
+    for y in meta['years']:
+        sd = json.loads((out_dir / 'seasons' / f'{y}.json').read_text(encoding='utf-8'))
+        bi = sd['batFields'].index('g')
+        pi = sd['pitFields'].index('g')
+        g = defaultdict(int)
+        for r in sd['bat']:
+            g[r[0]] = max(g[r[0]], r[bi] or 0)
+        for r in sd['pit']:
+            g[r[0]] = max(g[r[0]], r[pi] or 0)
+        for k, v in g.items():
+            total[k] += v
+    return total
+
+
+def school_key(name):
+    """'광주제일고'·'광주일고'처럼 같은 학교의 다른 표기를 맞춘다"""
+    return (name or '').replace('제일', '일').replace('상업고', '상고').replace('공업고', '공고').strip()
+
+
+def defer_unsigned(drafts, players, games_of):
+    """지명 행을 실제 선수와 잇고, 지명받고 그해 입단하지 않은 행을 정리한다
+    (2026-10-12 사용자: 2001년 채태인·추신수 같은 선수가 그해 드래프트에 나온다).
+    해외 진출·대학 진학으로 지명만 받고 몇 해 뒤 입단한 선수가 지명 해 게임 드래프트에 나오면 실제보다 일찍 KBO에서 뛰고,
+    게임은 지명 행을 선수 마스터와 '이름 + 입단 연도 ±1'로만 맞춰 가짜 동명 선수가 생겼다.
+    - 잇기: 같은 이름의 국내 선수마다, 데뷔 해까지의 지명 가운데 통산 경기(원본 '통산 경기')가 그 선수의 실제 1군 통산 경기와
+      맞는 행(±25%·5경기)을 그 선수의 입단 지명으로 보고 pid를 붙인다 (나이가 맞는 행만). 여럿이면 경기 수가 가장 가까운 행, 같으면 입단 해와 가까운 행.
+      실제 입단(entryYear)이 지명 2년 넘게 뒤면 행을 입단 해로 옮기고 drafted에 원래 지명 연도를 남긴다 (예: 추신수 2007 SK 해외 → 2021).
+    - 빼기: 이은 행보다 앞선 같은 이름·같은 출신교의 0경기 지명은 그 사람이 입단하지 않은 지명이다 (예: 채태인 2001 두산)
+    돌려주는 값: (정리한 지명, 옮긴 목록, 뺀 목록)"""
+    by_name = defaultdict(list)
+    for m in players:
+        if not m.get('foreign') and m.get('first'):
+            by_name[m['name']].append(m)
+    rows_of = defaultdict(list)
+    for y, lst in drafts.items():
+        for d in lst:
+            if d['kind'] not in ('육성선수', '원년 멤버'):
+                rows_of[d['name']].append((int(y), d))
+    claim = {}
+    drop = set()
+    for name, rows_ in rows_of.items():
+        rows_.sort(key=lambda x: x[0])
+        taken = set()
+        for m in sorted(by_name.get(name, []), key=lambda m: (m['first'], m['id'])):
+            b = m.get('birthYear')
+            gm = games_of.get(m['id'], 0)
+            age_ok = lambda y: (16 <= y - b <= 45) if b else (y >= m['first'] - 20)
+            near = lambda g: g > 0 and abs(g - gm) <= max(5, gm * 0.25)
+            ok = [(y, d) for y, d in rows_ if id(d) not in taken and y <= m['first'] and age_ok(y) and near(d['games'])]
+            if not ok:
+                continue
+            # 경기 수가 가장 가까운 행, 같으면 실제 입단 해와 가까운 행 (동명이인끼리 경기 수가 적으면 헷갈린다)
+            y, d = min(ok, key=lambda x: (abs(x[1]['games'] - gm), abs(x[0] - (m.get('entryYear') or x[0])), -x[0]))
+            taken.add(id(d))
+            claim[id(d)] = m
+            for y2, d2 in rows_:
+                if y2 < y and id(d2) not in taken and d2['games'] == 0 and age_ok(y2) and school_key(d2['school']) == school_key(d['school']):
+                    drop.add(id(d2))
+                    taken.add(id(d2))
+    out = defaultdict(list)
+    moved, dropped = [], []
+    for y in sorted(drafts, key=int):
+        Y = int(y)
+        for d in drafts[y]:
+            if id(d) in drop:
+                dropped.append(f"{d['name']} {Y}")
+                continue
+            m = claim.get(id(d))
+            if not m:
+                out[y].append(d)
+                continue
+            row = dict(d, pid=m['id'])
+            e = m.get('entryYear') or Y
+            if e > Y + 1:
+                row['drafted'] = Y
+                out[str(e)].append(row)
+                moved.append(f"{d['name']} {Y}→{e}")
+            else:
+                out[y].append(row)
+    return dict(out), moved, dropped
+
+
+def dump_drafts(drafts, players):
+    drafts, moved, dropped = defer_unsigned(drafts, players, master_games(OUT))
+    (OUT / 'drafts.json').write_text(json.dumps({
+        'version': 1, 'source': 'baseballchart.kr/draft (나무위키 「(연도) KBO 신인 드래프트」 문서 정리, 2026-09-21 수집)',
+        'license': 'CC BY-NC-SA 2.0 KR', 'years': {y: drafts[y] for y in sorted(drafts, key=int)},
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'신인 지명: 그해 입단하지 않은 지명 {len(moved)}건을 실제 입단 해로 옮김, {len(dropped)}건은 나중 지명이 있어 뺌')
+    return drafts
 
 POS = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격수': 'SS', '좌익수': 'LF', '중견수': 'CF',
        '우익수': 'RF', '지명타자': 'DH', '내야수': 'IF', '외야수': 'OF', '선발투수': 'SP', '구원투수': 'RP',
@@ -366,6 +463,10 @@ def main():
         # 병역 자료만 다시 만든다 (다른 JSON은 그대로라 저장 호환에 영향 없음)
         build_military(profiles_of(load_workbook(SRC, read_only=True, data_only=True)), OUT)
         return
+    if '--drafts-only' in sys.argv:
+        # 지명 자료만 다시 만든다 (선수 마스터는 players.json에서 읽는다)
+        dump_drafts(draft_rows(), json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players'])
+        return
     if '--managers-only' in sys.argv:
         # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
         build_managers(OUT)
@@ -579,8 +680,7 @@ def main():
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     dump({'version': 1, 'players': players}, OUT / 'players.json')
     dump_traits(build_traits({p['id'] for p in players}))
-    dump({'version': 1, 'source': 'baseballchart.kr/draft (나무위키 「(연도) KBO 신인 드래프트」 문서 정리, 2026-09-21 수집)',
-          'license': 'CC BY-NC-SA 2.0 KR', 'years': drafts}, OUT / 'drafts.json')
+    drafts = dump_drafts(drafts, players)
     dump({'version': 1, 'note': '보조자료의 FA 계약 목록. 금액은 구단 발표와 대조하지 않았다. 옵션 제외 보장액(억 원)', 'contracts': contracts},
          OUT / 'contracts.json')
     for y in years:

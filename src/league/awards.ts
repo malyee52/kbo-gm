@@ -152,11 +152,11 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   const regular = cands.filter((c) => (c.bat ? c.b.pa >= qualPa : c.p.outs >= qualOuts || c.p.sv >= 20));
   const mvp = regular.length ? win(regular.reduce((a, b) => (mvpScore(b) > mvpScore(a) ? b : a))) : null;
 
-  // ---- 신인상: KBO 규정 (입단 5년 이내, 이전 시즌까지 60타석·30이닝 이하), 외국인 제외
+  // ---- 신인상: KBO 규정 (입단 5년 이내, 이전 시즌까지 60타석·30이닝 이하), 외국인·해외 프로 출신 제외
   const lp = new Map(league.players.map((p) => [p.id, p]));
   const rookieOk = (sp: SimPlayer) => {
     const p = lp.get(sp.id);
-    if (!p || p.foreign) return false;
+    if (!p || p.foreign || p.returnedFromAbroad !== undefined) return false;
     return isRookie(p, year, realPrior(store, p.id, Math.min(year, league.startYear)));
   };
   const rookies = cands.filter((c) => rookieOk(c.sp) && (c.bat ? c.b.pa >= 100 : c.p.outs >= 90));
@@ -192,8 +192,12 @@ function realPrior(store: RealStore, id: string, before: number): Prior[] {
   return out;
 }
 
-/** 신인 자격 (KBO 규정): 첫 1군 시즌부터 5년 이내이고, 이전 시즌까지 누적 60타석·30이닝 이하. real: 게임 시작 전 실제 기록 */
+/**
+ * 신인 자격 (KBO 규정): 입단(그해 포함) 5년 이내이고, 이전 시즌까지 누적 60타석·30이닝 이하. real: 게임 시작 전 실제 기록.
+ * 2026-10-12 사용자 지적: 예전에는 '첫 1군 시즌부터 5년'으로 봐서, 2군에 오래 있다 늦게 올라온 선수가 신인상을 받았다
+ */
 export function isRookie(p: LeaguePlayer, year: number, real: Prior[] = []): boolean {
+  if (p.entryYear && year - p.entryYear >= 5) return false;
   const prev: Prior[] = [
     ...real,
     ...p.history.filter((h) => h.year < year).map((h) => ({ year: h.year, pa: h.bat?.[1] ?? 0, outs: h.pit?.[5] ?? 0 })),
