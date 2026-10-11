@@ -20,6 +20,8 @@ import { Club } from './screens/Club';
 import { Postseason } from './screens/Postseason';
 import { Growth } from './screens/Growth';
 import { Awards } from './screens/Awards';
+import { Records } from './screens/Records';
+import { Articles } from './screens/Articles';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -151,6 +153,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {g === '리그' && !!session.league.awards?.length && (
                   <button type="button" className={screen === 'awards' ? 'on' : ''} onClick={() => go('awards')}>시상식</button>
                 )}
+                {g === '리그' && (
+                  <button type="button" className={screen === 'records' ? 'on' : ''} onClick={() => go('records')}>기록실</button>
+                )}
+                {g === '리그' && (
+                  <button type="button" className={screen === 'articles' ? 'on' : ''} onClick={() => go('articles')}>기사</button>
+                )}
                 {g === '운영' && off && session.offseason?.growth && (
                   <button type="button" className={screen === 'growth' ? 'on' : ''} onClick={() => go('growth')}>선수 성장</button>
                 )}
@@ -201,6 +209,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'postseason' && <Postseason />}
               {screen === 'growth' && <Growth />}
               {screen === 'awards' && <Awards />}
+              {screen === 'records' && <Records />}
+              {screen === 'articles' && <Articles />}
             </ErrorBoundary>
           </main>
         </div>

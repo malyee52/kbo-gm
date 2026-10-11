@@ -13,6 +13,8 @@ import { parentGrade, type ParentGrade } from './owner';
 import type { LedgerEntry, LeaguePlayer, LeagueState } from './types';
 import { isFuturesTeam } from './world';
 import { fillBuff } from './events';
+import { legendFill } from './history';
+import { rivalFill } from './rivals';
 
 // ---- 수치 (임시값, docs/finance.md 2~4장)
 
@@ -297,12 +299,13 @@ function starBonus(world: World): number[] {
 }
 
 /** 한 경기 관중률 (0.15~1.0) */
-export function fillRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number): number {
+export function fillRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number, opp?: number): number {
   const wd = dateOf(year, day).weekday;
   const weekend = wd === 0 || wd === 6 ? 0.15 : wd === 5 ? 0.05 : 0;
   const mk = MARKETING_FILL[activeLevel(league, team, 'marketing')];
   const noise = (new Rng(`${league.seed}/gate/${year}/${day}/${team}`).next() - 0.5) * 0.1;
-  const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day);
+  const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day)
+    + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp);
   return Math.max(0.15, Math.min(1, v));
 }
 
@@ -330,7 +333,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       if (g.day >= upToDay) break;
       if (g.home === team) {
         const pct = w[team] + l[team] > 0 ? w[team] / (w[team] + l[team]) : 0.5;
-        const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year));
+        const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year, g.away));
         attendance += fans;
         homeGames++;
         const v = Math.round(fans * TICKET);

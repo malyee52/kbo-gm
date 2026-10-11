@@ -1,5 +1,7 @@
 // 홈: 우리 구단 요약, 다음 경기, 최근 결과, 알림, 순위 요약.
 import { ScenarioBanner } from '../ScenarioBanner';
+import { Headlines } from './Articles';
+import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
 import { winPct } from '../../engine';
@@ -109,6 +111,8 @@ export function Home() {
         </div>
       </section>
 
+      <Headlines />
+
       <section>
         <h2>알림</h2>
         {news.length === 0 ? <p className="muted">알림이 없습니다.</p> : (
@@ -140,7 +144,7 @@ function NextGame({ next }: { next: { day: number; home: number; away: number } 
   };
   return (
     <>
-      <p className="big">{home ? 'vs' : '@'} <TeamName idx={opp} /></p>
+      <p className="big">{home ? 'vs' : '@'} <TeamName idx={opp} />{isRivalry(session.league, me, opp) && <span className="tag rival">라이벌전</span>}</p>
       <p>{formatDate(session.world.year, next.day)} · {home ? '홈' : '원정'}</p>
       <p className="muted small">
         예상 선발: {mySp ? <PlayerLink p={mySp} /> : '-'} <span>({line(mySp?.idx)})</span>

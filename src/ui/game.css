@@ -387,3 +387,10 @@ dialog.player::backdrop { background: rgba(8, 12, 10, 0.5); backdrop-filter: blu
 .scenario-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
 .scenario-card h3 { margin: 0; }
 .scenario-card button { margin-top: auto; align-self: flex-start; }
+
+/* 기사 */
+.articles { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.articles li { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.articles li.mine { border-left: 3px solid var(--accent); padding-left: 8px; }
+.articles p { margin: 4px 0 0; }
+.tag.rival { margin-left: 8px; background: var(--loss-bg); color: var(--loss); font-size: 0.6em; vertical-align: middle; }
