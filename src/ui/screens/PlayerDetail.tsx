@@ -1,8 +1,8 @@
-// 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 실제 기록, 계약.
+// 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
 import { futuresText } from './Roster';
 import { useEffect, useRef } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
-import { absenceLabel, defenseAt, defenseGrade, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
+import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
@@ -25,15 +25,24 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   const registered = session.registered().some((x) => x.idx === p.idx);
   const back = session.returnDay(p);
   const master = store.players.get(p.id);
-  // 직전 3시즌 실제 기록 (시작 연도 기록은 미리 보여주지 않는다)
-  const history = [year - 1, year - 2, year - 3]
-    .map((y) => {
-      const s = store.season(y);
-      if (!s) return null;
-      const row = p.isPitcher ? s.pit.find((r) => r.id === p.id) : s.bat.find((r) => r.id === p.id);
-      return row ? { y, row } : null;
-    })
-    .filter((x): x is { y: number; row: BatRow | PitRow } => x !== null);
+  // 직전 3시즌 기록: 게임에서 치른 시즌은 게임 기록, 게임 시작 전 시즌만 실제 기록 (시작 연도 실제 기록은 미리 보여주지 않는다).
+  // 2026-10-12 사용자: "실제 기록을 띄워주는 건 의미가 없다, 게임에서 있었던 기록을 표시해야 한다"
+  const lp = session.leaguePlayer(p.id);
+  const start = session.league.startYear;
+  const decode = <T extends object>(empty: T, arr: number[]): T => Object.fromEntries(Object.keys(empty).map((k, i) => [k, arr[i] ?? 0])) as T;
+  const history: { label: string; bat?: BatLike; pit?: PitLike }[] = [year - 1, year - 2, year - 3].flatMap((y) => {
+    if (y >= start) {
+      return (lp?.history ?? []).filter((h) => h.year === y && (p.isPitcher ? h.pit : h.bat)).map((h) => ({
+        label: `${y} ${h.team}`,
+        ...(p.isPitcher ? { pit: decode(emptyPitLine(), h.pit!) } : { bat: decode(emptyBatLine(), h.bat!) }),
+      }));
+    }
+    const s = store.season(y);
+    const row = s && (p.isPitcher ? s.pit.find((r) => r.id === p.id) : s.bat.find((r) => r.id === p.id));
+    if (!row) return [];
+    const label = `${y} ${row.team} (게임 전 실제)`;
+    return [p.isPitcher ? { label, pit: pitFromRow(row as PitRow) } : { label, bat: batFromRow(row as BatRow) }];
+  });
 
   const bg = grades.batters.get(p.id);
   const pg = grades.pitchers.get(p.id);
@@ -97,13 +106,13 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         </section>
 
         <section>
-          <h3>직전 시즌 실제 기록</h3>
+          <h3>직전 시즌 기록 <span className="muted small">게임에서 치른 시즌은 이 게임의 기록</span></h3>
           {history.length === 0 ? <p className="muted small">직전 3시즌에 1군 기록이 없습니다.</p> : (
             <div className="scroll">
               {p.isPitcher ? (
-                <PitTable rows={history.map(({ y, row }) => ({ label: `${y} ${row.team}`, l: pitFromRow(row as PitRow) }))} />
+                <PitTable rows={history.map((h) => ({ label: h.label, l: h.pit! }))} />
               ) : (
-                <BatTable rows={history.map(({ y, row }) => ({ label: `${y} ${row.team}`, l: batFromRow(row as BatRow) }))} />
+                <BatTable rows={history.map((h) => ({ label: h.label, l: h.bat! }))} />
               )}
             </div>
           )}
