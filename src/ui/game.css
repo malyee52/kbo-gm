@@ -771,3 +771,13 @@ td .inline { flex-wrap: nowrap; }
 @media (max-width: 1200px) { .panel.start-new { grid-template-columns: minmax(0, 1fr); } }
 .team-card { min-width: 0; }
 .team-card .small { overflow-wrap: anywhere; }
+
+/* 트레이드: 선수 내놓기 (Trade.tsx ShopPanel) */
+.shop { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.shop-list { max-height: 560px; overflow-y: auto; }
+.shop table tr.pick { cursor: pointer; }
+.shop table tr.sel td { background: var(--me-bg); }
+.card.offer-card { border-radius: 14px; display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+.card.offer-card h2 { margin: 0; font-size: 15px; }
+.card.offer-card ul { margin: 0; }
+@media (max-width: 1100px) { .shop { grid-template-columns: minmax(0, 1fr); } }

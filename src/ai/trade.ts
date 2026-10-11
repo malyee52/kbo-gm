@@ -25,7 +25,7 @@ const GAIN_SHARE = 0.08;
  * 연봉 부담: 받는 선수와 주는 선수의 연봉 차이(만 원)를 이 단가로 나눠 런에서 뺀다 (이번 시즌 몫만, 임시값).
  * 시장 단가(약 4,500만 원/런)의 절반으로 둔 까닭: 이미 계약된 연봉은 구단이 어차피 내는 돈이라 새 계약보다 덜 따진다.
  */
-const SALARY_WON_PER_RUN = 9000;
+export const SALARY_WON_PER_RUN = 9000;
 /** 현금 1런의 값 (만 원). league/finance.ts의 CASH_WON_PER_RUN과 같다 (ai가 league를 가져오지 않게 숫자로 둔다) */
 const CASH_WON_PER_RUN = 12_000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */

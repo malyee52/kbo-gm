@@ -242,3 +242,33 @@ describe('트레이드 뒤 상태', () => {
     expect(r.toSave().season).toEqual(g.toSave().season);
   });
 });
+
+describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
+  it('구단마다 받아들일 조합을 제안하고, 받으면 그대로 성사되며, 조작 기록으로 다시 돌려도 같다', () => {
+    const g = newGame('shop');
+    g.advance(10);
+    const offer = [byNow(g, g.team.org)[6]];
+    const offers = g.shopOffers(offer);
+    expect(offers.length).toBeGreaterThan(0);
+    // 제안은 모두 직접 제안과 같은 판정으로 받아들여지는 조합이고, 우리 쪽 가치 순이다
+    for (const o of offers) {
+      expect(o.get.length).toBeGreaterThanOrEqual(1);
+      expect(o.get.length).toBeLessThanOrEqual(2);
+      expect(o.get.every((p) => p.teamIdx === o.team && !p.foreign)).toBe(true);
+      expect(g.evaluateTrade(o.team, offer, o.get).verdict).toBe('accept');
+    }
+    for (let i = 1; i < offers.length; i++) expect(offers[i - 1].value).toBeGreaterThanOrEqual(offers[i].value);
+    // 외국인은 내놓을 수 없다
+    const foreign = g.team.org.find((p) => p.foreign);
+    if (foreign) expect(g.shopOffers([foreign])).toEqual([]);
+    const o = offers[0];
+    expect(g.proposeTrade(o.team, offer, o.get).verdict).toBe('accept');
+    expect(offer[0].teamIdx).toBe(o.team);
+    expect(o.get.every((p) => p.teamIdx === g.teamIdx)).toBe(true);
+    g.advance(10);
+    const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+    const r = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'shop' }, g.actions, { year: 2026, day: g.day }, FAST);
+    expect(r.team.org.map((p) => p.id).sort()).toEqual(g.team.org.map((p) => p.id).sort());
+    expect(r.cashNow()).toBe(g.cashNow());
+  }, 120_000);
+});
