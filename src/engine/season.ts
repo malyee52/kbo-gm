@@ -359,9 +359,10 @@ export class Season {
       for (const ts of season) {
         for (const p of ts.team.org) {
           if (p.availability !== undefined || states.absentUntil[p.idx] > day) continue;
-          if (dayRng.chance(injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits))) {
+          if (dayRng.chance(injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1))) {
             const inj = drawInjury(dayRng, ip);
-            this.addAbsence({ day, idx: p.idx, until: day + inj.days, kind: inj.kind }, ts);
+            const days = ts.team.injuryDays ? Math.max(1, Math.round(inj.days * ts.team.injuryDays)) : inj.days;
+            this.addAbsence({ day, idx: p.idx, until: day + days, kind: inj.kind }, ts);
           } else if (this.eventRng.chance(ip.eventChance)) {
             const ev = pickEvent(p, this.eventRng, ip);
             this.addAbsence({ day, idx: p.idx, until: day + ev.days, kind: 'event', event: ev.event }, ts);

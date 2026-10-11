@@ -43,7 +43,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   };
 
   return (
-    <dialog ref={ref} className="player" style={{ ['--team' as string]: teamColor(session.world.teams[p.teamIdx].franchise) }}
+    <dialog ref={ref} className="player" style={{ ['--team' as string]: teamColor(session.teamInfo(p.teamIdx).franchise) }}
       onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="row-between">

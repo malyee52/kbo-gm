@@ -1,4 +1,5 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
+import { FinancePanel } from './Finance';
 import { capPayroll, salaryCap } from '../../league/salary';
 import {
   ACHIEVEMENTS, budgetFor, DIFFICULTY_LABEL, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
@@ -16,7 +17,6 @@ export function Club() {
   // 오프시즌이면 다음 시즌 기준 예산
   const year = session.phase === 'offseason' ? session.year + 1 : session.year;
   const cap = salaryCap(year);
-  const budget = budgetFor(L, me, year);
   const payroll = capPayroll(L.players, me);
   const ps = L.lastSeason?.postseason;
   const name = (t: number) => L.teams[t].name;
@@ -35,6 +35,8 @@ export function Club() {
           </span>
         </div>
       )}
+
+      <FinancePanel />
 
       <section className="cards">
         <div className="card">
@@ -56,18 +58,18 @@ export function Club() {
         </div>
 
         <div className="card">
-          <h2>예산 <span className="muted small">{year} 시즌</span></h2>
+          <h2>연봉·샐러리캡 <span className="muted small">{year} 시즌</span></h2>
           <dl className="facts">
             <dt>구단</dt><dd>{team.name} (모기업 등급 {parentGrade(L, me)})</dd>
             <dt>연봉 총액</dt><dd>{won(payroll)} <span className="muted small">외국인·신인 제외 상위 40명</span></dd>
             <dt>샐러리캡</dt><dd>{cap === null ? '없음' : won(cap)}</dd>
-            <dt>구단 예산</dt><dd>{budget === null ? '-' : won(budget)}</dd>
-            <dt>남은 여유</dt><dd>{budget === null ? '-' : won(Math.min(budget, cap ?? budget) - payroll)}</dd>
+            <dt>캡 여유</dt><dd>{cap === null ? '-' : won(cap - payroll)}</dd>
+            <dt>구단 자금</dt><dd>{won(session.cashNow())}</dd>
             {strikes > 0 && <><dt>캡 초과</dt><dd className="error-text">{strikes}회 연속 초과 (2회부터 1라운드 지명권 9단계 하락)</dd></>}
           </dl>
           <p className="muted small">
-            예산 = 샐러리캡 × 모기업 등급 배율(A 1.0, B 0.92, C 0.8) ± 지난 시즌 성적(상위 3팀 +5%, 하위 3팀 -5%). FA 제시는 캡과 예산 중 작은 쪽을 넘을 수 없습니다.
-            모기업 등급과 배율은 임시값입니다.
+            FA 제시는 샐러리캡(2023년부터)을 넘을 수 없고, 계약금(계약 총액의 30%)을 낼 자금이 있어야 합니다. 외국인 신규 계약은 이적료를 낼 자금이 있어야 합니다.
+            모기업 등급은 모기업 지원금(재정)에 반영됩니다. 등급과 금액은 임시값입니다.
           </p>
         </div>
       </section>

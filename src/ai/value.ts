@@ -6,7 +6,7 @@
 // - 연봉 부담: 트레이드 판단(trade.ts)에서 연봉을 런으로 바꿔 뺀다.
 // - 포지션 희소성: 선수 가치에는 포지션 보정을, 구단 전력에는 "그 자리를 맡을 선수가 없을 때의 손해"를 넣는다.
 
-import { assignSlots, batValue, defenseAt, fieldPosOf, pitValue, type SimPlayer, type Slot, type World } from '../engine';
+import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, fieldPosOf, pitValue, type SimPlayer, type Slot, type World } from '../engine';
 
 /** 선형 가중치(wOBA 계열)를 득점으로 바꾸는 배율. 공개된 세이버메트릭스 상수의 근사값 */
 export const WOBA_SCALE = 1.2;
@@ -22,22 +22,22 @@ const POS_ADJ: Record<string, number> = {
 };
 
 /**
- * 31~35세의 연간 하락 (런/시즌, 리그 평균 주전 기준). tools/fit_aging.ts의 델타 방식 추정값 (reports/aging-fit.txt).
- * 색인 0 = 31세. 투수가 타자보다 일찍, 크게 떨어진다.
+ * 하락 첫 5년의 연간 하락 (런/시즌, 리그 평균 주전 기준). tools/fit_aging.ts의 델타 방식 추정값 (reports/aging-fit.txt, 31~35세).
+ * 색인 0 = 하락 첫해 (DECLINE_START_AGE). 투수가 타자보다 일찍, 크게 떨어진다.
  */
 const DECLINE_BAT = [-2, -3, -3.6, -4.3, -4.2];
 const DECLINE_PIT = [-4.2, -3.5, -4.5, -6.4, -6.5];
 
 /**
- * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 31세 이상의 하락에 쓴다.
- * 30세 이하는 임시값. 31~35세는 실제 기록에서 추정한 값, 36세 이상은 생존 편향 때문에 데이터가 하락을 작게 잡아서 임시값.
+ * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 하락 나이(DECLINE_START_AGE, 지금 35세) 이후에 쓴다.
+ * 하락 전은 임시값. 하락 첫 5년은 실제 기록에서 추정한 31~35세 값을 그대로 옮긴 것, 그 뒤는 임시값
+ * (생존 편향 때문에 데이터가 하락을 작게 잡는다).
  */
 export function agingDelta(age: number, isPitcher = false): number {
-  if (age <= 23) return 6;
-  if (age <= 26) return 3;
-  if (age <= 30) return 0;
-  if (age <= 35) return (isPitcher ? DECLINE_PIT : DECLINE_BAT)[age - 31];
-  if (age <= 37) return isPitcher ? -7 : -6;
+  const k = age - DECLINE_START_AGE;
+  if (k < 0) return age <= 23 ? 6 : age <= 26 ? 3 : 0;
+  if (k < 5) return (isPitcher ? DECLINE_PIT : DECLINE_BAT)[k];
+  if (k < 7) return isPitcher ? -7 : -6;
   return -9;
 }
 
@@ -46,11 +46,11 @@ export const DEFAULT_AGE = 28;
 
 /**
  * 한 해 동안의 기대 성장 (런). 성장 판정(league/growth.ts)이 여기에 출전 기회와 운을 더한다.
- * 27세까지는 잠재력과의 격차를 빠르게, 28~30세는 천천히 좁히고, 31세부터는 나이에 따라 떨어진다 (임시값).
+ * 27세까지는 잠재력과의 격차를 빠르게, 28세부터 하락 나이 전까지는 천천히 좁히고, 하락 나이(DECLINE_START_AGE)부터 떨어진다 (임시값).
  * 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
  */
 export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false): number {
-  if (age >= 31) return agingDelta(age, isPitcher);
+  if (age >= DECLINE_START_AGE) return agingDelta(age, isPitcher);
   const gap = potential - runs;
   if (gap < 0) return gap * 0.2;
   const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.2 : 0.1;

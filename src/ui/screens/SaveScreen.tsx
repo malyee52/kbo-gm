@@ -1,8 +1,9 @@
 // 저장·설정: 저장 칸, 파일 내보내기·가져오기, 버그 보고용 재현 정보.
 import { useEffect, useState } from 'react';
 import { deleteSave, isAutoSlot, listSaves, type SaveRecord } from '../../game/storage';
+import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
-import { autoSlotFor, exportSession, saveSession, whenText } from '../saving';
+import { autoSlotFor, exportSession, reproOf, saveSession, whenText } from '../saving';
 
 const SLOTS = ['저장 1', '저장 2', '저장 3'];
 
@@ -26,14 +27,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
   };
 
   const bySlot = new Map(saves.map((s) => [s.slot, s]));
-  const repro = {
-    year: session.world.year,
-    team: session.team.name,
-    teamIdx: session.teamIdx,
-    seed: session.season.seed,
-    day: session.day,
-    actions: session.actions,
-  };
+  const repro = reproOf(session);
 
   const copyRepro = async () => {
     try {
@@ -96,14 +90,15 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
       <section className="panel">
         <h2>버그 보고용 재현 정보</h2>
         <p className="muted small">
-          같은 연도·구단·시드에서 아래 조작 기록을 같은 날에 다시 하면 똑같은 결과가 나옵니다.
+          처음 게임을 만든 조건(시작 연도·구단·시드·난이도)에서 아래 조작 기록을 같은 날에 다시 하면 똑같은 결과가 나옵니다.
           버그를 보고할 때 이 내용과 저장 파일을 함께 붙여 주세요.
         </p>
         <dl className="facts">
-          <dt>시드</dt><dd><code>{repro.seed}</code></dd>
-          <dt>진행</dt><dd>{repro.day}일차 (일정 색인)</dd>
+          <dt>시작</dt><dd>{repro.opts.year}년 {repro.team} · {DIFFICULTY_LABEL[repro.opts.difficulty ?? 'normal']}</dd>
+          <dt>게임 시드</dt><dd><code>{repro.opts.seed}</code></dd>
+          <dt>진행</dt><dd>{repro.at.year}년 {repro.at.phase === 'offseason' ? '오프시즌' : `${repro.at.day}일차 (일정 색인)`}</dd>
           <dt>조작 기록</dt><dd>{repro.actions.length}건</dd>
-          <dt>데이터 지문</dt><dd><code>{session.season.baseRoster}</code></dd>
+          <dt>데이터 지문</dt><dd><code>{repro.data}</code></dd>
         </dl>
         <textarea readOnly rows={4} value={JSON.stringify(repro)} aria-label="재현 정보" onFocus={(e) => e.currentTarget.select()} />
         <div className="actions">

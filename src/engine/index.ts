@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS, type EngineParams } from './params';
 import { buildWorld } from './ratings';
 import type { World } from './types';
 
-export { DEFAULT_PARAMS, type EngineParams } from './params';
+export { DECLINE_START_AGE, DEFAULT_PARAMS, type EngineParams } from './params';
 export { Rng } from './rng';
 export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor, LINEAR_WEIGHTS } from './ratings';
 export {

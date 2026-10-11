@@ -9,6 +9,7 @@ import {
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
+import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
@@ -36,6 +37,17 @@ export function projectedEnvironment(store: Store, params: EngineParams = DEFAUL
 export interface WorldOptions {
   /** 슬럼프(그 시즌만의 기량 저하)를 반영한다. 기본 true. 오프시즌 가치 계산처럼 미래를 내다볼 때는 끈다 */
   form?: boolean;
+  /** 퓨처스 구단(1군 진입 전 창단 구단)도 넣는다. 기본 false (시즌 월드에는 없다). 오프시즌 가치 계산(드래프트 등)에서 켠다 */
+  includeFutures?: boolean;
+}
+
+/**
+ * 그 시즌(year)에 퓨처스리그에만 있는 창단 구단인가 (2026-10-11 사용자 결정).
+ * 실제 창단 구단은 1군 진입 2년 전에 창단해 첫 드래프트에 참가하고, 1년 동안 퓨처스리그에서 뛴 뒤 1군에 들어왔다
+ * (NC: 2011 창단·2012 입단 드래프트, 2012 퓨처스, 2013 1군).
+ */
+export function isFuturesTeam(league: Pick<LeagueState, 'expansions'>, team: number, year: number): boolean {
+  return (league.expansions ?? []).some((e) => e.team === team && year < e.firstYear);
 }
 
 /**
@@ -64,10 +76,17 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     rules = p.rules;
   }
 
-  const teams: SimTeam[] = league.teams.map((t, idx) => ({ idx, name: t.name, franchise: t.franchise, org: [] }));
+  // 퓨처스 구단은 시즌 월드에서 뺀다. 창단 구단은 늘 구단 목록 끝에 붙으므로 빼도 다른 구단의 색인은 그대로다
+  const futures = opts.includeFutures ? [] : league.teams.map((_, i) => i).filter((i) => isFuturesTeam(league, i, year));
+  const kept = league.teams.length - futures.length;
+  if (futures.some((i) => i < kept)) throw new Error('퓨처스 구단이 구단 목록 끝에 있지 않습니다');
+  const teams: SimTeam[] = league.teams.slice(0, kept).map((t, idx) => {
+    const med = activeLevel(league, idx, 'medical');
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med ? { injuryRate: MEDICAL_RATE[med], injuryDays: MEDICAL_DAYS[med] } : {}) };
+  });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
-    if (lp.team < 0 || lp.military?.state === 'serving') continue;
+    if (lp.team < 0 || lp.team >= kept || lp.military?.state === 'serving') continue;
     const slump = form && lp.slump ? lp.slump : 0;
     const base = lp.bat && !lp.bat.def
       ? { ...lp.bat, def: makeDefense(lp.id, lp.pos, [], lp.bat.speed, lp.birthYear ? year - lp.birthYear : null) }

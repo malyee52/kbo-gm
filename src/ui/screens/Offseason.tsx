@@ -1,7 +1,7 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { useState } from 'react';
 import { OfferPanel } from './Club';
-import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots } from '../../league/offseason';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import {
   ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap,
@@ -118,6 +118,11 @@ export function Offseason() {
 }
 
 type Act = (r: { ok: boolean; message: string }, okText?: string) => void;
+
+/** 지명 구분 짧은 표시: 1R, 우선, 특별 */
+function pickShort(kind: number): string {
+  return kind >= 1 ? `${kind}R` : kind === 0 ? '우선' : '특별';
+}
 
 /** FA 보상선수 (2026-10-08): 영입 구단은 보호선수 명단을, 원 소속 구단은 보상선수 또는 보상금만을 고른다 */
 function CompPanel({ act }: { act: Act }) {
@@ -259,6 +264,7 @@ function FaPanel({ act }: { act: Act }) {
   const players = new Map(session.league.players.map((p) => [p.id, p]));
   const entries = off.fa.entries;
   const mineLeaving = entries.filter((e) => e.from === session.teamIdx && e.status === 'open');
+  const externalOffers = Object.keys(off.fa.userOffers).filter((id) => entries.find((e) => e.id === id)?.from !== session.teamIdx).length;
 
   return (
     <section className="stack">
@@ -267,6 +273,11 @@ function FaPanel({ act }: { act: Act }) {
         <p className="muted small">
           라운드를 마감하면 AI 구단도 제시하고, 선수는 가장 좋은 조건을 고릅니다 (원 소속 구단은 조금 더 쳐줍니다). 라운드가 지날수록 선수가 눈높이를 낮춥니다.
           외부 FA는 한 오프시즌에 {MAX_FA_SIGNINGS}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 보상금(A 300%, B 200%, C 150%)을 냅니다.
+        </p>
+        <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {MAX_FA_SIGNINGS}명</p>
+        <p className="small">
+          지금 자금 <strong>{won(session.cashNow())}</strong> · 계약금은 계약 총액(연봉 × 기간)의 30%를 계약할 때 한 번에 내고, 나머지는 시즌 중 월말에 나갑니다.
+          계약금을 낼 자금이 없으면 제시할 수 없습니다 (이번 라운드의 다른 제시 계약금까지 합쳐서).
         </p>
         <CapLine />
         {mineLeaving.length > 0 && (
@@ -384,7 +395,7 @@ function ForeignPanel({ act }: { act: Act }) {
         <h2>후보 <span className="muted small">{pool.length}명 (실존 선수는 다른 구단에서 재계약하지 않은 선수, 나머지는 가상 선수)</span></h2>
         <div className="scroll pick">
           <table>
-            <thead><tr><th className="l">선수</th><th>구분</th><th>자리</th><th>나이</th><th>현재</th><th>요구액</th><th /></tr></thead>
+            <thead><tr><th className="l">선수</th><th>구분</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>요구액</th><th>이적료</th><th /></tr></thead>
             <tbody>
               {pool.map((p) => {
                 const i = info(p);
@@ -392,7 +403,8 @@ function ForeignPanel({ act }: { act: Act }) {
                 return (
                   <tr key={p.id}>
                     <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
-                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(p.contract.salary)}</td>
+                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{dollarText(p.contract.salary)}</td>
+                    <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
                     <td>
                       <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}
                         onClick={() => act(session.signForeign(p.id), `${p.name}와 계약했습니다.`)}>계약</button>
@@ -417,7 +429,6 @@ function DraftPanel({ act }: { act: Act }) {
   const total = draftTotal(off);
   const done = d.pick >= total || d.pool.length === 0;
   const onClock = !done && draftTeamAt(off, d.pick) === session.teamIdx;
-  const n = d.order.length;
   const pool = d.pool.map((id) => players.get(id)!).sort((a, b) => (b.scoutPotential ?? 0) - (a.scoutPotential ?? 0) || a.id.localeCompare(b.id));
   const mine = d.picks.filter((p) => p.team === session.teamIdx);
 
@@ -427,7 +438,7 @@ function DraftPanel({ act }: { act: Act }) {
         <h2>신인 드래프트 <span className="muted small">{DRAFT_ROUNDS}라운드 전면 드래프트, 직전 시즌 성적 역순</span></h2>
         <p className="small">
           {done ? '드래프트가 끝났습니다.' : onClock
-            ? <strong>우리 차례입니다: {Math.floor(d.pick / n) + 1}라운드 {(d.pick % n) + 1}순위</strong>
+            ? <strong>우리 차례입니다: {pickKindAt(off, d.pick) >= 1 ? `${pickKindAt(off, d.pick)}라운드 ${pickNoAt(off, d.pick)}순위` : Off.pickKindLabel(pickKindAt(off, d.pick))}</strong>
             : `지명 진행 중 (${d.pick + 1}/${total})`}
         </p>
         <p className="muted small">
@@ -468,7 +479,7 @@ function DraftPanel({ act }: { act: Act }) {
                 {mine.map((pk) => {
                   const p = players.get(pk.id)!;
                   const i = info(p);
-                  return <tr key={pk.id}><td>{pk.round}R</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>잠재 {i.pot ?? '-'}</td></tr>;
+                  return <tr key={pk.id}><td>{pickShort(pk.round)}</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>잠재 {i.pot ?? '-'}</td></tr>;
                 })}
               </tbody>
             </table>
@@ -476,7 +487,7 @@ function DraftPanel({ act }: { act: Act }) {
           <h2>최근 지명</h2>
           <ul className="plain small">
             {d.picks.slice(-8).reverse().map((pk) => (
-              <li key={pk.id}>{pk.round}R <TeamName idx={pk.team} /> {players.get(pk.id)!.name}</li>
+              <li key={pk.id}>{pickShort(pk.round)} <TeamName idx={pk.team} /> {players.get(pk.id)!.name}</li>
             ))}
           </ul>
         </div>
@@ -548,14 +559,24 @@ function ReleasePanel({ act }: { act: Act }) {
   const info = useInfo();
   // 복무 중인 선수는 정원에 들지 않는다 (league/offseason.ts orgSize와 같은 기준. 2026-10-09 전수조사 H4)
   const serving = session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state === 'serving').length;
-  const mine = session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state !== 'serving')
-    .sort((a, b) => session.nextRuns(a.id) - session.nextRuns(b.id) || a.id.localeCompare(b.id));
+  // 자동 방출과 같은 순서 (Off.releaseOrder): 내보낼 수 있는 선수 → 최소 인원 때문에 미룬 선수 → 방출 순서에 없는 선수(외국인·FA·다년 계약)
+  const plan = session.releasePlan();
+  const ranked = [...plan.order, ...plan.kept];
+  const mine = [
+    ...ranked,
+    ...session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state !== 'serving' && !ranked.includes(p)),
+  ];
   const over = mine.length - ORG_LIMIT;
+  const claimable = session.claimable().sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id) || a.id.localeCompare(b.id));
   return (
     <section className="stack">
       <div className="panel">
         <h2>정원 정리 <span className="muted small">소속 선수 {mine.length}/{ORG_LIMIT}명</span></h2>
-        <p className="muted small">방출한 선수는 리그를 떠나며 되돌릴 수 없습니다. 지금 기여가 낮은 순으로 늘어놓았고, 자동 방출은 잠재력·나이까지 본 가치가 낮은 선수부터 내보냅니다 (이번 신인은 보통 남습니다).{serving ? ` 복무 중 ${serving}명은 정원에 들지 않아 여기 없습니다.` : ''}</p>
+        <p className="muted small">
+          방출은 되돌릴 수 없고, 방출한 선수는 다른 구단이 데려갈 수 있습니다. 자동 방출 순서대로 늘어놓았습니다: 앞으로 8시즌 가치(잠재력·나이 반영)가 낮은 순,
+          입단 {Off.ROOKIE_GRACE}년 안의 신인은 뒤로. 포수 {Off.MIN_CATCHERS}명·투수 {Off.MIN_PITCHERS}명·야수 {Off.MIN_HITTERS}명 아래로 내려가게 하는 선수는 맨 뒤로 미룹니다.
+          {serving ? ` 복무 중 ${serving}명은 정원에 들지 않아 여기 없습니다.` : ''}
+        </p>
         {over > 0 ? <p className="note small">{over}명을 더 방출해야 다음 단계로 갈 수 있습니다.</p> : <p className="small">정원 안입니다.</p>}
         <div className="actions">
           <button type="button" className="ghost" disabled={over <= 0} onClick={() => act(session.autoRelease(), '정원에 맞게 방출했습니다.')}>정원까지 자동 방출</button>
@@ -569,7 +590,10 @@ function ReleasePanel({ act }: { act: Act }) {
               const i = info(p);
               return (
                 <tr key={p.id}>
-                  <td className="l">{p.name}{p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}{p.contract.kind === 'rookie' && <span className="tag">신인</span>}</td>
+                  <td className="l">
+                    {p.name}{p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}{p.contract.kind === 'rookie' && <span className="tag">신인</span>}
+                    {over > 0 && plan.order.indexOf(p) >= 0 && plan.order.indexOf(p) < over && <span className="tag" title="정원까지 자동 방출하면 나갑니다">방출 대상</span>}
+                  </td>
                   <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
                   <td className="small">{p.foreign ? dollarText(p.contract.salary) : won(p.contract.salary)}</td>
                   <td><button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button></td>
@@ -579,6 +603,34 @@ function ReleasePanel({ act }: { act: Act }) {
           </tbody>
         </table>
       </div>
+      <div className="panel">
+        <h2>방출 선수 영입 <span className="muted small">{claimable.length}명</span></h2>
+        <p className="muted small">
+          다른 구단이 이번에 방출한 선수를 최저 연봉({won(Off.CLAIM_SALARY)}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
+          단계를 마감하면 AI 구단이 남은 방출 선수 중 쓸 만한 선수를 데려갑니다 (구단당 {Off.CLAIM_PER_TEAM}명까지).
+        </p>
+      </div>
+      {claimable.length > 0 && (
+        <div className="scroll pick">
+          <table>
+            <thead><tr><th className="l">선수</th><th className="l">방출 구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th /></tr></thead>
+            <tbody>
+              {claimable.map((p) => {
+                const i = info(p);
+                const from = session.offseason!.released!.find((r) => r.id === p.id)!.from;
+                return (
+                  <tr key={p.id}>
+                    <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td>
+                    <td className="l"><TeamName idx={from} /></td>
+                    <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                    <td><button type="button" className="small-btn" onClick={() => act(session.claim(p.id))}>영입</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

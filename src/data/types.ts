@@ -228,6 +228,16 @@ export interface DataStore {
   drafts?: Record<string, DraftRow[]>;
   /** 숨겨진 특수능력: 선수 ID 해시(engine/traits.ts의 traitKey) → 능력 코드. traits.json. 없으면 아무도 없다 */
   traits?: Record<string, string[]>;
+  /** 실제 병역 자료: 선수 ID → 상무·경찰 복무, 국제대회 금메달 면제. military.json. 없으면 나이·기록 공백으로 짐작한다 */
+  military?: Record<string, MilitaryRecord>;
+}
+
+/** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
+export interface MilitaryRecord {
+  /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름) */
+  served?: { unit: string; end?: number };
+  /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도 */
+  exempt?: { year: number; event: string };
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */

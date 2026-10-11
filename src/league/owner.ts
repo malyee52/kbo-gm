@@ -67,12 +67,12 @@ export function budgetFor(league: LeagueState, team: number, year: number): numb
 }
 
 
-/** FA 계약 등 연봉 지출의 상한: 샐러리캡과 예산 중 작은 쪽. 둘 다 없으면 null */
-export function spendLimit(league: LeagueState, team: number, year: number): number | null {
-  const cap = salaryCap(year);
-  const budget = budgetFor(league, team, year);
-  if (cap === null) return budget;
-  return budget === null ? cap : Math.min(cap, budget);
+/**
+ * FA 계약 등 연봉 지출의 상한: 샐러리캡(2023~). 캡이 없으면 null.
+ * 재정 상세형(2026-10-11)부터 "예산 = 캡 × 모기업 등급" 상한은 쓰지 않고, 구단 자금(계약금·이적료를 낼 수 있는가)이 대신한다 (finance.ts)
+ */
+export function spendLimit(_league: LeagueState, _team: number, year: number): number | null {
+  return salaryCap(year);
 }
 
 // ---- 샐러리캡 제재 (제도연표, 출처 확인)
@@ -121,10 +121,11 @@ export function applyCapSanctions(league: LeagueState, year: number): CapSanctio
 }
 
 /** 드래프트 지명 순서 (전체 지명 순 구단). order는 라운드 안 순서. 제재 구단은 1라운드에서 9단계 뒤로 */
-export function draftSlots(order: number[], rounds: number, penalized: Set<number>): number[] {
+export function draftSlots(order: number[], rounds: number, penalized: Set<number>, snake = false): number[] {
   const slots: number[] = [];
   for (let r = 0; r < rounds; r++) {
-    const round = [...order];
+    // 지그재그(2010~2017년 무렵): 짝수 라운드는 순서를 뒤집는다
+    const round = snake && r % 2 === 1 ? [...order].reverse() : [...order];
     if (r === 0) {
       for (const t of order) {
         if (!penalized.has(t)) continue;

@@ -17,7 +17,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 자동 테스트 (Vitest, 148개)
+npm test           # 자동 테스트 (Vitest, 209개)
 npm run typecheck
 npm run build
 npm run data       # data-src/ 엑셀 → public/data/ JSON 변환 후 검사 (Python 3 + openpyxl 필요)
@@ -26,6 +26,7 @@ npm run validate -- --years 2025 --seasons 1000   # 엔진 검증
 python3 tools/fit_regression.py                    # 능력 산출 회귀 상수 다시 맞추기
 npx tsx tools/longsim.ts --seasons 20 --seeds a,b --out reports/longsim-20.md   # 장기 진행 점검 (모든 구단 AI, 시드당 약 15초)
 npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 나이 보정 효과 측정
+npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진행 흐름 진단 (유입·방출·입대·포수, docs/longterm-plan.md)
 ```
 
 ## 구조
@@ -136,11 +137,12 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 
 ### M6 다년 진행
 - 임시값이 많다: 부상 정도·기간, 이탈 이벤트 확률, 은퇴 확률표, 슬럼프·조기 노쇠, 입대 확률과 복무 기간, 아시안게임 선발·금메달 확률. 목록은 `docs/milestones.md` M6.
-- **시작 때 병역 상태는 가늠한 값이다** (병역 자료 없음): 실존 국내 선수 29세 이상은 마친 것으로, 더 어리면 19~28세의 1~2시즌 기록 공백을 복무로 본다. 첫 오프시즌에 미필 20대 후반이 몰려 한 구단에서 8명까지 입대한다.
-- 2026 아시안게임 결과·면제자를 확인하지 못했다 (게임 안 아시안게임은 2030년부터).
+- **시작 때 병역 상태는 실제 자료부터 본다** (2026-10-11): `public/data/military.json` = 자료집 선수마스터 '출신교·경력(2026 프로필)'의 상무·경찰 + `data-src/병역_면제명단.csv`(2002·2010·2014·2018·2022 아시안게임과 2008 올림픽 금메달 대표팀, 2026 아시안게임 새 면제자 16명. 출처 열). `python tools/build_data.py --military-only`로 이것만 다시 만든다 (저장 호환 그대로). 자료에 없는 현역·사회복무는 알 수 없어 29세 이상·1군 기록 1~2년 공백이면 마친 것으로 짐작한다 (`Military.basis`가 'estimate'). 복무 끝 해(`served.end`)는 1군 공백으로 본 추정이다.
+- 2026 아이치·나고야 아시안게임 금메달(2026-09-27)은 실제 명단으로 면제. 게임 안 아시안게임은 시작 연도 뒤 대회만 (`isAsianGamesYear(year, startYear)`, 1998년부터).
+- 입대: 구단당 한 해 4명(`MILITARY_TEAM_CAP`, 강제 입대 28세는 상한 밖), 27세는 상한 안에서 먼저, 주전급(10런)은 27세 전 확률 입대 없음. 플레이어는 시즌 결과 화면의 "입대 선택" 탭에서 고르고, 결산 조작(`begin-off`의 `enlist`)에 남는다. 모두 임시값.
 - 2026년에 복무 중인 실존 선수는 그 해 기록이 없어 게임에 없다.
-- 입대 시기를 플레이어가 고를 수 없다.
-- 장기 진행에서 선수 전체 기량이 조금씩 낮아진다 (주전 기여 합 20년 동안 -17~-33%, 홈런 환경 계수 최대 1.13). 리그 기록은 환경 맞춤으로 유지된다. 원인(신인 잠재력·성장·노화)을 아직 가르지 못했다.
+- 장기 진행 기량 하락 (20년 -16~-27%)은 2026-10-11 고침 (`docs/longterm-plan.md` 7장, `reports/flow-longterm.md`): 정원을 80명으로 늘려도 그대로라 원인은 방출이 아니라 신인 잠재력이었다. 가상 신인 잠재력 배율 8 → 9(`DRAFT_POTENTIAL_SCALE`), 2군 성장 기회 0.5(`FUTURES_SHARE`, 25세 이하), 방출은 8시즌 가치·입단 2년 유예·포수 3명/투수·야수 18명 최소(`releaseOrder`), 방출 선수 시장(`releaseMarket`·`claimByUser`). 3시드 20시즌에서 2043~2045년 상위 270명 기여 합이 시작값의 -2.6~+6.2%. 남은 것: 2033~2036년 +18~27% 언덕 (시작 때 실존 유망주 잠재력이 높다).
+- **기량 하락 나이는 35세** (`DECLINE_START_AGE`, engine/params.ts, 2026-10-11 사용자 결정으로 31 → 33 → 35). 실제 기록 추정(`tools/fit_aging.ts`)은 31세였고 하락 폭(31~35세 추정값)은 그대로 4년 뒤로 옮겼다. 능력·수비·조기 노쇠·노화 특수능력이 같은 값을 쓴다. 바꾸면 `DRAFT_POTENTIAL_SCALE`을 `tools/flow_longterm.ts`로 다시 맞춘다 (35세 8.5, 33세 9, 31세 9.5). 육성 투자 효과는 30세 이하 (`DEVELOP_AGE`).
 - 대체 선수 기준은 고정 비율(`REPL_BAT_RATIO`·`REPL_PIT_RATIO`)이다. 선수 표본으로 해마다 재면 가상 선수만 남을 때 무너진다.
 
 ### M8 과거 시대 확장
