@@ -144,6 +144,22 @@ describe('기용표 (주전 자리, 선발·중계·마무리)', () => {
     if (!g.isAbsent(newCloser)) expect(g.season.pit[newCloser.idx].sv).toBeGreaterThan(0);
   });
 
+  it('로테이션 투수를 2군으로 내려도 다른 자리(포수 등)를 바꿀 수 있고, 빠진 투수는 기용표에서 빠진다 (2026-10-12 사용자 보고)', () => {
+    const g = lgGame('stale-plan');
+    const sp = g.effectivePlan().rotation[0];
+    expect(g.setPitcherRole(g.world.players[sp], 'SP').errors).toEqual([]); // 기용표를 직접 정한 상태로
+    // 그 선발을 1군에서 빼고 2군 투수 한 명을 올린다
+    const reg = g.registered().map((p) => p.idx);
+    const farm = g.team.org.find((p) => p.isPitcher && !reg.includes(p.idx) && !g.isAbsent(p))!;
+    expect(g.setEntry([...reg.filter((i) => i !== sp), farm.idx]).errors).toEqual([]);
+    const catcher = g.registered().find((p) => p.pos === 'C' && !g.slotOf(p)) ?? g.registered().find((p) => p.pos === 'C')!;
+    const r = g.setHitterSlot(catcher, 'C');
+    expect(r.errors).toEqual([]);
+    expect(r.warnings.some((w) => w.includes(g.world.players[sp].name))).toBe(true);
+    expect(g.effectivePlan().rotation).not.toContain(sp);
+    expect(g.slotOf(catcher)).toBe('C');
+  });
+
   it('잘못된 기용표는 받지 않는다: 2군 선수, 투수를 야수 자리에, 선발을 마무리로', () => {
     const g = lgGame('bad-plan');
     const reg = new Set(g.registered().map((p) => p.idx));
