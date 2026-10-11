@@ -4,6 +4,8 @@
 
 import type { SeasonAwards } from './awards';
 import type { TeamFinance } from './finance';
+import type { EventState } from './events';
+import type { ScenarioState } from './scenarios';
 import type { BatSkill, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
@@ -185,6 +187,10 @@ export interface LeagueState {
   draftPenalty?: (number | null)[];
   /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */
   finance?: TeamFinance[];
+  /** 시즌 중 무작위 이벤트: 오늘 확률, 답을 기다리는 이벤트, 기록, 관중 효과 (events.ts, 2026-10-11) */
+  events?: EventState;
+  /** 역사 시나리오로 시작한 게임 (scenarios.ts, 2026-10-11) */
+  scenario?: ScenarioState;
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

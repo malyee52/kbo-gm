@@ -34,7 +34,9 @@ describe('재정 기반', () => {
     expect(f.homeGames).toBeGreaterThan(10);
     expect(f.items.gate).toBeGreaterThan(0);
     expect(f.items.payroll).toBeLessThan(0); // 4월 말 지급
-    expect(a.cashNow()).toBe(START_CASH + Object.values(f.items).reduce((s, v) => s + (v ?? 0), 0));
+    // 장부(시작 자금 + 이벤트 수입·지출) + 시즌 중 흐름
+    expect(a.cashNow()).toBe(cashOf(a.league, lg) + Object.values(f.items).reduce((s, v) => s + (v ?? 0), 0));
+    expect(a.league.ledger.filter((e) => e.kind !== 'event' && (e.to === lg || e.from === lg)).reduce((s, e) => s + ledgerFlow(e, lg), 0)).toBe(START_CASH);
   });
 
   it('결산: 구단마다 결산이 남고, 자금은 장부 합과 같으며, 저장했다 불러와도 같다', () => {

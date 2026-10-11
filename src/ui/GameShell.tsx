@@ -23,6 +23,7 @@ import { Awards } from './screens/Awards';
 import { currentSeries, ROUND_LABEL } from '../league/postseason';
 import { teamColor } from './teams';
 import { ErrorBoundary } from './ErrorBoundary';
+import { EventDialog } from './EventDialog';
 
 /** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
 const NAV: { id: Screen; label: string; offLabel?: string; season?: boolean; group: '운영' | '리그' | '시스템' }[] = [
@@ -74,7 +75,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     await nextFrame();
     let left = days;
     while (left > 0 && !session.done) {
-      left -= session.advance(Math.min(7, left));
+      const did = session.advance(Math.min(7, left), true);
+      left -= did;
+      if (session.pendingEvent || did === 0) break; // 이벤트가 생기면 그날 멈춘다
       if (left > 0) {
         setVersion((v) => v + 1);
         await nextFrame();
@@ -175,14 +178,16 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             {!off && !session.done && <div className="advance">
               {busy && <span className="muted small" role="status">{busy}</span>}
               <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
-              <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done}>하루</button>
-              <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done}>일주일</button>
-              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중')} disabled={!!busy || session.done}>시즌 끝까지</button>
+              <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>하루</button>
+              <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>일주일</button>
+              <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>한 달</button>
+              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>시즌 끝까지</button>
             </div>}
           </header>
           {saveError && <p className="error banner" role="alert">{saveError}</p>}
           <main className="content" aria-busy={!!busy}>
             <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>
+              <EventDialog />
               {screen === 'home' && <Home />}
               {screen === 'roster' && <Roster />}
               {screen === 'schedule' && <Schedule focusGame={screenArg} />}

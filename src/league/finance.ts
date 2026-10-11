@@ -12,6 +12,7 @@ import type { SeriesGame } from './postseason';
 import { parentGrade, type ParentGrade } from './owner';
 import type { LedgerEntry, LeaguePlayer, LeagueState } from './types';
 import { isFuturesTeam } from './world';
+import { fillBuff } from './events';
 
 // ---- 수치 (임시값, docs/finance.md 2~4장)
 
@@ -124,13 +125,13 @@ export interface FinanceYear {
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest'
-  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'other';
+  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
-  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', other: '기타',
+  compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
@@ -301,7 +302,7 @@ export function fillRate(league: LeagueState, team: number, winPct: number, star
   const weekend = wd === 0 || wd === 6 ? 0.15 : wd === 5 ? 0.05 : 0;
   const mk = MARKETING_FILL[activeLevel(league, team, 'marketing')];
   const noise = (new Rng(`${league.seed}/gate/${year}/${day}/${team}`).next() - 0.5) * 0.1;
-  const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise;
+  const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day);
   return Math.max(0.15, Math.min(1, v));
 }
 

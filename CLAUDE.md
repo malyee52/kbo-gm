@@ -17,7 +17,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 자동 테스트 (Vitest, 209개)
+npm test           # 자동 테스트 (Vitest, 216개)
 npm run typecheck
 npm run build
 npm run data       # data-src/ 엑셀 → public/data/ JSON 변환 후 검사 (Python 3 + openpyxl 필요)
@@ -167,6 +167,6 @@ npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진
 - 숨겨진 특수능력(2026-10-08): 효과 크기(`params.ts`의 `traits`)와 후보 선정 기준(`tools/suggest_traits.py`)은 모두 임시값. 가을 사나이·좌완 킬러·우완 킬러는 기록으로 가릴 수 없어 자동으로 주지 않는다 (CSV에서 직접). 능력은 선수 ID로 붙으므로 2025년 이전 검증 월드에도 들어간다 (리그 평균 영향은 `reports/`에서 확인). 데이터 파일 자체는 브라우저 개발자 도구로 열 수 있다 (해시는 가림막일 뿐).
 
 ### 운영
-- git 저장소 (2026-10-08 시작, 기본 브랜치 `main`). 원격: `origin` = https://github.com/malyee52/kbo-gm (공개, 2026-10-08 사용자 결정으로 로컬 전용 방침을 바꿈). 배포는 GitHub Pages (`docs/deploy.md`, main에 반영되면 자동 배포). main에는 직접 push하지 않고 브랜치를 올려 PR로 병합한다. 줄바꿈은 LF로 고정 (`.gitattributes`). 커밋은 사용자가 요청하거나 허락할 때만 한다.
+- git 저장소 (2026-10-08 시작, 기본 브랜치 `main`). 원격: `origin` = https://github.com/malyee52/kbo-gm (공개, 2026-10-08 사용자 결정으로 로컬 전용 방침을 바꿈). 배포는 GitHub Pages (`docs/deploy.md`, main에 반영되면 자동 배포). main에는 직접 push하지 않고 브랜치를 올려 PR로 병합한다. 줄바꿈은 LF로 고정 (`.gitattributes`). 커밋은 업데이트가 생길 때마다 바로 한다 (2026-10-11 사용자 결정, 전에는 요청·허락할 때만). 작업 브랜치에 커밋하고 올리되, main 병합(=배포)은 사용자가 요청할 때. 사용자 파일 `tools/validate_longterm.ts`와 엑셀 임시 파일(`data-src/~$*`)은 커밋하지 않는다.
 - 개발 서버를 백그라운드로 띄웠다가 멈춰도 node 프로세스(vite)가 남아 5173 포트를 잡고 있을 수 있다. `netstat -ano | grep :5173`로 확인하고 정리한다.
 - **브라우저로 확인할 때는 다른 포트(`npx vite --port 5174`)로 띄운다.** 자동 저장이 한 칸뿐이라 5173에서 새 게임을 시작하면 사용자의 자동 저장을 덮어쓴다 (2026-10-08 한 번 덮어씀). 포트가 다르면 브라우저 저장소가 따로다.
