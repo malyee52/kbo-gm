@@ -6,7 +6,7 @@ import { GameSession } from '../src/game/session';
 import { condStatus, PLAN_CHALLENGES, stageStatus, type Cond, type SeasonMark } from '../src/league/campaigns';
 import { challengeById, CHALLENGES, planTeam } from '../src/league/challenges';
 import { spendLimit } from '../src/league/owner';
-import { PLAN_SYNOPSIS } from '../src/league/synopses';
+import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../src/league/synopses';
 import { capPayroll } from '../src/league/salary';
 
 let store: DataStore;
@@ -38,6 +38,12 @@ describe('기획안 도전 목록', () => {
       if (!m) continue;
       expect(store.season(p.year)!.teams.find((t) => t.franchise === p.franchise)!.w, `${p.no}`).toBe(Number(m[1]));
     }
+  });
+});
+
+describe('시즌 선택 시놉시스', () => {
+  it('자료가 있는 모든 해(1982~2026)에 시놉시스가 있다', () => {
+    for (const y of store.meta.years) expect(SEASON_SYNOPSIS[y]?.text.length, String(y)).toBeGreaterThan(80);
   });
 });
 

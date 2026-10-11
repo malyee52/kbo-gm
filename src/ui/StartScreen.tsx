@@ -10,7 +10,7 @@ import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
 import { teamColor } from './teams';
-import { PLAN_SYNOPSIS } from '../league/synopses';
+import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../league/synopses';
 
 const DEFAULT_YEAR = 2026;
 
@@ -158,6 +158,13 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             </span>
           </label>
         </div>
+        {SEASON_SYNOPSIS[year] && (
+          <div className="season-syn" key={year}>
+            <span className="small muted">{year} 시즌</span>
+            <h3>{SEASON_SYNOPSIS[year].title}</h3>
+            <p className="synopsis">{SEASON_SYNOPSIS[year].text}</p>
+          </div>
+        )}
         <div className="form-row">
           <label>
             난이도
