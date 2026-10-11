@@ -43,17 +43,22 @@ describe('직접 지휘', () => {
     const choices: CommandChoice[] = [];
     let pv = g.commandPreview(choices, 'next');
     let usedPh = false;
+    let steals = 0;
     let guard = 0;
     while (pv.req && guard++ < 200) {
       const r = pv.req;
       const c: CommandChoice = {};
-      if (r.side === 'bat' && !usedPh && r.bench.length && r.inn >= 5) { c.ph = r.bench[0]; usedPh = true; }
-      if (r.side === 'bat' && r.bases[0] >= 0 && r.bases[1] < 0 && r.outs < 2) c.tactic = 'bunt';
+      if (r.step === 'run') { c.steal = 'go'; steals++; }
+      if (r.step === 'bat' && !usedPh && r.bench.length && r.inn >= 5) { c.ph = r.bench[0]; usedPh = true; }
+      if (r.step === 'bat' && r.bases[0] >= 0 && r.bases[1] < 0 && r.outs < 2) c.tactic = 'bunt';
       if (r.side === 'field' && r.inn === 6 && r.bullpen.length && !r.plays.some((p) => p.kind === 'PC' && p.inn === 6)) c.pitcher = r.bullpen[0];
       pv = g.commandPreview([...pv.choices, c], 'next');
     }
     expect(pv.req).toBeNull();
     expect(pv.plays.some((p) => p.kind === 'PH')).toBe(usedPh);
+    // 주자 작전은 1루 주자·2루 빈 때만 묻고, 도루 시도를 고르면 도루 기록이 남는다. 도루 뒤에도 같은 타석의 타격 작전을 묻는다
+    expect(steals).toBeGreaterThan(0);
+    expect(pv.plays.filter((p) => (p.kind === 'SB' || p.kind === 'CS') && !p.top === (pv.home === lg)).length).toBe(steals);
     g.commitCommand(pv.choices);
     const last = g.ourGames().at(-1)!;
     expect({ away: last.awayRuns, home: last.homeRuns }).toEqual(pv.final);

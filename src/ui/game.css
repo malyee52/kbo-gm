@@ -503,6 +503,18 @@ tr.moved td { animation: row-flash 1.4s ease-out; }
 
 /* ---- 직접 지휘 (CommandView.tsx) */
 dialog.command { width: min(860px, calc(100vw - 32px)); }
-.command-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; margin: 8px 0; }
-.command-panel fieldset { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.command-panel select { max-width: 100%; }
+.command-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px 16px; margin: 8px 0; align-items: start; }
+/* fieldset은 기본 최소 너비가 내용 너비라 긴 선택 상자가 옆 칸을 침범한다 */
+.command-panel fieldset { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.command-panel legend { padding: 0 4px; font-weight: 700; }
+.command-panel .check { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.command-panel > .check { grid-column: 1 / -1; }
+.command-panel select { display: block; width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.command-panel .pr-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.command-panel .pr-row > span { overflow-wrap: anywhere; }
+dialog.command .dialog-body > header { flex-wrap: wrap; }
+dialog.command .dialog-body > header > div { min-width: 0; flex: 1 1 280px; }
+dialog.command .dialog-body > header h2 { font-size: 18px; overflow-wrap: anywhere; }
+.cast-field > * { min-width: 0; }
+.cast-now p { overflow-wrap: anywhere; }
+.cast-controls button { flex: 0 0 auto; }

@@ -79,6 +79,8 @@ export interface CommandRequest {
   /** 이 경기에서 몇 번째 물음인가 (0부터) */
   n: number;
   side: 'bat' | 'field';
+  /** run 주자 작전(투구 전: 대주자·도루), bat 타격 작전(도루 뒤: 대타·대주자·강공·번트), field 수비 */
+  step: 'run' | 'bat' | 'field';
   inn: number;
   top: boolean;
   outs: number;
@@ -104,12 +106,16 @@ export interface CommandRequest {
 
 /**
  * 지휘 선택. 비우면 자동(AI 감독).
- * 공격: ph 대타(지금 타자 대신), pr 대주자(그 베이스 주자 대신), tactic swing 강공(도루·번트 없음), steal 도루(1루 주자, 2루 비었을 때), bunt 희생번트.
+ * 주자 작전(run, 1루 주자가 있고 2루가 비었을 때만 묻는다): pr 대주자, steal go 도루 시도·hold 도루 안 함.
+ * 타격 작전(bat, 도루가 끝난 뒤): ph 대타(지금 타자 대신), pr 대주자, tactic swing 강공(번트 없음)·bunt 희생번트.
  * 수비: pitcher 투수 교체, keep 지금 투수 유지(자동 교체 안 함), walk 고의4구.
+ * (2026-10-12 사용자: 도루는 타석과 별개이고 도루 뒤에 번트도 할 수 있다 → 주자 작전과 타격 작전을 나눴다)
  */
 export interface CommandChoice {
   ph?: number;
   pr?: { base: 0 | 1 | 2; idx: number };
+  steal?: 'go' | 'hold';
+  /** 'steal'은 예전 기록 호환 (도루 시도로 본다) */
   tactic?: 'swing' | 'steal' | 'bunt';
   pitcher?: number;
   keep?: boolean;
@@ -457,8 +463,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     };
 
     const cmd = ctx.command;
-    const ask = (side: 'bat' | 'field'): CommandChoice => cmd!.decide({
-      n: cmdN++, side, inn: inning, top: !bat.isHome, outs, bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1],
+    const ask = (side: 'bat' | 'field', step: 'run' | 'bat' | 'field' = side): CommandChoice => cmd!.decide({
+      n: cmdN++, side, step, inn: inning, top: !bat.isHome, outs, bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1],
       away: away.runs, home: home.runs, batter: bat.lineup[bat.spot].idx, onDeck: bat.lineup[(bat.spot + 1) % 9].idx,
       pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs,
       lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
@@ -482,31 +488,29 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       if (plays && fld.pitcher !== was) note('PC', -1, fld.pitcher.p.idx, bat.runs);
       first = false;
       const pg = fld.pitcher;
-      const bc = cmd && bat.ts.team.idx === cmd.team ? ask('bat') : null;
+      const ours = !!cmd && bat.ts.team.idx === cmd.team;
       const bench = (idx: number | undefined) => (idx === undefined ? undefined
         : bat.ts.hitters.find((p) => p.idx === idx && !bat.lineup.includes(p) && !bat.removed.has(p.idx)));
-      const runnerIn = bench(bc?.pr?.idx);
-      const old = bc?.pr ? bases[bc.pr.base] : null;
-      if (runnerIn && old) {
+      const pinchRun = (c: CommandChoice | null) => {
+        const runnerIn = bench(c?.pr?.idx);
+        const old = c?.pr ? bases[c.pr.base] : null;
+        if (!runnerIn || !old) return;
         const slot = bat.lineup.indexOf(old.p);
         if (slot >= 0) bat.lineup[slot] = runnerIn;
         bat.removed.add(old.p.idx);
-        bases[bc!.pr!.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
+        bases[c!.pr!.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
         ctx.bat[runnerIn.idx].g++;
         note('PR', runnerIn.idx, pg.p.idx, bat.runs);
-      }
-      const hitter = bench(bc?.ph);
-      if (hitter) {
-        bat.removed.add(bat.lineup[bat.spot].idx);
-        bat.lineup[bat.spot] = hitter;
-        ctx.bat[hitter.idx].g++;
-        note('PH', hitter.idx, pg.p.idx, bat.runs);
-      }
-      const tactic = bc?.tactic;
+      };
 
-      // 도루: 1루 주자, 2루가 비었을 때 (지휘: 도루면 반드시, 강공·번트면 안 한다)
+      // 주자 작전 (투구 전, 도루할 수 있을 때만): 대주자, 도루
+      const rc = ours && bases[0] && !bases[1] ? ask('bat', 'run') : null;
+      pinchRun(rc);
+      const steal = rc?.steal ?? (rc?.tactic === 'steal' ? 'go' : undefined);
+
+      // 도루: 1루 주자, 2루가 비었을 때 (지휘: go면 반드시, hold면 안 한다, 아니면 감독 판단)
       const r1 = bases[0];
-      if (r1 && !bases[1] && (tactic === 'steal' || (!tactic && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))))) {
+      if (r1 && !bases[1] && (steal === 'go' || (steal === undefined && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))))) {
         const line = ctx.bat[r1.p.idx];
         if (rng.chance(r1.p.bat!.sbPct - fld.catcherDef * params.catcherStealPerRun)) {
           line.sb++;
@@ -534,6 +538,18 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
         note('WP', -1, pg.p.idx, r0);
         if (walkOff()) return true;
       }
+
+      // 타격 작전 (도루가 끝난 뒤): 대타, 대주자, 강공·번트
+      const bc = ours ? ask('bat', 'bat') : null;
+      pinchRun(bc);
+      const hitter = bench(bc?.ph);
+      if (hitter) {
+        bat.removed.add(bat.lineup[bat.spot].idx);
+        bat.lineup[bat.spot] = hitter;
+        ctx.bat[hitter.idx].g++;
+        note('PH', hitter.idx, pg.p.idx, bat.runs);
+      }
+      const tactic = bc?.tactic === 'steal' ? undefined : bc?.tactic;
 
       const batter = bat.lineup[bat.spot];
       bat.spot = (bat.spot + 1) % 9;
