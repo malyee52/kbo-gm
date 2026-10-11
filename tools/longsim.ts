@@ -104,7 +104,7 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
   if (off.stage !== 'ready') throw new Error(`${league.year} 오프시즌이 끝나지 않았습니다 (단계 ${off.stage})`);
   const retiredNow = (league.retired ?? []).filter((r) => r.year === off.year).length;
   Off.closeOffseason(league, off);
-  const sizes = league.teams.map((_, i) => league.players.filter((p) => p.team === i && !isServing(p)).length);
+  const sizes = league.teams.map((_, i) => league.players.filter((p) => p.team === i && !isServing(p) && !p.dev).length);
 
   return {
     world,

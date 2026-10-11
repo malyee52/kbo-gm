@@ -136,7 +136,7 @@ describe('정원 정리', () => {
     expect(g.offseason!.log.some((l) => l.text.includes(`방출 선수 ${star.name} 영입`))).toBe(true);
     // 시장이 끝나도 모든 구단이 정원 안
     for (let t = 0; t < g.league.teams.length; t++) {
-      expect(g.league.players.filter((x) => x.team === t && !isServing(x)).length).toBeLessThanOrEqual(68);
+      expect(g.league.players.filter((x) => x.team === t && !isServing(x) && !x.dev).length).toBeLessThanOrEqual(68);
     }
   }, 120_000);
 });

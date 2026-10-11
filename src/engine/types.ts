@@ -68,6 +68,8 @@ export interface SimPlayer {
   availability?: number;
   /** 실존 선수 여부. false면 가상 선수. 값이 없으면 실존 선수로 본다 (구체적 사건 이벤트를 막는 쪽) */
   real?: boolean;
+  /** 육성선수: 1군에 못 나간다 (정식 등록 전, league/offseason.ts) */
+  dev?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
   /** 나이가 추정값 (생년 자료 없음, M8) */

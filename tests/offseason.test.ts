@@ -338,11 +338,11 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
       if (h.offseason!.stage === 'draft') h.autoDraft();
       step(h);
     }
-    const mine = () => h.league.players.filter((p) => p.team === h.teamIdx && !isServing(p)).length;
+    const mine = () => h.league.players.filter((p) => p.team === h.teamIdx && !isServing(p) && !p.dev).length;
     if (mine() > ORG_LIMIT) expect(h.nextStage().ok).toBe(false);
     h.autoRelease();
     expect(h.nextStage().ok).toBe(true);
-    for (let t = 0; t < 10; t++) expect(h.league.players.filter((p) => p.team === t && !isServing(p)).length).toBeLessThanOrEqual(ORG_LIMIT);
+    for (let t = 0; t < 10; t++) expect(h.league.players.filter((p) => p.team === t && !isServing(p) && !p.dev).length).toBeLessThanOrEqual(ORG_LIMIT);
   });
 });
 

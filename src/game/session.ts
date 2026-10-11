@@ -19,6 +19,7 @@ import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { ops } from './stats';
 import { futuresSeason } from '../league/futures';
+import { ORG_LIMIT } from '../league/salary';
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import {
@@ -111,6 +112,10 @@ export type GameAction =
   | { year: number; type: 'comp-auto' }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   | { year: number; type: 'legend'; id: string }
+  | { year: number; type: 'to-dev'; id: string }
+  | { year: number; type: 'sign-dev'; id: string }
+  | { year: number; type: 'promote-dev'; id: string }
+  | { year?: number; day: number; type: 'convert'; id: string }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
@@ -130,6 +135,9 @@ export interface TradeRecord {
   pg?: string[];
   pr?: string[];
 }
+
+/** 육성선수 정식 등록이 되는 첫날 (KBO 규정 5월 1일) */
+export const DEV_REGISTER_FROM = { month: 5, date: 1 };
 
 /** 1군 말소 뒤 다시 등록할 수 있을 때까지 (KBO 규정 10일) */
 export const REREGISTER_DAYS = 10;
@@ -371,6 +379,7 @@ export class GameSession {
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else if (a.type === 'event') this.applyEventChoice(a.choice);
+    else if (a.type === 'convert') this.applyConvert(a.id);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -501,6 +510,43 @@ export class GameSession {
     return u > this.currentDay ? u : null;
   }
 
+  // ---- 육성선수 정식 등록 (시즌 중: 5월 1일 ~ 7월 31일, 정원 안)
+
+  /** 지금 정식 선수 수 (복무 중 제외, 육성선수 제외) */
+  regularCount(): number {
+    return this.team.org.filter((p) => !p.dev).length;
+  }
+
+  /** 육성선수를 정식 등록할 수 있나. 안 되면 이유 */
+  convertBlock(p: SimPlayer): string | null {
+    if (!p.dev || p.teamIdx !== this.teamIdx) return '정식 등록할 육성선수가 아닙니다.';
+    if (this.phase !== 'season' || this.done) return '시즌 중에만 정식 등록할 수 있습니다 (오프시즌에는 정원 정리 단계에서).';
+    const dt = dateOf(this.world.year, Math.min(this.day, this.season.schedule.length - 1));
+    if (dt.month < DEV_REGISTER_FROM.month) return `육성선수는 ${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일부터 정식 등록할 수 있습니다.`;
+    if (this.day > this.tradeDeadlineDay) return `선수 등록 마감(${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일)이 지났습니다.`;
+    if (this.regularCount() >= ORG_LIMIT) return `정식 선수 정원(${ORG_LIMIT}명)이 차 있습니다. 오프시즌에 정리하세요.`;
+    return null;
+  }
+
+  /** 육성선수를 정식 선수로 등록한다 (2군에 남는다. 1군은 따로 올린다) */
+  convertDev(p: SimPlayer): { ok: boolean; message: string } {
+    const why = this.convertBlock(p);
+    if (why) return { ok: false, message: why };
+    this.applyConvert(p.id);
+    this.actions.push({ year: this.year, day: this.day, type: 'convert', id: p.id });
+    return { ok: true, message: `${p.name} 정식 등록` };
+  }
+
+  private applyConvert(id: string): void {
+    const p = this.world.players.find((x) => x.id === id);
+    if (!p) return;
+    p.dev = false;
+    const lp = this.leaguePlayer(id);
+    if (lp) lp.dev = false;
+    this.season.teamSeasons[p.teamIdx].dirty = true;
+    this.addNews(this.day, 'entry', `${p.name}, 육성선수에서 정식 선수로 등록`);
+  }
+
   /**
    * 말소된 선수가 다시 1군에 등록될 수 있는 날 (일정 색인). 제한이 없으면 null (KBO: 말소 뒤 10일).
    * 지금 1군에 있는 선수는 제한이 없다 (AI에게 맡겼다가 다시 직접 관리로 바꿀 때 AI 명단은 그대로 넘어온다)
@@ -519,6 +565,8 @@ export class GameSession {
     const { rosterSize, foreignLimit } = this.world.rules;
     const errors: string[] = [];
     const warnings: string[] = [];
+    const devs = players.filter((p) => p.dev);
+    if (devs.length) errors.push(`육성선수는 정식 등록한 뒤에 1군에 올릴 수 있습니다: ${devs.map((p) => p.name).join(', ')}`);
     const blocked = players.filter((p) => this.reregisterDay(p) !== null);
     if (blocked.length) {
       errors.push(`1군에서 말소된 선수는 ${REREGISTER_DAYS}일이 지나야 다시 등록할 수 있습니다: ${blocked.map((p) => `${p.name} (${shortDate(this.world.year, this.reregisterDay(p)!)}부터)`).join(', ')}`);
@@ -1310,6 +1358,9 @@ export class GameSession {
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
       case 'legend': res = this.applyLegend(a.id); break;
+      case 'to-dev': res = Off.toDevByUser(L, off!, a.id); break;
+      case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
+      case 'promote-dev': res = Off.promoteDevByUser(L, off!, a.id); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
@@ -1624,6 +1675,14 @@ export class GameSession {
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /** 육성선수로 데려올 수 있는 선수 (정원 정리 단계) */
+  devPool(): LeaguePlayer[] {
+    return this.offseason ? Off.devPool(this.league, this.offseason) : [];
+  }
+  /** 정원 정리: 우리 선수를 육성선수로, 육성선수 영입, 육성선수 정식 등록 */
+  toDev(id: string) { return this.dispatchOff({ year: this.year, type: 'to-dev', id }); }
+  signDev(id: string) { return this.dispatchOff({ year: this.year, type: 'sign-dev', id }); }
+  promoteDevOff(id: string) { return this.dispatchOff({ year: this.year, type: 'promote-dev', id }); }
   /** 은퇴 선수를 우리 구단 레전드로 지정 (오프시즌) */
   designateLegend(id: string) { return this.dispatchOff({ year: this.year, type: 'legend', id }); }
   release(id: string) { return this.dispatchOff({ year: this.year, type: 'release', id }); }
