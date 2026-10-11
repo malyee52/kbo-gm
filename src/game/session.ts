@@ -50,6 +50,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
+import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 
 export interface NewGameOptions {
   year: number;
@@ -148,8 +149,8 @@ export interface TradeRecord {
   pr?: string[];
 }
 
-/** 진행을 멈출 만한 1군 선수 이탈 기간 (일, 임시값) */
-export const ATTENTION_DAYS = 3;
+/** 진행을 멈출 만한 1군 선수 이탈 기간 기본값 (일, 임시값. 멈춤 설정 stops.ts injuryDays로 바꿀 수 있다) */
+export const ATTENTION_DAYS = DEFAULT_STOPS.injuryDays;
 
 /** 육성선수 정식 등록이 되는 첫날 (KBO 규정 5월 1일) */
 export const DEV_REGISTER_FROM = { month: 5, date: 1 };
@@ -774,27 +775,62 @@ export class GameSession {
 
   // ---- 시즌 진행
 
-  /** days일 진행한다 (시즌이 끝나면 멈춤). 실제로 진행한 날 수를 돌려준다 */
   /**
-   * days일 진행한다. stopOnEvent면 이벤트가 생긴 날 멈추고, 답을 기다리는 이벤트가 있으면 진행하지 않는다 (화면).
-   * 아니면(테스트·장기 진행) 답을 기다리는 이벤트를 첫 번째 선택지로 자동 처리하고 계속 간다 (events.ts).
+   * days일 진행한다 (시즌이 끝나면 멈춤). 실제로 진행한 날 수를 돌려준다.
+   * stops: 무엇에서 멈출지 (stops.ts). 빠진 칸은 멈추지 않는다. 기본은 아무 데서도 멈추지 않는다 (테스트·장기 진행·시즌 끝까지).
+   * - 이벤트: 멈추는 이벤트면 그날 멈추고, 답을 기다리는 동안 진행하지 않는다.
+   *   멈추지 않는 이벤트는 다음 날 첫 번째 선택지로 자동 처리하고 조작 기록에 남기지 않는다 (재현해도 같은 자리에서 자동 처리된다).
+   * - 손볼 일(1군 선수 이탈·연패·트레이드 마감일·육성선수 등록일): 생긴 날 멈추고 attention에 남는다.
+   * 멈췄으면 stopped가 true다.
    */
-  /**
-   * days일 진행. stopOnEvent: 이벤트가 생기면 그날 멈춘다 (아니면 첫 선택지로 자동).
-   * stopOnAttention: 플레이어가 손봐야 할 일(직접 관리하는 1군 선수의 ATTENTION_DAYS일 이상 이탈)이 생기면 그날 멈춘다 (attention에 남는다)
-   */
-  advance(days: number, stopOnEvent = false, stopOnAttention = false): number {
+  advance(days: number, stops?: Partial<StopRules> | null): number {
+    const r = stopRules(stops);
     let n = 0;
     this.attention = [];
+    this.stopped = false;
     while (n < days && this.phase === 'season' && !this.season.done) {
-      if (this.league.events?.pending) {
-        if (stopOnEvent) break;
+      const ev = this.league.events?.pending;
+      if (ev) {
+        if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
+      const streak0 = r.losing ? this.currentStreak() : 0;
       this.stepDay();
       n++;
-      if (stopOnEvent && this.league.events?.pending) break;
-      if (stopOnAttention && this.attention.length) break;
+      this.checkStops(r, streak0);
+      const now = this.league.events?.pending;
+      if ((now && stopsOnEvent(r, now)) || this.attention.length) { this.stopped = true; break; }
+    }
+    return n;
+  }
+
+  /** 하루 진행한 뒤 멈춤 조건(이벤트 밖)을 본다 */
+  private checkStops(r: StopRules, streak0: number): void {
+    if (r.injury) {
+      for (const a of this.absencesToday) {
+        if (a.days >= r.injuryDays) this.attention.push({ kind: 'injury', text: a.text });
+      }
+    }
+    if (this.season.done) return;
+    if (r.losing) {
+      const k = this.currentStreak();
+      if (k <= -r.losingN && streak0 > -r.losingN) this.attention.push({ kind: 'losing', text: `${-k}연패에 빠졌습니다. 엔트리·기용표·타순을 점검해 보세요.` });
+    }
+    const day = this.season.day;
+    if (r.deadline && day === this.tradeDeadlineDay) {
+      this.attention.push({ kind: 'deadline', text: `오늘이 트레이드 마감일(${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일)입니다. 오늘 경기 전까지 트레이드할 수 있습니다.` });
+    }
+    if (r.devDay && day === this.devRegisterDay && this.team.org.some((p) => p.dev)) {
+      this.attention.push({ kind: 'dev', text: `오늘(${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일)부터 육성선수를 정식 등록할 수 있습니다 (${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일까지).` });
+    }
+  }
+
+  /** 육성선수 정식 등록이 되는 첫날 (일정 색인) */
+  get devRegisterDay(): number {
+    const n = this.season.schedule.length;
+    for (let d = 0; d < n; d++) {
+      const dt = dateOf(this.world.year, d);
+      if (dt.month > DEV_REGISTER_FROM.month || (dt.month === DEV_REGISTER_FROM.month && dt.date >= DEV_REGISTER_FROM.date)) return d;
     }
     return n;
   }
@@ -811,14 +847,22 @@ export class GameSession {
   }
 
   /** 마지막 진행에서 생긴, 플레이어가 손봐야 할 일 (화면이 진행을 멈추고 보여 준다) */
-  attention: string[] = [];
+  attention: Attention[] = [];
+  /** 마지막 진행이 멈춤 조건(이벤트 포함)에 걸려 멈췄나 */
+  stopped = false;
+  /** 오늘 빠진, 직접 관리하는 1군 선수 (멈춤 판정용) */
+  private absencesToday: { text: string; days: number }[] = [];
 
-  /** 다음 경기일까지 진행한다 (중간의 휴식일 포함) */
-  advanceToNextGameDay(): number {
+  /** 다음 경기일까지 진행한다 (중간의 휴식일 포함). 멈춤 조건에 걸리면 거기서 멈춘다 */
+  advanceToNextGameDay(stops?: Partial<StopRules> | null): number {
     let n = 0;
+    const attention: Attention[] = [];
     do {
-      n += this.advance(1);
+      n += this.advance(1, stops);
+      attention.push(...this.attention);
+      if (this.stopped) break;
     } while (this.phase === 'season' && !this.season.done && !this.season.schedule[this.season.day - 1]?.length);
+    this.attention = attention;
     return n;
   }
 
@@ -838,6 +882,7 @@ export class GameSession {
       }
     }
     const before = org.map((p) => s.states.absentUntil[p.idx]);
+    this.absencesToday = [];
     // 무작위 이벤트의 경기력 효과 (events.ts formToday) + 코치 (coaches.ts coachEdge)
     s.setForm(this.formWithCoaches(formToday(this.league, year, day, this.world.players)));
     s.simulateDay();
@@ -849,8 +894,8 @@ export class GameSession {
         // 이탈 사유는 실존 선수에게 중립 문구만 쓴다 (기획서 7장, absenceReason → eventLabel)
         const reason = this.absenceReason(p) ?? '결장';
         const back = until >= s.schedule.length ? '이번 시즌 복귀 어려움' : `복귀 예정 ${formatDate(year, until)} (${until - day}일)`;
-        // 직접 관리하는 1군 선수가 며칠 이상 빠지면 진행을 멈추고 알린다 (엔트리·기용표를 손볼 수 있게)
-        if (manual?.has(p.idx) && until - day >= ATTENTION_DAYS) this.attention.push(`${p.name}: ${reason}, ${back}`);
+        // 직접 관리하는 1군 선수가 빠지면 멈춤 판정에 넘긴다 (엔트리·기용표를 손볼 수 있게, checkStops)
+        if (manual?.has(p.idx)) this.absencesToday.push({ text: `${p.name}: ${reason}, ${back}`, days: until - day });
         this.addNews(day, 'absence', `${p.name}: ${reason}. ${back}.${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}`);
       }
     });

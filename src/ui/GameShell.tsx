@@ -27,6 +27,8 @@ import { teamColor } from './teams';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
+import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type StopRules } from '../game/stops';
+import { StopSettings } from './StopSettings';
 
 /** 왼쪽 메뉴. 묶음(group)별로 나눠 보여 주고, season이 true인 항목은 오프시즌에 숨긴다 */
 // 메뉴 묶음 (2026-10-12 정리): 우리 구단 / 리그(이번 시즌) / 역사 / 시스템
@@ -74,31 +76,41 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     }
   }, [session]);
 
+  // 진행 멈춤 설정 (브라우저에 저장, stops.ts)
+  const [stops, setStopsState] = useState<StopRules>(loadStops);
+  const setStops = (r: StopRules) => { setStopsState(r); saveStops(r); };
+
+  /** 진행이 이벤트 날에 끝났는데 그 이벤트에서 멈추지 않는 설정이면 첫 번째 선택지로 답한다 (조작 기록에 남겨 재현이 맞게) */
+  const autoAnswer = (rules: StopRules) => {
+    const ev = session.pendingEvent;
+    if (ev && !stopsOnEvent(rules, ev)) session.answerEvent(0);
+  };
+
   /**
    * days일 진행. 길면 일주일씩 끊어 화면이 멈추지 않게 한다.
-   * autoEvents(시즌 끝까지): 이벤트가 생겨도 멈추지 않고 첫 번째(무난한) 선택지로 자동 처리한다
+   * full(시즌 끝까지): 완전 자동. 무엇이 생겨도 멈추지 않고 이벤트는 첫 번째 선택지로 처리한다.
+   * 아니면 멈춤 설정(stops)대로 멈춘다.
    */
-  const advance = async (days: number, label: string, autoEvents = false) => {
+  const advance = async (days: number, label: string, full = false) => {
     if (busy || session.done) return;
+    const rules = full ? NO_STOPS : stops;
     setBusy(label);
     await nextFrame();
     // 여러 날 진행이면 끝나고 요약 창을 띄운다 (AdvanceSummary)
     const snap = days >= 7 ? takeSnapshot(session) : null;
     let left = days;
-    let attention: string[] = [];
+    let attention: Attention[] = [];
     while (left > 0 && !session.done) {
-      // 직접 관리하는 1군 선수가 다치는 등 손볼 일이 생기면 시즌 끝까지 진행 중이라도 멈춘다
-      const did = session.advance(Math.min(7, left), !autoEvents, true);
+      const did = session.advance(Math.min(7, left), rules);
       left -= did;
-      if (session.attention.length) { attention = [...session.attention]; break; }
-      if ((!autoEvents && session.pendingEvent) || did === 0) break; // 이벤트가 생기면 그날 멈춘다
+      if (session.attention.length) attention = [...session.attention];
+      if (session.stopped || did === 0) break;
       if (left > 0) {
         setVersion((v) => v + 1);
         await nextFrame();
       }
     }
-    // 시즌 마지막 날 생긴 이벤트도 자동으로 (조작 기록에 남겨 재현이 맞게)
-    if (autoEvents && session.pendingEvent) session.answerEvent(0);
+    autoAnswer(rules);
     changed();
     await autosave();
     setBusy(null);
@@ -107,7 +119,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   };
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
   const takeSnapshotAfter = () => takeSnapshot(session);
-  const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: string[] } | null>(null);
+  const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: Attention[] } | null>(null);
 
   /** 가을야구 진행 (경기 수, 또는 '우리 경기까지'·'시리즈 끝까지') */
   const advancePs = async (how: 'one' | 'ours' | 'series' | 'all', label: string) => {
@@ -128,10 +140,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (busy || session.done) return;
     setBusy('진행 중');
     await nextFrame();
-    session.advanceToNextGameDay();
+    session.advanceToNextGameDay(stops);
+    const attention = [...session.attention];
+    autoAnswer(stops);
     changed();
     await autosave();
     setBusy(null);
+    if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
     if (session.done) go(session.postseasonRunning ? 'postseason' : 'season-end');
   };
 
@@ -197,11 +212,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             </div>}
             {!off && !session.done && <div className="advance">
               {busy && <span className="muted small" role="status">{busy}</span>}
-              <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
+              <button type="button" onClick={() => void advanceNextGame()} disabled={!!busy || session.done || !!session.pendingEvent} title="휴식일은 건너뛰고 다음 경기일까지">다음 경기</button>
               <button type="button" onClick={() => void advance(1, '하루 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>하루</button>
               <button type="button" onClick={() => void advance(7, '일주일 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>일주일</button>
               <button type="button" onClick={() => void advance(30, '한 달 진행 중')} disabled={!!busy || session.done || !!session.pendingEvent}>한 달</button>
-              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (이벤트는 자동 선택)', true)} disabled={!!busy || session.done || !!session.pendingEvent} title="이벤트가 생기면 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
+              <button type="button" className="ghost" onClick={() => void advance(10000, '시즌 끝까지 진행 중 (완전 자동)', true)} disabled={!!busy || session.done || !!session.pendingEvent} title="완전 자동: 무엇이 생겨도 멈추지 않고, 이벤트는 첫 번째 선택지로 자동 처리합니다">시즌 끝까지</button>
+              <StopSettings value={stops} onChange={setStops} />
             </div>}
           </header>
           {saveError && <p className="error banner" role="alert">{saveError}</p>}

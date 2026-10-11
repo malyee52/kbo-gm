@@ -23,7 +23,7 @@ describe('무작위 이벤트', () => {
     let sawReset = false;
     let sawRise = false;
     for (let d = 0; d < 80; d++) {
-      g.advance(1, true);
+      g.advance(1, { event: true });
       const st = g.league.events!;
       if (st.pending) {
         expect(st.chance).toBe(EVENT_BASE);
@@ -39,12 +39,12 @@ describe('무작위 이벤트', () => {
     expect(sawReset).toBe(true);
   });
 
-  it('화면 진행(stopOnEvent)은 이벤트가 생긴 날 멈추고, 답하기 전에는 진행하지 않는다', () => {
+  it('화면 진행(이벤트에서 멈춤)은 이벤트가 생긴 날 멈추고, 답하기 전에는 진행하지 않는다', () => {
     const g = GameSession.create(store, opts('ev-b'), FAST);
-    g.advance(200, true);
+    g.advance(200, { event: true });
     expect(g.pendingEvent).not.toBeNull();
     const day = g.day;
-    expect(g.advance(7, true)).toBe(0);
+    expect(g.advance(7, { event: true })).toBe(0);
     expect(g.day).toBe(day);
     const def = EVENTS.find((e) => e.id === g.pendingEvent!.id)!;
     expect(def.choices.length).toBeGreaterThanOrEqual(2);
@@ -56,7 +56,7 @@ describe('무작위 이벤트', () => {
   it('답한 선택은 조작 기록으로 다시 돌려도 같다 (이벤트·자금·신뢰도), 저장했다 불러와도 같다', () => {
     const g = GameSession.create(store, opts('ev-c'), FAST);
     for (let i = 0; i < 6; i++) {
-      g.advance(200, true);
+      g.advance(200, { event: true });
       if (g.pendingEvent) g.answerEvent(g.pendingEvent ? EVENTS.find((e) => e.id === g.pendingEvent!.id)!.choices.length - 1 : 0);
     }
     const r = GameSession.replay(store, opts('ev-c'), g.actions, { year: 2026, day: g.day }, FAST);

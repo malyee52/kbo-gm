@@ -45,11 +45,11 @@ describe('손볼 일이 생기면 멈춘다', () => {
     expect(g.manualEntry).not.toBeNull();
     let stopped = false;
     for (let k = 0; k < 30 && !g.done; k++) {
-      const did = g.advance(30, false, true);
+      const did = g.advance(30, { injury: true, injuryDays: ATTENTION_DAYS });
       if (g.attention.length) {
         stopped = true;
         expect(did).toBeLessThanOrEqual(30);
-        const name = g.attention[0].split(':')[0];
+        const name = g.attention[0].text.split(':')[0];
         const p = g.team.org.find((x) => x.name === name)!;
         expect(g.manualEntry!.has(p.idx)).toBe(true);
         expect(g.season.states.absentUntil[p.idx] - (g.day - 1)).toBeGreaterThanOrEqual(ATTENTION_DAYS);

@@ -89,7 +89,7 @@ describe('경기에 영향을 주는 이벤트', () => {
     const o = { year: 2026, teamIdx: lg, seed: 'imp-replay' };
     const g = GameSession.create(store, o, FAST);
     for (let i = 0; i < 400 && !g.done; i++) {
-      g.advance(3, true);
+      g.advance(3, { event: true });
       if (g.league.events?.pending) g.answerEvent(1);
     }
     const r = GameSession.replay(store, o, g.actions, g.day, FAST);
@@ -102,7 +102,7 @@ describe('경기에 영향을 주는 이벤트', () => {
     const o = { year: 2026, teamIdx: lg, seed: 'auto-season' };
     const g = GameSession.create(store, o, FAST);
     // 화면의 "시즌 끝까지"와 같은 흐름: 일주일씩, 이벤트에서 멈추지 않는다
-    while (!g.done) expect(g.advance(7, false)).toBeGreaterThan(0);
+    while (!g.done) expect(g.advance(7)).toBeGreaterThan(0);
     if (g.pendingEvent) g.answerEvent(0);
     expect(g.pendingEvent).toBeFalsy();
     const log = g.league.events!.log;

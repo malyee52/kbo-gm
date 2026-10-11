@@ -4,6 +4,8 @@ import { useEffect, useRef } from 'react';
 import type { BatLine, PitLine } from '../engine';
 import { formatDate, shortDate } from '../game/calendar';
 import type { GameSession } from '../game/session';
+import type { Attention, AttentionKind } from '../game/stops';
+import type { Screen } from './context';
 import { fixed2, ipText, ops, rate3 } from '../game/stats';
 import { PlayerLink, useGame, useWon } from './context';
 import { teamColor } from './teams';
@@ -44,7 +46,16 @@ function diff<T extends object>(now: T, before: T | undefined): T {
 
 const NEWS_KINDS = new Set(['trade', 'event', 'absence', 'return', 'owner', 'callup']);
 
-export function AdvanceSummary({ snap, attention = [], onClose }: { snap: AdvanceSnapshot; attention?: string[]; onClose: () => void }) {
+/** 멈춘 까닭별 제목과 바로 갈 화면 (멈춤 설정 stops.ts) */
+const STOP_INFO: Record<AttentionKind, { title: string; go: Screen; button: string }> = {
+  injury: { title: '1군 선수가 빠졌습니다. 엔트리·기용표를 확인하세요.', go: 'roster', button: '선수단으로' },
+  losing: { title: '연패 중입니다.', go: 'roster', button: '선수단으로' },
+  deadline: { title: '트레이드 마감일입니다.', go: 'trade', button: '트레이드로' },
+  dev: { title: '육성선수 정식 등록이 열렸습니다.', go: 'roster', button: '선수단으로' },
+};
+const STOP_ORDER: AttentionKind[] = ['injury', 'losing', 'deadline', 'dev'];
+
+export function AdvanceSummary({ snap, attention = [], onClose }: { snap: AdvanceSnapshot; attention?: Attention[]; onClose: () => void }) {
   const { go } = useGame();
   const { session } = useGame();
   const won = useWon();
@@ -96,9 +107,18 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
 
         {attention.length > 0 && (
           <section className="note error-box">
-            <p><strong>진행을 멈췄습니다: 1군 선수가 빠졌습니다.</strong> 엔트리·기용표를 확인하세요.</p>
-            <ul className="plain small">{attention.map((a) => <li key={a}>{a}</li>)}</ul>
-            <div className="actions"><button type="button" onClick={() => { close(); go('roster'); }}>선수단으로</button></div>
+            <p><strong>진행을 멈췄습니다.</strong> <span className="muted small">(멈출 때는 진행 버튼 옆 ⚙ 멈춤에서 고릅니다)</span></p>
+            {STOP_ORDER.filter((k) => attention.some((a) => a.kind === k)).map((k) => (
+              <div key={k}>
+                <p><strong>{STOP_INFO[k].title}</strong></p>
+                <ul className="plain small">{attention.filter((a) => a.kind === k).map((a) => <li key={a.text}>{a.text}</li>)}</ul>
+              </div>
+            ))}
+            <div className="actions">
+              {[...new Set(STOP_ORDER.filter((k) => attention.some((a) => a.kind === k)).map((k) => STOP_INFO[k].go))].map((to) => (
+                <button key={to} type="button" onClick={() => { close(); go(to); }}>{STOP_ORDER.map((k) => STOP_INFO[k]).find((x) => x.go === to)!.button}</button>
+              ))}
+            </div>
           </section>
         )}
 
