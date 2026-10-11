@@ -245,6 +245,11 @@ export interface LeagueState {
   gm?: GmStyle[];
   /** AI 구단끼리 트레이드 기록 (gm.ts) */
   aiTrades?: AiTradeRecord[];
+  /**
+   * 이벤트(AI 구단의 트레이드 제안)를 받아들여 이뤄진 우리 트레이드 (선수 ID). 조작 기록에는 'event'로만 남아
+   * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)
+   */
+  eventTrades?: { year: number; day: number; team: number; give: string[]; get: string[] }[];
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */

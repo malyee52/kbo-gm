@@ -151,6 +151,8 @@ export interface EventDef {
   text: (c: EventContext, v: PendingEvent['vars']) => string;
   /** 첫 번째가 무난한 기본 선택 (자동 처리 때 쓴다) */
   choices: EventChoice[];
+  /** 무작위 이벤트로 굴리지 않고 따로 띄운다 (AI 트레이드 제안: session.ts tradeOfferDay) */
+  manual?: boolean;
 }
 
 const eok = (man: number) => `${(man / 10000).toFixed(1)}억 원`;
@@ -413,7 +415,9 @@ export const EVENTS: EventDef[] = [
     ],
   },
   {
-    id: 'trade-offer', title: '트레이드 제안 접수', weight: 12,
+    // 2026-10-12: 무작위 이벤트 가운데 하나로만 와서 한 시즌 0.4번도 안 됐다(사용자: "제안을 받아 본 적이 없다").
+    // 이제 트레이드 마감 전까지 날마다 따로 굴린다 (session.ts tradeOfferDay). 여기는 화면 문구와 선택지만
+    id: 'trade-offer', title: '트레이드 제안 접수', weight: 12, manual: true,
     when: (c) => c.tradeOpen,
     vars: (c, rng): PendingEvent['vars'] => {
       const o = c.tradeOffer(rng);
@@ -461,7 +465,7 @@ export function rollEvent(state: EventState, c: EventContext): PendingEvent | nu
   state.chance = EVENT_BASE;
   // 최근에 나온 이벤트는 피한다 (마지막 3개)
   const recent = new Set(state.log.slice(-3).map((l) => l.id));
-  const cands = EVENTS.filter((e) => !recent.has(e.id) && (!e.when || e.when(c)));
+  const cands = EVENTS.filter((e) => !e.manual && !recent.has(e.id) && (!e.when || e.when(c)));
   if (!cands.length) return null;
   const total = cands.reduce((s, e) => s + e.weight, 0);
   let u = rng.next() * total;

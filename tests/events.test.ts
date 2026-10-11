@@ -25,7 +25,11 @@ describe('무작위 이벤트', () => {
     for (let d = 0; d < 80; d++) {
       g.advance(1, { event: true });
       const st = g.league.events!;
-      if (st.pending) {
+      if (st.pending?.id === 'trade-offer') {
+        // AI 트레이드 제안은 무작위 이벤트와 따로 굴린다 (그날은 이벤트 확률을 건드리지 않는다)
+        expect(st.chance).toBeCloseTo(prev, 10);
+        g.answerEvent(0);
+      } else if (st.pending) {
         expect(st.chance).toBe(EVENT_BASE);
         sawReset = true;
         g.answerEvent(0);
@@ -74,7 +78,11 @@ describe('무작위 이벤트', () => {
     expect(g.done).toBe(true);
     const log = g.league.events!.log.filter((l) => l.year === 2026);
     expect(log.length).toBeGreaterThanOrEqual(4);
-    expect(log.length).toBeLessThanOrEqual(20);
+    expect(log.length).toBeLessThanOrEqual(30);
     expect(log.every((l) => l.choice === 0)).toBe(true);
+    // AI 트레이드 제안은 따로 굴려 마감 전까지 여러 번 온다 (2026-10-12, 예전에는 한 시즌 0.4번 꼴)
+    const offers = log.filter((l) => l.id === 'trade-offer');
+    expect(offers.length).toBeGreaterThanOrEqual(2);
+    expect(offers.every((l) => l.day <= g.tradeDeadlineDay)).toBe(true);
   });
 });
