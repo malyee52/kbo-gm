@@ -21,7 +21,7 @@ import { ops } from './stats';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
-import { settingsOf, type DifficultySettings } from '../league/difficulty';
+import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { ORG_LIMIT } from '../league/salary';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
@@ -1490,7 +1490,7 @@ export class GameSession {
 
   /** 지명권 트레이드가 되는 시즌인가 */
   get pickTradeOpen(): boolean {
-    return this.year >= PICK_TRADE_FROM;
+    return pickTradeAllowed(this.league, this.year, PICK_TRADE_FROM);
   }
 
   /** 그 구단이 가진 트레이드 가능한 지명권 */
@@ -1522,7 +1522,7 @@ export class GameSession {
   private checkPicks(aiTeam: number, give: SimPlayer[], get: SimPlayer[], picks: PickSwap): string | null {
     const all = [...picks.give, ...picks.get];
     if (all.length === 0) return null;
-    if (!this.pickTradeOpen) return `지명권 트레이드는 ${PICK_TRADE_FROM}년부터 할 수 있습니다 (2019년 8월 규약 개정).`;
+    if (!this.pickTradeOpen) return `지명권 트레이드는 ${PICK_TRADE_FROM}년부터 할 수 있습니다 (2019년 8월 규약 개정, 세부 난이도에서 모든 시대 허용으로 바꿀 수 있습니다).`;
     if (all.length > MAX_PICKS_PER_TRADE) return `한 트레이드에 지명권은 ${MAX_PICKS_PER_TRADE}장까지 넣을 수 있습니다.`;
     if (give.length + get.length === 0) return '지명권은 선수와 함께 트레이드해야 합니다.';
     if (new Set(all.map(pickId)).size !== all.length) return '같은 지명권이 두 번 들어 있습니다.';

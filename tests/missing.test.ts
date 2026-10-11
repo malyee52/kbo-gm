@@ -6,6 +6,7 @@ import { GameSession } from '../src/game/session';
 import { createLeague } from '../src/league/create';
 import { ORG_LIMIT } from '../src/league/salary';
 import { expansionRule, pickKindAt, snakeDraftYear } from '../src/league/offseason';
+import { PRESETS } from '../src/league/difficulty';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -61,7 +62,8 @@ describe('창단 구단은 1군 진입 2년 전에 퓨처스 구단으로 (2026-
   beforeAll(() => {
     // 2011 시작: 2011 시즌 뒤 NC가 창단해 2012 입단 드래프트(실제로는 2011년 8월)에 처음 참가한다
     const sk = store.season(2011)!.teams.findIndex((t) => t.name === 'SK');
-    g = GameSession.create(store, { year: 2011, teamIdx: sk, seed: 'nc-draft' }, FAST);
+    // 지명 순서 구조를 보는 시험이라 지명권 트레이드는 실제 규정(2020년부터)으로: 과거 시즌 허용(기본)이면 AI끼리 지명권이 오가 순번 주인이 바뀐다
+    g = GameSession.create(store, { year: 2011, teamIdx: sk, seed: 'nc-draft', settings: { ...PRESETS.normal, pickTradeEra: 0 } }, FAST);
     g.advance(100000);
     g.advancePostseason(10_000);
     g.beginOffseason();

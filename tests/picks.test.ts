@@ -5,6 +5,7 @@ import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import { applyPickOwners, expectedPotential, ownedPicks, pickId, pickLedger, pickOwner, PICK_MAX_ROUND, transferPick, type DraftPick } from '../src/league/picks';
 import type { LeagueState } from '../src/league/types';
+import { PRESETS } from '../src/league/difficulty';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -49,10 +50,16 @@ describe('지명권 기록', () => {
 });
 
 describe('트레이드에 지명권 넣기', () => {
-  it('규정: 2020년 전에는 안 되고, 선수 없이는 안 되며, 2장까지, 가진 지명권만', () => {
+  it('규정: 과거 시즌은 설정대로(기본은 1982년부터 허용, 실제 규정을 고르면 2020년부터), 선수 없이는 안 되며, 2장까지, 가진 지명권만', () => {
     const old = GameSession.create(store, { year: 2019, teamIdx: 0, seed: 'pk-old' }, FAST);
-    const oa = old.world.teams[1].org.find((p) => !p.foreign)!;
-    expect(old.evaluateTrade(1, [], [oa], 0, { give: [{ draft: 2020, round: 1, from: 0 }], get: [] }).message).toContain('2020년부터');
+    expect(old.pickTradeOpen).toBe(true);
+    const real = GameSession.create(store, { year: 2019, teamIdx: 0, seed: 'pk-old', settings: { ...PRESETS.normal, pickTradeEra: 0 } }, FAST);
+    const oa = real.world.teams[1].org.find((p) => !p.foreign)!;
+    expect(real.pickTradeOpen).toBe(false);
+    expect(real.evaluateTrade(1, [], [oa], 0, { give: [{ draft: 2020, round: 1, from: 0 }], get: [] }).message).toContain('2020년부터');
+    const early = GameSession.create(store, { year: 1982, teamIdx: 0, seed: 'pk-1982' }, FAST);
+    expect(early.pickTradeOpen).toBe(true);
+    expect(early.ownedPicks(0).length).toBeGreaterThan(0);
 
     const g = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'pk-rules' }, FAST);
     const a = g.world.teams[1].org.find((p) => !p.foreign)!;

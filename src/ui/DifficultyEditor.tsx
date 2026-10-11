@@ -6,7 +6,9 @@ export function DifficultyEditor({ value, onChange, disabled }: { value: Difficu
     <div className="difficulty-grid">
       {SETTING_DEFS.map((d) => {
         // 지금 값이 목록에 없으면(예전 값) 가장 가까운 것을 보여 준다
-        const cur = d.options.reduce((best, o) => (Math.abs(o.v - value[d.key]) < Math.abs(best.v - value[d.key]) ? o : best), d.options[0]);
+        // 예전 저장에 없는 항목(지명권 트레이드)은 첫 선택지(기본값)로 본다
+        const v = value[d.key] ?? d.options[0].v;
+        const cur = d.options.reduce((best, o) => (Math.abs(o.v - v) < Math.abs(best.v - v) ? o : best), d.options[0]);
         return (
           <label key={d.key} title={d.note}>
             <span className="small"><strong>{d.label}</strong></span>

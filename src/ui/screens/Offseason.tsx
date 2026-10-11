@@ -799,7 +799,7 @@ function PickPanel() {
       <div className="row-between wrap">
         <h2>우리 지명권</h2>
         <span className="muted small">
-          {drafts[0]} 입단 드래프트 1라운드 예상 {slot}순위 (지난 시즌 역순){!session.pickTradeOpen && ` · 지명권 트레이드는 ${PICK_TRADE_FROM}년부터`}
+          {drafts[0]} 입단 드래프트 1라운드 예상 {slot}순위 (지난 시즌 역순){!session.pickTradeOpen && ` · 지명권 트레이드는 ${PICK_TRADE_FROM}년부터 (세부 난이도에서 바꿀 수 있음)`}
         </span>
       </div>
       <div className="scroll">
