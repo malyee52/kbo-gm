@@ -18,6 +18,7 @@ import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { ops } from './stats';
+import { futuresSeason } from '../league/futures';
 import { judgeScenario, scenarioById } from '../league/scenarios';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import {
@@ -418,6 +419,13 @@ export class GameSession {
   private startEntry(): void {
     const ts = this.season.refresh(this.teamIdx);
     this.season.setManualEntry(this.teamIdx, activeOf(ts).map((p) => p.idx));
+  }
+
+  /** 지금까지의 퓨처스리그(2군) 성적과 순위 (league/futures.ts, 필요할 때 계산). AI 구단 1군은 지금 명단을 읽기만 한다 */
+  futures(): ReturnType<typeof futuresSeason> {
+    const mine = new Set(this.registered().map((p) => p.idx));
+    return futuresSeason(this.world, this.season, this.league.seed, (t) =>
+      (t === this.teamIdx ? mine : new Set(activeOf(this.season.teamSeasons[t]).map((p) => p.idx))));
   }
 
   /** 다음 경기일 기준 1군 (엔진이 실제로 쓸 명단). 플레이어가 정한 명단에서 결장 선수는 빠지고 임시 승격 선수가 들어간다 */

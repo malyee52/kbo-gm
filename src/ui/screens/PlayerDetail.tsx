@@ -1,4 +1,5 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 실제 기록, 계약.
+import { futuresText } from './Roster';
 import { useEffect, useRef } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
 import { absenceLabel, defenseAt, defenseGrade, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
@@ -89,6 +90,10 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           <div className="scroll">
             {p.isPitcher ? <PitTable rows={[{ label: String(year), l: session.season.pit[p.idx] }]} /> : <BatTable rows={[{ label: String(year), l: session.season.bat[p.idx] }]} />}
           </div>
+          {session.phase === 'season' && p.teamIdx >= 0 && (() => {
+            const f = futuresText(session.futures().lines.get(p.idx));
+            return f !== '-' ? <p className="small">퓨처스리그(2군): {f}</p> : null;
+          })()}
         </section>
 
         <section>
