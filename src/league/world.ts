@@ -110,6 +110,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       value: lp.isPitcher ? pitValue(pit!, lg) : batValue(bat!, lg),
       debutEstimate: lp.estimated,
       real: lp.real,
+      ...(lp.dev ? { dev: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
       ...(lp.birthYearEstimated ? { ageEstimated: true } : {}),
     };

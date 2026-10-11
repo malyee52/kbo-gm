@@ -564,8 +564,12 @@ function ReleasePanel({ act }: { act: Act }) {
   const ranked = [...plan.order, ...plan.kept];
   const mine = [
     ...ranked,
-    ...session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state !== 'serving' && !ranked.includes(p)),
+    ...session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state !== 'serving' && !p.dev && !ranked.includes(p)),
   ];
+  const devs = session.league.players.filter((p) => p.team === session.teamIdx && p.dev);
+  const devPool = session.devPool().sort((a, b) => (b.scoutPotential ?? b.potential) - (a.scoutPotential ?? a.potential) || a.id.localeCompare(b.id));
+  const ageOf = (p: (typeof mine)[number]) => (p.birthYear ? session.offseason!.year + 1 - p.birthYear : 99);
+  const canDev = (p: (typeof mine)[number]) => !p.foreign && ageOf(p) <= Off.DEV_MAX_AGE && p.contract.kind !== 'fa' && devs.length < Off.DEV_LIMIT;
   const over = mine.length - ORG_LIMIT;
   const claimable = session.claimable().sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id) || a.id.localeCompare(b.id));
   return (
@@ -596,13 +600,60 @@ function ReleasePanel({ act }: { act: Act }) {
                   </td>
                   <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
                   <td className="small">{p.foreign ? dollarText(p.contract.salary) : won(p.contract.salary)}</td>
-                  <td><button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button></td>
+                  <td>
+                    {canDev(p) && <button type="button" className="small-btn" title="방출하지 않고 육성선수로 돌립니다 (정원에서 빠지고, 시즌 중 5월 1일부터 정식 등록)" onClick={() => act(session.toDev(p.id))}>육성 전환</button>}{' '}
+                    <button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      <div className="panel">
+        <h2>육성선수 <span className="muted small">{devs.length}/{Off.DEV_LIMIT}명</span></h2>
+        <p className="muted small">
+          육성선수는 정원({ORG_LIMIT}명) 밖이고 최저 연봉입니다. 2군(퓨처스리그)에서 뛰며 성장하고, 1군에는 정식 선수로 등록한 뒤에만 나갈 수 있습니다
+          (시즌 중 5월 1일부터 7월 31일까지, 또는 오프시즌 정원 정리 때, 정원 안에서). {Off.DEV_MAX_AGE}세 이하 국내 선수만 육성선수로 돌리거나 데려올 수 있습니다.
+        </p>
+        {devs.length > 0 && (
+          <table>
+            <tbody>
+              {devs.map((p) => {
+                const i = info(p);
+                return (
+                  <tr key={p.id}>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>잠재 {i.pot ?? '-'}</td>
+                    <td><button type="button" className="small-btn" disabled={mine.length >= ORG_LIMIT} title={mine.length >= ORG_LIMIT ? '정원이 차 있습니다' : undefined} onClick={() => act(session.promoteDevOff(p.id))}>정식 등록</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {devPool.length > 0 && (
+        <div className="panel">
+          <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수 {devPool.length}명</span></h3>
+          <div className="scroll pick">
+            <table>
+              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재(평가)</th><th /></tr></thead>
+              <tbody>
+                {devPool.slice(0, 40).map((p) => {
+                  const i = info(p);
+                  return (
+                    <tr key={p.id}>
+                      <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                      <td><button type="button" className="small-btn" disabled={devs.length >= Off.DEV_LIMIT} onClick={() => act(session.signDev(p.id))}>육성 영입</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted small">단계를 마감하면 AI 구단이 남은 선수 가운데 잠재력이 높은 선수를 육성선수로 데려갑니다.</p>
+        </div>
+      )}
       <div className="panel">
         <h2>방출 선수 영입 <span className="muted small">{claimable.length}명</span></h2>
         <p className="muted small">

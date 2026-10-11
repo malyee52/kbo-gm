@@ -10,6 +10,7 @@ import {
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { Grade, HAND, PlayerLink, posName, useGame } from '../context';
 import type { FuturesLine } from '../../league/futures';
+import { ORG_LIMIT } from '../../league/salary';
 
 type Kind = 'hit' | 'pit';
 type SortKey = 'value' | 'name' | 'age' | 'g1' | 'g2' | 'g3' | 'g4' | 'stat' | 'saber';
@@ -152,6 +153,7 @@ export function Roster() {
           <h1>선수단</h1>
           <p className="muted small">
             1군 {first.length}/{rules.rosterSize}명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit}명 ·{' '}
+            정식 {session.regularCount()}/{ORG_LIMIT}명{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}명` : ''} ·{' '}
             {view.manual ? '엔트리 직접 관리' : '엔트리 AI가 관리'}
           </p>
         </div>
@@ -234,12 +236,20 @@ export function Roster() {
                     const roleText = inFirst || view.callUps.has(p.idx) ? (view.role.get(p.idx) ?? (session.isAbsent(p) ? '결장' : '-')) : '';
                     return (
                       <tr key={p.idx}>
-                        <td className="l"><PlayerLink p={p} /></td>
+                        <td className="l"><PlayerLink p={p} />{p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}</td>
                         <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
                         {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
                         {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
                         <td>
-                          {(() => {
+                          {p.dev ? (() => {
+                            const why = session.convertBlock(p);
+                            return (
+                              <button type="button" className="small-btn" disabled={!!why} title={why ?? '정식 선수로 등록합니다 (2군에 남고, 1군은 따로 올립니다)'}
+                                onClick={() => { const r = session.convertDev(p); setMsg({ errors: r.ok ? [] : [r.message], warnings: [], who: r.ok ? r.message : undefined }); changed(); }}>
+                                정식 등록
+                              </button>
+                            );
+                          })() : (() => {
                             const rd = !inFirst && view.manual ? session.reregisterDay(p) : null;
                             return (
                               <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage || rd !== null}

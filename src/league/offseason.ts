@@ -26,7 +26,7 @@ import {
   SERVICE_SHARE, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
-import type { LeaguePlayer, LeagueState } from './types';
+import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { isFuturesTeam, worldFromLeague } from './world';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
@@ -134,6 +134,8 @@ export interface OffseasonState {
     regular?: number;
     asia?: number;
   } | null;
+  /** 실제 육성선수 계약 신인 (드래프트 풀 밖, 정원 정리 때 육성선수로 데려온다). 2026-10-11 추가 */
+  devExtra?: string[];
   draft: {
     order: number[];
     /** 전체 지명 순 구단 (샐러리캡 제재로 1라운드 순서가 바뀔 수 있다, M7). 없으면 order를 라운드마다 반복 */
@@ -1147,6 +1149,23 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)));
     pool.push(p.id);
   });
+  // 실제 육성선수 계약 신인: 드래프트에는 안 나오고 정원 정리 때 육성선수로 데려올 수 있다 (devPool). 지명 난수와 따로 굴린다
+  const devRows = (store.drafts?.[String(year + 1)] ?? []).filter((d) => d.kind === '육성선수');
+  const devRng = new Rng(`${league.seed}/dev-rookies/${year}`);
+  off.devExtra = devRows.map((d, i) => makeDraftee(league, view, devRng, taken, d, real.length + i, year + 1, store, () => (ci ??= careerIndex(store))).id);
+  // 드래프트 미지명 입단 테스트 선수 (가상): 실제 육성 계약 자료가 모자란 만큼. 대부분 1군감이 아니지만 가끔 늦게 피는 선수가 있다 (임시값)
+  for (let i = devRows.length; i < DEV_TRYOUTS; i++) {
+    const univ = devRng.chance(0.5);
+    const potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(1 - devRng.next()) * 0.55) ** 1.2;
+    const age = univ ? 23 : 19;
+    const runs = univ ? potential * 0.3 - 10 : potential * 0.1 - 15;
+    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs: runs + devRng.range(-2, 2), potential }, year);
+    p.school = univ ? 'UNIV' : 'HS';
+    p.scoutPotential = scoutView(league, potential, devRng);
+    view.ctx.potential?.set(p.id, aiPotential(league, p));
+    p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year + 1 };
+    off.devExtra.push(p.id);
+  }
   for (let i = 0; i < (real?.length ? 0 : DRAFT_POOL); i++) {
     const univ = rng.chance(0.3);
     // 잠재력 분포: 실제 입단 동기(2012~2018년 입단)의 전성기 기여 순위에 맞춘 식 (M6).
@@ -1315,7 +1334,126 @@ function finishSalary(league: LeagueState, off: OffseasonState): void {
 
 /** 소속 인원 (정원 68명 대상). 복무 중인 선수(군 보류)는 세지 않는다 */
 function orgSize(league: LeagueState, team: number): number {
-  return league.players.filter((p) => p.team === team && !isServing(p)).length;
+  return league.players.filter((p) => p.team === team && !isServing(p) && !p.dev).length;
+}
+
+// ---- 육성선수 (2026-10-11, docs/roadmap.md 7.3)
+
+/** 구단당 육성선수 상한 (임시값) */
+export const DEV_LIMIT = 12;
+/** 육성선수로 돌리거나 데려올 수 있는 나이 (다음 시즌 나이, 임시값) */
+export const DEV_MAX_AGE = 25;
+/** 해마다 육성선수 후보로 나오는 드래프트 미지명 선수 수 (실제 육성 계약 자료 포함, 임시값) */
+const DEV_TRYOUTS = 30;
+/** AI 구단이 한 오프시즌에 육성선수로 돌리는 최대 인원 (임시값) */
+const AI_DEV_PER_YEAR = 3;
+/** AI 구단이 채우는 육성선수 수 (임시값) */
+const AI_DEV_TARGET = 6;
+/** 자기 선수를 육성선수로 돌릴 만한 잠재력 (런, AI가 보는 값, 임시값) */
+const DEV_MIN_POTENTIAL = 3;
+/** 미지명·방출 선수를 육성선수로 데려올 만한 잠재력 (임시값) */
+const DEV_SIGN_MIN_POTENTIAL = -3;
+
+export function devCount(league: LeagueState, team: number): number {
+  return league.players.filter((p) => p.team === team && p.dev).length;
+}
+
+function devContract(off: OffseasonState): Contract {
+  return { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
+}
+
+/** 육성선수로 데려올 수 있는 선수: 드래프트에서 아무도 안 뽑은 신인, 이번에 방출된 어린 선수 (아직 아무도 안 데려감) */
+export function devPool(league: LeagueState, off: OffseasonState): LeaguePlayer[] {
+  const lp = byId(league);
+  const ids = new Set([...(off.draft?.pool ?? []), ...(off.devExtra ?? []), ...(off.released ?? []).map((r) => r.id)]);
+  return [...ids].map((id) => lp.get(id)).filter((p): p is LeaguePlayer => !!p && p.team === -1 && !p.foreign && ageIn(p, off.year + 1) <= DEV_MAX_AGE);
+}
+
+/** 정원 정리 단계: 우리 선수를 육성선수로 돌린다 (방출하지 않고 정원에서 뺀다) */
+export function toDevByUser(league: LeagueState, off: OffseasonState, id: string): OfferCheck {
+  if (off.stage !== 'release') return { ok: false, message: '정원 정리 단계에서만 할 수 있습니다.' };
+  const p = league.players.find((x) => x.id === id && x.team === off.userTeam);
+  if (!p || p.dev) return { ok: false, message: '육성선수로 돌릴 수 없는 선수입니다.' };
+  if (p.foreign || ageIn(p, off.year + 1) > DEV_MAX_AGE) return { ok: false, message: `${DEV_MAX_AGE}세 이하 국내 선수만 육성선수로 돌릴 수 있습니다.` };
+  if (p.contract.until > off.year + 1 && p.contract.kind === 'fa') return { ok: false, message: 'FA 계약 선수는 육성선수로 돌릴 수 없습니다.' };
+  if (devCount(league, off.userTeam) >= DEV_LIMIT) return { ok: false, message: `육성선수는 ${DEV_LIMIT}명까지입니다.` };
+  p.dev = true;
+  p.contract = devContract(off);
+  log(off, 'release', `${p.name}, 육성선수로 전환`, true);
+  return { ok: true, message: `${p.name}을(를) 육성선수로 돌렸습니다.` };
+}
+
+/** 정원 정리 단계: 육성선수로 데려온다 (드래프트 미지명·방출 선수) */
+export function signDevByUser(league: LeagueState, off: OffseasonState, id: string): OfferCheck {
+  if (off.stage !== 'release') return { ok: false, message: '정원 정리 단계에서만 할 수 있습니다.' };
+  const p = devPool(league, off).find((x) => x.id === id);
+  if (!p) return { ok: false, message: '데려올 수 없는 선수입니다.' };
+  if (devCount(league, off.userTeam) >= DEV_LIMIT) return { ok: false, message: `육성선수는 ${DEV_LIMIT}명까지입니다.` };
+  p.team = off.userTeam;
+  p.dev = true;
+  p.entryYear ??= off.year + 1;
+  p.contract = devContract(off);
+  log(off, 'release', `육성선수 ${p.name} 영입 (최저 연봉)`, true);
+  return { ok: true, message: `${p.name}을(를) 육성선수로 데려왔습니다.` };
+}
+
+/** 오프시즌에 육성선수를 정식 선수로 (정원 안일 때) */
+export function promoteDevByUser(league: LeagueState, off: OffseasonState, id: string): OfferCheck {
+  if (off.stage !== 'release') return { ok: false, message: '정원 정리 단계에서만 할 수 있습니다.' };
+  const p = league.players.find((x) => x.id === id && x.team === off.userTeam && x.dev);
+  if (!p) return { ok: false, message: '정식 등록할 육성선수가 아닙니다.' };
+  if (orgSize(league, off.userTeam) >= ORG_LIMIT) return { ok: false, message: `정원(${ORG_LIMIT}명)이 차 있습니다.` };
+  p.dev = false;
+  log(off, 'release', `${p.name}, 정식 선수로 등록`, true);
+  return { ok: true, message: `${p.name}을(를) 정식 선수로 등록했습니다.` };
+}
+
+/** AI 구단: 현재 가치 하위 40% 안의 25세 이하 국내 선수 가운데 잠재력이 높은 순으로 n명까지 육성선수로. 돌린 수 */
+function aiToDev(league: LeagueState, off: OffseasonState, view: LeagueView, team: number, n: number): number {
+  if (n <= 0) return 0;
+  const roster = league.players.filter((p) => p.team === team && !isServing(p) && !p.dev);
+  const now = (p: LeaguePlayer) => { const sp = view.sim.get(p.id); return sp ? playerValue(sp, view.ctx, [1]) : 0; };
+  const byNow = [...roster].sort((a, b) => now(a) - now(b) || a.id.localeCompare(b.id));
+  const low = new Set(byNow.slice(0, Math.floor(byNow.length * 0.4)).map((p) => p.id));
+  const cands = roster
+    .filter((p) => low.has(p.id) && !p.foreign && p.contract.kind !== 'fa' && p.contract.kind !== 'nonFA' && ageIn(p, off.year + 1) <= DEV_MAX_AGE && aiPotential(league, p) >= DEV_MIN_POTENTIAL)
+    .sort((a, b) => aiPotential(league, b) - aiPotential(league, a) || a.id.localeCompare(b.id))
+    .slice(0, n);
+  for (const p of cands) {
+    p.dev = true;
+    p.contract = devContract(off);
+  }
+  return cands.length;
+}
+
+/**
+ * 정원 정리를 마칠 때 AI 구단의 육성선수: 남는 자리가 있으면 가장 나은 육성선수를 정식으로 올리고,
+ * 남은 미지명·방출 선수 가운데 잠재력이 높은 선수를 AI_DEV_TARGET명까지 육성선수로 데려간다 (구단을 돌아가며 하나씩).
+ */
+function aiDevMarket(league: LeagueState, off: OffseasonState): void {
+  const ai = league.teams.map((_, t) => t).filter((t) => t !== off.userTeam && !isFuturesTeam(league, t, off.year + 1));
+  const pot = (p: LeaguePlayer) => aiPotential(league, p);
+  for (const t of ai) {
+    const devs = league.players.filter((p) => p.team === t && p.dev).sort((a, b) => pot(b) - pot(a) || a.id.localeCompare(b.id));
+    for (const p of devs) {
+      if (orgSize(league, t) >= ORG_LIMIT) break;
+      p.dev = false;
+    }
+  }
+  // 미지명·방출 선수는 최저 연봉이라 기대치가 낮아도 데려간다 (DEV_SIGN_MIN_POTENTIAL)
+  const pool = devPool(league, off).filter((p) => pot(p) >= DEV_SIGN_MIN_POTENTIAL).sort((a, b) => pot(b) - pot(a) || a.id.localeCompare(b.id));
+  let i = 0;
+  for (let round = 0; round < AI_DEV_TARGET && i < pool.length; round++) {
+    for (const t of ai) {
+      if (i >= pool.length) break;
+      if (devCount(league, t) >= AI_DEV_TARGET) continue;
+      const p = pool[i++];
+      p.team = t;
+      p.dev = true;
+      p.entryYear ??= off.year + 1;
+      p.contract = devContract(off);
+    }
+  }
 }
 
 /** 정원 정리 때 지키는 최소 인원 (복무 중 제외, 임시값): 포수 3명, 투수·야수 각 18명. 모자라면 그 선수는 방출 순서에서 건너뛴다 */
@@ -1345,7 +1483,8 @@ export function releaseOrder(league: LeagueState, off: OffseasonState, view: Lea
 /** releaseOrder를 둘로: order = 최소 인원을 지키며 차례로 내보낼 수 있는 선수, kept = 최소 인원 때문에 뒤로 미룬 선수 */
 export function releaseSplit(league: LeagueState, off: OffseasonState, view: LeagueView, team: number,
                              valueOf: (p: LeaguePlayer) => number = (p) => releaseValue(view, p)): { order: LeaguePlayer[]; kept: LeaguePlayer[] } {
-  const roster = league.players.filter((p) => p.team === team && !isServing(p));
+  // 육성선수는 정원에 들지 않으므로 방출 순서에서 뺀다
+  const roster = league.players.filter((p) => p.team === team && !isServing(p) && !p.dev);
   const left = {
     C: roster.filter((p) => !p.isPitcher && p.pos === 'C').length,
     P: roster.filter((p) => p.isPitcher).length,
@@ -1385,12 +1524,16 @@ function enterRelease(league: LeagueState, off: OffseasonState, store: Store, pa
     if (t === off.userTeam) continue;
     const over = orgSize(league, t) - ORG_LIMIT;
     if (over <= 0) continue;
-    const cands = releaseOrder(league, off, view, t).slice(0, over);
+    // 먼저 지금 쓰임이 적은(구단 안 현재 가치 하위 40%) 어린 유망주를 육성선수로 돌려 자리를 만든다 (실제 구단들의 육성선수 전환)
+    // 한 해에 넘친 인원의 절반·AI_DEV_PER_YEAR명까지만 (나머지는 방출: 방출 선수 시장이 돌아가게)
+    const devs = aiToDev(league, off, view, t, Math.min(Math.floor(over / 2), AI_DEV_PER_YEAR, AI_DEV_TARGET - devCount(league, t)));
+    const rest = over - devs;
+    const cands = rest > 0 ? releaseOrder(league, off, view, t).slice(0, rest) : [];
     for (const p of cands) {
       p.team = -1;
       off.released.push({ id: p.id, from: t });
     }
-    log(off, 'release', `${league.teams[t].name}, ${cands.length}명 방출`, false);
+    log(off, 'release', `${league.teams[t].name}, ${cands.length}명 방출${devs ? `, ${devs}명 육성선수 전환` : ''}`, false);
   }
 }
 
@@ -1523,6 +1666,7 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
       return;
     case 'release':
       releaseMarket(league, off, store, params);
+      aiDevMarket(league, off);
       off.stage = 'ready';
       return;
     case 'ready':

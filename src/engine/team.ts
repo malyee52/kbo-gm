@@ -232,7 +232,8 @@ function allowedForeigners(avail: SimPlayer[], limit: number): Set<number> {
 export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number): void {
   const limit = world.rules.foreignLimit;
   const manual = ts.manual ?? null;
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day;
+  // 육성선수는 1군에 못 나간다 (정식 등록 전)
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev;
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
   if (manual) {
@@ -255,7 +256,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
     const have = availAll.filter((p) => p.isPitcher === isPitcher).length;
     if (have >= need) return;
     const out = ts.team.org
-      .filter((p) => p.isPitcher === isPitcher && st.absentUntil[p.idx] > day)
+      .filter((p) => p.isPitcher === isPitcher && st.absentUntil[p.idx] > day && !p.dev)
       .sort((a, b) => st.absentUntil[a.idx] - st.absentUntil[b.idx]);
     availAll.push(...out.slice(0, need - have));
   };
