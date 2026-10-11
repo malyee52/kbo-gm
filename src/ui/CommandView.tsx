@@ -11,7 +11,7 @@ import type { CommandPreview } from '../game/session';
 import { fixed2, ops, rate3 } from '../game/stats';
 import { Diamond } from './GameCast';
 import { useGame } from './context';
-import { teamColor } from './teams';
+import { teamVars } from './teams';
 
 type Tactic = '' | 'swing' | 'bunt';
 const TACTIC_LABEL: Record<Tactic, string> = { '': '자동 (감독)', swing: '강공', bunt: '희생번트' };
@@ -93,7 +93,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const date = formatDate(W.year, s.day);
 
   return (
-    <dialog ref={ref} className="player cast command" onClose={onCancel} style={{ ['--team' as string]: teamColor(session.team.franchise) }}>
+    <dialog ref={ref} className="player cast command tv" onClose={onCancel} style={teamVars(session.team.franchise, session.team.name)}>
       <div className="dialog-body">
         <header className="row-between">
           <div>

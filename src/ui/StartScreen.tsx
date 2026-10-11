@@ -192,7 +192,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                   role="radio"
                   aria-checked={teamIdx === i}
                   className={`team-card${teamIdx === i ? ' on' : ''}`}
-                  style={{ ['--c' as string]: teamColor(t.franchise) }}
+                  style={{ ['--c' as string]: teamColor(t.franchise, t.name) }}
                   onClick={() => setTeamIdx(i)}
                   disabled={!!busy}
                 >

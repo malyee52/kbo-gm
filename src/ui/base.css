@@ -1,66 +1,79 @@
 /* 디자인 토큰과 공통 부품. 게임 화면과 엔진 시험 화면이 함께 쓴다.
    방향: "스코어보드" — 어두운 사이드바에 구단 색 한 줄, 따뜻한 회백색 바탕, 숫자는 고정폭(tabular). 구단 로고·사진은 쓰지 않는다. */
+/* 2026-10-12 UI 개편: 밝은 모드는 '구단색 몰입'(D), 다크 모드는 '나이트 게임'(A, 남색 바탕 + 호박색 강조).
+   게임 화면에서는 .tv(구단 색 변수를 받은 요소)가 강조색을 구단색으로 바꾼다 (game.css). */
 :root {
-  --bg: #f2f3ef;
+  --bg: #f6f5f3;
   --panel: #ffffff;
-  --panel-2: #f7f8f5;
-  --fg: #16201b;
-  --muted: #65716a;
-  --faint: #9aa59e;
-  --line: #e0e4de;
-  --line-strong: #c6cdc5;
-  --accent: #176b47;
-  --accent-hover: #125a3b;
+  --panel-2: #f6f5f3;
+  --fg: #17181b;
+  --muted: #62666d;
+  --faint: #9a9ea5;
+  --line: #e7e4e0;
+  --line-strong: #d3cfca;
+  --accent: #1a1a1a;
+  --accent-hover: #333333;
   --accent-fg: #ffffff;
-  --accent-soft: #e2f0e8;
-  --warn-bg: #fff3d1;
-  --warn-fg: #6b4a00;
-  --error: #b3261e;
-  --error-bg: #fbe7e5;
+  --accent-soft: #ecebe8;
+  --warn-bg: #fff4d6;
+  --warn-fg: #5c4300;
+  --error: #b42318;
+  --error-bg: #fbe1de;
   --info-bg: #e4edfb;
-  --nav-bg: #131a16;
-  --nav-fg: #e8ece9;
-  --nav-muted: #8f9b94;
-  --nav-line: rgba(255, 255, 255, 0.08);
-  --nav-hover: rgba(255, 255, 255, 0.06);
-  --nav-on: rgba(255, 255, 255, 0.1);
-  --team: #176b47;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow-sm: 0 1px 2px rgba(20, 30, 25, 0.06), 0 1px 1px rgba(20, 30, 25, 0.04);
-  --shadow-md: 0 4px 14px rgba(20, 30, 25, 0.08);
-  --shadow-lg: 0 18px 50px rgba(20, 30, 25, 0.28);
+  --nav-bg: #131b2b;
+  --nav-fg: #eef2f8;
+  --nav-muted: #9aa7bc;
+  --nav-line: rgba(255, 255, 255, 0.1);
+  --nav-hover: rgba(255, 255, 255, 0.08);
+  --nav-on: rgba(255, 255, 255, 0.14);
+  --team: #1a1a1a;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow-sm: 0 1px 2px rgba(20, 16, 18, 0.05);
+  --shadow-md: 0 6px 18px rgba(20, 16, 18, 0.1);
+  --shadow-lg: 0 18px 50px rgba(20, 16, 18, 0.28);
   --font: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  --font-display: 'Black Han Sans', var(--font);
+  --font-num: 'Oswald', 'Pretendard Variable', system-ui, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1411;
-    --panel: #171d19;
-    --panel-2: #1c2420;
-    --fg: #e7ece8;
-    --muted: #94a199;
-    --faint: #66736b;
-    --line: #27312b;
-    --line-strong: #3a463f;
-    --accent: #4fb286;
-    --accent-hover: #67c398;
-    --accent-fg: #07130c;
-    --accent-soft: #1a3328;
-    --warn-bg: #3a3119;
-    --warn-fg: #f1d48a;
-    --error: #f2a39d;
-    --error-bg: #46231f;
-    --info-bg: #1c2e45;
-    --nav-bg: #0a0e0c;
-    --nav-fg: #e8ece9;
-    --nav-muted: #7f8c85;
+    --bg: #0e1420;
+    --panel: #172033;
+    --panel-2: #131b2b;
+    --fg: #eef2f8;
+    --muted: #9aa7bc;
+    --faint: #6b7891;
+    --line: #243049;
+    --line-strong: #2f3d5a;
+    --accent: #ffb547;
+    --accent-hover: #ffc56e;
+    --accent-fg: #1a1206;
+    --accent-soft: #3a2e14;
+    --warn-bg: #3a2e14;
+    --warn-fg: #ffd58a;
+    --error: #ff8a8a;
+    --error-bg: #3a1a20;
+    --info-bg: #1a2c48;
+    --nav-bg: #131b2b;
+    --nav-fg: #eef2f8;
+    --nav-muted: #9aa7bc;
+    --team: #ffb547;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.7);
     color-scheme: dark;
   }
 }
+
+/* 넓은 화면: 화면 전체를 키워 오른쪽이 비지 않게 한다 (브라우저 확대와 같은 효과).
+   확대된 요소 안의 vh·vw도 같이 커지므로, 화면 높이·폭을 쓰는 곳은 var(--z)로 나눈다 */
+:root { --z: 1; }
+@media (min-width: 1800px) { :root { --z: 1.25; } }
+@media (min-width: 2200px) { :root { --z: 1.5; } }
+@media (min-width: 3000px) { :root { --z: 2; } }
+html { zoom: var(--z); }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }

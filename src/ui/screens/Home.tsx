@@ -1,6 +1,5 @@
-// 홈: 우리 구단 요약, 다음 경기, 최근 결과, 알림, 순위 요약.
+// 홈 (2026-10-12 개편): 카드 4장 — 다음 경기 · 알림 · 최근 경기 · 순위(우리 팀 앞뒤). 우리 구단 성적은 위쪽 머리 부분에 있다.
 import { ScenarioBanner } from '../ScenarioBanner';
-import { Headlines } from './Articles';
 import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
@@ -27,6 +26,11 @@ export function Home() {
   const cut = session.world.rules.postseasonTeams;
   const moves = useRankMoves(order);
 
+  // 순위는 우리 팀 앞뒤 5줄만 (전체는 리그 > 순위)
+  const at = order.indexOf(me);
+  const from = Math.max(0, Math.min(at - 2, order.length - 5));
+  const near = order.slice(from, from + 5);
+
   return (
     <div className="stack">
       {session.done && (
@@ -41,101 +45,80 @@ export function Home() {
           </span>
         </div>
       )}
-      <section className="cards">
-        <div className="card hero">
-          <h2>우리 구단 <span className="muted small">{year} · 포스트시즌 진출권 상위 {cut}팀</span></h2>
-          <p className="big">{rec.g === 0 ? '개막 전' : <><CountUp value={rank} />위 <span className="muted">/ {s.teams.length}</span></>}</p>
-          <div className="stats">
-            <div className="stat"><span className="stat-label">승-패-무</span><span className="stat-value">{rec.w}-{rec.l}-{rec.t}</span></div>
-            <div className="stat"><span className="stat-label">승률</span><span className="stat-value">{rec.g === 0 ? '-' : rate3(winPct(rec))}</span></div>
-            <div className="stat"><span className="stat-label">게임차</span><span className="stat-value">{rec.g === 0 ? '-' : rank === 1 ? '선두' : gamesBehind(leader, rec).toFixed(1)}</span></div>
-            <div className="stat"><span className="stat-label">최근 10경기</span><span className="stat-value">{form.w}-{form.l}{form.t ? `-${form.t}` : ''}{form.streak && <small>{form.streak}</small>}</span></div>
-            <div className="stat"><span className="stat-label">득점 / 실점</span><span className="stat-value">{rec.rs}<small>/ {rec.ra}</small></span></div>
-          </div>
-          <ScenarioBanner />
-          {session.owner.goal?.year === year && (
-            <p className="small">
-              구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong><CountUp value={session.cashNow()} format={(v) => won(Math.round(v))} /></strong>{' '}
-              <button type="button" className="link" onClick={() => go('club')}>구단 현황</button>
-            </p>
-          )}
-        </div>
-        <div className="card">
+      <ScenarioBanner />
+      <section className="dash">
+        <div className="card wide">
           <h2>다음 경기</h2>
           {next ? <NextGame next={next} /> : <p className="muted">남은 경기가 없습니다.</p>}
         </div>
-      </section>
 
-      <section className="two">
-        <div>
-          <h2>최근 결과</h2>
-          {recent.length === 0 ? (
-            <p className="muted">아직 치른 경기가 없습니다. 위의 진행 버튼으로 시즌을 시작하세요.</p>
-          ) : (
-            <div className="scroll">
-              <table>
-                <tbody>
-                  {recent.map(({ g, i }) => {
-                    const home = g.home === me;
-                    const mine = home ? g.homeRuns : g.awayRuns;
-                    const theirs = home ? g.awayRuns : g.homeRuns;
-                    const r = mine > theirs ? '승' : mine < theirs ? '패' : '무';
-                    return (
-                      <tr key={i}>
-                        <td className="l muted">{shortDate(year, g.day)}</td>
-                        <td className="l">{home ? 'vs' : '@'} <TeamName idx={home ? g.away : g.home} /></td>
-                        <td><span className={`res res-${r}`}>{r}</span> {mine}:{theirs}{g.innings > 9 ? ` (${g.innings}회)` : ''}</td>
-                        <td><button type="button" className="link" onClick={() => go('schedule', i)}>박스스코어</button></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        <div className="card side">
+          <h2>알림 <button type="button" className="link small card-more" onClick={() => go('articles')}>기사</button></h2>
+          <ActiveEffects />
+          {news.length === 0 ? <p className="muted">알림이 없습니다.</p> : (
+            <ul className="alerts">
+              {news.slice(0, 5).map((n, k) => (
+                <li key={k} className={`news-${n.kind}`}>
+                  <span>{n.text}</span>
+                  <span className="muted small">{n.day < 0 ? `${n.year ?? year} 오프시즌` : shortDate(n.year ?? year, n.day)}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-        <div>
-          <h2>순위 요약</h2>
-          <div className="scroll">
-            <table>
-              <thead><tr><th>순위</th><th className="l">팀</th><th>승</th><th>패</th><th>무</th><th>게임차</th></tr></thead>
-              <tbody>
-                {order.map((t, k) => (
-                  <tr key={t} className={`${t === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}${moves.has(t) ? ' moved' : ''}`}>
-                    <td>{k + 1}{moves.has(t) && <span className={`move ${moves.get(t)! > 0 ? 'up' : 'down'}`}>{moves.get(t)! > 0 ? '▲' : '▼'}{Math.abs(moves.get(t)!)}</span>}</td><td className="l"><TeamName idx={t} /></td>
-                    <td>{s.teams[t].w}</td><td>{s.teams[t].l}</td><td>{s.teams[t].t}</td>
-                    <td>{k === 0 ? '-' : gamesBehind(leader, s.teams[t]).toFixed(1)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+        <div className="card wide">
+          <h2>최근 경기 <button type="button" className="link small card-more" onClick={() => go('schedule')}>일정·결과 전체</button></h2>
+          {recent.length === 0 ? (
+            <p className="muted">아직 치른 경기가 없습니다. 위쪽 "다음 경기"로 시즌을 시작하세요.</p>
+          ) : (
+            <div className="tiles">
+              {recent.map(({ g, i }) => {
+                const home = g.home === me;
+                const mine = home ? g.homeRuns : g.awayRuns;
+                const theirs = home ? g.awayRuns : g.homeRuns;
+                const r = mine > theirs ? '승' : mine < theirs ? '패' : '무';
+                return (
+                  <button key={i} type="button" className={`tile r-${r}`} onClick={() => go('schedule', i)} title="박스스코어">
+                    <span className="small">{shortDate(year, g.day)} {home ? 'vs' : '@'} {session.teamInfo(home ? g.away : g.home).name}</span>
+                    <strong>{r} {mine}:{theirs}</strong>
+                    {g.innings > 9 && <span className="small">{g.innings}회</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="small muted dash-line">
+            {rec.g > 0 && <>승률 <strong>{rate3(winPct(rec))}</strong> · 최근 10경기 <strong>{form.w}-{form.l}{form.t ? `-${form.t}` : ''}</strong> · 득점 {rec.rs} / 실점 {rec.ra}· </>}
+            {session.owner.goal?.year === year && <>구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong><CountUp value={session.cashNow()} format={(v) => won(Math.round(v))} /></strong></>}
+          </p>
         </div>
-      </section>
 
-      <ActiveEffects />
-
-      <Headlines />
-
-      <section>
-        <h2>알림</h2>
-        {news.length === 0 ? <p className="muted">알림이 없습니다.</p> : (
-          <ul className="news">
-            {news.map((n, k) => (
-              <li key={k} className={`news-${n.kind}`}>
-                <span className="muted small">{n.day < 0 ? `${n.year ?? year} 오프시즌` : formatDate(n.year ?? year, n.day)}</span>
-                <span>{n.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="card side">
+          <h2>순위 <span className="muted small">상위 {cut}팀 가을야구</span> <button type="button" className="link small card-more" onClick={() => go('standings')}>전체 순위</button></h2>
+          <table className="mini">
+            <tbody>
+              {near.map((t) => {
+                const k = order.indexOf(t);
+                return (
+                  <tr key={t} className={`${t === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}${moves.has(t) ? ' moved' : ''}`}>
+                    <td className="l">{k + 1}{moves.has(t) && <span className={`move ${moves.get(t)! > 0 ? 'up' : 'down'}`}>{moves.get(t)! > 0 ? '▲' : '▼'}{Math.abs(moves.get(t)!)}</span>}</td>
+                    <td className="l"><TeamName idx={t} /></td>
+                    <td>{s.teams[t].w}-{s.teams[t].l}{s.teams[t].t ? `-${s.teams[t].t}` : ''}</td>
+                    <td className="muted">{k === 0 ? '-' : gamesBehind(leader, s.teams[t]).toFixed(1)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
   );
 }
 
 function NextGame({ next }: { next: { day: number; home: number; away: number } }) {
-  const { session } = useGame();
+  const { session, command } = useGame();
   const me = session.teamIdx;
   const home = next.home === me;
   const opp = home ? next.away : next.home;
@@ -146,14 +129,23 @@ function NextGame({ next }: { next: { day: number; home: number; away: number } 
     const p = session.season.pit[idx];
     return p.g ? `${p.w}승 ${p.l}패 평균자책 ${fixed2((p.er * 27) / Math.max(1, p.outs))}` : '시즌 첫 등판';
   };
+  const team = (idx: number, sp: typeof mySp, right = false) => (
+    <div className={`vs-side${right ? ' right' : ''}`}>
+      <span className="vs-name"><TeamName idx={idx} /></span>
+      <span className="small">{sp ? <PlayerLink p={sp} /> : '선발 미정'} <span className="muted">{line(sp?.idx)}</span></span>
+    </div>
+  );
   return (
     <>
-      <p className="big">{home ? 'vs' : '@'} <TeamName idx={opp} />{isRivalry(session.league, me, opp) && <span className="tag rival">라이벌전</span>}</p>
-      <p>{formatDate(session.world.year, next.day)} · {home ? '홈' : '원정'}</p>
-      <p className="muted small">
-        예상 선발: {mySp ? <PlayerLink p={mySp} /> : '-'} <span>({line(mySp?.idx)})</span>
-        {' '}대 {oppSp ? <PlayerLink p={oppSp} /> : '-'} <span>({line(oppSp?.idx)})</span>
-      </p>
+      <p className="muted small">{formatDate(session.world.year, next.day)} · {home ? '홈' : '원정'}{isRivalry(session.league, me, opp) && <span className="tag rival">라이벌전</span>}</p>
+      <div className="vs">
+        {team(home ? opp : me, home ? oppSp : mySp)}
+        <span className="vs-mid">VS</span>
+        {team(home ? me : opp, home ? mySp : oppSp, true)}
+      </div>
+      {session.phase === 'season' && !session.done && (
+        <p className="vs-actions"><button type="button" onClick={command}>직접 지휘</button></p>
+      )}
     </>
   );
 }
