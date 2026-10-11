@@ -9,6 +9,7 @@ import {
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { Grade, HAND, PlayerLink, posName, useGame } from '../context';
+import type { FuturesLine } from '../../league/futures';
 
 type Kind = 'hit' | 'pit';
 type SortKey = 'value' | 'name' | 'age' | 'g1' | 'g2' | 'g3' | 'g4' | 'stat' | 'saber';
@@ -138,6 +139,7 @@ export function Roster() {
     return null;
   };
 
+  const fut = useMemo(() => session.futures().lines, [session, version]);
   const list = (inFirst: boolean) => {
     const rows = org.filter((p) => (kind === 'pit') === p.isPitcher && view.registered.has(p.idx) === inFirst);
     return sortPlayers(rows, sort, kind, session, grades, lg);
@@ -223,6 +225,7 @@ export function Roster() {
                   <tr>
                     <th className="l">이름</th><th className="l">역할</th>
                     {cols.map((c) => <th key={c.h} className={c.l ? 'l' : undefined} title={c.title}>{c.h}</th>)}
+                    {!inFirst && <th className="l" title="퓨처스리그(2군) 성적. 능력과 2군 출전 몫으로 만든 값">퓨처스</th>}
                     <th />
                   </tr>
                 </thead>
@@ -234,6 +237,7 @@ export function Roster() {
                         <td className="l"><PlayerLink p={p} /></td>
                         <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
                         {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
+                        {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
                         <td>
                           <button type="button" className="small-btn" onClick={() => move(p, !inFirst)} disabled={!session.canManage}>
                             {inFirst ? '2군으로' : '1군으로'}
@@ -365,4 +369,20 @@ function ServingList() {
       군 복무 중 {list.length}명 (정원 제외): {list.map((p) => `${p.name}(${p.isPitcher ? '투수' : posName(p.pos)}, ${p.military?.returnYear}년 시즌 중 복귀)`).join(', ')}
     </p>
   );
+}
+
+/** 퓨처스 기록 한 줄 */
+export function futuresText(l: FuturesLine | undefined): string {
+  if (!l) return '-';
+  if (l.bat && l.bat.pa > 0) {
+    const b = l.bat;
+    const obp = (b.h + b.bb) / Math.max(1, b.pa);
+    const slg = (b.h + b.d + 2 * b.t + 3 * b.hr) / Math.max(1, b.ab);
+    return `${b.pa}타석 ${rate3(b.h / Math.max(1, b.ab))} ${b.hr}홈런 OPS ${rate3(obp + slg)}`;
+  }
+  if (l.pit && l.pit.bf > 0) {
+    const x = l.pit;
+    return `${l.pit.gs ? `${x.gs}선발 ` : `${x.g}경기 `}${ipText(x.outs)}이닝 평균자책 ${fixed2((x.er * 27) / Math.max(1, x.outs))} ${x.so}삼진`;
+  }
+  return '-';
 }

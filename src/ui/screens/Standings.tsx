@@ -1,10 +1,12 @@
 // 순위표: 승·패·무, 승률, 게임차, 득실, 홈·원정, 최근 10경기, 연속 기록.
 import { winPct } from '../../engine';
 import { gamesBehind, rate3, recentForm } from '../../game/stats';
+import { useMemo } from 'react';
 import { TeamName, useGame } from '../context';
 
 export function Standings() {
-  const { session } = useGame();
+  const { session, version } = useGame();
+  const fut = useMemo(() => session.futures().teams, [session, version]);
   const s = session.season;
   const order = s.standings();
   const leader = s.teams[order[0]];
@@ -42,6 +44,22 @@ export function Standings() {
         </table>
       </div>
       <p className="muted small">홈·원정·최근 10경기는 승-무-패 순입니다.</p>
+
+      <h2>퓨처스리그 <span className="muted small">2군</span></h2>
+      <p className="muted small">2군 경기는 한 타석씩 돌리지 않고, 2군에 있는 선수의 능력과 출전 몫으로 성적을 만듭니다 (1군 경기 수의 약 80%). 득점·실점에서 승률을 정합니다.</p>
+      <div className="scroll">
+        <table>
+          <thead><tr><th>순위</th><th className="l">팀</th><th>경기</th><th>승</th><th>패</th><th>승률</th><th>득점</th><th>실점</th></tr></thead>
+          <tbody>
+            {fut.map((t, k) => (
+              <tr key={t.team} className={t.team === session.teamIdx ? 'me' : ''}>
+                <td>{k + 1}</td><td className="l"><TeamName idx={t.team} /></td><td>{t.g}</td><td>{t.w}</td><td>{t.l}</td>
+                <td>{t.g ? rate3(t.w / t.g) : '-'}</td><td>{t.rs}</td><td>{t.ra}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
