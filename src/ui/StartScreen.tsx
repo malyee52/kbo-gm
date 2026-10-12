@@ -5,7 +5,7 @@ import { PRESETS, type DifficultySettings } from '../league/difficulty';
 import { DifficultyEditor } from './DifficultyEditor';
 import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
-import { condText, type Tier } from '../league/campaigns';
+import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { whenText } from './saving';
@@ -35,7 +35,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saves, setSaves] = useState<SaveRecord[] | null>(null);
-  const [tier, setTier] = useState<Tier>('하');
+  const [tier, setTier] = useState<Tier>('쉬움');
+  const [kind, setKind] = useState<PlanKind>('season');
   const [startTab, setStartTab] = useState<'menu' | 'new' | 'challenge' | 'load'>('menu');
 
   useEffect(() => {
@@ -238,21 +239,26 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
         <h2>도전 시나리오 <span className="muted small">실제 구단의 그 시즌 개막에서 시작</span></h2>
         <details className="help small">
           <summary>규칙</summary>
-          시즌 도전 30개(난이도 하·중·상), 장기 캠페인 10개, 2000년 이전 클래식 캠페인 10개입니다. 위의 난이도·시드를 그대로 씁니다. 시놉시스와 실제 시즌 배경은 실제 역사에서 착안한 소개이고, 목표·기한은 게임용 설정입니다.
+          시즌 도전 36개와 장기 캠페인 60개를 실제 난이도로 나눴습니다. 쉬움은 실제로 압도적으로 우승한 팀, 중간은 강팀이었지만 우승에 닿지 못한 팀, 어려움은 최하위권이나 암흑기의 팀입니다. 위의 난이도·시드를 그대로 씁니다. 시놉시스와 실제 시즌 배경은 실제 역사에서 착안한 소개이고, 목표·기한은 게임용 설정입니다.
           여러 단계가 있으면 마지막 단계가 클리어 조건이고, 모든 단계를 기한 안에 이루면 완전 클리어입니다. 자체 육성 주전은 시작 때 만 23세 이하이거나 그 뒤 직접 지명한 선수 가운데 그 시즌 300타석·80이닝·구원 40경기를 넘긴 선수입니다.
         </details>
+        <div className="seg" role="tablist" aria-label="종류">
+          {(['season', 'long'] as PlanKind[]).map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{k === 'season' ? '시즌 도전' : '장기 캠페인'}</button>
+          ))}
+        </div>
         <div className="seg" role="tablist" aria-label="난이도">
-          {(['하', '중', '상', '장기', '클래식'] as Tier[]).map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={tier === k} className={tier === k ? 'on' : ''} onClick={() => setTier(k)}>{k === '장기' ? '장기 캠페인' : k === '클래식' ? '클래식 캠페인' : `난이도 ${k}`}</button>
+          {PLAN_TIERS.map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={tier === k} className={tier === k ? 'on' : ''} onClick={() => setTier(k)}>{k} <span className="muted small">{CHALLENGES.filter((c) => c.plan && !c.plan.legacy && c.plan.kind === kind && c.plan.tier === k).length}</span></button>
           ))}
         </div>
         <div className="scenario-grid">
-          {CHALLENGES.filter((c) => c.plan?.tier === tier).map((ch) => {
+          {CHALLENGES.filter((c) => c.plan && !c.plan.legacy && c.plan.kind === kind && c.plan.tier === tier).map((ch) => {
             const p = ch.plan!;
             const syn = PLAN_SYNOPSIS[p.no];
             return (
               <div key={ch.id} className="scenario-card">
-                <div className="row-between"><strong>{p.no} · {p.year} {nameIn(p.franchise, p.year)}</strong><span className="muted small">{p.level ? `난이도 ${p.level} · ` : ''}{ch.years}시즌</span></div>
+                <div className="row-between"><strong>{p.no} · {p.year} {nameIn(p.franchise, p.year)}</strong><span className="muted small">{ch.years > 1 ? `${p.year}~${p.year + ch.years - 1} · ` : ''}{ch.years}시즌</span></div>
                 <h3>{p.title}</h3>
                 {syn && <p className="synopsis">{syn.text}</p>}
                 {syn?.figures && <p className="small muted">상징 인물: {syn.figures}</p>}
@@ -263,7 +269,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                       {p.stages.map((st, i) => <li key={i} title={st.conds.map(condText).join(', ')}>{i === p.stages.length - 1 ? <strong>최종: {st.label}</strong> : st.label}</li>)}
                     </ol>
                   )}
-                <p className="small muted">{p.tier === '장기' ? '기간' : '실제'}: {p.background}{p.fun ? ` · ${p.fun}` : ''}{p.budget ? ` · 연봉 상한: 리그 평균의 ${Math.round(p.budget * 100)}%` : ''}</p>
+                <p className="small muted">{p.kind === 'long' ? '실제 그 시대' : '실제'}: {p.background}{p.fun ? ` · ${p.fun}` : ''}{p.budget ? ` · 연봉 상한: 리그 평균의 ${Math.round(p.budget * 100)}%` : ''}</p>
                 <button type="button" onClick={() => void startPlan(ch.id)} disabled={!!busy}>이 도전으로 시작</button>
               </div>
             );

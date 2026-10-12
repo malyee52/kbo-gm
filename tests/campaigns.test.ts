@@ -1,4 +1,4 @@
-// 기획안 도전 (league/campaigns.ts, 2026-10-12): 시즌 도전 30개 + 장기 캠페인 10개 + 클래식 캠페인 10개, 단계 판정, 자체 육성, 예산, 시놉시스.
+// 기획안 도전 (league/campaigns.ts, 2026-10-12): 두 번째 판 시즌 도전 36개 + 장기 캠페인 60개(실제 난이도별), 첫 판 50개는 legacy, 단계 판정, 자체 육성, 예산, 시놉시스.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
@@ -21,12 +21,15 @@ const start = (id: string, seed = `cp-${id}`) => {
 };
 
 describe('기획안 도전 목록', () => {
-  it('하·중·상 각 10개와 장기·클래식 캠페인 10개씩, 모든 시작 구단이 그 해 자료에 있고 시놉시스가 있다', () => {
-    expect(PLAN_CHALLENGES).toHaveLength(50);
-    for (const p of PLAN_CHALLENGES) expect(PLAN_SYNOPSIS[p.no]?.text.length, p.no).toBeGreaterThan(80);
-    for (const t of ['하', '중', '상', '장기', '클래식']) expect(PLAN_CHALLENGES.filter((p) => p.tier === t)).toHaveLength(10);
-    // 같은 난이도 안에서 구단이 겹치지 않는다
-    for (const t of ['하', '중', '상']) expect(new Set(PLAN_CHALLENGES.filter((p) => p.tier === t).map((p) => p.franchise)).size).toBe(10);
+  it('시즌 도전 쉬움·중간·어려움 12개씩, 장기 캠페인 20개씩, 모든 시작 구단이 그 해 자료에 있고 시놉시스가 있다', () => {
+    const live = PLAN_CHALLENGES.filter((p) => !p.legacy);
+    for (const t of ['쉬움', '중간', '어려움']) {
+      expect(live.filter((p) => p.kind === 'season' && p.tier === t), t).toHaveLength(12);
+      expect(live.filter((p) => p.kind === 'long' && p.tier === t), t).toHaveLength(20);
+    }
+    for (const p of live) expect(PLAN_SYNOPSIS[p.no]?.text.length, p.no).toBeGreaterThan(80);
+    // 첫 판 50개는 예전 저장의 판정을 위해 남아 있다
+    expect(PLAN_CHALLENGES.filter((p) => p.legacy)).toHaveLength(50);
     for (const c of CHALLENGES.filter((x) => x.plan)) expect(planTeam(store, c), c.id).not.toBeNull();
     expect(new Set(CHALLENGES.map((c) => c.id)).size).toBe(CHALLENGES.length);
   });
@@ -34,6 +37,7 @@ describe('기획안 도전 목록', () => {
   it('배경의 승수는 시즌 자료와 같다', () => {
     // 클래식 캠페인 배경에는 선수 승수(장명부 30승 등)가 섞여 있어 '정규시즌 N승'만 본다
     for (const p of PLAN_CHALLENGES) {
+      if (p.kind === 'long' && !p.legacy) continue; // 장기 캠페인 배경은 여러 해의 기록
       const m = p.tier === '클래식' ? p.background.match(/정규시즌 (\d+)승/) : p.background.match(/(\d+)승/);
       if (!m) continue;
       expect(store.season(p.year)!.teams.find((t) => t.franchise === p.franchise)!.w, `${p.no}`).toBe(Number(m[1]));
@@ -122,6 +126,14 @@ describe('게임에서', () => {
     expect(drafted.length).toBeGreaterThan(0);
     expect(g.league.challenge!.homegrown!.length).toBe(before + drafted.length);
   }, 300_000);
+
+  it('두 번째 판: 넥센 캠페인(C51)도 예산 85%, 시즌 도전 쉬움은 정규시즌 1위(완전) → 우승', () => {
+    expect(challengeById('plan-c51')!.plan!.budget).toBe(0.85);
+    const s = challengeById('plan-s09')!.plan!;
+    expect(s.year).toBe(2016);
+    expect(s.stages.map((x) => x.label)).toEqual(['2016년 정규시즌 1위', '2016년 한국시리즈 우승']);
+    expect(challengeById('plan-s25')!.plan!.stages.at(-1)!.label).toBe('1982년 포스트시즌 진출');
+  });
 
   it('넥센 캠페인 예산: 우리 구단 연봉 상한은 리그 평균의 85%, 다른 구단은 캡이 없던 해라 제한 없음', () => {
     const g = start('plan-l10');
