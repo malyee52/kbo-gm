@@ -306,7 +306,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             {saves.map((s) => (
               <div key={s.slot} className="save-item">
                 <div>
-                  <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
+                  <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot}{s.label ? ` "${s.label}"` : ''} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
                   <br />
                   <strong>{s.year} {s.teamName}</strong> <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
                 </div>

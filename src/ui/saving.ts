@@ -1,7 +1,7 @@
 // 화면에서 쓰는 저장 도우미: 세션 → 저장 기록, 파일 이름.
 import { formatDate } from '../game/calendar';
 import type { GameSession, ReproInfo } from '../game/session';
-import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord } from '../game/storage';
+import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord, getSave } from '../game/storage';
 
 export function summaryOf(s: GameSession): string {
   if (s.phase === 'offseason') {
@@ -25,8 +25,10 @@ export function recordOf(s: GameSession, slot: string): SaveRecord {
   };
 }
 
-export function saveSession(s: GameSession, slot: string): Promise<unknown> {
-  return putSave(recordOf(s, slot));
+/** 칸에 저장한다. 붙여 둔 이름은 그대로 둔다 */
+export async function saveSession(s: GameSession, slot: string): Promise<unknown> {
+  const label = (await getSave(slot))?.label;
+  return putSave({ ...recordOf(s, slot), ...(label ? { label } : {}) });
 }
 
 /** 이 게임의 자동 저장 칸 */

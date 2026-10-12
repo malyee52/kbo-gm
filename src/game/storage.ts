@@ -28,6 +28,8 @@ export interface SaveRecord {
   day: number;
   /** 저장 시점의 팀 성적 요약 */
   summary: string;
+  /** 플레이어가 붙인 이름 (2026-10-12, 없으면 칸 이름) */
+  label?: string;
   data: GameSave;
 }
 
@@ -63,6 +65,16 @@ export function putSave(rec: SaveRecord): Promise<IDBValidKey> {
 
 export function getSave(slot: string): Promise<SaveRecord | undefined> {
   return tx('readonly', (s) => s.get(slot) as IDBRequest<SaveRecord | undefined>);
+}
+
+/** 저장 칸에 이름을 붙인다 (빈 문자열이면 지운다) */
+export async function renameSave(slot: string, label: string): Promise<void> {
+  const rec = await getSave(slot);
+  if (!rec) return;
+  const t = label.trim().slice(0, 30);
+  if (t) rec.label = t;
+  else delete rec.label;
+  await putSave(rec);
 }
 
 export function deleteSave(slot: string): Promise<undefined> {

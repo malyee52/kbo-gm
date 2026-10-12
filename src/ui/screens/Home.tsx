@@ -1,5 +1,7 @@
 // 홈 (2026-10-12 개편): 카드 4장 — 다음 경기 · 알림 · 최근 경기 · 순위(우리 팀 앞뒤). 우리 구단 성적은 위쪽 머리 부분에 있다.
+import { useState } from 'react';
 import { ScenarioBanner } from '../ScenarioBanner';
+import type { NewsKind } from '../../game/session';
 import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
@@ -7,6 +9,16 @@ import { winPct } from '../../engine';
 import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
 import { CountUp, useRankMoves } from '../Motion';
+
+type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
+/** 알림 묶음 (session.ts NewsKind) */
+const NEWS_GROUPS: Record<NewsGroup, { label: string; kinds: NewsKind[] }> = {
+  all: { label: '전체', kinds: [] },
+  player: { label: '선수', kinds: ['absence', 'return', 'callup', 'entry', 'plan'] },
+  move: { label: '이적', kinds: ['trade', 'offseason'] },
+  club: { label: '구단', kinds: ['owner', 'event'] },
+  season: { label: '시즌', kinds: ['season'] },
+};
 
 export function Home() {
   const won = useWon();
@@ -22,7 +34,11 @@ export function Home() {
   const next = session.nextGame();
   const myGames = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me);
   const recent = myGames.slice(-5).reverse();
-  const news = [...session.news].reverse().slice(0, 14);
+  // 알림 종류별 보기 (2026-10-12). 고른 것은 이 브라우저에 기억한다
+  const [newsKind, setNewsKindState] = useState<NewsGroup>(() => { try { return (localStorage.getItem('kbo-news-kind') as NewsGroup) || 'all'; } catch { return 'all'; } });
+  const setNewsKind = (k: NewsGroup) => { setNewsKindState(k); try { localStorage.setItem('kbo-news-kind', k); } catch { /* 저장 못 해도 화면은 그대로 */ } };
+  const [newsMore, setNewsMore] = useState(false);
+  const news = [...session.news].reverse().filter((n) => newsKind === 'all' || NEWS_GROUPS[newsKind].kinds.includes(n.kind)).slice(0, 30);
   const cut = session.world.rules.postseasonTeams;
   const moves = useRankMoves(order);
 
@@ -55,9 +71,14 @@ export function Home() {
         <div className="card side">
           <h2>알림 <button type="button" className="link small card-more" onClick={() => go('articles')}>기사</button></h2>
           <ActiveEffects />
+          <div className="seg small" role="tablist" aria-label="알림 종류">
+            {(Object.keys(NEWS_GROUPS) as NewsGroup[]).map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={newsKind === k} className={newsKind === k ? 'on' : ''} onClick={() => setNewsKind(k)}>{NEWS_GROUPS[k].label}</button>
+            ))}
+          </div>
           {news.length === 0 ? <p className="muted">알림이 없습니다.</p> : (
             <ul className="alerts">
-              {news.slice(0, 5).map((n, k) => (
+              {news.slice(0, newsMore ? 30 : 5).map((n, k) => (
                 <li key={k} className={`news-${n.kind}`}>
                   <span>{n.text}</span>
                   <span className="muted small">{n.day < 0 ? `${n.year ?? year} 오프시즌` : shortDate(n.year ?? year, n.day)}</span>
@@ -65,6 +86,7 @@ export function Home() {
               ))}
             </ul>
           )}
+          {news.length > 5 && <button type="button" className="link small" onClick={() => setNewsMore(!newsMore)}>{newsMore ? '접기' : `더 보기 (최근 ${news.length}개)`}</button>}
         </div>
 
         <div className="card wide">
