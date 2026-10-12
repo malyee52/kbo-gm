@@ -12,6 +12,7 @@ import { isSeasonDone, whenText } from './saving';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
 import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../league/synopses';
+import { AboutContent } from './screens/About';
 
 const DEFAULT_YEAR = 2026;
 
@@ -364,19 +365,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           {import.meta.env.DEV && <> · <a href="?lab">엔진 시험 화면</a></>}
         </p>
         <details>
-          <summary>데이터 출처</summary>
-          <ul>
-            <li>선수·시즌 기록: 공개된 KBO 기록을 정리한 자료집 (원자료는 제3자 수집본으로 라이선스를 확인하지 못했습니다).</li>
-            <li>
-              신인 지명 1982~2027: <a href="https://baseballchart.kr/draft" target="_blank" rel="noreferrer">baseballchart.kr</a>
-              {' '}(나무위키 「(연도) KBO 신인 드래프트」 문서 정리), CC BY-NC-SA 2.0 KR. 게임 안에서 지명은 다시 하고 능력은 추정값입니다.
-            </li>
-            <li>
-              병역: 2026 선수 프로필 경력의 상무·경찰 복무와 국제대회 금메달 대표팀 명단(위키백과 메달리스트 표, 2026 아시안게임은 언론 보도의 면제자 명단).
-              자료에 없는 현역·사회복무는 나이와 1군 기록 공백으로 짐작합니다.
-            </li>
-            <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력은 기록에서 추정한 값입니다.</li>
-          </ul>
+          <summary>정보·출처 (자료 출처, 라이선스, 규정 요약, AI 기능)</summary>
+          <AboutContent />
         </details>
       </footer>
     </main>

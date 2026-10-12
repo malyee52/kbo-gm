@@ -9,7 +9,7 @@ import { priceIndex, wonText } from '../league/salary';
 
 export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
   | 'finance' | 'stadium' | 'staff' | 'club-history'
-  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof';
+  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about';
 
 export interface GameUi {
   store: BrowserStore;
