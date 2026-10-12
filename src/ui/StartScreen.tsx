@@ -30,7 +30,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   // 사용자 설정 (세부 난이도). null이면 difficulty 묶음
   const [custom, setCustom] = useState<DifficultySettings | null>(null);
-  const extra = custom ? { settings: custom } : {};
+  // 능력치 기준 (2026-10-12): 역사 재현이 기본
+  const [basis, setBasis] = useState<'season' | 'prior'>('season');
+  const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis };
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,6 +193,18 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <span className="muted small">{custom ? '항목마다 고릅니다. 게임 중에도 저장·설정 화면에서 바꿀 수 있습니다.' : `${DIFFICULTY_NOTE[difficulty]} 등. 게임 중에도 저장·설정 화면에서 바꿀 수 있습니다.`}</span>
         </div>
         {custom && <DifficultyEditor value={custom} onChange={setCustom} disabled={!!busy} />}
+        <div className="form-row">
+          <label>
+            능력치 기준
+            <select value={basis} disabled={!!busy} onChange={(e) => setBasis(e.target.value as 'season' | 'prior')}>
+              <option value="season">역사 재현 (그 시즌 성적 중심)</option>
+              <option value="prior">예측 (직전 3시즌 성적)</option>
+            </select>
+          </label>
+          <span className="muted small">{basis === 'season'
+            ? '그 시즌 실제 성적을 중심으로 직전 두 시즌을 조금 섞습니다. 그해 강했던 팀이 강하게 시작합니다.'
+            : '개막 전까지의 성적(직전 3시즌)만 봅니다. 그해 누가 터질지는 알 수 없습니다.'} 잠재력은 어느 쪽이든 선수가 실제로 보여 준 고점입니다.</span>
+        </div>
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
         {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
         {store.meta.inProgress.includes(year) && (

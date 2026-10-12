@@ -105,6 +105,8 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
   // 2026-10-12 사용자 "실제로 높았던 선수들의 잠재력이 실제보다 낮다": 예전에는 한 시즌씩 따로 능력을 뽑아(한 시즌 표본이라
   // 평균 쪽으로 크게 당겨진다) 좋은 두 시즌을 평균했다. 이제는 게임이 능력을 매기는 방식 그대로(그 시즌과 앞 두 시즌을
   // seasonWeights로 가중) 출전이 충분했던 시즌마다 능력을 뽑아 가장 높은 값을 쓴다. "그 선수의 전성기에 게임이 매겼을 능력"
+  // 2026-10-12 사용자: 잠재력은 그 선수가 실제로 보여 준 고점. 역사 재현 능력과 같은 가중치(seasonBlend: 그 시즌 중심)로 뽑고,
+  // 시작 연도·능력 기준과 상관없이 같은 값이다 (예: 2008 MVP 뒤 하락한 김광현도 고점 기준. 대체 역사에서는 하락하지 않을 수 있다)
   const meta: Meta = store.meta;
   let best: number | null = null;
   const take = (r: number) => { if (best === null || r > best) best = r; };
@@ -117,7 +119,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonWeights[k] ?? 0, lg: s.league.rates }] : [];
+        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
       });
       const skill = pitSkillFrom(rows, meta.priors.pitcher, params);
       take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0));
@@ -130,7 +132,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonWeights[k] ?? 0, lg: s.league.rates }] : [];
+        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
       });
       const skill = batSkillFrom(rows, meta.priors.batter, params);
       take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0));
