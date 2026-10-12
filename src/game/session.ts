@@ -32,6 +32,7 @@ import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { runsForGrade, type FreeOp } from '../fantasy/free';
+import { applyPromises, type Now } from '../fantasy/promises';
 import { batValue, pitValue } from '../engine';
 import { skillForRuns } from '../league/growth';
 import {
@@ -985,7 +986,15 @@ export class GameSession {
     if (e.arc) applyArc(f, e.arc, { year: e.year, day: e.day });
     if (e.effects?.length) this.applyFantasyEffects(e.effects, e.title);
     if (e.ops?.length) this.applyFreeOps(e.ops, e.title);
+    if (e.promises?.length || e.settles?.length) applyPromises(f, e.id!, { year: e.year, day: e.day }, e.promises, e.settles);
     if (e.kind === 'event' && e.choices?.length) this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지 사건: ${e.title} (판타지 화면에서 고르세요)`);
+  }
+
+  /** 약속 장부의 기한 판단용 지금 때 (promises.ts) */
+  get promiseNow(): Now {
+    return this.phase === 'season'
+      ? { phase: 'season', year: this.world.year, day: this.currentDay, seasonDays: this.season.schedule.length }
+      : { phase: 'offseason', year: this.year, day: 0, seasonDays: 144 };
   }
 
   /** 대화의 제안·사건의 선택지를 고른다 */

@@ -1,6 +1,7 @@
 // 자유 모드 (AI 진행): 무엇이든 글로 하면 AI 게임 마스터가 판정하고 실제 게임을 바꾼다 (src/fantasy/free.ts)
 import { useState } from 'react';
-import { freeAction, type FreeOp } from '../../fantasy/free';
+import { freeAction, settlePromises, type FreeOp } from '../../fantasy/free';
+import { duePromises, dueText } from '../../fantasy/promises';
 import { effectText } from '../../fantasy/effects';
 import { loadAiSettings } from '../../fantasy/settings';
 import { formatDate } from '../../game/calendar';
@@ -48,6 +49,25 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
       setBusy(false);
     }
   };
+  const settle = async () => {
+    setBusy(true);
+    setMsg({ text: '게임 마스터가 약속을 판정하는 중입니다…' });
+    try {
+      const r = await settlePromises(session, store, loadAiSettings());
+      if (r) session.addFantasy(r.entry);
+      setMsg(r?.dropped.length ? { text: `반영하지 못한 조작: ${r.dropped.join(', ')}` } : null);
+      changed();
+      void autosave();
+    } catch (e) {
+      setMsg({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const promises = session.fantasy?.promises ?? [];
+  const open = promises.filter((p) => p.status === 'open');
+  const due = duePromises(session.fantasy, session.promiseNow);
+  const statusLabel = { open: '진행 중', kept: '지킴', broken: '어김', void: '없던 일' } as const;
   const log = (session.fantasy?.log ?? []).filter((e) => e.kind === 'action').slice(compact ? -3 : -30).reverse();
   return (
     <section className="stack">
@@ -62,10 +82,23 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           <span className="muted small">AI 판정 {leniencyOf(L) + 1}/7 {LENIENCY_LABEL[leniencyOf(L)]} (저장·설정 → 난이도에서 바꿈). 명분이 있어야 통합니다. Ctrl+Enter. 결과는 바로 게임에 들어가고 저장·재현에도 남습니다.</span>
         </div>
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
+        {due.length > 0 && (
+          <p className="note">기한이 된 약속 {due.length}개 <button type="button" className="small-btn" disabled={busy} onClick={() => void settle()}>약속 판정하기</button></p>
+        )}
         {changedRules(L).length > 0 && (
           <p className="small"><strong>바뀐 규정</strong> {changedRules(L).map((c) => `${c.label} ${c.from ?? '실제'} → ${c.to ?? '실제'}`).join(' · ')}</p>
         )}
       </div>
+      {!compact && promises.length > 0 && (
+        <div className="panel">
+          <h2>약속 장부 <span className="muted small">진행 중 {open.length}개 · 기한이 되면 게임 마스터가 지켰는지 판정합니다</span></h2>
+          <ul className="plain small">
+            {[...open, ...promises.filter((p) => p.status !== 'open').slice(-8).reverse()].map((p) => (
+              <li key={p.id}><span className={p.status === 'broken' ? 'down' : p.status === 'kept' ? 'up' : 'muted'}>[{statusLabel[p.status]}]</span> {p.party}: {p.text} <span className="muted">(기한 {dueText(p)})</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {log.length === 0 ? <p className="muted">아직 행동이 없습니다.</p> : log.map((e) => (
         <article key={e.id} className="panel">
           <p className="muted small">{e.day < 0 ? `${e.year} 오프시즌` : formatDate(e.year, e.day)}</p>
@@ -73,6 +106,12 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           <h3>{e.title}</h3>
           {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
           {e.ops?.length ? <ul className="plain small fantasy-ops">{e.ops.map((op, k) => <li key={k}>✓ {opText(op, nameOf, teamName)}</li>)}</ul> : <p className="muted small">게임 변화 없음</p>}
+          {(e.promises?.length || e.settles?.length) ? (
+            <ul className="plain small">
+              {e.promises?.map((p, k) => <li key={`p${k}`}>🤝 약속: {p.party} — {p.text} (기한 {dueText(p)})</li>)}
+              {e.settles?.map((x) => <li key={x.id}>📒 {promises.find((p) => p.id === x.id)?.text ?? x.id}: {statusLabel[x.status]}</li>)}
+            </ul>
+          ) : null}
         </article>
       ))}
     </section>

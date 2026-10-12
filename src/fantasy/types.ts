@@ -2,6 +2,7 @@
 // 재현·불러오기 때 AI를 다시 부르지 않고 그대로 들어간다.
 import type { FantasyEffect } from './effects';
 import type { FreeOp } from './free';
+import type { FantasyPromise, PromiseDraft, PromiseSettle } from './promises';
 
 export type FantasyKind = 'article' | 'chat' | 'event' | 'memory' | 'action';
 
@@ -45,6 +46,10 @@ export interface FantasyEntry {
   arc?: ArcUpdate;
   /** 자유 모드 조작 (src/fantasy/free.ts). 들어갈 때 바로 적용 */
   ops?: FreeOp[];
+  /** 이 판정에서 생긴 약속 (promises.ts) */
+  promises?: PromiseDraft[];
+  /** 이 판정이 끝낸 약속 (지킴·어김·없던 일) */
+  settles?: PromiseSettle[];
 }
 
 export interface FantasyArc {
@@ -74,6 +79,9 @@ export interface FantasyState {
   discounts?: { id: string; pct: number; year: number }[];
   /** 다음 개막에 입단할 가상 유망주 (5단계 큰 변화) */
   prospects?: Extract<FantasyEffect, { type: 'prospect' }>[];
+  /** 약속·조건 장부 (자유 모드, promises.ts) */
+  promises?: FantasyPromise[];
+  pseq?: number;
 }
 
 export const FANTASY_LOG_MAX = 300;
