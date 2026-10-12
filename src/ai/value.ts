@@ -22,23 +22,23 @@ const POS_ADJ: Record<string, number> = {
 };
 
 /**
- * 하락 첫 5년의 연간 하락 (런/시즌, 리그 평균 주전 기준). tools/fit_aging.ts의 델타 방식 추정값 (reports/aging-fit.txt, 31~35세).
- * 색인 0 = 하락 첫해 (DECLINE_START_AGE). 투수가 타자보다 일찍, 크게 떨어진다.
+ * 하락 첫 5년의 연간 하락 (런/시즌, 리그 평균 주전 기준). 색인 0 = 하락 첫해 (DECLINE_START_AGE, 32세).
+ * 2026-10-12 사용자 "하락 나이는 낮추되 하락 폭은 둔화": 실제 기록 추정치(reports/aging-fit.txt, 31~35세: 타자 -2~-4.3, 투수 -4.2~-6.5)의
+ * 절반쯤에서 시작해 해마다 조금씩 커진다 (임시값). 투수가 타자보다 조금 더 떨어진다.
  */
-const DECLINE_BAT = [-2, -3, -3.6, -4.3, -4.2];
-const DECLINE_PIT = [-4.2, -3.5, -4.5, -6.4, -6.5];
+const DECLINE_BAT = [-1, -1.5, -2, -2.5, -3];
+const DECLINE_PIT = [-1.5, -2, -2.5, -3.5, -4];
 
 /**
- * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 하락 나이(DECLINE_START_AGE, 지금 35세) 이후에 쓴다.
- * 하락 전은 임시값. 하락 첫 5년은 실제 기록에서 추정한 31~35세 값을 그대로 옮긴 것, 그 뒤는 임시값
- * (생존 편향 때문에 데이터가 하락을 작게 잡는다).
+ * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 하락 나이(DECLINE_START_AGE, 지금 32세) 이후에 쓴다.
+ * 하락 전은 임시값. 하락 첫 5년은 DECLINE_BAT·DECLINE_PIT, 그 뒤(37세~)는 더 가파르다 (임시값).
  */
 export function agingDelta(age: number, isPitcher = false): number {
   const k = age - DECLINE_START_AGE;
   if (k < 0) return age <= 23 ? 6 : age <= 26 ? 3 : 0;
   if (k < 5) return (isPitcher ? DECLINE_PIT : DECLINE_BAT)[k];
-  if (k < 7) return isPitcher ? -7 : -6;
-  return -9;
+  if (k < 7) return isPitcher ? -5 : -4;
+  return isPitcher ? -7 : -6;
 }
 
 /** 나이를 모르는 선수는 이 나이로 본다 */

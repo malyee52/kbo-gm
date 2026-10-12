@@ -105,8 +105,10 @@ export interface EngineParams {
  * 기량 하락이 시작되는 나이 (다음 시즌 기준). 능력(ai/value.ts agingDelta·expectedGrowth), 성장 판정(league/growth.ts),
  * 수비(defense.ts ageDefense), 조기 노쇠(league/careers.ts)가 함께 쓴다.
  * 실제 기록 추정(tools/fit_aging.ts)은 31세였지만 2026-10-11 사용자 결정으로 33세, 같은 날 다시 35세로 늦췄다 (하락 곡선의 모양은 그대로, 4년 뒤로).
+ * 2026-10-12 사용자 "기량 하락 나이는 낮추되 하락 폭을 둔화": 32세부터, 처음 몇 해는 실제 추정치의 절반쯤으로 천천히 (ai/value.ts DECLINE_BAT·DECLINE_PIT).
+ * 35세 시작은 선수가 고점에 실제보다 훨씬 오래 머물러, 과거 연도에서 시작하면 리그 재능이 실제보다 크게 부풀었다 (2005 시작 → 2010 상위 270명 +28%)
  */
-export const DECLINE_START_AGE = 35;
+export const DECLINE_START_AGE = 32;
 
 export const DEFAULT_PARAMS: EngineParams = {
   seasonWeights: [1.0, 0.8, 0.6],
