@@ -157,6 +157,9 @@ export interface SeasonLine {
   /** emptyBatLine / emptyPitLine 키 순서의 값 */
   bat?: number[];
   pit?: number[];
+  /** 퓨처스리그(2군) 성적: futures.ts FUT_BAT_KEYS / FUT_PIT_KEYS 순서 (2026-10-12부터. 예전 시즌에는 없다) */
+  fbat?: number[];
+  fpit?: number[];
 }
 
 export interface LeagueTeam {

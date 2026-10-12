@@ -34,7 +34,7 @@ import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
 import { isFuturesTeam, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
-import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
+import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
@@ -315,6 +315,14 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   for (const sp of world.players) futById.set(sp.id, fut.lines.get(sp.idx));
   for (const e of extras) for (const sp of e.org) futById.set(sp.id, fut.lines.get(sp.idx));
   league.lastFutures = { year, teams: fut.teams };
+  // 창단 퓨처스 구단 선수는 1군 월드에 없어 아래 시즌 줄 만들기에서 빠진다: 퓨처스 성적만 따로 남긴다 (2026-10-12 퓨처스 기록 보관)
+  for (const e of extras) {
+    for (const sp of e.org) {
+      const p = lp.get(sp.id);
+      const rec = futuresRecord(fut.lines.get(sp.idx));
+      if (p && (rec.fbat || rec.fpit)) p.history.push({ year, team: league.teams[e.team]?.name ?? '', ...rec });
+    }
+  }
 
   const growth = new Map<string, GrowthEntry>();
   const servingBefore = new Set(league.players.filter((p) => isServing(p)).map((p) => p.id));
@@ -327,6 +335,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       year, team: world.teams[sp.teamIdx].name,
       ...(b.pa > 0 ? { bat: batKeys.map((k) => b[k]) } : {}),
       ...(pt.bf > 0 ? { pit: pitKeys.map((k) => pt[k]) } : {}),
+      ...futuresRecord(futById.get(sp.id)),
     });
     p.lastSaves = pt.sv;
     if (season.activeDays[sp.idx] >= SERVICE_SHARE * season.teams[sp.teamIdx].g) p.service++;

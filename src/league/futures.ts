@@ -37,6 +37,25 @@ export interface FuturesPit { g: number; gs: number; outs: number; bf: number; h
 export interface FuturesLine { idx: number; teamIdx: number; bat?: FuturesBat; pit?: FuturesPit; form: number; starter?: boolean }
 export interface FuturesTeam { team: number; g: number; w: number; l: number; rs: number; ra: number }
 
+/** 시즌 기록(SeasonLine.fbat·fpit)에 남기는 퓨처스 성적의 키 순서 */
+export const FUT_BAT_KEYS = ['g', 'pa', 'ab', 'h', 'd', 't', 'hr', 'bb', 'so'] as const;
+export const FUT_PIT_KEYS = ['g', 'gs', 'outs', 'bf', 'h', 'hr', 'bb', 'so', 'r', 'er'] as const;
+
+/** 퓨처스 줄을 시즌 기록용 배열로 (출전이 없으면 빈 객체). 소수점은 반올림해 정수로 남긴다 */
+export function futuresRecord(l: FuturesLine | undefined): { fbat?: number[]; fpit?: number[] } {
+  if (!l) return {};
+  return {
+    ...(l.bat && l.bat.pa > 0 ? { fbat: FUT_BAT_KEYS.map((k) => Math.round(l.bat![k])) } : {}),
+    ...(l.pit && l.pit.bf > 0 ? { fpit: FUT_PIT_KEYS.map((k) => Math.round(l.pit![k])) } : {}),
+  };
+}
+
+/** 시즌 기록의 배열을 다시 퓨처스 줄로 (화면 표시용) */
+export function futuresFromRecord(fbat?: number[], fpit?: number[]): Pick<FuturesLine, 'bat' | 'pit'> {
+  const dec = <K extends string>(keys: readonly K[], arr: number[]) => Object.fromEntries(keys.map((k, i) => [k, arr[i] ?? 0])) as Record<K, number>;
+  return { ...(fbat ? { bat: dec(FUT_BAT_KEYS, fbat) } : {}), ...(fpit ? { pit: dec(FUT_PIT_KEYS, fpit) } : {}) };
+}
+
 /** 지금까지 그 선수가 결장한 날 수 (시즌 시작 결장 + 결장 기록) */
 function absentDays(season: Season, p: SimPlayer, today: number): number {
   let d = Math.min(today, Math.max(0, p.startAbsent ?? 0));
