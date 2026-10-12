@@ -364,7 +364,7 @@ export class Season {
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
   refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, day);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
     return ts;
   }
 
@@ -399,7 +399,7 @@ export class Season {
         }
       }
     }
-    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day);
+    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0);
     for (const g of games) {
       for (const ts of [season[g.home], season[g.away]]) {
         for (const p of ts.hitters) this.activeDays[p.idx]++;
@@ -510,8 +510,8 @@ export class Season {
     const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
-    refreshActive(h, this.world, this.states, day);
-    refreshActive(a, this.world, this.states, day);
+    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
+    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
     const hl = todaysLineup(h, this.world.league, params, rng);
     const al = todaysLineup(a, this.world.league, params, rng);
     const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);

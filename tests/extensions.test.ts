@@ -37,6 +37,8 @@ describe('비FA 다년 계약', () => {
   it('맺으면 nonFA 계약(기간 동안 FA 아님), 계약금이 나가고, 연봉 협상에서 빠진다', () => {
     const o = [...g.extensionOffers()].sort((a, b) => b.p.potential - a.p.potential)[0];
     const d = o.demands.find((x) => x.years === 5)!;
+    // 계약금을 낼 자금 (시즌 성적에 따라 자금이 모자랄 수 있다. 2026-10-13 엔트리 순환 뒤 이 시드는 10억 남짓이었다)
+    g.league.ledger.push({ year: g.year + 1, from: -1, to: lg, amount: 500_000, note: '시험 자금', kind: 'event' });
     const before = cashOf(g.league, lg);
     expect(g.extend(o.p.id, 5).ok).toBe(true);
     const p = g.league.players.find((x) => x.id === o.p.id)!;

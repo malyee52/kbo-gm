@@ -238,12 +238,36 @@ function allowedForeigners(avail: SimPlayer[], limit: number): Set<number> {
   return out;
 }
 
-/** 그날 뛸 수 있는 선수로 1군 엔트리를 짠다 */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number): void {
+/** 엔트리 순환 주기 (일정 색인 일수) */
+export const CHURN_DAYS = 10;
+
+/** 0~1 해시 (FNV-1a). 엔트리 순환이 난수 흐름을 건드리지 않게 */
+function unitHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * 엔트리 순환 (2026-10-13, docs/temp-values.md 팀 실점 퍼짐의 남은 몫): 직접 정하지 않은 1군은 CHURN_DAYS일마다
+ * 국내 투수 몇 명이 부진·피로·잔부상으로 2군에 내려가고 다음 투수가 올라온다 (확률 churn). 실제로는 약한 투수도 꽤 던진다.
+ * 해시로 정해 난수 흐름과 저장·재현에 영향이 없다
+ */
+export function churnedOut(world: World, p: SimPlayer, day: number, churn: number): boolean {
+  if (churn <= 0 || !p.isPitcher || p.foreign) return false;
+  return unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}`) < churn;
+}
+
+/** 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다) */
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0): void {
   const limit = world.rules.foreignLimit;
   const manual = ts.manual ?? null;
+  const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev;
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn));
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
   if (manual) {
@@ -317,9 +341,11 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
       .sort((a, b) => b.pit!.startShare - a.pit!.startShare || a.value - b.value);
     rotation.push(...extra.slice(0, nRot - rotation.length));
   }
+  // 엔트리 순환 중이면 불펜 끝자리는 2군에서 "요즘 좋은" 투수가 올라온다: 가치에 주기마다 바뀌는 흔들림(jitter 런)을 더해 고른다
+  const callUpScore = (p: SimPlayer) => (rotating && jitter > 0 ? p.value + jitter * (unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}/j`) - 0.5) : p.value);
   const bullpen = pitchers
     .filter((p) => !rotation.includes(p))
-    .sort((a, b) => a.value - b.value)
+    .sort((a, b) => callUpScore(a) - callUpScore(b))
     .slice(0, Math.max(0, nPit - rotation.length));
   let closer: SimPlayer | null = plan?.closer !== null && plan?.closer !== undefined ? bullpen.find((p) => p.idx === plan.closer) ?? null : null;
   if (!closer) for (const p of bullpen) if (p.lastSaves >= 5 && (!closer || p.lastSaves > closer.lastSaves)) closer = p;
@@ -350,6 +376,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   ts.dirty = false;
   let next = Number.MAX_SAFE_INTEGER;
   for (const p of ts.team.org) if (st.absentUntil[p.idx] > day && st.absentUntil[p.idx] < next) next = st.absentUntil[p.idx];
+  if (rotating) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
   ts.nextReturnDay = next;
 }
 
