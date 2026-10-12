@@ -11,7 +11,7 @@ import { PlayerLink, TeamName, useGame } from '../context';
 import { EnlistPanel } from './Enlist';
 
 const TITLE_BAT = ['avg', 'hr', 'rbi', 'h', 'sb', 'ops'];
-const TITLE_PIT = ['era', 'w', 'sv', 'so'];
+const TITLE_PIT = ['era', 'w', 'sv', 'hld', 'so'];
 
 export function SeasonEnd() {
   const { session } = useGame();
@@ -145,7 +145,7 @@ export function SeasonEnd() {
                 const top = leaders<BatLine>(players.filter((p) => !p.isPitcher), s.bat, c, s.teams, batQualified, 1)[0];
                 return <tr key={c.key}><td className="l">{c.label}</td><td className="l">{top ? <PlayerLink p={top.player} showTeam /> : '-'}</td><td>{top?.value ?? '-'}</td></tr>;
               })}
-              {PIT_CATEGORIES.filter((c) => TITLE_PIT.includes(c.key)).map((c) => {
+              {PIT_CATEGORIES.filter((c) => TITLE_PIT.includes(c.key) && (c.key !== 'hld' || session.year >= 2000)).map((c) => {
                 const top = leaders<PitLine>(players.filter((p) => p.isPitcher), s.pit, c, s.teams, pitQualified, 1)[0];
                 return <tr key={c.key}><td className="l">{c.label}</td><td className="l">{top ? <PlayerLink p={top.player} showTeam /> : '-'}</td><td>{top?.value ?? '-'}</td></tr>;
               })}

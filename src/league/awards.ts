@@ -163,6 +163,8 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   title('era', '평균자책점', qPits, (c) => era(c.p), (x) => x.toFixed(2), true);
   title('so', '탈삼진', pits, (c) => c.p.so, (x) => `${x}개`);
   title('sv', '세이브', pits, (c) => c.p.sv, (x) => `${x}개`);
+  // 홀드: KBO 공식 타이틀은 2000년부터
+  if (year >= 2000) title('hld', '홀드', pits, (c) => c.p.hld ?? 0, (x) => `${x}개`);
   // 승률: 10승 이상
   title('wpct', '승률', pits.filter((c) => c.p.w >= 10), (c) => c.p.w / (c.p.w + c.p.l), f3);
 

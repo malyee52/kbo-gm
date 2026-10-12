@@ -40,6 +40,15 @@ describe('시상식', () => {
     expect(s.bat[W.find((p) => p.id === avgW.id)!.idx].pa).toBeGreaterThanOrEqual(qual);
   });
 
+  it('홀드 타이틀 (2000년부터 KBO 공식 타이틀): 그 시즌 최다 홀드 선수', () => {
+    const s = g.season;
+    const W = g.world.players;
+    const maxH = Math.max(...W.map((p) => s.pit[p.idx].hld));
+    const t = aw.titles.find((x) => x.key === 'hld')!;
+    expect(t.label).toBe('홀드');
+    expect(t.value).toBe(`${maxH}개`);
+  });
+
   it('골든글러브는 10명 (외야 3명), 같은 선수가 두 부문을 받지 않는다', () => {
     expect(aw.goldenGlove).toHaveLength(10);
     expect(aw.goldenGlove.filter((x) => x.pos === 'OF')).toHaveLength(3);

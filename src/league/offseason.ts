@@ -791,9 +791,17 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     }
     const faDemand = settingsOf(league).faDemand;
     const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand : 1));
-    if (!ok.length) continue;
+    const mine = offers.find((o) => o.team === off.userTeam);
+    if (!ok.length) {
+      if (mine) log(off, 'fa', `${p.name}: 우리 제시(연 ${wonText(mine.salary)})는 선수 요구에 못 미쳐 이번 라운드에 받아들여지지 않았습니다.`, true);
+      continue;
+    }
     const score = (o: FaOffer) => o.salary * (1 + 0.04 * (o.years - 1)) * (o.team === e.from ? 1.05 : 1);
     ok.sort((a, b) => score(b) - score(a) || (a.team === off.userTeam ? -1 : 1));
+    if (mine && ok[0].team !== off.userTeam) {
+      const why = ok.includes(mine) ? '다른 구단이 더 좋은 조건' : '우리 제시가 선수 요구에 못 미침';
+      log(off, 'fa', `${p.name}: 우리 제시(연 ${wonText(mine.salary)})는 선택되지 않았습니다. 계약 구단: ${league.teams[ok[0].team].name} (${why})`, true);
+    }
     signFa(league, off, e, ok[0], round, view);
   }
 
