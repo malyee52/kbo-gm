@@ -221,7 +221,7 @@ export function freeContext(g: GameSession, store: Store, action = ''): string {
   parts.push(`[우리 구단 ${g.league.teams[g.teamIdx].name} 선수 (능력 순)] ${rosterTable(g, g.teamIdx, 40)}`);
   const others = g.league.teams.map((t, i) => ({ t, i })).filter((x) => x.i !== g.teamIdx && (g.phase !== 'season' || g.world.teams[x.i]));
   parts.push('[다른 구단 주요 선수]', ...others.map(({ t, i }) => `${t.name}: ${rosterTable(g, i, 8)}`));
-  const recent = (g.league.fantasy?.log ?? []).filter((e) => e.kind === 'action').slice(-6).map((e) => `- ${e.title}: ${e.text.slice(0, 120)}`);
+  const recent = (g.league.fantasy?.log ?? []).filter((e) => e.kind === 'action').slice(-6).map((e) => `- ${e.withdrawn ? '(단장이 판정을 보고 거둬들임) ' : ''}${e.title}: ${(e.ask ?? '').slice(0, 80)} → ${e.text.slice(0, 120)}`);
   if (recent.length) parts.push('[지난 행동]', ...recent);
   if (g.league.fantasy?.regressor) parts.push(memoryContext(store, g.league, g.phase === 'season' ? g.world.year : g.year + 1));
   return parts.join('\n');
