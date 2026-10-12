@@ -22,7 +22,11 @@ export type FantasyEffect =
   /** 큰 변화 (arc만): 가상 유망주가 다음 개막에 입단. potential은 런, pos P·C·IF·OF */
   | { type: 'prospect'; name: string; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; potential: number }
   /** 큰 변화 (arc만): 구단주가 바뀐다 (신뢰를 새로 시작) */
-  | { type: 'ownerChange'; trust: number };
+  | { type: 'ownerChange'; trust: number }
+  /** 협상 (negotiate.ts만): 그 구단이 우리 트레이드 제안을 보는 호감 (런, AI 트레이드 평가 이득에 더한다) */
+  | { type: 'tradeGoodwill'; team: number; runs: number; days: number }
+  /** 협상 (negotiate.ts만): 그 선수의 FA·다년 계약 요구액 할인(+)·할증(−) 비율 (이번 오프시즌) */
+  | { type: 'demandDiscount'; player: string; pct: number };
 
 export interface EffectLimits { trust: number; fans: number; cash: number; edge: number; days: number; fill: number; potential: number; rest: number; count: number }
 
@@ -136,5 +140,7 @@ export function effectText(e: FantasyEffect, nameOf: (id: string) => string): st
     case 'potential': return `${nameOf(e.player)} 잠재력 ${sign(e.delta)}`;
     case 'prospect': return `유망주 ${e.name} (${e.pos === 'P' ? '투수' : e.pos === 'C' ? '포수' : e.pos === 'IF' ? '내야수' : '외야수'}, ${e.age}세) 다음 개막에 입단`;
     case 'ownerChange': return `구단주 교체 (신뢰 ${e.trust}에서 새로 시작)`;
+    case 'tradeGoodwill': return `상대 구단 호감 ${sign(e.runs)}런 (${e.days}일, 트레이드 평가에 더함)`;
+    case 'demandDiscount': return `${nameOf(e.player)} 요구액 ${e.pct >= 0 ? `${Math.round(e.pct * 100)}% 할인` : `${Math.round(-e.pct * 100)}% 인상`}`;
   }
 }

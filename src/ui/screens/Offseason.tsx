@@ -5,6 +5,7 @@ import { OfferPanel } from './Club';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
+import { AgentTalk } from './FantasyNegotiate';
 import {
   ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap,
 } from '../../league/salary';
@@ -415,7 +416,8 @@ function FaPanel({ act }: { act: Act }) {
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{e.grade}</td><td>{won(e.prevSalary)}</td><td>{won(e.ask)}</td><td>{e.years}년</td>
+                  <td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
+                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${e.grade}등급, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
                   <td className="l">
                     {e.status === 'signed' ? (
                       <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
@@ -645,7 +647,8 @@ function ExtensionPanel({ act }: { act: Act }) {
                         {demands.map((x) => <option key={x.years} value={x.years}>{x.years}년</option>)}
                       </select>
                     </td>
-                    <td className="small">{won(d.salary)} <span className="muted">(계약금 {won(Math.round(d.salary * y * Off.EXT_BONUS_SHARE))})</span></td>
+                    <td className="small">{won(d.salary)} <span className="muted">(계약금 {won(Math.round(d.salary * y * Off.EXT_BONUS_SHARE))})</span>
+                      <AgentTalk p={p} situation={`비FA 다년 계약 협상. FA까지 ${toFa}시즌, 지금 연봉 ${Math.round(p.contract.salary / 1000) / 10}억 원, ${y}년 요구 연 ${Math.round(d.salary / 1000) / 10}억 원. 구단 ${session.team.name}`} /></td>
                     <td><button type="button" className="small-btn" onClick={() => act(session.extend(p.id, y))}>계약</button></td>
                   </tr>
                 );

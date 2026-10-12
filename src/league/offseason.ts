@@ -546,6 +546,11 @@ export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number,
   return Math.max(MIN_SALARY, p.contract.salary, Math.round((base * factor) / 100) * 100);
 }
 
+/** 판타지 협상 할인(+)·할증(−)을 요구액에 (최저 연봉 아래로는 안 간다) */
+export function applyDiscount(salary: number, pct: number): number {
+  return pct ? Math.max(MIN_SALARY, Math.round((salary * (1 - pct)) / 100) * 100) : salary;
+}
+
 function signExtension(league: LeagueState, off: OffseasonState, p: LeaguePlayer, salary: number, years: number): number {
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   p.contract = { kind: 'nonFA', salary, until: off.year + years, prepaid: Math.round(bonus / years) };
@@ -561,7 +566,7 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
   const p = extensionCandidates(league, off).find((x) => x.id === id);
   if (!p) return { ok: false, message: '다년 계약을 맺을 수 없는 선수입니다 (국내 보류·신인 계약 선수, FA 시장에 나오지 않은 선수만).' };
   const view = leagueView(league, store, params);
-  const salary = extensionDemand(view, p, off.year, years);
+  const salary = applyDiscount(extensionDemand(view, p, off.year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === off.year)?.pct ?? 0);
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);
@@ -828,7 +833,9 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       offers.push({ team: t, salary: Math.round(Math.min(e.ask * 1.15, base * (1 + 0.05 * eager))), years: e.years });
     }
     const faDemand = settingsOf(league).faDemand;
-    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand : 1));
+    // 판타지 협상(에이전트 설득)의 할인·할증은 우리 제시에만 (src/fantasy/negotiate.ts)
+    const disc = 1 - (league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0);
+    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand * disc : 1));
     const mine = offers.find((o) => o.team === off.userTeam);
     if (!ok.length) {
       if (mine) log(off, 'fa', `${p.name}: 우리 제시(연 ${wonText(mine.salary)})는 선수 요구에 못 미쳐 이번 라운드에 받아들여지지 않았습니다.`, true);
