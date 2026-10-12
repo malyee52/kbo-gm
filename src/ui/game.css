@@ -233,6 +233,8 @@ button.small-btn.danger:hover:not(:disabled) { background: var(--error-bg); bord
 .stop-pop {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; width: min(320px, calc(100vw / var(--z) - 32px)); display: flex; flex-direction: column; gap: 10px;
   padding: 14px 16px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-md);
+  /* 구단 색 띠(.mast) 안에 떠 있어 띠의 글자색(--team-on)을 물려받으면 패널 배경에서 안 보인다 (2026-10-12 사용자 제보) */
+  color: var(--fg); text-align: left; font-weight: 400;
 }
 .stop-pop p { margin: 0; }
 .stop-pop fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
