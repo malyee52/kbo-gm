@@ -135,6 +135,8 @@ const NEUTRAL_KIND_LABEL: Record<Exclude<AbsenceKind, 'event'>, string> = {
  * 이탈 이벤트는 중립 문구만 쓴다. 가상 선수에게는 부상 정도와 구체적 사건까지 쓴다.
  */
 export function absenceLabel(a: Pick<Absence, 'kind' | 'event'>, p: Pick<SimPlayer, 'real'>, seasonOut = false): string {
+  // 실존 선수에게는 중립 이벤트라도 사유('징계성', '갈등')를 적지 않는다: 잘못을 한 것처럼 읽힌다 (2026-10-12)
+  if (a.kind === 'event' && !isVirtual(p)) return '1군 이탈';
   if (a.kind === 'event' && a.event) return eventLabel(a.event, p);
   const base = isVirtual(p) ? ABSENCE_KIND_LABEL[a.kind] : NEUTRAL_KIND_LABEL[a.kind as Exclude<AbsenceKind, 'event'>];
   return seasonOut && a.kind !== 'minor' ? `${base} (시즌 아웃)` : base;

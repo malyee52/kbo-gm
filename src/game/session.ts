@@ -52,7 +52,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
-import { FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
+import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 
@@ -1293,6 +1293,8 @@ export class GameSession {
       },
       addTrust: (d) => { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + d)); },
       addFill: (fill, days, note) => { ensureEvents(L).buffs.push({ team, year, from: day, until: day + days, fill, note }); },
+      addFans: (delta, note) => addFanEvent(L, team, year, day, delta, note),
+      addPotential: (id, delta) => { const p = L.players.find((x) => x.id === id && x.team === team); if (p) p.potential += delta; },
       // ---- 경기에 영향을 주는 도구
       players: this.team.org.map((p) => {
         const b = s.bat[p.idx];
