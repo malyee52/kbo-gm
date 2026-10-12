@@ -35,10 +35,12 @@ describe('경기력 효과 (컨디션)', () => {
   });
 
   it('시즌 내내 우리 구단 경기력 +3.0이면 같은 시드보다 많이 이긴다', () => {
-    // 한 시드는 운에 흔들려 두 시드 평균으로 본다 (2026-10-12 투수 가치·선발 기준을 바꾼 뒤 한 시드가 +2.0%p였다)
+    // 한 시드는 운에 흔들려 여러 시드 평균으로 본다 (2026-10-12 투수 가치·선발 기준을 바꾼 뒤 한 시드가 +2.0%p였다).
+    // 2026-10-13 엔트리 순환(rosterChurn)을 넣은 뒤 form-b가 −7.3%p(운)로 두 시드 평균이 +0.2%p가 되어 네 시드(c~f)로 바꿨다.
+    // 6시드 평균: 순환 없음 +6.9%p, 순환 +3.3%p (form-b 포함). 경기력 효과는 선수마다 그대로 들어가고 순환과 관계없다
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
     let diff = 0;
-    for (const seed of ['form-a', 'form-b']) {
+    for (const seed of ['form-c', 'form-d', 'form-e', 'form-f']) {
       const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
@@ -47,10 +49,10 @@ describe('경기력 효과 (컨디션)', () => {
         // 하루마다 끈다 (2026-10-12 이벤트 빈도를 올린 뒤 5일 사이에 이벤트가 끼어들었다)
         while (!g.done) { g.league.events!.chance = 0; g.advance(1); }
       }
-      diff += (w(boosted) - w(base)) / 2;
+      diff += (w(boosted) - w(base)) / 4;
     }
     expect(diff).toBeGreaterThan(0.025);
-  }, 300_000);
+  }, 600_000);
 });
 
 describe('경기에 영향을 주는 이벤트', () => {

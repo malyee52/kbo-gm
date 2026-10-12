@@ -29,6 +29,13 @@ export interface EngineParams {
    * 2026-10-12 팀 실점 퍼짐 측정(실제의 약 60%)으로 따로 둔다 (docs/temp-values.md)
    */
   seasonPitRegressScale?: number;
+  /**
+   * 엔트리 순환 (team.ts churnedOut): 직접 정하지 않은 1군에서 10일마다 국내 투수가 2군에 내려갈 확률. 없으면 0.
+   * 2026-10-13 tools/pitch_usage.ts로 맞춘 값 (docs/temp-values.md)
+   */
+  rosterChurn?: number;
+  /** 엔트리 순환 중 불펜 고를 때 가치에 더하는 흔들림 폭 (런). 2군에서 "요즘 좋은" 투수가 올라오는 몫 */
+  rosterJitter?: number;
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
   batRegress: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
   /** 투수 사건별 회귀 상수: 상대 타자 수 기준. tools/fit_regression.py로 맞춘 값 */
@@ -139,6 +146,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   seasonBlend: [1.0, 0.3, 0.1],
   seasonRegressScale: 0.5,
   seasonPitRegressScale: 0.25,
+  rosterChurn: 0.25,
+  rosterJitter: 0.06,
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
   foreignPriors: {

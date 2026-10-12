@@ -108,7 +108,9 @@ describe('시즌 중 시장', () => {
     for (let t = 0; t < g.world.teams.length; t++) expect(foreignSwapsUsed(g.marketCtx, t)).toBeLessThanOrEqual(FOREIGN_SWAPS);
     g.beginOffseason();
     expect(g.league.players.some((p) => p.market !== undefined)).toBe(false);
-    const signed = new Set(ai.map((m) => m.id));
+    // AI가 데려왔다가 다시 바꾼(방출한) 선수는 뺀다: 마지막 움직임이 영입인 선수만 (2026-10-13 엔트리 순환 뒤 이 시드에서 다시 바꾼 경우가 생겼다)
+    const last = new Map(movesOf(g.league, 2026).map((m) => [m.id, m.kind]));
+    const signed = new Set(ai.map((m) => m.id).filter((id) => last.get(id) === 'sign'));
     for (const id of signed) expect(g.league.players.find((p) => p.id === id)!.team).toBeGreaterThanOrEqual(0);
     const lp = g.league.players.find((p) => p.id === bad.id);
     if (lp && lp.history.some((h) => h.year === 2026)) expect(lp.history.at(-1)!.team).toBe(g.team.name);
