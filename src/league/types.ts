@@ -52,6 +52,8 @@ export interface LeaguePlayer {
   dev?: boolean;
   /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */
   market?: number;
+  /** 자유 모드의 빈 자리 (그 해, src/fantasy/free.ts): 시즌 중 AI가 새 선수를 만들 때 채워 쓴다. 쓰기 전에는 어디에도 보이지 않는다 */
+  reserve?: number;
   /** 시장에 나오는 때 (시즌의 몫 0~1). 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 (create.ts, market.ts) */
   marketFrom?: number;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */

@@ -75,6 +75,8 @@ export interface SimPlayer {
    * 시즌 중 시장의 미계약 선수는 teamIdx = -1이고 이 값이 없다 (어느 구단 명단에도 없다)
    */
   formerTeam?: number;
+  /** 자유 모드의 빈 자리 (아직 쓰지 않은 가상 선수 자리, src/fantasy/free.ts). 시장 목록에 나오지 않는다 */
+  reserve?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
   /** 나이가 추정값 (생년 자료 없음, M8) */

@@ -13,6 +13,7 @@ const FALLBACK: Record<FantasyEntry['kind'], string> = {
   chat: 'front office, desk, documents, two people talking, window view of a baseball field, warm light',
   event: 'dugout, players huddle, dramatic lighting, tension',
   memory: 'nostalgic, faded colors, empty baseball stadium at dusk, sunset',
+  action: 'dramatic scene, front office or ballpark, decisive moment, cinematic lighting',
 };
 
 /** 그림 지시문 (태그). 구단 색 유니폼과 기본·금지 태그를 붙인다 */

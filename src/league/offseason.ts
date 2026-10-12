@@ -459,8 +459,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };
   // 시즌 중 시장 (market.ts): 끝내 계약하지 않은 선수는 리그에서 지운다. 계약한 선수는 이제 보통 선수다
-  league.players = league.players.filter((p) => !(p.market === year && p.team === -1 && !p.history.some((h) => h.year === year)));
-  for (const p of league.players) delete p.market;
+  league.players = league.players.filter((p) => !((p.market === year || p.reserve === year) && p.team === -1 && !p.history.some((h) => h.year === year)));
+  for (const p of league.players) { delete p.market; delete p.reserve; }
 
   const off: OffseasonState = {
     format: 1, year, stage: 'fa', userTeam,
@@ -2207,6 +2207,37 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
  * 개막 때 시즌 중 시장의 가상 외국인 후보를 만든다 (market.ts). 외국인 제도가 없던 해는 만들지 않는다.
  * 후보는 team = -1, market = 그 해로 리그에 들어가 시즌 월드에 소속 없이 들어온다. 결산 때 계약하지 않은 후보는 지운다
  */
+/** 자유 모드 빈 자리 수 (시즌마다, 투수·야수 반씩) */
+export const FREE_RESERVES = 12;
+
+/** 자유 모드: 개막 때 시즌 중에 채워 쓸 빈 자리를 만든다 (src/fantasy/free.ts). 시즌 월드에 소속 없이 들어간다 */
+export function openReserves(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS): void {
+  const year = league.year;
+  const view = leagueView({ ...league, year: year - 1 }, store, params);
+  const rng = new Rng(`${league.seed}/reserve/${year}`);
+  const taken = takenNames(league, store);
+  for (let i = 0; i < FREE_RESERVES; i++) {
+    const isPitcher = i % 2 === 0;
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age: 22, runs: 0, isPitcher, pos: isPitcher ? null : (['SS', 'CF', 'C', '1B', '2B', '3B'] as const)[(i >> 1) % 6] }, year - 1);
+    p.reserve = year;
+    p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year };
+  }
+}
+
+/** 자유 모드 (오프시즌): 가상 선수를 그 구단에 바로 넣는다. runs는 지금 기여, potential은 잠재력 (런) */
+export function addFreePlayer(league: LeagueState, store: Store, params: EngineParams, team: number,
+  spec: { name: string; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; runs: number; potential: number }): LeaguePlayer {
+  const year = league.year;
+  const view = leagueView({ ...league, year }, store, params);
+  const rng = new Rng(`${league.seed}/free-player/${year}/${spec.name}/${league.nextVirtualId}`);
+  const isPitcher = spec.pos === 'P';
+  const pos = isPitcher ? null : spec.pos === 'C' ? 'C' : spec.pos === 'IF' ? (['SS', '2B', '3B'] as const)[rng.int(3)] : (['CF', 'LF', 'RF'] as const)[rng.int(3)];
+  const p = makeVirtual(league, view, rng, new Set(), { foreign: false, asia: false, age: spec.age, runs: spec.runs, potential: spec.potential, name: spec.name, isPitcher, pos }, year);
+  p.team = team;
+  p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 2 };
+  return p;
+}
+
 /**
  * 판타지 모드 큰 변화 (src/fantasy/effects.ts 'prospect'): 개막 때 가상 유망주를 그 구단에 넣는다 (육성 계약 아닌 신인 계약, 2군).
  * 지금 기여는 낮고(−8~0런) 잠재력이 크다

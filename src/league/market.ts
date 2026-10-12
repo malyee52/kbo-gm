@@ -116,7 +116,7 @@ export function releaseCost(lp: LeaguePlayer, year: number, seasonDays: number, 
 
 /** 시장에서 데려올 수 있는 선수: 그 해 시장의 외국인 후보와 자유계약 선수 (원 소속 구단 것은 빼고) */
 export function marketPlayers(ctx: Pick<MarketCtx, 'world'>, team: number): SimPlayer[] {
-  return ctx.world.players.filter((p) => p.teamIdx === -1 && p.formerTeam !== team);
+  return ctx.world.players.filter((p) => p.teamIdx === -1 && p.formerTeam !== team && !p.reserve);
 }
 
 export function isMarketForeign(p: SimPlayer, lp: LeaguePlayer | undefined, year: number): boolean {

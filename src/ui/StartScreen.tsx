@@ -34,9 +34,12 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   // 능력치 기준 (2026-10-12): 역사 재현이 기본
   const [basis, setBasis] = useState<'season' | 'prior'>('season');
   // 판타지 모드 (AI 이야기, docs/fantasy-mode.md)
-  const [fantasy, setFantasy] = useState(false);
+  // 모드: 기본 / 판타지(AI 보조) / 자유(AI 진행)
+  const [mode, setMode] = useState<'base' | 'fantasy' | 'free'>('base');
+  const fantasy = mode !== 'base';
   const [regressor, setRegressor] = useState(false);
-  const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis, ...(fantasy ? { fantasy: regressor ? { regressor: true } : {} } : {}) };
+  const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis,
+    ...(fantasy ? { fantasy: { ...(regressor ? { regressor: true } : {}), ...(mode === 'free' ? { free: true } : {}) } } : {}) };
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -210,11 +213,17 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             : '개막 전까지의 성적(직전 3시즌)만 봅니다. 그해 누가 터질지는 알 수 없습니다.'} 잠재력은 어느 쪽이든 선수가 실제로 보여 준 고점입니다.</span>
         </div>
         <div className="form-row">
-          <label className="inline">
-            <input type="checkbox" checked={fantasy} disabled={!!busy} onChange={(e) => setFantasy(e.target.checked)} />
-            판타지 모드 (AI 이야기)
+          <label>
+            게임 모드
+            <select value={mode} disabled={!!busy} onChange={(e) => setMode(e.target.value as 'base' | 'fantasy' | 'free')}>
+              <option value="base">기본</option>
+              <option value="fantasy">판타지 (AI 보조: 기사·대화·사건·설득)</option>
+              <option value="free">자유 모드 (AI 진행: 무엇이든 하면 AI가 판정)</option>
+            </select>
           </label>
-          <span className="muted small">본인의 AI API 키(Claude·OpenAI·Gemini)로 AI가 기사·대화·사건을 만들어 이야기가 흘러갑니다. 게임 안 "오늘 → 판타지"에서 키를 넣습니다.</span>
+          <span className="muted small">{mode === 'base' ? '실제 기록과 규칙대로 운영합니다.'
+            : mode === 'fantasy' ? '본인의 AI API 키로 AI가 기사·대화·사건을 만들고, 설득이 트레이드·계약 판단에 들어갑니다.'
+              : '"행동" 칸에 무엇이든 쓰면 AI 게임 마스터가 판정해 트레이드·영입·선수 능력·자금까지 바로 바꿉니다. 기존 화면도 함께 씁니다.'} 게임 안 "오늘 → 판타지"에서 키를 넣습니다.</span>
         </div>
         {fantasy && (
           <div className="form-row">
