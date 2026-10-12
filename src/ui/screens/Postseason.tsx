@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import { formatDate } from '../../game/calendar';
-import { currentSeries, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
-import { TeamName, useGame } from '../context';
+import { currentSeries, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
+import { PlayerLink, TeamName, useGame } from '../context';
 import { BoxView } from './Schedule';
 
 /** 진출 팀 수에 맞는 대진 설명 (1988년까지 2팀, 2014년까지 4팀, 2015년부터 5팀) */
@@ -77,6 +77,7 @@ export function Postseason() {
               {x.winner >= 0 ? <> · <TeamName idx={x.winner} /> {x.round === 'ks' ? '우승' : '진출'}</> : ' · 진행 중'}
             </span>
           </h2>
+          {x.mvp && <p className="small">시리즈 MVP <strong>{x.mvp.name}</strong> (<TeamName idx={x.mvp.team} />) · {x.mvp.line}</p>}
           {x.games.length === 0 ? <p className="muted small">아직 경기를 치르지 않았습니다.</p> : (
             <table>
               <thead><tr><th>경기</th><th className="l">날짜</th><th className="l">원정</th><th>점수</th><th className="l">홈</th><th /></tr></thead>
@@ -97,6 +98,8 @@ export function Postseason() {
         </section>
       ))}
 
+      {st && <PostseasonLeaders games={series.flatMap((x) => x.games)} />}
+
       {selGame?.box && (
         <BoxView
           log={{ day: selGame.day, home: selGame.home, away: selGame.away, homeRuns: selGame.homeRuns, awayRuns: selGame.awayRuns, innings: selGame.innings, win: null, loss: null, save: null }}
@@ -105,5 +108,32 @@ export function Postseason() {
       )}
       {!st && last && <p className="muted small">결산 뒤에는 박스스코어 없이 결과만 남습니다.</p>}
     </div>
+  );
+}
+
+/** 가을야구 개인 기록 (박스스코어로 합친 것, 결산 전까지) */
+function PostseasonLeaders({ games }: { games: SeriesGame[] }) {
+  const { session } = useGame();
+  const lines = [...postseasonLines(games).values()];
+  const P = session.world.players;
+  const hit = lines.filter((l) => l.bat && !P[l.idx]?.isPitcher && l.bat.ab > 0)
+    .sort((a, b) => b.bat!.h - a.bat!.h || b.bat!.hr - a.bat!.hr || b.bat!.rbi - a.bat!.rbi || a.idx - b.idx).slice(0, 8);
+  const pit = lines.filter((l) => l.pit && l.pit.outs > 0)
+    .sort((a, b) => b.pit!.outs - a.pit!.outs || a.pit!.er - b.pit!.er || a.idx - b.idx).slice(0, 8);
+  if (!hit.length && !pit.length) return null;
+  return (
+    <section className="panel">
+      <h2>가을야구 개인 기록 <span className="muted small">안타·이닝 순 상위 8명</span></h2>
+      <div className="two">
+        <table>
+          <thead><tr><th className="l">타자</th><th className="l">구단</th><th className="l">기록</th></tr></thead>
+          <tbody>{hit.map((l) => <tr key={l.idx} className={l.team === session.teamIdx ? 'me' : ''}><td className="l"><PlayerLink p={P[l.idx]} /></td><td className="l"><TeamName idx={l.team} /></td><td className="l small">{l.bat!.g}경기 {psLineText(l, false)}</td></tr>)}</tbody>
+        </table>
+        <table>
+          <thead><tr><th className="l">투수</th><th className="l">구단</th><th className="l">기록</th></tr></thead>
+          <tbody>{pit.map((l) => <tr key={l.idx} className={l.team === session.teamIdx ? 'me' : ''}><td className="l"><PlayerLink p={P[l.idx]} /></td><td className="l"><TeamName idx={l.team} /></td><td className="l small">{psLineText(l, true)}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </section>
   );
 }

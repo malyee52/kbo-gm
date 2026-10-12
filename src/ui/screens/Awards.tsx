@@ -1,4 +1,5 @@
 // 시상식 (2026-10-08 사용자 요청): MVP, 신인상, 골든글러브, 타이틀 홀더. 게임 안에서 치른 시즌마다 남는다.
+import { ROUND_LABEL } from '../../league/postseason';
 import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import { GG_LABEL, type AwardWinner } from '../../league/awards';
@@ -70,6 +71,25 @@ export function Awards() {
         <Big title="정규시즌 MVP" w={aw.mvp} />
         <Big title="신인상" w={aw.rookie} />
       </section>
+
+      {aw.postseasonMvps?.length ? (
+        <section className="panel">
+          <h2>가을야구 MVP</h2>
+          <table>
+            <thead><tr><th className="l">시리즈</th><th className="l">선수</th><th className="l">구단</th><th className="l">시리즈 기록</th></tr></thead>
+            <tbody>
+              {[...aw.postseasonMvps].reverse().map((m) => (
+                <tr key={m.round} className={m.team === me ? 'me' : ''}>
+                  <td className="l">{ROUND_LABEL[m.round]}</td>
+                  <td className="l"><Name w={{ ...m, war: 0 }} /></td>
+                  <td className="l"><TeamName idx={m.team} /></td>
+                  <td className="l small">{m.line}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       <section className="panel">
         <h2>골든글러브</h2>
