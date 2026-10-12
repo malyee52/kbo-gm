@@ -7,7 +7,7 @@ import type { GameSession } from '../game/session';
 import { leagueQuality } from '../engine';
 import { foreignRule } from '../league/eras';
 import type { LeaguePlayer } from '../league/types';
-import { complete, extractJson, type LlmSettings } from './llm';
+import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { gameContext } from './context';
 import { RULES } from './prompts';
 import { leniencyOf, leniencyRule, type Leniency } from './leniency';
@@ -347,7 +347,7 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
 
 /** 행동 한 번: AI 판정 → 이야기 글 (ops는 기록될 때 적용된다) */
 export async function freeAction(g: GameSession, store: Store, s: LlmSettings, action: string): Promise<{ entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] }> {
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: freeSystem(!!g.league.fantasy?.regressor, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store, action)}\n\n[단장의 행동]\n${action}` }],
     maxTokens: 1500,
@@ -356,17 +356,19 @@ export async function freeAction(g: GameSession, store: Store, s: LlmSettings, a
   return parseGmReply(g, store, raw, { ask: action.slice(0, 1000), who: '게임 마스터', fallbackTitle: '행동' });
 }
 
-type GmJson = { title?: string; narration?: string; ops?: unknown; promises?: unknown; settle?: unknown };
+type GmJson = { title?: string; narration?: string; text?: string; story?: string; ops?: unknown; promises?: unknown; settle?: unknown };
 
 /** 게임 마스터 답 → 이야기 글 (조작·약속·약속 판정) */
 function parseGmReply(g: GameSession, store: Store, raw: string, meta: { ask: string; who: string; fallbackTitle: string }, only?: Set<string>): { entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] } {
   const j = extractJson<GmJson>(raw);
-  if (!j?.narration) throw new Error('AI가 형식에 맞지 않게 답했습니다. 다시 시도하세요.');
-  const { ops, dropped } = resolveOps(g, j.ops, store);
-  const promises = resolvePromises(g, j.promises);
-  const settles = resolveSettles(g, j.settle, only);
+  // 이야기 칸 이름이 다르게 와도 받는다. JSON 없이 이야기만 왔으면 게임 변화 없이 이야기로 남긴다 (2026-10-13)
+  const narration = j?.narration ?? j?.text ?? j?.story ?? (!j && !/[{[]/.test(raw) && raw.trim().length > 20 ? raw.trim() : undefined);
+  if (!narration) throw new Error(`AI가 형식에 맞지 않게 답했습니다 (다시 물어도 같았습니다). 답 앞부분: ${preview(raw)}`);
+  const { ops, dropped } = resolveOps(g, j?.ops, store);
+  const promises = resolvePromises(g, j?.promises);
+  const settles = resolveSettles(g, j?.settle, only);
   return {
-    entry: { kind: 'action', title: String(j.title ?? meta.fallbackTitle).slice(0, 80), ask: meta.ask, text: String(j.narration).slice(0, 3000), who: meta.who,
+    entry: { kind: 'action', title: String(j?.title ?? meta.fallbackTitle).slice(0, 80), ask: meta.ask, text: String(narration).slice(0, 3000), who: meta.who,
       ...(ops.length ? { ops } : {}), ...(promises.length ? { promises } : {}), ...(settles.length ? { settles } : {}) },
     dropped,
   };
@@ -402,7 +404,7 @@ export async function settlePromises(g: GameSession, store: Store, s: LlmSetting
   const due = duePromises(g.league.fantasy, g.promiseNow);
   if (!due.length) return null;
   const list = due.map((p) => `- ${p.id} 상대 ${p.party}: ${p.text}`).join('\n');
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: freeSystem(!!g.league.fantasy?.regressor, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[기한이 된 약속]\n${list}\n\n위 약속들이 지켜졌는지 지금 게임 상황(성적·자금·소속·지난 행동)으로 판정하고, 결과와 대가를 이야기하라. 모든 약속을 settle에 넣는다.` }],
     maxTokens: 1500,

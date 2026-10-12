@@ -5,7 +5,7 @@
 import type { GameSession, CastGame } from '../game/session';
 import type { DataStore } from '../data/types';
 import { formatDate } from '../game/calendar';
-import { complete, extractJson, type LlmSettings } from './llm';
+import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { leniencyOf, leniencyRule, NEGOTIATE_SCALE } from './leniency';
 import { gameContextFor } from './ai';
@@ -49,7 +49,7 @@ ${RULES}
 
 /** 후일담 한 편 → 기사 (경기 key로 이어 둔다) */
 export async function gameStory(g: GameSession, s: LlmSettings, game: CastGame, moments: string[]): Promise<Omit<FantasyEntry, 'year' | 'day'>> {
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: STORY_SYSTEM,
     messages: [{ role: 'user', content: `[경기 기록]\n${gameSummary(g, game, moments)}` }],
     maxTokens: 900,
@@ -90,7 +90,7 @@ export async function pregameTalk(g: GameSession, store: Store, s: LlmSettings, 
   const opp = next ? (next.home === g.teamIdx ? next.away : next.home) : -1;
   const st = g.season.standings();
   const oppInfo = opp >= 0 ? `다음 경기: ${g.league.teams[opp].name}전 (상대 ${st.indexOf(opp) + 1}위, 우리 ${st.indexOf(g.teamIdx) + 1}위)` : '';
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: pregameSystem(maxEdge, l),
     messages: [{ role: 'user', content: `[게임 상황]\n${gameContextFor(g, store)}\n${oppInfo}\n\n[단장의 말]\n${speech}` }],
     maxTokens: 600,
@@ -98,7 +98,7 @@ export async function pregameTalk(g: GameSession, store: Store, s: LlmSettings, 
   });
   const j = extractJson<{ title?: string; text?: string; edge?: unknown; days?: unknown }>(raw);
   const text = String(j?.text ?? '').trim().slice(0, 1200);
-  if (!text) throw new Error('AI가 형식에 맞지 않게 답했습니다. 다시 시도하세요.');
+  if (!text) throw new Error(`AI가 형식에 맞지 않게 답했습니다 (다시 물어도 같았습니다). 답 앞부분: ${preview(raw)}`);
   const e = Number(j?.edge);
   const edge = Number.isFinite(e) ? Math.round(Math.max(-maxEdge, Math.min(maxEdge, e)) * 10000) / 10000 : 0;
   const days = Math.max(1, Math.min(3, Math.round(Number(j?.days) || 1)));

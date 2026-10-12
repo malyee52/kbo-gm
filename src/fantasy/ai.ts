@@ -1,7 +1,7 @@
 // 판타지 모드의 AI 요청과 답 해석 (3~5단계): 대화, 사건, 이야기 줄기.
 // 답은 JSON으로 받고 효과는 effects.ts로 검사한다. 결과는 FantasyEntry로 돌려주고, 기록(조작 기록)은 부른 쪽(화면)이 session.addFantasy로 한다.
 import type { GameSession } from '../game/session';
-import { complete, extractJson, type LlmSettings } from './llm';
+import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { gameContext } from './context';
 import { effectMenu, sanitizeEffects, type EffectPlayer, type EffectScale } from './effects';
 import { RULES } from './prompts';
@@ -74,7 +74,7 @@ export async function chatTurn(g: GameSession, store: Store, s: LlmSettings, c: 
     ...history.flatMap((e) => [{ role: 'user' as const, content: e.ask ?? '' }, { role: 'assistant' as const, content: JSON.stringify({ reply: e.text, offer: '', effects: [] }) }]),
     { role: 'user' as const, content: ask },
   ];
-  const raw = await complete(s, { system: chatSystem(c, !!g.league.fantasy?.regressor, leniencyOf(g.league)), messages, maxTokens: 700,
+  const raw = await completeJsonText(s, { system: chatSystem(c, !!g.league.fantasy?.regressor, leniencyOf(g.league)), messages, maxTokens: 700,
     mockReply: JSON.stringify({ reply: `${c.role}입니다. (시험용 답) 말씀하신 건 알아보겠습니다.`, offer: '', effects: [] }) });
   const j = extractJson<{ reply?: string; offer?: string; effects?: unknown }>(raw);
   const reply = (j?.reply ?? raw).toString().trim();
@@ -115,7 +115,7 @@ ${effectMenu(scale)}
 
 export async function makeEvent(g: GameSession, store: Store, s: LlmSettings): Promise<Omit<FantasyEntry, 'year' | 'day'>> {
   const scale: EffectScale = arcReady(g) ? 'arc' : 'event';
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: eventSystem(scale, !!g.league.fantasy?.regressor),
     messages: [{ role: 'user', content: `[게임 상황]\n${fullContext(g, store)}\n\n사건 하나를 만들어 줘.` }],
     maxTokens: 1400,
@@ -124,7 +124,7 @@ export async function makeEvent(g: GameSession, store: Store, s: LlmSettings): P
       arc: { title: '팬과 함께', summary: '팬들과 가까워지려는 시도가 시작됐다.' } }),
   });
   const j = extractJson<{ title?: string; text?: string; choices?: unknown[]; arc?: Partial<ArcUpdate> }>(raw);
-  if (!j?.title || !j.text || !Array.isArray(j.choices) || j.choices.length < 2) throw new Error('AI가 사건 형식에 맞지 않게 답했습니다. 다시 시도하세요.');
+  if (!j?.title || !j.text || !Array.isArray(j.choices) || j.choices.length < 2) throw new Error(`AI가 사건 형식에 맞지 않게 답했습니다 (다시 물어도 같았습니다). 답 앞부분: ${preview(raw)}`);
   const roster = effectRoster(g);
   const choices: FantasyChoice[] = j.choices.slice(0, 3).map((c) => {
     const x = (c ?? {}) as { label?: unknown; result?: unknown; effects?: unknown };
