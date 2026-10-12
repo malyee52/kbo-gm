@@ -864,6 +864,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
 /** 보호선수 명단에 넣지 않아도 자동 보호되는 선수: 외국인, 군 보류(복무 중), 이번 오프시즌 FA 계약 선수 */
 export function autoProtected(off: OffseasonState, p: LeaguePlayer): boolean {
   if (p.foreign || isServing(p)) return true;
+  // 이번 오프시즌에 보상선수로 온 선수도 다시 보상선수로 데려갈 수 없다 (2026-10-12: 한 선수가 두 번 지명돼 첫 구단에서 빠져나가던 것)
+  if (off.comp?.some((c) => c.pick === p.id)) return true;
   return off.fa.entries.some((e) => e.id === p.id && e.status === 'signed');
 }
 
