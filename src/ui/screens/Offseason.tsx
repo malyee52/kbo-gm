@@ -105,6 +105,7 @@ export function Offseason() {
       <div className="stack off-main">
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
+      {off.stage === 'second' && <SecondPanel act={act} />}
       {off.stage === 'foreign' && <ForeignPanel act={act} />}
       {off.stage === 'draft' && <DraftPanel act={act} />}
       {off.stage === 'salary' && <SalaryPanel act={act} />}
@@ -249,6 +250,106 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** 2차 드래프트·창단 특별 지명 (offseason.ts ProtectDraft): 우리 보호 명단과 지명 희망 순서. "다음"을 누르면 지명이 진행된다 */
+function SecondPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const off = session.offseason!;
+  return (
+    <section className="stack">
+      {off.expansion && <ProtectDraftPanel d={off.expansion} act={act} />}
+      {off.second && <ProtectDraftPanel d={off.second} act={act} />}
+    </section>
+  );
+}
+
+function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
+  const { session } = useGame();
+  const won = useWon();
+  const info = useInfo();
+  const off = session.offseason!;
+  const me = session.teamIdx;
+  const L = session.league;
+  const [showAll, setShowAll] = useState(false);
+  const title = d.kind === 'second' ? `${off.year} 2차 드래프트` : `${L.teams[d.team!].name} 창단 특별 지명`;
+  const takesPart = Off.protectDraftTeams(L, off, d).includes(me);
+  const prot = new Set(d.protect[String(me)] ?? []);
+  const pool = takesPart ? Off.protectDraftPool(L, off, d, me)
+    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+    .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs) : [];
+  const toggle = (id: string) => act(session.setDraftProtect(d.kind, prot.has(id) ? [...prot].filter((x) => x !== id) : [...prot, id]));
+  const picker = d.kind === 'second' || d.team === me;
+  const wish = new Set(d.wish);
+  const cands = picker ? Off.protectDraftCandidates(L, off, d, me)
+    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+    .sort((a, b) => Number(wish.has(b.p.id)) - Number(wish.has(a.p.id)) || b.runs - a.runs) : [];
+  const toggleWish = (id: string) => act(session.setDraftWish(d.kind, wish.has(id) ? d.wish.filter((x) => x !== id) : [...d.wish, id]));
+  const rule = d.kind === 'second' ? Off.secondRule(off.year) : null;
+  return (
+    <>
+      <div className="panel">
+        <h2>{title}</h2>
+        <p className="muted small">
+          {d.kind === 'second'
+            ? <>구단마다 보호선수 {d.limit}명을 내고, 성적 역순으로 다른 구단의 명단 밖 선수를 지명합니다 ({rule!.rounds}라운드{rule!.extra ? `, 하위 3개 구단은 ${rule!.extra}명 더` : ''}).
+                양도금은 라운드마다 {rule!.fees.slice(0, rule!.rounds).map((f) => `${f / 10000}억`).join('·')} 원. 입단 1~3년차·이번 FA 신청 선수·외국인·군 복무 중·육성선수는 자동 제외됩니다.
+                한 구단은 {Off.SECOND_MAX_LOSS}명까지 잃습니다 (임시값).</>
+            : <>1군에 들어오는 {L.teams[d.team!].name}이(가) 기존 구단마다 보호 {d.limit}명 밖 1명을 데려갑니다. 외국인·군 복무 중·육성선수는 자동 제외됩니다.</>}
+          {' '}"다음" 단계로 넘어가면 지명이 진행됩니다.
+        </p>
+      </div>
+      {takesPart && (
+        <div className="panel mine">
+          <h2>우리 보호선수 명단 <span className="muted small">{prot.size}/{d.limit}명 · 대상 {pool.length}명</span></h2>
+          <p className="muted small">처음에는 가치 높은 순 추천 명단이 들어 있습니다. 체크를 풀거나 넣어 바꾸세요.</p>
+          <div className="scroll flat">
+            <table>
+              <thead><tr><th>보호</th><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
+              <tbody>
+                {(showAll ? pool : pool.slice(0, d.limit + 15)).map(({ p }) => {
+                  const i = info(p);
+                  const on = prot.has(p.id);
+                  return (
+                    <tr key={p.id} className={on ? 'me' : ''}>
+                      <td><input type="checkbox" checked={on} disabled={!on && prot.size >= d.limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{won(p.contract.salary)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {!showAll && pool.length > d.limit + 15 && <button type="button" className="ghost small-btn" onClick={() => setShowAll(true)}>나머지 {pool.length - d.limit - 15}명 보기</button>}
+        </div>
+      )}
+      {picker && (
+        <div className="panel mine">
+          <h2>지명 희망 <span className="muted small">{d.wish.length}명 고름 · 고른 순서대로, 우리 차례에 남아 있는 선수를 지명</span></h2>
+          {d.kind === 'second' && <p className="muted small">아무도 고르지 않으면 지명하지 않습니다 (패스).</p>}
+          {d.wish.length > 0 && <p className="small">순서: {d.wish.map((id, k) => <span key={id}>{k > 0 && ' → '}{L.players.find((p) => p.id === id)?.name ?? id}</span>)}</p>}
+          <div className="scroll flat">
+            <table>
+              <thead><tr><th>지명</th><th className="l">선수</th><th className="l">구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
+              <tbody>
+                {cands.slice(0, 40).map(({ p }) => {
+                  const i = info(p);
+                  const on = wish.has(p.id);
+                  return (
+                    <tr key={p.id} className={on ? 'me' : ''}>
+                      <td><input type="checkbox" checked={on} onChange={() => toggleWish(p.id)} aria-label={`${p.name} 지명 희망`} /></td>
+                      <td className="l">{p.name}</td><td className="l"><TeamName idx={p.team} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{won(p.contract.salary)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted small">가치 높은 순 40명까지 보입니다.</p>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -85,10 +85,9 @@ describe('구단 변화 (자료의 구단 목록과 계보)', () => {
     const nc = g.league.teams.length - 1;
     expect(g.league.teams[nc]).toEqual({ name: 'NC', franchise: 'NC' });
     expect(g.league.teams.length).toBe(9);
-    const org = g.league.players.filter((p) => p.team === nc);
-    expect(org.length).toBeGreaterThanOrEqual(EXPANSION_MIN);
-    expect(org.filter((p) => p.real).length).toBeGreaterThanOrEqual(6); // 기존 8구단에서 1명씩 특별 지명
     expect(off.log.some((l) => l.text.includes('NC 1군 진입'))).toBe(true);
+    // 특별 지명과 창단 선수 보충은 2차 드래프트·특별 지명 단계를 마칠 때 (2026-10-12: 플레이어가 보호 명단을 고칠 수 있게)
+    expect(off.expansion?.team).toBe(nc);
     // 우리 차례(보상 선택·지명·방출)가 막으면 자동으로 처리하고 넘어간다. 넘어가지 못하면 멈추지 말고 실패한다
     const stage = () => g.offseason!.stage;
     const step = () => {
@@ -99,6 +98,9 @@ describe('구단 변화 (자료의 구단 목록과 계보)', () => {
       expect(r.ok, `${stage()}: ${r.message}`).toBe(true);
     };
     while (stage() !== 'draft') step();
+    const org = g.league.players.filter((p) => p.team === nc);
+    expect(org.length).toBeGreaterThanOrEqual(EXPANSION_MIN);
+    expect(org.filter((p) => p.real).length).toBeGreaterThanOrEqual(6); // 기존 8구단에서 1명씩 특별 지명
     const slots = off.draft!.slots!;
     expect(slots.slice(0, 2)).toEqual([nc, nc]);
     expect(slots.filter((t) => t === nc).length).toBe(2 + 11 + 3); // NC 두 번째 드래프트(2013 입단): 우선 2, 특별 3

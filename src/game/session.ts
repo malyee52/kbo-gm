@@ -175,6 +175,9 @@ export type GameAction =
   | { year: number; type: 'comp-protect'; fa: string; ids: string[] }
   | { year: number; type: 'comp-pick'; fa: string; pick: string }
   | { year: number; type: 'comp-auto' }
+  /** 2차 드래프트·창단 특별 지명: 우리 보호 명단, 지명 희망 순서 (offseason.ts ProtectDraft) */
+  | { year: number; type: 'pd-protect'; kind: 'second' | 'expansion'; ids: string[] }
+  | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string }
@@ -2059,6 +2062,8 @@ export class GameSession {
       case 'comp-protect': res = Off.setProtectByUser(L, off, a.fa, a.ids); break;
       case 'comp-pick': res = Off.pickCompByUser(L, off, a.fa, a.pick); break;
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;
+      case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
+      case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow()); break;
       case 'mgr-fire': res = fireManager(L, this.teamIdx, this.year); break;
@@ -2614,6 +2619,8 @@ export class GameSession {
   setProtect(fa: string, ids: string[]) { return this.dispatchOff({ year: this.year, type: 'comp-protect', fa, ids }); }
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
+  setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
+  setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
   orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
   fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
