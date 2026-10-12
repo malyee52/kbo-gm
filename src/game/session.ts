@@ -7,7 +7,7 @@
 import type { DataStore } from '../data/types';
 import {
   absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
-  type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
+  type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, MAX_PER_SIDE, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -48,7 +48,7 @@ import {
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
-  currentSeries, playNextGame, resultOf, ROUND_LABEL, startPostseason, stillAlive,
+  currentSeries, playNextGame, resultOf, ROUND_LABEL, RULES, startPostseason, stillAlive,
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
@@ -365,9 +365,16 @@ export class GameSession {
     return this.phase === 'season' && !s.done && !!s.schedule[s.day]?.some((g) => g.home === this.teamIdx || g.away === this.teamIdx);
   }
 
-  /** 오늘 우리 경기를 직접 지휘할 수 있나 (정규시즌, 답할 이벤트 없음) */
+  /** 오늘 우리 경기를 직접 지휘할 수 있나 (정규시즌, 또는 가을야구에서 다음 경기가 우리 경기. 답할 이벤트 없음) */
   get canCommand(): boolean {
-    return this.hasGameToday && !this.pendingEvent;
+    return (this.hasGameToday || this.ourPostseasonGameNext) && !this.pendingEvent;
+  }
+
+  /** 가을야구의 다음 경기가 우리 경기인가 (직접 지휘, 2026-10-12) */
+  get ourPostseasonGameNext(): boolean {
+    if (!this.postseasonRunning) return false;
+    const x = currentSeries(this.postseason!);
+    return !!x && (x.high === this.teamIdx || x.low === this.teamIdx);
   }
 
   /** 하루 진행 직전 준비 (실제 진행과 미리보기가 같게) */
@@ -393,6 +400,7 @@ export class GameSession {
    * mode: next 바로 다음 물음, crisis 위기·승부처까지 자동, inning 이 반 이닝이 끝날 때까지 자동, auto 경기 끝까지 자동
    */
   commandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto' = 'next'): CommandPreview {
+    if (this.postseasonRunning) return this.postseasonCommandPreview(choices, mode);
     const s = this.scratchSeason();
     const out = choices.map((c) => ({ ...c }));
     const me = this.teamIdx;
@@ -421,12 +429,45 @@ export class GameSession {
     return { req: null, choices: out, plays: s.plays.get(i) ?? [], home: g?.home ?? -1, away: g?.away ?? -1, ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}) };
   }
 
-  /** 직접 지휘 확정: 고른 대로 오늘을 진행한다 (조작 기록에 남아 다시 돌려도 같다) */
+  /** 가을야구 직접 지휘 미리보기: 가을야구 상태와 시즌을 복사해 다음 경기를 돌려 본다 (실제 진행은 그대로) */
+  private postseasonCommandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto'): CommandPreview {
+    const s = this.scratchSeason();
+    const st: PostseasonState = JSON.parse(JSON.stringify(this.postseason));
+    const x = currentSeries(st)!;
+    const rule = RULES[x.round];
+    const highHome = rule.homePattern[x.games.length] ?? true;
+    const home = highHome ? x.high : x.low;
+    const away = highHome ? x.low : x.high;
+    const out = choices.map((c) => ({ ...c }));
+    let half: { inn: number; top: boolean } | null = null;
+    const commander: GameCommand = {
+      team: this.teamIdx,
+      decide: (req) => {
+        if (req.n < choices.length) return choices[req.n];
+        half ??= { inn: req.inn, top: req.top };
+        const stop = mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top));
+        if (stop) throw new CommandPause(req);
+        out.push({});
+        return {};
+      },
+    };
+    s.boxTeams.add(this.teamIdx);
+    try {
+      const g = playNextGame(st, s, commander)!;
+      return { req: null, choices: out, plays: g.plays ?? [], home, away, final: { away: g.awayRuns, home: g.homeRuns } };
+    } catch (e) {
+      if (!(e instanceof CommandPause)) throw e;
+      return { req: e.req, choices: out, plays: e.req.plays, home, away };
+    }
+  }
+
+  /** 직접 지휘 확정: 고른 대로 오늘(가을야구면 다음 경기)을 진행한다 (조작 기록에 남아 다시 돌려도 같다) */
   commitCommand(choices: CommandChoice[]): { ok: boolean; message: string } {
     if (!this.canCommand) return { ok: false, message: '오늘 지휘할 경기가 없습니다.' };
-    this.dispatchSeason({ year: this.year, day: this.day, type: 'command', choices: choices.map((c) => ({ ...c })) });
+    this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'command', choices: choices.map((c) => ({ ...c })) });
     this.crisis = null;
-    this.advance(1);
+    if (this.postseasonRunning) this.advancePostseason(1);
+    else this.advance(1);
     return { ok: true, message: '경기를 마쳤습니다.' };
   }
 
@@ -694,7 +735,8 @@ export class GameSession {
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
       opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}) },
-      at: { year: this.year, day: this.day, phase: this.phase },
+      // 가을야구 중이면 가을야구 날짜 (2026-10-12: 정규시즌 날짜를 적어 다시 돌리면 가을야구 경기를 치르지 않던 문제)
+      at: { year: this.year, day: this.currentDay, phase: this.phase },
       actions: clone(this.actions),
     };
   }
@@ -1440,7 +1482,11 @@ export class GameSession {
     while (n < games && this.postseasonRunning) {
       const st = this.postseason!;
       const before = currentSeries(st)!;
-      const g = playNextGame(st, this.season)!;
+      // 직접 지휘한 경기 (조작 기록 command, 그 경기 날짜): 고른 대로, 나머지 물음은 감독에게
+      const cmd = this.pendingCommand?.day === st.day ? this.pendingCommand : null;
+      const commander: GameCommand | null = cmd ? { team: this.teamIdx, decide: (req) => cmd.choices[req.n] ?? {} } : null;
+      if (cmd) this.pendingCommand = null;
+      const g = playNextGame(st, this.season, commander)!;
       n++;
       this.postseasonGameNews(before, g);
     }

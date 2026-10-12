@@ -168,7 +168,8 @@ export function BoxView({ log, box }: { log: GameLog; box: BoxScore }) {
                 <thead><tr><th className="l">타자</th><th>타수</th><th>득점</th><th>안타</th><th>타점</th><th>홈런</th><th>볼넷</th><th>삼진</th></tr></thead>
                 <tbody>
                   {box[k].batters.map((b, i) => (
-                    <tr key={b.idx}><td className="l"><span className="muted small">{i + 1}</span> <PlayerLink p={session.world.players[b.idx]} /></td>
+                    <tr key={b.idx} className={b.sub ? 'sub-row' : undefined}><td className="l">
+                      {b.sub ? <span className="muted small">└ {b.sub === 'PH' ? '대타' : '대주자'}</span> : <span className="muted small">{b.order ?? i + 1}</span>} <PlayerLink p={session.world.players[b.idx]} /></td>
                       <td>{b.ab}</td><td>{b.r}</td><td>{b.h}</td><td>{b.rbi}</td><td>{b.hr}</td><td>{b.bb}</td><td>{b.so}</td></tr>
                   ))}
                 </tbody>

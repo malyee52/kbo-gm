@@ -8,7 +8,7 @@
 // 난수 위치를 상태에 담으므로 저장했다 이어 해도 결과가 같다.
 
 import {
-  emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type Play, type Season, type SimPlayer,
+  emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type GameCommand, type Play, type Season, type SimPlayer,
 } from '../engine';
 
 export type SeriesRound = 'wc' | 'semi' | 'po' | 'ks';
@@ -135,8 +135,8 @@ export function stillAlive(st: PostseasonState, team: number): boolean {
   return true;
 }
 
-/** 다음 경기를 치른다. 끝났으면 null. 시리즈가 끝나면 다음 시리즈를 연다 */
-export function playNextGame(st: PostseasonState, season: Season): SeriesGame | null {
+/** 다음 경기를 치른다. 끝났으면 null. 시리즈가 끝나면 다음 시리즈를 연다. command: 직접 지휘 (그 구단 경기일 때만 쓴다) */
+export function playNextGame(st: PostseasonState, season: Season, command: GameCommand | null = null): SeriesGame | null {
   const x = currentSeries(st);
   if (!x) return null;
   const rule = RULES[x.round];
@@ -146,14 +146,14 @@ export function playNextGame(st: PostseasonState, season: Season): SeriesGame | 
   const rng = Rng.fromState(st.seed, st.rng);
   const n = season.world.players.length;
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
-  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, POSTSEASON_MAX_INNINGS, rec);
+  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, POSTSEASON_MAX_INNINGS, rec, command);
   st.rng = rng.state();
   const g: SeriesGame = {
     day: st.day, home, away, homeRuns: r.homeRuns, awayRuns: r.awayRuns, innings: r.innings,
     box: {
       lineScore: r.lineScore,
-      home: { batters: boxBat(hl, rec.bat), pitchers: boxPit(r.homeStaff, rec.pit) },
-      away: { batters: boxBat(al, rec.bat), pitchers: boxPit(r.awayStaff, rec.pit) },
+      home: { batters: boxBat(hl, rec.bat, r.homeSubs), pitchers: boxPit(r.homeStaff, rec.pit) },
+      away: { batters: boxBat(al, rec.bat, r.awaySubs), pitchers: boxPit(r.awayStaff, rec.pit) },
     },
     ...(plays ? { plays } : {}),
   };
@@ -175,11 +175,16 @@ export function playNextGame(st: PostseasonState, season: Season): SeriesGame | 
   return g;
 }
 
-function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[]): BoxBatter[] {
-  return lineup.map((p) => {
-    const b = bat[p.idx];
-    return { idx: p.idx, ab: b.ab, r: b.r, h: b.h, rbi: b.rbi, hr: b.hr, bb: b.bb, so: b.so };
-  });
+function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], subs: { idx: number; order: number; kind: 'PH' | 'PR' }[] = []): BoxBatter[] {
+  const line = (idx: number): BoxBatter => {
+    const b = bat[idx];
+    return { idx, ab: b.ab, r: b.r, h: b.h, rbi: b.rbi, hr: b.hr, bb: b.bb, so: b.so };
+  };
+  // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
+  return lineup.flatMap((p, i) => [
+    { ...line(p.idx), order: i + 1 },
+    ...subs.filter((s) => s.order === i).map((s) => ({ ...line(s.idx), order: i + 1, sub: s.kind })),
+  ]);
 }
 
 function boxPit(staff: number[], pit: ReturnType<typeof emptyPitLine>[]): BoxPitcher[] {

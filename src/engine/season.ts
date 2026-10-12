@@ -3,7 +3,7 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
-import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type LeagueCounters, type Play } from './game';
+import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
@@ -99,6 +99,10 @@ export interface GameLog {
 
 export interface BoxBatter {
   idx: number;
+  /** 경기 중 교체로 들어온 타자 (2026-10-12부터. 예전 박스스코어에는 없다) */
+  sub?: 'PH' | 'PR';
+  /** 타순 (1~9). 교체 타자는 바꾼 선수의 타순 */
+  order?: number;
   ab: number;
   r: number;
   h: number;
@@ -402,7 +406,8 @@ export class Season {
       const awayLineup = todaysLineup(a, world.league, params, dayRng);
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
-      const batBefore = wantBox ? [...homeLineup, ...awayLineup].map((p) => ({ ...this.bat[p.idx] })) : null;
+      // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
+      const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
@@ -422,14 +427,19 @@ export class Season {
         win: res.win, loss: res.loss, save: res.save,
       });
       if (pitBefore && batBefore) {
-        const boxBat = (lineup: SimPlayer[], offset: number): BoxBatter[] => lineup.map((p, i) => {
-          const now = this.bat[p.idx];
-          const was = batBefore[offset + i];
+        const line = (idx: number): BoxBatter => {
+          const now = this.bat[idx];
+          const was = batBefore.get(idx)!;
           return {
-            idx: p.idx, ab: now.ab - was.ab, r: now.r - was.r, h: now.h - was.h, rbi: now.rbi - was.rbi, hr: now.hr - was.hr,
+            idx, ab: now.ab - was.ab, r: now.r - was.r, h: now.h - was.h, rbi: now.rbi - was.rbi, hr: now.hr - was.hr,
             bb: now.bb - was.bb, so: now.so - was.so,
           };
-        });
+        };
+        // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
+        const boxBat = (lineup: SimPlayer[], subs: GameSub[]): BoxBatter[] => lineup.flatMap((p, i) => [
+          { ...line(p.idx), order: i + 1 },
+          ...subs.filter((s) => s.order === i && batBefore.has(s.idx)).map((s) => ({ ...line(s.idx), order: i + 1, sub: s.kind })),
+        ]);
         const boxPit = (staff: number[]): BoxPitcher[] => staff.map((idx) => {
           const now = this.pit[idx];
           const was = pitBefore.get(idx)!;
@@ -444,8 +454,8 @@ export class Season {
         }
         this.boxes.set(this.log.length - 1, {
           lineScore: res.lineScore,
-          home: { batters: boxBat(homeLineup, 0), pitchers: boxPit(res.homeStaff) },
-          away: { batters: boxBat(awayLineup, 9), pitchers: boxPit(res.awayStaff) },
+          home: { batters: boxBat(homeLineup, res.homeSubs), pitchers: boxPit(res.homeStaff) },
+          away: { batters: boxBat(awayLineup, res.awaySubs), pitchers: boxPit(res.awayStaff) },
         });
       }
     }
@@ -482,10 +492,13 @@ export class Season {
    * 1군은 그날 기준으로 다시 짜고(부상 선수는 계속 빠진다), 주전 휴식은 없다. 난수는 넘겨받은 rng만 쓴다.
    */
   playExtraGame(home: number, away: number, day: number, rng: Rng, maxInnings: number,
-                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters }): { result: GameResult; home: SimPlayer[]; away: SimPlayer[]; plays?: Play[] } {
+                rec: { bat: BatLine[]; pit: PitLine[]; totals: LeagueCounters },
+                command: GameCommand | null = null): { result: GameResult; home: SimPlayer[]; away: SimPlayer[]; plays?: Play[] } {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
     const plays = this.boxTeams.has(home) || this.boxTeams.has(away) ? [] as Play[] : null;
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays };
+    // 직접 지휘 (2026-10-12 가을야구까지): 우리 경기에만
+    const cmd = command && (command.team === home || command.team === away) ? command : null;
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     refreshActive(h, this.world, this.states, day);

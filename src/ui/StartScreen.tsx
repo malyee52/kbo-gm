@@ -140,7 +140,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </button>
           <button type="button" className="title-btn" onClick={() => setStartTab('challenge')} disabled={!!busy}>
             <strong>도전 시나리오</strong>
-            <span>실제 구단의 그 시즌에서 시작하는 50가지 이야기</span>
+            <span>실제 구단의 그 시즌에서 시작하는 96가지 이야기</span>
           </button>
           <button type="button" className="title-btn" onClick={() => setStartTab('load')} disabled={!!busy}>
             <strong>불러오기</strong>
