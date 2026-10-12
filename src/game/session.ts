@@ -29,7 +29,8 @@ import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
-import { addFantasyEntry, type FantasyEntry, type FantasyState } from '../fantasy/types';
+import { addFantasyEntry, applyArc, type FantasyEntry, type FantasyState } from '../fantasy/types';
+import type { FantasyEffect } from '../fantasy/effects';
 import {
   aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
@@ -201,6 +202,9 @@ export type GameAction =
   /** 판타지 모드: AI가 만든 글(기사·대화·사건). 재현 때는 AI를 다시 부르지 않고 이 기록을 그대로 넣는다 (docs/fantasy-mode.md) */
   | { year: number; day: number; type: 'ai'; entry: FantasyEntry }
   | { year: number; type: 'ai-off'; entry: FantasyEntry }
+  /** 판타지 선택 (대화의 제안·사건의 선택지). id는 이야기 글 id */
+  | { year: number; day: number; type: 'ai-choice'; id: string; choice: number }
+  | { year: number; type: 'ai-choice-off'; id: string; choice: number }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
@@ -715,6 +719,7 @@ export class GameSession {
     else if (a.type === 'release-in') this.applyRelease(a.id);
     else if (a.type === 'sign-in') this.applySign(a.id);
     else if (a.type === 'ai') this.applyFantasy(a.entry);
+    else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
@@ -964,8 +969,60 @@ export class GameSession {
   }
 
   private applyFantasy(entry: FantasyEntry): void {
-    if (!this.league.fantasy) return;
-    addFantasyEntry(this.league.fantasy, entry);
+    const f = this.league.fantasy;
+    if (!f) return;
+    const e = addFantasyEntry(f, entry);
+    if (e.arc) applyArc(f, e.arc, { year: e.year, day: e.day });
+    if (e.effects?.length) this.applyFantasyEffects(e.effects, e.title);
+    if (e.kind === 'event' && e.choices?.length) this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지 사건: ${e.title} (판타지 화면에서 고르세요)`);
+  }
+
+  /** 대화의 제안·사건의 선택지를 고른다 */
+  chooseFantasy(id: string, choice: number): { ok: boolean; message: string } {
+    const e = this.league.fantasy?.log.find((x) => x.id === id);
+    if (!e || !e.choices?.[choice]) return { ok: false, message: '고를 수 없는 선택지입니다.' };
+    if (e.chosen !== undefined) return { ok: false, message: '이미 골랐습니다.' };
+    if (this.phase === 'season') this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'ai-choice', id, choice });
+    else this.dispatchOff({ year: this.year, type: 'ai-choice-off', id, choice });
+    return { ok: true, message: e.choices[choice].result || '골랐습니다.' };
+  }
+
+  private applyFantasyChoice(id: string, choice: number): void {
+    const e = this.league.fantasy?.log.find((x) => x.id === id);
+    const c = e?.choices?.[choice];
+    if (!e || !c || e.chosen !== undefined) return;
+    e.chosen = choice;
+    if (c.effects.length) this.applyFantasyEffects(c.effects, `${e.title}: ${c.label}`);
+  }
+
+  /** 판타지 효과 적용 (src/fantasy/effects.ts). 시즌 중에는 이벤트 도구, 오프시즌에는 리그 상태에 바로 */
+  private applyFantasyEffects(effects: FantasyEffect[], note: string): void {
+    const L = this.league;
+    const f = L.fantasy!;
+    const team = this.teamIdx;
+    const season = this.phase === 'season' && !this.done ? this.eventContext() : null;
+    const year = this.phase === 'season' ? this.year : this.year + 1;
+    for (const e of effects) {
+      switch (e.type) {
+        case 'trust': { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + e.delta)); break; }
+        case 'fans': addFanEvent(L, team, this.year, season ? season.day : -2, e.delta, `판타지: ${note}`); break;
+        case 'cash':
+          L.ledger.push(e.amount > 0 ? { year, from: -1, to: team, amount: e.amount, note: `판타지: ${note}`, kind: 'event' }
+            : { year, from: team, to: -1, amount: -e.amount, note: `판타지: ${note}`, kind: 'event' });
+          break;
+        case 'fill': season?.addFill(e.fill, e.days, `판타지: ${note}`); break;
+        case 'teamForm': season?.addForm(e.edge, e.days, `판타지: ${note}`, { side: e.side }); break;
+        case 'playerForm': season?.addForm(e.edge, e.days, `판타지: ${note}`, { player: e.player }); break;
+        case 'rest': season?.rest(e.player, e.days); break;
+        case 'potential': {
+          const p = L.players.find((x) => x.id === e.player && x.team === team && x.real === false);
+          if (p) p.potential += e.delta;
+          break;
+        }
+        case 'prospect': (f.prospects ??= []).push({ ...e }); this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지: 유망주 ${e.name}이(가) 다음 개막에 입단합니다.`); break;
+        case 'ownerChange': { const o = this.owner; o.trust = e.trust; this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'owner', `판타지: 구단주가 바뀌었습니다. 새 구단주의 신뢰 ${e.trust}에서 시작합니다.`); break; }
+      }
+    }
   }
 
   /** 육성선수를 정식 등록할 수 있나. 안 되면 이유 */
@@ -2050,6 +2107,14 @@ export class GameSession {
         this.phase = 'season';
         this.refreshRivals();
         Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
+        // 판타지 큰 변화: 입단 예정 유망주 (src/fantasy/effects.ts 'prospect')
+        if (L.fantasy?.prospects?.length) {
+          for (const sp of L.fantasy.prospects) {
+            const p = Off.addFantasyProspect(L, this.store, this.params, this.teamIdx, sp);
+            this.addNews(0, 'season', `${L.year} 시즌: 유망주 ${p.name} 입단 (판타지).`);
+          }
+          L.fantasy.prospects = [];
+        }
         this.world = worldFromLeague(clone(L), this.store, this.params);
         this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx] });
         this.applyTactics();
@@ -2109,6 +2174,7 @@ export class GameSession {
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'ai-off': this.applyFantasy(a.entry); break;
+      case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;

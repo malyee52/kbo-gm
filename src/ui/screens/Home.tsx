@@ -1,6 +1,7 @@
 // 홈 (2026-10-12 개편): 카드 4장 — 다음 경기 · 알림 · 최근 경기 · 순위(우리 팀 앞뒤). 우리 구단 성적은 위쪽 머리 부분에 있다.
 import { useState } from 'react';
 import { ScenarioBanner } from '../ScenarioBanner';
+import { pendingChoices } from '../../fantasy/types';
 import type { NewsKind } from '../../game/session';
 import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
@@ -62,6 +63,12 @@ export function Home() {
         </div>
       )}
       <ScenarioBanner />
+      {pendingChoices(session.fantasy).length > 0 && (
+        <div className="note row-between">
+          <span>판타지: 답을 기다리는 일이 {pendingChoices(session.fantasy).length}건 있습니다 ({pendingChoices(session.fantasy).slice(-1)[0].title}).</span>
+          <button type="button" onClick={() => go('fantasy')}>판타지로</button>
+        </div>
+      )}
       <section className="dash">
         <div className="card wide">
           <h2>다음 경기</h2>

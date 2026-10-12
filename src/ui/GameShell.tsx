@@ -17,6 +17,8 @@ import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Market } from './screens/Market';
 import { Fantasy } from './screens/Fantasy';
+import { autoEventDue, makeEvent } from '../fantasy/ai';
+import { loadAiSettings } from '../fantasy/settings';
 import { Offseason } from './screens/Offseason';
 import { Club } from './screens/Club';
 import { Postseason } from './screens/Postseason';
@@ -151,10 +153,32 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     changed();
     await autosave();
     setBusy(null);
+    void autoFantasyEvent();
     const rest = attention.filter((x) => x.kind !== 'crisis');
     if (session.crisis) setCmd(session.crisis);
     else if (snap || rest.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention: rest });
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
+  };
+  /**
+   * 판타지 4단계: 진행이 끝나면 때가 됐을 때 AI가 사건을 만든다 (src/fantasy/ai.ts autoEventDue). 기다리지 않고 뒤에서.
+   * AI 키가 없거나 시험용 제공자면 만들지 않는다. 실패하면 조용히 넘기고 다음 진행 때 다시
+   */
+  const fantasyBusy = useRef(false);
+  const autoFantasyEvent = async () => {
+    if (fantasyBusy.current || !session.fantasy || !autoEventDue(session)) return;
+    const s = loadAiSettings();
+    if (s.provider === 'mock' || !s.key.trim()) return;
+    fantasyBusy.current = true;
+    try {
+      const e = await makeEvent(session, store, s);
+      session.addFantasy(e);
+      changed();
+      await autosave();
+    } catch {
+      /* 다음 진행 때 다시 */
+    } finally {
+      fantasyBusy.current = false;
+    }
   };
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
   const takeSnapshotAfter = () => takeSnapshot(session);
