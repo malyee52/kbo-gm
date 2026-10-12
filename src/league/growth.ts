@@ -6,7 +6,7 @@
 
 import type { DataStore, Meta, Rates } from '../data/types';
 import {
-  batSkillFrom, batValue, DECLINE_START_AGE, DEFAULT_PARAMS, pitSkillFrom, pitValue, Rng,
+  batSkillFrom, batValue, DECLINE_START_AGE, DEFAULT_PARAMS, leagueQuality, pitSkillFrom, pitValue, Rng, seasonRegress,
   type BatSkill, type EngineParams, type PitSkill, type SimPlayer,
 } from '../engine';
 import { currentRuns, expectedGrowth, growthCap, type ValueContext } from '../ai/value';
@@ -108,6 +108,10 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
   // 2026-10-12 사용자: 잠재력은 그 선수가 실제로 보여 준 고점. 역사 재현 능력과 같은 가중치(seasonBlend: 그 시즌 중심)로 뽑고,
   // 시작 연도·능력 기준과 상관없이 같은 값이다 (예: 2008 MVP 뒤 하락한 김광현도 고점 기준. 대체 역사에서는 하락하지 않을 수 있다)
   const meta: Meta = store.meta;
+  // 리그 수준 (2026-10-12 사용자): 고점 시즌의 리그 대비 성적을 지금 리그 기준으로 바꾼다. 약한 리그(원년 등)의 고점은 줄고,
+  // 오래된 시대에 시작한 게임에서 뒤 세대(더 강한 리그)의 고점은 커진다 (engine/eras.ts leagueQuality)
+  const qNow = leagueQuality(ctx.world.year);
+  const qRatio = (y: number) => leagueQuality(y) / qNow;
   let best: number | null = null;
   const take = (r: number) => { if (best === null || r > best) best = r; };
   if (p.isPitcher) {
@@ -121,8 +125,8 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
         const s = store.season(year - k);
         return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
       });
-      const skill = pitSkillFrom(rows, meta.priors.pitcher, params);
-      take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0));
+      const skill = pitSkillFrom(rows, meta.priors.pitcher, seasonRegress(params));
+      take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0) * qRatio(year));
     }
   } else {
     const list = idx.bat.get(p.id) ?? [];
@@ -134,8 +138,8 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
         const s = store.season(year - k);
         return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
       });
-      const skill = batSkillFrom(rows, meta.priors.batter, params);
-      take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0));
+      const skill = batSkillFrom(rows, meta.priors.batter, seasonRegress(params));
+      take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year));
     }
   }
   return best;

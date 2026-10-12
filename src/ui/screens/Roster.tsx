@@ -439,7 +439,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
         <p className="small">{session.world.year} {line}{war !== undefined ? ` · WAR ${war.toFixed(1)}` : ''}</p>
         {lp && (
           <p className="small muted">
-            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential)} />
+            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential, session.year)} />
           </p>
         )}
         <p className="inline">

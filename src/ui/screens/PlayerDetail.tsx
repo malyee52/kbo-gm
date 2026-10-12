@@ -160,7 +160,7 @@ function ContractInfo({ id }: { id: string }) {
       <h3>계약과 잠재력</h3>
       <dl className="facts">
         <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</dd>
-        <dt>잠재력</dt><dd><Grade v={runsGrade(lp.scoutPotential ?? lp.potential)} />{lp.scoutPotential !== undefined && <span className="muted small"> (스카우트 평가)</span>}</dd>
+        <dt>잠재력</dt><dd><Grade v={runsGrade(lp.scoutPotential ?? lp.potential, session.year)} />{lp.scoutPotential !== undefined && <span className="muted small"> (스카우트 평가)</span>}</dd>
         {!lp.foreign && <><dt>FA</dt><dd>1군 연차 {lp.service}년{lp.faCount ? ` · FA 계약 ${lp.faCount}회` : ''}</dd></>}
       </dl>
       {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}

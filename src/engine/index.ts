@@ -5,9 +5,9 @@ import { DEFAULT_PARAMS, type EngineParams } from './params';
 import { buildWorld } from './ratings';
 import type { World } from './types';
 
-export { DECLINE_START_AGE, DEFAULT_PARAMS, type EngineParams } from './params';
+export { DECLINE_START_AGE, DEFAULT_PARAMS, isStarterSkill, STARTER_SHARE, type EngineParams } from './params';
 export { Rng } from './rng';
-export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor, LINEAR_WEIGHTS } from './ratings';
+export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress } from './ratings';
 export {
   simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
   type SeasonResult, type SeasonSave, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
@@ -30,7 +30,7 @@ export {
   TRAIT_CODES, TRAIT_INFO, DEFAULT_TRAIT_PARAMS, traitKey, traitsOf, traitEdge, hasTrait, agingScale, injuryScale, fatigueScale,
   type Trait, type TraitParams, type Situation,
 } from './traits';
-export { eraPitching, type EraPitching } from './eras';
+export { eraPitching, leagueQuality, type EraPitching } from './eras';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */

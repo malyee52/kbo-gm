@@ -46,12 +46,17 @@ describe('직접 지휘 마무리', () => {
 
   it('가을야구 경기도 직접 지휘할 수 있고, 조작 기록으로 다시 돌리면 같은 가을야구가 된다', () => {
     // 가을야구에 나가는 구단을 찾는다 (같은 시드면 정규시즌 결과는 구단 선택과 상관없이 같다)
+    // 가을야구에 나가는 구단을 찾는다 (맡은 구단에 따라 AI끼리 트레이드 등이 달라 정규시즌 결과가 조금 바뀐다)
     const probe = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'cmd-ps' }, FAST);
     probe.advance(100000, NO_STOPS);
-    const team = probe.postseason!.seeds[0];
-    const g = GameSession.create(store, { year: 2026, teamIdx: team, seed: 'cmd-ps' }, FAST);
-    g.advance(100000, NO_STOPS);
-    expect(g.postseason!.seeds).toContain(team);
+    let g: GameSession | null = null;
+    for (const team of probe.postseason!.seeds) {
+      const t = GameSession.create(store, { year: 2026, teamIdx: team, seed: 'cmd-ps' }, FAST);
+      t.advance(100000, NO_STOPS);
+      if (t.postseason!.seeds.includes(team)) { g = t; break; }
+    }
+    expect(g).not.toBeNull();
+    if (!g) return;
     while (g.postseasonRunning && !g.ourPostseasonGameNext) g.advancePostseason(1);
     expect(g.canCommand).toBe(true);
     const pv = g.commandPreview([], 'next');

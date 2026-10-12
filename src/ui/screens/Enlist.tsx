@@ -1,4 +1,5 @@
 // 입대 선택: 정규시즌이 끝난 뒤 결산 전에, 이번 오프시즌에 입대할 우리 구단 선수를 고른다 (시즌 결과 화면의 탭).
+import { isStarterSkill } from '../../engine';
 import { MILITARY_LAST_AGE, MILITARY_MIN_AGE, MILITARY_RETURN_DAY, MILITARY_TEAM_CAP } from '../../league/careers';
 import type { LeaguePlayer } from '../../league/types';
 import { Grade, PlayerLink, posName, useGame } from '../context';
@@ -88,10 +89,10 @@ export function EnlistPanel() {
                         aria-label={`${p.name} 입대`} title={c.forced ? '반드시 입대합니다' : full ? `한 해 ${MILITARY_TEAM_CAP}명까지입니다` : undefined} />
                     </td>
                     <td className="l">{sp ? <PlayerLink p={sp} /> : p.name}</td>
-                    <td>{p.isPitcher ? (p.pit!.startShare >= 0.5 ? '선발' : '구원') : posName(p.pos)}</td>
+                    <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
                     <td>{c.age}</td>
-                    <td><Grade v={runsGrade(c.runs)} /></td>
-                    <td><Grade v={runsGrade(p.scoutPotential ?? p.potential)} /></td>
+                    <td><Grade v={runsGrade(c.runs, session.year)} /></td>
+                    <td><Grade v={runsGrade(p.scoutPotential ?? p.potential, session.year)} /></td>
                     <td className="l small">{tags || '-'}</td>
                     <td className="l small muted">{basisText(p)}</td>
                   </tr>

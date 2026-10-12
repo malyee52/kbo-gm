@@ -19,6 +19,11 @@ export interface EngineParams {
   ratingBasis: 'season' | 'prior';
   /** 'season' 기준의 가중치: 그 시즌·직전·전전 시즌 (임시값). 실제 잠재력(커리어 고점)도 이 가중치로 시즌마다 뽑는다 */
   seasonBlend: [number, number, number];
+  /**
+   * 역사 재현(그 시즌 중심)과 잠재력 고점에 쓰는 회귀 배율: batRegress·pitRegress(다음 시즌 예측용으로 맞춘 값)에 곱한다.
+   * 이미 있었던 시즌을 그리는 것이라 평균 쪽으로 덜 당긴다. 2026-10-12 기준표(tools/benchmark_peaks.ts)에 맞춘 값
+   */
+  seasonRegressScale: number;
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
   batRegress: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
   /** 투수 사건별 회귀 상수: 상대 타자 수 기준. tools/fit_regression.py로 맞춘 값 */
@@ -110,11 +115,24 @@ export interface EngineParams {
  */
 export const DECLINE_START_AGE = 32;
 
+/**
+ * 선발 투수로 보는 선발 등판 비율 (2026-10-12). 예전에는 0.5였다: 1980년대 에이스는 선발과 구원을 겸해(선동열 1986 39경기 중 22선발,
+ * 최동원 1984 51경기 중 20선발) 0.42~0.5에 걸려 구원으로 분류되고 마무리가 되어 시뮬에서 한 해 50~60이닝만 던졌다.
+ * 로테이션은 이 기준을 넘는 투수 가운데 능력 순이라 선발·구원을 오간 스윙맨도 후보가 된다
+ */
+export const STARTER_SHARE = 0.4;
+
+/** 선발 투수인가 (STARTER_SHARE) */
+export function isStarterSkill(pit: { startShare: number } | null | undefined): boolean {
+  return !!pit && pit.startShare >= STARTER_SHARE;
+}
+
 export const DEFAULT_PARAMS: EngineParams = {
   seasonWeights: [1.0, 0.8, 0.6],
   debutSeasonWeight: 0.4,
   ratingBasis: 'prior',
   seasonBlend: [1.0, 0.3, 0.1],
+  seasonRegressScale: 0.5,
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
   foreignPriors: {

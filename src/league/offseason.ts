@@ -9,7 +9,7 @@ import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
-  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, makeDefense, Rng, traitsOf,
+  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, Rng, traitsOf,
   type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -78,9 +78,11 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-11 tools/flow_longterm.ts 3시드 20시즌으로 다시 맞춘 값 (임시값). 기량 하락 나이 35세·육성 투자 30세 이하·재정 결산 기준 8.5
  * (2045년 상위 270명 기여 합이 시작 대비 +5~9%, 중간 정점 +25~30%). 33세일 때 9, 31세일 때 9.5.
  * 2026-10-12 하락 나이 32세·완만한 하락으로 바꾸며 9 (2026 시작 2시드 20시즌: 2045년 상위 270명 기여 합 시작 대비 -2.3%, 8.5면 -8.5%).
+ * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
+ * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
  */
-export const DRAFT_POTENTIAL_SCALE = 9;
+export const DRAFT_POTENTIAL_SCALE = 10.5;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
 /** 외국인 후보 인원 (임시값) */
@@ -358,7 +360,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     growth.set(p.id, { id: p.id, team: sp.teamIdx, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs,
       ...(eff.runsDrop > 0 || eff.potentialCut > 0 ? { tags: ['부상 후유증'] } : {}) });
     const firstTeam = sp.isPitcher
-      ? pt.bf / ((sp.pit!.startShare >= 0.5 ? 650 : 280))
+      ? pt.bf / ((isStarterSkill(sp.pit) ? 650 : 280))
       : b.pa / 550;
     // 2군 유망주는 퓨처스리그에서 뛴다 (2026-10-12부터 실제 퓨처스 출전량으로, 예전에는 모두 FUTURES_SHARE):
     // 퓨처스에서 꽉 채워 뛰면 1군 기회 FUTURES_WEIGHT만큼. 퓨처스 활약·부진은 성장에 ±FUT_FORM_RUNS (futures.ts)

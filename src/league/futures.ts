@@ -7,7 +7,7 @@
 // 창단 뒤 1군 진입 전 퓨처스 구단은 시즌 월드에 없어 따로 받는다 (extra: 모든 선수가 2군, 경기 수는 리그 평균).
 // 오프시즌 성장 판정은 이 성적의 출전량(기회)과 시즌 운(활약·부진)을 쓴다 (futuresGrowth, 2026-10-12).
 
-import { DEFAULT_PARAMS, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
+import { DEFAULT_PARAMS, isStarterSkill, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
 import type { DataStore } from '../data/types';
 import type { LeagueState } from './types';
 import { isFuturesTeam, worldFromLeague } from './world';
@@ -116,7 +116,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
       if (pa >= 1) batPA.set(p.idx, { p, pa, g: Math.round(n * Math.min(1, paPer / 4)) });
     });
     const pitchers = team.org.filter((p) => p.isPitcher && p.pit && !reg.has(p.idx));
-    const starters = pitchers.filter((p) => p.pit!.startShare >= 0.5).sort((a, b) => a.value - b.value || a.idx - b.idx).slice(0, ROT);
+    const starters = pitchers.filter((p) => isStarterSkill(p.pit)).sort((a, b) => a.value - b.value || a.idx - b.idx).slice(0, ROT);
     const relievers = pitchers.filter((p) => !starters.includes(p)).sort((a, b) => a.value - b.value || a.idx - b.idx);
     for (const p of pitchers) {
       const n = games(p);

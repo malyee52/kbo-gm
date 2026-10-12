@@ -1,4 +1,5 @@
 // 시즌 뒤 성장·하락 결과 (2026-10-08 사용자 요청). 오프시즌을 시작할 때 판정한 능력 변화를 보여 준다.
+import { isStarterSkill } from '../../engine';
 import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import type { GrowthEntry } from '../../league/offseason';
@@ -28,8 +29,8 @@ export function Growth() {
   const others = list.filter((g) => !g.tags?.includes('복무 중'));
   const ups = [...others].sort((a, b) => delta(b) - delta(a)).slice(0, 15);
   const downs = [...others].sort((a, b) => delta(a) - delta(b)).slice(0, 15);
-  const upN = mine.filter((g) => runsGrade(g.after) > runsGrade(g.before)).length;
-  const downN = mine.filter((g) => runsGrade(g.after) < runsGrade(g.before)).length;
+  const upN = mine.filter((g) => runsGrade(g.after, session.year) > runsGrade(g.before, session.year)).length;
+  const downN = mine.filter((g) => runsGrade(g.after, session.year) < runsGrade(g.before, session.year)).length;
   const net = mine.reduce((s, g) => s + delta(g), 0);
 
   const rows = (items: GrowthEntry[], showTeam: boolean) => (
@@ -46,13 +47,13 @@ export function Growth() {
           if (!p) return null;
           const sp = session.world.players.find((x) => x.id === g.id);
           const d = delta(g);
-          const gb = runsGrade(g.before);
-          const ga = runsGrade(g.after);
+          const gb = runsGrade(g.before, session.year);
+          const ga = runsGrade(g.after, session.year);
           return (
             <tr key={g.id}>
               <td className="l">{sp ? <button type="button" className="link" onClick={() => openPlayer(sp.idx)}>{p.name}</button> : p.name}</td>
               {showTeam && <td className="l"><TeamName idx={g.team} /></td>}
-              <td>{p.isPitcher ? (p.pit!.startShare >= 0.5 ? '선발' : '구원') : posName(p.pos)}</td>
+              <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
               <td>{g.age ?? '-'}</td>
               <td>{gb} → <strong>{ga}</strong> {ga > gb ? <span className="up">▲{ga - gb}</span> : ga < gb ? <span className="down">▼{gb - ga}</span> : ''}</td>
               <td className={d > 0.5 ? 'up' : d < -0.5 ? 'down' : ''}>{d > 0 ? '+' : ''}{d.toFixed(1)}</td>

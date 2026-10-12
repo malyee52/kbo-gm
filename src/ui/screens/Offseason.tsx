@@ -1,4 +1,5 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
+import { isStarterSkill } from '../../engine';
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
@@ -19,10 +20,10 @@ function useInfo() {
     const age = p.birthYear ? next - p.birthYear : null;
     return {
       age,
-      role: p.isPitcher ? (p.pit!.startShare >= 0.5 ? '선발' : '구원') : posName(p.pos),
-      now: runsGrade(session.nextRuns(p.id)),
+      role: p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos),
+      now: runsGrade(session.nextRuns(p.id), session.year),
       // 잠재력은 전성기 상한이라 31세 이상에게는 뜻이 없다 (2026-10-09 전수조사 M5)
-      pot: age !== null && age >= 31 ? null : runsGrade(p.scoutPotential ?? p.potential),
+      pot: age !== null && age >= 31 ? null : runsGrade(p.scoutPotential ?? p.potential, session.year),
     };
   };
 }
