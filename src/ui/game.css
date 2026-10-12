@@ -789,3 +789,10 @@ td .inline { flex-wrap: nowrap; }
 .card.offer-card h2 { margin: 0; font-size: 15px; }
 .card.offer-card ul { margin: 0; }
 @media (max-width: 1100px) { .shop { grid-template-columns: minmax(0, 1fr); } }
+
+/* 판타지 삽화 (NovelAI, 2026-10-12) */
+.fantasy-art { margin: 8px 0 10px; }
+.fantasy-art img { display: block; width: 100%; max-width: 760px; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
+.fantasy-art figcaption { margin-top: 4px; }
+.fantasy-art-sample { display: block; width: 100%; max-width: 320px; height: auto; border-radius: var(--radius); }
+

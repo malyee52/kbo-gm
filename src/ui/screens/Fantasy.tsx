@@ -1,8 +1,13 @@
 // 판타지 모드 화면 (docs/fantasy-mode.md): 이야기(AI 기사·대화·사건 기록)와 AI 설정.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { complete, DEFAULT_MODEL, listModels, LlmError, PROVIDER_LABEL, type LlmSettings, type Provider } from '../../fantasy/llm';
 import { forgetAiKey, loadAiSettings, saveAiSettings } from '../../fantasy/settings';
 import { parseServiceAccount } from '../../fantasy/vertex';
+import { generateImage, loadNaiSettings, NAI_DEFAULT_MODEL, NAI_MODEL_HINTS, saveNaiSettings, type NaiSettings } from '../../fantasy/nai';
+import { illustrate } from '../../fantasy/illustrate';
+import { artKey, getArt } from '../../fantasy/images';
+import type { FantasyEntry } from '../../fantasy/types';
+import { teamPalette } from '../teams';
 import { gameContext } from '../../fantasy/context';
 import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
@@ -35,7 +40,7 @@ export function Fantasy() {
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>AI 설정</button>
         </div>
       </section>
-      {tab === 'story' ? <Story /> : <AiSettings />}
+      {tab === 'story' ? <Story /> : <><AiSettings /><NaiSettingsPanel /></>}
     </div>
   );
 }
@@ -45,6 +50,8 @@ function Story() {
   const f = session.fantasy!;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  // 자동으로 그릴 글 (방금 쓴 글)
+  const [autoArt, setAutoArt] = useState<FantasyEntry | null>(null);
   const write = async () => {
     const s = loadAiSettings();
     setBusy(true);
@@ -61,6 +68,9 @@ function Story() {
       if (!body) throw new LlmError('AI 답이 비어 있습니다. 다시 시도하세요.');
       session.addFantasy({ kind: 'article', title, text: body, who: 'AI 기자' });
       setMsg({ text: '기사를 남겼습니다.' });
+      // 삽화 자동 (NovelAI 토큰이 있고 자동이 켜져 있으면): 방금 남긴 글
+      const nai = loadNaiSettings();
+      if (nai.auto && nai.token.trim()) setAutoArt(f.log[f.log.length - 1]);
       changed();
     } catch (e) {
       setMsg({ text: (e as Error).message, error: true });
@@ -83,6 +93,7 @@ function Story() {
         <article key={i} className="panel">
           <p className="muted small">{e.day < 0 ? `${e.year} 오프시즌` : formatDate(e.year, e.day)}{e.who ? ` · ${e.who}` : ''}</p>
           <h3>{e.title}</h3>
+          <ArtFrame entry={e} auto={autoArt === e} />
           {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
         </article>
       ))}
@@ -190,3 +201,101 @@ function VertexFields({ s, update, setMsg }: { s: LlmSettings; update: (s: LlmSe
     </>
   );
 }
+
+/** 이야기 글의 삽화 (이 브라우저에 저장된 것). 없으면 그리기 버튼, auto면 바로 그린다 */
+function ArtFrame({ entry, auto }: { entry: FantasyEntry; auto: boolean }) {
+  const { session } = useGame();
+  const [url, setUrl] = useState<string | null>(null);
+  const [state, setState] = useState<'idle' | 'drawing' | 'error'>('idle');
+  const [err, setErr] = useState('');
+  const key = artKey(session.league, entry);
+  useEffect(() => {
+    let alive = true;
+    let made: string | null = null;
+    void getArt(key).then((b) => { if (alive && b) { made = URL.createObjectURL(b); setUrl(made); } });
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [key]);
+  const t = session.league.teams[session.teamIdx];
+  const pal = teamPalette(t.franchise, t.name);
+  const draw = async () => {
+    setState('drawing');
+    try {
+      const b = await illustrate(session, entry, { primary: pal.primary, second: pal.second });
+      setUrl(URL.createObjectURL(b));
+      setState('idle');
+    } catch (e) {
+      setErr((e as Error).message);
+      setState('error');
+    }
+  };
+  useEffect(() => { if (auto && !url && state === 'idle') void draw(); }, [auto]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nai = loadNaiSettings();
+  if (url) return (
+    <figure className="fantasy-art">
+      <img src={url} alt={`삽화: ${entry.title}`} loading="lazy" />
+      <figcaption className="muted small">AI 삽화 (가상 인물·장면) <button type="button" className="link small" onClick={() => void draw()} disabled={state === 'drawing'}>{state === 'drawing' ? '그리는 중…' : '다시 그리기'}</button></figcaption>
+    </figure>
+  );
+  if (!nai.token.trim()) return null;
+  return (
+    <p className="small">
+      {state === 'drawing' ? <span className="muted">삽화를 그리는 중입니다…</span>
+        : <button type="button" className="ghost small-btn" onClick={() => void draw()}>삽화 그리기</button>}
+      {state === 'error' && <span className="note error-box"> {err}</span>}
+    </p>
+  );
+}
+
+/** 삽화 (NovelAI) 설정 */
+function NaiSettingsPanel() {
+  const [s, setS] = useState<NaiSettings>(loadNaiSettings);
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const [sample, setSample] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const update = (next: NaiSettings) => { setS(next); saveNaiSettings(next); };
+  const test = async () => {
+    setBusy(true);
+    setMsg({ text: '시험 그림을 그리는 중입니다…' });
+    try {
+      const png = await generateImage(s, 'baseball stadium at night, stadium lights, empty field, anime illustration, original, no text, no logo', 12345, { width: 640, height: 640 });
+      setSample(URL.createObjectURL(new Blob([png as Uint8Array<ArrayBuffer>], { type: 'image/png' })));
+      setMsg({ text: '연결됨: 시험 그림을 받았습니다.' });
+    } catch (e) {
+      setMsg({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel stack">
+      <h2>삽화 (NovelAI)</h2>
+      <p className="muted small">
+        AI 글마다 NovelAI로 삽화를 그립니다. <strong>가상 인물과 장면만</strong> 그리고, 유니폼은 구단 색만 빌립니다 (로고·엠블럼·글자 없음, 실존 선수는 그리지 않음).
+        그림은 이 브라우저에만 저장되고 저장 파일·내보내기에는 들어가지 않습니다. Anlas(크레딧) 사용은 NovelAI 구독 조건을 따릅니다.
+      </p>
+      <div className="form-row">
+        <label>
+          영구 API 토큰
+          <input type="password" value={s.token} autoComplete="off" spellCheck={false} placeholder="pst-…" onChange={(e) => update({ ...s, token: e.target.value })} />
+        </label>
+        <span className="muted small">NovelAI 사이트 → 사용자 설정 → 계정 → Get Persistent API Token.</span>
+      </div>
+      <div className="form-row">
+        <label>
+          모델
+          <input type="text" value={s.model} list="nai-models" spellCheck={false} onChange={(e) => update({ ...s, model: e.target.value })} />
+          <datalist id="nai-models">{NAI_MODEL_HINTS.map((m) => <option key={m} value={m} />)}</datalist>
+        </label>
+        <span className="muted small">기본 {NAI_DEFAULT_MODEL}.</span>
+      </div>
+      <label className="inline"><input type="checkbox" checked={s.auto} onChange={(e) => update({ ...s, auto: e.target.checked })} /> AI 글이 생길 때마다 자동으로 그리기</label>
+      <div className="actions">
+        <button type="button" onClick={() => void test()} disabled={busy || !s.token.trim()}>시험 그림 (640×640)</button>
+        <button type="button" className="ghost danger" onClick={() => update({ ...s, token: '' })}>토큰 지우기</button>
+      </div>
+      {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
+      {sample && <img className="fantasy-art-sample" src={sample} alt="NovelAI 시험 그림" />}
+    </section>
+  );
+}
+

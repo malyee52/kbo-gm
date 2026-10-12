@@ -27,3 +27,10 @@ export function splitArticle(text: string): { title: string; body: string } {
   const body = lines.slice(first + 1).join('\n').trim();
   return { title, body };
 }
+
+/** 삽화 태그 (NovelAI). 실존 인물을 그리지 않는다: 가상 인물·장면만 (사용자 결정 2026-10-12) */
+export const ILLUSTRATION_SYSTEM = `You write a short English tag prompt for an anime-style illustration (NovelAI) of one scene from a Korean baseball story.
+Rules:
+- Draw only fictional, unnamed characters (e.g. a young pitcher, a team staff member, a reporter, fans) or places (stadium, dugout, office, press room). Never name or depict a real person. Never write any person's name.
+- No logos, emblems, letters, numbers or text in the picture.
+- Output only comma-separated English tags (10 to 25 tags), nothing else. Include composition and lighting (e.g. wide shot, night game, stadium lights).`;
