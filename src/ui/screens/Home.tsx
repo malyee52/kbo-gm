@@ -11,6 +11,7 @@ import { winPct } from '../../engine';
 import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
 import { CountUp, useRankMoves } from '../Motion';
+import { offerExpired } from '../../fantasy/rivals';
 
 type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
 /** 알림 묶음 (session.ts NewsKind) */
@@ -65,9 +66,9 @@ export function Home() {
       )}
       <ScenarioBanner />
       {session.fantasy?.free && <FantasyFree compact />}
-      {pendingChoices(session.fantasy).length > 0 && (
+      {pendingChoices(session.fantasy).filter((e) => !offerExpired(session, e)).length > 0 && (
         <div className="note row-between">
-          <span>판타지: 답을 기다리는 일이 {pendingChoices(session.fantasy).length}건 있습니다 ({pendingChoices(session.fantasy).slice(-1)[0].title}).</span>
+          <span>판타지: 답을 기다리는 일이 {pendingChoices(session.fantasy).filter((e) => !offerExpired(session, e)).length}건 있습니다 ({pendingChoices(session.fantasy).filter((e) => !offerExpired(session, e)).slice(-1)[0].title}).</span>
           <button type="button" onClick={() => go('fantasy')}>판타지로</button>
         </div>
       )}

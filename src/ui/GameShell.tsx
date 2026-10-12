@@ -41,6 +41,7 @@ import { loadStops, NO_STOPS, saveStops, stopsOnEvent, type Attention, type Stop
 import { StopSettings } from './StopSettings';
 import { settlePromises } from '../fantasy/free';
 import { duePromises } from '../fantasy/promises';
+import { rivalDue, rivalMove } from '../fantasy/rivals';
 
 /**
  * 메뉴 (2026-10-12 UI 개편): 위쪽 큰 메뉴 5개(묶음) + 그 아래 작은 탭(화면).
@@ -176,6 +177,20 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       try {
         const r = await settlePromises(session, store, s);
         if (r) { session.addFantasy(r.entry); changed(); await autosave(); }
+      } catch {
+        /* 다음 진행 때 다시 */
+      } finally {
+        fantasyBusy.current = false;
+      }
+    }
+    // 자유 모드: 다른 구단 단장의 움직임 (src/fantasy/rivals.ts)
+    if (!fantasyBusy.current && session.fantasy.free && rivalDue(session)) {
+      fantasyBusy.current = true;
+      try {
+        const r = await rivalMove(session, store, s);
+        session.addFantasy(r.entry);
+        changed();
+        await autosave();
       } catch {
         /* 다음 진행 때 다시 */
       } finally {

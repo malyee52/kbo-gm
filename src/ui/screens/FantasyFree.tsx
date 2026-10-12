@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { settlePromises } from '../../fantasy/free';
 import { GmPreviewCard, opText, useGmJudge } from './GmPreview';
+import { ChoiceButtons } from './FantasyChoices';
 import { duePromises, dueText } from '../../fantasy/promises';
 import { loadAiSettings } from '../../fantasy/settings';
 import { formatDate } from '../../game/calendar';
@@ -83,10 +84,11 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
       {log.length === 0 ? <p className="muted">아직 행동이 없습니다.</p> : log.map((e) => (
         <article key={e.id} className="panel">
           <p className="muted small">{e.day < 0 ? `${e.year} 오프시즌` : formatDate(e.year, e.day)}</p>
-          <p className="small chat-me"><span className="muted">단장</span> {e.ask}</p>
+          {e.rival !== undefined ? <p className="small"><span className="muted">{e.who}</span></p> : <p className="small chat-me"><span className="muted">단장</span> {e.ask}</p>}
           <h3 className={e.withdrawn ? 'muted' : undefined}>{e.title}{e.rerolls ? <span className="muted small"> (다시 판정 {e.rerolls}번)</span> : null}</h3>
           {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
           {e.ops?.length ? <ul className="plain small fantasy-ops">{e.ops.map((op, k) => <li key={k}>✓ {opText(op, nameOf, teamName)}</li>)}</ul> : <p className="muted small">{e.withdrawn ? '거둬들임 — 게임 변화 없음' : '게임 변화 없음'}</p>}
+          <ChoiceButtons entry={e} />
           {(e.promises?.length || e.settles?.length) ? (
             <ul className="plain small">
               {e.promises?.map((p, k) => <li key={`p${k}`}>🤝 약속: {p.party} — {p.text} (기한 {dueText(p)})</li>)}
