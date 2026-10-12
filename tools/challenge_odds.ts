@@ -12,6 +12,8 @@ const nSeeds = Number(arg('seeds', '8'));
 const ids = arg('ids', '');
 const tiers = arg('tier', '쉬움,중간,어려움').split(',');
 const kind = arg('kind', 'season');
+// 능력치 기준: 새 게임 기본값(역사 재현)과 같게
+const basis = arg('basis', 'season') as 'season' | 'prior';
 const store = loadDataStore();
 const params = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
 const list = CHALLENGES.filter((c) => c.plan && (ids ? ids.split(',').includes(c.id) : !c.plan.legacy && c.plan.kind === kind && tiers.includes(c.plan.tier)));
@@ -21,7 +23,7 @@ for (const ch of list) {
   const t = planTeam(store, ch)!;
   let ok = 0, full = 0, rankSum = 0, seasons = 0, proj = 0;
   for (let s = 0; s < nSeeds; s++) {
-    const g = GameSession.create(store, { year: p.year, teamIdx: t, seed: `odds-${ch.id}-${s}`, difficulty: 'normal', challenge: ch.id }, params);
+    const g = GameSession.create(store, { year: p.year, teamIdx: t, seed: `odds-${ch.id}-${s}`, difficulty: 'normal', challenge: ch.id, ratingBasis: basis }, params);
     proj += g.owner.goal?.projectedRank ?? 0;
     for (let guard = 0; guard < 15 && !g.league.challenge?.result; guard++) {
       g.advance(100000);
