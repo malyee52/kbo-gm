@@ -10,6 +10,7 @@ import {
   REMODEL, seatsAt, yearlyPayment,
 } from '../src/league/stadium';
 import type { LeagueState } from '../src/league/types';
+import { BALLPARK } from '../src/league/finance';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -42,7 +43,7 @@ describe('구장·팬덤 기본값', () => {
     expect(L.stadiums).toHaveLength(L.teams.length);
     expect(L.stadiums!.every((s) => s.capacity > 10_000 && s.quality === QUALITY_START)).toBe(true);
     expect(L.fans![lg].level).toBeGreaterThan(L.fans![kt].level);
-    expect(L.fans![lg].level).toBe(fanBase(0.08));
+    expect(L.fans![lg].level).toBe(fanBase(BALLPARK.LG.market)); // 2026-10-13 실제 관중으로 연고 시장을 맞춰 0.08 → 0.12
   });
 
   it('시즌 중 팬 변화는 그날부터만 반영되고, 결산·오프시즌 변화는 시작 값에 바로 들어간다', () => {

@@ -27,8 +27,11 @@ import {
 
 /** 달러 → 만 원 (1달러 = 1,400원) */
 export const WON_PER_USD = 0.14;
-/** 관중 1명당 객단가 (만 원) */
-export const TICKET = 1.6;
+/**
+ * 관중 1명당 객단가 (만 원). 2026-10-13 연고 시장을 실제 관중으로 맞춰 관중이 약 10% 늘어 1.6 → 1.46으로 낮춰 관중 수입 합을 그대로 뒀다
+ * (2024 실제: 입장 수입 약 1,593억 원 ÷ 관중 1,088만 명 ≈ 1.46만 원, 보도 기준)
+ */
+export const TICKET = 1.46;
 /** 가을야구 객단가 (만 원) */
 export const POSTSEASON_TICKET = 3.0;
 /** 중계권·리그 공동 수익 (구단마다 같은 몫, 만 원) */
@@ -61,18 +64,22 @@ export function addExpansionCapital(league: LeagueState, team: number, year: num
   league.ledger.push({ year, from: -1, to: team, amount: EXPANSION_CAPITAL, note: `${league.teams[team].name} 창단 자본금`, kind: 'start' });
 }
 
-/** 구장 수용 인원과 연고 시장 보정 (구단 계보별, 대략의 공개 수치·임시값. 시대별 구장 변화는 다루지 않는다) */
+/**
+ * 구장 수용 인원과 연고 시장 보정 (구단 계보별, 대략의 공개 수치·임시값. 시대별 구장 변화는 다루지 않는다).
+ * 연고 시장(팬덤 기본값에도 쓴다, stadium.ts)은 2026-10-13 실제 관중으로 맞췄다 (tools/attendance.ts, docs/temp-values.md):
+ * 2024 구단별 평균 관중(한화는 새 구장 2025 전반기)에서 실제 승률 몫을 빼고 남은 몫. 쌍방울·현대계는 자료가 없어 그대로
+ */
 export const BALLPARK: Record<string, { capacity: number; market: number }> = {
-  LG: { capacity: 23_750, market: 0.08 },
-  두산: { capacity: 23_750, market: 0.07 },
-  롯데: { capacity: 22_758, market: 0.08 },
-  SSG: { capacity: 23_000, market: 0.03 },
-  삼성: { capacity: 24_000, market: 0.03 },
-  KIA: { capacity: 20_500, market: 0.06 },
-  한화: { capacity: 17_000, market: 0.04 },
-  NC: { capacity: 17_983, market: -0.04 },
-  KT: { capacity: 18_700, market: -0.06 },
-  히어로즈: { capacity: 16_000, market: -0.03 },
+  LG: { capacity: 23_750, market: 0.12 },
+  두산: { capacity: 23_750, market: 0.12 },
+  롯데: { capacity: 22_758, market: 0.1 },
+  SSG: { capacity: 23_000, market: 0.02 },
+  삼성: { capacity: 24_000, market: 0.09 },
+  KIA: { capacity: 20_500, market: 0.1 },
+  한화: { capacity: 17_000, market: 0.17 },
+  NC: { capacity: 17_983, market: 0 },
+  KT: { capacity: 18_700, market: -0.02 },
+  히어로즈: { capacity: 16_000, market: 0.08 },
   쌍방울: { capacity: 12_000, market: -0.06 },
   현대계: { capacity: 15_000, market: -0.04 },
 };
