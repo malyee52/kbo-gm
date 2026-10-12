@@ -1,6 +1,7 @@
 // 자유 모드 (AI 진행, 2026-10-13 사용자 결정): 플레이어가 무엇이든 글로 하겠다고 하면 AI 게임 마스터가 판정하고, 그 결과를 실제 게임 조작(FreeOp)으로 낸다.
 // 사용자 결정: 바꿀 수 있는 범위는 거의 전부(트레이드·이동·방출·영입·가상 선수 만들기·모든 선수의 능력·잠재력·컨디션·계약·자금·구단주·팬, 다른 구단끼리도).
-// 판단에 안전망은 두지 않는다 (AI가 정하면 그대로). 경기는 엔진이 시뮬레이션한다. 실존 선수 규칙(지어낸 발언·사생활·물의 금지)만 지킨다.
+// 판단에 안전망은 두지 않는다 (AI가 정하면 그대로). 경기는 엔진이 시뮬레이션한다.
+// 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)도 데려올 수 있다 (사용자: "자유 모드의 목적이 그거야"). 실존 선수 규칙은 지시문에서 뺐다 (prompts.ts)
 // 조작은 이름 대신 id로 바꿔 이야기 기록(FantasyEntry.ops)에 남기고, 재현·불러오기 때는 AI 없이 그대로 다시 적용한다 (session.applyFreeOps).
 import type { GameSession } from '../game/session';
 import { leagueQuality } from '../engine';
@@ -29,8 +30,8 @@ type Store = Pick<DataStore, 'meta' | 'season' | 'players'> & Partial<Pick<DataS
 export type FreeOp =
   /** 선수를 그 구단으로 (−1이면 방출). 우리·다른 구단 모두 */
   | { op: 'move'; player: string; to: number }
-  /** 가상 선수를 만든다. now·potential은 20~80 등급 */
-  | { op: 'create'; name: string; team: number; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; now: number; potential: number }
+  /** 선수를 만든다 (가상 인물, 또는 real이면 리그 밖에서 데려온 실존 인물). now·potential은 20~80 등급 */
+  | { op: 'create'; name: string; team: number; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; now: number; potential: number; real?: boolean }
   /** 능력(now)·잠재력(potential)을 20~80 등급으로 */
   | { op: 'ability'; player: string; now?: number; potential?: number }
   /** 계약: 연봉(만 원), 기간(이번 시즌부터 몇 해) */
@@ -56,7 +57,7 @@ export function gradeOfRuns(runs: number, year: number): number {
 /** 게임 마스터에게 주는 조작 목록 */
 export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. 동명이인이면 "이름@구단")
 - {"op":"move","player":"선수 이름","to":"구단 이름 또는 방출"} 선수를 그 구단으로 옮긴다 (우리 구단·다른 구단 모두, 트레이드는 move 여러 개로)
-- {"op":"create","name":"지어낸 한국 이름","team":"구단 이름","pos":"P|C|IF|OF","age":17~40,"now":20~80,"potential":20~80} 가상 선수를 만들어 그 구단에 넣는다
+- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|IF|OF","age":17~50,"now":20~80,"potential":20~80,"real":true|false} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
 - {"op":"ability","player":"선수 이름","now":20~80,"potential":20~80} 능력·잠재력 등급을 바꾼다 (둘 중 하나만도 됨, 50 = 리그 주전 평균)
 - {"op":"contract","player":"선수 이름","salary":억 원(소수),"years":1~10} 계약을 바꾼다
 - {"op":"cash","amount":억 원} 우리 구단 자금 (+ 들어옴, − 나감)
@@ -78,15 +79,14 @@ export function freeSystem(regressor: boolean, l: Leniency = 3): string {
 - 경기 결과·기록은 바꾸지 않는다 (경기는 엔진이 치른다).
 - 규정: [이 게임의 규정]이 이 세계의 규정 전부다. 네가 아는 실제 KBO 규약·관행과 다르면 이 게임의 규정을 따른다. 목록에 없는 규정을 지어내 거절 이유로 쓰지 않는다.
   규정은 리그 전체의 일이라, 바꾸려면 KBO 이사회·총재·다른 구단을 움직일 명분이 필요하다 (판정 기준에 따라). 바꾸면 rule 조작을 낸다.
-- 조작할 수 있는 사람은 이 게임 리그 안의 선수뿐이다. [행동에 나온 이름]에 "리그에 없음"으로 나온 실존 인물(해외 리그 현역, 은퇴 선수, 야구 밖 인물)은
-  데려오거나 만들 수 없다. 이야기로 안 되는 이유를 말하고, 원하면 비슷한 유형의 가상 선수(지어낸 이름)를 대안으로 제안·영입할 수 있다. 가상 선수에 실존 인물 이름을 쓰지 않는다.
-  같은 이름의 선수가 여럿이면 [행동에 나온 이름]의 "이름@구단"으로 정확히 고른다.
+- 리그 안 선수는 move·ability·contract로, 리그 밖 인물(해외 리그 선수, 은퇴 선수 등, [행동에 나온 이름]의 "리그에 없음"이나 네가 아는 사람)은 판정에 따라 create(real true)로 데려온다.
+  리그 밖 인물을 데려올 때는 그 사람의 실제 나이와 지금 기량에 맞게 능력·잠재력을 정하고, 몸값·이적료·본인 의사 같은 명분과 대가를 판정한다.
+  같은 이름의 선수가 리그 안에 따로 있으면 혼동하지 않는다: 리그 안 선수는 "이름@구단"으로 move, 리그 밖 사람은 create.
 - 구단 운영과 관계없는 요청(야구 밖의 일)은 단장의 세계 안에서 짧게 이야기로만 다루고 조작은 내지 않는다.
 ${regressor ? '- 단장은 원래 역사를 기억하는 회귀자다 (다른 인물은 모른다).\n' : ''}
 ${leniencyRule(l)}
 
 ${RULES}
-- 실존 선수의 능력·소속·계약을 바꾸는 조작은 해도 되지만, 실존 선수에게 발언·속마음·사생활·물의를 붙이지 않는다. 대화 상대는 가상 인물이다.
 
 ${FREE_OPS_MENU}
 
@@ -102,7 +102,7 @@ function rosterTable(g: GameSession, team: number, n: number): string {
     const runs = currentRuns(asSim(p, ctx.world.league, year), ctx);
     return { p, runs };
   }).sort((a, b) => b.runs - a.runs).slice(0, n);
-  return rows.map(({ p, runs }) => `${p.name}${p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
+  return rows.map(({ p, runs }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
 }
 
 /** 지금 소속 (시즌 중에는 월드, 오프시즌에는 리그) */
@@ -202,9 +202,9 @@ export function namesContext(g: GameSession, store: Store, action: string): stri
       lines.push(`- ${name}${t >= 0 ? `@${L.teams[t].name}` : ''}: 리그 안 (${where}, ${p.birthYear ? year - p.birthYear : '?'}세 ${p.isPitcher ? '투수' : '야수'})`);
     }
   }
-  for (const [name, desc] of outside) lines.push(`- ${name}: 리그에 없음 (${desc.join(' / ')}). 데려오거나 만들 수 없다`);
+  for (const [name, desc] of outside) lines.push(`- ${name}: 리그에 없음 (${desc.join(' / ')}). 데려오려면 create (real true)`);
   if (!lines.length) return '';
-  return `[행동에 나온 이름]\n${lines.join('\n')}\n(행동이 말하는 사람이 리그 안 선수와 다른 사람이면 — 예를 들어 해외 리그 현역이나 은퇴한 같은 이름의 선수 — 리그 안 선수를 대신 조작하지 않는다)`;
+  return `[행동에 나온 이름]\n${lines.join('\n')}\n(행동이 말하는 사람이 리그 안 선수와 다른 사람이면 — 예를 들어 해외 리그 현역이나 은퇴한 같은 이름의 선수 — 리그 안 선수를 대신 옮기지 말고 create로 데려온다)`;
 }
 
 export function freeContext(g: GameSession, store: Store, action = ''): string {
@@ -262,14 +262,12 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         const team = teamByName(g, e.team);
         const name = typeof e.name === 'string' ? e.name.trim().slice(0, 8) : '';
         if (team === null || team < 0 || !name) { dropped.push(`create: ${name || '이름 없음'} (구단 ${String(e.team)})`); break; }
-        // 가상 선수에 실존 인물 이름을 쓰지 않는다 (실존 선수 규칙)
-        if (g.league.players.some((p) => p.name === name && p.real !== false) || (store && [...store.players.values()].some((m) => m.name === name))) {
-          dropped.push(`create: ${name}은(는) 실존 선수 이름이라 가상 선수에 쓸 수 없음`);
-          break;
-        }
+        // 리그 밖 실존 인물: AI가 real로 냈거나, 자료(KBO 기록)에는 있는데 지금 리그에 없는 이름
+        const inLeague = new Set(g.league.players.map((p) => p.id));
+        const real = e.real === true || (!!store && [...store.players.values()].some((m) => m.name === name && !inLeague.has(m.id)));
         const pos = e.pos === 'P' || e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
-        ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(40, Math.round(num(e.age) ?? 22))),
-          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))) });
+        ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(real ? 50 : 40, Math.round(num(e.age) ?? 22))),
+          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}) });
         break;
       }
       case 'ability': {

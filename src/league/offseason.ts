@@ -649,17 +649,19 @@ function overseasOffseason(league: LeagueState, off: OffseasonState, store: Stor
   const domestic = league.players.filter((p) => p.team >= 0 && !p.foreign && !p.dev && !isServing(p) && !isFuturesTeam(league, p.team, year + 1));
   const now = (p: LeaguePlayer) => { const sp = view.sim.get(p.id); return sp ? currentRuns(sp, view.ctx) : 0; };
   const top = domestic.map((p) => ({ p, r: now(p) })).sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id)).slice(0, 12);
-  // 외국인 포스팅 (자유 모드 규정, league/rules.ts foreignPosting): 외국인 정상급 선수도 해외 구단 요청을 받는다. 33세까지, 따로 한 해 DEPARTURES_PER_YEAR명까지
-  const foreignTop = foreignPostingOn(league)
-    ? league.players.filter((p) => p.team >= 0 && p.foreign && !p.dev && !isFuturesTeam(league, p.team, year + 1))
-      .map((p) => ({ p, r: now(p) })).sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id)).slice(0, 8)
-    : [];
+  // 외국인 포스팅 (자유 모드 규정, league/rules.ts foreignPosting): 외국인 정상급 선수도 해외 구단 요청을 받는다. 33세까지.
+  // 후보·한 해 상한은 리그 외국인 수에 비례 (사용자 지적 2026-10-13: 보유 한도를 10명으로 늘렸는데 2명만 나가는 건 불합리).
+  // 외국인 4명당 후보 1명(최소 8명), 15명당 한 해 1명(최소 DEPARTURES_PER_YEAR명)
+  const foreigners = foreignPostingOn(league) ? league.players.filter((p) => p.team >= 0 && p.foreign && !p.dev && !isFuturesTeam(league, p.team, year + 1)) : [];
+  const foreignCap = Math.max(DEPARTURES_PER_YEAR, Math.ceil(foreigners.length / 15));
+  const foreignTop = foreigners.map((p) => ({ p, r: now(p) })).sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id))
+    .slice(0, Math.max(8, Math.ceil(foreigners.length / 4)));
   let n = 0;
   let nf = 0;
   for (const { p, r } of [...top, ...foreignTop]) {
     const age = ageIn(p, year + 1);
     if (p.foreign) {
-      if (nf >= DEPARTURES_PER_YEAR || age > 33) continue;
+      if (nf >= foreignCap || age > 33) continue;
       if (!new Rng(`${league.seed}/fposting/${year}/${p.id}`).chance(POSTING_CHANCE)) continue;
       nf++;
     } else {

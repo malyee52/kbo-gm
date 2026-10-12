@@ -38,7 +38,7 @@ export function Fantasy() {
       <section className="row-between wrap">
         <div>
           <h1>{f.free ? '자유 모드' : '판타지'} <span className="muted small">{f.free ? 'AI 게임 마스터 진행' : 'AI 이야기'}{f.regressor ? ' · 회귀자' : ''}</span></h1>
-          <p className="muted small">AI가 지금 게임 상황을 읽고 기사·대화·사건을 만듭니다. 실존 선수에게는 지어낸 말·사생활·물의를 붙이지 않습니다.</p>
+          <p className="muted small">AI가 지금 게임 상황을 읽고 기사·대화·사건을 만듭니다. 내용 검열은 AI 제공자 쪽 기준을 따릅니다.</p>
         </div>
         <div className="seg" role="tablist" aria-label="판타지 화면">
           {f.free && <button type="button" role="tab" aria-selected={tab === 'free'} className={tab === 'free' ? 'on' : ''} onClick={() => setTab('free')}>행동</button>}
