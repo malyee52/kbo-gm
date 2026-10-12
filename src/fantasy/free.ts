@@ -14,6 +14,7 @@ import { leniencyOf, leniencyRule, type Leniency } from './leniency';
 import { memoryContext } from './history';
 import { sanitizeEffects, type FantasyEffect } from './effects';
 import type { FantasyEntry } from './types';
+import { duePromises, parseDue, promisesContext, type PromiseDraft, type PromiseSettle } from './promises';
 import type { DataStore } from '../data/types';
 import { currentRuns } from '../ai/value';
 import { asSim } from '../league/growth';
@@ -90,8 +91,12 @@ ${RULES}
 
 ${FREE_OPS_MENU}
 
+[약속] 판정에서 앞으로 지켜야 할 약속·조건이 생기면 promises에 남긴다 (우리가 한 약속, 상대가 한 약속, "우승하면 ~" 같은 조건 모두).
+due는 "2026-08-15", "시즌 끝", "오프시즌", "다음 시즌", "30일 뒤" 가운데 하나. [약속 장부]의 약속을 이번 행동이 끝내면 settle에 id와 결과(kept 지킴, broken 어김, void 없던 일)를 낸다.
+약속을 어기면 신뢰·팬·관계에 대가가 따른다 (판정 기준에 따라).
+
 [답 형식] JSON 하나만:
-{"title": "한 줄 제목", "narration": "판정과 결과 이야기 (3~8문장)", "ops": [ ... ]}`;
+{"title": "한 줄 제목", "narration": "판정과 결과 이야기 (3~8문장)", "ops": [ ... ], "promises": [{"party": "상대", "text": "약속 내용", "due": "기한"}], "settle": [{"id": "p1", "status": "kept"}]}`;
 }
 
 function rosterTable(g: GameSession, team: number, n: number): string {
@@ -209,6 +214,8 @@ export function namesContext(g: GameSession, store: Store, action: string): stri
 
 export function freeContext(g: GameSession, store: Store, action = ''): string {
   const parts = [gameContext(g), rulesContext(g, store), picksContext(g)];
+  const pc = promisesContext(g.league.fantasy);
+  if (pc) parts.push(pc);
   const names = namesContext(g, store, action);
   if (names) parts.push(names);
   parts.push(`[우리 구단 ${g.league.teams[g.teamIdx].name} 선수 (능력 순)] ${rosterTable(g, g.teamIdx, 40)}`);
@@ -346,11 +353,65 @@ export async function freeAction(g: GameSession, store: Store, s: LlmSettings, a
     maxTokens: 1500,
     mockReply: JSON.stringify({ title: '(시험용) 판정', narration: '단장의 뜻대로 일이 진행됐다.', ops: [{ op: 'fans', delta: 1 }] }),
   });
-  const j = extractJson<{ title?: string; narration?: string; ops?: unknown }>(raw);
+  return parseGmReply(g, store, raw, { ask: action.slice(0, 1000), who: '게임 마스터', fallbackTitle: '행동' });
+}
+
+type GmJson = { title?: string; narration?: string; ops?: unknown; promises?: unknown; settle?: unknown };
+
+/** 게임 마스터 답 → 이야기 글 (조작·약속·약속 판정) */
+function parseGmReply(g: GameSession, store: Store, raw: string, meta: { ask: string; who: string; fallbackTitle: string }, only?: Set<string>): { entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] } {
+  const j = extractJson<GmJson>(raw);
   if (!j?.narration) throw new Error('AI가 형식에 맞지 않게 답했습니다. 다시 시도하세요.');
   const { ops, dropped } = resolveOps(g, j.ops, store);
+  const promises = resolvePromises(g, j.promises);
+  const settles = resolveSettles(g, j.settle, only);
   return {
-    entry: { kind: 'action', title: String(j.title ?? '행동').slice(0, 80), ask: action.slice(0, 1000), text: String(j.narration).slice(0, 3000), who: '게임 마스터', ...(ops.length ? { ops } : {}) },
+    entry: { kind: 'action', title: String(j.title ?? meta.fallbackTitle).slice(0, 80), ask: meta.ask, text: String(j.narration).slice(0, 3000), who: meta.who,
+      ...(ops.length ? { ops } : {}), ...(promises.length ? { promises } : {}), ...(settles.length ? { settles } : {}) },
     dropped,
   };
+}
+
+export function resolvePromises(g: GameSession, raw: unknown): PromiseDraft[] {
+  const now = g.promiseNow;
+  return (Array.isArray(raw) ? raw.slice(0, 5) : []).flatMap((r) => {
+    const e = (r ?? {}) as Record<string, unknown>;
+    const text = typeof e.text === 'string' ? e.text.trim().slice(0, 200) : '';
+    if (!text) return [];
+    return [{ party: typeof e.party === 'string' && e.party.trim() ? e.party.trim().slice(0, 40) : '상대', text, ...parseDue(e.due, now) }];
+  });
+}
+
+export function resolveSettles(g: GameSession, raw: unknown, only?: Set<string>): PromiseSettle[] {
+  const open = new Set((g.league.fantasy?.promises ?? []).filter((p) => p.status === 'open').map((p) => p.id));
+  const out: PromiseSettle[] = [];
+  for (const r of Array.isArray(raw) ? raw.slice(0, 30) : []) {
+    const e = (r ?? {}) as Record<string, unknown>;
+    const id = String(e.id ?? '');
+    const status = e.status === 'kept' || e.status === 'broken' || e.status === 'void' ? e.status : null;
+    if (!status || !open.has(id) || (only && !only.has(id)) || out.some((x) => x.id === id)) continue;
+    out.push({ id, status });
+  }
+  return out;
+}
+
+/**
+ * 기한이 된 약속을 게임 마스터가 판정한다 (지켰나·어겼나, 그 결과의 조작). 판정하지 않은 약속은 없던 일로 정리한다 (같은 약속이 계속 남지 않게)
+ */
+export async function settlePromises(g: GameSession, store: Store, s: LlmSettings): Promise<{ entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] } | null> {
+  const due = duePromises(g.league.fantasy, g.promiseNow);
+  if (!due.length) return null;
+  const list = due.map((p) => `- ${p.id} 상대 ${p.party}: ${p.text}`).join('\n');
+  const raw = await complete(s, {
+    system: freeSystem(!!g.league.fantasy?.regressor, leniencyOf(g.league)),
+    messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[기한이 된 약속]\n${list}\n\n위 약속들이 지켜졌는지 지금 게임 상황(성적·자금·소속·지난 행동)으로 판정하고, 결과와 대가를 이야기하라. 모든 약속을 settle에 넣는다.` }],
+    maxTokens: 1500,
+    mockReply: JSON.stringify({ title: '(시험용) 약속의 날', narration: '약속을 지켰다.', settle: due.map((p) => ({ id: p.id, status: 'kept' })), ops: [] }),
+  });
+  const ids = new Set(due.map((p) => p.id));
+  const r = parseGmReply(g, store, raw, { ask: '(기한이 된 약속)', who: '약속 장부', fallbackTitle: '약속의 날' }, ids);
+  const settled = new Set((r.entry.settles ?? []).map((x) => x.id));
+  const rest = due.filter((p) => !settled.has(p.id)).map((p) => ({ id: p.id, status: 'void' as const }));
+  if (rest.length) r.entry.settles = [...(r.entry.settles ?? []), ...rest];
+  return r;
 }
