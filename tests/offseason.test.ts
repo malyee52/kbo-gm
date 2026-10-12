@@ -196,7 +196,8 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
   });
 
   it('FA 제시 검사: 최저 연봉 미만, 샐러리캡 초과는 받지 않는다', () => {
-    const e = g.offseason!.fa.entries.find((x) => x.from !== g.teamIdx)!;
+    // 요구액이 가장 적은 외부 FA (2026-10-12 투수 가치를 올린 뒤 첫 외부 FA의 1.2배가 샐러리캡을 넘었다)
+    const e = g.offseason!.fa.entries.filter((x) => x.from !== g.teamIdx).sort((a, b) => a.ask - b.ask)[0];
     expect(g.offerFa(e.id, MIN_SALARY - 1, 2).ok).toBe(false);
     expect(g.offerFa(e.id, 1_000_000, 2).ok).toBe(false); // 100억
     expect(g.offerFa(e.id, e.ask * 1.2, e.years).ok).toBe(true);
@@ -204,7 +205,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
 
   it('FA: 요구액보다 넉넉히 제시하면 첫 라운드에 우리와 계약하고, 원 소속 구단에 보상이 간다 (C등급은 보상금, A·B등급은 보상선수 단계)', () => {
     afterFa = GameSession.load(store, roundTrip(g.toSave()), FAST);
-    const e = afterFa.offseason!.fa.entries.find((x) => x.from !== afterFa.teamIdx && x.status === 'open')!;
+    const e = afterFa.offseason!.fa.entries.filter((x) => x.from !== afterFa.teamIdx && x.status === 'open').sort((a, b) => a.ask - b.ask)[0];
     expect(afterFa.offerFa(e.id, Math.round(e.ask * 1.3), e.years).ok).toBe(true);
     afterFa.nextStage();
     const done = afterFa.offseason!.fa.entries.find((x) => x.id === e.id)!;
@@ -214,7 +215,8 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(p.team).toBe(afterFa.teamIdx);
     expect(p.faCount).toBeGreaterThanOrEqual(1);
     if (e.grade === 'C') {
-      const ledger = afterFa.league.ledger.find((l) => l.note.startsWith(p.name));
+      // 보상금 (원 소속 구단이 받는 돈). 같은 선수 이름으로 계약금 줄도 있다
+      const ledger = afterFa.league.ledger.find((l) => l.note.startsWith(p.name) && l.to === e.from);
       expect(ledger?.to).toBe(e.from);
       expect(ledger?.amount).toBe(Math.round(COMPENSATION[e.grade] * e.prevSalary));
     } else {

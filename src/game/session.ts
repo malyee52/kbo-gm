@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, MAX_PER_SIDE, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -1347,7 +1347,7 @@ export class GameSession {
         const b = s.bat[p.idx];
         const pt = s.pit[p.idx];
         return {
-          id: p.id, name: p.name, isPitcher: p.isPitcher, starter: !!p.pit && p.pit.startShare >= 0.5, age: p.age, foreign: p.foreign,
+          id: p.id, name: p.name, isPitcher: p.isPitcher, starter: isStarterSkill(p.pit), age: p.age, foreign: p.foreign,
           pa: b.pa, ops: b.pa ? ops(b) : 0, outs: pt.outs, era: pt.outs ? (pt.er * 27) / pt.outs : 0,
           fatigue: currentFatigue(s.states, p.idx, day),
         };
@@ -1363,7 +1363,7 @@ export class GameSession {
           ...(opts?.player ? { player: opts.player } : {}), ...(opts?.side && opts.side !== 'all' ? { side: opts.side } : {}) });
       },
       restPitchers: (all) => {
-        for (const p of this.team.org) if (p.isPitcher && (all || !p.pit || p.pit.startShare < 0.5)) s.clearFatigue(p.idx);
+        for (const p of this.team.org) if (p.isPitcher && (all || !isStarterSkill(p.pit))) s.clearFatigue(p.idx);
       },
       rest: (id, days) => {
         const p = this.world.players.find((x) => x.id === id && x.teamIdx === team);

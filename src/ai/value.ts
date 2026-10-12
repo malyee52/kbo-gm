@@ -6,16 +6,25 @@
 // - 연봉 부담: 트레이드 판단(trade.ts)에서 연봉을 런으로 바꿔 뺀다.
 // - 포지션 희소성: 선수 가치에는 포지션 보정을, 구단 전력에는 "그 자리를 맡을 선수가 없을 때의 손해"를 넣는다.
 
-import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, fieldPosOf, pitValue, type SimPlayer, type Slot, type World } from '../engine';
+import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, eraPitching, fieldPosOf, isStarterSkill, pitValue, type SimPlayer, type Slot, type World } from '../engine';
 
 /** 선형 가중치(wOBA 계열)를 득점으로 바꾸는 배율. 공개된 세이버메트릭스 상수의 근사값 */
 export const WOBA_SCALE = 1.2;
 /** 한 시즌 출전량 (임시값) */
 const FULL_PA = 600;
+/** 선발 등판 수를 셀 수 없을 때 (월드 정보가 없을 때) */
 const STARTS_PER_SEASON = 28;
 const RELIEF_APPEARANCES = 60;
-/** 구원 투수는 접전 후반에 나오는 몫을 더 쳐준다 (임시값) */
-const RELIEF_LEVERAGE = 1.3;
+/**
+ * 구원 투수는 접전 후반에 나오는 몫을 더 쳐준다. 2026-10-12 기준표(tools/calibrate_value.ts)에 맞춰 1.3 → 1.6:
+ * 실제 시즌의 WAR와 비교하면 구원의 런이 타자보다 1.23배쯤 작게 잡혀 있었다
+ */
+const RELIEF_LEVERAGE = 1.6;
+/**
+ * 선발의 대체 선수 수준 (피타석 가치, 클수록 나쁘다): 리그의 대체 투수(replPit)보다 이만큼 나쁜 투수를 기준으로 본다.
+ * 2026-10-12 기준표에 맞춘 값: 같은 WAR에서 선발의 런이 타자보다 약 10런 작았다 (선발 한 시즌 약 660타자 × 0.0176 ÷ 1.2 ≈ 9.7런)
+ */
+const SP_REPL_SHIFT = 0.0176;
 /** 포지션 보정 (600타석당 런). 공개된 세이버메트릭스 상수의 근사값 */
 const POS_ADJ: Record<string, number> = {
   C: 12.5, SS: 7.5, '2B': 2.5, '3B': 2.5, CF: 2.5, LF: -7.5, RF: -7.5, '1B': -12.5, DH: -17.5, IF: 2.5, OF: -5,
@@ -102,7 +111,17 @@ export function valueContext(world: World): ValueContext {
 export type PitchRole = 'SP' | 'RP';
 
 export function isStarter(p: SimPlayer): boolean {
-  return p.isPitcher && (p.pit?.startShare ?? 0) >= 0.5;
+  return p.isPitcher && isStarterSkill(p.pit);
+}
+
+/**
+ * 그 시대 선발 한 명의 한 시즌 선발 등판 수와 등판당 소화 배율 (2026-10-12): 경기 수 ÷ 로테이션 인원, 시대별 투구 한계 배율(engine/eras.ts).
+ * 예전에는 모든 시대 28경기·배율 1이라 4인 로테이션에 완투가 많던 1980~90년대 에이스의 가치가 절반쯤으로 잡혔다 (tools/calibrate_value.ts)
+ */
+function starterLoad(world: World | undefined): { starts: number; scale: number } {
+  if (!world) return { starts: STARTS_PER_SEASON, scale: 1 };
+  const era = eraPitching(world.year);
+  return { starts: world.gamesPerTeam / era.rotation, scale: era.limitScale };
 }
 
 /** 타자의 이번 시즌 타격 기여 (포지션 보정 없음) */
@@ -113,8 +132,9 @@ function batRuns(p: SimPlayer, ctx: ValueContext): number {
 /** 투수의 한 시즌 기여. role을 주지 않으면 선발 비율로 정한다 */
 export function pitRuns(p: SimPlayer, ctx: ValueContext, role: PitchRole = isStarter(p) ? 'SP' : 'RP'): number {
   const s = p.pit!;
-  const per = (ctx.replPit - p.value) / WOBA_SCALE;
-  return role === 'SP' ? per * s.stamina * STARTS_PER_SEASON : per * s.reliefStint * RELIEF_APPEARANCES * RELIEF_LEVERAGE;
+  if (role === 'RP') return ((ctx.replPit - p.value) / WOBA_SCALE) * s.reliefStint * RELIEF_APPEARANCES * RELIEF_LEVERAGE;
+  const load = starterLoad(ctx.world);
+  return ((ctx.replPit + SP_REPL_SHIFT - p.value) / WOBA_SCALE) * s.stamina * load.scale * load.starts;
 }
 
 /** 주 포지션 수비 런 (지명타자는 0) */

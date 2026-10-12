@@ -1,6 +1,7 @@
 // 선수 기용: 1군 엔트리, 선발 라인업, 타순, 선발 로테이션, 불펜.
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
+import { isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
 import type { EngineParams } from './params';
@@ -307,7 +308,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const plan = manual ? ts.plan ?? null : null;
   const inAvail = new Set(pitchers.map((p) => p.idx));
   const planned = plan ? plan.rotation.filter((i) => inAvail.has(i)).map((i) => pitchers.find((p) => p.idx === i)!) : [];
-  const starters = pitchers.filter((p) => p.pit!.startShare >= 0.5 && !planned.includes(p) && p.idx !== plan?.closer).sort((a, b) => a.value - b.value);
+  const starters = pitchers.filter((p) => isStarterSkill(p.pit) && !planned.includes(p) && p.idx !== plan?.closer).sort((a, b) => a.value - b.value);
   const rotation = plan && plan.rotation.length ? [...planned] : starters.slice(0, nRot);
   if (plan && plan.rotation.length && rotation.length < MIN_PLAN_ROTATION) rotation.push(...starters.slice(0, nRot - rotation.length));
   if (rotation.length < nRot) {

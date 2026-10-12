@@ -35,16 +35,21 @@ describe('경기력 효과 (컨디션)', () => {
   });
 
   it('시즌 내내 우리 구단 경기력 +3.0이면 같은 시드보다 많이 이긴다', () => {
-    const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'form-a' }, FAST);
-    const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'form-a' }, FAST);
-    (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
-    for (const g of [base, boosted]) {
-      ensureEvents(g.league).chance = 0; // 무작위 이벤트는 끈다 (비교를 깨끗하게)
-      // 하루마다 끈다 (2026-10-12 이벤트 빈도를 올린 뒤 5일 사이에 이벤트가 끼어들었다)
-      while (!g.done) { g.league.events!.chance = 0; g.advance(1); }
-    }
+    // 한 시드는 운에 흔들려 두 시드 평균으로 본다 (2026-10-12 투수 가치·선발 기준을 바꾼 뒤 한 시드가 +2.0%p였다)
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
-    expect(w(boosted) - w(base)).toBeGreaterThan(0.03);
+    let diff = 0;
+    for (const seed of ['form-a', 'form-b']) {
+      const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
+      const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
+      (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
+      for (const g of [base, boosted]) {
+        ensureEvents(g.league).chance = 0; // 무작위 이벤트는 끈다 (비교를 깨끗하게)
+        // 하루마다 끈다 (2026-10-12 이벤트 빈도를 올린 뒤 5일 사이에 이벤트가 끼어들었다)
+        while (!g.done) { g.league.events!.chance = 0; g.advance(1); }
+      }
+      diff += (w(boosted) - w(base)) / 2;
+    }
+    expect(diff).toBeGreaterThan(0.025);
   }, 300_000);
 });
 

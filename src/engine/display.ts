@@ -1,5 +1,6 @@
 // 화면용 능력치: 내부 비율을 20~80 등급으로 환산한다. 50 = 리그 주전 평균, 10 = 1 표준편차.
 
+import { isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import type { SimPlayer, World } from './types';
 
@@ -66,8 +67,8 @@ export function computeGrades(world: World): DisplayGrades {
   const pitchers = world.players.filter((p) => p.isPitcher && p.pit);
   const refB = hitters.filter((p) => p.bat!.sample >= MIN_BAT_SAMPLE).map((p) => batterRaw(p, lg));
   const refP = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE).map((p) => pitcherRaw(p, lg));
-  const refStarters = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && p.pit!.startShare >= 0.5).map((p) => pitcherRaw(p, lg));
-  const refRelievers = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && p.pit!.startShare < 0.5).map((p) => pitcherRaw(p, lg));
+  const refStarters = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && isStarterSkill(p.pit)).map((p) => pitcherRaw(p, lg));
+  const refRelievers = pitchers.filter((p) => p.pit!.sample >= MIN_PIT_SAMPLE && !isStarterSkill(p.pit)).map((p) => pitcherRaw(p, lg));
 
   const sb = {
     contact: scaler(refB.map((r) => r.contact)), power: scaler(refB.map((r) => r.power)),

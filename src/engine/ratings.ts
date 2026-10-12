@@ -18,6 +18,8 @@ const PIT_EVENTS = ['so', 'bb', 'hbp', 'hr', 'hit'] as const;
 export const LINEAR_WEIGHTS = { bb: 0.69, hbp: 0.72, s1: 0.89, d2: 1.27, t3: 1.62, hr: 2.1 } as const;
 
 const DEFAULT_SB_PCT = 0.7;
+/** 선발·구원을 겸한 시즌에서 구원 한 번에 상대한 타자 수로 보는 값 (임시값) */
+const MIXED_RELIEF_BF = 6;
 
 export interface Weighted<T> {
   row: T;
@@ -107,6 +109,14 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
     } else if (starts / row.g <= 0.2) {
       bfRelief += w * row.tbf;
       gRelief += w * row.g;
+    } else if (row.gs !== null && starts > 0) {
+      // 선발과 구원을 겸한 시즌 (1980년대 에이스 등, 2026-10-12): 구원 등판은 한 번에 6명쯤 상대했다고 보고 나머지를 선발 몫으로
+      const relief = row.g - starts;
+      const perStart = Math.max(0, row.tbf - relief * MIXED_RELIEF_BF) / starts;
+      if (perStart > 0) {
+        bfStart += w * perStart * starts;
+        gStart += w * starts;
+      }
     }
   }
   skill.startShare = g > 0 ? gs / g : 0;
@@ -135,6 +145,14 @@ export function pitValue(s: PitSkill, lg: Rates): number {
     (W.s1 * lg.s1 + W.d2 * lg.d2 + W.t3 * lg.t3) * s.hit * inPlayShift +
     W.hr * s.hr * lg.hr
   );
+}
+
+/** 역사 재현·고점용 회귀 상수: 예측용 값에 seasonRegressScale을 곱한다 */
+export function seasonRegress(p: EngineParams): EngineParams {
+  const k = p.seasonRegressScale;
+  if (k === 1) return p;
+  const scale = <T extends Record<string, number>>(o: T): T => Object.fromEntries(Object.entries(o).map(([e, v]) => [e, v * k])) as T;
+  return { ...p, batRegress: scale(p.batRegress), pitRegress: scale(p.pitRegress) };
 }
 
 export interface BuildWorldInput {
@@ -171,6 +189,7 @@ export function buildWorld(input: BuildWorldInput): World {
   const rateW = seasonBasis ? params.seasonBlend : params.seasonWeights;
   const rateBat = seasonBasis ? [curBat, histBat[0], histBat[1]] : histBat;
   const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
+  const rp = seasonBasis ? seasonRegress(params) : params;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
 
   for (const id of ids) {
@@ -199,7 +218,7 @@ export function buildWorld(input: BuildWorldInput): World {
         debutEstimate = true;
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
-      pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, params);
+      pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, rp);
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
     } else {
@@ -212,7 +231,7 @@ export function buildWorld(input: BuildWorldInput): World {
         rows.push({ row: bRow, w: params.debutSeasonWeight, lg });
         debutEstimate = true;
       }
-      bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, params);
+      bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다
