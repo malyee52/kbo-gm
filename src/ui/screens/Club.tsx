@@ -11,6 +11,7 @@ import {
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
+import { ruleOf } from '../../league/rules';
 
 // 2026-10-12 UI 개편: 탭(개요·재정·구장·팬·감독·코치·이력·업적)은 위쪽 '구단' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
 export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
@@ -24,8 +25,8 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
   const team = L.teams[me];
   // 오프시즌이면 다음 시즌 기준 예산
   const year = session.phase === 'offseason' ? session.year + 1 : session.year;
-  const cap = salaryCap(year);
-  const payroll = capPayroll(L.players, me);
+  const cap = salaryCap(year, L);
+  const payroll = capPayroll(L.players, me, ruleOf(L, 'capTopN'));
   const ps = L.lastSeason?.postseason;
   const name = (t: number) => L.teams[t].name;
   const strikes = L.capStrikes?.[me] ?? 0;

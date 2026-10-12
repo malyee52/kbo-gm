@@ -5,6 +5,7 @@ import { effectText } from '../../fantasy/effects';
 import { loadAiSettings } from '../../fantasy/settings';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
+import { changedRules, RULE_DEFS } from '../../league/rules';
 import { leniencyOf, LENIENCY_LABEL } from '../../fantasy/leniency';
 
 export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t: number) => string): string {
@@ -15,6 +16,8 @@ export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t:
     case 'contract': return `${nameOf(op.player)} 계약 연 ${(op.salary / 10000).toFixed(1)}억 원 ${op.years}년`;
     case 'teamCash': return `${teamName(op.team)} 자금 ${op.amount > 0 ? '+' : '−'}${Math.abs(op.amount / 10000).toFixed(1)}억 원`;
     case 'effect': return effectText(op.effect, nameOf);
+    case 'pick': return `${op.draft} ${op.round}라운드 지명권(${teamName(op.from)} 원래) → ${teamName(op.to)}`;
+    case 'rule': return `규정 변경: ${RULE_DEFS.find((d) => d.key === op.key)?.label ?? op.key} → ${op.value ?? '실제 규정'}`;
   }
 }
 
@@ -59,6 +62,9 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           <span className="muted small">AI 판정 {leniencyOf(L) + 1}/7 {LENIENCY_LABEL[leniencyOf(L)]} (저장·설정 → 난이도에서 바꿈). 명분이 있어야 통합니다. Ctrl+Enter. 결과는 바로 게임에 들어가고 저장·재현에도 남습니다.</span>
         </div>
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
+        {changedRules(L).length > 0 && (
+          <p className="small"><strong>바뀐 규정</strong> {changedRules(L).map((c) => `${c.label} ${c.from ?? '실제'} → ${c.to ?? '실제'}`).join(' · ')}</p>
+        )}
       </div>
       {log.length === 0 ? <p className="muted">아직 행동이 없습니다.</p> : log.map((e) => (
         <article key={e.id} className="panel">

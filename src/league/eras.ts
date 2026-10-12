@@ -7,6 +7,8 @@
 
 import type { DataStore, Meta } from '../data/types';
 import type { LeagueTeam } from './types';
+import { ruleOf } from './rules';
+import type { LeagueState } from './types';
 
 /** FA 제도가 있는 오프시즌인가 (1999 시즌 뒤부터, 기획서 4.2 출처 확인) */
 export function faEnabled(offseasonYear: number): boolean {
@@ -33,12 +35,15 @@ export interface ForeignRule {
 }
 
 /** 다음 시즌(year)의 외국인 보유 한도. 자료가 없는 해는 마지막 해의 값 */
-export function foreignRule(meta: Meta, year: number): ForeignRule {
+export function foreignRule(meta: Meta, year: number, league?: Pick<LeagueState, 'rules'>): ForeignRule {
   const years = meta.years;
   const y = Math.min(Math.max(year, years[0]), years[years.length - 1]);
   const total = meta.rules[String(y)]?.foreignLimit ?? 0;
-  const asia = y >= 2026 && total > 0 ? 1 : 0;
-  return { total, asia, regular: Math.max(0, total - asia) };
+  const asia0 = y >= 2026 && total > 0 ? 1 : 0;
+  // 자유 모드 규정 변경 (league/rules.ts)
+  const regular = ruleOf(league, 'foreignRegular') ?? Math.max(0, total - asia0);
+  const asia = ruleOf(league, 'foreignAsia') ?? asia0;
+  return { total: regular + asia, asia, regular };
 }
 
 export type TeamChange =

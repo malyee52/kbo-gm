@@ -5,11 +5,12 @@ import { currentRuns } from '../../ai/value';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { foreignRule } from '../../league/eras';
-import { availableDay, FOREIGN_SWAPS, foreignHeld, foreignSwapsUsed, MARKET_DEADLINE, movesOf, releaseCost } from '../../league/market';
-import { dollarText, ORG_LIMIT } from '../../league/salary';
+import { availableDay, foreignHeld, foreignSwapsUsed, movesOf, releaseCost } from '../../league/market';
+import { dollarText } from '../../league/salary';
 import { ConfirmButton } from '../ConfirmButton';
 import { Grade, PlayerLink, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
+import { ruleDate, ruleOf } from '../../league/rules';
 
 type Kind = 'foreign' | 'free';
 
@@ -22,7 +23,7 @@ export function Market() {
   const ctx = session.values;
   const lp = new Map(session.league.players.map((p) => [p.id, p]));
   const market = session.marketPlayers();
-  const rule = foreignRule(store.meta, year);
+  const rule = foreignRule(store.meta, year, session.league);
   const held = foreignHeld(session.world, session.teamIdx, lp);
   const used = foreignSwapsUsed(session.marketCtx, session.teamIdx);
   const deadline = session.marketDeadlineDay;
@@ -60,13 +61,13 @@ export function Market() {
       <section className="panel">
         <h2>선수 시장</h2>
         <p className="muted small">
-          시즌 중 방출·영입은 {MARKET_DEADLINE.month}월 {MARKET_DEADLINE.date}일({shortDate(year, deadline)})까지입니다.
+          시즌 중 방출·영입은 {ruleDate(session.league, 'marketDeadline').month}월 {ruleDate(session.league, 'marketDeadline').date}일({shortDate(year, deadline)})까지입니다.
           {open ? '' : ' 지금은 마감됐습니다.'}
         </p>
         <ul className="plain small">
-          <li>정식 선수 {regular}/{ORG_LIMIT}명 · 외국인 {held.regular}/{rule.regular}명{rule.asia ? ` · 아시아쿼터 ${held.asia}/${rule.asia}명` : ''} · 외국인 교체 {used}/{FOREIGN_SWAPS}번</li>
+          <li>정식 선수 {regular}/{ruleOf(session.league, 'orgLimit')}명 · 외국인 {held.regular}/{rule.regular}명{rule.asia ? ` · 아시아쿼터 ${held.asia}/${rule.asia}명` : ''} · 외국인 교체 {used}/{ruleOf(session.league, 'foreignSwaps')}번</li>
           <li>방출(웨이버 공시): 선수 창의 "웨이버 공시"로 합니다. 하위 구단부터 데려갈 수 있고, 데려간 구단이 계약을 넘겨받습니다. 아무도 데려가지 않으면 자유계약 선수가 되고 남은 보장 연봉을 그때 냅니다(외국인은 연봉의 60%).</li>
-          <li>새 외국인은 보유 한도가 빈 자리에만, 한 시즌 {FOREIGN_SWAPS}번까지 데려올 수 있습니다. 연봉은 남은 달만큼 나갑니다.</li>
+          <li>새 외국인은 보유 한도가 빈 자리에만, 한 시즌 {ruleOf(session.league, 'foreignSwaps')}번까지 데려올 수 있습니다. 연봉은 남은 달만큼 나갑니다.</li>
           <li>자유계약 선수는 최저 연봉으로 이번 시즌까지 계약합니다. 같은 시즌에 방출한 선수는 다시 데려올 수 없습니다.</li>
         </ul>
       </section>

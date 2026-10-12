@@ -3,15 +3,16 @@ import { isStarterSkill } from '../../engine';
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
-import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, MAX_FA_SIGNINGS, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
-  ASIA_NEW_CAP, capPayroll, dollarText, FA_COMP, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap,
+  capPayroll, dollarText, FA_COMP, MIN_SALARY, salaryCap,
 } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
+import { ruleOf } from '../../league/rules';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -357,12 +358,12 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
 function CapLine() {
   const { session } = useGame();
   const won = useWon();
-  const cap = salaryCap(session.year + 1);
-  const pay = capPayroll(session.league.players, session.teamIdx);
+  const cap = salaryCap(session.year + 1, session.league);
+  const pay = capPayroll(session.league.players, session.teamIdx, ruleOf(session.league, 'capTopN'));
   const size = session.league.players.filter((p) => p.team === session.teamIdx).length;
   return (
     <p className="muted small">
-      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 40명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''} · 소속 선수 {size}/{ORG_LIMIT}명
+      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 40명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''} · 소속 선수 {size}/{ruleOf(session.league, 'orgLimit')}명
     </p>
   );
 }
@@ -385,9 +386,9 @@ function FaPanel({ act }: { act: Act }) {
         <h2>FA 시장 <span className="muted small">{off.fa.round}/{FA_ROUNDS}라운드</span></h2>
         <p className="muted small">
           라운드를 마감하면 AI 구단도 제시하고, 선수는 가장 좋은 조건을 고릅니다 (원 소속 구단은 조금 더 쳐줍니다). 라운드가 지날수록 선수가 눈높이를 낮춥니다.
-          외부 FA는 한 오프시즌에 {MAX_FA_SIGNINGS}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 보상금(A 300%, B 200%, C 150%)을 냅니다.
+          외부 FA는 한 오프시즌에 {ruleOf(session.league, 'maxFaSignings')}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 보상금(A 300%, B 200%, C 150%)을 냅니다.
         </p>
-        <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {MAX_FA_SIGNINGS}명</p>
+        <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {ruleOf(session.league, 'maxFaSignings')}명</p>
         <p className="small">
           지금 자금 <strong>{won(session.cashNow())}</strong> · 계약금은 계약 총액(연봉 × 기간)의 30%를 계약할 때 한 번에 내고, 나머지는 시즌 중 월말에 나갑니다.
           계약금을 낼 자금이 없으면 제시할 수 없습니다 (이번 라운드의 다른 제시 계약금까지 합쳐서).
@@ -467,8 +468,8 @@ function ForeignPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>외국인 선수</h2>
         <p className="muted small">
-          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(FOREIGN_NEW_CAP)}, 아시아쿼터 신규는 {dollarText(ASIA_NEW_CAP)}까지,{' '}
-          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(FOREIGN_TOTAL_CAP)}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
+          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(ruleOf(session.league, 'foreignNewCap'))}, 아시아쿼터 신규는 {dollarText(ruleOf(session.league, 'asiaNewCap'))}까지,{' '}
+          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(ruleOf(session.league, 'foreignTotalCap'))}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
           우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
@@ -626,7 +627,7 @@ function ExtensionPanel({ act }: { act: Act }) {
         <button type="button" className="ghost small-btn" onClick={() => setOpen(!open)}>{open ? '접기' : '후보 보기'}</button>
       </div>
       <p className="muted small">
-        보류·신인 계약인 국내 선수와 {Off.EXT_MIN_YEARS}~{Off.EXT_MAX_YEARS}년 계약을 맺습니다. 계약 동안 연봉 협상과 FA가 없고, 총액의 {Off.EXT_BONUS_SHARE * 100}%를 계약금으로 먼저 냅니다.
+        보류·신인 계약인 국내 선수와 {Off.EXT_MIN_YEARS}~{ruleOf(session.league, 'extMaxYears')}년 계약을 맺습니다. 계약 동안 연봉 협상과 FA가 없고, 총액의 {Off.EXT_BONUS_SHARE * 100}%를 계약금으로 먼저 냅니다.
         FA가 멀수록 싸게(최대 20% 할인), 길게 맺을수록 해마다 조금 더 쌉니다. AI 구단도 FA가 가까운 주축과 다년 계약을 맺습니다.
       </p>
       {open && (
@@ -780,13 +781,13 @@ function ReleasePanel({ act }: { act: Act }) {
   const devs = session.league.players.filter((p) => p.team === session.teamIdx && p.dev);
   const devPool = session.devPool().sort((a, b) => (b.scoutPotential ?? b.potential) - (a.scoutPotential ?? a.potential) || a.id.localeCompare(b.id));
   const ageOf = (p: (typeof mine)[number]) => (p.birthYear ? session.offseason!.year + 1 - p.birthYear : 99);
-  const canDev = (p: (typeof mine)[number]) => !p.foreign && ageOf(p) <= Off.DEV_MAX_AGE && p.contract.kind !== 'fa' && devs.length < Off.DEV_LIMIT;
-  const over = mine.length - ORG_LIMIT;
+  const canDev = (p: (typeof mine)[number]) => !p.foreign && ageOf(p) <= ruleOf(session.league, 'devMaxAge') && p.contract.kind !== 'fa' && devs.length < ruleOf(session.league, 'devLimit');
+  const over = mine.length - ruleOf(session.league, 'orgLimit');
   const claimable = session.claimable().sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id) || a.id.localeCompare(b.id));
   return (
     <section className="stack">
       <div className="panel">
-        <h2>정원 정리 <span className="muted small">소속 선수 {mine.length}/{ORG_LIMIT}명</span></h2>
+        <h2>정원 정리 <span className="muted small">소속 선수 {mine.length}/{ruleOf(session.league, 'orgLimit')}명</span></h2>
         <p className="muted small">
           방출은 되돌릴 수 없고, 방출한 선수는 다른 구단이 데려갈 수 있습니다. 자동 방출 순서대로 늘어놓았습니다: 앞으로 8시즌 가치(잠재력·나이 반영)가 낮은 순,
           입단 {Off.ROOKIE_GRACE}년 안의 신인은 뒤로. 포수 {Off.MIN_CATCHERS}명·투수 {Off.MIN_PITCHERS}명·야수 {Off.MIN_HITTERS}명 아래로 내려가게 하는 선수는 맨 뒤로 미룹니다.
@@ -822,10 +823,10 @@ function ReleasePanel({ act }: { act: Act }) {
         </table>
       </div>
       <div className="panel">
-        <h2>육성선수 <span className="muted small">{devs.length}/{Off.DEV_LIMIT}명</span></h2>
+        <h2>육성선수 <span className="muted small">{devs.length}/{ruleOf(session.league, 'devLimit')}명</span></h2>
         <p className="muted small">
-          육성선수는 정원({ORG_LIMIT}명) 밖이고 최저 연봉입니다. 2군(퓨처스리그)에서 뛰며 성장하고, 1군에는 정식 선수로 등록한 뒤에만 나갈 수 있습니다
-          (시즌 중 5월 1일부터 7월 31일까지, 또는 오프시즌 정원 정리 때, 정원 안에서). {Off.DEV_MAX_AGE}세 이하 국내 선수만 육성선수로 돌리거나 데려올 수 있습니다.
+          육성선수는 정원({ruleOf(session.league, 'orgLimit')}명) 밖이고 최저 연봉입니다. 2군(퓨처스리그)에서 뛰며 성장하고, 1군에는 정식 선수로 등록한 뒤에만 나갈 수 있습니다
+          (시즌 중 5월 1일부터 7월 31일까지, 또는 오프시즌 정원 정리 때, 정원 안에서). {ruleOf(session.league, 'devMaxAge')}세 이하 국내 선수만 육성선수로 돌리거나 데려올 수 있습니다.
         </p>
         {devs.length > 0 && (
           <table>
@@ -835,7 +836,7 @@ function ReleasePanel({ act }: { act: Act }) {
                 return (
                   <tr key={p.id}>
                     <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>잠재 {i.pot ?? '-'}</td>
-                    <td><button type="button" className="small-btn" disabled={mine.length >= ORG_LIMIT} title={mine.length >= ORG_LIMIT ? '정원이 차 있습니다' : undefined} onClick={() => act(session.promoteDevOff(p.id))}>정식 등록</button></td>
+                    <td><button type="button" className="small-btn" disabled={mine.length >= ruleOf(session.league, 'orgLimit')} title={mine.length >= ruleOf(session.league, 'orgLimit') ? '정원이 차 있습니다' : undefined} onClick={() => act(session.promoteDevOff(p.id))}>정식 등록</button></td>
                   </tr>
                 );
               })}
@@ -855,7 +856,7 @@ function ReleasePanel({ act }: { act: Act }) {
                   return (
                     <tr key={p.id}>
                       <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
-                      <td><button type="button" className="small-btn" disabled={devs.length >= Off.DEV_LIMIT} onClick={() => act(session.signDev(p.id))}>육성 영입</button></td>
+                      <td><button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(p.id))}>육성 영입</button></td>
                     </tr>
                   );
                 })}

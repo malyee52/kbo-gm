@@ -79,6 +79,8 @@ export function coreAge(org: SimPlayer[], ctx: ValueContext): number {
 export interface TradeProposal {
   /** AI 구단 색인 */
   aiTeam: number;
+  /** 한쪽 선수 수 상한 (리그 규정, 없으면 MAX_PER_SIDE) */
+  maxPerSide?: number;
   /** AI 구단이 받는 선수 (플레이어 구단 소속) */
   receive: SimPlayer[];
   /** AI 구단이 내주는 선수 */
@@ -115,7 +117,8 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const invalid = (message: string): TradeEvaluation => ({ verdict: 'reject-invalid', message, detail: base });
 
   if (prop.give.length === 0 && prop.receive.length === 0 && !prop.cash && !prop.picks) return invalid('주고받을 선수를 고르세요.');
-  if (prop.give.length > MAX_PER_SIDE || prop.receive.length > MAX_PER_SIDE) return invalid(`한쪽에서 ${MAX_PER_SIDE}명까지만 주고받을 수 있습니다.`);
+  const maxSide = prop.maxPerSide ?? MAX_PER_SIDE;
+  if (prop.give.length > maxSide || prop.receive.length > maxSide) return invalid(`한쪽에서 ${maxSide}명까지만 주고받을 수 있습니다.`);
   if (prop.give.some((p) => p.teamIdx !== prop.aiTeam)) return invalid('상대 구단 소속이 아닌 선수가 있습니다.');
   if (prop.receive.some((p) => p.teamIdx === prop.aiTeam)) return invalid('상대 구단 선수를 상대에게 줄 수는 없습니다.');
   if (new Set([...prop.give, ...prop.receive].map((p) => p.idx)).size !== prop.give.length + prop.receive.length) {

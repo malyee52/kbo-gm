@@ -19,8 +19,9 @@ import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { foreignRule } from './eras';
 import { payOf, paydays } from './finance';
-import { MIN_SALARY, ORG_LIMIT, WON_PER_RUN } from './salary';
+import { MIN_SALARY, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
+import { ruleDate, ruleOf } from './rules';
 
 /** 시즌 중 외국인 교체(새 계약) 한도 (KBO 규정 2회) */
 export const FOREIGN_SWAPS = 2;
@@ -67,7 +68,8 @@ export interface MarketCtx {
 }
 
 /** 마감일 (일정 색인). 그날 경기 전까지 */
-export function marketDeadlineDay(year: number, seasonDays: number): number {
+export function marketDeadlineDay(year: number, seasonDays: number, league?: Pick<LeagueState, 'rules'>): number {
+  const MARKET_DEADLINE = ruleDate(league, 'marketDeadline');
   let last = -1;
   for (let d = 0; d < seasonDays; d++) {
     const dt = dateOf(year, d);
@@ -132,7 +134,7 @@ export function availableDay(lp: LeaguePlayer | undefined, seasonDays: number): 
 export function releaseBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | null {
   if (p.teamIdx !== team) return '우리 구단 선수가 아닙니다.';
   if (ctx.season.done) return '시즌이 끝났습니다.';
-  if (ctx.season.day > marketDeadlineDay(ctx.world.year, ctx.season.schedule.length)) return `방출·영입 마감(${MARKET_DEADLINE.month}월 ${MARKET_DEADLINE.date}일)이 지났습니다.`;
+  if (ctx.season.day > marketDeadlineDay(ctx.world.year, ctx.season.schedule.length, ctx.league)) return `방출·영입 마감(${ruleDate(ctx.league, 'marketDeadline').month}월 ${ruleDate(ctx.league, 'marketDeadline').date}일)이 지났습니다.`;
   const org = ctx.world.teams[team].org;
   const catchers = org.filter((x) => !x.isPitcher && x.pos === 'C').length;
   if (!p.isPitcher && p.pos === 'C' && catchers <= 2) return '포수가 2명뿐이라 방출할 수 없습니다.';
@@ -149,21 +151,21 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
   if (p.teamIdx !== -1) return '시장에 있는 선수가 아닙니다.';
   if (p.formerTeam === team) return '이번 시즌에 방출한 선수는 다시 데려올 수 없습니다.';
   if (ctx.season.done) return '시즌이 끝났습니다.';
-  if (ctx.season.day > marketDeadlineDay(year, ctx.season.schedule.length)) return `방출·영입 마감(${MARKET_DEADLINE.month}월 ${MARKET_DEADLINE.date}일)이 지났습니다.`;
+  if (ctx.season.day > marketDeadlineDay(year, ctx.season.schedule.length, ctx.league)) return `방출·영입 마감(${ruleDate(ctx.league, 'marketDeadline').month}월 ${ruleDate(ctx.league, 'marketDeadline').date}일)이 지났습니다.`;
   const from = availableDay(lp.get(p.id), ctx.season.schedule.length);
   if (ctx.season.day < from) {
     const dt = dateOf(year, from);
     return `아직 시장에 나오지 않았습니다 (${dt.month}월 ${dt.date}일 무렵부터).`;
   }
-  if (!p.dev && regularCount(ctx.world, team) >= ORG_LIMIT) return `정식 선수 정원(${ORG_LIMIT}명)이 차 있습니다. 먼저 방출하세요.`;
+  if (!p.dev && regularCount(ctx.world, team) >= ruleOf(ctx.league, 'orgLimit')) return `정식 선수 정원(${ruleOf(ctx.league, 'orgLimit')}명)이 차 있습니다. 먼저 방출하세요.`;
   if (p.foreign) {
-    const rule = foreignRule(ctx.meta, year);
+    const rule = foreignRule(ctx.meta, year, ctx.league);
     const held = foreignHeld(ctx.world, team, lp);
     const asia = !!lp.get(p.id)?.asia;
     if (asia ? held.asia >= rule.asia : held.regular >= rule.regular) {
       return `외국인 ${asia ? '아시아쿼터' : '선수'} 보유 한도(${asia ? rule.asia : rule.regular}명)가 차 있습니다. 먼저 외국인 선수를 방출하세요.`;
     }
-    if (foreignSwapsUsed(ctx, team) >= FOREIGN_SWAPS) return `외국인 교체는 한 시즌 ${FOREIGN_SWAPS}번까지입니다.`;
+    if (foreignSwapsUsed(ctx, team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체는 한 시즌 ${ruleOf(ctx.league, 'foreignSwaps')}번까지입니다.`;
   }
   return null;
 }
@@ -187,7 +189,7 @@ export function releasePlayer(ctx: MarketCtx, p: SimPlayer, team: number): numbe
     const worth = runs >= CLAIM_MIN_RUNS && runs * WON_PER_RUN >= CLAIM_PAY_SHARE * lp.contract.salary;
     if (worth) {
       for (const t of [...season.standings()].reverse()) {
-        if (t === team || t === ctx.userTeam || regularCount(world, t) >= ORG_LIMIT) continue;
+        if (t === team || t === ctx.userTeam || regularCount(world, t) >= ruleOf(ctx.league, 'orgLimit')) continue;
         claimer = t;
         break;
       }
@@ -283,11 +285,11 @@ function swapTarget(ctx: MarketCtx, team: number): { out: SimPlayer; why: 'injur
 export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' }[] {
   const { world, season } = ctx;
   const day = season.day;
-  if (day < AI_SWAP_FROM_DAY || day % AI_SWAP_EVERY !== 0 || day > marketDeadlineDay(world.year, season.schedule.length) || season.done) return [];
+  if (day < AI_SWAP_FROM_DAY || day % AI_SWAP_EVERY !== 0 || day > marketDeadlineDay(world.year, season.schedule.length, ctx.league) || season.done) return [];
   const lpById = new Map(ctx.league.players.map((p) => [p.id, p]));
   const out: { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' }[] = [];
   for (let t = 0; t < world.teams.length; t++) {
-    if (t === ctx.userTeam || foreignSwapsUsed(ctx, t) >= FOREIGN_SWAPS) continue;
+    if (t === ctx.userTeam || foreignSwapsUsed(ctx, t) >= ruleOf(ctx.league, 'foreignSwaps')) continue;
     const target = swapTarget(ctx, t);
     if (!target) continue;
     // 같은 쓰임(투수·타자)과 같은 구분(일반·아시아쿼터)의 후보

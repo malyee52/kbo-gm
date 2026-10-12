@@ -4,19 +4,26 @@
 // 연봉 단위는 만 원 (외국인 선수만 달러).
 
 import { faServiceNeeded } from './eras';
-import type { LeaguePlayer, School } from './types';
+import type { LeagueState, LeaguePlayer, School } from './types';
+import { ruleOf } from './rules';
 
 /** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
 export const MIN_SALARY = 3000;
 
 /** 샐러리캡 (만 원). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1) */
 const CAP: Record<number, number> = { 2023: 1142638, 2024: 1142638, 2025: 1371165, 2026: 1439723, 2027: 1511709, 2028: 1587294 };
-export function salaryCap(year: number): number | null {
+export function salaryCap(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
   if (year < 2023) return null;
-  if (CAP[year]) return CAP[year];
-  let v = CAP[2028];
-  for (let y = 2029; y <= year; y++) v = Math.round(v * 1.05);
-  return v;
+  // 규정 변경 (league/rules.ts capScale, 0이면 폐지)
+  const scale = ruleOf(league, 'capScale');
+  if (scale <= 0) return null;
+  let v: number;
+  if (CAP[year]) v = CAP[year];
+  else {
+    v = CAP[2028];
+    for (let y = 2029; y <= year; y++) v = Math.round(v * 1.05);
+  }
+  return scale === 1 ? v : Math.round(v * scale);
 }
 /** 샐러리캡 도입 전(2022년까지)의 구단 예산 기준: 2023년 캡 값을 그대로 쓴다 (임시값. 내부 연봉은 2026년 물가라 캡 값과 같은 단위다) */
 export const PRE_CAP_BUDGET = 1142638;
@@ -45,12 +52,12 @@ export function priceIndex(year: number): number {
 /** 샐러리캡 대상: 외국인·신인을 뺀 구단별 연봉 상위 40명 합계 (출처 확인) */
 export const CAP_TOP_N = 40;
 
-export function capPayroll(players: LeaguePlayer[], team: number): number {
+export function capPayroll(players: LeaguePlayer[], team: number, topN = CAP_TOP_N): number {
   return players
     .filter((p) => p.team === team && !p.foreign && p.contract.kind !== 'rookie' && p.military?.state !== 'serving')
     .map((p) => p.contract.salary)
     .sort((a, b) => b - a)
-    .slice(0, CAP_TOP_N)
+    .slice(0, topN)
     .reduce((a, b) => a + b, 0);
 }
 
@@ -159,13 +166,13 @@ export const FOREIGN_REGULAR = 3;
 export const FOREIGN_ASIA = 1;
 
 /** 외국인 연봉 (달러, 임시값): 기여에 따라 */
-export function foreignSalary(runs: number, isNew: boolean, asia: boolean): number {
-  if (asia) return Math.min(ASIA_NEW_CAP, Math.round((80_000 + 6_000 * Math.max(0, runs)) / 10_000) * 10_000);
+export function foreignSalary(runs: number, isNew: boolean, asia: boolean, league?: Pick<LeagueState, 'rules'>): number {
+  if (asia) return Math.min(ruleOf(league, 'asiaNewCap'), Math.round((80_000 + 6_000 * Math.max(0, runs)) / 10_000) * 10_000);
   // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
   const r = Math.max(0, runs);
   // 신규: 20런 약 51만, 33런 약 74만, 46런 약 98만 달러 (외국인 능력을 올린 뒤 다시 맞춤, 2026-10-12)
   const v = Math.round((isNew ? 150_000 + 18_000 * r : 400_000 + 25_000 * r) / 50_000) * 50_000;
-  return isNew ? Math.min(FOREIGN_NEW_CAP, v) : Math.min(2_000_000, v);
+  return isNew ? Math.min(ruleOf(league, 'foreignNewCap'), v) : Math.min(2_000_000, v);
 }
 
 /** 소속선수 정원 68명 (2026~, 출처 확인) */

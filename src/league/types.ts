@@ -253,6 +253,8 @@ export interface LeagueState {
   challenge?: ChallengeState;
   /** 판타지 모드 (AI 이야기, src/fantasy). 없으면 보통 게임 */
   fantasy?: import('../fantasy/types').FantasyState;
+  /** 바뀐 리그 규정 (league/rules.ts). 자유 모드에서만 바뀐다. 없으면 실제 규정 */
+  rules?: Partial<import('./rules').RuleSet>;
   /** 구단별 코치 (coaches.ts) */
   coaches?: Coach[][];
   /** 구단별 감독 (managers.ts). 해임 뒤 개막 전까지는 null */
