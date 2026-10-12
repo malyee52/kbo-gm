@@ -250,12 +250,19 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
     const callUp = (isPitcher: boolean, need: number) => {
       const have = availAll.filter((p) => p.isPitcher === isPitcher).length;
       if (have >= need) return;
-      const extra = ts.team.org
+      // 외국인은 보유 한도 안에서만 올린다: 한도를 넘는 외국인을 올리면 아래에서 다시 빠져 인원이 모자란다
+      // (2026-10-12 버그: 2군 외국인 타자 둘을 올렸다가 빠져 라인업이 8명이 되어 경기가 멈췄다)
+      const cand = ts.team.org
         .filter((p) => p.isPitcher === isPitcher && !manual.has(p.idx) && ready(p))
-        .sort((a, b) => (isPitcher ? a.value - b.value : b.value - a.value))
-        .slice(0, need - have);
-      availAll.push(...extra);
-      ts.callUps!.push(...extra);
+        .sort((a, b) => (isPitcher ? a.value - b.value : b.value - a.value));
+      let foreign = availAll.filter((p) => p.foreign).length;
+      for (const p of cand) {
+        if (availAll.filter((x) => x.isPitcher === isPitcher).length >= need) break;
+        if (p.foreign && foreign >= limit) continue;
+        if (p.foreign) foreign++;
+        availAll.push(p);
+        ts.callUps!.push(p);
+      }
     };
     callUp(false, MIN_ACTIVE_HITTERS);
     callUp(true, MIN_ACTIVE_PITCHERS);
@@ -273,6 +280,20 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   fill(true, 9);
   const okForeign = allowedForeigners(availAll, limit);
   const avail = availAll.filter((p) => !p.foreign || okForeign.has(p.idx));
+  // 외국인 한도로 빠진 뒤에도 야수 9명·투수 몇 명은 꼭 남긴다: 국내 선수로 채우고, 그래도 모자라면 결장 중인 국내 선수까지 (경기를 못 치르는 일은 없게)
+  const topUp = (isPitcher: boolean, need: number) => {
+    const have = avail.filter((p) => p.isPitcher === isPitcher).length;
+    if (have >= need) return;
+    const inAvail = new Set(avail.map((p) => p.idx));
+    const pool = ts.team.org.filter((p) => p.isPitcher === isPitcher && !p.foreign && !p.dev && !inAvail.has(p.idx));
+    const ok = pool.filter((p) => st.absentUntil[p.idx] <= day).sort((a, b) => b.value - a.value);
+    const hurt = pool.filter((p) => st.absentUntil[p.idx] > day).sort((a, b) => st.absentUntil[a.idx] - st.absentUntil[b.idx]);
+    const extra = [...ok, ...hurt].slice(0, need - have);
+    avail.push(...extra);
+    if (manual) ts.callUps!.push(...extra.filter((p) => st.absentUntil[p.idx] <= day));
+  };
+  topUp(false, 11);
+  topUp(true, 9);
 
   // 직접 정한 1군은 투수·야수 인원도 플레이어가 정한 그대로 쓴다
   const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(world.rules.rosterSize);

@@ -9,10 +9,12 @@
 
 import { Rng } from '../engine';
 import type { LeaguePlayer, LeagueState } from './types';
+import { EXTRA_EVENTS } from './events-extra';
 
 /** 하루 확률의 처음 값, 하루마다 오르는 폭, 최대 */
-export const EVENT_BASE = 0.01;
-export const EVENT_STEP = 0.004;
+// 2026-10-12 이벤트를 127종으로 늘리며 조금 잦게 (한 시즌 무작위 이벤트 약 10 → 14번, 임시값)
+export const EVENT_BASE = 0.015;
+export const EVENT_STEP = 0.006;
 export const EVENT_MAX = 0.35;
 
 /** 며칠 동안 관중률을 바꾸는 효과 (finance.ts의 fillRate가 읽는다) */
@@ -116,6 +118,10 @@ export interface EventContext {
   tradeOffer(rng: Rng): { team: number; teamName: string; give: string; giveName: string; get: string; getName: string } | null;
   /** 제안된 트레이드를 실행한다 (조건이 바뀌었으면 하지 않는다). 결과 문구 */
   trade(team: number, give: string, get: string): string;
+  /** 팬 만족도를 바꾼다 (stadium.ts, 2026-10-12 이벤트 확장) */
+  addFans(delta: number, note: string): void;
+  /** 우리 선수 잠재력을 바꾼다 (런) */
+  addPotential(id: string, delta: number): void;
 }
 
 /** 이벤트가 보는 우리 선수 */
@@ -447,6 +453,9 @@ export const EVENTS: EventDef[] = [
     ],
   },
 ];
+
+// 확장 이벤트 104종 (events-extra.ts, 2026-10-12)
+EVENTS.push(...EXTRA_EVENTS);
 
 const byId = new Map(EVENTS.map((e) => [e.id, e]));
 export const eventDef = (id: string): EventDef | undefined => byId.get(id);

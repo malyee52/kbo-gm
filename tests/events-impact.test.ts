@@ -40,7 +40,8 @@ describe('경기력 효과 (컨디션)', () => {
     (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
     for (const g of [base, boosted]) {
       ensureEvents(g.league).chance = 0; // 무작위 이벤트는 끈다 (비교를 깨끗하게)
-      while (!g.done) { g.league.events!.chance = 0; g.advance(5); }
+      // 하루마다 끈다 (2026-10-12 이벤트 빈도를 올린 뒤 5일 사이에 이벤트가 끼어들었다)
+      while (!g.done) { g.league.events!.chance = 0; g.advance(1); }
     }
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
     expect(w(boosted) - w(base)).toBeGreaterThan(0.03);
@@ -57,7 +58,9 @@ describe('경기에 영향을 주는 이벤트', () => {
       g.advance(100000);
       for (const l of g.league.events!.log) seen.add(l.id);
     }
-    expect(GAME_EVENTS.filter((id) => seen.has(id)).length).toBeGreaterThanOrEqual(4);
+    // 2026-10-12 이벤트가 127종으로 늘어 이 11종은 드물어졌다: 두 시즌에 여러 종류가 나오고 그중 이 11종도 섞여 있으면 된다
+    expect(seen.size).toBeGreaterThanOrEqual(10);
+    expect(GAME_EVENTS.filter((id) => seen.has(id)).length).toBeGreaterThanOrEqual(1);
   }, 300_000);
 
   it('AI 트레이드 제안은 AI가 받아들일 조건이고, 받아들이면 선수가 바뀐다', () => {
