@@ -42,6 +42,7 @@ import { StopSettings } from './StopSettings';
 import { settlePromises } from '../fantasy/free';
 import { duePromises } from '../fantasy/promises';
 import { rivalDue, rivalMove } from '../fantasy/rivals';
+import { About } from './screens/About';
 
 /**
  * 메뉴 (2026-10-12 UI 개편): 위쪽 큰 메뉴 5개(묶음) + 그 아래 작은 탭(화면).
@@ -71,6 +72,7 @@ const NAV: NavItem[] = [
   { id: 'staff', label: '감독·코치', hub: '구단' },
   { id: 'club-history', label: '이력·업적', hub: '구단' },
   { id: 'save', label: '저장·설정', hub: '구단' },
+  { id: 'about', label: '정보·출처', hub: '구단' },
   { id: 'records', label: '연표', hub: '기록실' },
   { id: 'rec-career', label: '통산 순위', hub: '기록실' },
   { id: 'rec-season', label: '단일 시즌 기록', hub: '기록실' },
@@ -431,6 +433,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'market' && <Market />}
               {screen === 'fantasy' && <Fantasy />}
               {screen === 'save' && <SaveScreen onQuit={onQuit} />}
+              {screen === 'about' && <About />}
               {screen === 'season-end' && <SeasonEnd />}
               {screen === 'offseason' && <Offseason />}
               {screen === 'club' && <Club />}
