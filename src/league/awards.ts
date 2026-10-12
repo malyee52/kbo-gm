@@ -34,6 +34,8 @@ export interface SeasonAwards {
   rookie: AwardWinner | null;
   goldenGlove: { pos: GgPos; winner: AwardWinner }[];
   titles: TitleAward[];
+  /** 가을야구 시리즈 MVP (준플레이오프·플레이오프·한국시리즈, 결산 때 붙인다. 2026-10-12부터) */
+  postseasonMvps?: { round: import('./postseason').SeriesRound; id: string; name: string; team: number; line: string }[];
 }
 
 export type GgPos = 'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'OF' | 'DH';

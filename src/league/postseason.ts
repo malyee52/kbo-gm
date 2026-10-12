@@ -66,6 +66,16 @@ export interface SeriesResult {
   /** 이긴 팀. 진행 중이면 -1 */
   winner: number;
   games: SeriesGame[];
+  /** 시리즈 MVP (준플레이오프·플레이오프·한국시리즈, 끝난 시리즈. 2026-10-12부터) */
+  mvp?: SeriesMvp;
+}
+
+export interface SeriesMvp {
+  id: string;
+  name: string;
+  team: number;
+  /** 시리즈 기록 한 줄 */
+  line: string;
 }
 
 export interface PostseasonResult {
@@ -166,6 +176,10 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
   if (x.winsHigh >= rule.need || x.winsLow >= rule.need || x.games.length >= rule.maxGames) {
     // 승수가 같거나 경기 수 한도에 걸리면 상위 팀이 올라간다 (임시 규칙)
     x.winner = x.winsLow >= rule.need || x.winsLow > x.winsHigh ? x.low : x.high;
+    if (MVP_ROUNDS.includes(x.round)) {
+      const mvp = seriesMvp(x, season.world.players);
+      if (mvp) x.mvp = mvp;
+    }
     if (st.series.length === st.rounds.length) st.done = true;
     else {
       st.day += REST_BETWEEN;
@@ -192,6 +206,87 @@ function boxPit(staff: number[], pit: ReturnType<typeof emptyPitLine>[]): BoxPit
     const q = pit[idx];
     return { idx, outs: q.outs, bf: q.bf, h: q.h, r: q.r, er: q.er, bb: q.bb, so: q.so, hr: q.hr };
   });
+}
+
+// ---- 가을야구 개인 기록과 시리즈 MVP (2026-10-12)
+
+/** 시리즈 MVP를 주는 라운드 (KBO: 준플레이오프·플레이오프·한국시리즈. 와일드카드는 없다) */
+export const MVP_ROUNDS: SeriesRound[] = ['semi', 'po', 'ks'];
+
+export interface PsBat { g: number; ab: number; r: number; h: number; hr: number; rbi: number; bb: number; so: number }
+export interface PsPit { g: number; outs: number; h: number; er: number; bb: number; so: number; hr: number }
+/** 저장(SeasonLine.pbat·ppit)에 쓰는 키 순서 */
+export const PS_BAT_KEYS: (keyof PsBat)[] = ['g', 'ab', 'r', 'h', 'hr', 'rbi', 'bb', 'so'];
+export const PS_PIT_KEYS: (keyof PsPit)[] = ['g', 'outs', 'h', 'er', 'bb', 'so', 'hr'];
+
+export interface PsLine { idx: number; team: number; bat: PsBat | null; pit: PsPit | null }
+
+/** 경기들의 박스스코어로 선수별 합계 (박스스코어가 없는 경기는 빠진다: 결산 뒤 결과, 예전 저장) */
+export function postseasonLines(games: SeriesGame[]): Map<number, PsLine> {
+  const out = new Map<number, PsLine>();
+  const get = (idx: number, team: number) => out.get(idx) ?? out.set(idx, { idx, team, bat: null, pit: null }).get(idx)!;
+  for (const g of games) {
+    if (!g.box) continue;
+    for (const [side, team] of [[g.box.home, g.home], [g.box.away, g.away]] as const) {
+      const seen = new Set<number>();
+      for (const b of side.batters) {
+        const l = get(b.idx, team);
+        const t = (l.bat ??= { g: 0, ab: 0, r: 0, h: 0, hr: 0, rbi: 0, bb: 0, so: 0 });
+        if (!seen.has(b.idx)) { t.g++; seen.add(b.idx); }
+        t.ab += b.ab; t.r += b.r; t.h += b.h; t.hr += b.hr; t.rbi += b.rbi; t.bb += b.bb; t.so += b.so;
+      }
+      for (const q of side.pitchers) {
+        const l = get(q.idx, team);
+        const t = (l.pit ??= { g: 0, outs: 0, h: 0, er: 0, bb: 0, so: 0, hr: 0 });
+        t.g++; t.outs += q.outs; t.h += q.h; t.er += q.er; t.bb += q.bb; t.so += q.so; t.hr += q.hr;
+      }
+    }
+  }
+  return out;
+}
+
+/** 저장한 줄(SeasonLine.pbat·ppit)을 기록으로 */
+export function psFromRecord(idx: number, pbat?: number[], ppit?: number[]): PsLine {
+  const bat = pbat ? Object.fromEntries(PS_BAT_KEYS.map((k, i) => [k, pbat[i] ?? 0])) as unknown as PsBat : null;
+  const pit = ppit ? Object.fromEntries(PS_PIT_KEYS.map((k, i) => [k, ppit[i] ?? 0])) as unknown as PsPit : null;
+  return { idx, team: -1, bat, pit };
+}
+
+const ip = (outs: number) => `${Math.floor(outs / 3)}${outs % 3 ? ` ${outs % 3}/3` : ''}`;
+
+/** 가을야구 기록 한 줄 (타자는 타격, 투수는 투구) */
+export function psLineText(l: PsLine, isPitcher: boolean): string {
+  if (isPitcher && l.pit) {
+    const p = l.pit;
+    const era = p.outs ? ((p.er * 27) / p.outs).toFixed(2) : '-';
+    return `${p.g}경기 ${ip(p.outs)}이닝 평균자책 ${era} ${p.so}탈삼진`;
+  }
+  const b = l.bat;
+  if (!b) return '-';
+  const avg = b.ab ? (b.h / b.ab).toFixed(3).replace(/^0/, '') : '-';
+  return `타율 ${avg} (${b.ab}타수 ${b.h}안타)${b.hr ? ` ${b.hr}홈런` : ''} ${b.rbi}타점`;
+}
+
+/**
+ * 시리즈 MVP: 이긴 팀 선수 가운데 시리즈 기여가 가장 큰 선수 (실제 시상도 거의 이긴 팀에서 나온다).
+ * 타자 = 안타 + 2×홈런 + 0.8×타점 + 0.5×(볼넷 + 득점) − 0.3×범타, 투수 = 2×이닝 − 2×자책 + 0.3×탈삼진 (임시값. 실제 한국시리즈 MVP는 투수가 약 1/3이라 10시즌 측정으로 맞춤)
+ */
+export function seriesMvp(x: SeriesResult, players: SimPlayer[]): SeriesMvp | null {
+  if (x.winner < 0) return null;
+  const lines = postseasonLines(x.games);
+  let best: { l: PsLine; score: number; pitcher: boolean } | null = null;
+  for (const l of lines.values()) {
+    if (l.team !== x.winner) continue;
+    const p = players[l.idx];
+    if (!p) continue;
+    const bat = !p.isPitcher && l.bat ? l.bat.h + 2 * l.bat.hr + 0.8 * l.bat.rbi + 0.5 * (l.bat.bb + l.bat.r) - 0.3 * (l.bat.ab - l.bat.h) : -Infinity;
+    const pit = p.isPitcher && l.pit ? 2 * (l.pit.outs / 3) - 2 * l.pit.er + 0.3 * l.pit.so : -Infinity;
+    const score = Math.max(bat, pit);
+    if (!best || score > best.score || (score === best.score && p.id < players[best.l.idx].id)) best = { l, score, pitcher: pit > bat };
+  }
+  if (!best || !Number.isFinite(best.score)) return null;
+  const p = players[best.l.idx];
+  return { id: p.id, name: p.name, team: best.l.team, line: psLineText(best.l, best.pitcher) };
 }
 
 /** 남은 경기를 모두 치른다 */

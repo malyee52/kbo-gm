@@ -164,6 +164,9 @@ export interface SeasonLine {
   /** 퓨처스리그(2군) 성적: futures.ts FUT_BAT_KEYS / FUT_PIT_KEYS 순서 (2026-10-12부터. 예전 시즌에는 없다) */
   fbat?: number[];
   fpit?: number[];
+  /** 가을야구 성적: postseason.ts PS_BAT_KEYS / PS_PIT_KEYS 순서 (2026-10-12부터) */
+  pbat?: number[];
+  ppit?: number[];
 }
 
 export interface LeagueTeam {

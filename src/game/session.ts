@@ -53,7 +53,7 @@ import {
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
-  currentSeries, playNextGame, resultOf, ROUND_LABEL, RULES, startPostseason, stillAlive,
+  currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, RULES, startPostseason, stillAlive,
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
@@ -1615,6 +1615,7 @@ export class GameSession {
     }
     if (x.winner >= 0) {
       this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} 종료: ${name(x.winner)} 승리 (${x.winsHigh} - ${x.winsLow}).`);
+      if (x.mvp) this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} MVP: ${name(x.mvp.team)} ${x.mvp.name} (${x.mvp.line})`);
       if (this.postseason!.done) this.addNews(g.day, 'season', `${this.year} 한국시리즈 우승: ${name(x.winner)}!`);
     }
   }
@@ -1924,6 +1925,19 @@ export class GameSession {
         this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist);
         this.enlistChoice = null;
         L.lastSeason!.postseason = ps;
+        // 가을야구 개인 기록: 선수의 이번 시즌 줄에 붙인다 (postseason.ts, 2026-10-12)
+        {
+          const lines = postseasonLines(this.postseason!.series.flatMap((x) => x.games));
+          const byId = new Map(L.players.map((p) => [p.id, p]));
+          for (const l of lines.values()) {
+            const sp = this.world.players[l.idx];
+            const hist = sp ? byId.get(sp.id)?.history : undefined;
+            const h = hist?.[hist.length - 1]?.year === this.year ? hist[hist.length - 1] : undefined;
+            if (!h) continue;
+            if (l.bat && !sp.isPitcher) h.pbat = PS_BAT_KEYS.map((k) => l.bat![k]);
+            if (l.pit) h.ppit = PS_PIT_KEYS.map((k) => l.pit![k]);
+          }
+        }
         this.evaluateOwner(standings, ps, prevStandings, fin[this.teamIdx]);
         // 연표 (history.ts)
         recordYear(L, this.year, this.world.teams, this.season.teams, standings, ps.champion ?? null, ps.runnerUp ?? null,
@@ -1941,6 +1955,14 @@ export class GameSession {
               body: `${josa(t.name, '이', '가')} 한국시리즈에서 ${josa(this.world.teams[ps.runnerUp].name, '을', '를')} 꺾고 ${this.year} 시즌 정상에 올랐다.`
                 + (streak >= 2 ? ` ${streak}년 연속 우승이다.` : '')
                 + (dyn ? ` ${dyn.from}년부터 ${dyn.titles.length}번째 우승으로 왕조를 ${dyn.titles.length === DYNASTY_TITLES ? '열었다' : '이어 가고 있다'}.` : '') });
+          }
+          const psMvps = ps.series.filter((x) => x.mvp).map((x) => ({ round: x.round, ...x.mvp! }));
+          const awNow = L.awards?.find((a) => a.year === this.year);
+          if (awNow && psMvps.length) awNow.postseasonMvps = psMvps;
+          const ksMvp = ps.series.find((x) => x.round === 'ks')?.mvp;
+          if (ksMvp) {
+            const t = this.world.teams[ksMvp.team];
+            addArticle(L, { year: this.year, day: -1, kind: 'award', franchise: t?.franchise, title: `${this.year} 한국시리즈 MVP ${ksMvp.name}`, body: `${t?.name ?? ''} ${ksMvp.name}: 한국시리즈 ${ksMvp.line}.` });
           }
           const aw = L.awards?.find((a) => a.year === this.year);
           if (aw?.mvp) {

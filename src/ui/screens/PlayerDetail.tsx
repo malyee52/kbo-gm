@@ -1,6 +1,7 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
 import { lineTeam } from '../../engine';
 import { ReleaseButton } from './Market';
+import { postseasonLines, psFromRecord, psLineText } from '../../league/postseason';
 import { futuresText } from './Roster';
 import { futuresFromRecord, type FuturesLine } from '../../league/futures';
 import { useEffect, useRef } from 'react';
@@ -120,6 +121,21 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
               <ul className="plain small">
                 {fut.map((h) => <li key={`${h.year}-${h.team}`}>{h.year} {h.team}: {futuresText(futuresFromRecord(h.fbat, h.fpit) as FuturesLine)}</li>)}
               </ul>
+            </section>
+          );
+        })()}
+
+        {(() => {
+          // 가을야구 기록 (2026-10-12부터 결산 때 남긴다). 진행 중인 가을야구는 박스스코어로
+          const rows = [...(lp?.history ?? [])].filter((h) => h.pbat || h.ppit).reverse()
+            .map((h) => ({ key: `${h.year}`, label: `${h.year} ${h.team}`, l: psFromRecord(p.idx, h.pbat, h.ppit) }));
+          const live = session.postseason ? postseasonLines(session.postseason.series.flatMap((x) => x.games)).get(p.idx) : undefined;
+          if (live && session.phase === 'season') rows.unshift({ key: 'now', label: `${year} 진행 중`, l: live });
+          if (!rows.length) return null;
+          return (
+            <section>
+              <h3>가을야구 기록</h3>
+              <ul className="plain small">{rows.map((r) => <li key={r.key}>{r.label}: {psLineText(r.l, p.isPitcher)}</li>)}</ul>
             </section>
           );
         })()}
