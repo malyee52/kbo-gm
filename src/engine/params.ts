@@ -24,6 +24,11 @@ export interface EngineParams {
    * 이미 있었던 시즌을 그리는 것이라 평균 쪽으로 덜 당긴다. 2026-10-12 기준표(tools/benchmark_peaks.ts)에 맞춘 값
    */
   seasonRegressScale: number;
+  /**
+   * 역사 재현의 그 시즌 능력치에서 투수만 따로 쓰는 회귀 배율 (없으면 seasonRegressScale). 잠재력 고점(growth.ts)에는 쓰지 않는다.
+   * 2026-10-12 팀 실점 퍼짐 측정(실제의 약 60%)으로 따로 둔다 (docs/temp-values.md)
+   */
+  seasonPitRegressScale?: number;
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
   batRegress: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
   /** 투수 사건별 회귀 상수: 상대 타자 수 기준. tools/fit_regression.py로 맞춘 값 */
@@ -133,6 +138,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   ratingBasis: 'prior',
   seasonBlend: [1.0, 0.3, 0.1],
   seasonRegressScale: 0.5,
+  seasonPitRegressScale: 0.25,
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
   foreignPriors: {
