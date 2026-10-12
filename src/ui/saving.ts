@@ -60,6 +60,12 @@ export function reproOf(s: GameSession): ReproReport {
   return { app: 'kbo-gm', ...info, team: s.league.teams[info.opts.teamIdx]?.name ?? '', data: s.season.baseRoster };
 }
 
+/** 저장 기록이 그 시즌 종료(또는 오프시즌) 상태인지. 지난 시즌의 "정규시즌 종료" 소식은 세지 않는다 */
+export function isSeasonDone(s: Pick<SaveRecord, 'year' | 'data'>): boolean {
+  if (s.data.format === 2 && s.data.phase === 'offseason') return true;
+  return s.data.news.some((n) => (n.year ?? s.year) === s.year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
+}
+
 /** 저장 목록에 보여줄 진행 시점 */
 export function whenText(rec: Pick<SaveRecord, 'year' | 'day' | 'data'>, done: boolean): string {
   if (rec.data.format === 2 && rec.data.phase === 'offseason') return `${rec.year} 오프시즌`;

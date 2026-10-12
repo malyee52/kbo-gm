@@ -83,7 +83,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const world = session.world;
   const grades = useMemo(() => computeGrades(world), [world]);
 
-  const changed = useCallback(() => setVersion((v) => v + 1), []);
+  // 저장하지 않은 조작 수: 진행 버튼 밖의 조작(트레이드·엔트리·기용표 등)도 잠시 뒤 자동 저장한다
+  const dirty = useRef(0);
+  const changed = useCallback(() => { dirty.current++; setVersion((v) => v + 1); }, []);
   // 묶음마다 마지막으로 본 화면 (큰 메뉴를 다시 누르면 그 화면으로)
   const lastInHub = useRef<Partial<Record<Hub, Screen>>>({});
   // 휴대폰 화면: 진행 버튼 가운데 '다음 경기' 말고는 '더 진행'을 눌러 펼친다 (game.css 좁은 화면)
@@ -98,6 +100,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   }, []);
 
   const autosave = useCallback(async () => {
+    dirty.current = 0;
     try {
       await autosaveSession(session);
       setSaveError(null);
@@ -167,6 +170,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const endParty = useCallback(() => setParty([]), []);
   // 직접 지휘 (CommandView): 진행 버튼 옆 "직접 지휘", 또는 자동 진행이 위기에서 멈췄을 때
   const [cmd, setCmd] = useState<CommandPreview | null>(null);
+  // 진행 중이 아닐 때 바뀐 것이 있으면 1.5초 뒤 자동 저장 (창을 바로 닫아도 트레이드·엔트리 변경이 남는다)
+  useEffect(() => {
+    if (busy || cmd || !dirty.current) return; // 직접 지휘 중에는 경기가 끝난 뒤 저장한다
+    const t = setTimeout(() => { if (dirty.current) void autosave(); }, 1500);
+    return () => clearTimeout(t);
+  }, [version, busy, cmd, autosave]);
+
   const startCommand = async () => {
     if (busy || session.phase !== 'season' || (session.done && !session.postseasonRunning)) return;
     setBusy('직접 지휘 준비 중');

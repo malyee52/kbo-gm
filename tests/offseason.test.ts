@@ -228,6 +228,17 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     }
   });
 
+  it('FA: 우리 제시가 요구에 못 미치면 그 라운드에 알림이 남는다 (2026-10-12)', () => {
+    const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
+    const e = h.offseason!.fa.entries.filter((x) => x.from !== h.teamIdx && x.status === 'open' && x.ask > MIN_SALARY * 3).sort((a, b) => b.ask - a.ask)[0];
+    expect(h.offerFa(e.id, MIN_SALARY, e.years).ok).toBe(true);
+    const before = h.offseason!.log.length;
+    h.nextStage();
+    const notes = h.offseason!.log.slice(before).filter((l) => l.mine && l.text.startsWith(`${h.leaguePlayer(e.id)!.name}: 우리 제시`));
+    expect(notes.length).toBe(1);
+    expect(notes[0].text).toMatch(/받아들여지지 않았습니다|선택되지 않았습니다/);
+  });
+
   it('외국인: 끝나면 모든 구단이 아시아쿼터 빼고 3명 이하, 아시아쿼터 1명 이하, 금액 상한을 지킨다', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     while (h.offseason!.stage === 'fa' || h.offseason!.stage === 'comp') step(h);

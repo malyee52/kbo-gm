@@ -8,7 +8,8 @@ import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
-import { whenText } from './saving';
+import { isSeasonDone, whenText } from './saving';
+import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
 import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../league/synopses';
 
@@ -311,8 +312,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                 </div>
                 <div className="r-actions">
                   <button type="button" onClick={() => void load(s.data)} disabled={!!busy}>불러오기</button>
-                  <button type="button" className="ghost danger" disabled={!!busy}
-                    onClick={() => void deleteSave(s.slot).then(refreshSaves)}>지우기</button>
+                  <ConfirmButton label="지우기" confirmLabel="정말 지우기" disabled={!!busy}
+                    onConfirm={() => void deleteSave(s.slot).then(refreshSaves)} />
                 </div>
                 <span className="small">{s.summary}</span>
               </div>
@@ -354,8 +355,3 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   );
 }
 
-/** 저장 기록이 시즌 종료(또는 오프시즌) 상태인지 */
-function isSeasonDone(s: SaveRecord): boolean {
-  if (s.data.format === 2 && s.data.phase === 'offseason') return true;
-  return s.data.news.some((n) => (n.year ?? s.year) === s.year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
-}

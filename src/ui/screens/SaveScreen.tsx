@@ -5,7 +5,8 @@ import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
 import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
 import { DifficultyEditor } from '../DifficultyEditor';
-import { autoSlotFor, exportSession, reproOf, saveSession, whenText } from '../saving';
+import { autoSlotFor, exportSession, isSeasonDone, reproOf, saveSession, whenText } from '../saving';
+import { ConfirmButton } from '../ConfirmButton';
 
 const SLOTS = ['저장 1', '저장 2', '저장 3'];
 
@@ -61,7 +62,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
                     {s ? (
                       <>
                         <td className="l">{s.year} {s.teamName}</td>
-                        <td className="l">{whenText(s, s.data.news.some((n) => n.text.startsWith('정규시즌 종료')))}</td>
+                        <td className="l">{whenText(s, isSeasonDone(s))}</td>
                         <td className="l">{s.summary}</td>
                         <td className="l muted">{new Date(s.savedAt).toLocaleString('ko-KR')}</td>
                       </>
@@ -69,7 +70,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
                     <td className="r-actions">
                       {!isAutoSlot(slot) && <button type="button" onClick={() => void saveTo(slot)}>{s ? '덮어쓰기' : '저장'}</button>}
                       {s && !isAutoSlot(slot) && (
-                        <button type="button" className="ghost danger" onClick={() => void deleteSave(slot).then(refresh)}>지우기</button>
+                        <ConfirmButton label="지우기" confirmLabel="정말 지우기" onConfirm={() => void deleteSave(slot).then(refresh)} />
                       )}
                     </td>
                   </tr>
