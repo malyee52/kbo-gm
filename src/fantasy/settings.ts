@@ -9,7 +9,7 @@ export function loadAiSettings(): LlmSettings {
     if (raw) {
       const s = JSON.parse(raw) as Partial<LlmSettings>;
       const provider = (s.provider ?? 'anthropic') as Provider;
-      return { provider, model: s.model || DEFAULT_MODEL[provider], key: s.key ?? '' };
+      return { provider, model: s.model || DEFAULT_MODEL[provider], key: s.key ?? '', ...(s.region ? { region: s.region } : {}) };
     }
   } catch { /* 저장소를 못 쓰면 기본값 */ }
   return { provider: 'anthropic', model: DEFAULT_MODEL.anthropic, key: '' };
