@@ -2,7 +2,7 @@
 // AI가 단장의 설득을 읽고 태도(stance, −3~+3)를 정하면, 그 값이 실제 게임 판단에 들어간다.
 // - 트레이드: 상대 구단 호감(goodwill, 런) = 태도 × GOODWILL_PER. AI 트레이드 평가(ai/trade.ts)의 이득에 더해진다. 14일, 다시 협상하면 바뀐다(쌓이지 않음)
 // - FA·비FA 다년 계약: 에이전트 설득으로 요구액 할인(최대 10%) 또는 할증(최대 6%)
-// 실존 선수는 기록으로만 말한다. 협상 상대는 가상 인물(구단 운영팀장, 에이전트)이다. 같은 상대와는 쉬었다 다시 (쿨다운)
+// 협상 상대는 가상 인물(구단 운영팀장, 에이전트)이다. 같은 상대와는 쉬었다 다시 (쿨다운)
 import { Rng } from '../engine';
 import type { GameSession } from '../game/session';
 import { koreanName } from '../league/names';

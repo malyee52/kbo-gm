@@ -1051,6 +1051,7 @@ export class GameSession {
             if (!slot || !lp) { this.addNews(this.day, 'event', `자유 모드: 이번 시즌 빈 자리가 없어 ${op.name}을(를) 만들지 못했습니다 (다음 개막부터 다시).`); break; }
             lp.name = op.name; slot.name = op.name;
             lp.real = false; slot.real = false;
+            if (op.real) lp.outsider = true; else delete lp.outsider;
             lp.birthYear = year - op.age; slot.age = op.age;
             lp.potential = pot;
             if (!slot.isPitcher) { const pos = op.pos === 'C' ? 'C' : op.pos === 'OF' ? 'CF' : 'SS'; lp.pos = pos; slot.pos = pos; }
@@ -1060,7 +1061,8 @@ export class GameSession {
             this.season.transfer(slot.idx, op.team);
             (L.marketMoves ??= []).push({ year: this.world.year, day: this.season.day, id: slot.id, kind: 'sign', from: -1, to: op.team });
           } else {
-            Off.addFreePlayer(L, this.store, this.params, op.team, { name: op.name, pos: op.pos, age: op.age, runs, potential: pot });
+            const np = Off.addFreePlayer(L, this.store, this.params, op.team, { name: op.name, pos: op.pos, age: op.age, runs, potential: pot });
+            if (op.real) np.outsider = true;
           }
           break;
         }

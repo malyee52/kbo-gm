@@ -74,13 +74,35 @@ describe('자유 모드 규정', () => {
     expect(foreignPostingOn(b.league)).toBe(false);
   }, 900_000);
 
-  it('리그 밖 실존 인물: 이름 안내, 실존 이름으로 가상 선수를 만들지 않는다', () => {
+  it('외국인 포스팅 상한은 리그 외국인 수에 비례한다 (외국인이 많으면 한 해 2명보다 많이)', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'fp-many', fantasy: { free: true } }, FAST);
+    g.addFantasy({ kind: 'action', title: '포스팅 허용', text: 'x', ops: resolveOps(g, [{ op: 'rule', key: 'foreignPosting', value: 1 }, { op: 'rule', key: 'foreignRegular', value: 10 }]).ops });
+    g.advance(100000);
+    // 구단마다 국내 선수 7명을 외국인으로 바꿔 리그 외국인을 100명쯤으로 (용병이 많은 리그 흉내)
+    for (let t = 0; t < g.league.teams.length; t++) {
+      for (const p of g.league.players.filter((x) => x.team === t && !x.foreign && !x.dev).slice(0, 7)) p.foreign = true;
+    }
+    g.beginOffseason();
+    const n = g.league.players.filter((p) => p.foreign && p.abroad?.mode === 'posting').length
+      + (g.offseason!.postings ?? []).filter((x) => g.leaguePlayer(x.id)?.foreign).length;
+    const total = g.league.players.filter((p) => p.foreign && (p.team >= 0 || p.abroad)).length;
+    expect(n).toBeGreaterThan(2);
+    expect(n).toBeLessThanOrEqual(Math.max(2, Math.ceil(total / 15)));
+  }, 600_000);
+
+  it('리그 밖 실존 인물: 이름 안내, create(real)로 데려온다 (자료에 없는 사람도)', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'rules-3', fantasy: { free: true } }, FAST);
     const text = namesContext(g, store, 'MLB에서 뛰는 박찬호를 스카우팅해');
     expect(text).toContain('리그에 없음');
     expect(text).toMatch(/박찬호@/);
-    const { ops, dropped } = resolveOps(g, [{ op: 'create', name: '박찬호', team: 'LG', pos: 'P', age: 25, now: 70, potential: 75 }], store);
-    expect(ops.length).toBe(0);
-    expect(dropped[0]).toContain('실존');
+    // 자료에는 있는데 리그에 없는 이름은 real 표시가 없어도 리그 밖 실존 인물로 본다
+    const a = resolveOps(g, [{ op: 'create', name: '박찬호', team: 'LG', pos: 'P', age: 53, now: 40, potential: 40 }], store);
+    expect(a.ops[0]).toMatchObject({ op: 'create', real: true, age: 50 });
+    const b = resolveOps(g, [{ op: 'create', name: '오타니', team: 'LG', pos: 'P', age: 32, now: 80, potential: 80, real: true }], store);
+    g.addFantasy({ kind: 'action', title: '깜짝 영입', text: 'x', ops: [...a.ops, ...b.ops] });
+    const o = g.league.players.find((p) => p.name === '오타니')!;
+    expect(o.outsider).toBe(true);
+    expect(o.real).toBe(false);
+    expect(g.world.players.find((p) => p.id === o.id)!.teamIdx).toBe(g.teamIdx);
   }, 120_000);
 });
