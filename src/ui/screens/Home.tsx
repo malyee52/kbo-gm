@@ -12,6 +12,8 @@ import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
 import { CountUp, useRankMoves } from '../Motion';
 import { offerExpired } from '../../fantasy/rivals';
+import { pregameBlock, pregameTalk, PREGAME_WHO } from '../../fantasy/gameday';
+import { loadAiSettings } from '../../fantasy/settings';
 
 type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
 /** 알림 묶음 (session.ts NewsKind) */
@@ -76,6 +78,7 @@ export function Home() {
         <div className="card wide">
           <h2>다음 경기</h2>
           {next ? <NextGame next={next} /> : <p className="muted">남은 경기가 없습니다.</p>}
+          {next && session.fantasy && <PregameTalk />}
         </div>
 
         <div className="card side">
@@ -213,5 +216,48 @@ function ActiveEffects() {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** 판타지·자유 모드: 경기 전 미팅 (src/fantasy/gameday.ts). 단장의 말을 AI가 듣고 선수단 컨디션을 1~3일 바꾼다. 하루 한 번 */
+function PregameTalk() {
+  const { session, store, changed, autosave } = useGame();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const block = pregameBlock(session);
+  const today = session.fantasy?.log.filter((e) => e.who === PREGAME_WHO && e.year === session.year && e.day === session.currentDay).at(-1);
+  const talk = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const e = await pregameTalk(session, store, loadAiSettings(), text.trim());
+      session.addFantasy(e);
+      setText('');
+      setOpen(false);
+      changed();
+      void autosave();
+    } catch (err) {
+      setMsg({ text: (err as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (today) {
+    const fx = today.effects?.[0];
+    return <p className="small pregame">🗣 오늘 미팅: {today.text} {fx && fx.type === 'teamForm' && <span className={fx.edge > 0 ? 'up' : 'down'}>(선수단 컨디션 {fx.edge > 0 ? '+' : ''}{Math.round(fx.edge * 1000) / 10}%p, {fx.days}일)</span>}</p>;
+  }
+  if (block) return null;
+  if (!open) return <button type="button" className="small-btn ghost" onClick={() => setOpen(true)}>경기 전 미팅</button>;
+  return (
+    <div className="negotiate small">
+      <textarea rows={2} maxLength={500} value={text} disabled={busy} placeholder="예: 오늘은 순위 싸움의 분수령이다. 결과는 내가 책임질 테니 마음껏 휘둘러라" onChange={(e) => setText(e.target.value)} />
+      <span className="inline">
+        <button type="button" className="small-btn" onClick={() => void talk()} disabled={busy || !text.trim()}>{busy ? '선수단이 듣는 중…' : '말하기'}</button>
+        <button type="button" className="small-btn ghost" onClick={() => setOpen(false)}>닫기</button>
+      </span>
+      {msg && <p className={msg.error ? 'note error-box' : 'note'}>{msg.text}</p>}
+    </div>
   );
 }

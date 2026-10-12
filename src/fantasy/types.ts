@@ -60,6 +60,8 @@ export interface FantasyEntry {
   withdrawn?: boolean;
   /** 자유 모드: 다른 구단 단장의 움직임 (그 구단 색인, rivals.ts) */
   rival?: number;
+  /** 경기 후일담이면 그 경기 key (gameday.ts) */
+  game?: string;
 }
 
 export interface FantasyArc {
