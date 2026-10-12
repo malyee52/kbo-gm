@@ -249,6 +249,8 @@ export interface LeagueState {
   pickOwners?: { draft: number; round: number; from: number; owner: number }[];
   /** 도전 모드 진행 (challenges.ts) */
   challenge?: ChallengeState;
+  /** 판타지 모드 (AI 이야기, src/fantasy). 없으면 보통 게임 */
+  fantasy?: import('../fantasy/types').FantasyState;
   /** 구단별 코치 (coaches.ts) */
   coaches?: Coach[][];
   /** 구단별 감독 (managers.ts). 해임 뒤 개막 전까지는 null */
