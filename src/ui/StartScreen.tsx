@@ -35,7 +35,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [basis, setBasis] = useState<'season' | 'prior'>('season');
   // 판타지 모드 (AI 이야기, docs/fantasy-mode.md)
   const [fantasy, setFantasy] = useState(false);
-  const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis, ...(fantasy ? { fantasy: {} } : {}) };
+  const [regressor, setRegressor] = useState(false);
+  const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis, ...(fantasy ? { fantasy: regressor ? { regressor: true } : {} } : {}) };
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -215,6 +216,15 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </label>
           <span className="muted small">본인의 AI API 키(Claude·OpenAI·Gemini)로 AI가 기사·대화·사건을 만들어 이야기가 흘러갑니다. 게임 안 "오늘 → 판타지"에서 키를 넣습니다.</span>
         </div>
+        {fantasy && (
+          <div className="form-row">
+            <label className="inline">
+              <input type="checkbox" checked={regressor} disabled={!!busy} onChange={(e) => setRegressor(e.target.checked)} />
+              회귀자 (원래 역사를 기억하는 단장)
+            </label>
+            <span className="muted small">판타지 → 기억 노트에 시작 뒤 실제 시즌의 순위·우승·타이틀, 앞으로 터질 선수, 다가올 드래프트의 대어가 보입니다 (자료가 있는 2026년까지). 게임이 원래 역사와 갈라지면 표시합니다.</span>
+          </div>
+        )}
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
         {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
         {store.meta.inProgress.includes(year) && (

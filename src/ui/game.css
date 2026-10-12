@@ -795,4 +795,9 @@ td .inline { flex-wrap: nowrap; }
 .fantasy-art img { display: block; width: 100%; max-width: 760px; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
 .fantasy-art figcaption { margin-top: 4px; }
 .fantasy-art-sample { display: block; width: 100%; max-width: 320px; height: auto; border-radius: var(--radius); }
+/* 회귀자 기억 노트 */
+.memory-year { padding: 4px 0; border-top: 1px solid var(--line); }
+.memory-year:first-of-type { border-top: 0; }
+.memory-body { padding: 4px 0 6px 18px; }
+.memory-body p { margin: 2px 0; }
 

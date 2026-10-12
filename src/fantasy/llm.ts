@@ -45,12 +45,19 @@ export class LlmError extends Error {
 
 type Fetch = typeof fetch;
 
+/** "Failed to fetch" 같은 연결 실패를 어디서 났는지와 함께 (브라우저는 이유를 알려 주지 않는다) */
+export function failedFetch(url: string, e: unknown): string {
+  let host = url;
+  try { host = new URL(url).host; } catch { /* 그대로 */ }
+  return `${host}에 연결하지 못했습니다 (${(e as Error).message}). 광고 차단·보안 확장 프로그램이 이 주소를 막는지, 인터넷 연결을 확인하고 잠시 뒤 다시 해 보세요. 서버가 잠깐 오류를 내도 브라우저에는 이렇게 보입니다.`;
+}
+
 async function postJson(f: Fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
   let res: Response;
   try {
     res = await f(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
   } catch (e) {
-    throw new LlmError(`연결하지 못했습니다 (${(e as Error).message}). 인터넷 연결이나 제공자 주소 차단을 확인하세요.`);
+    throw new LlmError(failedFetch(url, e));
   }
   const text = await res.text();
   let data: unknown = null;
@@ -64,7 +71,8 @@ async function postJson(f: Fetch, url: string, headers: Record<string, string>, 
 }
 
 async function getJson(f: Fetch, url: string, headers: Record<string, string>): Promise<unknown> {
-  const res = await f(url, { headers });
+  let res: Response;
+  try { res = await f(url, { headers }); } catch (e) { throw new LlmError(failedFetch(url, e)); }
   if (!res.ok) throw new LlmError(`모델 목록을 받지 못했습니다 (${res.status})`, res.status);
   return res.json();
 }

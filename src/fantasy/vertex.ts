@@ -62,7 +62,7 @@ export async function accessToken(sa: ServiceAccount, f: typeof fetch = fetch): 
       body: `grant_type=${encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')}&assertion=${encodeURIComponent(jwt)}`,
     });
   } catch (e) {
-    throw new Error(`Google 인증 서버에 연결하지 못했습니다 (${(e as Error).message}). 브라우저가 막았을 수 있습니다.`);
+    throw new Error(`Google 인증 서버(oauth2.googleapis.com)에 연결하지 못했습니다 (${(e as Error).message}). 광고 차단·보안 확장 프로그램을 확인하세요.`);
   }
   const d = await res.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
   if (!res.ok || !d.access_token) throw new Error(`Google 인증 실패 (${res.status}): ${d.error_description ?? d.error ?? '알 수 없음'}. 서비스 계정 키와 권한(Vertex AI 사용자)을 확인하세요.`);

@@ -8,12 +8,13 @@ import { illustrate } from '../../fantasy/illustrate';
 import { artKey, getArt } from '../../fantasy/images';
 import type { FantasyEntry } from '../../fantasy/types';
 import { teamPalette } from '../teams';
+import { FantasyMemory } from './FantasyMemory';
 import { gameContext } from '../../fantasy/context';
 import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
 
-type Tab = 'story' | 'settings';
+type Tab = 'story' | 'memory' | 'settings';
 
 export function Fantasy() {
   const { session } = useGame();
@@ -37,10 +38,11 @@ export function Fantasy() {
         </div>
         <div className="seg" role="tablist" aria-label="판타지 화면">
           <button type="button" role="tab" aria-selected={tab === 'story'} className={tab === 'story' ? 'on' : ''} onClick={() => setTab('story')}>이야기</button>
+          {f.regressor && <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => setTab('memory')}>기억 노트</button>}
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>AI 설정</button>
         </div>
       </section>
-      {tab === 'story' ? <Story /> : <><AiSettings /><NaiSettingsPanel /></>}
+      {tab === 'story' ? <Story /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
     </div>
   );
 }
@@ -50,8 +52,12 @@ function Story() {
   const f = session.fantasy!;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
-  // 자동으로 그릴 글 (방금 쓴 글)
-  const [autoArt, setAutoArt] = useState<FantasyEntry | null>(null);
+  // 자동으로 그릴 글 (방금 쓴 글). 다른 탭(기억 노트)에서 막 쓴 글도 이 화면에 오면 그린다
+  const [autoArt, setAutoArt] = useState<FantasyEntry | null>(() => {
+    const nai = loadNaiSettings();
+    const lastEntry = f.log[f.log.length - 1];
+    return nai.auto && nai.token.trim() && lastEntry && lastEntry.kind === 'memory' ? lastEntry : null;
+  });
   const write = async () => {
     const s = loadAiSettings();
     setBusy(true);
@@ -228,7 +234,11 @@ function ArtFrame({ entry, auto }: { entry: FantasyEntry; auto: boolean }) {
       setState('error');
     }
   };
-  useEffect(() => { if (auto && !url && state === 'idle') void draw(); }, [auto]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 자동: 저장된 그림이 없을 때만 그린다 (불러오기가 끝나기 전에 다시 그려 Anlas를 쓰지 않게 저장소를 먼저 본다)
+  useEffect(() => {
+    if (!auto || state !== 'idle') return;
+    void getArt(key).then((b) => { if (!b) void draw(); });
+  }, [auto]); // eslint-disable-line react-hooks/exhaustive-deps
   const nai = loadNaiSettings();
   if (url) return (
     <figure className="fantasy-art">
