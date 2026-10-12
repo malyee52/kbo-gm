@@ -330,25 +330,34 @@ export class Season {
    * 선수를 다른 구단으로 옮긴다 (트레이드). world의 구단 소속을 바꾸므로 이 월드를 다른 시즌과 함께 쓰지 않는다.
    * 시즌 기록은 선수에게 그대로 남는다. 새 구단이 직접 관리하는 구단이면 2군으로 들어간다.
    */
+  /**
+   * 선수를 다른 구단으로 옮긴다. toTeam = -1이면 방출(어느 명단에도 없다, formerTeam에 마지막 소속),
+   * 지금 -1인 선수(방출 선수·시즌 중 시장의 선수)를 구단으로 옮기면 영입 (league/market.ts)
+   */
   transfer(playerIdx: number, toTeam: number): void {
     const p = this.world.players[playerIdx];
     const from = p.teamIdx;
     if (from === toTeam) return;
-    if (!this.world.teams[toTeam]) throw new Error(`구단 색인이 잘못됐습니다: ${toTeam}`);
-    const src = this.world.teams[from].org;
-    src.splice(src.indexOf(p), 1);
-    this.world.teams[toTeam].org.push(p);
-    p.teamIdx = toTeam;
-    this.teamSeasons[from].manual?.delete(playerIdx);
-    const plan = this.teamSeasons[from].plan;
-    if (plan) {
-      for (const k of Object.keys(plan.starters) as (keyof DepthPlan['starters'])[]) if (plan.starters[k] === playerIdx) delete plan.starters[k];
-      plan.rotation = plan.rotation.filter((i) => i !== playerIdx);
-      if (plan.closer === playerIdx) plan.closer = null;
-      if (plan.pen) delete plan.pen[playerIdx];
+    if (toTeam !== -1 && !this.world.teams[toTeam]) throw new Error(`구단 색인이 잘못됐습니다: ${toTeam}`);
+    if (from >= 0) {
+      const src = this.world.teams[from].org;
+      src.splice(src.indexOf(p), 1);
+      this.teamSeasons[from].manual?.delete(playerIdx);
+      const plan = this.teamSeasons[from].plan;
+      if (plan) {
+        for (const k of Object.keys(plan.starters) as (keyof DepthPlan['starters'])[]) if (plan.starters[k] === playerIdx) delete plan.starters[k];
+        plan.rotation = plan.rotation.filter((i) => i !== playerIdx);
+        if (plan.closer === playerIdx) plan.closer = null;
+        if (plan.pen) delete plan.pen[playerIdx];
+      }
+      this.teamSeasons[from].dirty = true;
     }
-    this.teamSeasons[from].dirty = true;
-    this.teamSeasons[toTeam].dirty = true;
+    if (toTeam >= 0) {
+      this.world.teams[toTeam].org.push(p);
+      this.teamSeasons[toTeam].dirty = true;
+      delete p.formerTeam;
+    } else if (from >= 0) p.formerTeam = from;
+    p.teamIdx = toTeam;
     this.transfers.push([this.day, playerIdx, toTeam]);
   }
 

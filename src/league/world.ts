@@ -90,7 +90,9 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
-    if (lp.team < 0 || lp.team >= kept || lp.military?.state === 'serving') continue;
+    // 시즌 중 시장의 선수(market.ts)는 어느 명단에도 없이 월드에 들어온다 (teamIdx = -1, 시즌 중 영입하면 구단으로 옮긴다)
+    const market = lp.team === -1 && lp.market === year;
+    if ((lp.team < 0 && !market) || lp.team >= kept || lp.military?.state === 'serving') continue;
     const slump = form && lp.slump ? lp.slump : 0;
     const base = lp.bat && !lp.bat.def
       ? { ...lp.bat, def: makeDefense(lp.id, lp.pos, [], lp.bat.speed, lp.birthYear ? year - lp.birthYear : null) }
@@ -122,7 +124,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const traits = traitsOf(store.traits, lp.id);
     if (traits) p.traits = traits;
     players.push(p);
-    teams[lp.team].org.push(p);
+    if (!market) teams[lp.team].org.push(p);
   }
   return { year, gamesPerTeam: games, rules, league: lg, env, teams, players };
 }

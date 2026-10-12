@@ -24,10 +24,15 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoac
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { ORG_LIMIT } from '../league/salary';
+import { dollarText, ORG_LIMIT, wonText } from '../league/salary';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
+import { lineTeam } from '../engine/types';
+import {
+  aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
+  settleMarketContracts, signBlock, signPlayer, type MarketCtx,
+} from '../league/market';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
   seasonBests, yearbook,
@@ -184,6 +189,9 @@ export type GameAction =
   | { year: number; type: 'posting'; id: string; accept: boolean }
   | { year: number; type: 'extend'; id: string; years: number }
   | { year?: number; day: number; type: 'convert'; id: string }
+  /** 시즌 중 방출(웨이버 공시)·시장 선수 영입 (league/market.ts) */
+  | { year: number; day: number; type: 'release-in'; id: string }
+  | { year: number; day: number; type: 'sign-in'; id: string }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
@@ -694,6 +702,8 @@ export class GameSession {
     else if (a.type === 'event') this.applyEventChoice(a.choice);
     else if (a.type === 'command') this.pendingCommand = { day: a.day, choices: a.choices.map((c) => ({ ...c })) };
     else if (a.type === 'convert') this.applyConvert(a.id);
+    else if (a.type === 'release-in') this.applyRelease(a.id);
+    else if (a.type === 'sign-in') this.applySign(a.id);
     else if (a.type === 'settings') this.applySettings(a.s);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
@@ -840,6 +850,87 @@ export class GameSession {
   /** 지금 정식 선수 수 (복무 중 제외, 육성선수 제외) */
   regularCount(): number {
     return this.team.org.filter((p) => !p.dev).length;
+  }
+
+  // ---- 시즌 중 방출·영입 (league/market.ts)
+
+  get marketCtx(): MarketCtx {
+    return { league: this.league, world: this.world, season: this.season, meta: this.store.meta, values: this.values, userTeam: this.teamIdx };
+  }
+
+  /** 시장에서 데려올 수 있는 선수 (외국인 후보, 자유계약 선수) */
+  marketPlayers(): SimPlayer[] {
+    return this.phase === 'season' ? marketPlayers(this.marketCtx, this.teamIdx) : [];
+  }
+
+  get marketDeadlineDay(): number {
+    return marketDeadlineDay(this.world.year, this.season.schedule.length);
+  }
+
+  releaseBlock(p: SimPlayer): string | null {
+    if (this.phase !== 'season') return '시즌 중에만 방출할 수 있습니다 (오프시즌에는 정원 정리 단계에서).';
+    return releaseBlock(this.marketCtx, p, this.teamIdx);
+  }
+
+  signBlock(p: SimPlayer): string | null {
+    if (this.phase !== 'season') return '시즌 중에만 영입할 수 있습니다.';
+    return signBlock(this.marketCtx, p, this.teamIdx);
+  }
+
+  /** 웨이버 공시. 데려간 구단이 있으면 그 이름을 메시지에 */
+  releaseInSeason(p: SimPlayer): { ok: boolean; message: string } {
+    const why = this.releaseBlock(p);
+    if (why) return { ok: false, message: why };
+    const to = this.applyRelease(p.id);
+    this.actions.push({ year: this.year, day: this.day, type: 'release-in', id: p.id });
+    return { ok: true, message: to >= 0 ? `${p.name}: ${this.world.teams[to].name}에서 웨이버로 데려갔습니다 (계약 승계).` : `${p.name} 방출: 자유계약 선수가 됐습니다.` };
+  }
+
+  signInSeason(p: SimPlayer): { ok: boolean; message: string } {
+    const why = this.signBlock(p);
+    if (why) return { ok: false, message: why };
+    this.applySign(p.id);
+    this.actions.push({ year: this.year, day: this.day, type: 'sign-in', id: p.id });
+    return { ok: true, message: `${p.name} 영입 (2군에 들어갑니다. 1군은 따로 올리세요).` };
+  }
+
+  private applyRelease(id: string): number {
+    const p = this.world.players.find((x) => x.id === id);
+    if (!p || p.teamIdx < 0) return -1;
+    const from = p.teamIdx;
+    this.fanStarLeaves(from, p);
+    const lp = this.leaguePlayer(id);
+    const cost = lp ? releaseCost(lp, this.world.year, this.season.schedule.length, this.season.day) : 0;
+    const to = releasePlayer(this.marketCtx, p, from);
+    this.valueCtx = null;
+    if (from === this.teamIdx) {
+      this.addNews(this.day, 'entry', to >= 0
+        ? `${p.name} 웨이버 공시: ${this.world.teams[to].name}에서 데려갔습니다 (계약 승계).`
+        : `${p.name} 웨이버 공시: 데려가는 구단이 없어 자유계약 선수가 됐습니다.${cost > 0 ? ` 남은 보장 연봉 ${wonText(cost)}을 냈습니다.` : ''}`);
+    } else if (to === this.teamIdx) this.addNews(this.day, 'entry', `${p.name}: 웨이버로 데려왔습니다.`);
+    return to;
+  }
+
+  private applySign(id: string): void {
+    const p = this.world.players.find((x) => x.id === id);
+    if (!p || p.teamIdx !== -1) return;
+    signPlayer(this.marketCtx, p, this.teamIdx);
+    this.valueCtx = null;
+    const lp = this.leaguePlayer(id);
+    this.addNews(this.day, 'entry', p.foreign && lp
+      ? `${p.name} 영입 (외국인 교체 ${foreignSwapsUsed(this.marketCtx, this.teamIdx)}/${FOREIGN_SWAPS}, 연봉 ${dollarText(lp.contract.salary)}의 남은 달 몫)`
+      : `${p.name} 영입 (최저 연봉, 이번 시즌까지)`);
+  }
+
+  /** 하루 뒤 AI 구단의 외국인 교체 (market.ts). 결정적이라 재현·불러오기와 같다 */
+  private aiMarket(): void {
+    for (const m of aiMarketDay(this.marketCtx)) {
+      this.valueCtx = null;
+      const t = this.world.teams[m.team];
+      const body = `${t.name}, 외국인 ${josa(m.out.name, '을', '를')} 내보내고 ${josa(m.in.name, '을', '를')} 영입했다${m.why === 'injury' ? ' (부상 대체)' : ''}.`;
+      this.addNews(this.season.day, 'trade', `[외국인 교체] ${body}`);
+      addArticle(this.league, { year: this.world.year, day: this.season.day, kind: 'trade', franchise: t.franchise, title: `${t.name} 외국인 교체`, body });
+    }
   }
 
   /** 육성선수를 정식 등록할 수 있나. 안 되면 이유 */
@@ -1287,6 +1378,7 @@ export class GameSession {
     } else {
       this.dailyArticles();
       this.aiTradeDay();
+      this.aiMarket();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
@@ -1828,6 +1920,7 @@ export class GameSession {
         });
         this.finishedLeague = clone(L);
         const prevStandings = L.lastSeason?.standings ?? null;
+        settleMarketContracts(L, this.year);
         this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist);
         this.enlistChoice = null;
         L.lastSeason!.postseason = ps;
@@ -1856,7 +1949,7 @@ export class GameSession {
           }
         }
         recordSeasonBests(L, this.year, this.world.gamesPerTeam, this.world.players.map((p) => ({
-          id: p.id, name: p.name, team: this.world.teams[p.teamIdx].name,
+          id: p.id, name: p.name, team: this.world.teams[lineTeam(p)]?.name ?? '',
           bat: this.season.bat[p.idx].pa > 0 ? Object.values(this.season.bat[p.idx]) : undefined,
           pit: this.season.pit[p.idx].bf > 0 ? Object.values(this.season.pit[p.idx]) : undefined,
         })));
@@ -1899,6 +1992,7 @@ export class GameSession {
         this.finishedLeague = null;
         this.phase = 'season';
         this.refreshRivals();
+        Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
         this.world = worldFromLeague(clone(L), this.store, this.params);
         this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx] });
         this.applyTactics();
@@ -2203,7 +2297,8 @@ export class GameSession {
     for (const p of this.world.players) {
       const now = this.totalNow(st, p.idx, p.id);
       const prev = st.prev.get(p.id) ?? now;
-      const team = this.world.teams[p.teamIdx];
+      const team = this.world.teams[lineTeam(p)];
+      if (!team) continue; // 시즌 중 시장의 미계약 선수 (market.ts)
       for (const m of MILESTONES) {
         for (const t of crossed(prev[m.key], now[m.key], m.every, m.from)) {
           addArticle(this.league, { year: this.year, day, kind: 'milestone', franchise: team.franchise,
@@ -2423,7 +2518,7 @@ export class GameSession {
     // AI 구단끼리 트레이드도 연봉 귀속에 넣는다 (gm.ts)
     const ai = (this.league.aiTrades ?? []).filter((t) => t.year === this.world.year)
       .map((t) => ({ day: t.day, from: t.buyer, to: t.seller, give: [...t.gave], get: [...t.got] }));
-    return [...mine, ...ai].sort((a, b) => a.day - b.day);
+    return [...mine, ...ai, ...financeMoves(this.league, this.world.year)].sort((a, b) => a.day - b.day);
   }
 
   /** 진행 중인 시즌의 수입·지출 (오프시즌이면 null) */

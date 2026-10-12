@@ -1,4 +1,5 @@
 // 게임 화면들이 함께 쓰는 상태와 작은 표시 부품.
+import { lineTeam } from '../engine';
 import { createContext, useContext, type ReactNode } from 'react';
 import type { BrowserStore } from '../data/loadBrowser';
 import type { DisplayGrades, SimPlayer } from '../engine';
@@ -6,7 +7,7 @@ import type { GameSession } from '../game/session';
 import { teamPalette } from './teams';
 import { priceIndex, wonText } from '../league/salary';
 
-export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
+export type Screen = 'home' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
   | 'finance' | 'stadium' | 'staff' | 'club-history'
   | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof';
 
@@ -63,6 +64,7 @@ export function chipVars(franchise: string, name?: string): Record<string, strin
 /** 구단 이름 + 색 표시 */
 export function TeamName({ idx, short = false }: { idx: number; short?: boolean }) {
   const { session } = useGame();
+  if (idx < 0) return <span className="team muted">자유계약</span>; // 시즌 중 방출·시장 선수 (market.ts)
   const t = session.teamInfo(idx);
   const mine = idx === session.teamIdx;
   return (
@@ -80,7 +82,7 @@ export function PlayerLink({ p, showTeam = false }: { p: SimPlayer; showTeam?: b
     <button type="button" className="link" onClick={() => openPlayer(p.idx)}>
       {p.name}
       {p.foreign && <span className="tag" title="외국인 선수">외</span>}
-      {showTeam && <span className="muted small"> {session.teamInfo(p.teamIdx).name}</span>}
+      {showTeam && <span className="muted small"> {lineTeam(p) >= 0 ? session.teamInfo(lineTeam(p)).name : '자유계약'}{p.teamIdx < 0 && p.formerTeam !== undefined ? ' (방출)' : ''}</span>}
     </button>
   );
 }

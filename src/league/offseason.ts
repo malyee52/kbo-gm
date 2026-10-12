@@ -4,6 +4,8 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
+import { lineTeam } from '../engine/types';
+import { MARKET_ASIA, MARKET_REGULAR } from './market';
 import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
@@ -184,6 +186,8 @@ export interface OffseasonState {
   changes?: TeamChange[];
   /** 이번 정원 정리에서 방출된 선수 (방출 선수 시장 후보, 2026-10-11 추가). from = 방출한 구단 */
   released?: { id: string; from: number }[];
+  /** 시즌 중 방출돼 소속 없이 시즌을 마친 선수 (market.ts). 방출 단계에서 방출 선수 시장에 함께 나온다 */
+  seasonReleased?: { id: string; from: number }[];
 }
 
 /** FA 보상 한 건: 영입 구단(to)이 보호선수 명단을 내고, 원 소속 구단(from)이 보상선수 또는 보상금만을 고른다 */
@@ -334,20 +338,25 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   }
 
   const growth = new Map<string, GrowthEntry>();
+  let seasonReleased: { id: string; from: number }[] | undefined;
   const servingBefore = new Set(league.players.filter((p) => isServing(p)).map((p) => p.id));
   for (const sp of world.players) {
+    // 시즌 중 방출된 선수는 마지막 소속 구단으로 결산한다. 시장의 미계약 선수는 결산하지 않는다 (아래에서 리그에서 지운다, market.ts)
+    const team = lineTeam(sp);
+    if (team < 0) continue;
     const p = lp.get(sp.id)!;
     const b = season.bat[sp.idx];
     const pt = season.pit[sp.idx];
     p.team = sp.teamIdx;
+    if (sp.teamIdx < 0) { p.contract = { ...p.contract, until: Math.min(p.contract.until, year) }; (seasonReleased ??= []).push({ id: p.id, from: team }); }
     p.history.push({
-      year, team: world.teams[sp.teamIdx].name,
+      year, team: world.teams[team].name,
       ...(b.pa > 0 ? { bat: batKeys.map((k) => b[k]) } : {}),
       ...(pt.bf > 0 ? { pit: pitKeys.map((k) => pt[k]) } : {}),
       ...futuresRecord(futById.get(sp.id)),
     });
     p.lastSaves = pt.sv;
-    if (season.activeDays[sp.idx] >= SERVICE_SHARE * season.teams[sp.teamIdx].g) p.service++;
+    if (season.activeDays[sp.idx] >= SERVICE_SHARE * season.teams[team].g) p.service++;
 
     // 부상 후유증 (careers.ts): 잠재력·능력 감소, 다음 시즌으로 넘어가는 결장
     const list = absences.get(sp.idx) ?? [];
@@ -364,7 +373,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
 
     // 성장 판정: 잠재력과의 격차, 나이, 출전 기회, 소폭의 운 (기획서 6.3). 슬럼프는 그 시즌만의 일이라 원래 능력에서 판정한다
     const runs = runsAt(p, year);
-    growth.set(p.id, { id: p.id, team: sp.teamIdx, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs,
+    growth.set(p.id, { id: p.id, team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs,
       ...(eff.runsDrop > 0 || eff.potentialCut > 0 ? { tags: ['부상 후유증'] } : {}) });
     const firstTeam = sp.isPitcher
       ? pt.bf / ((isStarterSkill(sp.pit) ? 650 : 280))
@@ -372,7 +381,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     // 2군 유망주는 퓨처스리그에서 뛴다 (2026-10-12부터 실제 퓨처스 출전량으로, 예전에는 모두 FUTURES_SHARE):
     // 퓨처스에서 꽉 채워 뛰면 1군 기회 FUTURES_WEIGHT만큼. 퓨처스 활약·부진은 성장에 ±FUT_FORM_RUNS (futures.ts)
     // 육성 투자: 2군 유망주 출전 몫과 30세 이하 성장 폭 (finance.ts)
-    const dev = activeLevel(league, sp.teamIdx, 'develop');
+    const dev = activeLevel(league, team, 'develop');
     const young = ageIn(p, year + 1) <= FUTURES_AGE;
     const fl = futById.get(p.id);
     const futOpp = young ? futuresOpportunity(fl) : 0;
@@ -386,7 +395,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       g.tags = [...(g.tags ?? []), form > 0 ? '퓨처스 활약' : '퓨처스 부진'];
     }
     // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
-    const next = coachGrowth(league, sp.teamIdx, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE) - eff.runsDrop;
+    const next = coachGrowth(league, team, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE) - eff.runsDrop;
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
@@ -427,11 +436,15 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };
+  // 시즌 중 시장 (market.ts): 끝내 계약하지 않은 선수는 리그에서 지운다. 계약한 선수는 이제 보통 선수다
+  league.players = league.players.filter((p) => !(p.market === year && p.team === -1 && !p.history.some((h) => h.year === year)));
+  for (const p of league.players) delete p.market;
 
   const off: OffseasonState = {
     format: 1, year, stage: 'fa', userTeam,
     fa: { round: 1, entries: [], userOffers: {}, signings: league.teams.map(() => 0) },
     foreign: null, draft: null, salary: null, log: [],
+    ...(seasonReleased ? { seasonReleased } : {}),
   };
   // 코치: 계약이 끝난 코치는 나가고, 올해 후보 시장이 열린다 (coaches.ts)
   expireCoaches(league, year);
@@ -643,6 +656,9 @@ export function answerPosting(league: LeagueState, off: OffseasonState, id: stri
   }
   league.ledger.push({ year: off.year + 1, from: -1, to: off.userTeam, amount: req.fee, note: `${p.name} 포스팅 이적료`, kind: 'posting' });
   sendAbroad(p, off.year + 1, off.userTeam, 'posting');
+  // FA 신청 선수였으면 FA 시장에서 뺀다 (남아 있으면 마지막 라운드에 "계약하지 못하고 떠남"으로 리그에서 지워졌다)
+  const fe = off.fa.entries.find((e) => e.id === id && e.status === 'open');
+  if (fe) fe.status = 'left';
   log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (이적료 ${(req.fee / 10000).toFixed(0)}억 원)`, true, true);
   addArticle(league, { year: off.year, day: -1, kind: 'overseas', franchise: league.teams[off.userTeam].franchise, title: `${p.name}, 해외 진출`,
     body: `${league.teams[off.userTeam].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
@@ -1813,7 +1829,8 @@ export function releaseValue(view: LeagueView, p: LeaguePlayer): number {
 
 function enterRelease(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   off.stage = 'release';
-  off.released = [];
+  // 시즌 중 방출된 선수도 방출 선수 시장에 나온다 (market.ts)
+  off.released = (off.seasonReleased ?? []).filter((r) => league.players.some((p) => p.id === r.id && p.team === -1));
   const view = leagueView(league, store, params);
   for (let t = 0; t < league.teams.length; t++) {
     if (t === off.userTeam) continue;
@@ -1990,6 +2007,32 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   }
   // 투자 확정 (AI 구단은 이때 계획을 정한다, finance.ts)
   lockInvestments(league, off.userTeam);
+}
+
+/**
+ * 개막 때 시즌 중 시장의 가상 외국인 후보를 만든다 (market.ts). 외국인 제도가 없던 해는 만들지 않는다.
+ * 후보는 team = -1, market = 그 해로 리그에 들어가 시즌 월드에 소속 없이 들어온다. 결산 때 계약하지 않은 후보는 지운다
+ */
+export function openMarket(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS): number {
+  const year = league.year;
+  const rule = foreignRule(store.meta, year);
+  if (rule.total === 0) return 0;
+  const view = leagueView({ ...league, year: year - 1 }, store, params);
+  const rng = new Rng(`${league.seed}/market/${year}`);
+  const taken = takenNames(league, store);
+  const n = MARKET_REGULAR + (rule.asia > 0 ? MARKET_ASIA : 0);
+  for (let i = 0; i < n; i++) {
+    const asia = i >= MARKET_REGULAR;
+    // 시즌 중에 남아 있는 후보는 개막 전 시장보다 한 단계 아래 (일반 16~38런, 평균 26)
+    const p = makeVirtual(league, view, rng, taken, {
+      foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(9),
+      runs: asia ? 2 + rng.range(-4, 10) : 26 + rng.range(-10, 12),
+    }, year - 1);
+    p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia), until: year };
+    p.scoutPotential = scoutView(league, p.potential, rng);
+    p.market = year;
+  }
+  return n;
 }
 
 /** 우리 구단이 보는 잠재력 (스카우트 투자 단계에 따른 오차) */

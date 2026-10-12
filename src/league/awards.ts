@@ -1,5 +1,6 @@
 // 시즌 시상 (2026-10-08 사용자 요청): MVP, 신인상, 골든글러브, 타이틀 홀더.
 // 시뮬레이션 기록으로 정한다. 투표가 없으므로 기준은 종합 가치(WAR 근사)와 KBO 규정타석·규정이닝이다. 가중치는 임시값.
+import { lineTeam } from '../engine/types';
 import { defenseAt } from '../engine/defense';
 import type { Season } from '../engine/season';
 import type { BatLine, PitLine, SimPlayer, World } from '../engine/types';
@@ -134,7 +135,7 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
     cands.push({ sp, b, p, war: sp.isPitcher ? pw : bw, bat: !sp.isPitcher });
   }
   const win = (c: Cand): AwardWinner => ({
-    id: c.sp.id, name: c.sp.name, team: c.sp.teamIdx, war: Math.round(c.war * 100) / 100,
+    id: c.sp.id, name: c.sp.name, team: lineTeam(c.sp), war: Math.round(c.war * 100) / 100,
     line: c.bat ? batLine(c.b) : pitLine(c.p),
   });
 

@@ -1,5 +1,6 @@
 // 기록실 (역사와 서사 1단계, league/history.ts): 연표, 통산 순위, 단일 시즌 기록, 구단 역사.
 // 통산은 게임 시작 전 실제 기록 + 게임 안 기록. 시즌 중이면 진행 중인 시즌도 더한다.
+import { lineTeam } from '../../engine';
 import { useMemo, useState } from 'react';
 import {
   CAREER_STATS, careerLeaders, careers, franchiseHistory, hallOfFame, LEGEND_SEASONS, legendCandidates, SEASON_STATS, seasonBests, yearbook,
@@ -28,7 +29,7 @@ export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
         const pt = session.season.pit[p.idx];
         if (b.pa === 0 && pt.bf === 0) continue;
         current.set(p.id, {
-          year: session.year, team: session.world.teams[p.teamIdx].name,
+          year: session.year, team: session.world.teams[lineTeam(p)]?.name ?? '',
           ...(b.pa > 0 ? { bat: Object.values(b) } : {}), ...(pt.bf > 0 ? { pit: Object.values(pt) } : {}),
         });
       }

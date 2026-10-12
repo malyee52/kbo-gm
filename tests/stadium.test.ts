@@ -109,7 +109,10 @@ describe('구장 공사와 팬 반응 (시즌을 넘기며)', () => {
     const champ = g.league.lastSeason!.postseason!.champion!;
     const log = g.league.fans![champ].log.filter((e) => e.year === 2026 && e.day === -1);
     expect(log.some((e) => e.reason.includes('우승'))).toBe(true);
-    expect(g.league.fans![champ].level).toBeGreaterThan(before[champ]);
+    // 결산 몫(성적·가을야구·우승)은 오른다. 시즌 중 트레이드로 프랜차이즈 스타를 잃은 몫은 빼고 본다 (2026-10-12: AI 트레이드로 스타 둘을 잃은 우승 구단)
+    const lost = g.league.fans![champ].log.filter((e) => e.year === 2026 && e.day !== -1 && e.delta < 0).reduce((s, e) => s + e.delta, 0);
+    expect(log.reduce((s, e) => s + e.delta, 0)).toBeGreaterThan(0);
+    expect(g.league.fans![champ].level - lost).toBeGreaterThan(before[champ]);
   }, 300_000);
 
   it('프랜차이즈 스타를 트레이드하면 그날부터 우리 팬 만족도가 떨어지고 알림이 뜬다', () => {

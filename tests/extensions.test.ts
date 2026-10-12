@@ -15,7 +15,7 @@ let lg: number;
 beforeAll(() => {
   store = loadDataStore();
   lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'ext' }, FAST);
+  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'ext5' }, FAST);
   g.advance(100000);
   g.beginOffseason();
 }, 300_000);
