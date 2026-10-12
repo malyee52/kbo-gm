@@ -96,9 +96,9 @@ export function playablePositions(def: Defense | undefined): FieldPos[] {
   return FIELD_POS.filter((q) => (def[q] ?? -99) >= -5).sort((a, b) => (def[b] ?? 0) - (def[a] ?? 0));
 }
 
-/** 수비 나이 변화 (오프시즌, 임시값): 25세 이하는 조금 늘고 기량 하락 나이(DECLINE_START_AGE)부터 해마다 0.5런씩 준다 */
+/** 수비 나이 변화 (오프시즌, 임시값): 25세 이하는 조금 늘고 기량 하락 나이(DECLINE_START_AGE, 32세)부터 해마다 0.4런씩 준다 (2026-10-12 하락 나이를 당기며 0.5 → 0.4) */
 export function ageDefense(def: Defense, age: number): Defense {
-  const d = age <= 25 ? 0.4 : age >= DECLINE_START_AGE ? -0.5 : 0;
+  const d = age <= 25 ? 0.4 : age >= DECLINE_START_AGE ? -0.4 : 0;
   if (!d) return def;
   const out: Defense = {};
   for (const q of FIELD_POS) if (def[q] !== undefined) out[q] = round1(def[q]! + d);

@@ -77,9 +77,10 @@ export const DRAFT_ROUNDS = 11;
  * 주전급 기여가 20년 동안 16~27% 줄었다 (실제 전성기는 한두 시즌의 좋은 기록이라 잠재력보다 높게 잡힌다).
  * 2026-10-11 tools/flow_longterm.ts 3시드 20시즌으로 다시 맞춘 값 (임시값). 기량 하락 나이 35세·육성 투자 30세 이하·재정 결산 기준 8.5
  * (2045년 상위 270명 기여 합이 시작 대비 +5~9%, 중간 정점 +25~30%). 33세일 때 9, 31세일 때 9.5.
+ * 2026-10-12 하락 나이 32세·완만한 하락으로 바꾸며 9 (2026 시작 2시드 20시즌: 2045년 상위 270명 기여 합 시작 대비 -2.3%, 8.5면 -8.5%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
  */
-export const DRAFT_POTENTIAL_SCALE = 8.5;
+export const DRAFT_POTENTIAL_SCALE = 9;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
 /** 외국인 후보 인원 (임시값) */
