@@ -36,6 +36,11 @@ function storyLine(g: GameSession): string {
   return out.join('\n');
 }
 
+/** 게임 상황 + 우리 선수 + 이야기 줄기 (+ 회귀자 기억). gameday.ts도 쓴다 */
+export function gameContextFor(g: GameSession, store: Store): string {
+  return fullContext(g, store);
+}
+
 function fullContext(g: GameSession, store: Store): string {
   const parts = [gameContext(g), rosterLine(g), storyLine(g)];
   if (g.league.fantasy?.regressor) parts.push(memoryContext(store, g.league, g.phase === 'season' ? g.world.year : g.year + 1));

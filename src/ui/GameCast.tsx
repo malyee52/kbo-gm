@@ -8,6 +8,8 @@ import { highlights, inningLabel, lineScoreUpTo, playText } from '../game/highli
 import type { CastGame } from '../game/session';
 import { useGame } from './context';
 import { teamVars } from './teams';
+import { gameStory, storyOf } from '../fantasy/gameday';
+import { loadAiSettings } from '../fantasy/settings';
 
 const SPEEDS = [{ label: '느리게', ms: 1300 }, { label: '보통', ms: 650 }, { label: '빠르게', ms: 220 }];
 const SPEED_KEY = 'kbo-gm.cast-speed';
@@ -36,6 +38,39 @@ export function Diamond({ play }: { play: Play | undefined }) {
       {base(100, 56, 0)}{base(60, 16, 1)}{base(20, 56, 2)}
       <rect x={53} y={89} width={14} height={14} className="base home" />
     </svg>
+  );
+}
+
+/** 판타지·자유 모드: AI 중계석 후일담 (src/fantasy/gameday.ts). 경기마다 한 편, 이야기 기록에 남는다 */
+function GameStory({ game, moments }: { game: CastGame; moments: string[] }) {
+  const { session, changed, autosave } = useGame();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const story = storyOf(session, game.key);
+  const write = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      session.addFantasy(await gameStory(session, loadAiSettings(), game, moments));
+      changed();
+      void autosave();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="cast-story">
+      <h3>중계석 후일담 <span className="muted small">AI</span></h3>
+      {story ? (
+        <>
+          <p><strong>{story.title}</strong></p>
+          {story.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
+        </>
+      ) : <button type="button" className="ghost" onClick={() => void write()} disabled={busy}>{busy ? '쓰는 중…' : '후일담 쓰기'}</button>}
+      {err && <p className="note error-box">{err}</p>}
+    </section>
   );
 }
 
@@ -135,6 +170,7 @@ export function GameCast({ game, onClose }: { game: CastGame; onClose: () => voi
                 <ul className="plain small">{moments.map((m, k) => <li key={k} className={`moment tag-${m.tag}`}>{m.text}</li>)}</ul>
               </section>
             )}
+            {done && session.fantasy && <GameStory game={game} moments={moments.map((m) => m.text)} />}
 
             <section>
               <h3>문자 중계</h3>
