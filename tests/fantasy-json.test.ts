@@ -1,6 +1,6 @@
 // AI 답 읽기 (2026-10-13 사용자 "자꾸 AI가 형식에 맞지 않게 대답했습니다"): 깨진 JSON 고쳐 읽기, 한 번 다시 묻기, 생각하는 모델 토큰 몫
 import { describe, expect, it } from 'vitest';
-import { complete, completeJson, extractJson, THINKING_ALLOWANCE } from '../src/fantasy/llm';
+import { complete, completeJson, extractJson, MAX_OUTPUT } from '../src/fantasy/llm';
 
 const reply = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
@@ -28,6 +28,22 @@ describe('AI 답 읽기', () => {
     expect(bodies[1].messages.at(-1)!.content).toContain('형식에 맞지 않았다');
   });
 
+  it('모델이 허용하는 최대보다 크면 오류의 허용값으로 줄여 다시 보내고 기억한다', async () => {
+    const asked: number[] = [];
+    const f = (async (_u: string, init?: RequestInit) => {
+      const n = JSON.parse(String(init?.body)).max_tokens as number;
+      asked.push(n);
+      if (n > 32000) return new Response(JSON.stringify({ error: { message: `max_tokens: ${n} > 32000, which is the maximum allowed number of output tokens for m-small` } }), { status: 400 });
+      return reply({ content: [{ type: 'text', text: 'ok' }] });
+    }) as typeof fetch;
+    const s = { provider: 'anthropic' as const, model: 'm-small', key: 'k' };
+    expect(await complete(s, { system: 'x', messages: [{ role: 'user', content: 'x' }] }, f)).toBe('ok');
+    expect(asked).toEqual([MAX_OUTPUT.anthropic, 32000]);
+    await complete(s, { system: 'x', messages: [{ role: 'user', content: 'x' }] }, f);
+    expect(asked.at(-1)).toBe(32000);
+    expect(asked.length).toBe(3);
+  });
+
   it('생각하는 모델: 한도를 넉넉히 주고 JSON 모드, 생각만 하다 끝나면 알기 쉬운 오류', async () => {
     let sent: { generationConfig: { maxOutputTokens: number; responseMimeType?: string } } | null = null;
     const ok = (async (_u: string, init?: RequestInit) => {
@@ -35,7 +51,7 @@ describe('AI 답 읽기', () => {
       return reply({ candidates: [{ content: { parts: [{ text: '생각', thought: true }, { text: '{"a":1}' }] }, finishReason: 'STOP' }] });
     }) as typeof fetch;
     expect(await complete({ provider: 'gemini', model: 'g', key: 'k' }, { system: 'JSON으로', messages: [{ role: 'user', content: 'x' }], maxTokens: 1500 }, ok)).toBe('{"a":1}');
-    expect(sent!.generationConfig).toEqual({ maxOutputTokens: 1500 + THINKING_ALLOWANCE, responseMimeType: 'application/json' });
+    expect(sent!.generationConfig).toEqual({ maxOutputTokens: MAX_OUTPUT.gemini, responseMimeType: 'application/json' });
     const cut = (async () => reply({ candidates: [{ content: { parts: [{ text: '...', thought: true }] }, finishReason: 'MAX_TOKENS' }] })) as typeof fetch;
     await expect(complete({ provider: 'gemini', model: 'g', key: 'k' }, { system: 'JSON', messages: [{ role: 'user', content: 'x' }] }, cut)).rejects.toThrow('토큰');
   });

@@ -78,18 +78,37 @@ async function getJson(f: Fetch, url: string, headers: Record<string, string>): 
 }
 
 /**
- * 생각하는 모델(Gemini 2.5·3, GPT-5·o 계열 등)은 생각한 토큰도 출력 한도에 들어가 답이 잘리거나 비었다
- * (2026-10-13 사용자 "자꾸 AI가 형식에 맞지 않게 대답했습니다라고 뜬다"). 답 한도에 이만큼 더 준다
+ * 출력 한도는 제공자별 최대로 (2026-10-13 사용자 "한도 그냥 각 모델별 최대 토큰으로 늘려").
+ * 생각하는 모델(Gemini 2.5·3, GPT-5·o 계열 등)은 생각한 토큰도 이 한도에 들어가 답이 잘리거나 비었다.
+ * 모델이 이보다 적게 허용하면 서버 오류(400)에 적힌 허용값으로 줄여 다시 보내고, 그 모델은 그 값을 기억한다 (withMaxTokens)
  */
-export const THINKING_ALLOWANCE = 8000;
+export const MAX_OUTPUT = { anthropic: 64_000, openai: 128_000, gemini: 65_536, vertexClaude: 64_000, vertexGemini: 65_536 } as const;
+const learnedMax = new Map<string, number>();
+
+/** 출력 한도를 최대로 보내고, 너무 크다는 400이면 허용값으로 줄여 다시 (최대 3번) */
+export async function withMaxTokens<T>(key: string, start: number, call: (max: number) => Promise<T>): Promise<T> {
+  let n = learnedMax.get(key) ?? start;
+  for (let tries = 0; ; tries++) {
+    try {
+      return await call(n);
+    } catch (e) {
+      if (!(e instanceof LlmError) || e.status !== 400 || tries >= 3 || !/token|max|limit|stream|output/i.test(e.message)) throw e;
+      const nums = (e.message.match(/\d[\d,]*/g) ?? []).map((x) => Number(x.replace(/,/g, ''))).filter((x) => x >= 1000 && x < n);
+      const next = nums.length ? Math.max(...nums) : n > 32_000 ? 32_000 : n > 16_384 ? 16_384 : 8_192;
+      if (next >= n) throw e;
+      n = next;
+      learnedMax.set(key, n);
+    }
+  }
+}
 
 /** 답이 JSON이어야 하는 요청인가 (지시문에 "JSON"이 있으면) */
 const wantsJson = (req: LlmRequest) => /JSON/.test(req.system);
 
 /** AI에게 묻는다. 답의 글을 돌려준다 */
 export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch): Promise<string> {
-  const max = req.maxTokens ?? 1200;
   const json = wantsJson(req);
+  const key = `${s.provider}/${s.model}`;
   if (s.provider === 'mock') return req.mockReply ?? '(시험용 답) 이번 주 경기는 계획대로 흘러갔다.';
   if (!s.key.trim()) throw new LlmError('API 키가 없습니다. 판타지 → AI 설정에서 넣으세요.');
   if (s.provider === 'vertex') {
@@ -98,26 +117,26 @@ export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch
     const url = vertexUrl(sa, s.region ?? 'global', s.model);
     const auth = { authorization: `Bearer ${token}` };
     if (/^claude/i.test(s.model)) {
-      const d = await postJson(f, url, auth, { anthropic_version: 'vertex-2023-10-16', max_tokens: max + 1000, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[]; stop_reason?: string };
+      const d = await withMaxTokens(key, MAX_OUTPUT.vertexClaude, (max) => postJson(f, url, auth, { anthropic_version: 'vertex-2023-10-16', max_tokens: max, system: req.system, messages: req.messages })) as { content?: { type: string; text?: string }[]; stop_reason?: string };
       return checkCut((d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join(''), d.stop_reason === 'max_tokens');
     }
-    const d = await postJson(f, url, auth, geminiBody(req, max, json)) as GeminiReply;
+    const d = await withMaxTokens(key, MAX_OUTPUT.vertexGemini, (max) => postJson(f, url, auth, geminiBody(req, max, json))) as GeminiReply;
     return geminiText(d);
   }
   if (s.provider === 'anthropic') {
-    const d = await postJson(f, 'https://api.anthropic.com/v1/messages', {
+    const d = await withMaxTokens(key, MAX_OUTPUT.anthropic, (max) => postJson(f, 'https://api.anthropic.com/v1/messages', {
       'x-api-key': s.key.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
-    }, { model: s.model, max_tokens: max + 1000, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[]; stop_reason?: string };
+    }, { model: s.model, max_tokens: max, system: req.system, messages: req.messages })) as { content?: { type: string; text?: string }[]; stop_reason?: string };
     return checkCut((d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join(''), d.stop_reason === 'max_tokens');
   }
   if (s.provider === 'openai') {
-    const d = await postJson(f, 'https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${s.key.trim()}` }, {
-      model: s.model, max_completion_tokens: max + THINKING_ALLOWANCE,
+    const d = await withMaxTokens(key, MAX_OUTPUT.openai, (max) => postJson(f, 'https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${s.key.trim()}` }, {
+      model: s.model, max_completion_tokens: max,
       messages: [{ role: 'system', content: req.system }, ...req.messages],
-    }) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+    })) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
     return checkCut(d.choices?.[0]?.message?.content ?? '', d.choices?.[0]?.finish_reason === 'length');
   }
-  const d = await postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, geminiBody(req, max, json)) as GeminiReply;
+  const d = await withMaxTokens(key, MAX_OUTPUT.gemini, (max) => postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, geminiBody(req, max, json))) as GeminiReply;
   return geminiText(d);
 }
 
@@ -132,7 +151,7 @@ function geminiText(d: GeminiReply): string {
 
 /** 한도에 걸려 답이 비었으면 알기 쉬운 오류로 (조금이라도 있으면 그대로 넘겨 고쳐 읽기·다시 묻기에 맡긴다) */
 function checkCut(text: string, cut: boolean): string {
-  if (cut && !text.trim()) throw new LlmError('AI가 생각하는 데 토큰을 다 써서 답을 쓰지 못했습니다. 다시 시도하거나 더 가벼운 모델을 고르세요.');
+  if (cut && !text.trim()) throw new LlmError('AI가 최대 토큰을 다 쓰고도 답을 쓰지 못했습니다 (생각이 너무 길었습니다). 다시 시도하거나 다른 모델을 고르세요.');
   return text;
 }
 
@@ -141,7 +160,7 @@ function geminiBody(req: LlmRequest, max: number, json = false) {
     systemInstruction: { parts: [{ text: req.system }] },
     contents: req.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
     // 생각하는 Gemini는 생각 토큰도 maxOutputTokens에 든다. JSON 답이면 JSON 모드로 (줄바꿈·따옴표 깨짐을 막는다)
-    generationConfig: { maxOutputTokens: max + THINKING_ALLOWANCE, ...(json ? { responseMimeType: 'application/json' } : {}) },
+    generationConfig: { maxOutputTokens: max, ...(json ? { responseMimeType: 'application/json' } : {}) },
   };
 }
 
