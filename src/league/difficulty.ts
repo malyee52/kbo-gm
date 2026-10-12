@@ -23,16 +23,21 @@ export interface DifficultySettings {
    * 2026-10-12 사용자 요청으로 설정에 넣었다. AI 구단끼리도 같은 규칙. 예전 저장에 없으면 허용으로 본다
    */
   pickTradeEra?: number;
+  /**
+   * 판타지·자유 모드 AI 판정의 관대함 7단계 (src/fantasy/leniency.ts): 0 아주 엄격 … 3 보통 … 6 판타지 리그.
+   * 2026-10-13 사용자 요청 "난이도에 따라 AI의 설득 난이도도 쉽게", "7단계, 가장 쉬워도 어느 정도 명분은 있어야". 예전 저장에 없으면 보통(3)
+   */
+  aiLeniency?: number;
 }
 
 export const PRESETS: Record<Difficulty, DifficultySettings> = {
-  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, income: 1.15, pickTradeEra: 1 },
-  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, income: 1, pickTradeEra: 1 },
-  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, income: 0.9, pickTradeEra: 1 },
+  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, income: 1.15, pickTradeEra: 1, aiLeniency: 4 },
+  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, income: 1, pickTradeEra: 1, aiLeniency: 3 },
+  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, income: 0.9, pickTradeEra: 1, aiLeniency: 2 },
 };
 
 /** 화면용: 항목마다 고를 수 있는 값 (쉬움 → 어려움 순) */
-export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note: string; options: { v: number; label: string }[] }[] = [
+export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note: string; options: { v: number; label: string }[]; fallback?: number }[] = [
   { key: 'scoutNoise', label: '스카우팅 (AI 평가 오차)', note: 'AI 구단이 선수 잠재력을 얼마나 잘못 보나. 오차가 크면 드래프트·트레이드에서 숨은 유망주를 건지기 쉽다',
     options: [{ v: 12, label: '±12런 (쉬움)' }, { v: 9, label: '±9런' }, { v: 6, label: '±6런 (보통)' }, { v: 4, label: '±4런' }, { v: 2, label: '±2런 (어려움)' }] },
   { key: 'tradeStrict', label: '트레이드', note: 'AI가 우리 제안을 받아들이려면 얼마나 이득이어야 하나',
@@ -47,6 +52,9 @@ export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note:
     options: [{ v: 1.3, label: '넉넉함' }, { v: 1.15, label: '조금 넉넉함 (쉬움)' }, { v: 1, label: '보통' }, { v: 0.9, label: '빠듯함 (어려움)' }, { v: 0.8, label: '아주 빠듯함' }] },
   { key: 'pickTradeEra', label: '지명권 트레이드', note: '실제 KBO는 2019년 8월부터 허용했다. 과거 시즌에서도 지명권을 주고받을지 (AI 구단끼리도 같은 규칙)',
     options: [{ v: 1, label: '모든 시대 허용 (1982년부터)' }, { v: 0, label: '실제 규정 (2020년부터)' }] },
+  { key: 'aiLeniency', label: 'AI 판정 (판타지·자유 모드)', note: 'AI가 설득·행동을 얼마나 잘 받아 주나. 가장 쉬운 "판타지 리그"도 그럴듯한 명분은 있어야 한다', fallback: 3,
+    options: [{ v: 6, label: '7 판타지 리그' }, { v: 5, label: '6 아주 관대' }, { v: 4, label: '5 관대 (쉬움)' }, { v: 3, label: '4 보통' },
+      { v: 2, label: '3 조금 엄격 (어려움)' }, { v: 1, label: '2 엄격' }, { v: 0, label: '1 아주 엄격' }] },
 ];
 
 /** 그 해 지명권 트레이드가 되나 (설정: 모든 시대 허용이 기본) */
@@ -67,6 +75,6 @@ export function userTeamOf(league: Pick<LeagueState, 'owner'>): number {
 /** 묶음 이름 (사용자 설정이 묶음과 같으면 그 이름) */
 export function settingsLabel(league: Pick<LeagueState, 'settings' | 'difficulty'>): string {
   const s = settingsOf(league);
-  const same = (Object.keys(PRESETS) as Difficulty[]).find((d) => SETTING_DEFS.every((def) => PRESETS[d][def.key] === s[def.key]));
+  const same = (Object.keys(PRESETS) as Difficulty[]).find((d) => SETTING_DEFS.every((def) => PRESETS[d][def.key] === (s[def.key] ?? def.fallback ?? PRESETS[d][def.key])));
   return same ? { easy: '쉬움', normal: '보통', hard: '어려움' }[same] : '사용자 설정';
 }

@@ -9,6 +9,7 @@ import { koreanName } from '../league/names';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { complete, extractJson, type LlmSettings } from './llm';
 import { RULES } from './prompts';
+import { adjustStance, leniencyOf, leniencyRule, NEGOTIATE_SCALE, type Leniency } from './leniency';
 import { castOf } from './cast';
 import type { FantasyEntry } from './types';
 
@@ -64,10 +65,13 @@ export interface TradeTalkInput {
   argument: string;
 }
 
-export function tradeSystem(name: string, role: string): string {
+export function tradeSystem(name: string, role: string, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션 판타지 모드의 가상 인물 "${name}" (${role})이다. 상대 구단 단장(플레이어)이 트레이드를 제안하며 너를 설득하려 한다.
 너는 우리 구단의 이익을 지키는 협상가다. 단장의 논리가 우리 구단 상황(성적·성향·약점)에 맞고 설득력이 있으면 마음이 기울고, 근거 없는 압박·과장·무례하면 기분이 상한다.
-[게임 평가]는 우리 구단 실무진의 숫자 평가다. 숫자가 많이 모자란 제안은 말만으로는 넘어가지 않는다.
+[게임 평가]는 우리 구단 실무진의 숫자 평가다.${l <= 3 ? ' 숫자가 많이 모자란 제안은 말만으로는 넘어가지 않는다.' : ' 판정 기준이 너그러울수록 숫자보다 명분을 더 본다.'}
+stance는 단장이 내세운 명분이 얼마나 설득력 있는지로 정한다. 명분이 없으면 0 이하.
+
+${leniencyRule(l)}
 
 ${RULES}
 
@@ -82,7 +86,7 @@ export async function tradeTalk(g: GameSession, s: LlmSettings, input: TradeTalk
     : input.verdict === 'short' ? `실무진 평가: 조금 모자람 (우리 기준으로 약 ${input.gap.toFixed(1)}런 모자람)`
       : input.verdict === 'far' ? `실무진 평가: 많이 모자람 (약 ${input.gap.toFixed(1)}런 모자람)` : '실무진 평가: 규정상 불가';
   const raw = await complete(s, {
-    system: tradeSystem(name, role),
+    system: tradeSystem(name, role, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[우리 구단 성향] ${input.tendency}\n[제안]\n${input.proposal}\n[게임 평가] ${evalText}\n\n[단장의 말]\n${input.argument}` }],
     maxTokens: 600,
     mockReply: JSON.stringify({ reply: '(시험용) 말씀은 잘 들었습니다. 긍정적으로 검토해 보죠.', stance: 2, counter: '' }),
@@ -90,8 +94,9 @@ export async function tradeTalk(g: GameSession, s: LlmSettings, input: TradeTalk
   const j = extractJson<{ reply?: string; stance?: unknown; counter?: string }>(raw);
   const reply = String(j?.reply ?? raw).trim().slice(0, 1200);
   if (!reply) throw new Error('AI 답이 비어 있습니다. 다시 시도하세요.');
-  const stance = stanceOf(j?.stance);
-  const runs = goodwillOf(stance);
+  const l = leniencyOf(g.league);
+  const stance = adjustStance(stanceOf(j?.stance), l);
+  const runs = Math.round(goodwillOf(stance) * NEGOTIATE_SCALE[l]);
   const counter = j?.counter ? String(j.counter).trim().slice(0, 200) : '';
   return {
     kind: 'chat', who: name, title: `${role} ${name}와의 트레이드 협상`, ask: input.argument.slice(0, 600),
@@ -102,9 +107,11 @@ export async function tradeTalk(g: GameSession, s: LlmSettings, input: TradeTalk
 
 // ---- 에이전트 협상 (FA·비FA 다년 계약)
 
-export function agentSystem(name: string): string {
+export function agentSystem(name: string, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션 판타지 모드의 가상 인물 "${name}" (선수 에이전트)이다. 단장(플레이어)이 네가 맡은 선수의 계약 조건을 낮추려고 설득한다.
-너는 선수의 이익을 지키지만, 구단의 진심·선수에게 맞는 역할·장기 계획·우승 가능성 같은 설득력 있는 이유에는 마음이 움직인다. 깎아 내리기·압박에는 오히려 요구를 올린다.
+너는 선수의 이익을 지키지만, 구단의 진심·선수에게 맞는 역할·장기 계획·우승 가능성 같은 설득력 있는 이유에는 마음이 움직인다. 깎아 내리기·압박에는 오히려 요구를 올린다. stance는 단장의 명분이 얼마나 설득력 있는지로 정한다.
+
+${leniencyRule(l)}
 
 ${RULES}
 
@@ -117,7 +124,7 @@ export async function agentTalk(g: GameSession, s: LlmSettings, p: LeaguePlayer,
   const agent = castOf(g.league).find((c) => c.key === 'agent')!;
   const tag = p.real === false ? '(가상)' : '(실존)';
   const raw = await complete(s, {
-    system: agentSystem(agent.name),
+    system: agentSystem(agent.name, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[선수] ${p.name}${tag}\n[상황] ${situation}\n\n[단장의 말]\n${argument}` }],
     maxTokens: 500,
     mockReply: JSON.stringify({ reply: '(시험용) 구단의 진심은 알겠습니다. 조금 양보하죠.', stance: 2 }),
@@ -125,7 +132,8 @@ export async function agentTalk(g: GameSession, s: LlmSettings, p: LeaguePlayer,
   const j = extractJson<{ reply?: string; stance?: unknown }>(raw);
   const reply = String(j?.reply ?? raw).trim().slice(0, 1000);
   if (!reply) throw new Error('AI 답이 비어 있습니다. 다시 시도하세요.');
-  const pct = Math.round(discountOf(stanceOf(j?.stance)) * 1000) / 1000;
+  const l = leniencyOf(g.league);
+  const pct = Math.round(discountOf(adjustStance(stanceOf(j?.stance), l)) * NEGOTIATE_SCALE[l] * 1000) / 1000;
   return {
     kind: 'chat', who: agent.name, title: `에이전트 ${agent.name}와 ${p.name} 계약 협상`, ask: argument.slice(0, 600), text: reply,
     effects: [{ type: 'demandDiscount', player: p.id, pct }],
