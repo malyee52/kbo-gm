@@ -257,7 +257,8 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
       expect(regular.length, h.league.teams[t].name).toBeLessThanOrEqual(3);
       expect(fs.length - regular.length).toBeLessThanOrEqual(1);
       expect(regular.reduce((s, p) => s + p.contract.salary, 0)).toBeLessThanOrEqual(FOREIGN_TOTAL_CAP);
-      for (const p of fs.filter((x) => !x.real)) expect(p.contract.salary).toBeLessThanOrEqual(p.asia ? ASIA_NEW_CAP : FOREIGN_NEW_CAP);
+      // 새로 온 가상 외국인만 신규 상한 (시즌 중 시장에서 데려와 뛴 가상 외국인은 재계약이라 상한이 다르다, market.ts)
+      for (const p of fs.filter((x) => !x.real && !x.history.length)) expect(p.contract.salary).toBeLessThanOrEqual(p.asia ? ASIA_NEW_CAP : FOREIGN_NEW_CAP);
     }
   });
 
