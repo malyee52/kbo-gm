@@ -10,6 +10,7 @@ import type { FantasyEntry } from '../../fantasy/types';
 import { teamPalette } from '../teams';
 import { FantasyMemory } from './FantasyMemory';
 import { FantasyChat } from './FantasyChat';
+import { FantasyFree } from './FantasyFree';
 import { ChoiceButtons } from './FantasyChoices';
 import { AUTO_EVENT_EVERY, makeEvent } from '../../fantasy/ai';
 import { gameContext } from '../../fantasy/context';
@@ -17,12 +18,12 @@ import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
 
-type Tab = 'story' | 'chat' | 'memory' | 'settings';
+type Tab = 'free' | 'story' | 'chat' | 'memory' | 'settings';
 
 export function Fantasy() {
   const { session } = useGame();
   const f = session.fantasy;
-  const [tab, setTab] = useState<Tab>(() => (loadAiSettings().key || loadAiSettings().provider === 'mock' ? 'story' : 'settings'));
+  const [tab, setTab] = useState<Tab>(() => (loadAiSettings().key || loadAiSettings().provider === 'mock' ? (session.fantasy?.free ? 'free' : 'story') : 'settings'));
   if (!f) {
     return (
       <div className="stack">
@@ -36,17 +37,18 @@ export function Fantasy() {
     <div className="stack">
       <section className="row-between wrap">
         <div>
-          <h1>판타지 <span className="muted small">AI 이야기{f.regressor ? ' · 회귀자' : ''}</span></h1>
+          <h1>{f.free ? '자유 모드' : '판타지'} <span className="muted small">{f.free ? 'AI 게임 마스터 진행' : 'AI 이야기'}{f.regressor ? ' · 회귀자' : ''}</span></h1>
           <p className="muted small">AI가 지금 게임 상황을 읽고 기사·대화·사건을 만듭니다. 실존 선수에게는 지어낸 말·사생활·물의를 붙이지 않습니다.</p>
         </div>
         <div className="seg" role="tablist" aria-label="판타지 화면">
+          {f.free && <button type="button" role="tab" aria-selected={tab === 'free'} className={tab === 'free' ? 'on' : ''} onClick={() => setTab('free')}>행동</button>}
           <button type="button" role="tab" aria-selected={tab === 'story'} className={tab === 'story' ? 'on' : ''} onClick={() => setTab('story')}>이야기</button>
           <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>대화</button>
           {f.regressor && <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => setTab('memory')}>기억 노트</button>}
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>AI 설정</button>
         </div>
       </section>
-      {tab === 'story' ? <Story /> : tab === 'chat' ? <FantasyChat /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
+      {tab === 'free' ? <FantasyFree /> : tab === 'story' ? <Story /> : tab === 'chat' ? <FantasyChat /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
     </div>
   );
 }

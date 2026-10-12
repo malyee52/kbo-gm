@@ -31,6 +31,9 @@ import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
+import { runsForGrade, type FreeOp } from '../fantasy/free';
+import { batValue, pitValue } from '../engine';
+import { skillForRuns } from '../league/growth';
 import {
   aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
@@ -117,7 +120,7 @@ export interface NewGameOptions {
   /** 시작 연도 능력 기준: 'season' 역사 재현(그 시즌 기록 중심), 'prior' 예측(직전 3시즌). 없으면 'prior' (예전 조작 기록과 같게) */
   ratingBasis?: 'season' | 'prior';
   /** 판타지 모드 (AI 이야기, docs/fantasy-mode.md). regressor: 회귀자 (단장이 원래 역사를 기억한다) */
-  fantasy?: { regressor?: boolean };
+  fantasy?: { regressor?: boolean; free?: boolean };
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -587,16 +590,22 @@ export class GameSession {
     const params: EngineParams = { ...baseParams, ratingBasis: opts.ratingBasis ?? 'prior' };
     const { league, world } = createLeague(store, opts.year, opts.seed, params);
     if (opts.ratingBasis) league.ratingBasis = opts.ratingBasis;
-    if (opts.fantasy) league.fantasy = { log: [], ...(opts.fantasy.regressor ? { regressor: true } : {}) };
+    if (opts.fantasy) league.fantasy = { log: [], ...(opts.fantasy.regressor ? { regressor: true } : {}), ...(opts.fantasy.free ? { free: true } : {}) };
     if (!world.teams[opts.teamIdx]) throw new Error(`구단 색인이 잘못됐습니다: ${opts.teamIdx}`);
     league.difficulty = opts.difficulty ?? 'normal';
     if (opts.settings) { league.settings = { ...opts.settings }; league.startSettings = { ...opts.settings }; }
     applyCapSanctions(league, league.year);
     league.owner = newOwner(opts.teamIdx);
-    const season = Season.start(world, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
+    let w = world;
+    if (opts.fantasy?.free) {
+      // 자유 모드: 시즌 중 AI가 새 선수를 만들 때 채울 빈 자리 (src/fantasy/free.ts). 월드에 소속 없이 들어가야 해서 월드를 다시 만든다
+      Off.openReserves(league, store, params);
+      w = worldFromLeague(structuredClone(league), store, params);
+    }
+    const season = Season.start(w, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
     ensureCoaches(league);
     ensureGm(league);
-    const g = new GameSession(store, params, opts.teamIdx, league, world, season);
+    const g = new GameSession(store, params, opts.teamIdx, league, w, season);
     g.refreshInjury(); // 월드를 만들 때는 아직 구단주(우리 구단)가 없었다
     g.refreshRivals();
     g.startEntry();
@@ -760,7 +769,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}), ...(L.fantasy ? { fantasy: L.fantasy.regressor ? { regressor: true } : {} } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}), ...(L.fantasy ? { fantasy: { ...(L.fantasy.regressor ? { regressor: true } : {}), ...(L.fantasy.free ? { free: true } : {}) } } : {}) },
       // 가을야구 중이면 가을야구 날짜 (2026-10-12: 정규시즌 날짜를 적어 다시 돌리면 가을야구 경기를 치르지 않던 문제)
       at: { year: this.year, day: this.currentDay, phase: this.phase },
       actions: clone(this.actions),
@@ -974,6 +983,7 @@ export class GameSession {
     const e = addFantasyEntry(f, entry);
     if (e.arc) applyArc(f, e.arc, { year: e.year, day: e.day });
     if (e.effects?.length) this.applyFantasyEffects(e.effects, e.title);
+    if (e.ops?.length) this.applyFreeOps(e.ops, e.title);
     if (e.kind === 'event' && e.choices?.length) this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지 사건: ${e.title} (판타지 화면에서 고르세요)`);
   }
 
@@ -993,6 +1003,90 @@ export class GameSession {
     if (!e || !c || e.chosen !== undefined) return;
     e.chosen = choice;
     if (c.effects.length) this.applyFantasyEffects(c.effects, `${e.title}: ${c.label}`);
+  }
+
+  /**
+   * 자유 모드 조작 적용 (src/fantasy/free.ts). 판단 상한은 없다. 시즌 중 소속 이동은 월드(Season.transfer)로, 리그 소속은 결산 때 따라간다.
+   * 오프시즌에는 리그 상태를 바로 바꾼다. 안 되는 조작(선수가 없어짐 등)은 건너뛴다
+   */
+  private applyFreeOps(ops: FreeOp[], note: string): void {
+    const L = this.league;
+    const season = this.phase === 'season';
+    const year = season ? this.world.year : this.year + 1;
+    const ctx = this.values;
+    const lpOf = (id: string) => L.players.find((p) => p.id === id);
+    const spOf = (id: string) => (season ? this.world.players.find((p) => p.id === id) : undefined);
+    const syncSim = (lp: LeaguePlayer) => {
+      const sp = spOf(lp.id);
+      if (!sp) return;
+      sp.bat = lp.bat ? { ...lp.bat, def: sp.bat?.def ?? lp.bat.def } : null;
+      sp.pit = lp.pit;
+      sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
+      if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
+    };
+    for (const op of ops) {
+      switch (op.op) {
+        case 'move': {
+          const lp = lpOf(op.player);
+          if (!lp) break;
+          if (season) {
+            const sp = spOf(op.player);
+            if (!sp || sp.teamIdx === op.to || (op.to >= 0 && !this.world.teams[op.to])) break;
+            const from = sp.teamIdx;
+            this.season.transfer(sp.idx, op.to);
+            (L.marketMoves ??= []).push({ year: this.world.year, day: this.season.day, id: sp.id, kind: op.to < 0 ? 'release' : from < 0 ? 'sign' : 'claim', from, to: op.to });
+          } else {
+            lp.team = op.to;
+          }
+          break;
+        }
+        case 'create': {
+          const runs = runsForGrade(op.now, year);
+          const pot = Math.max(runs, runsForGrade(op.potential, year));
+          if (season) {
+            if (!this.world.teams[op.team]) break;
+            const slot = this.world.players.find((p) => p.reserve && p.teamIdx === -1 && p.isPitcher === (op.pos === 'P'));
+            const lp = slot && lpOf(slot.id);
+            if (!slot || !lp) { this.addNews(this.day, 'event', `자유 모드: 이번 시즌 빈 자리가 없어 ${op.name}을(를) 만들지 못했습니다 (다음 개막부터 다시).`); break; }
+            lp.name = op.name; slot.name = op.name;
+            lp.real = false; slot.real = false;
+            lp.birthYear = year - op.age; slot.age = op.age;
+            lp.potential = pot;
+            if (!slot.isPitcher) { const pos = op.pos === 'C' ? 'C' : op.pos === 'OF' ? 'CF' : 'SS'; lp.pos = pos; slot.pos = pos; }
+            Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
+            delete slot.reserve;
+            syncSim(lp);
+            this.season.transfer(slot.idx, op.team);
+            (L.marketMoves ??= []).push({ year: this.world.year, day: this.season.day, id: slot.id, kind: 'sign', from: -1, to: op.team });
+          } else {
+            Off.addFreePlayer(L, this.store, this.params, op.team, { name: op.name, pos: op.pos, age: op.age, runs, potential: pot });
+          }
+          break;
+        }
+        case 'ability': {
+          const lp = lpOf(op.player);
+          if (!lp) break;
+          if (op.now !== undefined) Object.assign(lp, skillForRuns({ ...lp }, runsForGrade(op.now, year), ctx, year));
+          if (op.potential !== undefined) lp.potential = runsForGrade(op.potential, year);
+          lp.estimated = false;
+          syncSim(lp);
+          break;
+        }
+        case 'contract': {
+          const lp = lpOf(op.player);
+          if (lp) lp.contract = { ...lp.contract, kind: lp.foreign ? 'foreign' : lp.contract.kind, salary: op.salary, until: year + op.years - 1 };
+          break;
+        }
+        case 'teamCash':
+          L.ledger.push(op.amount > 0 ? { year, from: -1, to: op.team, amount: op.amount, note: `자유 모드: ${note}`, kind: 'event' }
+            : { year, from: op.team, to: -1, amount: -op.amount, note: `자유 모드: ${note}`, kind: 'event' });
+          break;
+        case 'effect':
+          this.applyFantasyEffects([op.effect], note);
+          break;
+      }
+    }
+    this.valueCtx = null;
   }
 
   /** 판타지 효과 적용 (src/fantasy/effects.ts). 시즌 중에는 이벤트 도구, 오프시즌에는 리그 상태에 바로 */
@@ -2120,6 +2214,7 @@ export class GameSession {
         this.phase = 'season';
         this.refreshRivals();
         Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
+        if (L.fantasy?.free) Off.openReserves(L, this.store, this.params); // 자유 모드 빈 자리
         // 판타지 큰 변화: 입단 예정 유망주 (src/fantasy/effects.ts 'prospect')
         if (L.fantasy?.prospects?.length) {
           for (const sp of L.fantasy.prospects) {

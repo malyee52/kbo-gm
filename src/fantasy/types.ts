@@ -1,8 +1,9 @@
 // 판타지 모드 상태 (league.fantasy, docs/fantasy-mode.md). AI가 만든 글과 효과는 조작 기록(GameAction 'ai'·'ai-off'·'ai-choice')으로 남아
 // 재현·불러오기 때 AI를 다시 부르지 않고 그대로 들어간다.
 import type { FantasyEffect } from './effects';
+import type { FreeOp } from './free';
 
-export type FantasyKind = 'article' | 'chat' | 'event' | 'memory';
+export type FantasyKind = 'article' | 'chat' | 'event' | 'memory' | 'action';
 
 /** 고를 수 있는 길 (대화의 제안, 사건의 선택지) */
 export interface FantasyChoice {
@@ -42,6 +43,8 @@ export interface FantasyEntry {
   chosen?: number;
   /** 이야기 줄기 변화 (5단계) */
   arc?: ArcUpdate;
+  /** 자유 모드 조작 (src/fantasy/free.ts). 들어갈 때 바로 적용 */
+  ops?: FreeOp[];
 }
 
 export interface FantasyArc {
@@ -57,6 +60,8 @@ export interface FantasyArc {
 export interface FantasyState {
   /** 회귀자: 단장(플레이어)이 원래 역사를 기억한다 (2단계) */
   regressor?: boolean;
+  /** 자유 모드 (AI 진행): AI 게임 마스터가 행동을 판정하고 게임을 바꾼다 (src/fantasy/free.ts) */
+  free?: boolean;
   log: FantasyEntry[];
   /** 다음 id 번호 */
   seq?: number;

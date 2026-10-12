@@ -1,0 +1,89 @@
+// 자유 모드 (AI 진행): 게임 마스터 조작이 실제 게임을 바꾸고, 저장·불러오기·재현이 같다
+import { beforeAll, describe, expect, it } from 'vitest';
+import { loadDataStore, type DataStore } from '../src/data/loadNode';
+import { DEFAULT_PARAMS } from '../src/engine';
+import { GameSession } from '../src/game/session';
+import { freeAction, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
+import { currentRuns } from '../src/ai/value';
+import { cashOf } from '../src/league/finance';
+
+let store: DataStore;
+const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
+const roundTrip = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+beforeAll(() => { store = loadDataStore(); }, 120_000);
+const lgOf = () => store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+
+describe('자유 모드', () => {
+  it('등급 ↔ 런', () => {
+    for (const g of [30, 50, 65, 80]) expect(gradeOfRuns(runsForGrade(g, 2026), 2026)).toBe(g);
+  });
+
+  it('시즌 중: 다른 구단 선수 데려오기, 실존 선수 능력 바꾸기, 새 선수 만들기, 자금·계약 — 저장·재현이 같다', async () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'free-1', fantasy: { free: true } }, FAST);
+    expect(g.fantasy!.free).toBe(true);
+    g.advance(10);
+    // 이름으로 조작: 삼성의 가장 좋은 국내 타자를 데려온다
+    const sam = g.league.teams.findIndex((t) => t.name === '삼성');
+    const star = g.world.teams[sam].org.filter((p) => !p.isPitcher && !p.foreign).sort((a, b) => b.value - a.value)[0];
+    const mine = g.team.org.find((p) => !p.foreign && !p.isPitcher && p.real !== false)!;
+    const { ops, dropped } = resolveOps(g, [
+      { op: 'move', player: star.name, to: 'LG' },
+      { op: 'move', player: mine.name, to: '삼성' },
+      { op: 'ability', player: star.name, now: 75 },
+      { op: 'create', name: '한별빛', team: 'LG', pos: 'P', age: 19, now: 55, potential: 78 },
+      { op: 'contract', player: star.name, salary: 30, years: 4 },
+      { op: 'cash', amount: 50 },
+      { op: 'trust', delta: 20 },
+      { op: 'move', player: '없는선수', to: 'LG' },
+    ]);
+    expect(dropped.length).toBe(1);
+    const cash0 = cashOf(g.league, g.teamIdx);
+    g.addFantasy({ kind: 'action', title: '대형 트레이드', text: 'x', ask: 'y', ops });
+    expect(star.teamIdx).toBe(g.teamIdx);
+    expect(g.world.players.find((p) => p.id === mine.id)!.teamIdx).toBe(sam);
+    expect(gradeOfRuns(currentRuns(star, g.values), 2026)).toBeGreaterThanOrEqual(73);
+    const born = g.world.players.find((p) => p.name === '한별빛')!;
+    expect(born.teamIdx).toBe(g.teamIdx);
+    expect(born.isPitcher).toBe(true);
+    expect(g.marketPlayers().some((p) => p.reserve)).toBe(false);
+    expect(g.leaguePlayer(star.id)!.contract).toMatchObject({ salary: 300000, until: 2029 });
+    expect(cashOf(g.league, g.teamIdx)).toBe(cash0 + 500000);
+    g.advance(15);
+    const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
+    expect(roundTrip(h.toSave().league)).toEqual(roundTrip(g.toSave().league));
+    expect(h.world.players.find((p) => p.name === '한별빛')!.teamIdx).toBe(g.teamIdx);
+    h.advance(5); g.advance(5);
+    expect(roundTrip(h.toSave().season)).toEqual(roundTrip(g.toSave().season));
+    const info = g.reproInfo();
+    expect(info.opts.fantasy).toEqual({ free: true });
+    const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
+    expect(roundTrip(r.toSave().league)).toEqual(roundTrip(g.toSave().league));
+    // 결산: 만든 선수는 남고, 쓰지 않은 빈 자리는 지운다
+    g.advance(100000);
+    g.beginOffseason();
+    const lp = g.league.players.find((p) => p.name === '한별빛')!;
+    expect(lp.team).toBe(g.teamIdx);
+    expect(lp.reserve).toBeUndefined();
+    expect(g.league.players.some((p) => p.reserve !== undefined)).toBe(false);
+  }, 600_000);
+
+  it('오프시즌: 만들기·이동은 리그 상태에 바로', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'free-2', fantasy: { free: true } }, FAST);
+    g.advance(100000);
+    g.beginOffseason();
+    const kia = g.league.teams.findIndex((t) => t.name === 'KIA');
+    const target = g.league.players.filter((p) => p.team === kia && !p.foreign)[0];
+    const { ops } = resolveOps(g, [{ op: 'create', name: '도하늘', team: 'LG', pos: 'OF', age: 24, now: 60, potential: 70 }, { op: 'move', player: `${target.name}@KIA`, to: 'LG' }]);
+    g.addFantasy({ kind: 'action', title: 't', text: 'x', ops });
+    expect(g.league.players.find((p) => p.name === '도하늘')!.team).toBe(g.teamIdx);
+    expect(g.leaguePlayer(target.id)!.team).toBe(g.teamIdx);
+  }, 600_000);
+
+  it('시험용 AI 행동: 이야기와 조작이 남는다', async () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'free-3', fantasy: { free: true } }, FAST);
+    const { entry } = await freeAction(g, store, { provider: 'mock', model: 'mock', key: '' }, '팬 사인회를 연다');
+    g.addFantasy(entry);
+    expect(g.fantasy!.log.at(-1)).toMatchObject({ kind: 'action', ask: '팬 사인회를 연다' });
+    expect(g.fantasy!.log.at(-1)!.ops!.length).toBe(1);
+  }, 120_000);
+});

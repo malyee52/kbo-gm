@@ -91,7 +91,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
     // 시즌 중 시장의 선수(market.ts)는 어느 명단에도 없이 월드에 들어온다 (teamIdx = -1, 시즌 중 영입하면 구단으로 옮긴다)
-    const market = lp.team === -1 && lp.market === year;
+    const market = lp.team === -1 && (lp.market === year || lp.reserve === year);
     if ((lp.team < 0 && !market) || lp.team >= kept || lp.military?.state === 'serving') continue;
     const slump = form && lp.slump ? lp.slump : 0;
     const base = lp.bat && !lp.bat.def
@@ -117,6 +117,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       debutEstimate: lp.estimated,
       real: lp.real,
       ...(lp.dev ? { dev: true } : {}),
+      ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
       ...(lp.birthYearEstimated ? { ageEstimated: true } : {}),
     };
