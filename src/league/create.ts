@@ -60,6 +60,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const special = new Set(store.meta.specialEntries?.[String(startYear)] ?? []);
   const startPlayers = recorded.players.filter((p) => (!p.foreign || !opening || opening.has(p.id)) && !special.has(p.id));
   const idx = careerIndex(store);
+  const lastDataYear = Math.max(...store.meta.years);
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
   for (const c of store.contracts ?? []) (contractsById.get(c.id) ?? contractsById.set(c.id, []).get(c.id)!).push(c);
 
@@ -79,7 +80,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     const ten = tenure0(p);
     const now = currentRuns(p, ctx);
     const peak = realPeakRuns(p, idx, store, ctx, params);
-    const potential = potentialOf(now, peak, p.age, seed, p.id);
+    // 성장 여유분은 자료가 끝나는 해(마지막 시즌) 나이로 본다 (2026-10-12 사용자: 잠재력 = 실제로 보여 준 고점).
+    // 전성기가 이미 기록에 있는 선수(예: 2010년 김광현)는 고점이 곧 잠재력이고, 마지막 시즌에도 젊어 앞날을 모르는 선수만 여유분을 받는다
+    const roomAge = p.age === null ? null : p.age + (lastDataYear - startYear);
+    const potential = potentialOf(now, peak, roomAge, seed, p.id);
 
     // 계약 기록: 시작 연도 이전에 시작한 것만 (그 뒤 계약은 미래 정보)
     const rows = (contractsById.get(p.id) ?? []).filter((c) => c.first <= startYear).sort((a, b) => a.first - b.first);

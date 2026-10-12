@@ -1,4 +1,5 @@
-// 능력 산출: 직전 3시즌 기록 → 타석 결과별 리그 대비 비율.
+// 능력 산출: 3시즌 기록 → 타석 결과별 리그 대비 비율.
+// params.ratingBasis 'prior'(예측) = 직전 3시즌, 'season'(역사 재현, 2026-10-12) = 그 시즌·직전·전전 시즌 (seasonBlend).
 //
 // 사건 e의 비율 = (Σ 가중치 × 그 시즌 횟수 ÷ 그 시즌 리그 비율  +  K × 사전 평균) ÷ (Σ 가중치 × 타석  +  K)
 // "횟수 ÷ 리그 비율"은 그 횟수를 리그 평균 선수가 내려면 필요한 타석 수라서, 시대가 달라도 그대로 더할 수 있다.
@@ -164,6 +165,12 @@ export function buildWorld(input: BuildWorldInput): World {
   const players: SimPlayer[] = [];
   const curBat = new Map(current.bat.map((r) => [r.id, r]));
   const curPit = new Map(current.pit.map((r) => [r.id, r]));
+  // 능력을 뽑는 시즌과 가중치. 역사 재현은 그 시즌을 맨 앞에 두고 직전 두 시즌을 덜 섞는다 (표본이 적은 해는 타석 수만큼만 반영되므로 자연히 앞 시즌 쪽으로 당겨진다)
+  const seasonBasis = params.ratingBasis === 'season';
+  const rateSeasons = seasonBasis ? [current, history[0], history[1]] : history;
+  const rateW = seasonBasis ? params.seasonBlend : params.seasonWeights;
+  const rateBat = seasonBasis ? [curBat, histBat[0], histBat[1]] : histBat;
+  const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
 
   for (const id of ids) {
@@ -183,9 +190,9 @@ export function buildWorld(input: BuildWorldInput): World {
 
     if (isPitcher) {
       const rows: Weighted<PitRow>[] = [];
-      history.forEach((s, i) => {
-        const r = histPit[i]?.get(id);
-        if (s && r && r.tbf > 0) rows.push({ row: r, w: params.seasonWeights[i] ?? 0, lg: s.league.rates });
+      rateSeasons.forEach((s, i) => {
+        const r = ratePit[i]?.get(id);
+        if (s && r && r.tbf > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates });
       });
       if (rows.length === 0 && pRow && pRow.tbf > 0) {
         rows.push({ row: pRow, w: params.debutSeasonWeight, lg });
@@ -193,12 +200,13 @@ export function buildWorld(input: BuildWorldInput): World {
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
       pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, params);
-      lastSaves = histPit[0]?.get(id)?.sv ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
+      // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
+      lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
     } else {
       const rows: Weighted<BatRow>[] = [];
-      history.forEach((s, i) => {
-        const r = histBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: params.seasonWeights[i] ?? 0, lg: s.league.rates });
+      rateSeasons.forEach((s, i) => {
+        const r = rateBat[i]?.get(id);
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
         rows.push({ row: bRow, w: params.debutSeasonWeight, lg });
@@ -209,7 +217,7 @@ export function buildWorld(input: BuildWorldInput): World {
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다
       const posPa = new Map<string, number>();
-      for (const h of histBat) {
+      for (const h of seasonBasis ? rateBat : histBat) {
         const r = h?.get(id);
         if (r?.pos && r.pos !== 'IF' && r.pos !== 'OF') posPa.set(r.pos, (posPa.get(r.pos) ?? 0) + Math.max(1, r.pa));
       }
@@ -218,9 +226,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const recent = (posPa.get('DH') ?? 0) > 0.7 * totalPa ? 'DH' : field?.[0] ?? (posPa.has('DH') ? 'DH' : undefined);
       pos = recent ?? (m.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null) ?? bRow?.pos ?? null;
       // 세부 포지션이 어디에도 없으면 직전 시즌의 내야·외야 구분이라도, 그것도 없으면 내야로 본다 (1980~90년대 자료. 빈 자료는 추정치, 2026-10-09 QA)
-      if (!pos) pos = histBat.map((h) => h?.get(id)?.pos).find((q) => q === 'IF' || q === 'OF') ?? 'IF';
-      // 수비: 직전 시즌들에 맡은 포지션(멀티 포지션 이력)과 주력·나이로 만든 추정값 (기록 없음)
-      bat.def = makeDefense(id, pos, histBat.map((h) => h?.get(id)?.pos ?? null), bat.speed, m.birthYear ? year - m.birthYear : null,
+      const posHist = seasonBasis ? rateBat : histBat;
+      if (!pos) pos = posHist.map((h) => h?.get(id)?.pos).find((q) => q === 'IF' || q === 'OF') ?? 'IF';
+      // 수비: 직전 시즌들(역사 재현은 그 시즌부터)에 맡은 포지션(멀티 포지션 이력)과 주력·나이로 만든 추정값 (기록 없음)
+      bat.def = makeDefense(id, pos, posHist.map((h) => h?.get(id)?.pos ?? null), bat.speed, m.birthYear ? year - m.birthYear : null,
         pos ? posPa.get(pos) ?? 0 : 0);
     }
 

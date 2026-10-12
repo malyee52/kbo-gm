@@ -1,5 +1,5 @@
 // 장기 진행 흐름 진단: 해마다 선수 유입·유출, 방출된 유망주, 입대, 포수 수, 상위 270명 기여 합을 잰다 (docs/longterm-plan.md).
-// 실행: npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b  (시드당 약 30초, 모든 구단 AI)
+// 실행: npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b [--start 2005]  (시드당 약 30초, 모든 구단 AI)
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Season } from '../src/engine';
 import { currentRuns, valueContext } from '../src/ai/value';
@@ -13,13 +13,14 @@ import { worldFromLeague } from '../src/league/world';
 const arg = (n: string, d: string) => { const i = process.argv.indexOf(`--${n}`); return i < 0 ? d : process.argv[i + 1]; };
 const seasons = Number(arg('seasons', '15'));
 const seeds = arg('seeds', 'diag-a,diag-b').split(',');
+const startYear = Number(arg('start', '2026'));
 const store = loadDataStore();
 const params = DEFAULT_PARAMS;
 const f1 = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '-');
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
 
 for (const seed of seeds) {
-  const { league } = createLeague(store, 2026, seed, params);
+  const { league } = createLeague(store, startYear, seed, params);
   console.log(`\n## 시드 ${seed}`);
   console.log('| 연도 | 상위270 기여합 | 상위270 평균나이 | 25세이하 평균잠재 | 유입 수 | 유입 평균잠재 | 유입 잠재10위 | 은퇴(평균나이·기여) | 방출·미계약(평균나이·기여) | 방출 중 기여5+ | 입대 수(구단 최대) | 포수 최소 | 30세+ 비중 | 방출 중 잠재10+ (신인생성) |');
   console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');

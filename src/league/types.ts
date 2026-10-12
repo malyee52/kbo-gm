@@ -209,6 +209,8 @@ export interface LeagueState {
   settings?: DifficultySettings;
   /** 시작 때의 세부 난이도 (재현 정보용. 게임 중 바꾼 것은 조작 기록에 남는다) */
   startSettings?: DifficultySettings;
+  /** 시작 연도 능력 기준 (engine/params.ts ratingBasis, 2026-10-12). 없으면 'prior'(예전 저장) */
+  ratingBasis?: 'season' | 'prior';
   /** 플레이어(단장)의 구단주 평가 상태 */
   owner?: OwnerState;
   /** 구단별 샐러리캡 연속 초과 횟수 */

@@ -107,6 +107,8 @@ export interface NewGameOptions {
   challenge?: string;
   /** 세부 난이도 (사용자 설정, league/difficulty.ts). 없으면 difficulty 묶음 */
   settings?: DifficultySettings;
+  /** 시작 연도 능력 기준: 'season' 역사 재현(그 시즌 기록 중심), 'prior' 예측(직전 3시즌). 없으면 'prior' (예전 조작 기록과 같게) */
+  ratingBasis?: 'season' | 'prior';
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -518,8 +520,11 @@ export class GameSession {
    * 새 게임. store에는 모든 시즌과 계약 기록이 불러와져 있어야 한다 (잠재력·연차 산출).
    * 첫 시즌은 worldForYear와 같은 월드에 게임 시드를 그대로 써서, 같은 시드면 M3·M4와 같은 결과가 나온다.
    */
-  static create(store: Store, opts: NewGameOptions, params: EngineParams = DEFAULT_PARAMS): GameSession {
+  static create(store: Store, opts: NewGameOptions, baseParams: EngineParams = DEFAULT_PARAMS): GameSession {
+    // 능력 기준은 시작 때(createLeague의 월드)에만 쓰인다. 그 뒤 시즌은 리그 상태의 능력으로 만든다
+    const params: EngineParams = { ...baseParams, ratingBasis: opts.ratingBasis ?? 'prior' };
     const { league, world } = createLeague(store, opts.year, opts.seed, params);
+    if (opts.ratingBasis) league.ratingBasis = opts.ratingBasis;
     if (!world.teams[opts.teamIdx]) throw new Error(`구단 색인이 잘못됐습니다: ${opts.teamIdx}`);
     league.difficulty = opts.difficulty ?? 'normal';
     if (opts.settings) { league.settings = { ...opts.settings }; league.startSettings = { ...opts.settings }; }
@@ -688,7 +693,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}) },
       at: { year: this.year, day: this.day, phase: this.phase },
       actions: clone(this.actions),
     };

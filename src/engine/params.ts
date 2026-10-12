@@ -12,6 +12,13 @@ export interface EngineParams {
   seasonWeights: [number, number, number];
   /** 직전 기록이 전혀 없을 때 해당 시즌 기록에 주는 가중치. 잠재력 모델(M5) 도입 전 임시 처리 */
   debutSeasonWeight: number;
+  /**
+   * 시작 연도 능력의 기준 (2026-10-12 사용자 결정): 'season' = 역사 재현, 그 시즌 기록 중심(seasonBlend로 그 시즌·직전·전전 시즌을 섞는다),
+   * 'prior' = 예측, 직전 3시즌(seasonWeights). 새 게임에서 고른다. 예전 저장·조작 기록에는 없으므로 없으면 'prior'
+   */
+  ratingBasis: 'season' | 'prior';
+  /** 'season' 기준의 가중치: 그 시즌·직전·전전 시즌 (임시값). 실제 잠재력(커리어 고점)도 이 가중치로 시즌마다 뽑는다 */
+  seasonBlend: [number, number, number];
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
   batRegress: { so: number; bb: number; hbp: number; hr: number; s1: number; d2: number; t3: number };
   /** 투수 사건별 회귀 상수: 상대 타자 수 기준. tools/fit_regression.py로 맞춘 값 */
@@ -104,6 +111,8 @@ export const DECLINE_START_AGE = 35;
 export const DEFAULT_PARAMS: EngineParams = {
   seasonWeights: [1.0, 0.8, 0.6],
   debutSeasonWeight: 0.4,
+  ratingBasis: 'prior',
+  seasonBlend: [1.0, 0.3, 0.1],
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
   foreignPriors: {
