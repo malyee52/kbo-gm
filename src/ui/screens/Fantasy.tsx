@@ -9,12 +9,15 @@ import { artKey, getArt } from '../../fantasy/images';
 import type { FantasyEntry } from '../../fantasy/types';
 import { teamPalette } from '../teams';
 import { FantasyMemory } from './FantasyMemory';
+import { FantasyChat } from './FantasyChat';
+import { ChoiceButtons } from './FantasyChoices';
+import { AUTO_EVENT_EVERY, makeEvent } from '../../fantasy/ai';
 import { gameContext } from '../../fantasy/context';
 import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
 
-type Tab = 'story' | 'memory' | 'settings';
+type Tab = 'story' | 'chat' | 'memory' | 'settings';
 
 export function Fantasy() {
   const { session } = useGame();
@@ -38,17 +41,18 @@ export function Fantasy() {
         </div>
         <div className="seg" role="tablist" aria-label="판타지 화면">
           <button type="button" role="tab" aria-selected={tab === 'story'} className={tab === 'story' ? 'on' : ''} onClick={() => setTab('story')}>이야기</button>
+          <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>대화</button>
           {f.regressor && <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => setTab('memory')}>기억 노트</button>}
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>AI 설정</button>
         </div>
       </section>
-      {tab === 'story' ? <Story /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
+      {tab === 'story' ? <Story /> : tab === 'chat' ? <FantasyChat /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
     </div>
   );
 }
 
 function Story() {
-  const { session, changed } = useGame();
+  const { session, store, changed } = useGame();
   const f = session.fantasy!;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -84,14 +88,36 @@ function Story() {
       setBusy(false);
     }
   };
+  const event = async () => {
+    setBusy(true);
+    setMsg({ text: 'AI가 사건을 만드는 중입니다…' });
+    try {
+      const e = await makeEvent(session, store, loadAiSettings());
+      session.addFantasy(e);
+      setMsg({ text: '사건이 생겼습니다. 아래에서 고르세요.' });
+      const nai = loadNaiSettings();
+      if (nai.auto && nai.token.trim()) setAutoArt(f.log[f.log.length - 1]);
+      changed();
+    } catch (e) {
+      setMsg({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
   const entries = [...f.log].reverse();
   return (
     <section className="stack">
       <div className="panel">
         <div className="row-between wrap">
           <h2>이야기</h2>
-          <button type="button" onClick={() => void write()} disabled={busy}>{busy ? '쓰는 중…' : '지금 상황으로 기사 쓰기'}</button>
+          <span className="inline">
+            <button type="button" onClick={() => void event()} disabled={busy}>{busy ? 'AI가 쓰는 중…' : '사건 만들기'}</button>
+            <button type="button" className="ghost" onClick={() => void write()} disabled={busy}>기사 쓰기</button>
+          </span>
         </div>
+        {f.arc && <p className="small fantasy-arc">이야기 줄기 <strong>{f.arc.title}</strong>{f.arc.climax ? ' (절정)' : ''} · {f.arc.beats}번째 사건 · {f.arc.summary}</p>}
+        {(f.pastArcs?.length ?? 0) > 0 && <p className="muted small">끝난 이야기: {f.pastArcs!.slice(-5).map((a) => a.title).join(' · ')}</p>}
+        <p className="muted small">정규시즌에는 {AUTO_EVENT_EVERY}일쯤마다 AI가 사건을 저절로 만듭니다 (AI 키가 있을 때). 이야기가 몇 번 이어져 절정에 이르면 구단주 교체·큰 투자·전설적인 유망주 같은 큰 변화가 생길 수 있습니다.</p>
         {msg && <p className={msg.error ? 'note error-box' : 'muted small'} role="status">{msg.text}</p>}
         <p className="muted small">AI가 쓴 글은 저장 파일과 조작 기록에 남아, 불러오거나 재현해도 같은 이야기가 나옵니다 (AI를 다시 부르지 않습니다).</p>
       </div>
@@ -100,7 +126,9 @@ function Story() {
           <p className="muted small">{e.day < 0 ? `${e.year} 오프시즌` : formatDate(e.year, e.day)}{e.who ? ` · ${e.who}` : ''}</p>
           <h3>{e.title}</h3>
           <ArtFrame entry={e} auto={autoArt === e} />
+          {e.ask && <p className="small chat-me"><span className="muted">단장</span> {e.ask}</p>}
           {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
+          <ChoiceButtons entry={e} />
         </article>
       ))}
     </section>

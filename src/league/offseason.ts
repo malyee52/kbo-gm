@@ -2200,6 +2200,25 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
  * 개막 때 시즌 중 시장의 가상 외국인 후보를 만든다 (market.ts). 외국인 제도가 없던 해는 만들지 않는다.
  * 후보는 team = -1, market = 그 해로 리그에 들어가 시즌 월드에 소속 없이 들어온다. 결산 때 계약하지 않은 후보는 지운다
  */
+/**
+ * 판타지 모드 큰 변화 (src/fantasy/effects.ts 'prospect'): 개막 때 가상 유망주를 그 구단에 넣는다 (육성 계약 아닌 신인 계약, 2군).
+ * 지금 기여는 낮고(−8~0런) 잠재력이 크다
+ */
+export function addFantasyProspect(league: LeagueState, store: Store, params: EngineParams, team: number,
+  spec: { name: string; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; potential: number }): LeaguePlayer {
+  const year = league.year;
+  const view = leagueView({ ...league, year: year - 1 }, store, params);
+  const rng = new Rng(`${league.seed}/fantasy-prospect/${year}/${spec.name}`);
+  const isPitcher = spec.pos === 'P';
+  const pos = isPitcher ? null : spec.pos === 'C' ? 'C' : spec.pos === 'IF' ? (['SS', '2B', '3B'] as const)[rng.int(3)] : (['CF', 'LF', 'RF'] as const)[rng.int(3)];
+  const p = makeVirtual(league, view, rng, new Set(), {
+    foreign: false, asia: false, age: spec.age, runs: -8 + rng.range(0, 8), potential: spec.potential, name: spec.name, isPitcher, pos,
+  }, year - 1);
+  p.team = team;
+  p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 2 };
+  return p;
+}
+
 export function openMarket(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS): number {
   const year = league.year;
   const rule = foreignRule(store.meta, year);

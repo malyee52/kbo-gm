@@ -800,4 +800,17 @@ td .inline { flex-wrap: nowrap; }
 .memory-year:first-of-type { border-top: 0; }
 .memory-body { padding: 4px 0 6px 18px; }
 .memory-body p { margin: 2px 0; }
+/* 판타지 대화·선택지 (3~5단계) */
+.chat-log { display: flex; flex-direction: column; gap: 10px; }
+.chat-turn { border-top: 1px solid var(--line); padding-top: 8px; }
+.chat-turn:first-child { border-top: 0; padding-top: 0; }
+.chat-me, .chat-them { margin: 2px 0; }
+.chat-me { color: var(--muted); }
+.chat-input { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input textarea { flex: 1; min-width: 0; resize: vertical; }
+.fantasy-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; align-items: center; }
+.fantasy-choices button { display: inline-flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.fantasy-effects { font-weight: 400; opacity: 0.85; }
+.fantasy-chosen { margin-top: 6px; }
+.fantasy-arc { margin: 4px 0; }
 
