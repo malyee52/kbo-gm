@@ -148,11 +148,11 @@ export function pitValue(s: PitSkill, lg: Rates): number {
 }
 
 /** 역사 재현·고점용 회귀 상수: 예측용 값에 seasonRegressScale을 곱한다 */
-export function seasonRegress(p: EngineParams): EngineParams {
+export function seasonRegress(p: EngineParams, pitScale = p.seasonRegressScale): EngineParams {
   const k = p.seasonRegressScale;
-  if (k === 1) return p;
-  const scale = <T extends Record<string, number>>(o: T): T => Object.fromEntries(Object.entries(o).map(([e, v]) => [e, v * k])) as T;
-  return { ...p, batRegress: scale(p.batRegress), pitRegress: scale(p.pitRegress) };
+  if (k === 1 && pitScale === 1) return p;
+  const scale = <T extends Record<string, number>>(o: T, m: number): T => Object.fromEntries(Object.entries(o).map(([e, v]) => [e, v * m])) as T;
+  return { ...p, batRegress: scale(p.batRegress, k), pitRegress: scale(p.pitRegress, pitScale) };
 }
 
 export interface BuildWorldInput {
@@ -189,7 +189,7 @@ export function buildWorld(input: BuildWorldInput): World {
   const rateW = seasonBasis ? params.seasonBlend : params.seasonWeights;
   const rateBat = seasonBasis ? [curBat, histBat[0], histBat[1]] : histBat;
   const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
-  const rp = seasonBasis ? seasonRegress(params) : params;
+  const rp = seasonBasis ? seasonRegress(params, params.seasonPitRegressScale ?? params.seasonRegressScale) : params;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
 
   for (const id of ids) {
