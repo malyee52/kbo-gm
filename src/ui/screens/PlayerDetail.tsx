@@ -1,5 +1,6 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
 import { futuresText } from './Roster';
+import { futuresFromRecord, type FuturesLine } from '../../league/futures';
 import { useEffect, useRef } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
 import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
@@ -105,6 +106,20 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             return f !== '-' ? <p className="small">퓨처스리그(2군): {f}</p> : null;
           })()}
         </section>
+
+        {(() => {
+          // 퓨처스리그(2군) 시즌별 기록 (2026-10-12부터 결산 때 남긴다)
+          const fut = [...(lp?.history ?? [])].filter((h) => h.fbat || h.fpit).reverse();
+          if (!fut.length) return null;
+          return (
+            <section>
+              <h3>퓨처스리그 기록 <span className="muted small">2군에서 뛴 시즌</span></h3>
+              <ul className="plain small">
+                {fut.map((h) => <li key={`${h.year}-${h.team}`}>{h.year} {h.team}: {futuresText(futuresFromRecord(h.fbat, h.fpit) as FuturesLine)}</li>)}
+              </ul>
+            </section>
+          );
+        })()}
 
         <section>
           <h3>직전 시즌 기록 <span className="muted small">게임에서 치른 시즌은 이 게임의 기록</span></h3>
