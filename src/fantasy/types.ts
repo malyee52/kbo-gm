@@ -50,6 +50,10 @@ export interface FantasyEntry {
   promises?: PromiseDraft[];
   /** 이 판정이 끝낸 약속 (지킴·어김·없던 일) */
   settles?: PromiseSettle[];
+  /** 자유 모드: 받아들이기 전에 다시 판정한 횟수 (하루 한도, ui/screens/GmPreview.tsx) */
+  rerolls?: number;
+  /** 자유 모드: 단장이 판정을 보고 거둬들인 행동 (조작 없음, 기록만) */
+  withdrawn?: boolean;
 }
 
 export interface FantasyArc {

@@ -817,4 +817,5 @@ td .inline { flex-wrap: nowrap; }
 .negotiate { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line-strong); display: flex; flex-direction: column; gap: 6px; }
 .negotiate h3 { margin: 0; }
 .negotiate textarea { width: 100%; resize: vertical; }
-
+/* 자유 모드 판정 미리보기 (GmPreview.tsx) */
+.gm-preview { border: 2px dashed var(--accent, var(--line-strong)); }
