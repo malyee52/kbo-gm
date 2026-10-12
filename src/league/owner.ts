@@ -6,6 +6,7 @@ import type { PostseasonResult } from './postseason';
 import { capPayroll, salaryCap, PRE_CAP_BUDGET } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { challengeBudget } from './challenges';
+import { ruleOf } from './rules';
 
 // ---- 난이도
 
@@ -56,7 +57,7 @@ export function parentGrade(league: LeagueState, team: number): ParentGrade {
  */
 export function budgetFor(league: LeagueState, team: number, year: number): number | null {
   // 캡 도입 전에도 예산은 있다 (2023년 캡 값 기준, 임시값). 전에는 null이라 2022년 이전 FA 제시에 상한이 없었다 (2026-10-09 QA)
-  const cap = salaryCap(year) ?? PRE_CAP_BUDGET;
+  const cap = salaryCap(year, league) ?? PRE_CAP_BUDGET;
   let f = GRADE_FACTOR[parentGrade(league, team)];
   const st = league.lastSeason?.standings;
   if (st) {
@@ -74,8 +75,8 @@ export function budgetFor(league: LeagueState, team: number, year: number): numb
  * 기획안 도전의 예산 규칙(넥센 캠페인: 리그 평균 연봉의 85%)이 있으면 그것과 캡 가운데 작은 쪽 (challenges.ts)
  */
 export function spendLimit(league: LeagueState, team: number, year: number): number | null {
-  const cap = salaryCap(year);
-  const budget = league.challenge ? challengeBudget(league, team, year, (t) => capPayroll(league.players, t)) : null;
+  const cap = salaryCap(year, league);
+  const budget = league.challenge ? challengeBudget(league, team, year, (t) => capPayroll(league.players, t, ruleOf(league, 'capTopN'))) : null;
   if (budget === null) return cap;
   return cap === null ? budget : Math.min(cap, budget);
 }
@@ -102,21 +103,21 @@ export interface CapSanction {
  * 제재금은 장부(ledger)에 남고, 지명권 하락은 그 시즌 뒤 드래프트에 적용된다.
  */
 export function applyCapSanctions(league: LeagueState, year: number): CapSanction[] {
-  const cap = salaryCap(year);
+  const cap = salaryCap(year, league);
   const n = league.teams.length;
   league.capStrikes ??= new Array(n).fill(0);
   league.draftPenalty ??= new Array(n).fill(null);
   const out: CapSanction[] = [];
   if (cap === null) return out;
   for (let t = 0; t < n; t++) {
-    const pay = capPayroll(league.players, t);
+    const pay = capPayroll(league.players, t, ruleOf(league, 'capTopN'));
     if (pay <= cap) {
       league.capStrikes[t] = 0;
       continue;
     }
     const strike = ++league.capStrikes[t];
     const over = pay - cap;
-    const fine = Math.round(over * CAP_FINE_RATE[Math.min(strike, 3) - 1]);
+    const fine = Math.round(over * CAP_FINE_RATE[Math.min(strike, 3) - 1] * ruleOf(league, 'capFineScale'));
     const pickDrop = strike >= 2;
     league.ledger.push({ year, from: t, to: -1, amount: fine, note: `샐러리캡 초과 제재금 (${strike}회 연속, 초과 ${Math.round(over / 10000)}억 원)` });
     if (pickDrop) league.draftPenalty[t] = year;
@@ -126,7 +127,7 @@ export function applyCapSanctions(league: LeagueState, year: number): CapSanctio
 }
 
 /** 드래프트 지명 순서 (전체 지명 순 구단). order는 라운드 안 순서. 제재 구단은 1라운드에서 9단계 뒤로 */
-export function draftSlots(order: number[], rounds: number, penalized: Set<number>, snake = false): number[] {
+export function draftSlots(order: number[], rounds: number, penalized: Set<number>, snake = false, drop = CAP_PICK_DROP): number[] {
   const slots: number[] = [];
   for (let r = 0; r < rounds; r++) {
     // 지그재그(2010~2017년 무렵): 짝수 라운드는 순서를 뒤집는다
@@ -136,7 +137,7 @@ export function draftSlots(order: number[], rounds: number, penalized: Set<numbe
         if (!penalized.has(t)) continue;
         const i = round.indexOf(t);
         round.splice(i, 1);
-        round.splice(Math.min(round.length, i + CAP_PICK_DROP), 0, t);
+        round.splice(Math.min(round.length, i + drop), 0, t);
       }
     }
     slots.push(...round);

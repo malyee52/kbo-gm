@@ -90,6 +90,8 @@ export interface PostseasonResult {
 /** 진행 중인 포스트시즌 (저장 가능) */
 export interface PostseasonState {
   format: 1;
+  /** 연장 이닝 제한 (리그 규정이 바뀌었을 때만, league/rules.ts) */
+  maxInnings?: number;
   year: number;
   seed: string;
   seeds: number[];
@@ -156,7 +158,7 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
   const rng = Rng.fromState(st.seed, st.rng);
   const n = season.world.players.length;
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
-  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, POSTSEASON_MAX_INNINGS, rec, command);
+  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, st.maxInnings ?? POSTSEASON_MAX_INNINGS, rec, command);
   st.rng = rng.state();
   const g: SeriesGame = {
     day: st.day, home, away, homeRuns: r.homeRuns, awayRuns: r.awayRuns, innings: r.innings,

@@ -9,7 +9,7 @@ import {
   absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
-import { coreAge, evaluateTrade, horizonWeights, MAX_PER_SIDE, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
+import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
@@ -24,7 +24,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoac
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, ORG_LIMIT, wonText } from '../league/salary';
+import { dollarText, wonText } from '../league/salary';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
@@ -35,7 +35,7 @@ import { runsForGrade, type FreeOp } from '../fantasy/free';
 import { batValue, pitValue } from '../engine';
 import { skillForRuns } from '../league/growth';
 import {
-  aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
+  aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
 } from '../league/market';
 import {
@@ -44,7 +44,7 @@ import {
 } from '../league/history';
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM, type ArticleKind } from '../league/articles';
 import {
-  MAX_PICKS_PER_TRADE, ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
+  ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
   pickLedger, tradablePick, transferPick, type DraftPick, type PickLedgerRow,
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
@@ -65,6 +65,7 @@ import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
+import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
 
 /** 중계·하이라이트용 우리 경기 (정규시즌 또는 가을야구) */
 export interface CastGame {
@@ -889,7 +890,7 @@ export class GameSession {
   }
 
   get marketDeadlineDay(): number {
-    return marketDeadlineDay(this.world.year, this.season.schedule.length);
+    return marketDeadlineDay(this.world.year, this.season.schedule.length, this.league);
   }
 
   releaseBlock(p: SimPlayer): string | null {
@@ -943,7 +944,7 @@ export class GameSession {
     this.valueCtx = null;
     const lp = this.leaguePlayer(id);
     this.addNews(this.day, 'entry', p.foreign && lp
-      ? `${p.name} 영입 (외국인 교체 ${foreignSwapsUsed(this.marketCtx, this.teamIdx)}/${FOREIGN_SWAPS}, 연봉 ${dollarText(lp.contract.salary)}의 남은 달 몫)`
+      ? `${p.name} 영입 (외국인 교체 ${foreignSwapsUsed(this.marketCtx, this.teamIdx)}/${ruleOf(this.league, 'foreignSwaps')}, 연봉 ${dollarText(lp.contract.salary)}의 남은 달 몫)`
       : `${p.name} 영입 (최저 연봉, 이번 시즌까지)`);
   }
 
@@ -1084,6 +1085,18 @@ export class GameSession {
         case 'effect':
           this.applyFantasyEffects([op.effect], note);
           break;
+        case 'pick':
+          if (L.teams[op.to]) transferPick(L, { draft: op.draft, round: op.round, from: op.from }, op.to);
+          break;
+        case 'rule': {
+          // 리그 규정 (league/rules.ts). 기본값으로 돌리면 기록에서 지운다
+          const r = (L.rules ??= {}) as Record<string, number | null>;
+          if (op.value === RULE_DEFAULTS[op.key]) delete r[op.key];
+          else r[op.key] = op.value;
+          if (!Object.keys(r).length) delete L.rules;
+          this.addNews(Math.max(0, season ? this.day : 0), 'event', `규정 변경: ${RULE_DEFS.find((d) => d.key === op.key)?.label ?? op.key} → ${op.value ?? '실제 규정'}`);
+          break;
+        }
       }
     }
     this.valueCtx = null;
@@ -1136,8 +1149,8 @@ export class GameSession {
     if (this.phase !== 'season' || this.done) return '시즌 중에만 정식 등록할 수 있습니다 (오프시즌에는 정원 정리 단계에서).';
     const dt = dateOf(this.world.year, Math.min(this.day, this.season.schedule.length - 1));
     if (dt.month < DEV_REGISTER_FROM.month) return `육성선수는 ${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일부터 정식 등록할 수 있습니다.`;
-    if (this.day > this.tradeDeadlineDay) return `선수 등록 마감(${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일)이 지났습니다.`;
-    if (this.regularCount() >= ORG_LIMIT) return `정식 선수 정원(${ORG_LIMIT}명)이 차 있습니다. 오프시즌에 정리하세요.`;
+    if (this.day > this.tradeDeadlineDay) return `선수 등록 마감(${this.tradeDl.month}월 ${this.tradeDl.date}일)이 지났습니다.`;
+    if (this.regularCount() >= ruleOf(this.league, 'orgLimit')) return `정식 선수 정원(${ruleOf(this.league, 'orgLimit')}명)이 차 있습니다. 오프시즌에 정리하세요.`;
     return null;
   }
 
@@ -1471,10 +1484,10 @@ export class GameSession {
     }
     const day = this.season.day;
     if (r.deadline && day === this.tradeDeadlineDay) {
-      this.attention.push({ kind: 'deadline', text: `오늘이 트레이드 마감일(${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일)입니다. 오늘 경기 전까지 트레이드할 수 있습니다.` });
+      this.attention.push({ kind: 'deadline', text: `오늘이 트레이드 마감일(${this.tradeDl.month}월 ${this.tradeDl.date}일)입니다. 오늘 경기 전까지 트레이드할 수 있습니다.` });
     }
     if (r.devDay && day === this.devRegisterDay && this.team.org.some((p) => p.dev)) {
-      this.attention.push({ kind: 'dev', text: `오늘(${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일)부터 육성선수를 정식 등록할 수 있습니다 (${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일까지).` });
+      this.attention.push({ kind: 'dev', text: `오늘(${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일)부터 육성선수를 정식 등록할 수 있습니다 (${this.tradeDl.month}월 ${this.tradeDl.date}일까지).` });
     }
   }
 
@@ -1760,6 +1773,7 @@ export class GameSession {
     this.season.setForm(null);
     const st = this.season.standings();
     this.postseason = startPostseason(this.season, st, this.world.rules.postseasonTeams, seasonSeed(this.league));
+    if (ruleOf(this.league, 'postseasonMaxInnings') !== RULE_DEFAULTS.postseasonMaxInnings) this.postseason.maxInnings = ruleOf(this.league, 'postseasonMaxInnings');
     const name = (t: number) => this.world.teams[t].name;
     const mine = this.postseason.seeds.includes(this.teamIdx);
     this.addNews(this.day, 'season', `가을야구 대진: ${this.postseason.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ')}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
@@ -1856,12 +1870,17 @@ export class GameSession {
     return this.valueCtx;
   }
 
+  /** 트레이드 마감 월일 (리그 규정, league/rules.ts) */
+  get tradeDl(): { month: number; date: number } {
+    return ruleDate(this.league, 'tradeDeadline');
+  }
+
   /** 트레이드를 할 수 있는 마지막 날 (일정 색인). 이 날의 경기 전까지 가능 */
   get tradeDeadlineDay(): number {
     let last = -1;
     for (let d = 0; d < this.season.schedule.length; d++) {
       const dt = dateOf(this.world.year, d);
-      if (dt.month < TRADE_DEADLINE.month || (dt.month === TRADE_DEADLINE.month && dt.date <= TRADE_DEADLINE.date)) last = d;
+      if (dt.month < this.tradeDl.month || (dt.month === this.tradeDl.month && dt.date <= this.tradeDl.date)) last = d;
     }
     return last;
   }
@@ -1903,7 +1922,7 @@ export class GameSession {
     const none = { gain: 0, need: 0, before: 0, after: 0, tendency: 'rebuild' as const };
     if (aiTeam === this.teamIdx || !this.world.teams[aiTeam]) return { verdict: 'reject-invalid', message: '상대 구단을 고르세요.', detail: none };
     if (!this.tradeOpen) {
-      const why = this.done ? '시즌이 끝났습니다.' : `트레이드 마감(${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일)이 지났습니다.`;
+      const why = this.done ? '시즌이 끝났습니다.' : `트레이드 마감(${this.tradeDl.month}월 ${this.tradeDl.date}일)이 지났습니다.`;
       return { verdict: 'reject-invalid', message: why, detail: none };
     }
     if (give.some((p) => p.teamIdx !== this.teamIdx)) return { verdict: 'reject-invalid', message: '우리 구단 선수만 내줄 수 있습니다.', detail: none };
@@ -1920,7 +1939,7 @@ export class GameSession {
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
     const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay);
-    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
+    return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
       this.world.teams[aiTeam].org, sit, this.values);
   }
 
@@ -1976,7 +1995,7 @@ export class GameSession {
     const all = [...picks.give, ...picks.get];
     if (all.length === 0) return null;
     if (!this.pickTradeOpen) return `지명권 트레이드는 ${PICK_TRADE_FROM}년부터 할 수 있습니다 (2019년 8월 규약 개정, 세부 난이도에서 모든 시대 허용으로 바꿀 수 있습니다).`;
-    if (all.length > MAX_PICKS_PER_TRADE) return `한 트레이드에 지명권은 ${MAX_PICKS_PER_TRADE}장까지 넣을 수 있습니다.`;
+    if (all.length > ruleOf(this.league, 'maxPicksPerTrade')) return `한 트레이드에 지명권은 ${ruleOf(this.league, 'maxPicksPerTrade')}장까지 넣을 수 있습니다.`;
     // 2026-10-12 사용자 요청으로 현금 ↔ 지명권 트레이드도 연다 (실제 규약은 선수와 함께였다). 지명권끼리만 바꾸는 것은 막는다
     if (give.length + get.length === 0 && !cash) return '지명권은 선수나 현금과 함께 트레이드해야 합니다.';
     if (new Set(all.map(pickId)).size !== all.length) return '같은 지명권이 두 번 들어 있습니다.';
@@ -1992,7 +2011,7 @@ export class GameSession {
    * 그대로 받으면 성사된다. 우리 쪽에서 본 가치가 높은 순. 제안이 없는 구단은 빠진다
    */
   shopOffers(offer: SimPlayer[], cash = 0, want: ShopWant = 'any'): ShopOffer[] {
-    if (!this.tradeOpen || offer.length > MAX_PER_SIDE || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
+    if (!this.tradeOpen || offer.length > ruleOf(this.league, 'maxPerSide') || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
     if (offer.length === 0 && cash <= 0) return [];
     if (cash > 0 && cash > this.cashNow()) return [];
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
@@ -2867,7 +2886,7 @@ export class GameSession {
     const off = this.offseason;
     if (!off) return [];
     const view = Off.leagueView(this.league, this.store, this.params);
-    const ys = Array.from({ length: Off.EXT_MAX_YEARS - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
+    const ys = Array.from({ length: ruleOf(this.league, 'extMaxYears') - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
     return Off.extensionCandidates(this.league, off).map((p) => ({
       p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) })),
     }));

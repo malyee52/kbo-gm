@@ -1,18 +1,19 @@
 // 트레이드: 상대 구단 선택, 주고받을 선수 고르기, 제안과 AI 답, 요구안 묻기, 트레이드 기록.
 import { isStarterSkill } from '../../engine';
 import { useMemo, useState } from 'react';
-import { MAX_PER_SIDE, TENDENCY_LABEL, type TradeEvaluation } from '../../ai/trade';
+import { TENDENCY_LABEL, type TradeEvaluation } from '../../ai/trade';
 import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
-import { TRADE_DEADLINE, type ShopOffer, type ShopWant } from '../../game/session';
+import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { currentRuns } from '../../ai/value';
 import { runsGrade } from '../grades';
 import { teamColor } from '../teams';
-import { MAX_PICKS_PER_TRADE, parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
+import { parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
 import { GM_STYLE_LABEL, GM_STYLE_NOTE, gmStyle } from '../../league/gm';
 import { TradeTalk } from './FantasyNegotiate';
+import { ruleOf } from '../../league/rules';
 
 type Kind = 'all' | 'hit' | 'pit';
 
@@ -60,9 +61,9 @@ export function Trade() {
   const toggle = (set: Set<number>, setter: (s: Set<number>) => void, p: SimPlayer) => {
     const next = new Set(set);
     if (next.has(p.idx)) next.delete(p.idx);
-    else if (next.size < MAX_PER_SIDE) next.add(p.idx);
+    else if (next.size < ruleOf(session.league, 'maxPerSide')) next.add(p.idx);
     else {
-      setReply({ text: `한쪽에서 ${MAX_PER_SIDE}명까지 고를 수 있습니다.` });
+      setReply({ text: `한쪽에서 ${ruleOf(session.league, 'maxPerSide')}명까지 고를 수 있습니다.` });
       return;
     }
     setter(next);
@@ -105,9 +106,9 @@ export function Trade() {
         <div>
           <p className="muted small">
             {open
-              ? `마감: ${TRADE_DEADLINE.month}월 ${TRADE_DEADLINE.date}일 (${formatDate(year, session.tradeDeadlineDay)} 경기 전까지)`
+              ? `마감: ${session.tradeDl.month}월 ${session.tradeDl.date}일 (${formatDate(year, session.tradeDeadlineDay)} 경기 전까지)`
               : session.done ? '시즌이 끝나 트레이드를 할 수 없습니다.' : '트레이드 마감이 지났습니다.'}
-            {' · '}한쪽에서 {MAX_PER_SIDE}명까지. 받은 선수는 2군으로 들어옵니다.
+            {' · '}한쪽에서 {ruleOf(session.league, 'maxPerSide')}명까지. 받은 선수는 2군으로 들어옵니다.
           </p>
         </div>
       </section>
@@ -175,7 +176,7 @@ export function Trade() {
         <section className="panel">
           <h2>신인 지명권</h2>
           <p className="muted small">
-            다음 {PICK_YEARS_AHEAD}번의 드래프트, {PICK_MAX_ROUND}라운드까지. 한 트레이드에 {MAX_PICKS_PER_TRADE}장까지, 선수와 함께만 (2019년 8월 KBO 규약).
+            다음 {PICK_YEARS_AHEAD}번의 드래프트, {PICK_MAX_ROUND}라운드까지. 한 트레이드에 {ruleOf(session.league, 'maxPicksPerTrade')}장까지, 선수와 함께만 (2019년 8월 KBO 규약).
             순번은 그 해 원래 구단의 순위로 정해집니다. 넘겨받은 지명권으로 뽑은 선수는 입단 첫해 트레이드할 수 없습니다.
             리빌딩 구단일수록, 하위권 구단의 지명권일수록 높게 칩니다.
           </p>
@@ -258,8 +259,8 @@ function ShopPanel({ open }: { open: boolean }) {
   const pick = (p: SimPlayer) => {
     const next = new Set(sel);
     if (next.has(p.idx)) next.delete(p.idx);
-    else if (next.size < MAX_PER_SIDE) next.add(p.idx);
-    else { setMsg({ text: `한 번에 ${MAX_PER_SIDE}명까지 내놓을 수 있습니다.` }); return; }
+    else if (next.size < ruleOf(session.league, 'maxPerSide')) next.add(p.idx);
+    else { setMsg({ text: `한 번에 ${ruleOf(session.league, 'maxPerSide')}명까지 내놓을 수 있습니다.` }); return; }
     setSel(next);
     setOffers(null);
     setMsg(null);
@@ -298,7 +299,7 @@ function ShopPanel({ open }: { open: boolean }) {
     <div className="shop">
       <section className="panel">
         <div className="row-between wrap">
-          <h2>내놓을 선수 <span className="muted small">{sel.size}/{MAX_PER_SIDE}명 · 외국인·육성선수 제외</span></h2>
+          <h2>내놓을 선수 <span className="muted small">{sel.size}/{ruleOf(session.league, 'maxPerSide')}명 · 외국인·육성선수 제외</span></h2>
           <span className="inline">
             <label className="inline small">현금 얹기
               <input type="number" min={0} step={0.5} value={cashText} onChange={(e) => { setCashText(e.target.value); setOffers(null); }} style={{ width: 80 }} aria-label="얹을 현금(억 원)" /> 억 원
@@ -420,7 +421,7 @@ function PickBoxes({ title, team, selected, other, setSelected, disabled, onChan
   const toggle = (id: string) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
-    else if (next.size + other.size < MAX_PICKS_PER_TRADE) next.add(id);
+    else if (next.size + other.size < ruleOf(session.league, 'maxPicksPerTrade')) next.add(id);
     else return;
     setSelected(next);
     onChange();

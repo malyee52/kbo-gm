@@ -4,6 +4,7 @@
 // 조작은 이름 대신 id로 바꿔 이야기 기록(FantasyEntry.ops)에 남기고, 재현·불러오기 때는 AI 없이 그대로 다시 적용한다 (session.applyFreeOps).
 import type { GameSession } from '../game/session';
 import { leagueQuality } from '../engine';
+import { foreignRule } from '../league/eras';
 import type { LeaguePlayer } from '../league/types';
 import { complete, extractJson, type LlmSettings } from './llm';
 import { gameContext } from './context';
@@ -15,6 +16,13 @@ import type { FantasyEntry } from './types';
 import type { DataStore } from '../data/types';
 import { currentRuns } from '../ai/value';
 import { asSim } from '../league/growth';
+import { changedRules, clampRule, foreignPostingOn, ruleDate, ruleOf, RULE_DEFS, type RuleKey } from '../league/rules';
+import { ownedPicks, pickOwner, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../league/picks';
+import { capPayroll, salaryCap } from '../league/salary';
+import { cashOf } from '../league/finance';
+import { pickTradeAllowed } from '../league/difficulty';
+import { STAGES, STAGE_LABEL } from '../league/offseason';
+import { formatDate } from '../game/calendar';
 
 type Store = Pick<DataStore, 'meta' | 'season' | 'players'> & Partial<Pick<DataStore, 'drafts'>>;
 
@@ -30,7 +38,11 @@ export type FreeOp =
   /** 다른 구단 자금 (만 원) */
   | { op: 'teamCash'; team: number; amount: number }
   /** 판타지 효과 (신뢰·팬·자금·관중·컨디션·휴식 등, 상한 넉넉히) */
-  | { op: 'effect'; effect: FantasyEffect };
+  | { op: 'effect'; effect: FantasyEffect }
+  /** 지명권 주인을 바꾼다 (draft 입단 연도, round 라운드, from 원래 구단, to 새 주인) */
+  | { op: 'pick'; draft: number; round: number; from: number; to: number }
+  /** 리그 규정을 바꾼다 (league/rules.ts) */
+  | { op: 'rule'; key: RuleKey; value: number | null };
 
 // ---- 등급 ↔ 런 (ui/grades.ts runsGrade의 거꾸로: 40 + 5 × (−0.49 + 0.108 × 런) × 리그 수준)
 export function runsForGrade(grade: number, year: number): number {
@@ -53,7 +65,9 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"fans","delta":정수} 우리 팬 만족도
 - {"op":"teamForm","side":"bat|pit|all","edge":−0.05~0.05,"days":1~60} 우리 선수단 컨디션 (시즌 중)
 - {"op":"playerForm","player":"우리 선수 이름","edge":−0.05~0.05,"days":1~60} (시즌 중)
-- {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)`;
+- {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)
+- {"op":"pick","draft":입단 연도,"round":라운드,"from":"원래 구단 이름","to":"새 주인 구단 이름"} 신인 지명권을 넘긴다 ([지명권]의 남은 지명권만)
+- {"op":"rule","key":"규정 키","value":값} 리그 규정을 바꾼다 ([이 게임의 규정]의 키와 범위. 리그 전체에 적용된다)`;
 
 export function freeSystem(regressor: boolean, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션의 "자유 모드" 게임 마스터(TRPG 진행자)다. 플레이어는 한 구단의 단장이고, 무엇이든 하겠다고 말할 수 있다.
@@ -62,6 +76,12 @@ export function freeSystem(regressor: boolean, l: Leniency = 3): string {
 - 트레이드·영입 같은 일은 상대가 받아들일 때만 조작을 낸다. 거절·보류면 조작 없이 이야기만.
 - 플레이어가 말하지 않은 큰일을 멋대로 벌이지 않는다. 다만 판정의 대가·부작용(자금, 팬, 구단주 신뢰 등)은 붙일 수 있다.
 - 경기 결과·기록은 바꾸지 않는다 (경기는 엔진이 치른다).
+- 규정: [이 게임의 규정]이 이 세계의 규정 전부다. 네가 아는 실제 KBO 규약·관행과 다르면 이 게임의 규정을 따른다. 목록에 없는 규정을 지어내 거절 이유로 쓰지 않는다.
+  규정은 리그 전체의 일이라, 바꾸려면 KBO 이사회·총재·다른 구단을 움직일 명분이 필요하다 (판정 기준에 따라). 바꾸면 rule 조작을 낸다.
+- 조작할 수 있는 사람은 이 게임 리그 안의 선수뿐이다. [행동에 나온 이름]에 "리그에 없음"으로 나온 실존 인물(해외 리그 현역, 은퇴 선수, 야구 밖 인물)은
+  데려오거나 만들 수 없다. 이야기로 안 되는 이유를 말하고, 원하면 비슷한 유형의 가상 선수(지어낸 이름)를 대안으로 제안·영입할 수 있다. 가상 선수에 실존 인물 이름을 쓰지 않는다.
+  같은 이름의 선수가 여럿이면 [행동에 나온 이름]의 "이름@구단"으로 정확히 고른다.
+- 구단 운영과 관계없는 요청(야구 밖의 일)은 단장의 세계 안에서 짧게 이야기로만 다루고 조작은 내지 않는다.
 ${regressor ? '- 단장은 원래 역사를 기억하는 회귀자다 (다른 인물은 모른다).\n' : ''}
 ${leniencyRule(l)}
 
@@ -82,7 +102,7 @@ function rosterTable(g: GameSession, team: number, n: number): string {
     const runs = currentRuns(asSim(p, ctx.world.league, year), ctx);
     return { p, runs };
   }).sort((a, b) => b.runs - a.runs).slice(0, n);
-  return rows.map(({ p, runs }) => `${p.name}${p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${Math.round(p.contract.salary / 1000) / 10}억`).join('; ');
+  return rows.map(({ p, runs }) => `${p.name}${p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
 }
 
 /** 지금 소속 (시즌 중에는 월드, 오프시즌에는 리그) */
@@ -94,8 +114,103 @@ export function teamOfNow(g: GameSession, p: LeaguePlayer): number {
   return p.team;
 }
 
-export function freeContext(g: GameSession, store: Store): string {
-  const parts = [gameContext(g)];
+const won = (v: number) => `${Math.round(v / 1000) / 10}억 원`;
+const dollar = (v: number) => `${Math.round(v / 10000).toLocaleString('ko-KR')}만 달러`;
+
+/** 지금 이 게임의 규정 (AI가 실제 KBO 규약 대신 따르는 목록, 2026-10-13 사용자 요청 "우리 룰에 대해 프롬프트") */
+export function rulesContext(g: GameSession, store: Store): string {
+  const L = g.league;
+  const season = g.phase === 'season';
+  const year = season ? g.world.year : g.year + 1;
+  const lines: string[] = [];
+  if (season) {
+    const tdl = ruleDate(L, 'tradeDeadline');
+    const mdl = ruleDate(L, 'marketDeadline');
+    lines.push(`- 지금: ${year} 시즌 중 ${formatDate(year, g.currentDay)}. 트레이드 ${g.tradeOpen ? `가능 (마감 ${tdl.month}월 ${tdl.date}일)` : `마감됨 (${tdl.month}월 ${tdl.date}일)`}, 시즌 중 방출·영입 마감 ${mdl.month}월 ${mdl.date}일`);
+  } else {
+    lines.push(`- 지금: ${g.year} 오프시즌 (${g.offseason ? STAGE_LABEL[g.offseason.stage] : ''} 단계). 다음 시즌 ${year}`);
+  }
+  const fr = foreignRuleFor(g, store, year);
+  lines.push(`- 외국인: 보유 ${fr.regular}명${fr.asia ? ` + 아시아쿼터 ${fr.asia}명` : ''}, 신규 계약 상한 ${dollar(ruleOf(L, 'foreignNewCap'))}, 아시아쿼터 신규 상한 ${dollar(ruleOf(L, 'asiaNewCap'))}, 총액 상한 ${dollar(ruleOf(L, 'foreignTotalCap'))}, 시즌 중 교체 ${ruleOf(L, 'foreignSwaps')}번. 외국인 선수는 구단 간 트레이드 불가`);
+  lines.push(`- 외국인 포스팅: ${foreignPostingOn(L) ? '켜짐 (KBO 외국인 선수도 해외 구단 요청으로 포스팅, 원소속 구단이 이적료를 받음)' : '꺼짐 (실제 KBO처럼 없음. 켜려면 rule foreignPosting 1)'}`);
+  const cap = salaryCap(year, L);
+  lines.push(`- 샐러리캡: ${cap === null ? (ruleOf(L, 'capScale') <= 0 ? '폐지됨' : '아직 없음 (2023년 도입)') : `${won(cap)} (연봉 상위 ${ruleOf(L, 'capTopN')}명, 외국인·신인 제외). 우리 구단 지금 ${won(capPayroll(L.players, g.teamIdx, ruleOf(L, 'capTopN')))}. 초과 제재금 배율 ${ruleOf(L, 'capFineScale')}, 3회 초과 때 1라운드 지명 ${ruleOf(L, 'capPickDrop')}자리 강등`}`);
+  lines.push(`- 트레이드: 한쪽 ${ruleOf(L, 'maxPerSide')}명까지, 지명권 ${pickTradeAllowed(L, g.year, 2020) ? `한 번에 ${ruleOf(L, 'maxPicksPerTrade')}장까지 거래 가능 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지)` : '거래 불가 (이 시대 규정)'}. 현금 트레이드 가능`);
+  lines.push(`- FA: 오프시즌 외부 FA ${ruleOf(L, 'maxFaSignings')}명까지. 비FA 다년 계약 최대 ${ruleOf(L, 'extMaxYears')}년`);
+  lines.push(`- 선수단: 소속 정원 ${ruleOf(L, 'orgLimit')}명, 육성선수 ${ruleOf(L, 'devLimit')}명 (${ruleOf(L, 'devMaxAge')}세 이하). 포스트시즌 연장 ${ruleOf(L, 'postseasonMaxInnings')}회까지`);
+  lines.push(`- 우리 구단 자금: ${won(cashOf(L, g.teamIdx))}`);
+  const ch = changedRules(L);
+  if (ch.length) lines.push(`- 이 게임에서 바뀐 규정: ${ch.map((c) => `${c.label} ${c.from ?? '실제'} → ${c.to ?? '실제'}`).join(', ')}`);
+  lines.push(`[규정 키와 범위 (rule 조작용)] ${RULE_DEFS.map((d) => `${d.key}: ${d.label} ${d.min}~${d.max}`).join('; ')}`);
+  return `[이 게임의 규정]\n${lines.join('\n')}`;
+}
+
+function foreignRuleFor(g: GameSession, store: Store, year: number) {
+  return foreignRule(store.meta, year, g.league);
+}
+
+/** 넘길 수 있는 지명권의 가장 이른 드래프트 (이번 드래프트가 이미 시작됐으면 그다음) */
+export function firstOpenDraft(g: GameSession): number {
+  if (g.phase === 'season') return g.world.year + 1;
+  const st = g.offseason?.stage;
+  return st && STAGES.indexOf(st) >= STAGES.indexOf('draft') ? g.year + 2 : g.year + 1;
+}
+
+function picksContext(g: GameSession): string {
+  const L = g.league;
+  const teams = L.teams.map((_, i) => i).filter((i) => g.phase !== 'season' || g.world.teams[i]);
+  const first = firstOpenDraft(g);
+  const base = first - 1;
+  const mine = ownedPicks(L, g.teamIdx, base, teams).filter((p) => p.draft >= first);
+  const fmt = (p: { draft: number; round: number; from: number }) => `${p.draft} ${p.round}라운드(${L.teams[p.from].name} 원래)`;
+  // 다른 구단은 자기 지명권에서 달라진 것만 (넘겨준 것, 받아 온 것)
+  const others = teams.filter((t) => t !== g.teamIdx).map((t) => {
+    const ps = ownedPicks(L, t, base, teams).filter((p) => p.draft >= first);
+    const extra = ps.filter((p) => p.from !== t);
+    const gone: string[] = [];
+    for (let d = first; d <= base + PICK_YEARS_AHEAD; d++) for (let r = 1; r <= PICK_MAX_ROUND; r++) {
+      const o = pickOwner(L, { draft: d, round: r, from: t });
+      if (o !== t) gone.push(`${d} ${r}라운드 → ${L.teams[o]?.name ?? '?'}`);
+    }
+    return gone.length || extra.length ? `${L.teams[t].name}: ${[...gone.map((x) => `넘김 ${x}`), ...extra.map((p) => `받음 ${fmt(p)}`)].join(', ')}` : '';
+  }).filter(Boolean);
+  return `[지명권] (넘길 수 있는 것: ${first}~${base + PICK_YEARS_AHEAD} 드래프트, 1~${PICK_MAX_ROUND}라운드. 각 구단은 따로 적지 않으면 자기 지명권을 모두 가지고 있다)\n우리: ${mine.map(fmt).join(', ') || '없음'}${others.length ? `\n다른 구단 변동: ${others.join('; ')}` : ''}`;
+}
+
+/** 행동에 나온 이름: 리그 안 선수(소속)와 리그에 없는 실존 인물을 구분해 AI에 알려 준다 (예: "MLB의 박찬호" ↔ 리그의 다른 박찬호) */
+export function namesContext(g: GameSession, store: Store, action: string): string {
+  const L = g.league;
+  const year = g.phase === 'season' ? g.world.year : g.year + 1;
+  const inLeague = new Map<string, LeaguePlayer[]>();
+  for (const p of L.players) if (p.name.length >= 2 && action.includes(p.name)) inLeague.set(p.name, [...(inLeague.get(p.name) ?? []), p]);
+  const seen = new Set(L.players.map((p) => p.id));
+  const outside = new Map<string, string[]>();
+  for (const m of store.players.values()) {
+    if (m.name.length < 2 || seen.has(m.id) || !action.includes(m.name)) continue;
+    outside.set(m.name, [...(outside.get(m.name) ?? []), `${m.birthYear ?? '?'}년생 ${m.kind === 'P' ? '투수' : '야수'}, KBO 기록 ${m.first}~${m.last}`]);
+  }
+  // 더 긴 이름의 일부로만 나온 이름은 뺀다 ("박찬호" 안의 "박찬")
+  const all = [...inLeague.keys(), ...outside.keys()];
+  const partOnly = (n: string) => all.some((m) => m !== n && m.includes(n)) && action.split(all.find((m) => m !== n && m.includes(n))!).join('').indexOf(n) < 0;
+  for (const n of [...inLeague.keys()]) if (partOnly(n)) inLeague.delete(n);
+  for (const n of [...outside.keys()]) if (partOnly(n)) outside.delete(n);
+  const lines: string[] = [];
+  for (const [name, ps] of inLeague) {
+    for (const p of ps) {
+      const t = teamOfNow(g, p);
+      const where = t >= 0 ? L.teams[t].name : t === -2 ? '해외 (조작 불가)' : L.retired?.some((r) => r.id === p.id) ? '은퇴 (조작 불가)' : '무소속';
+      lines.push(`- ${name}${t >= 0 ? `@${L.teams[t].name}` : ''}: 리그 안 (${where}, ${p.birthYear ? year - p.birthYear : '?'}세 ${p.isPitcher ? '투수' : '야수'})`);
+    }
+  }
+  for (const [name, desc] of outside) lines.push(`- ${name}: 리그에 없음 (${desc.join(' / ')}). 데려오거나 만들 수 없다`);
+  if (!lines.length) return '';
+  return `[행동에 나온 이름]\n${lines.join('\n')}\n(행동이 말하는 사람이 리그 안 선수와 다른 사람이면 — 예를 들어 해외 리그 현역이나 은퇴한 같은 이름의 선수 — 리그 안 선수를 대신 조작하지 않는다)`;
+}
+
+export function freeContext(g: GameSession, store: Store, action = ''): string {
+  const parts = [gameContext(g), rulesContext(g, store), picksContext(g)];
+  const names = namesContext(g, store, action);
+  if (names) parts.push(names);
   parts.push(`[우리 구단 ${g.league.teams[g.teamIdx].name} 선수 (능력 순)] ${rosterTable(g, g.teamIdx, 40)}`);
   const others = g.league.teams.map((t, i) => ({ t, i })).filter((x) => x.i !== g.teamIdx && (g.phase !== 'season' || g.world.teams[x.i]));
   parts.push('[다른 구단 주요 선수]', ...others.map(({ t, i }) => `${t.name}: ${rosterTable(g, i, 8)}`));
@@ -128,7 +243,7 @@ function playerByName(g: GameSession, raw: unknown): LeaguePlayer | null {
 const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : typeof x === 'string' && x.trim() && Number.isFinite(Number(x)) ? Number(x) : null);
 
 /** AI가 낸 조작을 이름 → id로 바꾸고 범위를 다듬는다 (판단 상한은 없다, 값의 범위만) */
-export function resolveOps(g: GameSession, raw: unknown): { ops: FreeOp[]; dropped: string[] } {
+export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore, 'players'>): { ops: FreeOp[]; dropped: string[] } {
   const ops: FreeOp[] = [];
   const dropped: string[] = [];
   const rosterForEffects = g.league.players.filter((p) => teamOfNow(g, p) === g.teamIdx).map((p) => ({ id: p.id, name: p.name, real: p.real !== false }));
@@ -147,6 +262,11 @@ export function resolveOps(g: GameSession, raw: unknown): { ops: FreeOp[]; dropp
         const team = teamByName(g, e.team);
         const name = typeof e.name === 'string' ? e.name.trim().slice(0, 8) : '';
         if (team === null || team < 0 || !name) { dropped.push(`create: ${name || '이름 없음'} (구단 ${String(e.team)})`); break; }
+        // 가상 선수에 실존 인물 이름을 쓰지 않는다 (실존 선수 규칙)
+        if (g.league.players.some((p) => p.name === name && p.real !== false) || (store && [...store.players.values()].some((m) => m.name === name))) {
+          dropped.push(`create: ${name}은(는) 실존 선수 이름이라 가상 선수에 쓸 수 없음`);
+          break;
+        }
         const pos = e.pos === 'P' || e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
         ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(40, Math.round(num(e.age) ?? 22))),
           now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))) });
@@ -192,6 +312,27 @@ export function resolveOps(g: GameSession, raw: unknown): { ops: FreeOp[]; dropp
         ops.push({ op: 'effect', effect: x });
         break;
       }
+      case 'pick': {
+        const from = teamByName(g, e.from);
+        const to = teamByName(g, e.to);
+        const draft = num(e.draft);
+        const round = num(e.round);
+        const first = firstOpenDraft(g);
+        if (from === null || from < 0 || to === null || to < 0 || draft === null || round === null || draft < first || draft > first - 1 + PICK_YEARS_AHEAD
+          || round < 1 || round > PICK_MAX_ROUND || pickOwner(g.league, { draft, round, from }) === to) {
+          dropped.push(`pick: ${String(e.draft)} ${String(e.round)}라운드 (${String(e.from)} → ${String(e.to)})`);
+          break;
+        }
+        ops.push({ op: 'pick', draft, round, from, to });
+        break;
+      }
+      case 'rule': {
+        const def = RULE_DEFS.find((d) => d.key === e.key);
+        const v = e.value === null || e.value === '실제' ? null : num(e.value);
+        if (!def || (v === null && def.key !== 'foreignRegular' && def.key !== 'foreignAsia')) { dropped.push(`rule: ${String(e.key)}`); break; }
+        ops.push({ op: 'rule', key: def.key, value: v === null ? null : clampRule(def.key, v) });
+        break;
+      }
       default:
         dropped.push(`알 수 없는 조작 ${String(e.op)}`);
     }
@@ -203,13 +344,13 @@ export function resolveOps(g: GameSession, raw: unknown): { ops: FreeOp[]; dropp
 export async function freeAction(g: GameSession, store: Store, s: LlmSettings, action: string): Promise<{ entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] }> {
   const raw = await complete(s, {
     system: freeSystem(!!g.league.fantasy?.regressor, leniencyOf(g.league)),
-    messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[단장의 행동]\n${action}` }],
+    messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store, action)}\n\n[단장의 행동]\n${action}` }],
     maxTokens: 1500,
     mockReply: JSON.stringify({ title: '(시험용) 판정', narration: '단장의 뜻대로 일이 진행됐다.', ops: [{ op: 'fans', delta: 1 }] }),
   });
   const j = extractJson<{ title?: string; narration?: string; ops?: unknown }>(raw);
   if (!j?.narration) throw new Error('AI가 형식에 맞지 않게 답했습니다. 다시 시도하세요.');
-  const { ops, dropped } = resolveOps(g, j.ops);
+  const { ops, dropped } = resolveOps(g, j.ops, store);
   return {
     entry: { kind: 'action', title: String(j.title ?? '행동').slice(0, 80), ask: action.slice(0, 1000), text: String(j.narration).slice(0, 3000), who: '게임 마스터', ...(ops.length ? { ops } : {}) },
     dropped,
