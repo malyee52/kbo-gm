@@ -94,32 +94,74 @@ export function naiBody(model: string, prompt: string, seed: number, size: { wid
   };
 }
 
-/** zip에서 첫 PNG 파일을 꺼낸다 (저장·deflate 둘 다) */
-export async function firstPngFromZip(buf: ArrayBuffer): Promise<Uint8Array> {
+/** zip 안 파일 하나: 이름, 압축 방식, 압축된 데이터 */
+interface ZipEntry { name: string; method: number; data: Uint8Array }
+
+/**
+ * zip의 파일 목록. 중앙 디렉터리(파일 끝)에서 크기·위치를 읽는다: 스트리밍으로 만든 zip은 앞쪽 헤더의 크기가 0이고
+ * 실제 크기가 뒤(데이터 설명자·중앙 디렉터리)에 있다 (2026-10-13: 앞쪽 헤더만 읽다 압축 풀기가 깨져 "Failed to fetch"로 보였다)
+ */
+export function zipEntries(buf: ArrayBuffer): ZipEntry[] {
   const v = new DataView(buf);
   const bytes = new Uint8Array(buf);
-  // 이미 PNG면 그대로
-  if (bytes[0] === 0x89 && bytes[1] === 0x50) return bytes;
+  const dec = new TextDecoder();
+  // 중앙 디렉터리 끝 기록 (끝에서 거꾸로 찾는다, 주석 최대 64KB)
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 0xffff); i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  const out: ZipEntry[] = [];
+  if (eocd >= 0) {
+    const count = v.getUint16(eocd + 10, true);
+    let p = v.getUint32(eocd + 16, true);
+    for (let k = 0; k < count && p + 46 <= bytes.length && v.getUint32(p, true) === 0x02014b50; k++) {
+      const method = v.getUint16(p + 10, true);
+      const csize = v.getUint32(p + 20, true);
+      const nameLen = v.getUint16(p + 28, true);
+      const extraLen = v.getUint16(p + 30, true);
+      const commentLen = v.getUint16(p + 32, true);
+      const local = v.getUint32(p + 42, true);
+      const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+      if (local + 30 <= bytes.length && v.getUint32(local, true) === 0x04034b50) {
+        const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+        out.push({ name, method, data: bytes.subarray(start, start + csize) });
+      }
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    if (out.length) return out;
+  }
+  // 중앙 디렉터리가 없으면 앞쪽 헤더로 (크기가 적힌 zip만)
   let p = 0;
   while (p + 30 <= bytes.length && v.getUint32(p, true) === 0x04034b50) {
     const method = v.getUint16(p + 8, true);
     const csize = v.getUint32(p + 18, true);
     const nameLen = v.getUint16(p + 26, true);
     const extra = v.getUint16(p + 28, true);
-    const name = new TextDecoder().decode(bytes.subarray(p + 30, p + 30 + nameLen));
     const start = p + 30 + nameLen + extra;
-    const data = bytes.subarray(start, start + csize);
-    if (/\.png$/i.test(name)) {
-      if (method === 0) return data.slice();
-      if (method === 8) {
-        const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-        return new Uint8Array(await new Response(stream).arrayBuffer());
-      }
-      throw new Error(`zip 압축 방식 ${method}은 풀 수 없습니다.`);
-    }
+    out.push({ name: dec.decode(bytes.subarray(p + 30, p + 30 + nameLen)), method, data: bytes.subarray(start, start + csize) });
+    if (!csize) break;
     p = start + csize;
   }
-  throw new Error('NovelAI 답에서 그림을 찾지 못했습니다.');
+  return out;
+}
+
+async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** zip에서 첫 PNG 파일을 꺼낸다 (저장·deflate 둘 다, PNG가 그대로 오면 그대로) */
+export async function firstPngFromZip(buf: ArrayBuffer): Promise<Uint8Array> {
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) return bytes;
+  const entries = zipEntries(buf);
+  const e = entries.find((x) => /\.png$/i.test(x.name)) ?? entries[0];
+  if (!e || !e.data.length) throw new Error('NovelAI 답에서 그림을 찾지 못했습니다 (zip 형식을 읽지 못함).');
+  if (e.method === 0) return e.data.slice();
+  if (e.method === 8) {
+    try { return await inflateRaw(e.data); } catch (err) { throw new Error(`NovelAI 그림의 압축을 풀지 못했습니다 (${(err as Error).message}).`); }
+  }
+  throw new Error(`zip 압축 방식 ${e.method}은 풀 수 없습니다.`);
 }
 
 /** 그림 한 장 (PNG 바이트) */
@@ -140,5 +182,7 @@ export async function generateImage(s: NaiSettings, prompt: string, seed: number
     const hint = res.status === 401 ? ' (토큰을 확인하세요)' : res.status === 402 ? ' (구독·Anlas가 모자랍니다)' : res.status === 429 ? ' (동시 요청 한도, 잠시 뒤에)' : '';
     throw new Error(`NovelAI 오류 ${res.status}${hint}: ${t.slice(0, 160)}`);
   }
-  return firstPngFromZip(await res.arrayBuffer());
+  let buf: ArrayBuffer;
+  try { buf = await res.arrayBuffer(); } catch (e) { throw new Error(`NovelAI 그림을 받는 중에 연결이 끊겼습니다 (${(e as Error).message}). 잠시 뒤 다시 해 보세요.`); }
+  return firstPngFromZip(buf);
 }

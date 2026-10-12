@@ -24,7 +24,36 @@ function zipOf(name: string, data: Uint8Array, method: 0 | 8): ArrayBuffer {
   return out.buffer;
 }
 
+/** 스트리밍으로 만든 zip: 앞쪽 헤더 크기 0(플래그 bit 3) + 데이터 설명자 + 중앙 디렉터리 (NovelAI 답이 이런 꼴일 때 깨졌다) */
+function streamingZip(name: string, data: Uint8Array): ArrayBuffer {
+  const body = new Uint8Array(deflateRawSync(data));
+  const nb = new TextEncoder().encode(name);
+  const local = new Uint8Array(30 + nb.length);
+  const lv = new DataView(local.buffer);
+  lv.setUint32(0, 0x04034b50, true); lv.setUint16(6, 0x0008, true); lv.setUint16(8, 8, true); lv.setUint16(26, nb.length, true);
+  local.set(nb, 30);
+  const desc = new Uint8Array(16);
+  const dv = new DataView(desc.buffer);
+  dv.setUint32(0, 0x08074b50, true); dv.setUint32(8, body.length, true); dv.setUint32(12, data.length, true);
+  const cen = new Uint8Array(46 + nb.length);
+  const cv = new DataView(cen.buffer);
+  cv.setUint32(0, 0x02014b50, true); cv.setUint16(8, 0x0008, true); cv.setUint16(10, 8, true);
+  cv.setUint32(20, body.length, true); cv.setUint32(24, data.length, true); cv.setUint16(28, nb.length, true); cv.setUint32(42, 0, true);
+  cen.set(nb, 46);
+  const cenOff = local.length + body.length + desc.length;
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true); ev.setUint32(12, cen.length, true); ev.setUint32(16, cenOff, true);
+  const out = new Uint8Array(cenOff + cen.length + end.length);
+  out.set(local, 0); out.set(body, local.length); out.set(desc, local.length + body.length); out.set(cen, cenOff); out.set(end, cenOff + cen.length);
+  return out.buffer;
+}
+
 describe('NovelAI 삽화', () => {
+  it('스트리밍 zip (앞쪽 헤더 크기 0): 중앙 디렉터리로 크기를 읽어 푼다', async () => {
+    expect(Array.from(await firstPngFromZip(streamingZip('image_0.png', PNG)))).toEqual(Array.from(PNG));
+  });
+
   it('태그 다듬기: 한글·이름·로고·글자 태그를 지운다', () => {
     const t = sanitizeTags('김도영, young pitcher, team logo, Lee Jung-hoo smiling, stadium lights\nnight game; letters on jersey', ['Lee Jung-hoo']);
     expect(t).toBe('young pitcher, stadium lights, night game');
