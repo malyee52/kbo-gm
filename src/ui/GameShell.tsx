@@ -16,6 +16,7 @@ import { SeasonEnd } from './screens/SeasonEnd';
 import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Market } from './screens/Market';
+import { Fantasy } from './screens/Fantasy';
 import { Offseason } from './screens/Offseason';
 import { Club } from './screens/Club';
 import { Postseason } from './screens/Postseason';
@@ -46,6 +47,7 @@ const HUBS: Hub[] = ['오늘', '선수단', '리그', '구단', '기록실'];
 interface NavItem { id: Screen; label: string; offLabel?: string; season?: boolean; off?: boolean; hub: Hub }
 const NAV: NavItem[] = [
   { id: 'home', label: '홈', season: true, hub: '오늘' },
+  { id: 'fantasy', label: '판타지', hub: '오늘' },
   { id: 'offseason', label: '오프시즌', off: true, hub: '오늘' },
   { id: 'schedule', label: '일정·결과', offLabel: '지난 시즌 일정', hub: '오늘' },
   { id: 'articles', label: '기사', hub: '오늘' },
@@ -268,6 +270,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (n.id === 'season-end') return session.done;
     if (n.id === 'awards') return !!session.league.awards?.length;
     if (n.id === 'growth') return !!session.offseason?.growth;
+    if (n.id === 'fantasy') return !!session.fantasy;
     return true;
   };
   const nav = NAV.filter(shown);
@@ -372,6 +375,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'leaders' && <Leaders />}
               {screen === 'trade' && <Trade />}
               {screen === 'market' && <Market />}
+              {screen === 'fantasy' && <Fantasy />}
               {screen === 'save' && <SaveScreen onQuit={onQuit} />}
               {screen === 'season-end' && <SeasonEnd />}
               {screen === 'offseason' && <Offseason />}

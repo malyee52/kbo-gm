@@ -29,6 +29,7 @@ import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
+import { addFantasyEntry, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import {
   aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
@@ -114,6 +115,8 @@ export interface NewGameOptions {
   settings?: DifficultySettings;
   /** 시작 연도 능력 기준: 'season' 역사 재현(그 시즌 기록 중심), 'prior' 예측(직전 3시즌). 없으면 'prior' (예전 조작 기록과 같게) */
   ratingBasis?: 'season' | 'prior';
+  /** 판타지 모드 (AI 이야기, docs/fantasy-mode.md). regressor: 회귀자 (단장이 원래 역사를 기억한다) */
+  fantasy?: { regressor?: boolean };
 }
 
 /** 버그 보고용 재현 정보. `GameSession.replay(store, opts, actions, at)`에 그대로 넣으면 같은 상태가 된다 */
@@ -195,6 +198,9 @@ export type GameAction =
   /** 시즌 중 방출(웨이버 공시)·시장 선수 영입 (league/market.ts) */
   | { year: number; day: number; type: 'release-in'; id: string }
   | { year: number; day: number; type: 'sign-in'; id: string }
+  /** 판타지 모드: AI가 만든 글(기사·대화·사건). 재현 때는 AI를 다시 부르지 않고 이 기록을 그대로 넣는다 (docs/fantasy-mode.md) */
+  | { year: number; day: number; type: 'ai'; entry: FantasyEntry }
+  | { year: number; type: 'ai-off'; entry: FantasyEntry }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
@@ -577,6 +583,7 @@ export class GameSession {
     const params: EngineParams = { ...baseParams, ratingBasis: opts.ratingBasis ?? 'prior' };
     const { league, world } = createLeague(store, opts.year, opts.seed, params);
     if (opts.ratingBasis) league.ratingBasis = opts.ratingBasis;
+    if (opts.fantasy) league.fantasy = { log: [], ...(opts.fantasy.regressor ? { regressor: true } : {}) };
     if (!world.teams[opts.teamIdx]) throw new Error(`구단 색인이 잘못됐습니다: ${opts.teamIdx}`);
     league.difficulty = opts.difficulty ?? 'normal';
     if (opts.settings) { league.settings = { ...opts.settings }; league.startSettings = { ...opts.settings }; }
@@ -707,6 +714,7 @@ export class GameSession {
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'release-in') this.applyRelease(a.id);
     else if (a.type === 'sign-in') this.applySign(a.id);
+    else if (a.type === 'ai') this.applyFantasy(a.entry);
     else if (a.type === 'settings') this.applySettings(a.s);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
@@ -747,7 +755,7 @@ export class GameSession {
     const L = this.league;
     const firstTeam = L.owner?.history[0]?.team ?? L.owner?.team ?? this.teamIdx;
     return {
-      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}) },
+      opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}), ...(L.fantasy ? { fantasy: L.fantasy.regressor ? { regressor: true } : {} } : {}) },
       // 가을야구 중이면 가을야구 날짜 (2026-10-12: 정규시즌 날짜를 적어 다시 돌리면 가을야구 경기를 치르지 않던 문제)
       at: { year: this.year, day: this.currentDay, phase: this.phase },
       actions: clone(this.actions),
@@ -934,6 +942,30 @@ export class GameSession {
       this.addNews(this.season.day, 'trade', `[외국인 교체] ${body}`);
       addArticle(this.league, { year: this.world.year, day: this.season.day, kind: 'trade', franchise: t.franchise, title: `${t.name} 외국인 교체`, body });
     }
+  }
+
+  // ---- 판타지 모드 (src/fantasy, docs/fantasy-mode.md)
+
+  get fantasy(): FantasyState | null {
+    return this.league.fantasy ?? null;
+  }
+
+  /** AI가 만든 글을 이야기 기록에 넣고 조작 기록에 남긴다 (화면이 AI를 부른 뒤). 판타지 게임이 아니면 넣지 않는다 */
+  addFantasy(entry: Omit<FantasyEntry, 'year' | 'day'>): { ok: boolean; message: string } {
+    if (!this.league.fantasy) return { ok: false, message: '판타지 모드 게임이 아닙니다.' };
+    if (this.phase === 'season') {
+      const e: FantasyEntry = { ...entry, year: this.year, day: this.currentDay };
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'ai', entry: e });
+    } else {
+      const e: FantasyEntry = { ...entry, year: this.year, day: -1 };
+      this.dispatchOff({ year: this.year, type: 'ai-off', entry: e });
+    }
+    return { ok: true, message: '이야기에 남겼습니다.' };
+  }
+
+  private applyFantasy(entry: FantasyEntry): void {
+    if (!this.league.fantasy) return;
+    addFantasyEntry(this.league.fantasy, entry);
   }
 
   /** 육성선수를 정식 등록할 수 있나. 안 되면 이유 */
@@ -2076,6 +2108,7 @@ export class GameSession {
       case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
+      case 'ai-off': this.applyFantasy(a.entry); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
