@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { complete, DEFAULT_MODEL, listModels, LlmError, PROVIDER_LABEL, type LlmSettings, type Provider } from '../../fantasy/llm';
 import { forgetAiKey, loadAiSettings, saveAiSettings } from '../../fantasy/settings';
+import { parseServiceAccount } from '../../fantasy/vertex';
 import { gameContext } from '../../fantasy/context';
 import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
@@ -129,7 +130,7 @@ function AiSettings() {
           </select>
         </label>
       </div>
-      {s.provider !== 'mock' && (
+      {s.provider === 'vertex' ? <VertexFields s={s} update={update} setMsg={setMsg} /> : s.provider !== 'mock' && (
         <div className="form-row">
           <label>
             API 키
@@ -147,10 +148,45 @@ function AiSettings() {
       </div>
       <div className="actions">
         <button type="button" onClick={() => void run('test')} disabled={busy}>연결 시험</button>
-        <button type="button" className="ghost" onClick={() => void run('models')} disabled={busy || s.provider === 'mock'}>모델 목록 불러오기</button>
+        <button type="button" className="ghost" onClick={() => void run('models')} disabled={busy || s.provider === 'mock'}>{s.provider === 'vertex' ? '모델 이름 예' : '모델 목록 불러오기'}</button>
         <button type="button" className="ghost danger" onClick={() => { forgetAiKey(); setS(loadAiSettings()); setMsg({ text: '키를 지웠습니다.' }); }}>키 지우기</button>
       </div>
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
     </section>
+  );
+}
+
+/** Vertex AI: 서비스 계정 JSON 파일과 지역 */
+function VertexFields({ s, update, setMsg }: { s: LlmSettings; update: (s: LlmSettings) => void; setMsg: (m: { text: string; error?: boolean } | null) => void }) {
+  let info: string | null = null;
+  try { if (s.key) { const sa = parseServiceAccount(s.key); info = `프로젝트 ${sa.project_id} · ${sa.client_email}`; } } catch { info = null; }
+  const load = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      parseServiceAccount(text);
+      update({ ...s, key: text });
+      setMsg({ text: '서비스 계정 JSON을 넣었습니다. "연결 시험"을 눌러 보세요.' });
+    } catch (e) {
+      setMsg({ text: (e as Error).message, error: true });
+    }
+  };
+  return (
+    <>
+      <div className="form-row">
+        <label>
+          서비스 계정 JSON 파일
+          <input type="file" accept=".json,application/json" onChange={(e) => void load(e.target.files?.[0])} />
+        </label>
+        <span className="muted small">{info ?? '아직 없습니다.'} Google Cloud 콘솔 → IAM → 서비스 계정 → 키 만들기(JSON). 권한은 "Vertex AI 사용자"만 주는 계정을 권합니다. 파일 안의 비밀 키가 이 브라우저에 저장됩니다.</span>
+      </div>
+      <div className="form-row">
+        <label>
+          지역
+          <input type="text" value={s.region ?? 'global'} spellCheck={false} onChange={(e) => update({ ...s, region: e.target.value })} />
+        </label>
+        <span className="muted small">기본 global. Claude 모델은 us-east5·europe-west1 같은 지역이 필요할 수 있습니다. 모델 이름이 claude로 시작하면 Claude(Anthropic), 아니면 Gemini로 부릅니다.</span>
+      </div>
+    </>
   );
 }

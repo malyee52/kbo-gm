@@ -2,21 +2,26 @@
 // 서버가 없는 게임이라 플레이어 본인 키로 브라우저에서 바로 부른다. 키는 settings.ts가 브라우저에만 둔다.
 // 이 파일은 fetch만 쓰고 게임 상태를 건드리지 않는다. 답은 부른 쪽이 조작 기록에 남긴다 (재현).
 
-export type Provider = 'anthropic' | 'openai' | 'gemini' | 'mock';
+import { accessToken, parseServiceAccount, vertexUrl } from './vertex';
+
+export type Provider = 'anthropic' | 'openai' | 'gemini' | 'vertex' | 'mock';
 
 export const PROVIDER_LABEL: Record<Provider, string> = {
-  anthropic: 'Claude (Anthropic)', openai: 'OpenAI', gemini: 'Gemini (Google)', mock: '시험용 (AI 없이 정해진 글)',
+  anthropic: 'Claude (Anthropic)', openai: 'OpenAI', gemini: 'Gemini (Google AI Studio 키)', vertex: 'Vertex AI (Google Cloud 서비스 계정 JSON)', mock: '시험용 (AI 없이 정해진 글)',
 };
 
 /** 기본 모델 (2026-10-12. 바뀌면 설정에서 고치거나 모델 목록을 불러 고른다) */
 export const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: 'claude-sonnet-5-5', openai: 'gpt-5.5', gemini: 'gemini-3.6-flash', mock: 'mock',
+  anthropic: 'claude-sonnet-5-5', openai: 'gpt-5.5', gemini: 'gemini-3.6-flash', vertex: 'gemini-3.6-flash', mock: 'mock',
 };
 
 export interface LlmSettings {
   provider: Provider;
   model: string;
+  /** API 키. Vertex AI는 서비스 계정 JSON 글 전체 */
   key: string;
+  /** Vertex AI 지역 (없으면 global) */
+  region?: string;
 }
 
 export interface LlmMessage {
@@ -69,6 +74,18 @@ export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch
   const max = req.maxTokens ?? 1200;
   if (s.provider === 'mock') return req.mockReply ?? '(시험용 답) 이번 주 경기는 계획대로 흘러갔다.';
   if (!s.key.trim()) throw new LlmError('API 키가 없습니다. 판타지 → AI 설정에서 넣으세요.');
+  if (s.provider === 'vertex') {
+    const sa = parseServiceAccount(s.key);
+    const token = await accessToken(sa, f);
+    const url = vertexUrl(sa, s.region ?? 'global', s.model);
+    const auth = { authorization: `Bearer ${token}` };
+    if (/^claude/i.test(s.model)) {
+      const d = await postJson(f, url, auth, { anthropic_version: 'vertex-2023-10-16', max_tokens: max, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[] };
+      return (d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
+    }
+    const d = await postJson(f, url, auth, geminiBody(req, max)) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    return (d.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  }
   if (s.provider === 'anthropic') {
     const d = await postJson(f, 'https://api.anthropic.com/v1/messages', {
       'x-api-key': s.key.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
@@ -82,17 +99,25 @@ export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch
     }) as { choices?: { message?: { content?: string } }[] };
     return d.choices?.[0]?.message?.content ?? '';
   }
-  const d = await postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, {
+  const d = await postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, geminiBody(req, max)) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return (d.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+}
+
+function geminiBody(req: LlmRequest, max: number) {
+  return {
     systemInstruction: { parts: [{ text: req.system }] },
     contents: req.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
     generationConfig: { maxOutputTokens: max },
-  }) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  return (d.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  };
 }
+
+/** Vertex AI 모델 이름 예 (목록 API는 프로젝트 권한이 더 필요해 고정 목록. 직접 고쳐 쓸 수 있다) */
+export const VERTEX_MODEL_HINTS = ['gemini-3.6-flash', 'gemini-3.1-pro', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'];
 
 /** 그 제공자가 쓸 수 있는 모델 이름 */
 export async function listModels(s: LlmSettings, f: Fetch = fetch): Promise<string[]> {
   if (s.provider === 'mock') return ['mock'];
+  if (s.provider === 'vertex') return VERTEX_MODEL_HINTS;
   if (!s.key.trim()) throw new LlmError('API 키가 없습니다.');
   if (s.provider === 'anthropic') {
     const d = await getJson(f, 'https://api.anthropic.com/v1/models?limit=100', {

@@ -46,3 +46,6 @@
 - OpenAI: `POST https://api.openai.com/v1/chat/completions`, 헤더 `Authorization: Bearer`. 기본 `gpt-5.5` (OpenAI 변경 기록의 권장)
 - Gemini: `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, 헤더 `x-goog-api-key`. 기본 `gemini-3.6-flash` (공식 안내 예시, 확인 필요)
 - 모델 이름은 자주 바뀌므로 설정에서 직접 고치거나 "모델 목록 불러오기"(각 제공자의 모델 목록 API)로 고른다
+- Vertex AI (2026-10-12 사용자 요청): Google Cloud 서비스 계정 JSON 파일로 연결 (`src/fantasy/vertex.ts`). 브라우저에서 JWT(RS256)를 Web Crypto로 서명해 `oauth2.googleapis.com/token`에서 접속 토큰을 받는다(메모리에 50분).
+  Gemini는 `publishers/google/models/{model}:generateContent`, 이름이 claude로 시작하는 모델은 `publishers/anthropic/models/{model}:rawPredict`(본문 `anthropic_version: vertex-2023-10-16`). 지역 기본 global (지역 없는 호스트 `aiplatform.googleapis.com`).
+  JSON 안의 비밀 키가 브라우저에 저장된다: 권한을 "Vertex AI 사용자"로만 준 계정을 권한다. 브라우저에서 토큰 서버·Vertex 주소를 막지 않는지는 아직 실제 키로 확인하지 못했다
