@@ -22,8 +22,11 @@ export const POSTING_SERVICE = 7;
 export const POSTING_FEE_PER_RUN = 40_000;
 export const POSTING_FEE_MIN = 300_000;
 export const POSTING_FEE_MAX = 1_500_000;
-/** 정상급 선수 한 명이 한 해에 포스팅을 요청할 확률 (임시값: 리그 전체 한 해 1명 안팎) */
-export const POSTING_CHANCE = 0.1;
+/**
+ * 정상급 선수 한 명이 한 해에 포스팅을 요청할 확률. 2026-10-12 실제 자료로 맞춤: 2012~2026년 해외 진출 15명(한 해 약 1명, KNOWN_OVERSEAS).
+ * 0.1이면 게임에서 한 해 0.55명, 0.25면 0.97명 (2026 시작 15시즌, 2시드)
+ */
+export const POSTING_CHANCE = 0.25;
 /** 한 해 해외 진출 상한 (리그 전체, 임시값) */
 export const DEPARTURES_PER_YEAR = 2;
 /** 해외에서 이 나이(다음 시즌 나이)가 되면 은퇴로 본다 */

@@ -5,6 +5,7 @@
 //   무소속 선수는 오프시즌마다 리그 명단에서 지워지므로(closeOffseason), 보관하지 않으면 통산 기록이 사라진다.
 // - 연표: 게임 안 시즌은 결산 때 순위·우승을 기록하고(yearbook), 시작 전 시즌은 자료의 최종 순위로 만든다.
 
+import { batWarOf, pitWarOf, realEnv, realEnvOf, warSummary } from './war';
 import type { DataStore } from '../data/types';
 import type { LeaguePlayer, LeagueState, SeasonLine } from './types';
 
@@ -27,6 +28,8 @@ export interface ArchivedPlayer {
   seasons: number;
   bat?: number[];
   pit?: number[];
+  /** 게임 안 시즌별 가치 (war.ts, 2026-10-12부터. 예전 보관 선수에는 없다) */
+  wars?: number[];
 }
 
 export interface YearTeam {
@@ -74,6 +77,8 @@ export interface Career {
   franchiseSeasons: Record<string, number>;
   /** 마지막 소속 구단 이름 */
   lastTeam: string;
+  /** 시즌별 가치 (승, war.ts). 실제 시즌과 게임 안 시즌 */
+  wars: number[];
 }
 
 const emptyBat = (): CareerBat => ({ g: 0, pa: 0, ab: 0, r: 0, h: 0, d: 0, t: 0, hr: 0, rbi: 0, bb: 0, so: 0, sb: 0 });
@@ -124,7 +129,24 @@ function archiveOf(league: LeagueState, p: LeaguePlayer, why: ArchivedPlayer['wh
     id: p.id, name: p.name, real: p.real, isPitcher: p.isPitcher, birthYear: p.birthYear,
     lastYear: h[h.length - 1].year, franchises, franchiseSeasons, lastTeam: h[h.length - 1].team, why, seasons: h.length,
     bat: sumLines(h.map((s) => s.bat)), pit: sumLines(h.map((s) => s.pit)),
+    ...(league.seasonEnv ? { wars: h.map((s) => lineWar(league, null, s, p.pos)) } : {}),
   };
+}
+
+/** 게임 안 시즌 줄의 가치 (war.ts). 그 해 시뮬 환경이 없으면(예전 저장) 실제 자료의 그 해(가까운 해) 환경, 그것도 없으면 0 */
+function lineWar(league: LeagueState, store: Store | null, s: SeasonLine, pos: string | null | undefined): number {
+  const env = league.seasonEnv?.[String(s.year)] ?? (store ? realEnvOf(store, s.year) : undefined);
+  if (!env) return 0;
+  let w = 0;
+  if (s.bat) {
+    const b = s.bat;
+    w += batWarOf({ pa: b[B.pa], h: b[B.h], d: b[B.d], t: b[B.t], hr: b[B.hr], bb: b[B.bb], hbp: b[B.hbp] }, pos, env);
+  }
+  if (s.pit) {
+    const q = s.pit;
+    w += pitWarOf({ g: q[P.g], gs: q[P.gs], outs: q[P.outs], hr: q[P.hr], bb: q[P.bb], hbp: q[P.hbp], so: q[P.so], r: q[P.r] }, env);
+  }
+  return w;
 }
 
 /** 실제 자료의 구단 이름 → 계보 (그 해 이름) */
@@ -193,7 +215,7 @@ function realCareers(store: Store, before: number): Map<string, Career> {
     let c = out.get(id);
     if (!c) {
       const m = store.players.get(id);
-      c = { id, name: m?.name ?? id, real: true, isPitcher: m ? m.kind === 'P' : false, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: true, franchiseSeasons: {}, lastTeam: '' };
+      c = { id, name: m?.name ?? id, real: true, isPitcher: m ? m.kind === 'P' : false, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: true, franchiseSeasons: {}, lastTeam: '', wars: [] };
       out.set(id, c);
     }
     c.firstYear = Math.min(c.firstYear, year);
@@ -215,6 +237,12 @@ function realCareers(store: Store, before: number): Map<string, Career> {
       c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + 1;
       if (y >= c.lastYear) c.lastTeam = r.team;
     }
+    // 시즌 가치 (war.ts): 투수의 타격 기록은 빼고, 한 해에 한 값
+    const env = realEnv(sd);
+    const yearWar = new Map<string, number>();
+    for (const r of sd.bat) if (store.players.get(r.id)?.kind !== 'P') yearWar.set(r.id, (yearWar.get(r.id) ?? 0) + batWarOf(r, r.pos, env));
+    for (const r of sd.pit) yearWar.set(r.id, (yearWar.get(r.id) ?? 0) + pitWarOf(r, env));
+    for (const [id, w] of yearWar) get(id, y).wars.push(w);
     for (const r of sd.bat) {
       const c = get(r.id, y).bat;
       c.g += r.g; c.pa += r.pa; c.ab += r.ab; c.r += r.r; c.h += r.h; c.d += r.d; c.t += r.t; c.hr += r.hr; c.rbi += r.rbi;
@@ -234,11 +262,11 @@ function realCareers(store: Store, before: number): Map<string, Career> {
  */
 export function careers(league: LeagueState, store: Store, current?: Map<string, SeasonLine>): Map<string, Career> {
   const out = new Map<string, Career>();
-  for (const [id, c] of realCareers(store, league.startYear)) out.set(id, { ...c, bat: { ...c.bat }, pit: { ...c.pit }, franchiseSeasons: { ...c.franchiseSeasons } });
+  for (const [id, c] of realCareers(store, league.startYear)) out.set(id, { ...c, bat: { ...c.bat }, pit: { ...c.pit }, franchiseSeasons: { ...c.franchiseSeasons }, wars: [...c.wars] });
   const get = (id: string, name: string, real: boolean, isPitcher: boolean, year: number): Career => {
     let c = out.get(id);
     if (!c) {
-      c = { id, name, real, isPitcher, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: false, franchiseSeasons: {}, lastTeam: '' };
+      c = { id, name, real, isPitcher, firstYear: year, lastYear: year, active: false, bat: emptyBat(), pit: emptyPit(), hasReal: false, franchiseSeasons: {}, lastTeam: '', wars: [] };
       out.set(id, c);
     }
     c.name = name;
@@ -251,6 +279,7 @@ export function careers(league: LeagueState, store: Store, current?: Map<string,
     const c = get(a.id, a.name, a.real, a.isPitcher, a.lastYear);
     if (a.bat) addBatLine(c.bat, a.bat);
     if (a.pit) addPitLine(c.pit, a.pit);
+    if (a.wars) c.wars.push(...a.wars);
     for (const [f, n] of Object.entries(a.franchiseSeasons ?? {})) c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + n;
     c.lastTeam = a.lastTeam;
   }
@@ -258,11 +287,11 @@ export function careers(league: LeagueState, store: Store, current?: Map<string,
     const lines = [...p.history, ...(current?.get(p.id) ? [current.get(p.id)!] : [])];
     if (!lines.length && !out.has(p.id)) continue;
     const c = get(p.id, p.name, p.real, p.isPitcher, lines.at(-1)?.year ?? league.year);
-    c.active = p.team >= 0;
+    c.active = p.team >= 0 || p.team === -2; // 해외(−2)에서 뛰는 선수도 현역 (명예의 전당·은퇴 판정)
     for (const s of lines) {
       if (s.bat) addBatLine(c.bat, s.bat);
       if (s.pit) addPitLine(c.pit, s.pit);
-      if (s.bat || s.pit) { const f = gameFranchise(league, s.year, s.team); c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + 1; c.lastTeam = s.team; }
+      if (s.bat || s.pit) { const f = gameFranchise(league, s.year, s.team); c.franchiseSeasons[f] = (c.franchiseSeasons[f] ?? 0) + 1; c.lastTeam = s.team; c.wars.push(lineWar(league, store, s, p.pos)); }
     }
   }
   return out;
@@ -414,9 +443,16 @@ export function franchiseHistory(league: LeagueState, store: Store): FranchiseHi
   return [...out.values()].sort((a, b) => b.titles.length - a.titles.length || b.postseasons - a.postseasons);
 }
 
-// ---- 명예의 전당과 구단 레전드 (임시 기준)
+// ---- 명예의 전당과 구단 레전드
 
-/** 헌액 기준 (하나라도 넘으면). 게임 안 MVP 2회 이상도 */
+/**
+ * 헌액 기준 (2026-10-12, 실제 자료로 맞춤): 통산 가치(war.ts) HOF_WAR승 이상, 또는 최고 5시즌 합 HOF_PEAK5승 이상, 또는 게임 안 MVP 2회 이상.
+ * 실제 커리어에 적용하면 2024년까지 은퇴한 선수 45명 (KBO 레전드 40인과 비슷한 규모, 선동열·최동원·이종범·장효조·이만수·김시진 포함).
+ * 예전 기준(2,000안타·300홈런·150승 같은 누적 기록)은 144경기 시대의 오래 뛴 선수만 들어가 1980~90년대 스타가 빠졌다. 누적 기록은 헌액 사유로만 적는다
+ */
+export const HOF_WAR = 45;
+export const HOF_PEAK5 = 30;
+/** 헌액 사유로 함께 적는 누적 기록 */
 export const HOF_RULES: { label: string; test: (c: Career) => boolean }[] = [
   { label: '2,000안타', test: (c) => c.bat.h >= 2000 },
   { label: '300홈런', test: (c) => c.bat.hr >= 300 },
@@ -455,9 +491,16 @@ export function hallOfFame(league: LeagueState, all: Map<string, Career>): HofEn
   const out: HofEntry[] = [];
   for (const c of all.values()) {
     if (c.active) continue;
-    const reasons = HOF_RULES.filter((r) => r.test(c)).map((r) => r.label);
-    if ((mvps.get(c.id) ?? 0) >= HOF_MVP) reasons.push(`MVP ${mvps.get(c.id)}회`);
-    if (reasons.length) out.push({ c, year: c.lastYear + 1, reasons });
+    const { total, peak5 } = warSummary(c.wars);
+    const mvp = mvps.get(c.id) ?? 0;
+    if (total < HOF_WAR && peak5 < HOF_PEAK5 && mvp < HOF_MVP) continue;
+    const reasons = [
+      ...(total >= HOF_WAR ? [`통산 가치 ${total.toFixed(0)}승`] : []),
+      ...(peak5 >= HOF_PEAK5 ? [`최고 5시즌 ${peak5.toFixed(0)}승`] : []),
+      ...(mvp >= HOF_MVP ? [`MVP ${mvp}회`] : []),
+      ...HOF_RULES.filter((r) => r.test(c)).map((r) => r.label),
+    ];
+    out.push({ c, year: c.lastYear + 1, reasons });
   }
   return out.sort((a, b) => b.year - a.year || b.reasons.length - a.reasons.length || a.c.name.localeCompare(b.c.name));
 }

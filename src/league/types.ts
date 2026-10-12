@@ -226,6 +226,8 @@ export interface LeagueState {
   events?: EventState;
   /** 리그를 떠난 선수의 게임 안 통산 (history.ts, 2026-10-11) */
   archive?: ArchivedPlayer[];
+  /** 게임 안 시즌의 리그 환경 (war.ts, 결산 때). 시즌 가치(WAR)를 다시 계산할 때 쓴다. 예전 저장에는 없다 (그 해 실제 자료로 대신) */
+  seasonEnv?: Record<string, import('./war').WarEnv>;
   /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
   yearbook?: YearRecord[];
   /** 게임 안 시즌의 단일 시즌 기록 부문별 상위 (history.ts) */
