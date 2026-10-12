@@ -17,8 +17,9 @@ export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t:
   }
 }
 
-export function FantasyFree() {
-  const { session, store, changed, autosave } = useGame();
+/** compact: 홈 화면용 (입력 + 최근 행동 3개, 2026-10-13 사용자 요청) */
+export function FantasyFree({ compact = false }: { compact?: boolean }) {
+  const { session, store, changed, autosave, go } = useGame();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -43,12 +44,12 @@ export function FantasyFree() {
       setBusy(false);
     }
   };
-  const log = (session.fantasy?.log ?? []).filter((e) => e.kind === 'action').slice(-30).reverse();
+  const log = (session.fantasy?.log ?? []).filter((e) => e.kind === 'action').slice(compact ? -3 : -30).reverse();
   return (
     <section className="stack">
       <div className="panel stack">
-        <h2>행동 <span className="muted small">무엇이든 하겠다고 쓰면 게임 마스터(AI)가 판정해 바로 반영합니다</span></h2>
-        <textarea rows={3} maxLength={1000} value={text} disabled={busy}
+        <h2>행동 <span className="muted small">무엇이든 하겠다고 쓰면 게임 마스터(AI)가 판정해 바로 반영합니다</span>{compact && <button type="button" className="link small card-more" onClick={() => go('fantasy')}>판타지 전체</button>}</h2>
+        <textarea rows={compact ? 2 : 3} maxLength={1000} value={text} disabled={busy}
           placeholder="예: 롯데 단장에게 전화해 우리 2군 유망주 둘과 현금 10억으로 마무리 투수를 달라고 한다 / 일본 독립리그에서 강속구 투수를 찾아 데려온다 / 구단주에게 내년 예산 증액을 설득한다"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void act(); } }} />
