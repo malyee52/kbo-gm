@@ -1,6 +1,6 @@
 // 저장·설정: 저장 칸, 파일 내보내기·가져오기, 버그 보고용 재현 정보.
 import { useEffect, useState } from 'react';
-import { deleteSave, isAutoSlot, listSaves, type SaveRecord } from '../../game/storage';
+import { deleteSave, isAutoSlot, listSaves, renameSave, type SaveRecord } from '../../game/storage';
 import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
 import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
@@ -58,7 +58,14 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
                 const s = bySlot.get(slot);
                 return (
                   <tr key={slot}>
-                    <td className="l">{isAutoSlot(slot) ? '자동 저장' : slot}</td>
+                    <td className="l">
+                      {isAutoSlot(slot) ? '자동 저장' : slot}
+                      {s && !isAutoSlot(slot) && (
+                        <input type="text" className="slot-label" defaultValue={s.label ?? ''} placeholder="이름 붙이기" maxLength={30} aria-label={`${slot} 이름`}
+                          onBlur={(e) => { if ((e.target.value.trim()) !== (s.label ?? '')) void renameSave(slot, e.target.value).then(refresh); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+                      )}
+                    </td>
                     {s ? (
                       <>
                         <td className="l">{s.year} {s.teamName}</td>

@@ -307,6 +307,11 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: var(--panel); box-shadow: var(--shadow-sm); }
 .seg button { border: 0; border-radius: 0; background: transparent; color: var(--muted); font-weight: 600; padding: 5px 14px; min-height: 30px; box-shadow: none; }
 .seg button + button { border-left: 1px solid var(--line); }
+/* 작은 구분 버튼 (홈 알림 종류, 2026-10-12) */
+.seg.small { margin: 2px 0 8px; }
+.seg.small button { padding: 3px 10px; min-height: 26px; font-size: 12px; }
+/* 저장 칸 이름 (저장 화면) */
+.slot-label { margin-left: 8px; width: 9.5em; max-width: 100%; padding: 2px 6px; font-size: 13px; }
 .seg button:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
 .seg button.on { background: var(--fg); color: var(--bg); }
 .seg.small button { padding: 3px 10px; font-size: 12px; min-height: 26px; }
