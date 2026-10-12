@@ -34,3 +34,16 @@ Rules:
 - Draw only fictional, unnamed characters (e.g. a young pitcher, a team staff member, a reporter, fans) or places (stadium, dugout, office, press room). Never name or depict a real person. Never write any person's name.
 - No logos, emblems, letters, numbers or text in the picture.
 - Output only comma-separated English tags (10 to 25 tags), nothing else. Include composition and lighting (e.g. wide shot, night game, stadium lights).`;
+
+/** 회귀자: 단장의 독백 (원래 역사를 기억하는 사람) */
+export const MEMORY_SYSTEM = `너는 KBO 단장 시뮬레이션 판타지 모드의 화자다. 주인공은 한 번 겪은 시대로 돌아온 단장(회귀자)이고, 원래 역사(실제 기록)를 기억한다.
+게임 상황과 [원래 역사]를 읽고, 지금 시점에서 주인공이 떠올리는 기억과 다짐을 1인칭 독백으로 쓴다.
+
+${RULES}
+- 원래 역사의 기록(우승 구단, 타이틀, 성적 숫자)은 주어진 그대로만 쓴다. 실존 선수에 대해서는 "원래라면 그해 44홈런을 쳤다" 같은 기록 사실만 떠올린다.
+- 게임이 원래 역사와 달라진 점이 있으면 그 차이를 짚는다.
+
+[형식]
+첫 줄: 제목 (한 줄)
+빈 줄
+본문: 4~7문장, 1인칭 독백(-다 또는 -지). 담담하고 소설 같은 말투.`;

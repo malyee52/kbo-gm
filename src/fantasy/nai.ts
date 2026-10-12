@@ -133,7 +133,7 @@ export async function generateImage(s: NaiSettings, prompt: string, seed: number
       body: JSON.stringify(naiBody(s.model || NAI_DEFAULT_MODEL, prompt, seed, size)),
     });
   } catch (e) {
-    throw new Error(`NovelAI에 연결하지 못했습니다 (${(e as Error).message}).`);
+    throw new Error(`NovelAI(image.novelai.net)에 연결하지 못했습니다 (${(e as Error).message}). 광고 차단·보안 확장 프로그램을 확인하고 잠시 뒤 다시 해 보세요 (그림 서버가 바쁠 때도 이렇게 보입니다).`);
   }
   if (!res.ok) {
     const t = await res.text().catch(() => '');
