@@ -49,3 +49,12 @@
 - Vertex AI (2026-10-12 사용자 요청): Google Cloud 서비스 계정 JSON 파일로 연결 (`src/fantasy/vertex.ts`). 브라우저에서 JWT(RS256)를 Web Crypto로 서명해 `oauth2.googleapis.com/token`에서 접속 토큰을 받는다(메모리에 50분).
   Gemini는 `publishers/google/models/{model}:generateContent`, 이름이 claude로 시작하는 모델은 `publishers/anthropic/models/{model}:rawPredict`(본문 `anthropic_version: vertex-2023-10-16`). 지역 기본 global (지역 없는 호스트 `aiplatform.googleapis.com`).
   JSON 안의 비밀 키가 브라우저에 저장된다: 권한을 "Vertex AI 사용자"로만 준 계정을 권한다. 브라우저에서 토큰 서버·Vertex 주소를 막지 않는지는 아직 실제 키로 확인하지 못했다
+
+## 5. 삽화 (NovelAI, 2026-10-12)
+
+사용자 결정: **가상 인물·장면 + 구단 색 느낌**, **글마다 자동**.
+- 글(기사 등) → 글 AI가 영어 그림 태그(가상 인물·장면만, 이름·글자·로고 금지) → `sanitizeTags`로 한글·선수 이름·로고·글자 태그 제거 → 구단 색 유니폼 태그(`colorWord`)와 기본·금지 태그 → NovelAI
+- 글 AI 키가 없으면 글 종류별 정해 둔 장면 태그
+- 그림은 게임 상태에 영향이 없어 조작 기록에 남기지 않고, 이 브라우저 IndexedDB `kbo-gm-art`에 WebP로 줄여 둔다 (저장 파일·내보내기에 없음)
+- 브라우저 호출 허용(CORS) 확인 (2026-10-12): image.novelai.net, oauth2.googleapis.com, aiplatform.googleapis.com, api.openai.com, generativelanguage.googleapis.com, api.anthropic.com 모두 허용
+
