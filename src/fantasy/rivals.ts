@@ -7,7 +7,7 @@ import { Rng } from '../engine';
 import type { GameSession } from '../game/session';
 import { koreanName } from '../league/names';
 import type { LeagueState } from '../league/types';
-import { complete, extractJson, type LlmSettings } from './llm';
+import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { FREE_OPS_MENU, freeContext, resolveOps, resolvePromises, teamOfNow, type FreeOp } from './free';
 import type { FantasyChoice, FantasyEntry } from './types';
@@ -66,7 +66,7 @@ export async function rivalMove(g: GameSession, store: Store, s: LlmSettings): P
   const { team, kind } = rivalPick(g);
   const gm = rivalGmOf(g.league, team);
   const teamName = g.league.teams[team].name;
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: rivalSystem(),
     messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[이번 주 움직이는 단장] ${teamName} 단장 ${gm} (가상 인물). 종류: ${kind === 'offer' ? 'offer (우리에게 제안)' : 'move (다른 구단과의 움직임)'}` }],
     maxTokens: 1500,
@@ -75,7 +75,7 @@ export async function rivalMove(g: GameSession, store: Store, s: LlmSettings): P
       : { kind, title: `(시험용) ${teamName}의 투자`, narration: '자금을 투입했다.', ops: [{ op: 'teamCash', team: teamName, amount: 5 }] }),
   });
   const j = extractJson<{ kind?: string; title?: string; narration?: string; ops?: unknown; choices?: unknown }>(raw);
-  if (!j?.narration) throw new Error('AI가 형식에 맞지 않게 답했습니다.');
+  if (!j?.narration) throw new Error(`AI가 형식에 맞지 않게 답했습니다 (다시 물어도 같았습니다). 답 앞부분: ${preview(raw)}`);
   const dropped: string[] = [];
   const base = { kind: 'action' as const, title: String(j.title ?? `${teamName} 단장의 움직임`).slice(0, 80), text: String(j.narration).slice(0, 2000), who: `${teamName} 단장 ${gm}`, rival: team };
   const rawChoices = Array.isArray(j.choices) ? j.choices.slice(0, 3) : [];

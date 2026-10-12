@@ -7,7 +7,7 @@ import { Rng } from '../engine';
 import type { GameSession } from '../game/session';
 import { koreanName } from '../league/names';
 import type { LeaguePlayer, LeagueState } from '../league/types';
-import { complete, extractJson, type LlmSettings } from './llm';
+import { completeJsonText, extractJson, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { adjustStance, leniencyOf, leniencyRule, NEGOTIATE_SCALE, type Leniency } from './leniency';
 import { castOf } from './cast';
@@ -85,7 +85,7 @@ export async function tradeTalk(g: GameSession, s: LlmSettings, input: TradeTalk
   const evalText = input.verdict === 'accept' ? '실무진 평가: 받아들일 만함'
     : input.verdict === 'short' ? `실무진 평가: 조금 모자람 (우리 기준으로 약 ${input.gap.toFixed(1)}런 모자람)`
       : input.verdict === 'far' ? `실무진 평가: 많이 모자람 (약 ${input.gap.toFixed(1)}런 모자람)` : '실무진 평가: 규정상 불가';
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: tradeSystem(name, role, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[우리 구단 성향] ${input.tendency}\n[제안]\n${input.proposal}\n[게임 평가] ${evalText}\n\n[단장의 말]\n${input.argument}` }],
     maxTokens: 600,
@@ -123,7 +123,7 @@ ${RULES}
 export async function agentTalk(g: GameSession, s: LlmSettings, p: LeaguePlayer, situation: string, argument: string): Promise<Omit<FantasyEntry, 'year' | 'day'>> {
   const agent = castOf(g.league).find((c) => c.key === 'agent')!;
   const tag = p.real === false ? '(가상)' : '(실존)';
-  const raw = await complete(s, {
+  const raw = await completeJsonText(s, {
     system: agentSystem(agent.name, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[선수] ${p.name}${tag}\n[상황] ${situation}\n\n[단장의 말]\n${argument}` }],
     maxTokens: 500,

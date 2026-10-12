@@ -77,9 +77,19 @@ async function getJson(f: Fetch, url: string, headers: Record<string, string>): 
   return res.json();
 }
 
+/**
+ * 생각하는 모델(Gemini 2.5·3, GPT-5·o 계열 등)은 생각한 토큰도 출력 한도에 들어가 답이 잘리거나 비었다
+ * (2026-10-13 사용자 "자꾸 AI가 형식에 맞지 않게 대답했습니다라고 뜬다"). 답 한도에 이만큼 더 준다
+ */
+export const THINKING_ALLOWANCE = 8000;
+
+/** 답이 JSON이어야 하는 요청인가 (지시문에 "JSON"이 있으면) */
+const wantsJson = (req: LlmRequest) => /JSON/.test(req.system);
+
 /** AI에게 묻는다. 답의 글을 돌려준다 */
 export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch): Promise<string> {
   const max = req.maxTokens ?? 1200;
+  const json = wantsJson(req);
   if (s.provider === 'mock') return req.mockReply ?? '(시험용 답) 이번 주 경기는 계획대로 흘러갔다.';
   if (!s.key.trim()) throw new LlmError('API 키가 없습니다. 판타지 → AI 설정에서 넣으세요.');
   if (s.provider === 'vertex') {
@@ -88,34 +98,50 @@ export async function complete(s: LlmSettings, req: LlmRequest, f: Fetch = fetch
     const url = vertexUrl(sa, s.region ?? 'global', s.model);
     const auth = { authorization: `Bearer ${token}` };
     if (/^claude/i.test(s.model)) {
-      const d = await postJson(f, url, auth, { anthropic_version: 'vertex-2023-10-16', max_tokens: max, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[] };
-      return (d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
+      const d = await postJson(f, url, auth, { anthropic_version: 'vertex-2023-10-16', max_tokens: max + 1000, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[]; stop_reason?: string };
+      return checkCut((d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join(''), d.stop_reason === 'max_tokens');
     }
-    const d = await postJson(f, url, auth, geminiBody(req, max)) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-    return (d.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    const d = await postJson(f, url, auth, geminiBody(req, max, json)) as GeminiReply;
+    return geminiText(d);
   }
   if (s.provider === 'anthropic') {
     const d = await postJson(f, 'https://api.anthropic.com/v1/messages', {
       'x-api-key': s.key.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
-    }, { model: s.model, max_tokens: max, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[] };
-    return (d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
+    }, { model: s.model, max_tokens: max + 1000, system: req.system, messages: req.messages }) as { content?: { type: string; text?: string }[]; stop_reason?: string };
+    return checkCut((d.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join(''), d.stop_reason === 'max_tokens');
   }
   if (s.provider === 'openai') {
     const d = await postJson(f, 'https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${s.key.trim()}` }, {
-      model: s.model, max_completion_tokens: max,
+      model: s.model, max_completion_tokens: max + THINKING_ALLOWANCE,
       messages: [{ role: 'system', content: req.system }, ...req.messages],
-    }) as { choices?: { message?: { content?: string } }[] };
-    return d.choices?.[0]?.message?.content ?? '';
+    }) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+    return checkCut(d.choices?.[0]?.message?.content ?? '', d.choices?.[0]?.finish_reason === 'length');
   }
-  const d = await postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, geminiBody(req, max)) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  return (d.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  const d = await postJson(f, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model)}:generateContent`, { 'x-goog-api-key': s.key.trim() }, geminiBody(req, max, json)) as GeminiReply;
+  return geminiText(d);
 }
 
-function geminiBody(req: LlmRequest, max: number) {
+type GeminiReply = { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[] };
+
+/** Gemini 답 글 (생각 부분은 뺀다) */
+function geminiText(d: GeminiReply): string {
+  const c = d.candidates?.[0];
+  const text = (c?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? '').join('');
+  return checkCut(text, c?.finishReason === 'MAX_TOKENS');
+}
+
+/** 한도에 걸려 답이 비었으면 알기 쉬운 오류로 (조금이라도 있으면 그대로 넘겨 고쳐 읽기·다시 묻기에 맡긴다) */
+function checkCut(text: string, cut: boolean): string {
+  if (cut && !text.trim()) throw new LlmError('AI가 생각하는 데 토큰을 다 써서 답을 쓰지 못했습니다. 다시 시도하거나 더 가벼운 모델을 고르세요.');
+  return text;
+}
+
+function geminiBody(req: LlmRequest, max: number, json = false) {
   return {
     systemInstruction: { parts: [{ text: req.system }] },
     contents: req.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-    generationConfig: { maxOutputTokens: max },
+    // 생각하는 Gemini는 생각 토큰도 maxOutputTokens에 든다. JSON 답이면 JSON 모드로 (줄바꿈·따옴표 깨짐을 막는다)
+    generationConfig: { maxOutputTokens: max + THINKING_ALLOWANCE, ...(json ? { responseMimeType: 'application/json' } : {}) },
   };
 }
 
@@ -142,28 +168,69 @@ export async function listModels(s: LlmSettings, f: Fetch = fetch): Promise<stri
   return (d.models ?? []).filter((m) => m.supportedGenerationMethods?.includes('generateContent')).map((m) => m.name.replace(/^models\//, ''));
 }
 
-/** 답에서 JSON 하나를 꺼낸다 (코드 블록·앞뒤 설명이 붙어도). 없거나 깨졌으면 null */
+/**
+ * 답에서 JSON 하나를 꺼낸다 (코드 블록·앞뒤 설명이 붙어도). 흔한 깨짐을 고쳐 읽는다 (2026-10-13):
+ * 문자열 안의 날 줄바꿈·탭, 끝에 붙은 쉼표, 한도에 걸려 잘린 답(열린 문자열·괄호를 닫는다). 그래도 안 되면 null
+ */
 export function extractJson<T = unknown>(text: string): T | null {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  const body = fenced ? fenced[1] : text;
+  const fenced = /```[a-zA-Z]*\s*([\s\S]*?)(?:```|$)/.exec(text);
+  const body = fenced && /[[{]/.test(fenced[1]) ? fenced[1] : text;
   const start = body.search(/[[{]/);
   if (start < 0) return null;
-  const open = body[start];
-  const close = open === '{' ? '}' : ']';
-  let depth = 0;
+  let out = '';
+  const stack: string[] = [];
   let inStr = false;
+  let end = -1;
   for (let i = start; i < body.length; i++) {
     const c = body[i];
     if (inStr) {
-      if (c === '\\') i++;
-      else if (c === '"') inStr = false;
+      if (c === '\\') { out += c + (body[i + 1] ?? ''); i++; continue; }
+      if (c === '"') { inStr = false; out += c; continue; }
+      if (c === '\n') { out += '\\n'; continue; }
+      if (c === '\r') continue;
+      if (c === '\t') { out += '\\t'; continue; }
+      out += c;
       continue;
     }
-    if (c === '"') inStr = true;
-    else if (c === open) depth++;
-    else if (c === close && --depth === 0) {
-      try { return JSON.parse(body.slice(start, i + 1)) as T; } catch { return null; }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === '{' || c === '[') stack.push(c === '{' ? '}' : ']');
+    else if (c === '}' || c === ']') {
+      if (stack.pop() !== c) return null;
+      out += c;
+      if (!stack.length) { end = i; break; }
+      continue;
     }
+    out += c;
   }
-  return null;
+  if (end < 0) {
+    // 잘린 답: 열린 문자열·괄호를 닫는다 (마지막 미완성 키·값은 버린다)
+    if (inStr) out += '"';
+    out = out.replace(/,\s*"[^"]*"\s*:?\s*"?$/, '').replace(/[,:]\s*$/, '');
+    while (stack.length) out += stack.pop();
+  }
+  const clean = out.replace(/,(\s*[}\]])/g, '$1');
+  try { return JSON.parse(clean) as T; } catch { return null; }
+}
+
+/** 답 앞부분 (오류 안내용) */
+export const preview = (raw: string) => raw.replace(/\s+/g, ' ').trim().slice(0, 80) || '(빈 답)';
+
+/**
+ * JSON 답을 받는다: 읽지 못하면 한 번 더 "형식에 맞게 다시" 묻는다 (2026-10-13). 그래도 안 되면 json null
+ */
+export async function completeJson<T>(s: LlmSettings, req: LlmRequest, ok: (j: T | null) => boolean = (j) => !!j, f: Fetch = fetch): Promise<{ json: T | null; raw: string }> {
+  const raw = await complete(s, req, f);
+  const j = extractJson<T>(raw);
+  if (ok(j) || s.provider === 'mock') return { json: j, raw };
+  const raw2 = await complete(s, {
+    ...req,
+    messages: [...req.messages, { role: 'assistant', content: raw.slice(0, 6000) || '(빈 답)' },
+      { role: 'user', content: '방금 답이 형식에 맞지 않았다 (JSON이 깨졌거나 잘렸다). 같은 내용을 [답 형식]의 JSON 하나로만 다시 보내라. 설명·코드 블록 없이, 이야기는 조금 짧게, 문자열 안 줄바꿈은 \\n으로.' }],
+  }, f);
+  return { json: extractJson<T>(raw2), raw: raw2 };
+}
+
+/** completeJson의 답 글만 (부르는 쪽이 extractJson으로 다시 읽는다) */
+export async function completeJsonText(s: LlmSettings, req: LlmRequest, f: Fetch = fetch): Promise<string> {
+  return (await completeJson(s, req, undefined, f)).raw;
 }
