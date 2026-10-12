@@ -63,6 +63,10 @@ export interface FantasyState {
   /** 지금 이야기 줄기와 끝난 줄기 (5단계) */
   arc?: FantasyArc;
   pastArcs?: FantasyArc[];
+  /** 협상으로 생긴 상대 구단 호감 (트레이드, negotiate.ts). 구단마다 하나, 다시 협상하면 바뀐다 */
+  goodwill?: { team: number; runs: number; year: number; until: number }[];
+  /** 협상으로 생긴 요구액 할인·할증 (선수마다, 그 오프시즌) */
+  discounts?: { id: string; pct: number; year: number }[];
   /** 다음 개막에 입단할 가상 유망주 (5단계 큰 변화) */
   prospects?: Extract<FantasyEffect, { type: 'prospect' }>[];
 }
@@ -99,3 +103,15 @@ export function applyArc(state: FantasyState, u: ArcUpdate, at: { year: number; 
 export function pendingChoices(state: FantasyState | null | undefined): FantasyEntry[] {
   return (state?.log ?? []).filter((e) => e.choices?.length && e.chosen === undefined);
 }
+
+/** 지금 그 구단의 호감 (런). 그 해 until 전까지 */
+export function goodwillFor(state: FantasyState | null | undefined, team: number, year: number, day: number): number {
+  const g = state?.goodwill?.find((x) => x.team === team && x.year === year && day < x.until);
+  return g ? g.runs : 0;
+}
+
+/** 그 선수의 요구액 할인 비율 (그 오프시즌, 없으면 0) */
+export function discountFor(state: FantasyState | null | undefined, id: string, year: number): number {
+  return state?.discounts?.find((x) => x.id === id && x.year === year)?.pct ?? 0;
+}
+

@@ -89,6 +89,8 @@ export interface TradeProposal {
   picks?: { receive: number; give: number };
   /** 수락 기준 배율 (플레이어 제안에 세부 난이도, league/difficulty.ts). 없으면 1 */
   strict?: number;
+  /** 판타지 협상으로 생긴 호감 (런, src/fantasy/negotiate.ts). 이득에 더한다 */
+  goodwill?: number;
 }
 
 export type TradeVerdict =
@@ -136,7 +138,7 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   // 짠돌이형 단장은 연봉 부담을 두 배로 본다 (league/gm.ts)
   const salaryCost = ((pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN) * (situation.style === 'frugal' ? 2 : 1);
   // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
-  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0);
+  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0) + (prop.goodwill ?? 0);
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0) + (prop.picks?.give ?? 0);
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE) * (prop.strict ?? 1);
   const detail = { gain, need, before, after: afterV, tendency };

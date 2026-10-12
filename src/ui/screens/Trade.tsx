@@ -12,6 +12,7 @@ import { runsGrade } from '../grades';
 import { teamColor } from '../teams';
 import { MAX_PICKS_PER_TRADE, parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
 import { GM_STYLE_LABEL, GM_STYLE_NOTE, gmStyle } from '../../league/gm';
+import { TradeTalk } from './FantasyNegotiate';
 
 type Kind = 'all' | 'hit' | 'pit';
 
@@ -167,6 +168,7 @@ export function Trade() {
           </button>
           <button type="button" className="ghost" onClick={() => { setGive(new Set()); setGet(new Set()); setGp(new Set()); setRp(new Set()); setCashText('0'); setReply(null); }}>비우기</button>
         </div>
+        {open && <TradeTalk team={other} give={giveList} get={getList} cash={cashMan} picks={{ give: [...gp].map(parsePick), get: [...rp].map(parsePick) }} pickLabel={(k) => session.pickLabel(k)} />}
       </section>
 
       {session.pickTradeOpen && (

@@ -813,4 +813,8 @@ td .inline { flex-wrap: nowrap; }
 .fantasy-effects { font-weight: 400; opacity: 0.85; }
 .fantasy-chosen { margin-top: 6px; }
 .fantasy-arc { margin: 4px 0; }
+/* 판타지 협상 (설득하기) */
+.negotiate { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line-strong); display: flex; flex-direction: column; gap: 6px; }
+.negotiate h3 { margin: 0; }
+.negotiate textarea { width: 100%; resize: vertical; }
 

@@ -29,7 +29,7 @@ import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
-import { addFantasyEntry, applyArc, type FantasyEntry, type FantasyState } from '../fantasy/types';
+import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import {
   aiMarketDay, financeMoves, FOREIGN_SWAPS, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
@@ -1020,6 +1020,17 @@ export class GameSession {
           break;
         }
         case 'prospect': (f.prospects ??= []).push({ ...e }); this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지: 유망주 ${e.name}이(가) 다음 개막에 입단합니다.`); break;
+        case 'tradeGoodwill': {
+          const day = this.phase === 'season' ? this.currentDay : 0;
+          f.goodwill = (f.goodwill ?? []).filter((x) => x.team !== e.team || x.year !== this.world.year);
+          if (e.runs) f.goodwill.push({ team: e.team, runs: e.runs, year: this.world.year, until: day + e.days });
+          break;
+        }
+        case 'demandDiscount': {
+          f.discounts = (f.discounts ?? []).filter((x) => x.id !== e.player || x.year !== this.year);
+          if (e.pct) f.discounts.push({ id: e.player, pct: e.pct, year: this.year });
+          break;
+        }
         case 'ownerChange': { const o = this.owner; o.trust = e.trust; this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'owner', `판타지: 구단주가 바뀌었습니다. 새 구단주의 신뢰 ${e.trust}에서 시작합니다.`); break; }
       }
     }
@@ -1814,7 +1825,9 @@ export class GameSession {
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
-    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict }, this.world.teams[aiTeam].org, sit, this.values);
+    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay);
+    return evaluateTrade({ aiTeam, receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
+      this.world.teams[aiTeam].org, sit, this.values);
   }
 
   /** 트레이드를 제안한다. AI가 수락하면 바로 실행한다 */
@@ -2761,7 +2774,7 @@ export class GameSession {
     const view = Off.leagueView(this.league, this.store, this.params);
     const ys = Array.from({ length: Off.EXT_MAX_YEARS - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
     return Off.extensionCandidates(this.league, off).map((p) => ({
-      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.extensionDemand(view, p, off.year, years) })),
+      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) })),
     }));
   }
 
