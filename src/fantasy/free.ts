@@ -8,6 +8,7 @@ import type { LeaguePlayer } from '../league/types';
 import { complete, extractJson, type LlmSettings } from './llm';
 import { gameContext } from './context';
 import { RULES } from './prompts';
+import { leniencyOf, leniencyRule, type Leniency } from './leniency';
 import { memoryContext } from './history';
 import { sanitizeEffects, type FantasyEffect } from './effects';
 import type { FantasyEntry } from './types';
@@ -54,14 +55,16 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"playerForm","player":"우리 선수 이름","edge":−0.05~0.05,"days":1~60} (시즌 중)
 - {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)`;
 
-export function freeSystem(regressor: boolean): string {
+export function freeSystem(regressor: boolean, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션의 "자유 모드" 게임 마스터(TRPG 진행자)다. 플레이어는 한 구단의 단장이고, 무엇이든 하겠다고 말할 수 있다.
 너는 그 행동이 이 세계에서 어떻게 되는지 판정하고(성공·실패·조건부·대가), 결과를 이야기로 들려주고, 실제 게임에 반영할 조작을 낸다.
-- 판정은 네가 한다. 현실성·구단 사정·상대 입장·대가를 고려하되, 결정은 자유다. 상대 구단·인물도 네가 연기한다.
+- 판정은 네가 한다. 아래 판정 기준에 따라 명분·구단 사정·상대 입장·대가를 본다. 상대 구단·인물도 네가 연기한다.
 - 트레이드·영입 같은 일은 상대가 받아들일 때만 조작을 낸다. 거절·보류면 조작 없이 이야기만.
 - 플레이어가 말하지 않은 큰일을 멋대로 벌이지 않는다. 다만 판정의 대가·부작용(자금, 팬, 구단주 신뢰 등)은 붙일 수 있다.
 - 경기 결과·기록은 바꾸지 않는다 (경기는 엔진이 치른다).
 ${regressor ? '- 단장은 원래 역사를 기억하는 회귀자다 (다른 인물은 모른다).\n' : ''}
+${leniencyRule(l)}
+
 ${RULES}
 - 실존 선수의 능력·소속·계약을 바꾸는 조작은 해도 되지만, 실존 선수에게 발언·속마음·사생활·물의를 붙이지 않는다. 대화 상대는 가상 인물이다.
 
@@ -199,7 +202,7 @@ export function resolveOps(g: GameSession, raw: unknown): { ops: FreeOp[]; dropp
 /** 행동 한 번: AI 판정 → 이야기 글 (ops는 기록될 때 적용된다) */
 export async function freeAction(g: GameSession, store: Store, s: LlmSettings, action: string): Promise<{ entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] }> {
   const raw = await complete(s, {
-    system: freeSystem(!!g.league.fantasy?.regressor),
+    system: freeSystem(!!g.league.fantasy?.regressor, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[단장의 행동]\n${action}` }],
     maxTokens: 1500,
     mockReply: JSON.stringify({ title: '(시험용) 판정', narration: '단장의 뜻대로 일이 진행됐다.', ops: [{ op: 'fans', delta: 1 }] }),

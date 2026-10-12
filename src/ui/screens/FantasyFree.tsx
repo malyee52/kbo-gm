@@ -5,6 +5,7 @@ import { effectText } from '../../fantasy/effects';
 import { loadAiSettings } from '../../fantasy/settings';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
+import { leniencyOf, LENIENCY_LABEL } from '../../fantasy/leniency';
 
 export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t: number) => string): string {
   switch (op.op) {
@@ -55,7 +56,7 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void act(); } }} />
         <div className="actions">
           <button type="button" onClick={() => void act()} disabled={busy || !text.trim()}>{busy ? '판정 중…' : '행동하기'}</button>
-          <span className="muted small">Ctrl+Enter. 결과(트레이드·영입·능력·자금 등)는 바로 게임에 들어가고, 저장·재현에도 그대로 남습니다. 경기는 엔진이 치릅니다.</span>
+          <span className="muted small">AI 판정 {leniencyOf(L) + 1}/7 {LENIENCY_LABEL[leniencyOf(L)]} (저장·설정 → 난이도에서 바꿈). 명분이 있어야 통합니다. Ctrl+Enter. 결과는 바로 게임에 들어가고 저장·재현에도 남습니다.</span>
         </div>
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
       </div>

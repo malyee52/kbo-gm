@@ -5,6 +5,7 @@ import { complete, extractJson, type LlmSettings } from './llm';
 import { gameContext } from './context';
 import { effectMenu, sanitizeEffects, type EffectPlayer, type EffectScale } from './effects';
 import { RULES } from './prompts';
+import { leniencyOf, leniencyRule, type Leniency } from './leniency';
 import { memoryContext } from './history';
 import type { CastMember } from './cast';
 import type { ArcUpdate, FantasyChoice, FantasyEntry } from './types';
@@ -43,10 +44,12 @@ function fullContext(g: GameSession, store: Store): string {
 
 // ---- 대화 (3단계)
 
-export function chatSystem(c: CastMember, regressor: boolean): string {
+export function chatSystem(c: CastMember, regressor: boolean, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션 판타지 모드의 가상 인물 "${c.name}" (${c.role})이다. 상대는 플레이어 구단의 단장이다.
 성격·말투: ${c.persona}
 ${regressor ? '단장은 미래를 기억하는 회귀자지만 너는 그 사실을 모른다. [원래 역사]는 단장만 아는 것이니 네 입으로 미래를 말하지 않는다.\n' : ''}
+${leniencyRule(l)}
+
 ${RULES}
 - 너는 가상 인물이고, 실존 인물인 척하지 않는다.
 - 대화로 구단에 작은 변화가 생길 만하면 effects에 제안한다 (단장이 받아들여야 적용된다). 대부분의 대화는 효과가 없다.
@@ -66,7 +69,7 @@ export async function chatTurn(g: GameSession, store: Store, s: LlmSettings, c: 
     ...history.flatMap((e) => [{ role: 'user' as const, content: e.ask ?? '' }, { role: 'assistant' as const, content: JSON.stringify({ reply: e.text, offer: '', effects: [] }) }]),
     { role: 'user' as const, content: ask },
   ];
-  const raw = await complete(s, { system: chatSystem(c, !!g.league.fantasy?.regressor), messages, maxTokens: 700,
+  const raw = await complete(s, { system: chatSystem(c, !!g.league.fantasy?.regressor, leniencyOf(g.league)), messages, maxTokens: 700,
     mockReply: JSON.stringify({ reply: `${c.role}입니다. (시험용 답) 말씀하신 건 알아보겠습니다.`, offer: '', effects: [] }) });
   const j = extractJson<{ reply?: string; offer?: string; effects?: unknown }>(raw);
   const reply = (j?.reply ?? raw).toString().trim();
