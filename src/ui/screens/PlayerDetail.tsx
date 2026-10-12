@@ -1,4 +1,6 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
+import { lineTeam } from '../../engine';
+import { ReleaseButton } from './Market';
 import { futuresText } from './Roster';
 import { futuresFromRecord, type FuturesLine } from '../../league/futures';
 import { useEffect, useRef } from 'react';
@@ -55,19 +57,19 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   };
 
   return (
-    <dialog ref={ref} className="player tv" style={teamVars(session.teamInfo(p.teamIdx).franchise, session.teamInfo(p.teamIdx).name)}
+    <dialog ref={ref} className="player tv" style={lineTeam(p) >= 0 ? teamVars(session.teamInfo(lineTeam(p)).franchise, session.teamInfo(lineTeam(p)).name) : undefined}
       onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="row-between">
           <div>
             <h2 id="player-name">{p.name}{p.foreign && <span className="tag">외국인</span>}</h2>
             <p className="muted">
-              <TeamName idx={p.teamIdx} /> · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투)` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
+              <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투)` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
               {' · '}{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}
               {master?.entryYear ? ` · ${master.entryYear}년 입단` : ''}
             </p>
             <p className="small">
-              {mine ? (registered ? '1군' : '2군') : '다른 구단'}
+              {mine ? (registered ? '1군' : '2군') : p.teamIdx < 0 ? '시장 (영입은 선수단 → 선수 시장)' : '다른 구단'}
               {back !== null && (
                 <span className="status out"> {session.absenceReason(p)} · {back >= session.season.schedule.length ? '이번 시즌 복귀 어려움' : `${shortDate(year, back)} 복귀 예정`}</span>
               )}
@@ -75,6 +77,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           </div>
           <button type="button" className="ghost" onClick={() => ref.current?.close()} aria-label="닫기">닫기</button>
         </header>
+        {mine && session.phase === 'season' && !session.done && <p className="small"><ReleaseButton p={p} onDone={() => ref.current?.close()} /></p>}
 
         <section>
           <h3>능력치 <span className="muted small">20~80, 50이 리그 주전 평균</span></h3>

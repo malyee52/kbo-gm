@@ -70,6 +70,11 @@ export interface SimPlayer {
   real?: boolean;
   /** 육성선수: 1군에 못 나간다 (정식 등록 전, league/offseason.ts) */
   dev?: boolean;
+  /**
+   * 시즌 중 방출된 선수의 마지막 소속 (teamIdx = -1, league/market.ts). 기록·이름 표시는 이 구단으로 한다.
+   * 시즌 중 시장의 미계약 선수는 teamIdx = -1이고 이 값이 없다 (어느 구단 명단에도 없다)
+   */
+  formerTeam?: number;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
   /** 나이가 추정값 (생년 자료 없음, M8) */
@@ -167,6 +172,11 @@ export interface TeamRecord {
 
 export function emptyBatLine(): BatLine {
   return { g: 0, pa: 0, ab: 0, r: 0, h: 0, d: 0, t: 0, hr: 0, rbi: 0, bb: 0, hbp: 0, so: 0, sb: 0, cs: 0, gdp: 0, sf: 0, sac: 0 };
+}
+
+/** 기록·이름 표시에 쓰는 구단: 지금 소속, 방출됐으면 마지막 소속, 시장의 미계약 선수면 -1 */
+export function lineTeam(p: Pick<SimPlayer, 'teamIdx' | 'formerTeam'>): number {
+  return p.teamIdx >= 0 ? p.teamIdx : p.formerTeam ?? -1;
 }
 
 export function emptyPitLine(): PitLine {

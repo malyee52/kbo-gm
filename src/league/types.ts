@@ -50,6 +50,10 @@ export interface LeaguePlayer {
   abroad?: AbroadState;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
+  /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */
+  market?: number;
+  /** 시장에 나오는 때 (시즌의 몫 0~1). 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 (create.ts, market.ts) */
+  marketFrom?: number;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */
   noTradeYear?: number;
   id: string;
@@ -252,6 +256,8 @@ export interface LeagueState {
   gm?: GmStyle[];
   /** AI 구단끼리 트레이드 기록 (gm.ts) */
   aiTrades?: AiTradeRecord[];
+  /** 시즌 중 방출·영입 (market.ts) */
+  marketMoves?: import('./market').MarketMove[];
   /**
    * 이벤트(AI 구단의 트레이드 제안)를 받아들여 이뤄진 우리 트레이드 (선수 ID). 조작 기록에는 'event'로만 남아
    * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)

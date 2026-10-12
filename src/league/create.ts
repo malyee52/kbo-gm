@@ -4,7 +4,7 @@ import type { DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
 import { initialMilitary } from './careers';
-import { makeDraftee, takenNames } from './offseason';
+import { makeDraftee, openMarket, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
@@ -116,6 +116,28 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     };
   };
   const players: LeaguePlayer[] = startPlayers.map(toLeague);
+  // 시즌 중 시장 (market.ts): 그 해 실제로 시즌 중에 교체돼 들어온 외국인은 개막 때 소속 없이 시장 후보로 둔다
+  if (opening) {
+    // 들어온 무렵: 그 해 출전량으로 어림한다 (야수 경기 수, 선발 등판 × 5, 구원 경기 수 ÷ 0.45를 팀 경기 수에 견준 몫만큼 시즌 끝에서 거슬러)
+    const sd = store.season(startYear);
+    const arrival = (id: string): number => {
+      if (!sd) return 0;
+      const b = sd.bat.find((r) => r.id === id);
+      const q = sd.pit.find((r) => r.id === id);
+      const share = q ? ((q.gs ?? 0) >= q.g / 2 ? (q.gs ?? 0) * 5 : q.g / 0.45) / sd.games : b ? b.g / sd.games : 1;
+      return Math.round(Math.max(0, 1 - Math.min(1, share)) * 100) / 100;
+    };
+    for (const p of recorded.players) {
+      if (!p.foreign || opening.has(p.id) || special.has(p.id)) continue;
+      const lp = toLeague(p);
+      lp.team = -1;
+      lp.market = startYear;
+      const from = arrival(p.id);
+      if (from > 0) lp.marketFrom = from;
+      lp.contract = { kind: 'foreign', salary: foreignSalary(currentRuns(p, ctx), true, lp.asia), until: startYear };
+      players.push(lp);
+    }
+  }
 
   const league: LeagueState = {
     format: 1, seed, startYear, year: startYear,
@@ -133,7 +155,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   trimToOrgLimit(league, recordedIds);
   ensureFinance(league);
   for (const e of league.expansions ?? []) addExpansionCapital(league, e.team, startYear);
-  const world = opening || added || special.size || futures ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  const market = openMarket(league, store, params);
+  const world = opening || added || special.size || futures || market ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
 

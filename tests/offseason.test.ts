@@ -58,10 +58,13 @@ describe('리그 상태 만들기', () => {
     const opening = openingForeigners(store, 2026)!;
     const special = new Set(store.meta.specialEntries?.['2026'] ?? []);
     const kept = ref.players.filter((p) => (!p.foreign || opening.has(p.id)) && !special.has(p.id));
+    // 개막 명단에 없던 외국인(시즌 중 교체돼 들어온 선수)은 소속 없이 시즌 중 시장 후보로 들어온다 (market.ts)
+    const late = ref.players.filter((p) => p.foreign && !opening.has(p.id) && !special.has(p.id)).map((p) => p.id).sort();
+    expect(world.players.filter((p) => p.teamIdx === -1 && !p.id.startsWith('v')).map((p) => p.id).sort()).toEqual(late);
     // 특별 엔트리(은퇴식 등으로 하루 등록된 선수)는 빠진다
     expect(world.players.some((p) => p.name === '박병호')).toBe(false);
     // 1군 기록 없는 2026 신인(d2026-)은 따로 더해진다 (다음 테스트)
-    const recorded = world.players.filter((p) => !p.id.startsWith('d2026-'));
+    const recorded = world.players.filter((p) => !p.id.startsWith('d2026-') && p.teamIdx >= 0);
     expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${p.teamIdx}`));
     expect(recorded.map((p) => p.value)).toEqual(kept.map((p) => p.value));
     expect(ref.players.length - recorded.length).toBeGreaterThan(20);

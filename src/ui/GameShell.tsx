@@ -15,6 +15,7 @@ import { Schedule } from './screens/Schedule';
 import { SeasonEnd } from './screens/SeasonEnd';
 import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
+import { Market } from './screens/Market';
 import { Offseason } from './screens/Offseason';
 import { Club } from './screens/Club';
 import { Postseason } from './screens/Postseason';
@@ -50,6 +51,7 @@ const NAV: NavItem[] = [
   { id: 'articles', label: '기사', hub: '오늘' },
   { id: 'roster', label: '선수단', season: true, hub: '선수단' },
   { id: 'trade', label: '트레이드', season: true, hub: '선수단' },
+  { id: 'market', label: '선수 시장', season: true, hub: '선수단' },
   { id: 'growth', label: '선수 성장', off: true, hub: '선수단' },
   { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', hub: '리그' },
   { id: 'leaders', label: '개인 기록', offLabel: '지난 시즌 기록', hub: '리그' },
@@ -369,6 +371,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'standings' && <Standings />}
               {screen === 'leaders' && <Leaders />}
               {screen === 'trade' && <Trade />}
+              {screen === 'market' && <Market />}
               {screen === 'save' && <SaveScreen onQuit={onQuit} />}
               {screen === 'season-end' && <SeasonEnd />}
               {screen === 'offseason' && <Offseason />}

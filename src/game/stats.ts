@@ -1,5 +1,6 @@
 // 기록 계산: 비율 기록, 규정 타석·이닝, 부문별 순위.
 
+import { lineTeam } from '../engine/types';
 import type { BatLine, PitLine, SimPlayer, TeamRecord } from '../engine';
 import { rankTeams } from '../engine';
 
@@ -95,7 +96,8 @@ export function leaders<L extends BatLine | PitLine>(
     .filter((p) => {
       const l = lines[p.idx];
       if (!cat.qualified) return true;
-      return isQualified(l, teams[p.teamIdx].g) && Number.isFinite(cat.score(l));
+      const t = teams[lineTeam(p)];
+      return !!t && isQualified(l, t.g) && Number.isFinite(cat.score(l));
     })
     .map((p) => ({ p, s: cat.score(lines[p.idx]) }))
     .filter((x) => Number.isFinite(x.s) && (cat.qualified || x.s > 0))

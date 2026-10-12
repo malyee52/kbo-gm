@@ -15,7 +15,7 @@ export {
 export {
   MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
 } from './team';
-export { emptyBatLine, emptyPitLine } from './types';
+export { emptyBatLine, emptyPitLine, lineTeam } from './types';
 export { BUNT_SUCCESS, emptyLeagueCounters, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
   FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
