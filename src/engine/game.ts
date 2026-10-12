@@ -4,7 +4,7 @@ import type { Rates } from '../data/types';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
-import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest, type PlayerStates, type TeamSeason } from './team';
+import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest, type PlayerStates, type Slot, type TeamSeason } from './team';
 import { fatigueScale, traitEdge, type Situation } from './traits';
 import type { BatLine, LeagueEnv, PitLine, PitSkill, SimPlayer } from './types';
 
@@ -185,6 +185,18 @@ interface Side {
   catcherDef: number;
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
   removed: Set<number>;
+  /** 지금 수비 위치 (선수 색인 → 자리). 대타·대주자는 바꾼 선수의 자리를 그대로 받는다 */
+  slots: Map<number, Slot>;
+  /** 경기 중 들어온 타자 (박스스코어: 타순 자리, 대타·대주자) */
+  subs: GameSub[];
+}
+
+/** 경기 중 교체로 들어온 타자 (직접 지휘의 대타·대주자) */
+export interface GameSub {
+  idx: number;
+  /** 타순 자리 (0~8) */
+  order: number;
+  kind: 'PH' | 'PR';
 }
 
 export interface GameResult {
@@ -200,6 +212,9 @@ export interface GameResult {
   /** 등판 순서대로 투수 색인 */
   homeStaff: number[];
   awayStaff: number[];
+  /** 경기 중 들어온 대타·대주자 (들어온 순서) */
+  homeSubs: GameSub[];
+  awaySubs: GameSub[];
 }
 
 const enum Ev { SO, BB, HBP, HR, S1, D2, T3, OUT }
@@ -347,19 +362,41 @@ function platoonEdge(b: SimPlayer, p: SimPlayer, size: number): number {
   return b.bats === p.throws ? -size : size;
 }
 
-/** 수비 배치에서 팀 수비 런과 포수 수비 런 */
-function fieldDefense(ts: TeamSeason, lineup: SimPlayer[]): { def: number; catcherDef: number } {
+/** 선발 라인업의 수비 위치 (선수 색인 → 자리) */
+function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slot> {
   const slots = ts.field && lineup.every((p) => ts.field!.has(p.idx))
     ? lineup.map((p) => ({ p, slot: ts.field!.get(p.idx)! }))
     : assignSlots(lineup);
+  return new Map(slots.map(({ p, slot }) => [p.idx, slot]));
+}
+
+/** 수비 배치에서 팀 수비 런과 포수 수비 런 */
+function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { def: number; catcherDef: number } {
   let def = 0;
   let catcherDef = 0;
-  for (const { p, slot } of slots) {
+  for (const p of lineup) {
+    const slot = slots.get(p.idx);
+    if (!slot) continue;
     const r = defenseAt(p, slot);
     def += r;
     if (slot === 'C') catcherDef = r;
   }
   return { def, catcherDef };
+}
+
+/**
+ * 대타·대주자: 타순 order 자리의 선수를 바꾼다. 들어온 선수는 나간 선수의 수비 자리를 맡고(포수 자리에 포수가 아니면 수비력이 떨어진다),
+ * 다음 수비부터 팀 수비력에 반영된다 (2026-10-12 직접 지휘 마무리)
+ */
+function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH' | 'PR'): void {
+  const outP = side.lineup[order];
+  const slot = side.slots.get(outP.idx);
+  side.lineup[order] = inP;
+  side.removed.add(outP.idx);
+  side.slots.delete(outP.idx);
+  if (slot) side.slots.set(inP.idx, slot);
+  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  side.subs.push({ idx: inP.idx, order, kind });
 }
 
 /** 주자·이닝·점수 상황 (숨겨진 특수능력 판정용) */
@@ -417,8 +454,9 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
-    const fd = fieldDefense(ts, lineup);
-    return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set() };
+    const slots = fieldSlots(ts, lineup);
+    const fd = fieldDefense(lineup, slots);
+    return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [] };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
@@ -510,8 +548,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
         const old = c?.pr ? bases[c.pr.base] : null;
         if (!runnerIn || !old) return;
         const slot = bat.lineup.indexOf(old.p);
-        if (slot >= 0) bat.lineup[slot] = runnerIn;
-        bat.removed.add(old.p.idx);
+        if (slot >= 0) substitute(bat, slot, runnerIn, 'PR');
+        else bat.removed.add(old.p.idx);
         bases[c!.pr!.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
         ctx.bat[runnerIn.idx].g++;
         note('PR', runnerIn.idx, pg.p.idx, bat.runs);
@@ -558,8 +596,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       pinchRun(bc);
       const hitter = bench(bc?.ph);
       if (hitter) {
-        bat.removed.add(bat.lineup[bat.spot].idx);
-        bat.lineup[bat.spot] = hitter;
+        substitute(bat, bat.spot, hitter, 'PH');
         ctx.bat[hitter.idx].g++;
         note('PH', hitter.idx, pg.p.idx, bat.runs);
       }
@@ -825,5 +862,6 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   return {
     homeRuns: home.runs, awayRuns: away.runs, innings: inning, win, loss, save, lineScore,
     homeStaff: home.staff.map((x) => x.p.idx), awayStaff: away.staff.map((x) => x.p.idx),
+    homeSubs: home.subs, awaySubs: away.subs,
   };
 }

@@ -22,7 +22,7 @@ import { Growth } from './screens/Growth';
 import { Awards } from './screens/Awards';
 import { Records } from './screens/Records';
 import { Articles } from './screens/Articles';
-import { currentSeries, ROUND_LABEL } from '../league/postseason';
+import { currentSeries, ROUND_LABEL, stillAlive } from '../league/postseason';
 import { teamVars } from './teams';
 import { gamesBehind, recentForm } from '../game/stats';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -168,9 +168,18 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   // 직접 지휘 (CommandView): 진행 버튼 옆 "직접 지휘", 또는 자동 진행이 위기에서 멈췄을 때
   const [cmd, setCmd] = useState<CommandPreview | null>(null);
   const startCommand = async () => {
-    if (busy || session.done || session.phase !== 'season') return;
+    if (busy || session.phase !== 'season' || (session.done && !session.postseasonRunning)) return;
     setBusy('직접 지휘 준비 중');
     await nextFrame();
+    // 가을야구: 다음 경기가 우리 경기가 될 때까지 다른 시리즈를 진행 (2026-10-12 가을야구 직접 지휘)
+    if (session.postseasonRunning) {
+      while (session.postseasonRunning && !session.ourPostseasonGameNext) session.advancePostseason(1);
+      changed();
+      setBusy(null);
+      if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+      else go('postseason');
+      return;
+    }
     // 오늘 경기가 없으면 경기 날까지 (멈춤 설정대로)
     let attention: Attention[] = [];
     while (!session.hasGameToday && !session.done) {
@@ -192,6 +201,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (!done) return;
     await autosave();
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
+    else if (session.postseasonRunning) go('postseason');
   };
   /** 진행 전 경기 수를 받아, 그 뒤 우리 경기 가운데 마지막 것 (중계 기록이 있을 때) */
   const castAfter = (before: number) => {
@@ -297,6 +307,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 <button type="button" onClick={() => void advancePs('ours', '우리 경기까지 진행 중')} disabled={!!busy}>우리 경기까지</button>
                 <button type="button" onClick={() => void advancePs('series', '시리즈 진행 중')} disabled={!!busy}>시리즈 끝까지</button>
                 <button type="button" onClick={() => void advancePs('all', '가을야구 진행 중')} disabled={!!busy}>가을야구 끝까지</button>
+                {session.postseason && stillAlive(session.postseason, session.teamIdx) && (
+                  <button type="button" onClick={() => void startCommand()} disabled={!!busy} title="우리 가을야구 다음 경기를 타석마다 직접 지휘합니다">직접 지휘</button>
+                )}
               </div>
             </div>}
             {!off && !session.done && <div className="advance">
