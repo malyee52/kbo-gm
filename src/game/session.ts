@@ -33,6 +33,7 @@ import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry,
 import type { FantasyEffect } from '../fantasy/effects';
 import { runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
+import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, pitValue } from '../engine';
 import { skillForRuns } from '../league/growth';
 import {
@@ -1002,6 +1003,7 @@ export class GameSession {
     const e = this.league.fantasy?.log.find((x) => x.id === id);
     if (!e || !e.choices?.[choice]) return { ok: false, message: '고를 수 없는 선택지입니다.' };
     if (e.chosen !== undefined) return { ok: false, message: '이미 골랐습니다.' };
+    if (offerExpired(this, e)) return { ok: false, message: `제안이 만료됐습니다 (${RIVAL_OFFER_DAYS}일 안에 답해야 합니다).` };
     if (this.phase === 'season') this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'ai-choice', id, choice });
     else this.dispatchOff({ year: this.year, type: 'ai-choice-off', id, choice });
     return { ok: true, message: e.choices[choice].result || '골랐습니다.' };
@@ -1013,6 +1015,8 @@ export class GameSession {
     if (!e || !c || e.chosen !== undefined) return;
     e.chosen = choice;
     if (c.effects.length) this.applyFantasyEffects(c.effects, `${e.title}: ${c.label}`);
+    if (c.ops?.length) this.applyFreeOps(c.ops, `${e.title}: ${c.label}`);
+    if (c.promises?.length && this.league.fantasy) applyPromises(this.league.fantasy, e.id!, { year: this.year, day: this.phase === 'season' ? this.currentDay : -1 }, c.promises);
   }
 
   /**

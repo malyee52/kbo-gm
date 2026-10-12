@@ -12,6 +12,10 @@ export interface FantasyChoice {
   /** 고른 뒤 결과 글 */
   result: string;
   effects: FantasyEffect[];
+  /** 자유 모드 조작 (다른 구단 단장의 제안 등, rivals.ts) */
+  ops?: FreeOp[];
+  /** 고르면 생기는 약속 */
+  promises?: PromiseDraft[];
 }
 
 /** AI가 낸 이야기 줄기 변화 */
@@ -54,6 +58,8 @@ export interface FantasyEntry {
   rerolls?: number;
   /** 자유 모드: 단장이 판정을 보고 거둬들인 행동 (조작 없음, 기록만) */
   withdrawn?: boolean;
+  /** 자유 모드: 다른 구단 단장의 움직임 (그 구단 색인, rivals.ts) */
+  rival?: number;
 }
 
 export interface FantasyArc {
