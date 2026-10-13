@@ -13,6 +13,7 @@ import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPack
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
+import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
@@ -999,6 +1000,13 @@ export class GameSession {
     if (e.effects?.length) this.applyFantasyEffects(e.effects, e.title);
     if (e.ops?.length) this.applyFreeOps(e.ops, e.title);
     if (e.promises?.length || e.settles?.length) applyPromises(f, e.id!, { year: e.year, day: e.day }, e.promises, e.settles);
+    // 단장 노트 (자유 모드): 더하고 지운다. 최근 40개까지
+    if (e.noteDrop?.length) f.notes = (f.notes ?? []).filter((n) => !e.noteDrop!.includes(n.id));
+    for (const text of e.notes ?? []) {
+      f.nseq = (f.nseq ?? 0) + 1;
+      (f.notes ??= []).push({ id: `n${f.nseq}`, year: e.year, text });
+    }
+    if (f.notes && f.notes.length > 40) f.notes.splice(0, f.notes.length - 40);
     if (e.kind === 'event' && e.choices?.length) this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'event', `판타지 사건: ${e.title} (판타지 화면에서 고르세요)`);
   }
 
@@ -1131,6 +1139,11 @@ export class GameSession {
           break;
         case 'pick':
           if (L.teams[op.to]) transferPick(L, { draft: op.draft, round: op.round, from: op.from }, op.to);
+          break;
+        case 'future':
+          // 입단 예약: 그 해 개막 때 들어온다 (openPipeline)
+          if (L.fantasy) (L.fantasy.pipeline ??= []).push({ name: op.name, team: op.team, pos: op.pos, ...(op.role ? { role: op.role } : {}), birthYear: op.birthYear,
+            joinYear: op.joinYear, now: op.now, potential: op.potential, ...(op.foreign ? { foreign: true } : {}), ...(op.real ? { real: true } : {}), from: note });
           break;
         case 'rule': {
           // 리그 규정 (league/rules.ts). 기본값으로 돌리면 기록에서 지운다
@@ -2278,7 +2291,9 @@ export class GameSession {
         this.refreshRivals();
         Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
         if (L.fantasy?.free) Off.openReserves(L, this.store, this.params); // 자유 모드 빈 자리
+        const pipelineNews = this.openPipeline(); // 자유 모드 입단 예약
         const twoWayNews = Off.openTwoWay(L, this.store, this.params, this.teamIdx); // 이도류 (league/twoway.ts)
+        twoWayNews.unshift(...pipelineNews);
         // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
         for (const p of L.players) {
           if (!p.outsider) continue;
@@ -2984,6 +2999,32 @@ export class GameSession {
     }
     this.season.setManualEntry(this.teamIdx, [...cur]);
     this.addNews(this.day, 'entry', `${p.name} 1군 등록`);
+  }
+
+  /** 자유 모드 입단 예약: 이 시즌 개막 때 들어올 선수를 만든다 (리그 상태, 오프시즌 끝 open 때). 소식을 돌려준다 */
+  private openPipeline(): string[] {
+    const L = this.league;
+    const due = (L.fantasy?.pipeline ?? []).filter((x) => x.joinYear <= L.year);
+    if (!due.length) return [];
+    L.fantasy!.pipeline = L.fantasy!.pipeline!.filter((x) => x.joinYear > L.year);
+    const out: string[] = [];
+    for (const x of due) {
+      if (!L.teams[x.team]) continue;
+      const age = L.year - x.birthYear;
+      const runs = runsForGrade(x.now, L.year);
+      const pot = Math.max(runs, runsForGrade(x.potential, L.year));
+      const pos = x.pos === 'IF' ? '2B' : x.pos === 'OF' ? 'RF' : x.pos;
+      const np = Off.addFreePlayer(L, this.store, this.params, x.team, { name: x.name, pos, age, runs, potential: pot });
+      if (x.real) np.outsider = true;
+      const op = { op: 'create' as const, name: x.name, team: x.team, pos: x.pos as Extract<FreeOp, { op: 'create' }>['pos'], age, now: x.now, potential: x.potential,
+        ...(x.role ? { role: x.role } : {}), ...(x.foreign ? { foreign: true } : {}), military: age >= 28 ? 'done' as const : 'pending' as const };
+      this.setPitchRole(np, op.role);
+      this.applyNationality(np, op);
+      const ctx = leagueView({ ...L, year: L.year - 1 }, this.store, this.params).ctx;
+      Object.assign(np, skillForRuns({ ...np }, runs, ctx, L.year));
+      out.push(`${L.teams[x.team].name} ${x.name} 입단 (예약, ${age}세)`);
+    }
+    return out;
   }
 
   /** 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약 */

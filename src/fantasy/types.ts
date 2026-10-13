@@ -62,6 +62,10 @@ export interface FantasyEntry {
   rival?: number;
   /** 경기 후일담이면 그 경기 key (gameday.ts) */
   game?: string;
+  /** 단장 노트에 더할 글 (자유 모드, 게임 마스터가 오래 기억할 사실) */
+  notes?: string[];
+  /** 지울 노트 id */
+  noteDrop?: string[];
 }
 
 export interface FantasyArc {
@@ -94,6 +98,11 @@ export interface FantasyState {
   /** 약속·조건 장부 (자유 모드, promises.ts) */
   promises?: FantasyPromise[];
   pseq?: number;
+  /** 단장 노트 (자유 모드): 게임 마스터가 남긴 오래 기억할 사실. 판정 맥락에 늘 들어간다 (2026-10-13 사용자 "AI가 기록하는 노트") */
+  notes?: { id: string; year: number; text: string }[];
+  nseq?: number;
+  /** 입단 예약 (자유 모드 future 조작): 그 해 개막 때 선수가 실제로 들어온다 */
+  pipeline?: FutureSigning[];
 }
 
 export const FANTASY_LOG_MAX = 300;
@@ -140,3 +149,18 @@ export function discountFor(state: FantasyState | null | undefined, id: string, 
   return state?.discounts?.find((x) => x.id === id && x.year === year)?.pct ?? 0;
 }
 
+/** 입단 예약 한 건 (free.ts future 조작). 능력은 입단할 때의 20~80 등급 */
+export interface FutureSigning {
+  name: string;
+  team: number;
+  pos: string;
+  role?: 'SP' | 'RP';
+  birthYear: number;
+  joinYear: number;
+  now: number;
+  potential: number;
+  foreign?: boolean;
+  real?: boolean;
+  /** 예약한 이야기 글 */
+  from?: string;
+}

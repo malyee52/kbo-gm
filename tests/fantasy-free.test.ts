@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { freeAction, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
+import { freeAction, freeContext, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
 import { currentRuns } from '../src/ai/value';
 import { cashOf } from '../src/league/finance';
 import { defenseAt } from '../src/engine';
@@ -136,4 +136,34 @@ describe('자유 모드', () => {
     expect(g.leaguePlayer(sun.id)!.military?.state).not.toBe('serving');
     expect(g.leaguePlayer(bunch.id)!.military?.state).not.toBe('serving');
   }, 600_000);
+
+  it('입단 예약·단장 노트: 2000년에 후원한 그레인키(1983년생)는 만 17세 이후 정한 해 개막 때 실제로 들어온다', () => {
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe', fantasy: { free: true } }, FAST);
+    const team = g.league.teams[0].name;
+    const { ops, dropped } = resolveOps(g, [
+      { op: 'future', name: '잭 그레인키', team, pos: 'P', role: 'SP', birthYear: 1983, joinYear: 2002, now: 50, potential: 75 },
+      { op: 'future', name: '오타니 쇼헤이', team, pos: 'P', birthYear: 1994, joinYear: 2003, now: 45, potential: 80 },
+    ], store);
+    expect(dropped).toEqual([]);
+    expect(ops[1]).toMatchObject({ joinYear: 2011, foreign: true }); // 만 17세 전에는 못 들어온다
+    g.addFantasy({ kind: 'action', title: '글로벌 아카데미', text: 'x', ops, notes: ['SK 글로벌 아카데미: 그레인키 2002, 오타니 2011 입단 예약'] });
+    expect(g.fantasy!.pipeline!.length).toBe(2);
+    expect(g.fantasy!.notes![0]).toMatchObject({ id: 'n1' });
+    expect(freeContext(g, store)).toContain('[단장 노트]');
+    expect(freeContext(g, store)).toContain('[입단 예약]');
+    for (let y = 2000; y < 2002; y++) {
+      g.advance(100000);
+      g.beginOffseason();
+      for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
+        const st = g.offseason!.stage;
+        if (st === 'draft') g.autoDraft(); if (st === 'comp') g.autoComp(); if (st === 'release') g.autoRelease();
+        g.nextStage();
+      }
+      g.openNextSeason();
+    }
+    const gr = g.league.players.find((p) => p.name === '잭 그레인키');
+    expect(gr?.team).toBe(0);
+    expect(gr?.foreign).toBe(true);
+    expect(g.fantasy!.pipeline!.map((x) => x.name)).toEqual(['오타니 쇼헤이']);
+  }, 900_000);
 });
