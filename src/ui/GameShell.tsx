@@ -43,6 +43,7 @@ import { settlePromises } from '../fantasy/free';
 import { duePromises } from '../fantasy/promises';
 import { rivalDue, rivalMove } from '../fantasy/rivals';
 import { About } from './screens/About';
+import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
 
 /**
  * 메뉴 (2026-10-12 UI 개편): 위쪽 큰 메뉴 5개(묶음) + 그 아래 작은 탭(화면).
@@ -213,6 +214,19 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       fantasyBusy.current = false;
     }
   };
+  // 구단 연대기 (src/fantasy/chronicle.ts): 오프시즌에 들어서면 그 해 연대기를 쓴다 (키가 있을 때, 해마다 한 번)
+  useEffect(() => {
+    const year = chronicleDue(session);
+    if (year === null || fantasyBusy.current) return;
+    const s = loadAiSettings();
+    if (s.provider === 'mock' || !s.key.trim()) return;
+    fantasyBusy.current = true;
+    writeChronicle(session, s, year)
+      .then((e) => { if (chronicleDue(session) === year) { session.addFantasy(e); changed(); void autosave(); } })
+      .catch(() => { /* 다음에 다시 */ })
+      .finally(() => { fantasyBusy.current = false; });
+  }, [version, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** 하루 진행 중 멈춘 경우: 요약할 기간이 없으니 지금 상태를 기준으로 (손볼 일만 보여 준다) */
   const takeSnapshotAfter = () => takeSnapshot(session);
   const [summary, setSummary] = useState<{ snap: AdvanceSnapshot; attention: Attention[] } | null>(null);

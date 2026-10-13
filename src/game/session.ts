@@ -1000,6 +1000,12 @@ export class GameSession {
     if (e.effects?.length) this.applyFantasyEffects(e.effects, e.title);
     if (e.ops?.length) this.applyFreeOps(e.ops, e.title);
     if (e.promises?.length || e.settles?.length) applyPromises(f, e.id!, { year: e.year, day: e.day }, e.promises, e.settles);
+    // 구단 연대기: 해마다 한 장, 이야기 기록과 따로
+    if (e.chronicle !== undefined) {
+      f.chronicles = (f.chronicles ?? []).filter((c) => c.year !== e.chronicle);
+      f.chronicles.push({ year: e.chronicle, title: e.title, text: e.text });
+      f.chronicles.sort((a, b) => a.year - b.year);
+    }
     // 단장 노트 (자유 모드): 더하고 지운다. 최근 40개까지
     if (e.noteDrop?.length) f.notes = (f.notes ?? []).filter((n) => !e.noteDrop!.includes(n.id));
     for (const text of e.notes ?? []) {

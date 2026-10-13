@@ -66,6 +66,8 @@ export interface FantasyEntry {
   notes?: string[];
   /** 지울 노트 id */
   noteDrop?: string[];
+  /** 그 해 구단 연대기 (chronicle.ts) */
+  chronicle?: number;
 }
 
 export interface FantasyArc {
@@ -101,6 +103,8 @@ export interface FantasyState {
   /** 단장 노트 (자유 모드): 게임 마스터가 남긴 오래 기억할 사실. 판정 맥락에 늘 들어간다 (2026-10-13 사용자 "AI가 기록하는 노트") */
   notes?: { id: string; year: number; text: string }[];
   nseq?: number;
+  /** 구단 연대기 (chronicle.ts): 해마다 한 장. 이야기 기록과 따로 남는다 */
+  chronicles?: { year: number; title: string; text: string }[];
   /** 입단 예약 (자유 모드 future 조작): 그 해 개막 때 선수가 실제로 들어온다 */
   pipeline?: FutureSigning[];
 }

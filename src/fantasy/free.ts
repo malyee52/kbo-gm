@@ -232,6 +232,7 @@ export function freeContext(g: GameSession, store: Store, action = ''): string {
   const pc = promisesContext(g.league.fantasy);
   if (pc) parts.push(pc);
   const f = g.league.fantasy;
+  if (f?.chronicles?.length) parts.push('[구단 연대기 (최근)]', ...f.chronicles.slice(-3).map((c) => `- ${c.year} ${c.title}: ${c.text.slice(0, 160)}`));
   if (f?.notes?.length) parts.push('[단장 노트]', ...f.notes.map((n) => `- ${n.id} (${n.year}) ${n.text}`));
   if (f?.pipeline?.length) parts.push('[입단 예약]', ...f.pipeline.map((x) => `- ${x.name} (${g.league.teams[x.team]?.name ?? '?'}, ${x.joinYear} 입단, ${x.birthYear}년생 ${x.pos}, 입단 때 능력 ${x.now} 잠재 ${x.potential})`));
   const names = namesContext(g, store, action);
