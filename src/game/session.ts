@@ -34,7 +34,7 @@ import type { FantasyEffect } from '../fantasy/effects';
 import { runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, pitValue, type Defense } from '../engine';
+import { batValue, FIELD_POS, makeDefense, pitValue, type Defense } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import {
@@ -1043,7 +1043,8 @@ export class GameSession {
     const syncSim = (lp: LeaguePlayer) => {
       const sp = spOf(lp.id);
       if (!sp) return;
-      sp.bat = lp.bat ? { ...lp.bat, def: sp.bat?.def ?? lp.bat.def } : null;
+      // 수비는 리그 쪽 값을 따른다 (없던 예전 저장만 월드 값을 남긴다). 전에는 월드 값이 앞서 만든 선수의 새 수비가 들어가지 않았다
+      sp.bat = lp.bat ? { ...lp.bat, def: lp.bat.def ?? sp.bat?.def } : null;
       sp.pit = lp.pit;
       sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
       if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
@@ -1078,7 +1079,12 @@ export class GameSession {
             if (op.real) lp.outsider = true; else delete lp.outsider;
             lp.birthYear = year - op.age; slot.age = op.age;
             lp.potential = pot;
-            if (!slot.isPitcher) { const pos = op.pos === 'C' ? 'C' : op.pos === 'OF' ? 'CF' : 'SS'; lp.pos = pos; slot.pos = pos; }
+            if (!slot.isPitcher) {
+              // 주 포지션과 그 자리 기준 수비 (빈 자리 바탕의 수비를 그대로 쓰면 모든 자리가 유격수 기준이 됐다, 2026-10-13 푸홀스 보고)
+              const pos = op.pos === 'IF' ? '2B' : op.pos === 'OF' ? 'RF' : op.pos;
+              lp.pos = pos; slot.pos = pos;
+              if (lp.bat) lp.bat = { ...lp.bat, def: makeDefense(lp.id, pos, pos === 'DH' ? [] : [pos], lp.bat.speed, op.age) };
+            }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
             Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
