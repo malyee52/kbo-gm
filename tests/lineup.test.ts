@@ -45,7 +45,9 @@ describe('수비 능력', () => {
     expect(makeDefense('x1', 'SS', [], 0.5, 27)).toEqual(makeDefense('x1', 'SS', [], 0.5, 27));
     expect(moveRuns('3B', 'SS', true)).toBeGreaterThan(moveRuns('3B', 'SS', false));
     expect(moveRuns('1B', 'SS', false)).toBeLessThan(moveRuns('3B', 'SS', false));
-    expect(moveRuns('SS', '1B', false)).toBeGreaterThan(0); // 유격수는 1루를 평균보다 잘 본다
+    // 2026-10-13 사용자 "수비 포지션 능력치가 실제와 다르게 작동": 쉬운 자리 덤을 없앴다 (전에는 거의 모든 선수가 1루에서 가장 높았다). 본 자리가 가장 높다
+    expect(moveRuns('SS', '1B', false)).toBeLessThan(0);
+    expect(moveRuns('SS', '3B', true)).toBe(0);
     expect(moveRuns('LF', 'C', false)).toBeLessThanOrEqual(-60);
   });
 

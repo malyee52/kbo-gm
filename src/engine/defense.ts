@@ -19,7 +19,11 @@ const SPECTRUM: Record<FieldPos, number> = { C: 3, SS: 4, '2B': 3, CF: 3, '3B': 
 const INFIELD = new Set<FieldPos>(['1B', '2B', '3B', 'SS']);
 const OUTFIELD = new Set<FieldPos>(['LF', 'CF', 'RF']);
 
-/** 포지션을 옮길 때의 수비 런 변화 (임시값). 해 본 포지션이면 손해가 1/4 (그 자리를 실제로 맡아 본 선수) */
+/**
+ * 포지션을 옮길 때의 수비 런 변화 (임시값). 해 본 포지션이면 손해가 1/4 (그 자리를 실제로 맡아 본 선수).
+ * 2026-10-13 사용자 "수비 포지션 능력치가 실제와 다르게 작동": 전에는 쉬운 자리로 가면 최대 +5라 거의 모든 선수가 1루에서 가장 높게 나왔다.
+ * 이제 해 본 쉬운 자리는 본 자리와 같고 안 해 본 쉬운 자리는 조금(−0.5) 낮다. 본 자리가 가장 높다
+ */
 export function moveRuns(from: FieldPos, to: FieldPos, played: boolean): number {
   if (from === to) return 0;
   let d: number;
@@ -27,8 +31,8 @@ export function moveRuns(from: FieldPos, to: FieldPos, played: boolean): number 
   else if (from === 'C') d = to === '1B' ? 0 : to === '3B' ? -4 : -8 - SPECTRUM[to] * 2;
   else {
     const gap = SPECTRUM[to] - SPECTRUM[from];
-    // 쉬운 자리로 가면 그 자리 평균보다 조금 낫고(최대 +5), 어려운 자리로 가면 크게 손해
-    d = gap <= 0 ? Math.min(5, -gap) : -gap * 10;
+    // 쉬운 자리: 해 본 자리면 본 자리와 같고, 안 해 본 자리는 조금(−0.5) 낯설다. 어려운 자리로 가면 크게 손해
+    d = gap <= 0 ? (played ? 0 : -0.5) : -gap * 10;
     if (INFIELD.has(from) && OUTFIELD.has(to)) d -= 4;
     if (OUTFIELD.has(from) && INFIELD.has(to) && to !== '1B') d -= 12;
     if (OUTFIELD.has(from) && to === '1B') d -= 3;
@@ -50,9 +54,11 @@ export function fieldPosOf(pos: string | null | undefined): FieldPos {
  * 많이 뛸수록 운의 폭을 줄이고(최대 40%) 조금 더한다(최대 +3런). 1,500타석(주전 약 3시즌)에서 최대 (임시값).
  * 같은 선수 id면 늘 같은 값 (시드 난수 `defense/<id>`).
  */
-export function makeDefense(id: string, pos: string | null, played: (string | null)[], speed: number, age: number | null, primaryPa = 0): Defense {
+export function makeDefense(id: string, pos: string | null, played: (string | null)[], speed: number, age: number | null, primaryPa = 0,
+  opts: { awards?: { year: number; pos: string; rank: number }[]; year?: number; fieldPos?: string } = {}): Defense {
   const rng = new Rng(`defense/${id}`);
-  const primary = fieldPosOf(pos);
+  // 지명타자는 커리어에 가장 많이 맡은 수비 자리를 본 자리로 (예전에는 1루로 보고 다른 자리는 못 맡았다)
+  const primary = fieldPosOf(pos === 'DH' && opts.fieldPos ? opts.fieldPos : pos);
   // 가운데가 두꺼운 운 (표준편차 약 4런)
   const proven = Math.min(1, primaryPa / 1500);
   const talent = (rng.next() + rng.next() + rng.next() - 1.5) * 8 * (1 - 0.4 * proven) + 3 * proven;
@@ -69,10 +75,25 @@ export function makeDefense(id: string, pos: string | null, played: (string | nu
   }
   if (pos === 'IF') ['2B', '3B', 'SS'].forEach((x) => exp.add(x as FieldPos));
   if (pos === 'OF') ['LF', 'CF', 'RF'].forEach((x) => exp.add(x as FieldPos));
+  for (const a of opts.awards ?? []) if ((FIELD_POS as readonly string[]).includes(a.pos)) exp.add(a.pos as FieldPos);
   const out: Defense = {};
   for (const q of FIELD_POS) out[q] = round1(base + moveRuns(primary, q, exp.has(q)));
+  // KBO 수비상(2023~) 보정: 그 자리 수상 +10런, 2위 +7, 3위 +5까지 끌어올린다 (떨어진 해마다 1.5런씩 덜). 같은 만큼 모든 자리에 더한다 (수비 재능)
+  let lift = 0;
+  for (const a of opts.awards ?? []) {
+    const q = a.pos as FieldPos;
+    if (out[q] === undefined || opts.year === undefined) continue;
+    const dy = Math.abs(opts.year - a.year);
+    if (dy > 2) continue;
+    const target = (AWARD_RUNS[a.rank] ?? 0) - 1.5 * dy;
+    lift = Math.max(lift, target - out[q]!);
+  }
+  if (lift > 0) for (const q of FIELD_POS) out[q] = round1(out[q]! + lift);
   return out;
 }
+
+/** 수비상 순위 → 그 자리 수비 런 하한 (임시값: +10 = 리그 정상급) */
+const AWARD_RUNS: Record<number, number> = { 1: 10, 2: 7, 3: 5 };
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
 

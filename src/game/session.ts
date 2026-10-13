@@ -34,7 +34,7 @@ import type { FantasyEffect } from '../fantasy/effects';
 import { runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, pitValue } from '../engine';
+import { batValue, FIELD_POS, pitValue, type Defense } from '../engine';
 import { skillForRuns } from '../league/growth';
 import {
   aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
@@ -212,6 +212,9 @@ export type GameAction =
   | { year: number; day: number; type: 'ai-choice'; id: string; choice: number }
   | { year: number; type: 'ai-choice-off'; id: string; choice: number }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
+  /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런 */
+  | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense }
+  | { year: number; type: 'def-edit-off'; id: string; def: Defense }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
@@ -733,6 +736,7 @@ export class GameSession {
     else if (a.type === 'ai') this.applyFantasy(a.entry);
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
+    else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -2315,6 +2319,7 @@ export class GameSession {
       case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
+      case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'ai-off': this.applyFantasy(a.entry); break;
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
@@ -2866,6 +2871,39 @@ export class GameSession {
   orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
   fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
   hireManager(name: string) { return this.dispatchOff({ year: this.year, type: 'mgr-hire', name }); }
+  /**
+   * 수비 능력치를 직접 고친다 (2026-10-13 사용자 선택 "공개 수상·평가로 보정 + 직접 고치기"). 수비 기록 자료가 없어 추정값이라,
+   * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다
+   */
+  editDefense(id: string, def: Defense): { ok: boolean; message: string } {
+    const lp = this.leaguePlayer(id);
+    if (!lp?.bat) return { ok: false, message: '타자 능력이 없는 선수입니다.' };
+    const clean: Defense = {};
+    for (const q of FIELD_POS) {
+      const v = def[q];
+      if (typeof v === 'number' && Number.isFinite(v)) clean[q] = Math.round(Math.max(-40, Math.min(25, v)) * 10) / 10;
+    }
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'def-edit', id, def: clean });
+      return { ok: true, message: '수비 능력치를 고쳤습니다.' };
+    }
+    return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean });
+  }
+
+  private applyDefenseEdit(id: string, def: Defense): void {
+    const lp = this.leaguePlayer(id);
+    if (!lp?.bat) return;
+    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def } };
+    if (this.phase === 'season') {
+      const sp = this.world.players.find((p) => p.id === id);
+      if (sp?.bat) {
+        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def } };
+        if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
+      }
+    }
+    this.valueCtx = null;
+  }
+
   /**
    * 세부 난이도를 바꾼다 (게임 중에도, 조작 기록에 남는다). 부상 빈도는 다음 경기부터
    */

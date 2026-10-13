@@ -1,5 +1,5 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
-import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type PlayerMaster, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type PlayerMaster, type RawSeason, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -18,7 +18,7 @@ export interface BrowserStore extends DataStore {
 
 export async function loadBrowserStore(): Promise<BrowserStore> {
   // 신인 지명(drafts.json)은 오프시즌 드래프트와 새 게임에 필요해서 처음부터 불러온다 (약 640KB, 압축 전송)
-  const [meta, pl, dr, tr, mil, mgr] = await Promise.all([
+  const [meta, pl, dr, tr, mil, mgr, dfa] = await Promise.all([
     get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json'), get<{ years: Record<string, DraftRow[]> }>('drafts.json'),
     // 숨겨진 특수능력 표. 파일이 없어도 게임은 돌아간다 (아무도 능력이 없는 것으로)
     get<{ traits: Record<string, string[]> }>('traits.json').then((t) => t.traits, () => undefined),
@@ -26,6 +26,8 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     get<{ players: Record<string, MilitaryRecord> }>('military.json').then((t) => t.players, () => undefined),
     // 감독 실명 명단과 운영 경향 (약 35KB). 없으면 감독 기능을 쓰지 않는다
     get<ManagerData>('managers.json').catch(() => undefined),
+    // KBO 수비상 순위 (수비 추정 보정, 약 3KB). 없으면 보정하지 않는다
+    get<{ players: Record<string, DefenseAward[]> }>('defense_awards.json').then((t) => t.players, () => undefined),
   ]);
   const seasons = new Map<number, SeasonData>();
   const load = async (years: number[]) => {
@@ -42,6 +44,7 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     traits: tr,
     military: mil,
     managers: mgr,
+    defenseAwards: dfa,
     async ensureYear(year) {
       await load([year, year - 1, year - 2, year - 3]);
     },
