@@ -48,9 +48,11 @@ describe('퓨처스리그', () => {
   it('나눠 진행해도(하루씩) 한 번에 진행한 것과 같다', () => {
     const a = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'fut-chunk' }, FAST);
     const b = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'fut-chunk' }, FAST);
-    for (const g of [a, b]) ensureEvents(g.league).chance = 0;
+    // 무작위 이벤트는 양쪽 다 끈다: 확률은 날마다 오르므로 0에서 시작하면 한 번에 진행한 쪽에서 중간에 이벤트가 날 수 있다
+    // (2026-10-13 수비수별 실책을 넣은 뒤 24일째 대표팀 이벤트가 끼어들어 갈라졌다). 아주 낮게 두어 40일 안에 오르지 않게
+    for (const g of [a, b]) ensureEvents(g.league).chance = -100;
     a.advance(40);
-    for (let i = 0; i < 40; i++) { ensureEvents(b.league).chance = 0; b.advance(1); b.futures(); }
+    for (let i = 0; i < 40; i++) { b.advance(1); b.futures(); }
     expect([...b.futures().lines.entries()]).toEqual([...a.futures().lines.entries()]);
     expect(b.futures().teams).toEqual(a.futures().teams);
   }, 300_000);

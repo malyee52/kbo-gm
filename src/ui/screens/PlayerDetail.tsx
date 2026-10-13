@@ -205,7 +205,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
   return (
     <div className="defense">
       <h4 className="small">
-        수비 <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span>
+        수비{session.phase === 'season' && (session.season.errors[p.idx] ?? 0) > 0 ? <span className="muted"> 이번 시즌 실책 {session.season.errors[p.idx]}개 ·</span> : null} <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span>
         {!edit && p.bat && <button type="button" className="link small" onClick={open}>고치기</button>}
       </h4>
       {edit ? (
@@ -228,7 +228,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
         </div>
       )}
       {msg && <p className="muted small">{msg}</p>}
-      <p className="muted small">KBO가 수비 기록의 자동 수집을 막고 있어, 커리어에 맡은 포지션·주력·나이와 KBO 수비상(2023~) 순위로 만든 추정값입니다. 실제와 다르면 "고치기"로 바꾸세요.</p>
+      <p className="muted small">KBO가 수비 기록의 자동 수집을 막고 있어, 커리어에 맡은 포지션·주력·나이와 KBO 수비상(2023~) 순위로 만든 추정값입니다. 실제와 다르면 "고치기"로 바꾸세요. 실책률은 그 자리 수비 등급에 따라 달라집니다 (실책 출루 기준).</p>
     </div>
   );
 }
