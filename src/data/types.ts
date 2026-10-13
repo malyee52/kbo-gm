@@ -234,6 +234,8 @@ export interface DataStore {
   traits?: Record<string, string[]>;
   /** 실제 병역 자료: 선수 ID → 상무·경찰 복무, 국제대회 금메달 면제. military.json. 없으면 나이·기록 공백으로 짐작한다 */
   military?: Record<string, MilitaryRecord>;
+  /** KBO 수비상 순위 (2023~, defense_awards.json, tools/build_defense_awards.py): 선수 ID → 그 해 포지션·순위. 수비 추정 보정에 쓴다 */
+  defenseAwards?: Record<string, DefenseAward[]>;
   /** 연도별 구단 감독과 감독 경력·운영 경향 (managers.json). 없으면 감독 기능을 쓰지 않는다 */
   managers?: ManagerData;
 }
@@ -291,4 +293,12 @@ function unpack<T>(fields: string[], rows: unknown[][]): T[] {
 export function decodeSeason(raw: RawSeason): SeasonData {
   const { batFields, bat, pitFields, pit, ...rest } = raw;
   return { ...rest, bat: unpack<BatRow>(batFields, bat), pit: unpack<PitRow>(pitFields, pit) };
+}
+
+/** KBO 수비상 한 건 (감독·코치·단장 투표 75% + 수비 기록 25%, 언론 보도) */
+export interface DefenseAward {
+  year: number;
+  pos: string;
+  /** 1 수상, 2·3 순위 */
+  rank: number;
 }

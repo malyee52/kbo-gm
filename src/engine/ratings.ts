@@ -7,6 +7,7 @@
 
 import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
+import type { DefenseAward } from '../data/types';
 import type { EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
@@ -166,6 +167,10 @@ export interface BuildWorldInput {
   params: EngineParams;
   /** 숨겨진 특수능력 표 (traits.json의 traits). 없으면 아무도 능력이 없다 */
   traits?: Record<string, string[]>;
+  /** 그 해 전 모든 시즌 (수비 포지션 이력용). 없으면 history만 */
+  career?: SeasonData[];
+  /** KBO 수비상 순위 (선수 ID → 수상). 없으면 보정하지 않는다 */
+  defenseAwards?: Record<string, DefenseAward[]>;
 }
 
 /**
@@ -191,6 +196,18 @@ export function buildWorld(input: BuildWorldInput): World {
   const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
   const rp = seasonBasis ? seasonRegress(params, params.seasonPitRegressScale ?? params.seasonRegressScale) : params;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
+  // 커리어 수비 포지션: 선수 → 포지션 → 타석(최근일수록 무겁게, 해마다 0.85배). 역사 재현은 그 시즌도 넣는다
+  const careerPos = new Map<string, Map<string, number>>();
+  const careerSeasons = [...(input.career ?? history.filter((s): s is SeasonData => !!s)), ...(seasonBasis ? [current] : [])];
+  for (const s of careerSeasons) {
+    const w = 0.85 ** Math.max(0, year - s.year);
+    for (const r of s.bat) {
+      if (!r.pos || r.pos === 'IF' || r.pos === 'OF') continue;
+      let m = careerPos.get(r.id);
+      if (!m) careerPos.set(r.id, (m = new Map()));
+      m.set(r.pos, (m.get(r.pos) ?? 0) + Math.max(1, r.pa) * w);
+    }
+  }
 
   for (const id of ids) {
     const m = master.get(id);
@@ -247,9 +264,13 @@ export function buildWorld(input: BuildWorldInput): World {
       // 세부 포지션이 어디에도 없으면 직전 시즌의 내야·외야 구분이라도, 그것도 없으면 내야로 본다 (1980~90년대 자료. 빈 자료는 추정치, 2026-10-09 QA)
       const posHist = seasonBasis ? rateBat : histBat;
       if (!pos) pos = posHist.map((h) => h?.get(id)?.pos).find((q) => q === 'IF' || q === 'OF') ?? 'IF';
-      // 수비: 직전 시즌들(역사 재현은 그 시즌부터)에 맡은 포지션(멀티 포지션 이력)과 주력·나이로 만든 추정값 (기록 없음)
-      bat.def = makeDefense(id, pos, posHist.map((h) => h?.get(id)?.pos ?? null), bat.speed, m.birthYear ? year - m.birthYear : null,
-        pos ? posPa.get(pos) ?? 0 : 0);
+      // 수비: 커리어에 맡은 포지션(멀티 포지션 이력, 2026-10-13), 주력·나이, KBO 수비상으로 만든 추정값 (수비 기록 없음).
+      // 커리어 세부 포지션이 없을 때만 직전 시즌들의 내야·외야 구분을 쓴다
+      const career = careerPos.get(id);
+      const played = career && career.size ? [...career.keys()] : posHist.map((h) => h?.get(id)?.pos ?? null);
+      const careerField = career ? [...career.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] : undefined;
+      bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
+        pos ? posPa.get(pos) ?? 0 : 0, { awards: input.defenseAwards?.[id], year, fieldPos: pos === 'DH' ? careerField ?? (m.pos && m.pos !== 'DH' ? m.pos : undefined) : undefined });
     }
 
     const p: SimPlayer = {

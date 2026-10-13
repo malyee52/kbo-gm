@@ -819,3 +819,7 @@ td .inline { flex-wrap: nowrap; }
 .negotiate textarea { width: 100%; resize: vertical; }
 /* 자유 모드 판정 미리보기 (GmPreview.tsx) */
 .gm-preview { border: 2px dashed var(--accent, var(--line-strong)); }
+/* 수비 직접 고치기 (PlayerDetail) */
+.defense-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; }
+.defense-edit label { display: flex; flex-direction: column; gap: 2px; }
+.defense-edit input { width: 4.2em; }

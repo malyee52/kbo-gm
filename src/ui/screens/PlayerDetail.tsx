@@ -4,7 +4,7 @@ import { ReleaseButton } from './Market';
 import { postseasonLines, psFromRecord, psLineText } from '../../league/postseason';
 import { futuresText } from './Roster';
 import { futuresFromRecord, type FuturesLine } from '../../league/futures';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
 import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIELD_POS, isVirtual, playablePositions, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
@@ -187,16 +187,48 @@ function ContractInfo({ id }: { id: string }) {
   );
 }
 
-/** 포지션별 수비 등급 (20~80, 50 = 그 자리 평균 수비수) */
+/** 포지션별 수비 등급 (20~80, 50 = 그 자리 평균 수비수). 직접 고치기 (2026-10-13 사용자 선택) */
 function DefenseInfo({ p }: { p: SimPlayer }) {
+  const { session, changed, autosave } = useGame();
+  const [edit, setEdit] = useState<Record<string, number> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const playable = playablePositions(p.bat?.def);
+  const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => [q, defenseGrade(defenseAt(p, q))])));
+  const save = () => {
+    if (!edit) return;
+    // 등급 → 수비 런 (5런 = 10점)
+    const def = Object.fromEntries(FIELD_POS.map((q) => [q, (edit[q] - 50) / 2]));
+    const r = session.editDefense(p.id, def);
+    setMsg(r.message);
+    if (r.ok) { setEdit(null); changed(); void autosave(); }
+  };
   return (
     <div className="defense">
-      <h4 className="small">수비 <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span></h4>
-      <div className="grades">
-        {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} v={defenseGrade(defenseAt(p, q))} />)}
-      </div>
-      <p className="muted small">수비 기록이 자료에 없어, 직전 시즌들에 맡은 포지션·주력·나이로 만든 추정값입니다.</p>
+      <h4 className="small">
+        수비 <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span>
+        {!edit && p.bat && <button type="button" className="link small" onClick={open}>고치기</button>}
+      </h4>
+      {edit ? (
+        <div className="defense-edit">
+          {FIELD_POS.map((q) => (
+            <label key={q} className="small">
+              {posName(q)}
+              <input type="number" min={20} max={80} step={1} value={edit[q]} onChange={(e) => setEdit({ ...edit, [q]: Math.max(20, Math.min(80, Number(e.target.value) || 20)) })} />
+            </label>
+          ))}
+          <span className="inline">
+            <button type="button" className="small-btn" onClick={save}>저장</button>
+            <button type="button" className="small-btn ghost" onClick={() => setEdit(null)}>취소</button>
+          </span>
+          <p className="muted small">20~80 (50 = 그 자리 평균, 40 아래면 맡기기 어렵다). 고친 값은 조작 기록에 남고 경기·선수 가치에 바로 들어갑니다.</p>
+        </div>
+      ) : (
+        <div className="grades">
+          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} v={defenseGrade(defenseAt(p, q))} />)}
+        </div>
+      )}
+      {msg && <p className="muted small">{msg}</p>}
+      <p className="muted small">KBO가 수비 기록의 자동 수집을 막고 있어, 커리어에 맡은 포지션·주력·나이와 KBO 수비상(2023~) 순위로 만든 추정값입니다. 실제와 다르면 "고치기"로 바꾸세요.</p>
     </div>
   );
 }
