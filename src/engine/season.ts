@@ -161,6 +161,8 @@ interface FixedAbsence {
 
 /** 진행 중 시즌의 저장 형태 (JSON으로 그대로 쓸 수 있다) */
 export interface SeasonSave {
+  /** 수비수별 실책 (예전 저장에는 없다) */
+  errors?: number[];
   format: 1;
   seed: string;
   year: number;
@@ -228,6 +230,8 @@ export class Season {
   readonly states: PlayerStates;
   readonly bat: BatLine[];
   readonly pit: PitLine[];
+  /** 수비수별 실책 (선수 색인, 정규시즌. 2026-10-13) */
+  readonly errors: number[];
   readonly teams: TeamRecord[];
   readonly totals: LeagueCounters;
   readonly teamSeasons: TeamSeason[];
@@ -267,6 +271,7 @@ export class Season {
     this.demotedDay = new Int32Array(n).fill(-1);
     this.bat = Array.from({ length: n }, emptyBatLine);
     this.pit = Array.from({ length: n }, emptyPitLine);
+    this.errors = new Array(n).fill(0);
     this.teams = world.teams.map(emptyTeamRecord);
     this.totals = emptyLeagueCounters();
     this.boxTeams = new Set(init.boxTeams ?? []);
@@ -279,6 +284,7 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: rng.fork('games'),
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
+      errors: this.errors,
     };
 
     // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다
@@ -553,6 +559,7 @@ export class Season {
       lastStartDay: Array.from(st.lastStartDay),
       bat: this.bat.map((b) => BAT_KEYS.map((k) => b[k])),
       pit: this.pit.map((p) => PIT_KEYS.map((k) => p[k])),
+      errors: [...this.errors],
       teams: this.teams.map((t) => ({ ...t })),
       totals: { ...this.totals },
       log: this.log.map((g) => ({ ...g })),
@@ -596,6 +603,7 @@ export class Season {
     s.states.lastStartDay.set(save.lastStartDay);
     save.bat.forEach((row, i) => BAT_KEYS.forEach((k, j) => { s.bat[i][k] = row[j]; }));
     save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j] ?? 0; })); // 예전 저장에는 뒤에 붙인 항목(홀드)이 없다
+    save.errors?.forEach((v, i) => { if (i < s.errors.length) s.errors[i] = v; }); // 예전 저장에는 없다 (0)
     save.teams.forEach((t, i) => Object.assign(s.teams[i], t));
     Object.assign(s.totals, save.totals);
     s.log.push(...save.log.map((g) => ({ ...g })));

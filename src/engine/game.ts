@@ -66,6 +66,8 @@ export interface GameContext {
   plays?: Play[] | null;
   /** 직접 지휘 (경기 개입): 이 구단의 타석마다 지휘자에게 묻는다. 고른 것이 '자동'이면 AI 감독과 똑같이 진행한다 */
   command?: GameCommand | null;
+  /** 수비수별 실책 수 (선수 색인). 없으면 남기지 않는다 */
+  errors?: number[];
 }
 
 /** 직접 지휘하는 구단과 판단 함수 (game/session.ts가 조작 기록·미리보기로 채운다) */
@@ -147,6 +149,8 @@ export interface Play {
   home: number;
   /** 이 플레이로 난 점수 */
   runs: number;
+  /** 실책(E)을 한 수비수 (선수 색인) */
+  fielder?: number;
 }
 
 interface PitcherInGame {
@@ -183,6 +187,10 @@ interface Side {
   def: number;
   /** 포수의 수비 런 */
   catcherDef: number;
+  /** 실책 배율 (수비수별 실책률을 타구 몫으로 가중한 합, 평균 수비진 ≈ 1) */
+  errMult: number;
+  /** 실책이 났을 때 누가 했나 고르는 몫 (선수 색인, 타구 몫 × 실책률) */
+  errBy: { idx: number; w: number }[];
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
   removed: Set<number>;
   /** 지금 수비 위치 (선수 색인 → 자리). 대타·대주자는 바꾼 선수의 자리를 그대로 받는다 */
@@ -370,18 +378,37 @@ function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slot> {
   return new Map(slots.map(({ p, slot }) => [p.idx, slot]));
 }
 
-/** 수비 배치에서 팀 수비 런과 포수 수비 런 */
-function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { def: number; catcherDef: number } {
+/**
+ * 실책 날 타구가 그 자리로 가는 몫 (실책 출루 기준, 임시값): 내야 땅볼·송구가 대부분, 1루는 송구를 받는 쪽이라 적다.
+ * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율": 전에는 팀 수비 합으로만 실책 출루 확률을 줄였다
+ */
+const ERROR_SHARE: Partial<Record<Slot, number>> = { SS: 0.2, '3B': 0.17, '2B': 0.17, '1B': 0.12, C: 0.04, LF: 0.1, CF: 0.1, RF: 0.1 };
+/** 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
+const ERROR_PER_RUN = 0.045;
+export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
+/** 리그 실책 수를 예전(팀 수비 합 방식)과 같게 맞추는 배율 (2025 두 시드로 잼: 수비수별로 바꾸니 약 8% 많았다) */
+const ERROR_NORM = 0.93;
+
+/** 수비 배치에서 팀 수비 런, 포수 수비 런, 실책 배율 */
+function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { def: number; catcherDef: number; errMult: number; errBy: { idx: number; w: number }[] } {
   let def = 0;
   let catcherDef = 0;
+  let errMult = 0;
+  const errBy: { idx: number; w: number }[] = [];
   for (const p of lineup) {
     const slot = slots.get(p.idx);
     if (!slot) continue;
     const r = defenseAt(p, slot);
     def += r;
     if (slot === 'C') catcherDef = r;
+    const share = ERROR_SHARE[slot] ?? 0;
+    if (share > 0) {
+      const w = share * errorRateOf(r);
+      errMult += w;
+      errBy.push({ idx: p.idx, w });
+    }
   }
-  return { def, catcherDef };
+  return { def, catcherDef, errMult: (errMult || 1) * ERROR_NORM, errBy };
 }
 
 /**
@@ -507,10 +534,12 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       totals.outs += n;
     };
     const plays = ctx.plays;
+    let errFielder = -1;
     const note = (kind: PlayKind, who: number, pit: number, r0: number) => {
       plays?.push({
         inn: inning, top: !bat.isHome, kind, bat: who, pit, outs: Math.min(3, outs),
         bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1], away: away.runs, home: home.runs, runs: bat.runs - r0,
+        ...(kind === 'E' && errFielder >= 0 ? { fielder: errFielder } : {}),
       });
     };
 
@@ -731,10 +760,13 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
         default: {
           // 인플레이 아웃이 될 타구
           bl.ab++; totals.ab++;
-          if (rng.chance(ctx.env.roe * Math.max(0.3, 1 - fld.def * params.defenseHitPerRun * 3))) {
-            // 실책 출루: 주자는 한 베이스씩, 타자 주자는 비자책
+          if (rng.chance(ctx.env.roe * fld.errMult)) {
+            // 실책 출루: 그 타구를 받은 수비수의 실책률로 (fieldDefense). 주자는 한 베이스씩, 타자 주자는 비자책
             totals.roe++;
             kind = 'E';
+            let u = rng.next() * fld.errBy.reduce((s, x) => s + x.w, 0);
+            errFielder = fld.errBy.find((x) => (u -= x.w) < 0)?.idx ?? fld.errBy.at(-1)?.idx ?? -1;
+            if (errFielder >= 0 && ctx.errors) ctx.errors[errFielder] = (ctx.errors[errFielder] ?? 0) + 1;
             me.earned = false;
             if (outs === 2) halfUnearned = true;
             if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }

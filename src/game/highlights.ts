@@ -25,6 +25,8 @@ export function playText(p: Play, name: NameOf): string {
   const who = name(p.bat);
   if (p.kind === 'HR') return `${who} ${homerLabel(p.runs)}!`;
   const tail = p.runs > 0 ? ` (${p.runs}점)` : '';
+  // 실책: 누가 했나 (2026-10-13 수비수별 실책)
+  if (p.kind === 'E' && p.fielder !== undefined && p.fielder >= 0) return `${who} ${name(p.fielder)}의 실책으로 출루${tail}`;
   return `${who} ${KIND_TEXT[p.kind]}${tail}`;
 }
 
