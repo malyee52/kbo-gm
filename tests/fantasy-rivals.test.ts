@@ -53,4 +53,20 @@ describe('다른 구단 단장', () => {
     const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
     expect(roundTrip(r.toSave().league)).toEqual(roundTrip(g.toSave().league));
   }, 600_000);
+
+  it('오프시즌: FA·외국인 단계마다 한 번 움직이고, 오프시즌 제안은 개막 전까지 유효', async () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'rival-off', fantasy: { free: true } }, FAST);
+    g.advance(100000);
+    g.beginOffseason();
+    expect(g.offseason!.stage).toBe('fa');
+    expect(rivalDue(g)).toBe(true);
+    const r = await rivalMove(g, store, mock);
+    g.addFantasy(r.entry);
+    const e = g.fantasy!.log.at(-1)!;
+    expect(e.offStage).toBe('fa');
+    expect(rivalDue(g)).toBe(false);
+    if (e.choices) expect(offerExpired(g, e)).toBe(false);
+    for (let guard = 0; g.offseason!.stage !== 'foreign' && guard < 10; guard++) { if (g.offseason!.stage === 'comp') g.autoComp(); g.nextStage(); }
+    expect(rivalDue(g)).toBe(true);
+  }, 600_000);
 });

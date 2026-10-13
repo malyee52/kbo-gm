@@ -214,6 +214,18 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       fantasyBusy.current = false;
     }
   };
+  // 다른 구단 단장의 오프시즌 움직임 (src/fantasy/rivals.ts): FA·외국인 단계마다 한 번 (자유 모드, 키가 있을 때)
+  useEffect(() => {
+    if (session.phase !== 'offseason' || !rivalDue(session) || fantasyBusy.current) return;
+    const s = loadAiSettings();
+    if (s.provider === 'mock' || !s.key.trim()) return;
+    fantasyBusy.current = true;
+    rivalMove(session, store, s)
+      .then((r) => { if (rivalDue(session)) { session.addFantasy(r.entry); changed(); void autosave(); } })
+      .catch(() => { /* 다음에 다시 */ })
+      .finally(() => { fantasyBusy.current = false; });
+  }, [version, session]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 구단 연대기 (src/fantasy/chronicle.ts): 오프시즌에 들어서면 그 해 연대기를 쓴다 (키가 있을 때, 해마다 한 번)
   useEffect(() => {
     const year = chronicleDue(session);

@@ -25,24 +25,36 @@ export function rivalGmOf(league: Pick<LeagueState, 'seed' | 'teams' | 'players'
   return koreanName(new Rng(`${league.seed}/rival-gm/${franchise}`), taken);
 }
 
+/** 오프시즌에 움직이는 단계 (2026-10-13 사용자 선택 "다른 구단 오프시즌 무브"): FA 시장과 외국인 영입 때 한 번씩 */
+export const RIVAL_OFF_STAGES = ['fa', 'foreign'] as const;
+
 /** 이번에 움직일 구단과 종류 (시드로 정한다) */
 export function rivalPick(g: GameSession): { team: number; kind: 'offer' | 'move' } {
-  const teams = g.league.teams.map((_, i) => i).filter((i) => i !== g.teamIdx && g.world.teams[i]);
-  const rng = new Rng(`${g.league.seed}/rival/${g.world.year}/${g.currentDay}`);
+  const teams = g.league.teams.map((_, i) => i).filter((i) => i !== g.teamIdx && (g.phase === 'season' ? g.world.teams[i] : true));
+  const key = g.phase === 'season' ? `${g.world.year}/${g.currentDay}` : `off/${g.year}/${g.offseason?.stage ?? ''}`;
+  const rng = new Rng(`${g.league.seed}/rival/${key}`);
   return { team: teams[rng.int(teams.length)], kind: rng.chance(0.6) ? 'offer' : 'move' };
 }
 
 export function rivalDue(g: GameSession): boolean {
   const f = g.league.fantasy;
-  if (!f?.free || g.phase !== 'season' || g.done || g.currentDay < 3) return false;
-  const last = [...f.log].reverse().find((e) => e.rival !== undefined && e.year === g.world.year);
+  if (!f?.free) return false;
+  if (g.phase === 'offseason') {
+    // 오프시즌: FA·외국인 단계마다 한 번 (그 단계에서 이미 움직였으면 아니다)
+    const st = g.offseason?.stage;
+    if (!st || !(RIVAL_OFF_STAGES as readonly string[]).includes(st)) return false;
+    return !f.log.some((e) => e.rival !== undefined && e.year === g.year && e.day < 0 && e.offStage === st);
+  }
+  if (g.phase !== 'season' || g.done || g.currentDay < 3) return false;
+  const last = [...f.log].reverse().find((e) => e.rival !== undefined && e.year === g.world.year && e.day >= 0);
   return g.currentDay - (last ? last.day : -RIVAL_EVERY) >= RIVAL_EVERY;
 }
 
-/** 우리에게 온 제안이 만료됐나 */
+/** 우리에게 온 제안이 만료됐나: 시즌 중 제안은 RIVAL_OFFER_DAYS일, 오프시즌 제안은 개막 전까지 */
 export function offerExpired(g: Pick<GameSession, 'phase' | 'year' | 'currentDay'>, e: FantasyEntry): boolean {
   if (e.rival === undefined || !e.choices?.length) return false;
-  if (g.phase !== 'season' || e.day < 0 || e.year !== g.year) return true;
+  if (e.day < 0) return !(g.phase === 'offseason' && e.year === g.year);
+  if (g.phase !== 'season' || e.year !== g.year) return true;
   return g.currentDay - e.day > RIVAL_OFFER_DAYS;
 }
 
@@ -52,6 +64,7 @@ export function rivalSystem(): string {
 - kind "offer": 그 단장이 플레이어(우리 구단 단장)에게 제안·요청·견제를 해 온다 (트레이드, 현금 거래, 지명권, 선수 임대 같은 협력, 맞대응 경고 등).
   choices 2~3개 (받기·조건 바꿔 받기·거절 등). 각 선택지의 ops에 그 선택이 일으킬 실제 조작을 넣는다 (거절이면 빈 배열이나 관계 대가).
 - kind "move": 그 구단이 다른 구단(우리 구단 제외)과 벌이는 큰 움직임 (트레이드, 영입, 리그 밖 선수 영입, 자금 투입). ops는 바로 반영된다. 우리 선수·우리 구단 수치는 건드리지 않는다.
+- 오프시즌이면 그 시기에 맞게: FA 시장(경쟁 입찰·견제·보상선수 신경전), 외국인 영입 경쟁, 트레이드, 대형 투자. FA 시장에 나온 선수는 조작으로 옮기지 않는다 (FA 계약은 시장에서 정해진다).
 - [이 게임의 규정]을 따른다. 규정 밖의 일은 명분을 붙인다.
 ${RULES}
 
@@ -68,7 +81,7 @@ export async function rivalMove(g: GameSession, store: Store, s: LlmSettings): P
   const teamName = g.league.teams[team].name;
   const raw = await completeJsonText(s, {
     system: rivalSystem(),
-    messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[이번 주 움직이는 단장] ${teamName} 단장 ${gm} (가상 인물). 종류: ${kind === 'offer' ? 'offer (우리에게 제안)' : 'move (다른 구단과의 움직임)'}` }],
+    messages: [{ role: 'user', content: `[게임 상황]\n${freeContext(g, store)}\n\n[${g.phase === 'season' ? '이번 주' : `오프시즌 ${g.offseason?.stage === 'fa' ? 'FA 시장' : '외국인 영입'} 때`} 움직이는 단장] ${teamName} 단장 ${gm} (가상 인물). 종류: ${kind === 'offer' ? 'offer (우리에게 제안)' : 'move (다른 구단과의 움직임)'}` }],
     maxTokens: 1500,
     mockReply: JSON.stringify(kind === 'offer'
       ? { kind, title: `(시험용) ${teamName}의 제안`, narration: '현금 거래를 제안해 왔다.', choices: [{ label: '받는다', result: '거래가 성사됐다.', ops: [{ op: 'cash', amount: 1 }] }, { label: '거절한다', result: '정중히 거절했다.', ops: [] }] }
@@ -77,7 +90,8 @@ export async function rivalMove(g: GameSession, store: Store, s: LlmSettings): P
   const j = extractJson<{ kind?: string; title?: string; narration?: string; ops?: unknown; choices?: unknown }>(raw);
   if (!j?.narration) throw new Error(`AI가 형식에 맞지 않게 답했습니다 (다시 물어도 같았습니다). 답 앞부분: ${preview(raw)}`);
   const dropped: string[] = [];
-  const base = { kind: 'action' as const, title: String(j.title ?? `${teamName} 단장의 움직임`).slice(0, 80), text: String(j.narration).slice(0, 2000), who: `${teamName} 단장 ${gm}`, rival: team };
+  const base = { kind: 'action' as const, title: String(j.title ?? `${teamName} 단장의 움직임`).slice(0, 80), text: String(j.narration).slice(0, 2000), who: `${teamName} 단장 ${gm}`, rival: team,
+    ...(g.phase === 'offseason' && g.offseason ? { offStage: g.offseason.stage } : {}) };
   const rawChoices = Array.isArray(j.choices) ? j.choices.slice(0, 3) : [];
   if ((j.kind ?? kind) === 'offer' && rawChoices.length >= 2) {
     const choices: FantasyChoice[] = rawChoices.map((c) => {
@@ -92,8 +106,11 @@ export async function rivalMove(g: GameSession, store: Store, s: LlmSettings): P
   // 다른 구단끼리: 우리 선수·우리 구단 수치를 건드리는 조작은 뺀다
   const r = resolveOps(g, j.ops, store);
   const mineIds = new Set(g.league.players.filter((p) => teamOfNow(g, p) === g.teamIdx).map((p) => p.id));
+  // 오프시즌 FA 시장 선수(소속 없음)는 조작으로 옮기지 않는다 (FA 계약은 시장에서)
+  const freeAgents = new Set(g.phase === 'offseason' ? g.league.players.filter((p) => p.team < 0).map((p) => p.id) : []);
   const ops = r.ops.filter((op: FreeOp) => {
     if (op.op === 'effect' || op.op === 'rule') return false;
+    if (op.op === 'move' && freeAgents.has(op.player)) return false;
     if ((op.op === 'move' || op.op === 'ability' || op.op === 'contract') && mineIds.has(op.player)) return false;
     if ((op.op === 'move' && op.to === g.teamIdx) || (op.op === 'create' && op.team === g.teamIdx) || (op.op === 'teamCash' && op.team === g.teamIdx)) return false;
     if (op.op === 'pick' && (op.to === g.teamIdx || op.from === g.teamIdx)) return false;

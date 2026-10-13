@@ -60,6 +60,8 @@ export interface FantasyEntry {
   withdrawn?: boolean;
   /** 자유 모드: 다른 구단 단장의 움직임 (그 구단 색인, rivals.ts) */
   rival?: number;
+  /** 오프시즌 움직임이면 그 단계 */
+  offStage?: string;
   /** 경기 후일담이면 그 경기 key (gameday.ts) */
   game?: string;
   /** 단장 노트에 더할 글 (자유 모드, 게임 마스터가 오래 기억할 사실) */
