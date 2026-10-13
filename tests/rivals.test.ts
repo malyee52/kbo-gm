@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { fillRate } from '../src/league/finance';
+import { eraFillScale, fillRate } from '../src/league/finance';
 import { realYearbook, type YearRecord } from '../src/league/history';
 import { computeRivals, dynasties, isRivalry, RIVAL_FILL, titleStreak } from '../src/league/rivals';
 
@@ -57,7 +57,8 @@ describe('라이벌', () => {
     const lotte = L.teams.findIndex((t) => t.franchise === '롯데');
     expect(isRivalry(L, doosan, lotte)).toBe(false);
     const base = fillRate(L, doosan, 0.4, 0, 10, 2026, lotte);
-    expect(fillRate(L, doosan, 0.4, 0, 10, 2026, nc)).toBeCloseTo(Math.min(1, base + RIVAL_FILL), 10);
+    // 2026-10-13 시대별 관중 배율(eraFillScale)이 관중률 전체에 곱해진다
+    expect(fillRate(L, doosan, 0.4, 0, 10, 2026, nc)).toBeCloseTo(Math.min(1, base + RIVAL_FILL * eraFillScale(2026)), 10);
     expect(g.news.some((n) => n.text.includes('시즌 라이벌'))).toBe(true);
   });
 });
