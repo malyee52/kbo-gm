@@ -62,6 +62,8 @@ export interface FantasyEntry {
   rival?: number;
   /** 오프시즌 움직임이면 그 단계 */
   offStage?: string;
+  /** 구단주 면담이면 그 차례 (ownerMeeting.ts: pre·mid·end) */
+  meeting?: string;
   /** 경기 후일담이면 그 경기 key (gameday.ts) */
   game?: string;
   /** 단장 노트에 더할 글 (자유 모드, 게임 마스터가 오래 기억할 사실) */
