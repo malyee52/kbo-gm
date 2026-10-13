@@ -113,4 +113,27 @@ describe('자유 모드', () => {
     expect(defenseAt(sp, 'CF')).toBeLessThan(defenseAt(sp, '3B') - 5);
     expect(defenseAt(sp, 'C')).toBeLessThan(-30);
   }, 120_000);
+
+  it('만든 선수의 국적·병역: 외국 이름은 외국인, 28세 이상 국내 선수는 병역 마침, 리그 밖 선수는 입대하지 않는다', () => {
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'mil-t', fantasy: { free: true } }, FAST);
+    const team = g.league.teams[0].name;
+    const { ops } = resolveOps(g, [
+      { op: 'create', name: '선동열', team, pos: 'P', role: 'RP', age: 38, now: 70, potential: 70, real: true },
+      { op: 'create', name: '멜빈 번치', team, pos: 'P', role: 'SP', age: 28, now: 55, potential: 55, real: true },
+      { op: 'create', name: '김신인', team, pos: 'SS', age: 20, now: 40, potential: 60 },
+    ], store);
+    expect(ops[0]).toMatchObject({ military: 'done' });
+    expect(ops[1]).toMatchObject({ foreign: true });
+    expect(ops[2]).toMatchObject({ military: 'pending' });
+    g.addFantasy({ kind: 'action', title: 't', text: 'x', ops });
+    const sun = g.league.players.find((p) => p.name === '선동열')!;
+    const bunch = g.league.players.find((p) => p.name === '멜빈 번치')!;
+    expect(sun.military?.state).toBe('done');
+    expect(bunch.foreign).toBe(true);
+    expect(bunch.contract.kind).toBe('foreign');
+    g.advance(100000);
+    g.beginOffseason();
+    expect(g.leaguePlayer(sun.id)!.military?.state).not.toBe('serving');
+    expect(g.leaguePlayer(bunch.id)!.military?.state).not.toBe('serving');
+  }, 600_000);
 });

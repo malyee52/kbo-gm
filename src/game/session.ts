@@ -25,13 +25,14 @@ import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
 import { dollarText, wonText } from '../league/salary';
+import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
-import { runsForGrade, type FreeOp } from '../fantasy/free';
+import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, makeDefense, pitValue, type Defense } from '../engine';
@@ -1087,6 +1088,8 @@ export class GameSession {
             }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
+            this.applyNationality(lp, op);
+            slot.foreign = lp.foreign;
             Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
             delete slot.reserve;
             syncSim(lp);
@@ -1100,6 +1103,7 @@ export class GameSession {
             if (op.real) np.outsider = true;
             this.setPitchRole(np, op.role);
             this.typicalStarterStamina(np);
+            this.applyNationality(np, op);
             Object.assign(np, skillForRuns({ ...np }, runs, ctx, year));
           }
           break;
@@ -2275,6 +2279,20 @@ export class GameSession {
         Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
         if (L.fantasy?.free) Off.openReserves(L, this.store, this.params); // 자유 모드 빈 자리
         const twoWayNews = Off.openTwoWay(L, this.store, this.params, this.teamIdx); // 이도류 (league/twoway.ts)
+        // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
+        for (const p of L.players) {
+          if (!p.outsider) continue;
+          if (looksForeignName(p.name) && !p.foreign) {
+            p.foreign = true;
+            p.contract = { ...p.contract, kind: 'foreign', salary: Math.max(300_000, Math.round(p.contract.salary / WON_PER_USD)) };
+            delete p.military;
+          }
+          if (p.military?.state === 'serving' || (p.foreign && p.startAbsentReason === 'military')) {
+            if (p.military) p.military = { state: 'done', basis: 'estimate', note: '자유 모드 영입 (병역 해당 없음)' };
+            if (p.startAbsentReason === 'military') { delete p.startAbsent; delete p.startAbsentReason; }
+            twoWayNews.push(`${p.name} 병역 정정 (리그 밖에서 데려온 선수라 해당 없음)`);
+          } else if (p.military?.state === 'pending' && p.birthYear && L.year - p.birthYear >= 28) p.military = { state: 'done', basis: 'estimate', note: '자유 모드' };
+        }
         // 판타지 큰 변화: 입단 예정 유망주 (src/fantasy/effects.ts 'prospect')
         if (L.fantasy?.prospects?.length) {
           for (const sp of L.fantasy.prospects) {
@@ -2966,6 +2984,18 @@ export class GameSession {
     }
     this.season.setManualEntry(this.teamIdx, [...cur]);
     this.addNews(this.day, 'entry', `${p.name} 1군 등록`);
+  }
+
+  /** 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약 */
+  private applyNationality(lp: LeaguePlayer, op: Extract<FreeOp, { op: 'create' }>): void {
+    if (op.foreign) {
+      lp.foreign = true;
+      delete lp.military;
+      lp.contract = { ...lp.contract, kind: 'foreign', salary: Math.max(lp.contract.kind === 'foreign' ? lp.contract.salary : 0, 300_000) };
+    } else {
+      lp.foreign = false;
+      lp.military = { state: op.military ?? 'pending', basis: 'estimate', note: '자유 모드' };
+    }
   }
 
   /** 만든 투수의 역할 (선발·구원). 구원이면 선발 비율을 낮게 */
