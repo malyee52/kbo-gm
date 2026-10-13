@@ -32,7 +32,7 @@ export type FreeOp =
   /** 선수를 그 구단으로 (−1이면 방출). 우리·다른 구단 모두 */
   | { op: 'move'; player: string; to: number }
   /** 선수를 만든다 (가상 인물, 또는 real이면 리그 밖에서 데려온 실존 인물). now·potential은 20~80 등급 */
-  | { op: 'create'; name: string; team: number; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; now: number; potential: number; real?: boolean }
+  | { op: 'create'; name: string; team: number; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; now: number; potential: number; real?: boolean; role?: 'SP' | 'RP' }
   /** 능력(now)·잠재력(potential)을 20~80 등급으로 */
   | { op: 'ability'; player: string; now?: number; potential?: number }
   /** 계약: 연봉(만 원), 기간(이번 시즌부터 몇 해) */
@@ -58,7 +58,7 @@ export function gradeOfRuns(runs: number, year: number): number {
 /** 게임 마스터에게 주는 조작 목록 */
 export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. 동명이인이면 "이름@구단")
 - {"op":"move","player":"선수 이름","to":"구단 이름 또는 방출"} 선수를 그 구단으로 옮긴다 (우리 구단·다른 구단 모두, 트레이드는 move 여러 개로)
-- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|IF|OF","age":17~50,"now":20~80,"potential":20~80,"real":true|false} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
+- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|IF|OF","role":"SP|RP (투수만: 선발·구원)","age":17~50,"now":20~80,"potential":20~80,"real":true|false} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
 - {"op":"ability","player":"선수 이름","now":20~80,"potential":20~80} 능력·잠재력 등급을 바꾼다 (둘 중 하나만도 됨, 50 = 리그 주전 평균)
 - {"op":"contract","player":"선수 이름","salary":억 원(소수),"years":1~10} 계약을 바꾼다
 - {"op":"cash","amount":억 원} 우리 구단 자금 (+ 들어옴, − 나감)
@@ -272,9 +272,12 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         // 리그 밖 실존 인물: AI가 real로 냈거나, 자료(KBO 기록)에는 있는데 지금 리그에 없는 이름
         const inLeague = new Set(g.league.players.map((p) => p.id));
         const real = e.real === true || (!!store && [...store.players.values()].some((m) => m.name === name && !inLeague.has(m.id)));
-        const pos = e.pos === 'P' || e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
+        // 투수 역할: role 또는 pos에 SP·RP로 (2026-10-13: 이야기는 마무리인데 선발로 들어가던 것)
+        const roleRaw = String(e.role ?? e.pos ?? '').toUpperCase();
+        const role = /RP|CL|마무리|구원|불펜/.test(roleRaw) ? 'RP' as const : /SP|선발/.test(roleRaw) ? 'SP' as const : undefined;
+        const pos = role || e.pos === 'P' ? 'P' : e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
         ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(real ? 50 : 40, Math.round(num(e.age) ?? 22))),
-          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}) });
+          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}), ...(pos === 'P' && role ? { role } : {}) });
         break;
       }
       case 'ability': {

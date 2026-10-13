@@ -16,7 +16,7 @@ import { useGame } from '../context';
 export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t: number) => string): string {
   switch (op.op) {
     case 'move': return op.to < 0 ? `${nameOf(op.player)} 방출` : `${nameOf(op.player)} → ${teamName(op.to)}`;
-    case 'create': return `${op.real ? '영입 (리그 밖)' : '새 선수'} ${op.name} (${teamName(op.team)}, ${op.pos === 'P' ? '투수' : op.pos === 'C' ? '포수' : op.pos === 'IF' ? '내야수' : '외야수'} ${op.age}세, 능력 ${op.now} 잠재 ${op.potential})`;
+    case 'create': return `${op.real ? '영입 (리그 밖)' : '새 선수'} ${op.name} (${teamName(op.team)}, ${op.pos === 'P' ? (op.role === 'RP' ? '구원 투수' : op.role === 'SP' ? '선발 투수' : '투수') : op.pos === 'C' ? '포수' : op.pos === 'IF' ? '내야수' : '외야수'} ${op.age}세, 능력 ${op.now} 잠재 ${op.potential})`;
     case 'ability': return `${nameOf(op.player)} ${op.now !== undefined ? `능력 ${op.now}` : ''}${op.now !== undefined && op.potential !== undefined ? ' · ' : ''}${op.potential !== undefined ? `잠재 ${op.potential}` : ''}`;
     case 'contract': return `${nameOf(op.player)} 계약 연 ${(op.salary / 10000).toFixed(1)}억 원 ${op.years}년`;
     case 'teamCash': return `${teamName(op.team)} 자금 ${op.amount > 0 ? '+' : '−'}${Math.abs(op.amount / 10000).toFixed(1)}억 원`;

@@ -1059,6 +1059,7 @@ export class GameSession {
             const from = sp.teamIdx;
             this.season.transfer(sp.idx, op.to);
             (L.marketMoves ??= []).push({ year: this.world.year, day: this.season.day, id: sp.id, kind: op.to < 0 ? 'release' : from < 0 ? 'sign' : 'claim', from, to: op.to });
+            if (op.to === this.teamIdx) this.autoRegister(sp);
           } else {
             lp.team = op.to;
           }
@@ -1078,14 +1079,22 @@ export class GameSession {
             lp.birthYear = year - op.age; slot.age = op.age;
             lp.potential = pot;
             if (!slot.isPitcher) { const pos = op.pos === 'C' ? 'C' : op.pos === 'OF' ? 'CF' : 'SS'; lp.pos = pos; slot.pos = pos; }
+            this.setPitchRole(lp, op.role);
+            this.typicalStarterStamina(lp);
             Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
             delete slot.reserve;
             syncSim(lp);
+            // 마무리로 데려온 정상급 구원: 세이브 경력으로 AI 감독이 마무리로 쓴다
+            if (op.role === 'RP' && op.now >= 60) { lp.lastSaves = 20; slot.lastSaves = 20; }
             this.season.transfer(slot.idx, op.team);
             (L.marketMoves ??= []).push({ year: this.world.year, day: this.season.day, id: slot.id, kind: 'sign', from: -1, to: op.team });
+            if (op.team === this.teamIdx) this.autoRegister(slot);
           } else {
             const np = Off.addFreePlayer(L, this.store, this.params, op.team, { name: op.name, pos: op.pos, age: op.age, runs, potential: pot });
             if (op.real) np.outsider = true;
+            this.setPitchRole(np, op.role);
+            this.typicalStarterStamina(np);
+            Object.assign(np, skillForRuns({ ...np }, runs, ctx, year));
           }
           break;
         }
@@ -2928,6 +2937,47 @@ export class GameSession {
       }
     }
     this.valueCtx = null;
+  }
+
+  /**
+   * 자유 모드로 시즌 중 우리 구단에 온 선수는 1군에 바로 등록한다 (2026-10-13 사용자 보고: 데려온 선동열이 2군에 머물러 던지지 않았다).
+   * 1군이 꽉 차면 같은 쪽(투수·야수)에서 가장 약한 선수를 내린다. 조작 적용의 일부라 재현에도 같다
+   */
+  private autoRegister(p: SimPlayer): void {
+    const ts = this.season.teamSeasons[this.teamIdx];
+    if (!ts.manual || p.dev) return;
+    const cur = new Set(ts.manual);
+    cur.add(p.idx);
+    const size = this.world.rules.rosterSize;
+    if (cur.size > size) {
+      const same = [...cur].map((i) => this.world.players[i]).filter((x) => x.idx !== p.idx && x.isPitcher === p.isPitcher);
+      // 투수 value는 작을수록, 야수는 클수록 좋다
+      const weakest = same.sort((a, b) => (p.isPitcher ? b.value - a.value : a.value - b.value))[0];
+      if (weakest) {
+        cur.delete(weakest.idx);
+        this.addNews(this.day, 'entry', `${weakest.name} 1군 말소 (${p.name} 등록 자리)`);
+      }
+    }
+    this.season.setManualEntry(this.teamIdx, [...cur]);
+    this.addNews(this.day, 'entry', `${p.name} 1군 등록`);
+  }
+
+  /** 만든 투수의 역할 (선발·구원). 구원이면 선발 비율을 낮게 */
+  private setPitchRole(lp: LeaguePlayer, role: 'SP' | 'RP' | undefined): void {
+    if (!lp.pit || !role) return;
+    lp.pit = role === 'RP' ? { ...lp.pit, startShare: 0.02, reliefStint: Math.max(4, lp.pit.reliefStint) } : { ...lp.pit, startShare: Math.max(0.9, lp.pit.startShare) };
+  }
+
+  /**
+   * 만든 선발 투수의 체력을 리그 선발 중간값까지 (빈 자리·가상 선수 바탕은 체력이 낮아 일찍 내려갔다, 2026-10-13). 바꿨으면 true
+   */
+  private typicalStarterStamina(lp: LeaguePlayer): boolean {
+    if (!lp.pit || !isStarterSkill(lp.pit)) return false;
+    const st = this.world.players.filter((p) => p.pit && isStarterSkill(p.pit) && p.pit.sample >= 300).map((p) => p.pit!.stamina).sort((a, b) => a - b);
+    const mid = st.length ? st[Math.floor(st.length / 2)] : 24;
+    if (lp.pit.stamina >= mid) return false;
+    lp.pit = { ...lp.pit, stamina: mid };
+    return true;
   }
 
   private applyDefenseEdit(id: string, def: Defense): void {

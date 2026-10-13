@@ -86,4 +86,18 @@ describe('자유 모드', () => {
     expect(g.fantasy!.log.at(-1)).toMatchObject({ kind: 'action', ask: '팬 사인회를 연다' });
     expect(g.fantasy!.log.at(-1)!.ops!.length).toBe(1);
   }, 120_000);
+
+  it('리그 밖 정상급 마무리 영입 (2000년 선동열): 구원으로 만들고 1군에 바로 등록, 마무리로 던진다', () => {
+    const team = store.season(2000)!.teams.findIndex((t) => t.name === 'SK');
+    const g = GameSession.create(store, { year: 2000, teamIdx: team, seed: 'sun-t', fantasy: { free: true } }, FAST);
+    const { ops } = resolveOps(g, [{ op: 'create', name: '선동열', team: 'SK', pos: 'P', role: '마무리', age: 37, now: 74, potential: 75, real: true }], store);
+    expect(ops[0]).toMatchObject({ op: 'create', pos: 'P', role: 'RP' });
+    g.addFantasy({ kind: 'action', title: '국보의 귀환', text: 'x', ops });
+    const sp = g.world.players.find((p) => p.name === '선동열')!;
+    expect(gradeOfRuns(currentRuns(sp, g.values), 2000)).toBeGreaterThanOrEqual(70);
+    expect(g.registered().some((p) => p.idx === sp.idx)).toBe(true);
+    g.advance(30);
+    expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
+    expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
+  }, 300_000);
 });
