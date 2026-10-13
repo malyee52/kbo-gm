@@ -17,8 +17,9 @@ import { gameContext } from '../../fantasy/context';
 import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
+import { chronicleDue, writeChronicle } from '../../fantasy/chronicle';
 
-type Tab = 'free' | 'story' | 'chat' | 'memory' | 'settings';
+type Tab = 'free' | 'story' | 'chat' | 'memory' | 'chronicle' | 'settings';
 
 export function Fantasy() {
   const { session } = useGame();
@@ -45,10 +46,11 @@ export function Fantasy() {
           <button type="button" role="tab" aria-selected={tab === 'story'} className={tab === 'story' ? 'on' : ''} onClick={() => setTab('story')}>이야기</button>
           <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>대화</button>
           {f.regressor && <button type="button" role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'on' : ''} onClick={() => setTab('memory')}>기억 노트</button>}
+          <button type="button" role="tab" aria-selected={tab === 'chronicle'} className={tab === 'chronicle' ? 'on' : ''} onClick={() => setTab('chronicle')}>연대기</button>
           <button type="button" role="tab" aria-selected={tab === 'settings'} className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>AI 설정</button>
         </div>
       </section>
-      {tab === 'free' ? <FantasyFree /> : tab === 'story' ? <Story /> : tab === 'chat' ? <FantasyChat /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : <><AiSettings /><NaiSettingsPanel /></>}
+      {tab === 'free' ? <FantasyFree /> : tab === 'story' ? <Story /> : tab === 'chat' ? <FantasyChat /> : tab === 'memory' ? <FantasyMemory onWrote={() => setTab('story')} /> : tab === 'chronicle' ? <Chronicle /> : <><AiSettings /><NaiSettingsPanel /></>}
     </div>
   );
 }
@@ -339,3 +341,42 @@ function NaiSettingsPanel() {
   );
 }
 
+/** 구단 연대기 (src/fantasy/chronicle.ts): 해마다 한 장. 오프시즌에 자동으로 쓰고, 여기서 직접 쓸 수도 있다 */
+function Chronicle() {
+  const { session, changed, autosave } = useGame();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const list = [...(session.fantasy?.chronicles ?? [])].reverse();
+  const due = chronicleDue(session);
+  const write = async () => {
+    if (due === null) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      session.addFantasy(await writeChronicle(session, loadAiSettings(), due));
+      changed();
+      void autosave();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="stack">
+      <div className="panel">
+        <h2>구단 연대기 <span className="muted small">시즌이 끝나면(오프시즌) AI가 그 해를 한 장으로 남깁니다</span></h2>
+        {due !== null && <button type="button" onClick={() => void write()} disabled={busy}>{busy ? '쓰는 중…' : `${due} 연대기 쓰기`}</button>}
+        {err && <p className="note error-box">{err}</p>}
+        {list.length === 0 && due === null && <p className="muted">아직 연대기가 없습니다. 첫 시즌이 끝나면 생깁니다.</p>}
+      </div>
+      {list.map((c) => (
+        <article key={c.year} className="panel">
+          <p className="muted small">{c.year} 시즌</p>
+          <h3>{c.title}</h3>
+          {c.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
+        </article>
+      ))}
+    </section>
+  );
+}
