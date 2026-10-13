@@ -324,6 +324,33 @@ function starBonus(world: World): number[] {
   return out;
 }
 
+/**
+ * 시대별 리그 경기당 평균 관중 (2026-10-13 사용자 선택 "시대별 관중 수준"). 보도된 해만 두고 그 사이는 잇는다:
+ * 1982 143만 8,768명/240경기, 1995 540만 6,374명/504경기(역대 최다였던 해), 1998 263만 9,119명, 2004 233만 1,978명(침체기),
+ * 2008 525만 6,332명, 2010 평균 1만 1,144명, 2012 평균 1만 3,451명, 2017 평균 약 1만 1,600명, 2023 약 810만/720경기,
+ * 2024 평균 1만 5,122명, 2025 약 1,224만/716경기. 2016·2018·2019·2022는 총 관중으로 잰 대략값(임시값).
+ * 2020·2021년 코로나 무관중·제한은 반영하지 않는다 (게임 경제가 무너져서). 연고 시장 보정은 2024년 기준이라 2024를 1로 본다
+ */
+const ERA_ATTENDANCE: [number, number][] = [
+  [1982, 5995], [1995, 10727], [1998, 5236], [2004, 4383], [2008, 10429], [2010, 11144], [2012, 13451],
+  [2016, 11583], [2017, 11668], [2018, 11214], [2019, 10119], [2022, 8439], [2023, 11250], [2024, 15122], [2025, 17103],
+];
+export function eraAttendance(year: number): number {
+  const a = ERA_ATTENDANCE;
+  if (year <= a[0][0]) return a[0][1];
+  if (year >= a[a.length - 1][0]) return a[a.length - 1][1];
+  for (let i = 1; i < a.length; i++) {
+    if (year <= a[i][0]) {
+      const [y0, v0] = a[i - 1];
+      const [y1, v1] = a[i];
+      return v0 + ((v1 - v0) * (year - y0)) / (y1 - y0);
+    }
+  }
+  return a[a.length - 1][1];
+}
+/** 그 해 관중 배율 (2024 = 1). 관중률에 곱하고, 객단가는 거꾸로 나눠 관중 수입은 시대와 상관없이 같게 둔다 (게임 돈은 모두 2026년 물가) */
+export const eraFillScale = (year: number) => eraAttendance(year) / eraAttendance(2024);
+
 /** 한 경기 관중률 (0.15~1.0) */
 export function fillRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number, opp?: number): number {
   const wd = dateOf(year, day).weekday;
@@ -333,7 +360,8 @@ export function fillRate(league: LeagueState, team: number, winPct: number, star
   const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day)
     + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp)
     + stadiumFill(league.stadiums?.[team], year) + fanFill(fanLevel(league, team, year, day));
-  return Math.max(0.15, Math.min(1, v));
+  // 시대별 관중 수준 (2000년대 초 침체기는 2024년의 약 0.3배)
+  return Math.max(0.05, Math.min(1, v * eraFillScale(year)));
 }
 
 /**
@@ -355,7 +383,8 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const star = starBonus(world)[team] ?? 0;
     const park = league.stadiums?.[team];
     const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
-    const ticket = TICKET * ticketScale(park);
+    // 관중이 적은 시대는 객단가를 그만큼 올려 관중 수입 합을 시대와 상관없이 같게 (eraFillScale)
+    const ticket = (TICKET * ticketScale(park)) / eraFillScale(year);
     const w = new Array(world.teams.length).fill(0);
     const l = new Array(world.teams.length).fill(0);
     for (const g of season.log) {
