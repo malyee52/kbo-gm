@@ -36,19 +36,24 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   const lp = session.leaguePlayer(p.id);
   const start = session.league.startYear;
   const decode = <T extends object>(empty: T, arr: number[]): T => Object.fromEntries(Object.keys(empty).map((k, i) => [k, arr[i] ?? 0])) as T;
+  // 투타 겸업 (2026-10-13): 타격·투구 기록을 둘 다 모은다 (본업 쪽 표가 먼저, 반대쪽은 기록이 있을 때만)
   const history: { label: string; bat?: BatLike; pit?: PitLike }[] = [year - 1, year - 2, year - 3].flatMap((y) => {
     if (y >= start) {
-      return (lp?.history ?? []).filter((h) => h.year === y && (p.isPitcher ? h.pit : h.bat)).map((h) => ({
+      return (lp?.history ?? []).filter((h) => h.year === y && (h.pit || h.bat)).map((h) => ({
         label: `${y} ${h.team}`,
-        ...(p.isPitcher ? { pit: decode(emptyPitLine(), h.pit!) } : { bat: decode(emptyBatLine(), h.bat!) }),
+        ...(h.pit ? { pit: decode(emptyPitLine(), h.pit) } : {}),
+        ...(h.bat ? { bat: decode(emptyBatLine(), h.bat) } : {}),
       }));
     }
     const s = store.season(y);
-    const row = s && (p.isPitcher ? s.pit.find((r) => r.id === p.id) : s.bat.find((r) => r.id === p.id));
-    if (!row) return [];
-    const label = `${y} ${row.team} (게임 전 실제)`;
-    return [p.isPitcher ? { label, pit: pitFromRow(row as PitRow) } : { label, bat: batFromRow(row as BatRow) }];
+    const pr = s?.pit.find((r) => r.id === p.id);
+    const br = s?.bat.find((r) => r.id === p.id);
+    if (!pr && !br) return [];
+    const label = `${y} ${(pr ?? br)!.team} (게임 전 실제)`;
+    return [{ label, ...(pr ? { pit: pitFromRow(pr as PitRow) } : {}), ...(br ? { bat: batFromRow(br as BatRow) } : {}) }];
   });
+  const batHist = history.filter((h) => h.bat && (h.bat.pa ?? 0) > 0);
+  const pitHist = history.filter((h) => h.pit && ((h.pit as { bf?: number }).bf ?? (h.pit as { outs?: number }).outs ?? 0) > 0);
 
   const bg = grades.batters.get(p.id);
   const pg = grades.pitchers.get(p.id);
@@ -106,6 +111,9 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           <h3>{year} 시즌 기록 (시뮬레이션){(() => { const w = session.phase === 'season' ? seasonWar(session.world, session.season).get(p.idx) : undefined; return w !== undefined ? <span className="muted small"> · WAR {w.toFixed(1)}</span> : null; })()}</h3>
           <div className="scroll">
             {p.isPitcher ? <PitTable rows={[{ label: String(year), l: session.season.pit[p.idx] }]} /> : <BatTable rows={[{ label: String(year), l: session.season.bat[p.idx] }]} />}
+            {/* 이도류: 반대쪽 기록 */}
+            {p.isPitcher && session.season.bat[p.idx].pa > 0 && <BatTable rows={[{ label: `${year} 타격`, l: session.season.bat[p.idx] }]} />}
+            {!p.isPitcher && session.season.pit[p.idx].bf > 0 && <PitTable rows={[{ label: `${year} 투구`, l: session.season.pit[p.idx] }]} />}
           </div>
           {session.phase === 'season' && p.teamIdx >= 0 && (() => {
             const f = futuresText(session.futures().lines.get(p.idx));
@@ -144,12 +152,18 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
 
         <section>
           <h3>직전 시즌 기록 <span className="muted small">게임에서 치른 시즌은 이 게임의 기록</span></h3>
-          {history.length === 0 ? <p className="muted small">직전 3시즌에 1군 기록이 없습니다.</p> : (
+          {(p.isPitcher ? pitHist : batHist).length === 0 && (p.isPitcher ? batHist : pitHist).length === 0 ? <p className="muted small">직전 3시즌에 1군 기록이 없습니다.</p> : (
             <div className="scroll">
               {p.isPitcher ? (
-                <PitTable rows={history.map((h) => ({ label: h.label, l: h.pit! }))} />
+                <>
+                  {pitHist.length > 0 && <PitTable rows={pitHist.map((h) => ({ label: h.label, l: h.pit! }))} />}
+                  {batHist.length > 0 && <BatTable rows={batHist.map((h) => ({ label: `${h.label} 타격`, l: h.bat! }))} />}
+                </>
               ) : (
-                <BatTable rows={history.map((h) => ({ label: h.label, l: h.bat! }))} />
+                <>
+                  {batHist.length > 0 && <BatTable rows={batHist.map((h) => ({ label: h.label, l: h.bat! }))} />}
+                  {pitHist.length > 0 && <PitTable rows={pitHist.map((h) => ({ label: `${h.label} 투구`, l: h.pit! }))} />}
+                </>
               )}
             </div>
           )}

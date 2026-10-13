@@ -110,9 +110,16 @@ export function seasonWar(world: World, season: Season): Map<number, number> {
     const b = season.bat[sp.idx];
     const p = season.pit[sp.idx];
     if (!b || !p || (b.pa === 0 && p.bf === 0)) continue;
-    out.set(sp.idx, sp.isPitcher ? pitWar(p, lg, lgEra) : b.pa > 0 ? batWar(sp, b, lg, teamGames) : 0);
+    out.set(sp.idx, (sp.isPitcher ? pitWar(p, lg, lgEra) : b.pa > 0 ? batWar(sp, b, lg, teamGames) : 0) + twoWayWar(sp, b, p, lg, lgEra, teamGames));
   }
   return out;
+}
+
+/** 이도류(투타 겸업, league/twoway.ts) 선수의 반대쪽 WAR: 투수의 타격은 지명타자로, 타자의 투구는 투수 WAR로. 이도류가 아니면 0 */
+function twoWayWar(sp: SimPlayer, b: BatLine, p: PitLine, lg: Parameters<typeof batWar>[2], lgEra: number, teamGames: number): number {
+  if (!sp.alt) return 0;
+  if (sp.isPitcher) return b.pa > 0 ? batWar({ ...sp, pos: 'DH' }, b, lg, teamGames) : 0;
+  return p.bf > 0 ? pitWar(p, lg, lgEra) : 0;
 }
 
 export function seasonAwards(world: World, season: Season, league: LeagueState, store: RealStore): SeasonAwards {
@@ -134,7 +141,7 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
     if (b.pa === 0 && p.bf === 0) continue;
     const bw = b.pa > 0 && !sp.isPitcher ? batWar(sp, b, lg, teamGames) : 0;
     const pw = pitWar(p, lg, lgEra);
-    cands.push({ sp, b, p, war: sp.isPitcher ? pw : bw, bat: !sp.isPitcher });
+    cands.push({ sp, b, p, war: (sp.isPitcher ? pw : bw) + twoWayWar(sp, b, p, lg, lgEra, teamGames), bat: !sp.isPitcher });
   }
   const win = (c: Cand): AwardWinner => ({
     id: c.sp.id, name: c.sp.name, team: lineTeam(c.sp), war: Math.round(c.war * 100) / 100,
