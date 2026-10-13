@@ -71,6 +71,24 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           <p className="small"><strong>바뀐 규정</strong> {changedRules(L).map((c) => `${c.label} ${c.from ?? '실제'} → ${c.to ?? '실제'}`).join(' · ')}</p>
         )}
       </div>
+      {!compact && ((session.fantasy?.notes?.length ?? 0) > 0 || (session.fantasy?.pipeline?.length ?? 0) > 0) && (
+        <div className="panel">
+          <h2>단장 노트 <span className="muted small">게임 마스터가 기억하는 사실과 입단 예약 (판정 때마다 읽는다)</span></h2>
+          {session.fantasy?.pipeline?.length ? (
+            <>
+              <h3 className="small">입단 예약</h3>
+              <ul className="plain small">
+                {[...session.fantasy.pipeline].sort((a, b) => a.joinYear - b.joinYear).map((x, k) => (
+                  <li key={k}>{x.joinYear} 개막 · {x.name} ({teamName(x.team)}, {x.joinYear - x.birthYear}세, 능력 {x.now} 잠재 {x.potential}{x.foreign ? ', 외국인' : ''})</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {session.fantasy?.notes?.length ? (
+            <ul className="plain small">{session.fantasy.notes.slice().reverse().map((n) => <li key={n.id}><span className="muted">{n.year}</span> {n.text}</li>)}</ul>
+          ) : null}
+        </div>
+      )}
       {!compact && promises.length > 0 && (
         <div className="panel">
           <h2>약속 장부 <span className="muted small">진행 중 {open.length}개 · 기한이 되면 게임 마스터가 지켰는지 판정합니다</span></h2>
@@ -89,9 +107,10 @@ export function FantasyFree({ compact = false }: { compact?: boolean }) {
           {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
           {e.ops?.length ? <ul className="plain small fantasy-ops">{e.ops.map((op, k) => <li key={k}>✓ {opText(op, nameOf, teamName)}</li>)}</ul> : <p className="muted small">{e.withdrawn ? '거둬들임 — 게임 변화 없음' : '게임 변화 없음'}</p>}
           <ChoiceButtons entry={e} />
-          {(e.promises?.length || e.settles?.length) ? (
+          {(e.promises?.length || e.settles?.length || e.notes?.length) ? (
             <ul className="plain small">
               {e.promises?.map((p, k) => <li key={`p${k}`}>🤝 약속: {p.party} — {p.text} (기한 {dueText(p)})</li>)}
+              {e.notes?.map((t, k) => <li key={`n${k}`}>📝 노트: {t}</li>)}
               {e.settles?.map((x) => <li key={x.id}>📒 {promises.find((p) => p.id === x.id)?.text ?? x.id}: {statusLabel[x.status]}</li>)}
             </ul>
           ) : null}

@@ -23,6 +23,7 @@ export function opText(op: FreeOp, nameOf: (id: string) => string, teamName: (t:
     case 'effect': return effectText(op.effect, nameOf);
     case 'pick': return `${op.draft} ${op.round}라운드 지명권(${teamName(op.from)} 원래) → ${teamName(op.to)}`;
     case 'rule': return `규정 변경: ${RULE_DEFS.find((d) => d.key === op.key)?.label ?? op.key} → ${op.value ?? '실제 규정'}`;
+    case 'future': return `입단 예약 ${op.name} (${teamName(op.team)}, ${op.joinYear} 입단 ${op.joinYear - op.birthYear}세, 능력 ${op.now} 잠재 ${op.potential}${op.foreign ? ', 외국인' : ''})`;
   }
 }
 
@@ -96,6 +97,7 @@ export function GmPreviewCard({ judge }: { judge: GmJudge }) {
       {e.text.split('\n').filter(Boolean).map((line, k) => <p key={k}>{line}</p>)}
       {e.ops?.length ? <ul className="plain small fantasy-ops">{e.ops.map((op, k) => <li key={k}>→ {opText(op, nameOf, teamName)}</li>)}</ul> : <p className="muted small">게임 변화 없음</p>}
       {e.promises?.map((x, k) => <p key={k} className="small">🤝 약속: {x.party} — {x.text} (기한 {dueText(x)})</p>)}
+      {e.notes?.map((t, k) => <p key={`n${k}`} className="small">📝 노트: {t}</p>)}
       {p.dropped.length > 0 && <p className="muted small">반영할 수 없는 조작: {p.dropped.join(', ')}</p>}
       <div className="actions">
         <button type="button" onClick={judge.accept} disabled={judge.busy}>받아들이기</button>

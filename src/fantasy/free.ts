@@ -48,7 +48,12 @@ export type FreeOp =
   /** 지명권 주인을 바꾼다 (draft 입단 연도, round 라운드, from 원래 구단, to 새 주인) */
   | { op: 'pick'; draft: number; round: number; from: number; to: number }
   /** 리그 규정을 바꾼다 (league/rules.ts) */
-  | { op: 'rule'; key: RuleKey; value: number | null };
+  | { op: 'rule'; key: RuleKey; value: number | null }
+  /** 입단 예약: joinYear 개막 때 그 선수가 들어온다 (후원·육성 계약·파이프라인. 지금 뛸 수 없는 어린 선수) */
+  | { op: 'future'; name: string; team: number; pos: CreatePos; role?: 'SP' | 'RP'; birthYear: number; joinYear: number; now: number; potential: number; foreign?: boolean; real?: boolean };
+
+/** 입단할 수 있는 가장 어린 나이 (KBO 규정, 만 17세 무렵) */
+export const MIN_JOIN_AGE = 17;
 
 // ---- 등급 ↔ 런 (ui/grades.ts runsGrade의 거꾸로: 40 + 5 × (−0.49 + 0.108 × 런) × 리그 수준)
 export function runsForGrade(grade: number, year: number): number {
@@ -73,7 +78,9 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"playerForm","player":"우리 선수 이름","edge":−0.05~0.05,"days":1~60} (시즌 중)
 - {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)
 - {"op":"pick","draft":입단 연도,"round":라운드,"from":"원래 구단 이름","to":"새 주인 구단 이름"} 신인 지명권을 넘긴다 ([지명권]의 남은 지명권만)
-- {"op":"rule","key":"규정 키","value":값} 리그 규정을 바꾼다 ([이 게임의 규정]의 키와 범위. 리그 전체에 적용된다)`;
+- {"op":"rule","key":"규정 키","value":값} 리그 규정을 바꾼다 ([이 게임의 규정]의 키와 범위. 리그 전체에 적용된다)
+- {"op":"future","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH","role":"SP|RP","birthYear":출생 연도,"joinYear":입단 연도,"now":입단 때 능력 20~80,"potential":20~80,"foreign":true|false,"real":true|false}
+  입단 예약: 그 해 개막 때 그 선수가 실제로 들어온다. 지금 뛸 수 없는 어린 선수(후원·장학·육성 계약·파이프라인)는 create가 아니라 이것으로, 이름마다 하나씩. 입단 나이는 만 17세 이상`;
 
 export function freeSystem(regressor: boolean, l: Leniency = 3): string {
   return `너는 KBO 단장 시뮬레이션의 "자유 모드" 게임 마스터(TRPG 진행자)다. 플레이어는 한 구단의 단장이고, 무엇이든 하겠다고 말할 수 있다.
@@ -99,8 +106,12 @@ ${FREE_OPS_MENU}
 due는 "2026-08-15", "시즌 끝", "오프시즌", "다음 시즌", "30일 뒤" 가운데 하나. [약속 장부]의 약속을 이번 행동이 끝내면 settle에 id와 결과(kept 지킴, broken 어김, void 없던 일)를 낸다.
 약속을 어기면 신뢰·팬·관계에 대가가 따른다 (판정 기준에 따라).
 
+[단장 노트] 오래 기억해야 할 사실(진행 중인 프로젝트, 후원·계약한 선수 명단과 입단 시기, 구단 방침, 숨은 사정)은 notes에 짧게 남긴다.
+[단장 노트]에 있는 것은 이 세계의 사실로 이어 간다. 끝나거나 틀린 노트는 noteDrop에 id를 넣어 지운다.
+이야기로 "나중에 데려온다"고 했으면 반드시 future 조작으로 예약한다 (이야기만으로는 아무도 오지 않는다).
+
 [답 형식] JSON 하나만:
-{"title": "한 줄 제목", "narration": "판정과 결과 이야기 (3~8문장)", "ops": [ ... ], "promises": [{"party": "상대", "text": "약속 내용", "due": "기한"}], "settle": [{"id": "p1", "status": "kept"}]}`;
+{"title": "한 줄 제목", "narration": "판정과 결과 이야기 (3~8문장)", "ops": [ ... ], "promises": [{"party": "상대", "text": "약속 내용", "due": "기한"}], "settle": [{"id": "p1", "status": "kept"}], "notes": ["노트 한 줄"], "noteDrop": ["n1"]}`;
 }
 
 function rosterTable(g: GameSession, team: number, n: number): string {
@@ -220,6 +231,9 @@ export function freeContext(g: GameSession, store: Store, action = ''): string {
   const parts = [gameContext(g), rulesContext(g, store), picksContext(g)];
   const pc = promisesContext(g.league.fantasy);
   if (pc) parts.push(pc);
+  const f = g.league.fantasy;
+  if (f?.notes?.length) parts.push('[단장 노트]', ...f.notes.map((n) => `- ${n.id} (${n.year}) ${n.text}`));
+  if (f?.pipeline?.length) parts.push('[입단 예약]', ...f.pipeline.map((x) => `- ${x.name} (${g.league.teams[x.team]?.name ?? '?'}, ${x.joinYear} 입단, ${x.birthYear}년생 ${x.pos}, 입단 때 능력 ${x.now} 잠재 ${x.potential})`));
   const names = namesContext(g, store, action);
   if (names) parts.push(names);
   parts.push(`[우리 구단 ${g.league.teams[g.teamIdx].name} 선수 (능력 순)] ${rosterTable(g, g.teamIdx, 40)}`);
@@ -346,6 +360,23 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         ops.push({ op: 'pick', draft, round, from, to });
         break;
       }
+      case 'future': {
+        const team = teamByName(g, e.team);
+        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 20) : '';
+        const by = num(e.birthYear);
+        if (team === null || team < 0 || !name || by === null) { dropped.push(`future: ${name || '이름 없음'}`); break; }
+        const nowYear = g.phase === 'season' ? g.world.year : g.year;
+        // 입단은 다음 시즌부터, 만 17세 이상
+        const join = Math.max(nowYear + 1, Math.round(num(e.joinYear) ?? nowYear + 1), Math.round(by) + MIN_JOIN_AGE);
+        const roleRaw = String(e.role ?? e.pos ?? '').toUpperCase();
+        const role = /RP|CL|마무리|구원/.test(roleRaw) ? 'RP' as const : /SP|선발/.test(roleRaw) ? 'SP' as const : undefined;
+        const pos = (role || e.pos === 'P' ? 'P' : typeof e.pos === 'string' && CREATE_POS.includes(e.pos.toUpperCase()) ? e.pos.toUpperCase() : 'IF') as CreatePos;
+        const foreign = e.foreign === true || (e.foreign !== false && looksForeignName(name));
+        ops.push({ op: 'future', name, team, pos, ...(pos === 'P' && role ? { role } : {}), birthYear: Math.round(by), joinYear: join,
+          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 40))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 60))),
+          ...(foreign ? { foreign: true } : {}), ...(e.real === false ? {} : { real: true }) });
+        break;
+      }
       case 'rule': {
         const def = RULE_DEFS.find((d) => d.key === e.key);
         const v = e.value === null || e.value === '실제' ? null : num(e.value);
@@ -371,7 +402,7 @@ export async function freeAction(g: GameSession, store: Store, s: LlmSettings, a
   return parseGmReply(g, store, raw, { ask: action.slice(0, 1000), who: '게임 마스터', fallbackTitle: '행동' });
 }
 
-type GmJson = { title?: string; narration?: string; text?: string; story?: string; ops?: unknown; promises?: unknown; settle?: unknown };
+type GmJson = { title?: string; narration?: string; text?: string; story?: string; ops?: unknown; promises?: unknown; settle?: unknown; notes?: unknown; noteDrop?: unknown };
 
 /** 게임 마스터 답 → 이야기 글 (조작·약속·약속 판정) */
 function parseGmReply(g: GameSession, store: Store, raw: string, meta: { ask: string; who: string; fallbackTitle: string }, only?: Set<string>): { entry: Omit<FantasyEntry, 'year' | 'day'>; dropped: string[] } {
@@ -382,9 +413,13 @@ function parseGmReply(g: GameSession, store: Store, raw: string, meta: { ask: st
   const { ops, dropped } = resolveOps(g, j?.ops, store);
   const promises = resolvePromises(g, j?.promises);
   const settles = resolveSettles(g, j?.settle, only);
+  const notes = (Array.isArray(j?.notes) ? j!.notes : []).filter((x): x is string => typeof x === 'string' && !!x.trim()).slice(0, 5).map((x) => x.trim().slice(0, 300));
+  const known = new Set((g.league.fantasy?.notes ?? []).map((n) => n.id));
+  const noteDrop = (Array.isArray(j?.noteDrop) ? j!.noteDrop : []).map(String).filter((id) => known.has(id));
   return {
     entry: { kind: 'action', title: String(j?.title ?? meta.fallbackTitle).slice(0, 80), ask: meta.ask, text: String(narration).slice(0, 3000), who: meta.who,
-      ...(ops.length ? { ops } : {}), ...(promises.length ? { promises } : {}), ...(settles.length ? { settles } : {}) },
+      ...(ops.length ? { ops } : {}), ...(promises.length ? { promises } : {}), ...(settles.length ? { settles } : {}),
+      ...(notes.length ? { notes } : {}), ...(noteDrop.length ? { noteDrop } : {}) },
     dropped,
   };
 }
