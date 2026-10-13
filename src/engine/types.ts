@@ -79,6 +79,8 @@ export interface SimPlayer {
   reserve?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
+  /** 이도류로 쓰는 선수의 반대쪽 능력 (투수의 타격 bat, 타자의 투구 pit). 있으면 refreshActive가 반대쪽 자리 후보에도 넣는다 */
+  alt?: { bat?: BatSkill; pit?: PitSkill };
   /** 나이가 추정값 (생년 자료 없음, M8) */
   ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */

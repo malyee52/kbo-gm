@@ -12,6 +12,7 @@ import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game
 import { dollarText } from '../../league/salary';
 import { Grade, gradeClass, HAND, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
+import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 
@@ -97,6 +98,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             ) : null}
           </div>
           {!p.isPitcher && <DefenseInfo p={p} />}
+          <TwoWayInfo p={p} />
           {p.debutEstimate && <p className="note small">직전 기록이 없어 {year}년 기록을 크게 보정해 능력을 추정한 선수입니다 (잠재력 모델 도입 전 임시 처리).</p>}
         </section>
 
@@ -184,6 +186,35 @@ function ContractInfo({ id }: { id: string }) {
       </dl>
       {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}
     </section>
+  );
+}
+
+/**
+ * 투타 겸업 (league/twoway.ts, 2026-10-13): 모든 선수의 반대쪽 능력(투수의 타격, 타자의 투구)과 잠재력.
+ * 우리 구단 선수는 이도류로 쓸지 정한다 (투수 겸업은 지명타자로도, 등판 다음 날은 타석에서 쉰다)
+ */
+function TwoWayInfo({ p }: { p: SimPlayer }) {
+  const { session, changed, autosave } = useGame();
+  const [msg, setMsg] = useState<string | null>(null);
+  const lp = session.leaguePlayer(p.id);
+  if (!lp?.alt) return null;
+  const year = session.phase === 'season' ? session.world.year : session.year + 1;
+  const side = p.isPitcher ? '타격' : '투구';
+  const mine = lp.team === session.teamIdx;
+  const toggle = () => {
+    const r = session.setTwoWay(p.id, !lp.twoWay);
+    setMsg(r.message);
+    if (r.ok) { changed(); void autosave(); }
+  };
+  return (
+    <div className="defense">
+      <h4 className="small">
+        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <Grade v={gradeAt(lp.alt.runs, year)} /> · 잠재 <Grade v={gradeAt(lp.alt.potential, year)} />{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
+        {mine && <button type="button" className="link small" onClick={toggle}>{lp.twoWay ? '본업만 맡기기' : '이도류로 쓰기'}</button>}
+      </h4>
+      <p className="muted small">모든 선수가 반대쪽 능력을 갖지만 대부분은 낮고 자라지 않습니다. 겸업 재능이 있는 몇 명만 크게 자랍니다. 이도류로 쓰면 {p.isPitcher ? '등판하지 않는 날 지명타자로 나가고(등판 날도 타석에 서고, 다음 날은 쉰다)' : '선발 투수 후보에도 들어가고, 던진 다음 날은 타석에서 쉰다'}.</p>
+      {msg && <p className="muted small">{msg}</p>}
+    </div>
   );
 }
 
