@@ -90,9 +90,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다
+  // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다. 시즌 중에도 능력이 바뀌는 조작(자유 모드 선수 만들기·능력 변경,
+  // 이도류 등)이 있어 조작마다 다시 계산한다 (2026-10-13 사용자 보고: 자유 모드로 만든 선동열이 오버롤 70인데 세부 능력은 빈 자리의 40대로 보였다)
   const world = session.world;
-  const grades = useMemo(() => computeGrades(world), [world]);
+  const grades = useMemo(() => computeGrades(world), [world, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 저장하지 않은 조작 수: 진행 버튼 밖의 조작(트레이드·엔트리·기용표 등)도 잠시 뒤 자동 저장한다
   const dirty = useRef(0);
