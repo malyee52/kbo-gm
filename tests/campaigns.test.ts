@@ -105,7 +105,8 @@ describe('게임에서', () => {
   }, 240_000);
 
   it('장기 캠페인: 시작 때 만 23세 이하 선수와 그 뒤 지명한 선수가 자체 육성 후보, 중간 단계는 진행 중', () => {
-    const g = start('plan-l04');
+    const g = start('plan-l04', 'cp-l04-2');
+    // 2026-10-13 수비·엔트리 순환 변경 뒤 기본 시드(cp-plan-l04)는 첫해에 우승·자체 육성 4명으로 캠페인을 끝내 버려(운) 시드를 바꿨다
     const c = g.league.challenge!;
     expect(c.homegrown!.length).toBeGreaterThan(0);
     for (const id of c.homegrown!) {

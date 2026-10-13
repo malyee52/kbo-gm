@@ -60,7 +60,8 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
     const g = newGame();
     // 주전이 아닌(서브) 야수 중 기여가 큰 4명. 투수를 섞으면 상대의 약한 불펜을 채우는 정당한 거래가 될 수 있다
     // (2026-10-08: 롯데가 구원 3명 + 야수 1명을 받고 2루 여유 자원 고승민을 내주는 것을 받아들임. 전력 +17런으로 타당한 판단)
-    const bench = byNow(g, g.team.org.filter((p) => !p.isPitcher && g.slotOf(p) === null && nowRuns(g)(p) > 0)).slice(0, 4);
+    // 2026-10-13 오버롤의 수비 비중을 절반으로 줄인 뒤 기여가 0보다 큰 서브 야수가 3명뿐이라, 기여 순 상위 4명으로
+    const bench = byNow(g, g.team.org.filter((p) => !p.isPitcher && g.slotOf(p) === null)).slice(0, 4);
     expect(bench).toHaveLength(4);
     let sumBeatsStar = 0;
     for (const t of g.world.teams) {

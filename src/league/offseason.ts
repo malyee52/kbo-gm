@@ -2368,12 +2368,36 @@ const NEVER_POTENTIAL: [number, number] = [-15, -3];
  *   순위 식에 넣고 운을 크게 더한다. 지명 순번과 실제 커리어의 관계는 약하다 (임시값).
  * 시작 능력은 잠재력에서 나이 여유분(growthRoom × 0.7~1.3)을 뺀 값 (-15런 아래로는 내리지 않는다).
  */
+/**
+ * 신인의 수비 포지션 (2026-10-13 사용자 "이대호는 지명하자마자 지명타자로 뜬다. 현실에서 그런 선수는 없다"):
+ * 마스터 포지션은 커리어 끝(프로필) 기준이라 은퇴 무렵 지명타자였던 선수가 신인 때부터 지명타자가 됐다.
+ * 이제 입단 뒤 첫 시즌들 기록의 수비 포지션 → 커리어에서 가장 많이 맡은 수비 포지션 → 마스터 포지션(지명타자 아니면) → 지명 표기 순. 지명타자는 없다
+ */
+export function rookiePosition(store: Pick<DataStore, 'season' | 'meta'>, m: PlayerMaster | null | undefined, entryYear: number, draftPos: string | null | undefined): string {
+  const field = (q: string | null | undefined): q is string => !!q && q !== 'DH' && q !== 'IF' && q !== 'OF' && !PITCHER_POS.includes(q);
+  if (m) {
+    const count = new Map<string, number>();
+    for (const y of store.meta.years) {
+      if (y < entryYear) continue;
+      const r = store.season(y)?.bat.find((b) => b.id === m.id);
+      if (!field(r?.pos)) continue;
+      // 입단 뒤 처음 몇 해의 자리를 크게 (신인 때 맡은 자리)
+      count.set(r!.pos!, (count.get(r!.pos!) ?? 0) + Math.max(1, r!.pa) * (y - entryYear < 4 ? 10 : 1));
+    }
+    const best = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+    if (best) return best;
+    if (field(m.pos)) return m.pos;
+  }
+  if (draftPos === 'C') return 'C';
+  if (draftPos === 'OF') return 'OF';
+  return 'IF';
+}
+
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
                             entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'>, career: () => CareerIndex): LeaguePlayer {
   const m = matchDraftee(store, d, entryYear, league);
   const isPitcher = m ? masterIsPitcher(m, career) : d.pos === 'P';
-  const masterPos = m?.pos && !PITCHER_POS.includes(m.pos) ? m.pos : null;
-  const pos = isPitcher ? null : masterPos ?? (d.pos === 'P' ? 'IF' : d.pos);
+  const pos = isPitcher ? null : rookiePosition(store, m, entryYear, d.pos);
   const lastData = Math.max(...store.meta.years);
   let potential: number;
   if (m) {

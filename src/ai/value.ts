@@ -137,6 +137,12 @@ export function pitRuns(p: SimPlayer, ctx: ValueContext, role: PitchRole = isSta
   return ((ctx.replPit + SP_REPL_SHIFT - p.value) / WOBA_SCALE) * s.stamina * load.scale * load.starts;
 }
 
+/**
+ * 선수 가치·능력 등급에 넣는 수비 비중 (2026-10-13 사용자 선택 "수비 비중 낮춤"): 주 포지션 수비 런의 절반만.
+ * 수비는 기록이 없는 추정값이라 오버롤을 크게 흔들지 않게. 경기 시뮬레이션의 수비 효과와 팀 전력 계산(teamStrength)은 그대로
+ */
+export const DEFENSE_VALUE_WEIGHT = 0.5;
+
 /** 주 포지션 수비 런 (지명타자는 0) */
 function primaryDefense(p: SimPlayer): number {
   return p.pos === 'DH' ? 0 : defenseAt(p, fieldPosOf(p.pos));
@@ -145,7 +151,7 @@ function primaryDefense(p: SimPlayer): number {
 /** 지금 능력 기준 한 시즌 기여 (런). 타자는 포지션 보정과 주 포지션 수비 포함 */
 export function currentRuns(p: SimPlayer, ctx: ValueContext): number {
   if (p.isPitcher) return pitRuns(p, ctx);
-  return batRuns(p, ctx) + ((POS_ADJ[p.pos ?? ''] ?? 0) + primaryDefense(p)) * (FULL_PA / 600);
+  return batRuns(p, ctx) + ((POS_ADJ[p.pos ?? ''] ?? 0) + primaryDefense(p) * DEFENSE_VALUE_WEIGHT) * (FULL_PA / 600);
 }
 
 /** y시즌 뒤(0 = 이번 시즌)의 추정 기여 변화량. ctx에 잠재력이 있으면 성장 기댓값으로 계산한다 */
