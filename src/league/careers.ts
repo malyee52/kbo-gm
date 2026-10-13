@@ -254,8 +254,12 @@ export function enlistCandidates(league: LeagueState, team: number, year: number
   const out: EnlistCandidate[] = [];
   for (const p of league.players) {
     if (p.team !== team || p.foreign || p.military?.state !== 'pending') continue;
+    // 리그 밖에서 데려온 선수(자유 모드)는 입대하지 않는다 (2026-10-13 사용자 보고: 38세 선동열·외국인 멜빈 번치 입대)
+    if (p.outsider) continue;
     const age = ageAt(p, year + 1);
     if (age === null || age < MILITARY_MIN_AGE) continue;
+    // 강제 입대 나이를 3년 넘긴 미필은 현실에 없다: 면제로 본다 (만든 선수·예전 저장의 안전장치)
+    if (age > MILITARY_LAST_AGE + 3) continue;
     const runs = runsOf(p);
     const forced = age >= MILITARY_LAST_AGE;
     // 강제 입대 한 해 전(27세)이면 상한 안에서 먼저 보낸다: 한 해에 강제 입대가 몰려 상한을 넘지 않게

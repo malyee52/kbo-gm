@@ -36,7 +36,7 @@ export type FreeOp =
   /** 선수를 그 구단으로 (−1이면 방출). 우리·다른 구단 모두 */
   | { op: 'move'; player: string; to: number }
   /** 선수를 만든다 (가상 인물, 또는 real이면 리그 밖에서 데려온 실존 인물). now·potential은 20~80 등급 */
-  | { op: 'create'; name: string; team: number; pos: CreatePos; age: number; now: number; potential: number; real?: boolean; role?: 'SP' | 'RP' }
+  | { op: 'create'; name: string; team: number; pos: CreatePos; age: number; now: number; potential: number; real?: boolean; role?: 'SP' | 'RP'; foreign?: boolean; military?: 'done' | 'exempt' | 'pending' }
   /** 능력(now)·잠재력(potential)을 20~80 등급으로 */
   | { op: 'ability'; player: string; now?: number; potential?: number }
   /** 계약: 연봉(만 원), 기간(이번 시즌부터 몇 해) */
@@ -62,7 +62,7 @@ export function gradeOfRuns(runs: number, year: number): number {
 /** 게임 마스터에게 주는 조작 목록 */
 export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. 동명이인이면 "이름@구단")
 - {"op":"move","player":"선수 이름","to":"구단 이름 또는 방출"} 선수를 그 구단으로 옮긴다 (우리 구단·다른 구단 모두, 트레이드는 move 여러 개로)
-- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH (그 선수의 실제 주 포지션)","role":"SP|RP (투수만: 선발·구원)","age":17~50,"now":20~80,"potential":20~80,"real":true|false} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
+- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH (그 선수의 실제 주 포지션)","role":"SP|RP (투수만: 선발·구원)","age":17~50,"now":20~80,"potential":20~80,"real":true|false,"foreign":true|false (외국 국적),"military":"done|exempt|pending" (국내 선수 병역: 마침·면제·미필)} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
 - {"op":"ability","player":"선수 이름","now":20~80,"potential":20~80} 능력·잠재력 등급을 바꾼다 (둘 중 하나만도 됨, 50 = 리그 주전 평균)
 - {"op":"contract","player":"선수 이름","salary":억 원(소수),"years":1~10} 계약을 바꾼다
 - {"op":"cash","amount":억 원} 우리 구단 자금 (+ 들어옴, − 나감)
@@ -251,6 +251,9 @@ function playerByName(g: GameSession, raw: unknown): LeaguePlayer | null {
   return mine.length === 1 ? mine[0] : null;
 }
 
+/** 외국인 이름처럼 보이나: 띄어쓰기나 가운뎃점이 있거나 다섯 글자 이상 (한국 이름은 대개 두세 글자) */
+export const looksForeignName = (name: string) => /[\s·]/.test(name.trim()) || name.trim().length >= 5;
+
 const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : typeof x === 'string' && x.trim() && Number.isFinite(Number(x)) ? Number(x) : null);
 
 /** AI가 낸 조작을 이름 → id로 바꾸고 범위를 다듬는다 (판단 상한은 없다, 값의 범위만) */
@@ -280,8 +283,13 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         const roleRaw = String(e.role ?? e.pos ?? '').toUpperCase();
         const role = /RP|CL|마무리|구원|불펜/.test(roleRaw) ? 'RP' as const : /SP|선발/.test(roleRaw) ? 'SP' as const : undefined;
         const pos = (role || e.pos === 'P' ? 'P' : typeof e.pos === 'string' && CREATE_POS.includes(e.pos.toUpperCase()) ? e.pos.toUpperCase() : 'IF') as CreatePos;
+        // 외국인·병역 (2026-10-13 사용자 보고: 만든 선수가 모두 미필 국내 선수라 38세 선동열·외국인 멜빈 번치가 입대했다).
+        // 게임 마스터가 주지 않으면 이름으로(띄어쓰기·다섯 글자 이상이면 외국인), 국내 선수는 28세 이상이면 마친 것으로
+        const foreign = e.foreign === true || (e.foreign !== false && looksForeignName(name));
+        const military = foreign ? undefined : e.military === 'done' || e.military === 'exempt' || e.military === 'pending' ? e.military
+          : (num(e.age) ?? 22) >= 28 ? 'done' as const : 'pending' as const;
         ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(real ? 50 : 40, Math.round(num(e.age) ?? 22))),
-          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}), ...(pos === 'P' && role ? { role } : {}) });
+          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}), ...(pos === 'P' && role ? { role } : {}), ...(foreign ? { foreign: true } : {}), ...(military ? { military } : {}) });
         break;
       }
       case 'ability': {
