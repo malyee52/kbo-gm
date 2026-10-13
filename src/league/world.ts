@@ -119,6 +119,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       ...(lp.dev ? { dev: true } : {}),
       ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
+      // 이도류 (league/twoway.ts): 반대쪽 실제 능력치
+      ...(lp.twoWay && (lp.alt?.bat || lp.alt?.pit) ? { alt: { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) } } : {}),
       ...(lp.birthYearEstimated ? { ageEstimated: true } : {}),
     };
     // 숨겨진 특수능력은 리그 상태(저장)에 두지 않고 데이터에서 매번 붙인다

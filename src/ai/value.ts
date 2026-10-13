@@ -150,8 +150,21 @@ function primaryDefense(p: SimPlayer): number {
 
 /** 지금 능력 기준 한 시즌 기여 (런). 타자는 포지션 보정과 주 포지션 수비 포함 */
 export function currentRuns(p: SimPlayer, ctx: ValueContext): number {
-  if (p.isPitcher) return pitRuns(p, ctx);
-  return batRuns(p, ctx) + ((POS_ADJ[p.pos ?? ''] ?? 0) + primaryDefense(p) * DEFENSE_VALUE_WEIGHT) * (FULL_PA / 600);
+  const base = p.isPitcher ? pitRuns(p, ctx) : batRuns(p, ctx) + ((POS_ADJ[p.pos ?? ''] ?? 0) + primaryDefense(p) * DEFENSE_VALUE_WEIGHT) * (FULL_PA / 600);
+  // 이도류 (league/twoway.ts): 반대쪽 기여의 일부 (한 시즌을 둘로 나눠 쓰므로)
+  const face = twoWayFace(p, ctx.world);
+  return face ? base + Math.max(0, currentRuns(face, ctx)) * TWO_WAY_SHARE : base;
+}
+
+/** 이도류 선수가 반대쪽에서 내는 기여의 몫 (임시값: 투수 겸업은 지명타자로 등판 다음 날을 빼고 거의 매일, 타자 겸업은 선발 로테이션 한 자리) */
+export const TWO_WAY_SHARE = 0.6;
+
+/** 이도류 선수의 반대쪽 얼굴 (engine/team.ts refreshActive와 같은 모양). 없으면 null */
+export function twoWayFace(p: SimPlayer, world: Pick<World, 'league'>): SimPlayer | null {
+  if (!p.alt) return null;
+  if (p.isPitcher && p.alt.bat) return { ...p, alt: undefined, isPitcher: false, bat: p.alt.bat, pos: 'DH', value: batValue(p.alt.bat, world.league) };
+  if (!p.isPitcher && p.alt.pit) return { ...p, alt: undefined, isPitcher: true, pit: p.alt.pit, value: pitValue(p.alt.pit, world.league) };
+  return null;
 }
 
 /** y시즌 뒤(0 = 이번 시즌)의 추정 기여 변화량. ctx에 잠재력이 있으면 성장 기댓값으로 계산한다 */

@@ -7,6 +7,7 @@ import { eraPitching } from './eras';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
+import { batValue, pitValue } from './ratings';
 import type { SimPlayer, SimTeam, World } from './types';
 
 /** 시즌 중 바뀌는 선수 상태. 색인은 SimPlayer.idx */
@@ -320,6 +321,20 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   topUp(false, 11);
   topUp(true, 9);
 
+  // 이도류 (league/twoway.ts): 반대쪽 능력이 있는 선수는 반대쪽 자리 후보에도 넣는다. 같은 선수 색인을 쓰는 다른 얼굴이라
+  // 기록·피로·부상은 한 선수로 이어진다. 투수 겸업은 등판한 날도 지명타자로 서고, 등판 다음 날은 타석에서 쉰다 (오타니식).
+  // 반대쪽 얼굴은 엔트리 인원에 세지 않는다 (한 선수가 한 자리)
+  const restedBat = (p: SimPlayer) => st.lastStartDay[p.idx] === day - 1;
+  const batFaces: SimPlayer[] = [];
+  const pitFaces: SimPlayer[] = [];
+  for (const p of avail) {
+    if (!p.alt) continue;
+    if (p.isPitcher && p.alt.bat && !restedBat(p)) batFaces.push({ ...p, isPitcher: false, bat: p.alt.bat, pos: 'DH', value: batValue(p.alt.bat, world.league) });
+    if (!p.isPitcher && p.alt.pit) pitFaces.push({ ...p, isPitcher: true, pit: p.alt.pit, value: pitValue(p.alt.pit, world.league) });
+  }
+  // 타자 겸업이 어제 선발로 던졌으면 오늘은 타석에서 쉰다
+  const benchToday = new Set(avail.filter((p) => !p.isPitcher && p.alt?.pit && restedBat(p)).map((p) => p.idx));
+
   // 직접 정한 1군은 투수·야수 인원도 플레이어가 정한 그대로 쓴다
   const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(world.rules.rosterSize);
   const nHit = manual ? Number.MAX_SAFE_INTEGER : world.rules.rosterSize - nPit;
@@ -328,7 +343,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const era = eraPitching(world.year);
   const nRot = era.rotation;
   ts.restDays = era.restDays;
-  const pitchers = avail.filter((p) => p.isPitcher);
+  const pitchers = [...avail.filter((p) => p.isPitcher), ...pitFaces];
   const plan = manual ? ts.plan ?? null : null;
   const inAvail = new Set(pitchers.map((p) => p.idx));
   const planned = plan ? plan.rotation.filter((i) => inAvail.has(i)).map((i) => pitchers.find((p) => p.idx === i)!) : [];
@@ -344,15 +359,15 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   // 엔트리 순환 중이면 불펜 끝자리는 2군에서 "요즘 좋은" 투수가 올라온다: 가치에 주기마다 바뀌는 흔들림(jitter 런)을 더해 고른다
   const callUpScore = (p: SimPlayer) => (rotating && jitter > 0 ? p.value + jitter * (unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}/j`) - 0.5) : p.value);
   const bullpen = pitchers
-    .filter((p) => !rotation.includes(p))
+    .filter((p) => !rotation.includes(p) && !pitFaces.includes(p))
     .sort((a, b) => callUpScore(a) - callUpScore(b))
     .slice(0, Math.max(0, nPit - rotation.length));
   let closer: SimPlayer | null = plan?.closer !== null && plan?.closer !== undefined ? bullpen.find((p) => p.idx === plan.closer) ?? null : null;
   if (!closer) for (const p of bullpen) if (p.lastSaves >= 5 && (!closer || p.lastSaves > closer.lastSaves)) closer = p;
   if (!closer) closer = bullpen[0] ?? null;
 
-  // 야수: 주전 9명 → 백업 포수 → 가치 순
-  const hittersAll = avail.filter((p) => !p.isPitcher).sort((a, b) => b.value - a.value);
+  // 야수: 주전 9명 → 백업 포수 → 가치 순 (이도류 투수의 타자 얼굴은 인원 밖에서 더한다)
+  const hittersAll = [...avail.filter((p) => !p.isPitcher && !benchToday.has(p.idx)), ...batFaces].sort((a, b) => b.value - a.value);
   const chosen = assignLineup(hittersAll);
   const pick = new Set(chosen.map((p) => p.idx));
   const backupC = hittersAll.find((p) => p.pos === 'C' && !pick.has(p.idx));
@@ -361,7 +376,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
     pick.add(backupC.idx);
   }
   for (const p of hittersAll) {
-    if (chosen.length >= nHit) break;
+    if (chosen.length >= nHit + chosen.filter((x) => batFaces.includes(x)).length) break;
     if (!pick.has(p.idx)) {
       chosen.push(p);
       pick.add(p.idx);
@@ -377,6 +392,8 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   let next = Number.MAX_SAFE_INTEGER;
   for (const p of ts.team.org) if (st.absentUntil[p.idx] > day && st.absentUntil[p.idx] < next) next = st.absentUntil[p.idx];
   if (rotating) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
+  // 이도류 선수가 있으면 날마다 다시 짠다 (등판 다음 날 타석 휴식)
+  if (ts.team.org.some((p) => p.alt)) next = Math.min(next, day + 1);
   ts.nextReturnDay = next;
 }
 

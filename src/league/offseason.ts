@@ -45,6 +45,7 @@ import {
 import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
 import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
+import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
 
 type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits'>;
 
@@ -425,6 +426,12 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     // 등급(20~80)의 기준 집단이 "표본이 충분한 선수"라서, 가상 선수도 뛰면 기준 집단에 들어가야 한다
     if (p.bat) p.bat = { ...p.bat, sample: Math.round(b.pa + 0.6 * p.bat.sample) };
     if (p.pit) p.pit = { ...p.pit, sample: Math.round(pt.bf + 0.6 * p.pit.sample) };
+    // 반대쪽 능력 성장 (league/twoway.ts): 이도류로 뛰면 출전 몫 0.5, 아니면 연습만 0.1. 겸업 재능이 없으면 잠재력이 낮아 거의 자라지 않는다
+    if (p.alt) {
+      p.alt.runs = growthRuns(age, p.alt.runs, p.alt.potential, p.twoWay ? 0.5 : 0.1, new Rng(`${league.seed}/alt-growth/${year}/${p.id}`), !p.isPitcher,
+        agingScale(traitsOf(store.traits, p.id), params.traits));
+      if (p.twoWay) Object.assign(p.alt, altSkillFor(p, ctxNow, year));
+    }
     // 수비 나이 변화 (수비 정보가 없던 저장은 여기서 만든다)
     if (p.bat) {
       const def = p.bat.def ?? sp.bat?.def ?? makeDefense(p.id, p.pos, [], p.bat.speed, ageIn(p, year));
@@ -1694,6 +1701,8 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const runs = univ ? potential * 0.35 - 8 : potential * 0.1 - 14;
     const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs: runs + rng.range(-3, 3), potential }, year);
     p.school = univ ? 'UNIV' : 'HS';
+    // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
+    if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;
     // 스카우트 평가: 실제 잠재력에 오차 (모든 구단이 같은 평가를 본다. 난이도별 오차는 M7)
     p.scoutPotential = scoutView(league, potential, rng);
     view.ctx.potential?.set(p.id, aiPotential(league, p));
@@ -2418,6 +2427,8 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
     starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
   }, entryYear - 1);
   p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
+  // 겸업 재능 (league/twoway.ts): 실제 지명 표기가 투타겸업 (예: 하현승 2027 키움 1순위)
+  if (d.twoWay) p.twoWayTalent = true;
   if (m && !m.birthYear) p.birthYearEstimated = true;
   p.scoutPotential = scoutView(league, potential, rng);
   view.ctx.potential?.set(p.id, aiPotential(league, p));
@@ -2503,4 +2514,22 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
   view.sim.set(p.id, sim);
   view.ctx.potential?.set(p.id, aiPotential(league, p));
   return p;
+}
+
+/**
+ * 개막 때 이도류 정리 (league/twoway.ts): 반대쪽 능력이 없는 선수(새 선수·예전 저장)에게 만들고,
+ * AI 구단은 반대쪽 능력이 AI_TWO_WAY_GRADE 이상이면 이도류로 쓴다. 우리 구단은 플레이어가 정한다 (session.setTwoWay)
+ */
+export function openTwoWay(league: LeagueState, store: Store, params: EngineParams, userTeam: number): string[] {
+  const year = league.year;
+  ensureAlts(league, year);
+  const news: string[] = [];
+  const view = leagueView({ ...league, year: year - 1 }, store, params);
+  for (const p of league.players) {
+    if (p.team < 0 || p.team === userTeam || p.twoWay || !p.alt) continue;
+    if (gradeAt(p.alt.runs, year) < AI_TWO_WAY_GRADE) continue;
+    setTwoWay(p, true, view.ctx, year);
+    news.push(`${league.teams[p.team].name} ${p.name}, 이도류로 뛴다 (${p.isPitcher ? '투수 겸 지명타자' : '타자 겸 투수'})`);
+  }
+  return news;
 }

@@ -50,6 +50,12 @@ export interface LeaguePlayer {
   abroad?: AbroadState;
   /** 자유 모드에서 리그 밖(해외 리그·은퇴 등)에서 데려온 실존 인물. 엔진에서는 가상 선수(real false)로 다룬다 (자료에 기록이 없어서) */
   outsider?: boolean;
+  /** 본업 반대쪽 능력 (투수의 타격, 타자의 투구, league/twoway.ts). 예전 저장에는 없다 */
+  alt?: import('./twoway').AltAbility;
+  /** 구단이 이도류로 쓴다 (반대쪽 자리에도 나간다) */
+  twoWay?: boolean;
+  /** 겸업 재능: 반대쪽 잠재력이 높다 (실제 지명 자료의 투타겸업, 가상 신인 일부) */
+  twoWayTalent?: boolean;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
   /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */

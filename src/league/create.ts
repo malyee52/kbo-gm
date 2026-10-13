@@ -13,6 +13,7 @@ import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
+import { ensureAlts } from './twoway';
 
 type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'>;
 
@@ -153,9 +154,13 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     + addAbsentVeterans(league, store, startYear, params, special, toLeague)
     + addLateDebuts(league, store, ctx, startYear, idx);
   trimToOrgLimit(league, recordedIds);
+  // 투타 겸업 (league/twoway.ts): 실제 지명 자료에 투타겸업으로 표기된 선수는 겸업 재능, 모든 선수에게 반대쪽 능력
+  const twoWayIds = new Set(Object.values(store.drafts ?? {}).flat().filter((d) => d.twoWay && d.pid).map((d) => d.pid!));
+  for (const p of league.players) if (twoWayIds.has(p.id)) p.twoWayTalent = true;
   ensureFinance(league);
   for (const e of league.expansions ?? []) addExpansionCapital(league, e.team, startYear);
   const market = openMarket(league, store, params);
+  ensureAlts(league, startYear); // 시장 선수까지 모두
   const world = opening || added || special.size || futures || market ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }

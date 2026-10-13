@@ -526,7 +526,8 @@ export class Season {
 
   private snapshotPitchers(sides: TeamSeason[]): Map<number, PitLine> {
     const m = new Map<number, PitLine>();
-    for (const ts of sides) for (const p of ts.team.org) if (p.isPitcher) m.set(p.idx, { ...this.pit[p.idx] });
+    // 이도류 타자(반대쪽 투구 능력이 있는 선수)도 던질 수 있다 (league/twoway.ts)
+    for (const ts of sides) for (const p of ts.team.org) if (p.isPitcher || p.alt?.pit) m.set(p.idx, { ...this.pit[p.idx] });
     return m;
   }
 

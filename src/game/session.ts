@@ -36,6 +36,7 @@ import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, pitValue, type Defense } from '../engine';
 import { skillForRuns } from '../league/growth';
+import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import {
   aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
@@ -215,6 +216,9 @@ export type GameAction =
   /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런 */
   | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense }
   | { year: number; type: 'def-edit-off'; id: string; def: Defense }
+  /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
+  | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
+  | { year: number; type: 'two-way-off'; id: string; on: boolean }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
@@ -606,6 +610,7 @@ export class GameSession {
     if (opts.fantasy?.free) {
       // 자유 모드: 시즌 중 AI가 새 선수를 만들 때 채울 빈 자리 (src/fantasy/free.ts). 월드에 소속 없이 들어가야 해서 월드를 다시 만든다
       Off.openReserves(league, store, params);
+      ensureAlts(league, opts.year);
       w = worldFromLeague(structuredClone(league), store, params);
     }
     const season = Season.start(w, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
@@ -737,6 +742,7 @@ export class GameSession {
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
+    else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -2253,6 +2259,7 @@ export class GameSession {
         this.refreshRivals();
         Off.openMarket(L, this.store, this.params); // 시즌 중 시장의 외국인 후보 (market.ts)
         if (L.fantasy?.free) Off.openReserves(L, this.store, this.params); // 자유 모드 빈 자리
+        const twoWayNews = Off.openTwoWay(L, this.store, this.params, this.teamIdx); // 이도류 (league/twoway.ts)
         // 판타지 큰 변화: 입단 예정 유망주 (src/fantasy/effects.ts 'prospect')
         if (L.fantasy?.prospects?.length) {
           for (const sp of L.fantasy.prospects) {
@@ -2270,6 +2277,7 @@ export class GameSession {
         this.startEntry();
         for (const c of changes) this.addNews(0, 'season', `${L.year} 시즌: ${changeText(c)}.`);
         for (const t of mgrNews) this.addNews(0, 'season', `${L.year} 시즌: ${t}.`);
+        for (const t of twoWayNews) this.addNews(0, 'season', `${L.year} 시즌: ${t}.`);
         // 창단 구단: 1군 진입 2년 전 창단해 1년 동안 퓨처스리그를 뛴다 (2026-10-11)
         for (const e of L.expansions ?? []) {
           const name = L.teams[e.team].name;
@@ -2320,6 +2328,7 @@ export class GameSession {
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
+      case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
       case 'ai-off': this.applyFantasy(a.entry); break;
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
@@ -2888,6 +2897,37 @@ export class GameSession {
       return { ok: true, message: '수비 능력치를 고쳤습니다.' };
     }
     return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean });
+  }
+
+  /**
+   * 이도류로 쓰기·그만두기 (2026-10-13 사용자 선택 "오타니식 + 구단이 역할 선택"). 투수는 지명타자로도, 타자는 선발 투수 후보로도 나간다.
+   * 반대쪽 능력이 낮으면 써도 손해일 뿐 막지는 않는다. 우리 구단 선수만
+   */
+  setTwoWay(id: string, on: boolean): { ok: boolean; message: string } {
+    const lp = this.leaguePlayer(id);
+    if (!lp || lp.team !== this.teamIdx) return { ok: false, message: '우리 구단 선수만 정할 수 있습니다.' };
+    if (!!lp.twoWay === on) return { ok: false, message: on ? '이미 이도류입니다.' : '이미 본업만 맡고 있습니다.' };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'two-way', id, on });
+      return { ok: true, message: on ? `${lp.name}을(를) 이도류로 씁니다.` : `${lp.name}은(는) 본업만 맡습니다.` };
+    }
+    return this.dispatchOff({ year: this.year, type: 'two-way-off', id, on });
+  }
+
+  private applyTwoWay(id: string, on: boolean): void {
+    const lp = this.leaguePlayer(id);
+    if (!lp) return;
+    const year = this.phase === 'season' ? this.world.year : this.year + 1;
+    setTwoWayAbility(lp, on, this.values, year);
+    if (this.phase === 'season') {
+      const sp = this.world.players.find((p) => p.id === id);
+      if (sp) {
+        if (on && (lp.alt?.bat || lp.alt?.pit)) sp.alt = { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) };
+        else delete sp.alt;
+        if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
+      }
+    }
+    this.valueCtx = null;
   }
 
   private applyDefenseEdit(id: string, def: Defense): void {
