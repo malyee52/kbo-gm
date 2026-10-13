@@ -19,6 +19,7 @@ import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
 import { chronicleDue, writeChronicle } from '../../fantasy/chronicle';
 import { PressConference } from './PressConference';
+import { OwnerMeeting } from './OwnerMeeting';
 
 type Tab = 'free' | 'story' | 'chat' | 'memory' | 'chronicle' | 'settings';
 
@@ -112,6 +113,7 @@ function Story() {
   const entries = [...f.log].reverse();
   return (
     <section className="stack">
+      <OwnerMeeting />
       <PressConference />
       <div className="panel">
         <div className="row-between wrap">

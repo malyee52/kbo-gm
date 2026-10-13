@@ -15,6 +15,7 @@ import { offerExpired } from '../../fantasy/rivals';
 import { pregameBlock, pregameTalk, PREGAME_WHO } from '../../fantasy/gameday';
 import { loadAiSettings } from '../../fantasy/settings';
 import { PressConference } from './PressConference';
+import { OwnerMeeting } from './OwnerMeeting';
 
 type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
 /** 알림 묶음 (session.ts NewsKind) */
@@ -81,6 +82,7 @@ export function Home() {
           {next ? <NextGame next={next} /> : <p className="muted">남은 경기가 없습니다.</p>}
           {next && session.fantasy && <PregameTalk />}
           {session.fantasy && <PressConference compact />}
+          {session.fantasy && <OwnerMeeting compact />}
         </div>
 
         <div className="card side">
