@@ -18,6 +18,7 @@ import { ARTICLE_SYSTEM, splitArticle } from '../../fantasy/prompts';
 import { formatDate } from '../../game/calendar';
 import { useGame } from '../context';
 import { chronicleDue, writeChronicle } from '../../fantasy/chronicle';
+import { PressConference } from './PressConference';
 
 type Tab = 'free' | 'story' | 'chat' | 'memory' | 'chronicle' | 'settings';
 
@@ -111,6 +112,7 @@ function Story() {
   const entries = [...f.log].reverse();
   return (
     <section className="stack">
+      <PressConference />
       <div className="panel">
         <div className="row-between wrap">
           <h2>이야기</h2>
