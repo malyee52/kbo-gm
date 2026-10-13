@@ -14,6 +14,7 @@ import { CountUp, useRankMoves } from '../Motion';
 import { offerExpired } from '../../fantasy/rivals';
 import { pregameBlock, pregameTalk, PREGAME_WHO } from '../../fantasy/gameday';
 import { loadAiSettings } from '../../fantasy/settings';
+import { PressConference } from './PressConference';
 
 type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
 /** 알림 묶음 (session.ts NewsKind) */
@@ -79,6 +80,7 @@ export function Home() {
           <h2>다음 경기</h2>
           {next ? <NextGame next={next} /> : <p className="muted">남은 경기가 없습니다.</p>}
           {next && session.fantasy && <PregameTalk />}
+          {session.fantasy && <PressConference compact />}
         </div>
 
         <div className="card side">
