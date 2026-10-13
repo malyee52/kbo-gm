@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, defenseAt, defenseGrade, fieldPosOf, FIELD_POS } from '../src/engine';
 import { GameSession } from '../src/game/session';
+import { rookiePosition } from '../src/league/offseason';
 
 let store: DataStore;
 let g: GameSession;
@@ -54,4 +55,12 @@ describe('수비 포지션·능력치', () => {
     const l = GameSession.load(store, roundTrip(h.toSave()), FAST);
     expect(defenseAt(l.world.players.find((x) => x.id === p.id)!, 'SS')).toBe(12);
   }, 300_000);
+
+  it('신인은 지명타자로 시작하지 않는다 (이대호: 커리어 끝 프로필은 지명타자지만 신인 때는 수비 자리)', () => {
+    const m = [...store.players.values()].find((x) => x.name === '이대호' && x.birthYear === 1982)!;
+    const pos = rookiePosition(store, m, 2001, 'P');
+    expect(pos).not.toBe('DH');
+    expect(['1B', '3B', 'C', '2B', 'SS', 'LF', 'RF', 'CF']).toContain(pos);
+    expect(rookiePosition(store, null, 2027, 'P')).toBe('IF');
+  });
 });
