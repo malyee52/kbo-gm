@@ -13,7 +13,8 @@ export function Leaders() {
   const [kind, setKind] = useState<'bat' | 'pit'>('bat');
   const [mineOnly, setMineOnly] = useState(false);
   const s = session.season;
-  const players = session.world.players.filter((p) => (kind === 'pit') === p.isPitcher && (!mineOnly || p.teamIdx === session.teamIdx));
+  // 이도류(투타 겸업): 타자 순위에는 타석이 있는 투수도, 투수 순위에는 던진 타자도 (2026-10-13)
+  const players = session.world.players.filter((p) => (kind === 'pit' ? p.isPitcher || s.pit[p.idx].bf > 0 : !p.isPitcher || s.bat[p.idx].pa > 0) && (!mineOnly || p.teamIdx === session.teamIdx));
   const g = s.teams[session.teamIdx].g;
 
   return (

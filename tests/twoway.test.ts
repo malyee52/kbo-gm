@@ -4,6 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { gradeAt, runsForGradeAt } from '../src/league/twoway';
+import { seasonWar } from '../src/league/awards';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -46,6 +47,13 @@ describe('투타 겸업', () => {
       expect([b.home, b.away].some((side) => side.batters.some((x) => x.idx === ace.idx))).toBe(false);
     }
     expect(checked).toBeGreaterThan(0);
+    // WAR에 타격 몫도 들어간다 (이도류)
+    const withBat = seasonWar(g.world, s).get(ace.idx)!;
+    const alt = g.world.players[ace.idx].alt;
+    delete g.world.players[ace.idx].alt;
+    const pitOnly = seasonWar(g.world, s).get(ace.idx)!;
+    g.world.players[ace.idx].alt = alt;
+    expect(withBat).not.toBe(pitOnly);
     // (반대쪽 능력을 시험용으로 직접 바꿔 재현 비교는 하지 않는다. 저장·불러오기는 같아야 한다)
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     expect(h.world.players[ace.idx].alt?.bat).toBeDefined();
