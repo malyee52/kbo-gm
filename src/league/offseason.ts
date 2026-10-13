@@ -2255,12 +2255,13 @@ export function openReserves(league: LeagueState, store: Store, params: EnginePa
 
 /** 자유 모드 (오프시즌): 가상 선수를 그 구단에 바로 넣는다. runs는 지금 기여, potential은 잠재력 (런) */
 export function addFreePlayer(league: LeagueState, store: Store, params: EngineParams, team: number,
-  spec: { name: string; pos: 'P' | 'C' | 'IF' | 'OF'; age: number; runs: number; potential: number }): LeaguePlayer {
+  spec: { name: string; pos: string; age: number; runs: number; potential: number }): LeaguePlayer {
   const year = league.year;
   const view = leagueView({ ...league, year }, store, params);
   const rng = new Rng(`${league.seed}/free-player/${year}/${spec.name}/${league.nextVirtualId}`);
   const isPitcher = spec.pos === 'P';
-  const pos = isPitcher ? null : spec.pos === 'C' ? 'C' : spec.pos === 'IF' ? (['SS', '2B', '3B'] as const)[rng.int(3)] : (['CF', 'LF', 'RF'] as const)[rng.int(3)];
+  // 세부 자리를 주면 그대로 (자유 모드), 내야·외야면 그 안에서
+  const pos = isPitcher ? null : spec.pos === 'IF' ? (['SS', '2B', '3B'] as const)[rng.int(3)] : spec.pos === 'OF' ? (['CF', 'LF', 'RF'] as const)[rng.int(3)] : spec.pos;
   const p = makeVirtual(league, view, rng, new Set(), { foreign: false, asia: false, age: spec.age, runs: spec.runs, potential: spec.potential, name: spec.name, isPitcher, pos }, year);
   p.team = team;
   p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 2 };

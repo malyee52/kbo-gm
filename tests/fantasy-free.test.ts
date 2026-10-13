@@ -6,6 +6,7 @@ import { GameSession } from '../src/game/session';
 import { freeAction, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
 import { currentRuns } from '../src/ai/value';
 import { cashOf } from '../src/league/finance';
+import { defenseAt } from '../src/engine';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -100,4 +101,16 @@ describe('자유 모드', () => {
     expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
     expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
   }, 300_000);
+
+  it('만든 야수는 그 주 포지션 기준 수비 (푸홀스 3루: 유격수 수비가 3루보다 낮다)', () => {
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pujols', fantasy: { free: true } }, FAST);
+    const { ops } = resolveOps(g, [{ op: 'create', name: '푸홀스', team: g.league.teams[0].name, pos: '3B', age: 20, now: 45, potential: 78, real: true }], store);
+    expect(ops[0]).toMatchObject({ pos: '3B' });
+    g.addFantasy({ kind: 'action', title: 't', text: 'x', ops });
+    const sp = g.world.players.find((p) => p.name === '푸홀스')!;
+    expect(sp.pos).toBe('3B');
+    expect(defenseAt(sp, 'SS')).toBeLessThan(defenseAt(sp, '3B') - 5);
+    expect(defenseAt(sp, 'CF')).toBeLessThan(defenseAt(sp, '3B') - 5);
+    expect(defenseAt(sp, 'C')).toBeLessThan(-30);
+  }, 120_000);
 });
