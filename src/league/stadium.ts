@@ -7,6 +7,7 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
+import { Rng } from '../engine';
 import { realParkAt, realParkOpening } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
 
@@ -46,6 +47,8 @@ export interface StadiumState {
   name?: string;
   /** 실제 구장 자료가 확인되지 않은 값인가 (화면에 '확인 필요') */
   unchecked?: boolean;
+  /** 명명권 계약 (naming.ts) */
+  naming?: import('./naming').Naming;
 }
 
 /** 신구장 크기 (홈런 배율, 임시값). 작은 구장은 홈런이 늘고 큰 구장은 준다 */
@@ -57,6 +60,22 @@ export const PARK_SIZES: Record<ParkSize, { label: string; hr: number }> = {
 };
 /** 돔: 공사비 배율, 관중률 가산 (날씨 걱정 없는 쾌적함, 임시값) */
 export const DOME = { cost: 1.4, fill: 0.03 };
+
+/**
+ * 지자체 협상 (신구장, 2026-10-14): 표준 분담은 표의 구단 부담 그대로. 지원을 더 요구하면 성공할 때 구단 부담 ×SHARE,
+ * 실패하면 협상이 길어져 착공이 한 시즌 늦어지고 팬 만족도가 조금 떨어진다. 성공 확률은 팬 만족도가 높을수록 (임시값)
+ */
+export const MUNICIPAL = { share: 0.7, base: 0.45, perFan: 0.004, min: 0.15, max: 0.8, fanLoss: -2 };
+export type StadiumDeal = 'standard' | 'push';
+
+export function municipalChance(league: Pick<LeagueState, 'fans'>, team: number, year: number): number {
+  const fans = fanLevel(league, team, year);
+  return Math.max(MUNICIPAL.min, Math.min(MUNICIPAL.max, MUNICIPAL.base + (fans - 50) * MUNICIPAL.perFan));
+}
+
+/** AI 신구장: 시설이 이 아래이고 구장이 AI_NEW_AGE년 넘게 됐고 자금이 공사비의 1.5배 이상이면 (임시값) */
+export const AI_NEW_BELOW = 35;
+export const AI_NEW_AGE = 25;
 
 /** 경기에 쓰는 구장 특성 (world.ts SimTeam.park) */
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
@@ -136,8 +155,8 @@ export function installment(s: StadiumState | undefined, year: number): number {
 
 /** 공사를 잡고 착공금을 장부에 적는다 (다음 시즌 장부) */
 function startProject(league: LeagueState, team: number, offYear: number, kind: 'remodel' | 'new', years: number, cost: number, capacity: number,
-                      park?: { hr: number; dome: boolean }): void {
-  league.stadiums![team].project = { kind, start: offYear + 1, open: offYear + 1 + years, cost, capacity, ...(park ? { hr: park.hr, ...(park.dome ? { dome: true } : {}) } : {}) };
+                      park?: { hr: number; dome: boolean }, delay = 0): void {
+  league.stadiums![team].project = { kind, start: offYear + 1 + delay, open: offYear + 1 + delay + years, cost, capacity, ...(park ? { hr: park.hr, ...(park.dome ? { dome: true } : {}) } : {}) };
   league.ledger.push({ year: offYear + 1, from: team, to: -1, amount: downPayment(cost), note: `${league.teams[team].name} 구장 ${kind === 'new' ? '신축' : '리모델링'} 착공금`, kind: 'stadium' });
 }
 
@@ -156,7 +175,7 @@ export function stadiumOptions(): { id: string; kind: 'remodel' | 'new'; label: 
  * cash: 지금 자금. 착공금만큼은 있어야 한다
  */
 export function orderStadium(league: LeagueState, team: number, offYear: number, id: string, cash: number,
-                             park: { size?: ParkSize; dome?: boolean } = {}): { ok: boolean; message: string } {
+                             park: { size?: ParkSize; dome?: boolean; deal?: StadiumDeal } = {}): { ok: boolean; message: string } {
   const s = league.stadiums?.[team];
   const opt = stadiumOptions().find((o) => o.id === id);
   if (!s || !opt) return { ok: false, message: '없는 공사입니다.' };
@@ -164,14 +183,29 @@ export function orderStadium(league: LeagueState, team: number, offYear: number,
   if (park.size !== undefined && !PARK_SIZES[park.size]) return { ok: false, message: '없는 구장 크기입니다.' };
   const isNew = opt.kind === 'new';
   const dome = isNew && !!park.dome;
-  const cost = Math.round(opt.cost * (dome ? DOME.cost : 1));
+  let cost = Math.round(opt.cost * (dome ? DOME.cost : 1));
+  if (cash < downPayment(cost)) return { ok: false, message: `자금이 모자랍니다. 착공금 ${(downPayment(cost) / 10000).toFixed(0)}억 원은 있어야 합니다.` };
+  // 지자체 협상 (신구장만): 난수는 리그 시드·연도·구단으로 (재현·불러오기와 같다)
+  let delay = 0;
+  let dealNote = '';
+  if (isNew && park.deal === 'push') {
+    const chance = municipalChance(league, team, offYear);
+    if (new Rng(`${league.seed}/municipal/${offYear}/${team}`).chance(chance)) {
+      cost = Math.round(cost * MUNICIPAL.share);
+      dealNote = ` 지자체 협상 성공: 구단 부담이 ${Math.round((1 - MUNICIPAL.share) * 100)}% 줄었습니다.`;
+    } else {
+      delay = 1;
+      addFanEvent(league, team, offYear, -2, MUNICIPAL.fanLoss, '신구장 비용 분담 갈등');
+      dealNote = ' 지자체 협상 결렬: 협상이 길어져 착공이 한 시즌 늦어지고, 팬들의 실망이 큽니다.';
+    }
+  }
   const down = downPayment(cost);
-  if (cash < down) return { ok: false, message: `자금이 모자랍니다. 착공금 ${(down / 10000).toFixed(0)}억 원은 있어야 합니다.` };
   const size = park.size ?? 'neutral';
-  startProject(league, team, offYear, opt.kind, opt.years, cost, opt.capacity(s.capacity), isNew ? { hr: PARK_SIZES[size].hr, dome } : undefined);
+  startProject(league, team, offYear, opt.kind, opt.years, cost, opt.capacity(s.capacity), isNew ? { hr: PARK_SIZES[size].hr, dome } : undefined, delay);
   const eok = (v: number) => `${(v / 10000).toFixed(0)}억 원`;
   const kind = isNew ? ` (${PARK_SIZES[size].label}${dome ? ', 돔' : ''})` : '';
-  return { ok: true, message: `${opt.label}${kind} 주문: ${offYear + 1}~${offYear + opt.years} 시즌 공사, ${offYear + 1 + opt.years} 시즌 개장. 구단 부담 ${eok(cost)} (착공금 ${eok(down)} 지금, 나머지는 해마다 결산 때 ${eok(yearlyPayment(cost, opt.years))})` };
+  const start = offYear + 1 + delay;
+  return { ok: true, message: `${opt.label}${kind} 주문: ${start}~${start + opt.years - 1} 시즌 공사, ${start + opt.years} 시즌 개장. 구단 부담 ${eok(cost)} (착공금 ${eok(down)} 지금, 나머지는 공사 기간 결산 때 해마다 ${eok(yearlyPayment(cost, opt.years))}).${dealNote}` };
 }
 
 /**
@@ -211,6 +245,16 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
       if (real.dome) s.dome = true; else delete s.dome;
       if (real.checked) delete s.unchecked; else s.unchecked = true;
       out.push(`${league.teams[t].name}, ${year + 1} 시즌부터 ${real.name}${real.planned ? ' (실제 계획)' : ''} 사용 (${real.capacity.toLocaleString()}석${real.dome ? ', 돔' : ''})`);
+    }
+    // AI 신구장: 오래되고 낡은 구장, 자금이 넉넉하면 (지자체 표준 분담, 중립 구장. 연고 시장이 크면 큰 구장)
+    const age = year + 1 - (s.opened ?? realParkAt(league.teams[t].franchise, year)?.from ?? league.startYear);
+    const bigMarket = (league.fans?.[t]?.level ?? 50) >= 60;
+    const opt = NEW_PARK.options[bigMarket ? 1 : 0];
+    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= opt.cost * 1.5
+        && !realParkOpening(league.teams[t].franchise, year + 1 + NEW_PARK.years)) {
+      startProject(league, t, year, 'new', NEW_PARK.years, opt.cost, opt.capacity, { hr: 1, dome: false });
+      out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
+      continue;
     }
     if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= REMODEL.cost * 1.5) {
       startProject(league, t, year, 'remodel', REMODEL.years, REMODEL.cost, s.capacity + REMODEL.capacity);
