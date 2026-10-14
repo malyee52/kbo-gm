@@ -69,6 +69,8 @@ import {
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
+import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
+import { isFuturesTeam } from '../league/world';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
@@ -195,6 +197,7 @@ export type GameAction =
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string }
+  | { year: number; type: 'camp'; pick: CampPick }
   /** 감독 해임·선임 (managers.ts) */
   | { year: number; type: 'mgr-fire' }
   | { year: number; type: 'mgr-hire'; name: string }
@@ -2336,6 +2339,14 @@ export class GameSession {
         const pipelineNews = this.openPipeline(); // 자유 모드 입단 예약
         const twoWayNews = Off.openTwoWay(L, this.store, this.params, this.teamIdx); // 이도류 (league/twoway.ts)
         twoWayNews.unshift(...pipelineNews);
+        // 스프링캠프 (league/camp.ts): 비용·개막 뒤 컨디션·유망주 성장
+        {
+          const w = worldFromLeague(L, this.store, this.params, { form: false });
+          const userPick = L.campPlan?.year === L.year ? L.campPlan.pick : null;
+          const teams = L.teams.map((_, i) => i).filter((i) => !isFuturesTeam(L, i, L.year));
+          twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w)));
+          delete L.campPlan;
+        }
         // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
         for (const p of L.players) {
           if (!p.outsider) continue;
@@ -2407,6 +2418,11 @@ export class GameSession {
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow()); break;
+      case 'camp':
+        if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
+        L.campPlan = { year: this.year + 1, pick: { place: a.pick.place, focus: a.pick.focus } };
+        res = { ok: true, message: '스프링캠프를 정했습니다. 개막 때 비용을 내고 효과가 납니다.' };
+        break;
       case 'mgr-fire': res = fireManager(L, this.teamIdx, this.year); break;
       case 'mgr-hire': res = hireManager(L, this.store, this.teamIdx, this.year, a.name); break;
       case 'legend': res = this.applyLegend(a.id); break;
@@ -2968,6 +2984,9 @@ export class GameSession {
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
   orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
+  setCamp(pick: CampPick) { return this.dispatchOff({ year: this.year, type: 'camp', pick }); }
+  /** 다음 시즌 우리 캠프 (정하지 않았으면 기본) */
+  get campPlan(): CampPick { return this.league.campPlan?.year === this.year + 1 ? this.league.campPlan.pick : DEFAULT_CAMP; }
   fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
   hireManager(name: string) { return this.dispatchOff({ year: this.year, type: 'mgr-hire', name }); }
   /**
