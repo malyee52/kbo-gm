@@ -10,7 +10,7 @@ export { Rng } from './rng';
 export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress } from './ratings';
 export {
   simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
-  type SeasonResult, type SeasonSave, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
+  type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
   MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,

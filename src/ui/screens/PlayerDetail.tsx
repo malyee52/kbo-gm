@@ -15,6 +15,7 @@ import { runsGrade } from '../grades';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
+import { allStarHistory } from '../../league/allstar';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -190,6 +191,7 @@ function ContractInfo({ id }: { id: string }) {
   const lp = session.leaguePlayer(id);
   if (!lp) return null;
   const c = lp.contract;
+  const allStar = allStarHistory(session.league, id);
   return (
     <section>
       <h3>계약과 잠재력</h3>
@@ -197,6 +199,7 @@ function ContractInfo({ id }: { id: string }) {
         <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</dd>
         <dt>잠재력</dt><dd><Grade v={runsGrade(lp.scoutPotential ?? lp.potential, session.year)} />{lp.scoutPotential !== undefined && <span className="muted small"> (스카우트 평가)</span>}</dd>
         {!lp.foreign && <><dt>FA</dt><dd>1군 연차 {lp.service}년{lp.faCount ? ` · FA 계약 ${lp.faCount}회` : ''}</dd></>}
+        {allStar.years.length > 0 && <><dt>올스타</dt><dd>{allStar.years.length}회 ({allStar.years.join(', ')}){allStar.mvp.length ? ` · MVP ${allStar.mvp.join(', ')}` : ''}{allStar.derby.length ? ` · 홈런 더비 우승 ${allStar.derby.join(', ')}` : ''}</dd></>}
       </dl>
       {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}
     </section>

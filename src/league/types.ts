@@ -287,6 +287,8 @@ export interface LeagueState {
   storyMonth?: { year: number; month: number; lines: Record<string, number[]> };
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
+  /** 올스타전 기록 (allstar.ts, 2026-10-14) */
+  allStars?: import('./allstar').AllStarRecord[];
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
   expansions?: { team: number; firstYear: number }[];
 }

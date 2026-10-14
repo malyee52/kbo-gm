@@ -66,6 +66,14 @@ export function generateSchedule(nTeams: number, gamesPerTeam: number, rng: Rng)
   return days;
 }
 
+/** 시범 경기 한쪽 (Season.playExhibition): 야수 9명 이상, 투수 첫 번째가 선발 */
+export interface ExhibitionSide {
+  name: string;
+  hitters: SimPlayer[];
+  pitchers: SimPlayer[];
+  closer: SimPlayer | null;
+}
+
 export interface SeasonResult {
   seed: string;
   year: number;
@@ -522,6 +530,32 @@ export class Season {
     const al = todaysLineup(a, this.world.league, params, rng);
     const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
+  }
+
+  /**
+   * 시즌과 따로 도는 시범 경기 (올스타전, league/allstar.ts). 정규시즌 기록·선수 상태·난수에 손대지 않는다:
+   * 피로·결장 없는 새 상태로 치르고, 기록은 새 배열에 쌓아 돌려준다. 투수는 hook(선발 한계 배율)만큼 일찍 바꾼다.
+   */
+  playExhibition(home: ExhibitionSide, away: ExhibitionSide, rng: Rng, hook = 0.3): { result: GameResult; home: SimPlayer[]; away: SimPlayer[]; bat: BatLine[]; pit: PitLine[] } {
+    const n = this.world.players.length;
+    const bat = Array.from({ length: n }, emptyBatLine);
+    const pit = Array.from({ length: n }, emptyPitLine);
+    const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
+    const ctx: GameContext = {
+      ...this.ctx, params, rng, bat, pit, totals: emptyLeagueCounters(), states: newPlayerStates(n),
+      plays: null, command: null, form: undefined, errors: undefined, postseason: false,
+    };
+    const side = (s: ExhibitionSide, idx: number): TeamSeason => ({
+      team: { idx, name: s.name, franchise: s.name, org: [...s.hitters, ...s.pitchers] },
+      hitters: s.hitters, rotation: s.pitchers.slice(0, 1), bullpen: s.pitchers.slice(1), closer: s.closer,
+      nextReturnDay: 0, dirty: false, tactics: { steal: 1, bunt: 0.3, hook },
+    });
+    const h = side(home, -2);
+    const a = side(away, -3);
+    const hl = todaysLineup(h, this.world.league, params, rng);
+    const al = todaysLineup(a, this.world.league, params, rng);
+    const result = simulateGame(h, a, hl, al, home.pitchers[0], away.pitchers[0], ctx);
+    return { result, home: hl, away: al, bat, pit };
   }
 
   private snapshotPitchers(sides: TeamSeason[]): Map<number, PitLine> {

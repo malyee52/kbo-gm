@@ -17,6 +17,7 @@ import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Market } from './screens/Market';
 import { Search } from './screens/Search';
+import { AllStar } from './screens/AllStar';
 import { Fantasy } from './screens/Fantasy';
 import { autoEventDue, makeEvent } from '../fantasy/ai';
 import { loadAiSettings } from '../fantasy/settings';
@@ -66,6 +67,7 @@ const NAV: NavItem[] = [
   { id: 'growth', label: '선수 성장', off: true, hub: '선수단' },
   { id: 'standings', label: '순위', offLabel: '지난 시즌 순위', hub: '리그' },
   { id: 'leaders', label: '개인 기록', offLabel: '지난 시즌 기록', hub: '리그' },
+  { id: 'allstar', label: '올스타전', hub: '리그' },
   { id: 'postseason', label: '가을야구', hub: '리그' },
   { id: 'season-end', label: '시즌 결과', hub: '리그' },
   { id: 'awards', label: '시상식', hub: '리그' },
@@ -461,6 +463,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'trade' && <Trade />}
               {screen === 'market' && <Market />}
               {screen === 'search' && <Search />}
+              {screen === 'allstar' && <AllStar />}
               {screen === 'fantasy' && <Fantasy />}
               {screen === 'save' && <SaveScreen onQuit={onQuit} />}
               {screen === 'about' && <About />}
