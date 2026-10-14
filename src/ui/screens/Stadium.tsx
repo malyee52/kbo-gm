@@ -82,7 +82,7 @@ export function StadiumPanel() {
                   {(Object.keys(PARK_SIZES) as ParkSize[]).map((k) => <option key={k} value={k}>{PARK_SIZES[k].label} · 홈런 ×{PARK_SIZES[k].hr}</option>)}
                 </select>
               </label>
-              <label className="inline"><input type="checkbox" checked={dome} onChange={(e) => setDome(e.target.checked)} /> 돔 (공사비 ×{DOME.cost}, 관중률 +{Math.round(DOME.fill * 100)}%p)</label>
+              <label style={{ flexDirection: 'row', alignItems: 'center' }}><input type="checkbox" checked={dome} onChange={(e) => setDome(e.target.checked)} /> 돔 (공사비 ×{DOME.cost}, 관중률 +{Math.round(DOME.fill * 100)}%p)</label>
               <label>지자체 협상
                 <select value={deal} onChange={(e) => setDeal(e.target.value as 'standard' | 'push')}>
                   <option value="standard">표준 분담 (표 그대로)</option>
