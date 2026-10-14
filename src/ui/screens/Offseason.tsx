@@ -1,5 +1,6 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { isStarterSkill } from '../../engine';
+import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
@@ -123,6 +124,7 @@ export function Offseason() {
       </div>
       <aside className="stack off-side">
         {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
+        <CampPanel act={act} />
         <PostingPanel act={act} />
         <OffLog />
       </aside>
@@ -663,6 +665,35 @@ function ExtensionPanel({ act }: { act: Act }) {
 }
 
 /** 우리 선수의 포스팅(해외 진출) 요청과 해외에서 뛰는 선수 (league/overseas.ts) */
+/** 스프링캠프 (league/camp.ts): 다음 시즌 캠프 장소·훈련 방향. 개막 때 비용을 내고 효과가 난다 */
+function CampPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const won = useWon();
+  const pick = session.campPlan;
+  const set = (p: Partial<CampPick>) => act(session.setCamp({ ...pick, ...p }), '스프링캠프를 바꿨습니다.');
+  const place = CAMP_PLACE[pick.place];
+  const focus = CAMP_FOCUS[pick.focus];
+  return (
+    <section className="panel">
+      <h2>{session.year + 1} 스프링캠프</h2>
+      <div className="form-row">
+        <label>장소
+          <select value={pick.place} onChange={(e) => set({ place: e.target.value as CampPlace })}>
+            {CAMP_PLACES.map((p) => <option key={p} value={p}>{CAMP_PLACE[p].label}</option>)}
+          </select>
+        </label>
+        <label>훈련 방향
+          <select value={pick.focus} onChange={(e) => set({ focus: e.target.value as CampFocus })}>
+            {CAMP_FOCUSES.map((f) => <option key={f} value={f}>{CAMP_FOCUS[f].label}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="small">비용 {won(place.cost)} · 효과 배율 {place.factor}{place.injury > 1 ? ' · 추운 날씨로 부상 조금 늘어남' : ''}</p>
+      <p className="muted small">{focus.label}: {focus.note}. 컨디션 효과는 개막 뒤 {CAMP_DAYS}일 동안 이어지고, 개막할 때 비용을 냅니다.</p>
+    </section>
+  );
+}
+
 function PostingPanel({ act }: { act: Act }) {
   const { session } = useGame();
   const off = session.offseason!;

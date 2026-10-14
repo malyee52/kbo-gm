@@ -289,6 +289,10 @@ export interface LeagueState {
   awards?: SeasonAwards[];
   /** 올스타전 기록 (allstar.ts, 2026-10-14) */
   allStars?: import('./allstar').AllStarRecord[];
+  /** 스프링캠프 기록 (camp.ts, 최근 5년) */
+  camps?: import('./camp').CampRecord[];
+  /** 플레이어가 고른 다음 시즌 캠프 (year = 그 시즌) */
+  campPlan?: { year: number; pick: import('./camp').CampPick };
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
   expansions?: { team: number; firstYear: number }[];
 }
