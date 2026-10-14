@@ -7,6 +7,7 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
+import { realParkAt, realParkOpening } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
 
 // ---- 구장
@@ -41,6 +42,10 @@ export interface StadiumState {
    */
   hr?: number;
   dome?: boolean;
+  /** 구장 이름 (실제 구장 역사 ballparks.ts, 게임 안에서 지은 구장은 '새 구장') */
+  name?: string;
+  /** 실제 구장 자료가 확인되지 않은 값인가 (화면에 '확인 필요') */
+  unchecked?: boolean;
 }
 
 /** 신구장 크기 (홈런 배율, 임시값). 작은 구장은 홈런이 늘고 큰 구장은 준다 */
@@ -86,7 +91,14 @@ export const AI_REMODEL_BELOW = 35;
 /** 구장 상태가 없는 리그(새 게임, 예전 저장)에 채운다. capacity: 구단 계보의 기본 수용 인원 */
 export function ensureStadiums(league: LeagueState, capacity: (team: number) => number): StadiumState[] {
   league.stadiums ??= [];
-  for (let t = 0; t < league.teams.length; t++) league.stadiums[t] ??= { capacity: capacity(t), quality: QUALITY_START };
+  for (let t = 0; t < league.teams.length; t++) {
+    // 실제 구장 이름만 (수용 인원·시설·돔 관중 가산은 관중 모델이 맞춰 둔 값 그대로, ballparks.ts). 예전 저장에도 이름을 붙인다
+    const real = realParkAt(league.teams[t].franchise, league.year);
+    const named = real ? { name: real.name, ...(real.checked ? {} : { unchecked: true }) } : {};
+    const cur = league.stadiums[t];
+    if (!cur) league.stadiums[t] = { capacity: capacity(t), quality: QUALITY_START, ...named };
+    else if (cur.name === undefined && cur.opened === undefined) Object.assign(cur, named);
+  }
   return league.stadiums;
 }
 
@@ -179,6 +191,8 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
         s.opened = year + 1;
         s.hr = p.hr ?? 1;
         if (p.dome) s.dome = true; else delete s.dome;
+        s.name = `${league.teams[t].name} 새 구장`;
+        delete s.unchecked;
       } else {
         s.capacity = p.capacity;
         s.quality = Math.min(90, s.quality + REMODEL.quality);
@@ -186,6 +200,17 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
       (s.done ??= []).push({ kind: p.kind, open: p.open, cost: p.cost });
       delete s.project;
       out.push(`${league.teams[t].name} ${p.kind === 'new' ? '신구장' : '리모델링한 구장'} ${year + 1} 시즌 개장 (${s.capacity.toLocaleString()}석)`);
+    }
+    // 실제 구장 역사: 다음 시즌에 실제로 새 구장으로 옮긴 구단 (게임 안에서 공사를 잡았거나 지은 구단은 빼고)
+    const real = realParkOpening(league.teams[t].franchise, year + 1);
+    if (real && !s.project && !(s.done ?? []).some((d) => d.kind === 'new')) {
+      s.capacity = real.capacity;
+      s.quality = NEW_PARK.quality;
+      s.opened = year + 1;
+      s.name = real.name;
+      if (real.dome) s.dome = true; else delete s.dome;
+      if (real.checked) delete s.unchecked; else s.unchecked = true;
+      out.push(`${league.teams[t].name}, ${year + 1} 시즌부터 ${real.name}${real.planned ? ' (실제 계획)' : ''} 사용 (${real.capacity.toLocaleString()}석${real.dome ? ', 돔' : ''})`);
     }
     if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= REMODEL.cost * 1.5) {
       startProject(league, t, year, 'remodel', REMODEL.years, REMODEL.cost, s.capacity + REMODEL.capacity);
