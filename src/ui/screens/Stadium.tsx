@@ -51,7 +51,7 @@ export function StadiumPanel() {
   return (
     <>
       <section className="panel">
-        <h2>우리 구장 <span className="muted small">{s.opened !== undefined ? `${s.opened}년 개장` : '기존 구장'}</span></h2>
+        <h2>{s.name ?? '우리 구장'} <span className="muted small">{s.opened !== undefined ? `${s.opened}년 개장` : '기존 구장'}{s.unchecked ? ' · 실제 구장 자료 확인 필요' : ''}</span></h2>
         <div className="stats">
           <div className="stat"><span className="stat-label">수용 인원</span><strong className="stat-value">{s.capacity.toLocaleString()}석</strong>
             {underConstruction(s, year) && p?.kind === 'remodel' && <span className="small down">{year} 시즌 공사 중 {seatsAt(s, year).toLocaleString()}석만</span>}</div>
@@ -139,7 +139,7 @@ export function StadiumPanel() {
                 const pr = st.project && st.project.open > session.year ? st.project : null;
                 return (
                   <tr key={t} className={t === me ? 'me' : ''}>
-                    <td className="l"><TeamName idx={t} /></td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
+                    <td className="l"><TeamName idx={t} />{st.name && <span className="muted small"> {st.name}</span>}</td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
                     <td>{Math.round(fanLevel(L, t, session.year, off ? undefined : session.day - 1))}</td>
                     <td className="l small">{pr ? `${pr.kind === 'new' ? '신구장' : '리모델링'} ${pr.open} 개장` : st.opened !== undefined ? `${st.opened} 개장` : ''}</td>
                   </tr>
