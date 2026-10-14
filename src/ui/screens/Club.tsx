@@ -12,6 +12,7 @@ import {
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
 import { ruleOf } from '../../league/rules';
+import { REP_FA, REP_TRADE, repLabel, repOf } from '../../league/reputation';
 
 // 2026-10-12 UI 개편: 탭(개요·재정·구장·팬·감독·코치·이력·업적)은 위쪽 '구단' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
 export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
@@ -70,6 +71,8 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
           </p>
           <p className="muted small">난이도: {settingsLabel(L)}</p>
         </div>
+
+        <RepCard />
 
         <div className="card">
           <h2>연봉·샐러리캡 <span className="muted small">{year} 시즌</span></h2>
@@ -182,5 +185,28 @@ export function OfferPanel() {
         </tbody>
       </table>
     </section>
+  );
+}
+
+/** 단장 평판 (league/reputation.ts): 구단을 옮겨도 따라간다 */
+function RepCard() {
+  const { session } = useGame();
+  const v = repOf(session.league);
+  const log = (session.league.reputation?.log ?? []).slice(-8).reverse();
+  return (
+    <div className="card">
+      <h2>단장 평판</h2>
+      <p className="big">{v} <span className="muted small">{repLabel(v)}</span></p>
+      <div className="track trust" aria-label={`단장 평판 ${v} / 100`}><i style={{ width: `${v}%` }} /></div>
+      <p className="muted small">
+        리그가 단장을 보는 눈입니다. 구단을 옮겨도 따라가고, 해마다 50 쪽으로 조금 돌아갑니다.
+        높으면 FA·다년 계약 선수가 덜 부르고(100이면 −{REP_FA * 100}%), 트레이드 상대가 조금 너그러우며(±{REP_TRADE}런), 해고되더라도 강팀에서 제의가 옵니다.
+      </p>
+      {log.length > 0 && (
+        <ul className="plain small">
+          {log.map((x, i) => <li key={i}><span className="muted">{x.year}</span> {x.reason} <strong>{x.delta > 0 ? '+' : ''}{x.delta}</strong></li>)}
+        </ul>
+      )}
+    </div>
   );
 }

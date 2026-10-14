@@ -5,6 +5,7 @@
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
 import { lineTeam } from '../engine/types';
+import { repDemand } from './reputation';
 import { MARKET_ASIA, MARKET_REGULAR } from './market';
 import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
@@ -574,7 +575,7 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
   const p = extensionCandidates(league, off).find((x) => x.id === id);
   if (!p) return { ok: false, message: '다년 계약을 맺을 수 없는 선수입니다 (국내 보류·신인 계약 선수, FA 시장에 나오지 않은 선수만).' };
   const view = leagueView(league, store, params);
-  const salary = applyDiscount(extensionDemand(view, p, off.year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === off.year)?.pct ?? 0);
+  const salary = Math.max(MIN_SALARY, Math.round(applyDiscount(extensionDemand(view, p, off.year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === off.year)?.pct ?? 0) * repDemand(league)));
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);
@@ -861,7 +862,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     }
     const faDemand = settingsOf(league).faDemand;
     // 판타지 협상(에이전트 설득)의 할인·할증은 우리 제시에만 (src/fantasy/negotiate.ts)
-    const disc = 1 - (league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0);
+    // 단장 평판도 우리 제시에만: 평판이 높으면 선수가 덜 부른다 (reputation.ts)
+    const disc = (1 - (league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0)) * repDemand(league);
     const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand * disc : 1));
     const mine = offers.find((o) => o.team === off.userTeam);
     if (!ok.length) {

@@ -291,6 +291,8 @@ export interface LeagueState {
   allStars?: import('./allstar').AllStarRecord[];
   /** 스프링캠프 기록 (camp.ts, 최근 5년) */
   camps?: import('./camp').CampRecord[];
+  /** 단장 평판 (reputation.ts). 구단을 옮겨도 따라간다 */
+  reputation?: import('./reputation').RepState;
   /** 플레이어가 고른 다음 시즌 캠프 (year = 그 시즌) */
   campPlan?: { year: number; pick: import('./camp').CampPick };
   /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
