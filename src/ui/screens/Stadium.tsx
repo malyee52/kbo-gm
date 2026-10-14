@@ -1,10 +1,12 @@
 // 구장·팬 (구단 운영 탭, stadium.ts): 우리 구장과 공사 주문, 팬 만족도와 그 변화, 리그 구단 비교.
 import { useState } from 'react';
 import {
-  DOME, downPayment, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, PARK_SIZES, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment,
+  DOME, downPayment, MUNICIPAL, municipalChance, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, PARK_SIZES, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment,
   type ParkSize,
 } from '../../league/stadium';
 import { TeamName, useGame, useWon } from '../context';
+import { ConfirmButton } from '../ConfirmButton';
+import { namingAt, namingOffers, stadiumName } from '../../league/naming';
 
 const levelClass = (v: number) => (v >= 75 ? 'g-hi' : v >= 60 ? 'g-up' : v <= 25 ? 'g-lo' : v <= 40 ? 'g-dn' : '');
 const pctp = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%p`;
@@ -34,11 +36,12 @@ export function StadiumPanel() {
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [size, setSize] = useState<ParkSize>('neutral');
   const [dome, setDome] = useState(false);
+  const [deal, setDeal] = useState<'standard' | 'push'>('standard');
 
   if (!s) return <section className="panel"><p className="muted">구장 정보가 없습니다 (예전 저장). 다음 결산 뒤에 생깁니다.</p></section>;
 
   const order = (id: string) => {
-    const r = session.orderStadium(id, id.startsWith('new') ? { size, dome } : {});
+    const r = session.orderStadium(id, id.startsWith('new') ? { size, dome, deal } : {});
     setMsg({ text: r.message, error: !r.ok });
     setConfirm(null);
     changed();
@@ -51,7 +54,7 @@ export function StadiumPanel() {
   return (
     <>
       <section className="panel">
-        <h2>{s.name ?? '우리 구장'} <span className="muted small">{s.opened !== undefined ? `${s.opened}년 개장` : '기존 구장'}{s.unchecked ? ' · 실제 구장 자료 확인 필요' : ''}</span></h2>
+        <h2>{stadiumName(L, me, year) ?? '우리 구장'} <span className="muted small">{s.opened !== undefined ? `${s.opened}년 개장` : '기존 구장'}{s.unchecked ? ' · 실제 구장 자료 확인 필요' : ''}</span></h2>
         <div className="stats">
           <div className="stat"><span className="stat-label">수용 인원</span><strong className="stat-value">{s.capacity.toLocaleString()}석</strong>
             {underConstruction(s, year) && p?.kind === 'remodel' && <span className="small down">{year} 시즌 공사 중 {seatsAt(s, year).toLocaleString()}석만</span>}</div>
@@ -80,6 +83,12 @@ export function StadiumPanel() {
                 </select>
               </label>
               <label className="inline"><input type="checkbox" checked={dome} onChange={(e) => setDome(e.target.checked)} /> 돔 (공사비 ×{DOME.cost}, 관중률 +{Math.round(DOME.fill * 100)}%p)</label>
+              <label>지자체 협상
+                <select value={deal} onChange={(e) => setDeal(e.target.value as 'standard' | 'push')}>
+                  <option value="standard">표준 분담 (표 그대로)</option>
+                  <option value="push">지원을 더 요구 (성공 {Math.round(municipalChance(L, me, session.year) * 100)}%: 구단 부담 −{Math.round((1 - MUNICIPAL.share) * 100)}%, 실패: 착공 한 시즌 늦어짐·팬 {MUNICIPAL.fanLoss})</option>
+                </select>
+              </label>
             </div>
             <div className="scroll">
               <table>
@@ -107,6 +116,7 @@ export function StadiumPanel() {
           </>
         )}
         {!off && !building && <p className="muted small">공사는 오프시즌에 주문합니다.</p>}
+        <NamingSection year={year} off={off} onDone={(r) => { setMsg({ text: r.message, error: !r.ok }); changed(); if (r.ok) void autosave(); }} />
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
       </section>
 
@@ -139,7 +149,7 @@ export function StadiumPanel() {
                 const pr = st.project && st.project.open > session.year ? st.project : null;
                 return (
                   <tr key={t} className={t === me ? 'me' : ''}>
-                    <td className="l"><TeamName idx={t} />{st.name && <span className="muted small"> {st.name}</span>}</td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
+                    <td className="l"><TeamName idx={t} />{stadiumName(L, t, year) && <span className="muted small"> {stadiumName(L, t, year)}</span>}</td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
                     <td>{Math.round(fanLevel(L, t, session.year, off ? undefined : session.day - 1))}</td>
                     <td className="l small">{pr ? `${pr.kind === 'new' ? '신구장' : '리모델링'} ${pr.open} 개장` : st.opened !== undefined ? `${st.opened} 개장` : ''}</td>
                   </tr>
@@ -149,6 +159,40 @@ export function StadiumPanel() {
           </table>
         </div>
       </section>
+    </>
+  );
+}
+
+/** 구장 명명권 (league/naming.ts): 지금 계약, 오프시즌에는 가상 기업들의 제안 */
+function NamingSection({ year, off, onDone }: { year: number; off: boolean; onDone: (r: { ok: boolean; message: string }) => void }) {
+  const { session } = useGame();
+  const won = useWon();
+  const L = session.league;
+  const me = session.teamIdx;
+  const now = namingAt(L, me, year);
+  const offers = off ? namingOffers(L, me, session.year) : [];
+  return (
+    <>
+      <h3>명명권</h3>
+      {now
+        ? <p className="small">{now.sponsor} 파크 · {now.from}~{now.until} 시즌 · 해마다 {won(now.yearly)} (개막 때 들어옵니다)</p>
+        : <p className="muted small">구장 이름을 팔지 않았습니다.{off ? '' : ' 제안은 오프시즌에 받습니다.'}</p>}
+      {offers.length > 0 && (
+        <div className="scroll flat">
+          <table>
+            <thead><tr><th className="l">기업 (가상)</th><th>기간</th><th>해마다</th><th>합계</th><th /></tr></thead>
+            <tbody>
+              {offers.map((o) => (
+                <tr key={o.id}>
+                  <td className="l">{o.sponsor}</td><td>{o.years}시즌</td><td>{won(o.yearly)}</td><td>{won(o.yearly * o.years)}</td>
+                  <td><ConfirmButton label="계약" confirmLabel="정말 계약 (중간에 깰 수 없음)" className="small-btn" onConfirm={() => onDone(session.signNaming(o.id))} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {offers.length > 0 && <p className="muted small">제안 금액은 팬 만족도와 시설이 좋을수록 큽니다. 기업 이름은 모두 가상입니다.</p>}
     </>
   );
 }

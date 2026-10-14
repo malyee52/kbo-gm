@@ -70,6 +70,7 @@ import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
+import { openNaming, signNaming } from '../league/naming';
 import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
@@ -197,8 +198,9 @@ export type GameAction =
   | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
-  | { year: number; type: 'stadium'; id: string; size?: ParkSize; dome?: boolean }
+  | { year: number; type: 'stadium'; id: string; size?: ParkSize; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
+  | { year: number; type: 'naming'; id: string }
   /** 감독 해임·선임 (managers.ts) */
   | { year: number; type: 'mgr-fire' }
   | { year: number; type: 'mgr-hire'; name: string }
@@ -2354,6 +2356,7 @@ export class GameSession {
           twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w)));
           delete L.campPlan;
         }
+        twoWayNews.push(...openNaming(L, this.teamIdx)); // 구장 명명권 (league/naming.ts)
         // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
         for (const p of L.players) {
           if (!p.outsider) continue;
@@ -2424,7 +2427,8 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
-      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.dome ? { dome: true } : {}) }); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }); break;
+      case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
         if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
         L.campPlan = { year: this.year + 1, pick: { place: a.pick.place, focus: a.pick.focus } };
@@ -3001,10 +3005,12 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
-  orderStadium(id: string, park: { size?: ParkSize; dome?: boolean } = {}) {
-    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.dome ? { dome: true } : {}) });
+  orderStadium(id: string, park: { size?: ParkSize; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
+    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
   }
   setCamp(pick: CampPick) { return this.dispatchOff({ year: this.year, type: 'camp', pick }); }
+  /** 구장 명명권 제안 받기 (오프시즌) */
+  signNaming(id: string) { return this.dispatchOff({ year: this.year, type: 'naming', id }); }
   /** 다음 시즌 우리 캠프 (정하지 않았으면 기본) */
   get campPlan(): CampPick { return this.league.campPlan?.year === this.year + 1 ? this.league.campPlan.pick : DEFAULT_CAMP; }
   fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
