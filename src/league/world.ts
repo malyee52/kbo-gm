@@ -12,6 +12,7 @@ import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
+import { parkFactor } from './stadium';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
@@ -89,7 +90,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     // 스프링캠프 (camp.ts): 체력 훈련·국내 캠프의 시즌 부상 배율
     const camp = campInjury(league, idx, year);
     const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
-    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}) };
+    // 구장 특성 (stadium.ts): 게임 안에서 지은 신구장만
+    const park = parkFactor(league.stadiums?.[idx]);
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
+      ...(park.hr !== 1 ? { park: { hr: park.hr } } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {

@@ -431,7 +431,7 @@ type PaState = Pick<Situation, 'runnersOn' | 'scoring' | 'late'>;
 const NO_STATE: PaState = { runnersOn: false, scoring: false, late: false };
 
 /** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
-function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE): Ev {
+function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE, parkHr = 1): Ev {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
@@ -449,7 +449,8 @@ function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boole
   const pSo = combine(bs.so * cal.so * lg.so * down, ps.so * lg.so * (1 - fat), lg.so);
   const pBb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
   const pHbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
-  const pHr = combine(bs.hr * cal.hr * lg.hr * up, ps.hr * lg.hr * worse, lg.hr);
+  // 홈 구장 특성 (게임 안에서 지은 신구장만 1이 아니다, league/stadium.ts): 양 팀 타자 모두에게
+  const pHr = combine(bs.hr * cal.hr * lg.hr * up * parkHr, ps.hr * lg.hr * worse, lg.hr);
   const hitP = ps.hit * worse * Math.max(0.5, 1 - fieldDef * params.defenseHitPerRun);
   const pS1 = combine(bs.s1 * cal.s1 * lg.s1 * up, hitP * lg.s1, lg.s1);
   const pD2 = combine(bs.d2 * cal.d2 * lg.d2 * up, hitP * lg.d2, lg.d2);
@@ -486,6 +487,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [] };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
+  const parkHr = homeTs.team.park?.hr ?? 1;
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
 
   // 승리·패전 후보: 리드를 잡은 시점의 투수와 그 점수를 내준 투수. 동점이 되면 지운다
@@ -673,7 +675,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       }
       const ev = fc?.walk ? Ev.BB : samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def, {
         runnersOn: !!(bases[0] || bases[1] || bases[2]), scoring: !!(bases[1] || bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
-      });
+      }, parkHr);
       const me: Runner = { p: batter, resp: pg, earned: true };
       const r0 = bat.runs;
       let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (fc?.walk ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';

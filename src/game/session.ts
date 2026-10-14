@@ -67,7 +67,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
-import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
+import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
@@ -197,7 +197,7 @@ export type GameAction =
   | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
-  | { year: number; type: 'stadium'; id: string }
+  | { year: number; type: 'stadium'; id: string; size?: ParkSize; dome?: boolean }
   | { year: number; type: 'camp'; pick: CampPick }
   /** 감독 해임·선임 (managers.ts) */
   | { year: number; type: 'mgr-fire' }
@@ -2424,7 +2424,7 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
-      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow()); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.dome ? { dome: true } : {}) }); break;
       case 'camp':
         if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
         L.campPlan = { year: this.year + 1, pick: { place: a.pick.place, focus: a.pick.focus } };
@@ -3001,7 +3001,9 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
-  orderStadium(id: string) { return this.dispatchOff({ year: this.year, type: 'stadium', id }); }
+  orderStadium(id: string, park: { size?: ParkSize; dome?: boolean } = {}) {
+    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.dome ? { dome: true } : {}) });
+  }
   setCamp(pick: CampPick) { return this.dispatchOff({ year: this.year, type: 'camp', pick }); }
   /** 다음 시즌 우리 캠프 (정하지 않았으면 기본) */
   get campPlan(): CampPick { return this.league.campPlan?.year === this.year + 1 ? this.league.campPlan.pick : DEFAULT_CAMP; }

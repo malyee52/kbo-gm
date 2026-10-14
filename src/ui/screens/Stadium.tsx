@@ -1,7 +1,8 @@
 // 구장·팬 (구단 운영 탭, stadium.ts): 우리 구장과 공사 주문, 팬 만족도와 그 변화, 리그 구단 비교.
 import { useState } from 'react';
 import {
-  downPayment, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment,
+  DOME, downPayment, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, PARK_SIZES, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment,
+  type ParkSize,
 } from '../../league/stadium';
 import { TeamName, useGame, useWon } from '../context';
 
@@ -31,11 +32,13 @@ export function StadiumPanel() {
   const log = [...(L.fans?.[me]?.log ?? [])].reverse().slice(0, 14);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const [size, setSize] = useState<ParkSize>('neutral');
+  const [dome, setDome] = useState(false);
 
   if (!s) return <section className="panel"><p className="muted">구장 정보가 없습니다 (예전 저장). 다음 결산 뒤에 생깁니다.</p></section>;
 
   const order = (id: string) => {
-    const r = session.orderStadium(id);
+    const r = session.orderStadium(id, id.startsWith('new') ? { size, dome } : {});
     setMsg({ text: r.message, error: !r.ok });
     setConfirm(null);
     changed();
@@ -54,6 +57,7 @@ export function StadiumPanel() {
             {underConstruction(s, year) && p?.kind === 'remodel' && <span className="small down">{year} 시즌 공사 중 {seatsAt(s, year).toLocaleString()}석만</span>}</div>
           <div className="stat"><span className="stat-label">관중률 보정 (시설{honey ? '·새 구장' : ''})</span><strong className="stat-value">{pctp(stadiumFill(s, year))}</strong></div>
           <div className="stat"><span className="stat-label">객단가</span><strong className="stat-value">×{ticketScale(s).toFixed(2)}</strong></div>
+          <div className="stat"><span className="stat-label">구장 특성</span><strong className="stat-value">홈런 ×{(s.hr ?? 1).toFixed(2)}</strong>{s.dome && <span className="small">돔</span>}</div>
         </div>
         <Meter label="시설" v={s.quality} />
         <p className="muted small">시설은 해마다 1씩 낡습니다 (바닥 20). 50이 보통이고, 높을수록 관중이 더 들고 입장권을 비싸게 받을 수 있습니다. 신구장은 개장 뒤 세 시즌 동안 관중이 더 듭니다.</p>
@@ -69,13 +73,23 @@ export function StadiumPanel() {
         {off && !building && (
           <>
             <h3>공사 주문 <span className="muted small">{year} 시즌부터 공사</span></h3>
+            <div className="form-row">
+              <label>신구장 크기
+                <select value={size} onChange={(e) => setSize(e.target.value as ParkSize)}>
+                  {(Object.keys(PARK_SIZES) as ParkSize[]).map((k) => <option key={k} value={k}>{PARK_SIZES[k].label} · 홈런 ×{PARK_SIZES[k].hr}</option>)}
+                </select>
+              </label>
+              <label className="inline"><input type="checkbox" checked={dome} onChange={(e) => setDome(e.target.checked)} /> 돔 (공사비 ×{DOME.cost}, 관중률 +{Math.round(DOME.fill * 100)}%p)</label>
+            </div>
             <div className="scroll">
               <table>
                 <thead><tr><th className="l">공사</th><th>구단 부담</th><th>착공금</th><th>기간</th><th>해마다</th><th>완공 뒤</th><th className="l">공사 중</th><th /></tr></thead>
                 <tbody>
-                  {stadiumOptions().map((o) => (
+                  {stadiumOptions().map((o) => {
+                    const cost = o.kind === 'new' && dome ? Math.round(o.cost * DOME.cost) : o.cost;
+                    return (
                     <tr key={o.id}>
-                      <td className="l">{o.label}</td><td>{won(o.cost)}</td><td>{won(downPayment(o.cost))}</td><td>{o.years}시즌</td><td>{won(yearlyPayment(o.cost, o.years))}</td>
+                      <td className="l">{o.label}{o.kind === 'new' && <span className="muted small"> · {PARK_SIZES[size].label}{dome ? ' · 돔' : ''}</span>}</td><td>{won(cost)}</td><td>{won(downPayment(cost))}</td><td>{o.years}시즌</td><td>{won(yearlyPayment(cost, o.years))}</td>
                       <td>{o.capacity(s.capacity).toLocaleString()}석 · 시설 {o.kind === 'new' ? 100 : Math.min(90, s.quality - 1 + REMODEL.quality)}</td>
                       <td className="l small">{o.kind === 'remodel' ? `그 시즌 관중석 ${Math.round(REMODEL.closed * 100)}% 못 씀` : '옛 구장을 그대로 씀'}</td>
                       <td>
@@ -84,11 +98,12 @@ export function StadiumPanel() {
                           : <button type="button" className="small-btn" onClick={() => setConfirm(o.id)}>주문</button>}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            <p className="muted small">신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
+            <p className="muted small">신구장 크기는 홈·원정 두 팀 타자 모두의 홈런에 그대로 곱해집니다 (원래 구장은 선수 기록에 이미 구장 효과가 들어 있어 ×1). 신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
           </>
         )}
         {!off && !building && <p className="muted small">공사는 오프시즌에 주문합니다.</p>}
@@ -116,7 +131,7 @@ export function StadiumPanel() {
         <h2>리그 구장·팬</h2>
         <div className="scroll">
           <table>
-            <thead><tr><th className="l">구단</th><th>수용 인원</th><th>시설</th><th>팬 만족도</th><th className="l">공사</th></tr></thead>
+            <thead><tr><th className="l">구단</th><th>수용 인원</th><th>시설</th><th>홈런</th><th>팬 만족도</th><th className="l">공사</th></tr></thead>
             <tbody>
               {L.teams.map((_, t) => {
                 const st = L.stadiums?.[t];
@@ -124,7 +139,7 @@ export function StadiumPanel() {
                 const pr = st.project && st.project.open > session.year ? st.project : null;
                 return (
                   <tr key={t} className={t === me ? 'me' : ''}>
-                    <td className="l"><TeamName idx={t} /></td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td>
+                    <td className="l"><TeamName idx={t} /></td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
                     <td>{Math.round(fanLevel(L, t, session.year, off ? undefined : session.day - 1))}</td>
                     <td className="l small">{pr ? `${pr.kind === 'new' ? '신구장' : '리모델링'} ${pr.open} 개장` : st.opened !== undefined ? `${st.opened} 개장` : ''}</td>
                   </tr>
