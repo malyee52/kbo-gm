@@ -28,7 +28,7 @@ function checkLeague(g: GameSession, label: string, roster = true) {
   // 정원은 시즌 중 규정을 줄여도 오프시즌 방출 단계에서 맞춘다
   const limit = ruleOf(g.league, 'orgLimit');
   g.league.teams.forEach((t, i) => {
-    const org = g.league.players.filter((p) => p.team === i && !p.retired);
+    const org = g.league.players.filter((p) => p.team === i);
     // 정원은 복무 중·육성선수를 뺀 정식 선수 (offseason.ts orgSize)
     expect(org.filter((p) => !isServing(p) && !p.dev).length, `${label}: ${t.name} 정원`).toBeLessThanOrEqual(limit);
     expect(org.filter((p) => p.isPitcher).length, `${label}: ${t.name} 투수`).toBeGreaterThanOrEqual(18);
@@ -86,13 +86,13 @@ describe('자유 모드 여러 시즌', () => {
       g.advance(100000);
       g.beginOffseason();
       checkLeague(g, `${year} 결산`, false);
-      for (const n of created) expect(g.league.players.some((p) => p.name === n && !p.retired), `${n} 남음`).toBe(true);
+      for (const n of created) expect(g.league.players.some((p) => p.name === n), `${n} 남음`).toBe(true);
       runOffseason(g, (st) => {
         // 오프시즌 단계마다 하나씩 조작 (FA·드래프트 사이에도 끼어든다)
         if (st === 'fa') apply(`${year} 오프시즌`, [{ op: 'create', name: OFF[s], team: 'LG', pos: 'OF', age: 27, now: 58, potential: 60 }]);
         if (st === 'draft') {
           const kia = g.league.teams.findIndex((t) => t.name === 'KIA');
-          const v = g.league.players.find((p) => p.team === kia && !p.foreign && !p.retired && p.isPitcher)!;
+          const v = g.league.players.find((p) => p.team === kia && !p.foreign && p.isPitcher)!;
           apply(`${year} 드래프트`, [{ op: 'move', player: `${v.name}@KIA`, to: 'LG' }]);
         }
       });
