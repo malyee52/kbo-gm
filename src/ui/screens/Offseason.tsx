@@ -125,6 +125,11 @@ export function Offseason() {
       <aside className="stack off-side">
         {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
         <CampPanel act={act} />
+        <section className="panel">
+          <h2>감독·코치</h2>
+          <p className="muted small">감독 교체와 코치 고용은 오프시즌 내내 할 수 있습니다 (시즌 중에도 가능).</p>
+          <button type="button" className="ghost" onClick={() => go('staff')}>감독·코치 화면으로</button>
+        </section>
         <PostingPanel act={act} />
         <OffLog />
       </aside>

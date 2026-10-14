@@ -5,6 +5,7 @@ import {
 } from '../../league/managers';
 import type { ManagerInfo } from '../../data/types';
 import { TeamName, useGame, useWon } from '../context';
+import { ConfirmButton } from '../ConfirmButton';
 
 const ratio = (v: number) => {
   const n = Math.round((v - 1) * 100);
@@ -35,13 +36,16 @@ export function ManagerPanel() {
   const m = managerOf(L, me);
   const info = m ? infoOf(store, m.name) : undefined;
   const t = tacticsOf(info);
-  const pool = off && !m ? candidates(L, store, year + 1).slice(0, CANDIDATE_MAX) : [];
+  // 시즌 중(정규시즌)에도, 오프시즌에도 후보를 보여 준다 (2026-10-14 사용자 "감독을 교체할 방법이 없어")
+  const inSeason = session.phase === 'season' && !session.done;
+  const pool = off ? candidates(L, store, year + 1).slice(0, CANDIDATE_MAX) : inSeason ? candidates(L, store, year).slice(0, CANDIDATE_MAX) : [];
+  const seated = !!m && !m.interim;
   const act = (r: { ok: boolean; message: string }) => {
     setMsg({ text: r.message, error: !r.ok });
     setConfirmFire(false);
     if (r.ok) { changed(); void autosave(); }
   };
-  const buyout = m ? Math.round(m.salary * Math.max(0, m.until - year) * MANAGER_BUYOUT) : 0;
+  const buyout = seated ? Math.round(m!.salary * (Math.max(0, m!.until - year) + (inSeason ? 0.5 : 0)) * MANAGER_BUYOUT) : 0;
 
   return (
     <>
@@ -60,10 +64,14 @@ export function ManagerPanel() {
               운영 경향은 이 감독이 시즌 내내 맡은 해의 팀 기록을 그 해 리그 평균과 견준 것입니다 (성격·능력 평가가 아닙니다). 팀 기록에는 선수 구성도 섞여 있어 경기에는 일부만 반영합니다:
               도루 시도 ×{t.steal.toFixed(2)}, 희생번트 ×{t.bunt.toFixed(2)}, 선발 투구 한계 ×{t.hook.toFixed(2)}. 경기 중 작전은 지금처럼 감독이 합니다.
             </p>
-            {off && (confirmFire
+            {m.interim && <p className="note small">수석코치가 시즌 끝까지 감독 대행을 맡고 있습니다. 오프시즌에 정식 감독을 고르세요 (고르지 않으면 개막 때 첫 후보).</p>}
+            {off && seated && (confirmFire
               ? <span className="inline"><button type="button" className="small-btn danger" onClick={() => act(session.fireManager())}>정말 해임 (위약금 {won(buyout)})</button><button type="button" className="small-btn" onClick={() => setConfirmFire(false)}>취소</button></span>
-              : <button type="button" className="small-btn" onClick={() => setConfirmFire(true)}>해임</button>)}
-            {!off && <p className="muted small">감독 교체는 오프시즌에 합니다. 해임하면 남은 계약 연봉의 {Math.round(MANAGER_BUYOUT * 100)}%를 위약금으로 냅니다.</p>}
+              : <button type="button" className="small-btn" onClick={() => setConfirmFire(true)}>해임만 하기</button>)}
+            {inSeason && seated && (confirmFire
+              ? <span className="inline"><button type="button" className="small-btn danger" onClick={() => act(session.changeManager(null))}>정말 경질 (위약금 {won(buyout)}), 수석코치 대행</button><button type="button" className="small-btn" onClick={() => setConfirmFire(false)}>취소</button></span>
+              : <button type="button" className="small-btn" onClick={() => setConfirmFire(true)}>경질하고 감독 대행 체제로</button>)}
+            {seated && <p className="muted small">{inSeason ? '시즌 중에 바꾸면' : '해임하면'} 남은 계약 연봉{inSeason ? '(이번 시즌 절반 포함)' : ''}의 {Math.round(MANAGER_BUYOUT * 100)}%를 위약금으로 냅니다: {won(buyout)}.</p>}
           </>
         ) : (
           <p className="note">감독 자리가 비어 있습니다. 아래 후보 가운데서 고르세요. 고르지 않으면 개막 때 첫 후보가 맡습니다.</p>
@@ -71,7 +79,7 @@ export function ManagerPanel() {
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
         {pool.length > 0 && (
           <>
-            <h3>감독 후보 <span className="muted small">{year + 1}~{year + MANAGER_YEARS} 시즌 계약</span></h3>
+            <h3>감독 후보 <span className="muted small">{off ? `${year + 1}~${year + MANAGER_YEARS}` : `${year}~${year + MANAGER_YEARS - 1}`} 시즌 계약{inSeason ? ', 오늘부터' : ''}</span></h3>
             <p className="muted small">실제 KBO 감독(대행 포함)을 맡았던 사람 가운데 지금 다른 구단에 없는 사람입니다. 경력이 긴 순서입니다.</p>
             <div className="scroll">
               <table>
@@ -83,7 +91,13 @@ export function ManagerPanel() {
                       <tr key={name}>
                         <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><Tendency info={i} /></td>
                         <td>{won(managerSalary(i))}</td>
-                        <td><button type="button" className="small-btn" onClick={() => act(session.hireManager(name))}>선임</button></td>
+                        <td>
+                          {inSeason
+                            ? <ConfirmButton label={seated ? '교체' : '선임'} confirmLabel={seated ? `정말 교체 (위약금 ${won(buyout)})` : '정말 선임'} className="small-btn" onConfirm={() => act(session.changeManager(name))} />
+                            : seated
+                              ? <ConfirmButton label="교체" confirmLabel={`정말 교체 (위약금 ${won(buyout)})`} className="small-btn" onConfirm={() => act(session.replaceManager(name))} />
+                              : <button type="button" className="small-btn" onClick={() => act(session.hireManager(name))}>선임</button>}
+                        </td>
                       </tr>
                     );
                   })}
