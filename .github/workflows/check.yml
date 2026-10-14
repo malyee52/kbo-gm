@@ -1,0 +1,29 @@
+# PR 검사: main으로 가는 PR마다 테스트와 빌드(타입 검사 포함)를 돌린다. 배포는 deploy.yml.
+name: check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # build = tsc --noEmit + vite build
+      - run: npm run build
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
