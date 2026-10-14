@@ -25,7 +25,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoac
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, wonText } from '../league/salary';
+import { dollarText, MIN_SALARY, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -59,7 +59,7 @@ import {
 } from '../league/finance';
 import { aiEnlistPicks, enlistCandidates, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
-  ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, offersFor, outcomeLabel,
+  ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
@@ -70,6 +70,7 @@ import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
+import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
@@ -2040,7 +2041,8 @@ export class GameSession {
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
-    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay);
+    // 판타지 설득의 호의 + 단장 평판 (league/reputation.ts)
+    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
     return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
       this.world.teams[aiTeam].org, sit, this.values);
   }
@@ -2526,13 +2528,23 @@ export class GameSession {
         : `재정 결산: ${fin.net >= 0 ? '흑자' : '적자'} ${money(Math.abs(fin.net))}, 자금 ${money(fin.cash)}.${fd ? ` 신뢰도 ${b2} → ${o.trust}.` : ''}`);
     }
     const prevLast = !!prevStandings && prevStandings[prevStandings.length - 1] === team;
-    for (const id of newAchievements(o, prevLast)) {
+    const got = newAchievements(o, prevLast);
+    for (const id of got) {
       o.achievements.push({ id, year: this.year, team });
       say(`업적 달성: ${ACHIEVEMENTS[id].label} (${ACHIEVEMENTS[id].note})`);
     }
-    if (o.trust < FIRE_BELOW) {
+    const fired = o.trust < FIRE_BELOW;
+    // 단장 평판 (league/reputation.ts)
+    const rec = this.season.teams[team];
+    const rep = updateReputation(L, {
+      year: this.year, winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
+      postseason: ps.seeds.includes(team), seriesWon: ps.series.filter((x) => x.winner === team).length, champion: outcome.champion,
+      goalMet: achieved, capOver, rescued: !!fin && fin.rescue > 0, achievements: got.length, fired,
+    });
+    say(`단장 평판 ${rep.before} → ${rep.after} (${rep.parts.join(', ')}).`);
+    if (fired) {
       o.firedYears.push(this.year);
-      o.offers = offersFor(standings, team);
+      o.offers = offersByRep(standings, team, repOf(L));
       say(`해고되었습니다. 신뢰도 ${o.trust}. 영입 제의: ${o.offers.map((t) => L.teams[t].name).join(', ')}. 구단 화면에서 고르세요.`);
     }
   }
@@ -3169,7 +3181,7 @@ export class GameSession {
     const view = Off.leagueView(this.league, this.store, this.params);
     const ys = Array.from({ length: ruleOf(this.league, 'extMaxYears') - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
     return Off.extensionCandidates(this.league, off).map((p) => ({
-      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) })),
+      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Math.max(MIN_SALARY, Math.round(Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) * repDemand(this.league))) })),
     }));
   }
 
