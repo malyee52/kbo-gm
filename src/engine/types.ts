@@ -96,6 +96,8 @@ export interface SimTeam {
   /** 의료·트레이닝 투자: 부상 확률 배율, 결장 기간 배율 (없으면 1, league/finance.ts) */
   injuryRate?: number;
   injuryDays?: number;
+  /** 홈 구장 특성 (league/stadium.ts parkFactor): 홈런 배율. 없으면 1 */
+  park?: { hr: number };
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */
