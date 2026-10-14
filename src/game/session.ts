@@ -68,6 +68,7 @@ import {
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves } from '../league/stadium';
+import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
@@ -1649,6 +1650,7 @@ export class GameSession {
       this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rank}위 (${t.w}승 ${t.l}패 ${t.t}무).`);
       this.openPostseason();
     } else {
+      if (day === this.allStarDay) this.allStarBreak(day);
       this.dailyArticles();
       this.aiTradeDay();
       this.aiMarket();
@@ -1931,6 +1933,40 @@ export class GameSession {
       this.valueCtx = ctx;
     }
     return this.valueCtx;
+  }
+
+  /** 올스타전 날 (일정 색인, 휴식일). 없으면 -1 (league/allstar.ts) */
+  get allStarDay(): number {
+    return allStarDay(this.season.schedule, this.world.year);
+  }
+
+  /** 올해 올스타전 기록 (아직이면 null) */
+  get allStarThisYear(): AllStarRecord | null {
+    return this.league.allStars?.find((r) => r.year === this.world.year) ?? null;
+  }
+
+  /** 올스타전 하루: 선발·경기·홈런 더비, 우리 선수 소식과 팬 만족도, 기사 */
+  private allStarBreak(day: number): void {
+    const year = this.world.year;
+    const rec = playAllStar(this.league, this.world, this.season, this.values, day);
+    if (!rec) return;
+    const nameOf = (id: string | null) => (id ? rec.roster.find((x) => x.id === id)?.name ?? this.world.players.find((p) => p.id === id)?.name ?? id : '-');
+    const ours = rec.roster.filter((x) => x.team === this.teamIdx);
+    const [d, n] = rec.game.score;
+    const result = d === n ? `${d}-${n} 무승부` : `${SIDE_NAMES[d > n ? 0 : 1]} ${Math.max(d, n)}-${Math.min(d, n)} 승리`;
+    const mvpOurs = rec.game.mvp !== null && ours.some((x) => x.id === rec.game.mvp);
+    const derbyOurs = rec.derby.winner !== null && ours.some((x) => x.id === rec.derby.winner);
+    this.addNews(day, 'season', `올스타전: ${result}, MVP ${nameOf(rec.game.mvp)}. 홈런 더비 우승 ${nameOf(rec.derby.winner)}.`
+      + (ours.length ? ` 우리 구단 ${ours.length}명 출전 (${ours.map((x) => x.name).join(', ')}).` : ' 우리 구단 출전 선수는 없습니다.'));
+    const fan = Math.min(ALLSTAR_FAN.max, ours.length * ALLSTAR_FAN.perPlayer + (mvpOurs ? ALLSTAR_FAN.mvp : 0) + (derbyOurs ? ALLSTAR_FAN.derby : 0));
+    if (fan > 0) addFanEvent(this.league, this.teamIdx, year, day, fan, mvpOurs ? '올스타전 MVP' : '올스타 선발');
+    const mvpTeam = rec.roster.find((x) => x.id === rec.game.mvp)?.team;
+    addArticle(this.league, {
+      year, day, kind: 'allstar', title: `올스타전 ${result}, MVP ${nameOf(rec.game.mvp)}`,
+      body: `${josa(SIDE_NAMES[0], '과', '와')} ${josa(SIDE_NAMES[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
+        + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다.`,
+      ...(mvpTeam !== undefined ? { franchise: this.world.teams[mvpTeam].franchise } : {}),
+    });
   }
 
   /** 트레이드 마감 월일 (리그 규정, league/rules.ts) */
