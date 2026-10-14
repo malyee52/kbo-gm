@@ -22,7 +22,13 @@ export interface Manager {
   until: number;
   /** 연봉 (만 원) */
   salary: number;
+  /** 시즌 중 경질 뒤 수석코치가 맡은 감독 대행 (그 시즌까지, 오프시즌에 정식 감독을 고른다) */
+  interim?: boolean;
 }
+
+/** 감독 대행 (이름 자료가 없는 수석코치). 운영 경향은 보통 */
+export const INTERIM_NAME = '감독 대행 (수석코치)';
+export const INTERIM_SALARY = 10_000;
 
 export interface ManagerChange {
   year: number;
@@ -167,13 +173,49 @@ export function fireManager(league: LeagueState, team: number, offYear: number):
   return { ok: true, message: `${cur.name} 감독을 해임했습니다.${buyout > 0 ? ` 위약금 ${(buyout / 10000).toFixed(1)}억 원.` : ''} 개막 전에 새 감독을 고르세요.` };
 }
 
-/** 우리 구단 감독 고용 (오프시즌, 다음 시즌부터). 자리가 차 있으면 먼저 해임해야 한다 */
+/** 우리 구단 감독 고용 (오프시즌, 다음 시즌부터). 자리가 차 있으면 먼저 해임해야 한다 (감독 대행은 빈자리로 본다) */
 export function hireManager(league: LeagueState, store: Pick<DataStore, 'managers'>, team: number, offYear: number, name: string): { ok: boolean; message: string } {
-  if (managerOf(league, team)) return { ok: false, message: '먼저 지금 감독을 해임해야 합니다.' };
+  if (managerOf(league, team) && !managerOf(league, team)!.interim) return { ok: false, message: '먼저 지금 감독을 해임해야 합니다.' };
   if (!candidates(league, store, offYear + 1).includes(name)) return { ok: false, message: '고용할 수 없는 후보입니다.' };
   league.managers![team] = makeManager(store, name, offYear + 1);
   record(league, { year: offYear + 1, team, from: null, to: name, reason: '선임' });
   return { ok: true, message: `${name} 감독 선임: ${offYear + 1}~${offYear + MANAGER_YEARS} 시즌, 연봉 ${(league.managers![team]!.salary / 10000).toFixed(1)}억 원.` };
+}
+
+/** 오프시즌 감독 교체를 한 번에: 해임(위약금) 뒤 선임. 선임할 수 없으면 아무것도 바꾸지 않는다 */
+export function replaceManager(league: LeagueState, store: Pick<DataStore, 'managers'>, team: number, offYear: number, name: string): { ok: boolean; message: string } {
+  if (!candidates(league, store, offYear + 1).includes(name)) return { ok: false, message: '고용할 수 없는 후보입니다.' };
+  const cur = managerOf(league, team);
+  const fired = cur && !cur.interim ? fireManager(league, team, offYear) : null;
+  if (cur?.interim) league.managers![team] = null;
+  const hired = hireManager(league, store, team, offYear, name);
+  return { ok: hired.ok, message: `${fired ? `${fired.message.replace(' 개막 전에 새 감독을 고르세요.', '')} ` : ''}${hired.message}` };
+}
+
+/**
+ * 시즌 중 감독 교체 (우리 구단, year = 지금 시즌). name이 있으면 그 후보를 바로 정식 감독으로(이번 시즌부터 MANAGER_YEARS년),
+ * null이면 수석코치가 시즌 끝까지 감독 대행. 전임 감독 위약금 = 연봉 × (남은 시즌 + 이번 시즌 절반) × MANAGER_BUYOUT, 이번 시즌 장부
+ */
+export function changeManagerInSeason(league: LeagueState, store: Pick<DataStore, 'managers'>, team: number, year: number, name: string | null): { ok: boolean; message: string } {
+  const cur = managerOf(league, team);
+  if (name === null && cur?.interim) return { ok: false, message: '이미 감독 대행 체제입니다.' };
+  if (name !== null && !candidates(league, store, year).includes(name)) return { ok: false, message: '데려올 수 없는 후보입니다.' };
+  let note = '';
+  if (cur && !cur.interim) {
+    const buyout = Math.round(cur.salary * (Math.max(0, cur.until - year) + 0.5) * MANAGER_BUYOUT);
+    if (buyout > 0) league.ledger.push({ year, from: team, to: -1, amount: buyout, note: `${cur.name} 감독 시즌 중 경질 위약금`, kind: 'coach' });
+    record(league, { year, team, from: cur.name, to: '', reason: '시즌 중 경질' });
+    note = `${cur.name} 감독 경질${buyout > 0 ? ` (위약금 ${(buyout / 10000).toFixed(1)}억 원)` : ''}. `;
+  }
+  league.managers ??= [];
+  if (name === null) {
+    league.managers[team] = { name: INTERIM_NAME, since: year, until: year, salary: INTERIM_SALARY, interim: true };
+    record(league, { year, team, from: null, to: INTERIM_NAME, reason: '감독 대행' });
+    return { ok: true, message: `${note}수석코치가 시즌 끝까지 감독 대행을 맡습니다. 정식 감독은 오프시즌에 고르세요.` };
+  }
+  league.managers[team] = makeManager(store, name, year);
+  record(league, { year, team, from: null, to: name, reason: '시즌 중 선임' });
+  return { ok: true, message: `${note}${name} 감독 선임: ${year}~${year + MANAGER_YEARS - 1} 시즌, 연봉 ${(league.managers[team]!.salary / 10000).toFixed(1)}억 원.` };
 }
 
 /**
@@ -196,7 +238,11 @@ export function openManagers(league: LeagueState, store: Pick<DataStore, 'manage
   // 1) 우리 구단
   if (userTeam >= 0) {
     const m = league.managers[userTeam];
-    if (m && m.until < year) {
+    // 감독 대행은 시즌이 끝나면 물러난다 (오프시즌에 고르지 않았으면 아래 3)에서 첫 후보)
+    if (m?.interim) {
+      league.managers[userTeam] = null;
+      record(league, { year, team: userTeam, from: m.name, to: '', reason: '대행 종료' });
+    } else if (m && m.until < year) {
       m.until = year + MANAGER_RENEW_YEARS - 1;
       out.push(`${league.teams[userTeam].name} ${m.name} 감독과 ${MANAGER_RENEW_YEARS}년 재계약`);
     }

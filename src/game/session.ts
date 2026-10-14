@@ -21,7 +21,7 @@ import { quoteLine, voice } from '../league/voices';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
-import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, ensureCoaches, hireCoach } from '../league/coaches';
+import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
@@ -72,7 +72,7 @@ import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } 
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
-import { ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, tacticsOf } from '../league/managers';
+import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
 
@@ -202,6 +202,7 @@ export type GameAction =
   /** 감독 해임·선임 (managers.ts) */
   | { year: number; type: 'mgr-fire' }
   | { year: number; type: 'mgr-hire'; name: string }
+  | { year: number; type: 'mgr-replace'; name: string }
   | { year: number; type: 'legend'; id: string }
   | { year: number; type: 'to-dev'; id: string }
   | { year: number; type: 'sign-dev'; id: string }
@@ -212,6 +213,8 @@ export type GameAction =
   | { year?: number; day: number; type: 'convert'; id: string }
   /** 시즌 중 방출(웨이버 공시)·시장 선수 영입 (league/market.ts) */
   | { year: number; day: number; type: 'release-in'; id: string }
+  | { year: number; day: number; type: 'mgr-change'; name: string | null }
+  | { year: number; day: number; type: 'hire-coach-in'; id: string }
   | { year: number; day: number; type: 'sign-in'; id: string }
   /** 판타지 모드: AI가 만든 글(기사·대화·사건). 재현 때는 AI를 다시 부르지 않고 이 기록을 그대로 넣는다 (docs/fantasy-mode.md) */
   | { year: number; day: number; type: 'ai'; entry: FantasyEntry }
@@ -745,6 +748,8 @@ export class GameSession {
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'release-in') this.applyRelease(a.id);
     else if (a.type === 'sign-in') this.applySign(a.id);
+    else if (a.type === 'mgr-change') this.applyManagerChange(a.name);
+    else if (a.type === 'hire-coach-in') this.applyHireCoachIn(a.id);
     else if (a.type === 'ai') this.applyFantasy(a.entry);
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
@@ -2427,6 +2432,7 @@ export class GameSession {
         break;
       case 'mgr-fire': res = fireManager(L, this.teamIdx, this.year); break;
       case 'mgr-hire': res = hireManager(L, this.store, this.teamIdx, this.year, a.name); break;
+      case 'mgr-replace': res = replaceManager(L, this.store, this.teamIdx, this.year, a.name); break;
       case 'legend': res = this.applyLegend(a.id); break;
       case 'to-dev': res = Off.toDevByUser(L, off!, a.id); break;
       case 'sign-dev': res = Off.signDevByUser(L, off!, a.id); break;
@@ -3001,6 +3007,49 @@ export class GameSession {
   get campPlan(): CampPick { return this.league.campPlan?.year === this.year + 1 ? this.league.campPlan.pick : DEFAULT_CAMP; }
   fireManager() { return this.dispatchOff({ year: this.year, type: 'mgr-fire' }); }
   hireManager(name: string) { return this.dispatchOff({ year: this.year, type: 'mgr-hire', name }); }
+  /** 오프시즌: 해임과 선임을 한 번에 */
+  replaceManager(name: string) { return this.dispatchOff({ year: this.year, type: 'mgr-replace', name }); }
+
+  /** 시즌 중 감독 교체 (name null = 감독 대행). 정규시즌 중에만 */
+  changeManager(name: string | null): { ok: boolean; message: string } {
+    if (this.phase !== 'season' || this.season.done) return { ok: false, message: '시즌 중 감독 교체는 정규시즌 동안만 할 수 있습니다. 오프시즌에는 구단 → 감독·코치에서 바꿉니다.' };
+    const r = this.applyManagerChange(name);
+    if (r.ok) this.actions.push({ year: this.year, day: this.day, type: 'mgr-change', name });
+    return r;
+  }
+
+  private applyManagerChange(name: string | null): { ok: boolean; message: string } {
+    const r = changeManagerInSeason(this.league, this.store, this.teamIdx, this.world.year, name);
+    if (r.ok) {
+      this.applyTactics();
+      this.addNews(this.season.day, 'season', r.message);
+    }
+    return r;
+  }
+
+  /** 지금 고용할 수 있는 코치 (시즌 중 시장 / 오프시즌 시장) */
+  coachCandidates(): Coach[] {
+    if (this.phase === 'season') return this.season.done ? [] : coachMarketInSeason(this.league, this.world.year);
+    return this.offseason?.coachMarket ?? [];
+  }
+
+  /** 시즌 중 코치 고용 (같은 역할 코치는 위약금을 내고 바꾼다) */
+  hireCoachInSeason(id: string): { ok: boolean; message: string } {
+    if (this.phase !== 'season' || this.season.done) return { ok: false, message: '시즌 중 코치 고용은 정규시즌 동안만 할 수 있습니다.' };
+    const r = this.applyHireCoachIn(id);
+    if (r.ok) this.actions.push({ year: this.year, day: this.day, type: 'hire-coach-in', id });
+    return r;
+  }
+
+  private applyHireCoachIn(id: string): { ok: boolean; message: string } {
+    const year = this.world.year;
+    const c = coachMarketInSeason(this.league, year).find((x) => x.id === id);
+    if (!c) return { ok: false, message: '고용할 수 없는 코치입니다.' };
+    const buyout = hireCoach(this.league, this.teamIdx, c, year);
+    const label = `${COACH_ROLE_LABEL[c.role]} (${c.level}등급·${COACH_STYLE_LABEL[c.style]})`;
+    this.addNews(this.season.day, 'season', `${label} 고용${buyout ? `, 전임 코치 위약금 ${(buyout / 10000).toFixed(1)}억 원` : ''}.`);
+    return { ok: true, message: `${label}를 고용했습니다. 오늘부터 경기력에 반영됩니다.` };
+  }
   /**
    * 수비 능력치를 직접 고친다 (2026-10-13 사용자 선택 "공개 수상·평가로 보정 + 직접 고치기"). 수비 기록 자료가 없어 추정값이라,
    * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다

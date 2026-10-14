@@ -112,6 +112,18 @@ export function coachMarket(league: Pick<LeagueState, 'seed'>, year: number): Co
   return out;
 }
 
+/**
+ * 시즌 중 코치 시장 (2026-10-14 사용자 "코치를 데려올 방법이 없어"): 오프시즌 시장과 따로 만든 역할마다 MARKET_PER_ROLE명 가운데
+ * 지금 어느 구단에도 없는 코치. 계약은 이번 시즌부터
+ */
+export function coachMarketInSeason(league: Pick<LeagueState, 'seed' | 'coaches'>, year: number): Coach[] {
+  const rng = new Rng(`${league.seed}/coach-market-in/${year}`);
+  const employed = new Set((league.coaches ?? []).flat().map((c) => c.id));
+  const out: Coach[] = [];
+  for (const role of COACH_ROLES) for (let i = 0; i < MARKET_PER_ROLE; i++) out.push({ ...makeCoach(rng, role, year - 1, i), id: `coach-in-${year}-${role}-${i}` });
+  return out.filter((c) => !employed.has(c.id));
+}
+
 /** 계약이 끝난 코치를 내보낸다 (오프시즌 시작, year = 막 끝난 시즌) */
 export function expireCoaches(league: LeagueState, year: number): void {
   if (!league.coaches) return;

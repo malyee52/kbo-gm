@@ -16,7 +16,8 @@ export function CoachPanel() {
   const me = session.teamIdx;
   const edge = coachEdge(L, me);
   const off = session.phase === 'offseason' ? session.offseason : null;
-  const market = off?.coachMarket ?? [];
+  const market = session.coachCandidates();
+  const inSeason = session.phase === 'season';
   const year = off ? off.year : session.year;
 
   const effect = (c: Coach) => {
@@ -32,7 +33,7 @@ export function CoachPanel() {
       <h2>코치진 <span className="muted small">연봉 합 {won(coachPayroll(L, me))} / 년</span></h2>
       <p className="muted small">
         코치는 실명 자료가 없어 역할·등급·성향으로만 나옵니다. 3등급이 리그 평균이고, 시즌 중 경기력(타석마다 유리한 정도, %p)과 결산 때 선수 성장에 영향을 줍니다.
-        지금: 타자 {pct(edge.bat)}, 투수 {pct(edge.pit)}. 계약이 끝나면 오프시즌에 후보 가운데서 새로 고용합니다 (빈자리는 개막 때 가장 싼 후보로 채웁니다).
+        지금: 타자 {pct(edge.bat)}, 투수 {pct(edge.pit)}. 아래 후보 가운데서 시즌 중에도 오프시즌에도 데려올 수 있습니다 (빈자리는 개막 때 가장 싼 후보로 채웁니다).
       </p>
       <table>
         <thead><tr><th className="l">역할</th><th>등급</th><th>성향</th><th className="l">경력</th><th>연봉</th><th>계약</th><th className="l">효과</th></tr></thead>
@@ -54,9 +55,9 @@ export function CoachPanel() {
         </tbody>
       </table>
       {msg && <p className="note small" role="status">{msg}</p>}
-      {off && market.length > 0 && (
+      {market.length > 0 && (
         <>
-          <h3>코치 후보 <span className="muted small">{year + 1} 시즌부터</span></h3>
+          <h3>코치 후보 <span className="muted small">{inSeason ? `${year} 시즌 오늘부터` : `${year + 1} 시즌부터`}</span></h3>
           <p className="muted small">같은 역할 코치가 있으면 남은 계약 연봉의 {Math.round(COACH_BUYOUT * 100)}%를 위약금으로 내고 바꿉니다.</p>
           <div className="scroll">
             <table>
@@ -71,7 +72,7 @@ export function CoachPanel() {
                       <td className="l small">{c.career}</td><td>{won(c.salary)}</td><td>{c.until}년까지</td>
                       <td>
                         <button type="button" className="small-btn" title={buyout ? `위약금 ${won(buyout)}` : undefined}
-                          onClick={() => { const r = session.hireCoach(c.id); setMsg(r.message); if (r.ok) { changed(); void autosave(); } }}>
+                          onClick={() => { const r = inSeason ? session.hireCoachInSeason(c.id) : session.hireCoach(c.id); setMsg(r.message); if (r.ok) { changed(); void autosave(); } }}>
                           {cur ? '교체' : '고용'}
                         </button>
                       </td>
