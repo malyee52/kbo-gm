@@ -43,7 +43,7 @@ export interface SeedResult {
   cashMin: number; cashMax: number;
   // 오프시즌
   faEntries: number; faMoved: number; faStayed: number; faLeft: number;
-  enlistByTeam: number[]; servingAfter: number;
+  enlistByTeam: number[]; enlistKinds?: { unit: number; active: number; reserve: number }; servingAfter: number;
   retired: number; retiredReal: number;
   growth: { n: number; meanDelta: number; up5: number; down5: number; byAge: Record<string, number> };
   capOver: number; capShare: { min: number; max: number; mean: number };
@@ -187,6 +187,9 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
   const growth = off.growth ?? [];
   const enlistByTeam = w.teams.map(() => 0);
   for (const gr of growth) if (gr.tags?.includes('입대') && gr.team >= 0) enlistByTeam[gr.team]++;
+  // 복무 형태 (2026-10-21 상무 정원·현역·보충역)
+  const enlistKinds = { unit: 0, active: 0, reserve: 0 };
+  for (const p of L.players) if (p.military?.enlisted === off.year && (p.military.state === 'serving' || p.military.state === 'homeOnly')) enlistKinds[p.military.kind ?? 'unit']++;
   const ages: Record<string, number[]> = {};
   for (const gr of growth) {
     if (gr.tags?.includes('입대')) continue;
@@ -250,7 +253,7 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
     cashMin: Math.min(...cash), cashMax: Math.max(...cash),
     faEntries: fa.length, faMoved: fa.filter((e) => e.status === 'signed' && e.team !== e.from).length,
     faStayed: fa.filter((e) => e.status === 'signed' && e.team === e.from).length, faLeft: fa.filter((e) => e.status !== 'signed').length,
-    enlistByTeam, servingAfter: L2.players.filter(isServing).length - 0 * servingPre.size,
+    enlistByTeam, enlistKinds, servingAfter: L2.players.filter(isServing).length - 0 * servingPre.size,
     retired: retired.length, retiredReal: retired.filter((r) => r.real).length,
     growth: {
       n: deltas.length, meanDelta: deltas.reduce((a, b) => a + b, 0) / (deltas.length || 1),
@@ -391,7 +394,8 @@ export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnT
   out.push('', '### 첫 오프시즌\n', '| 지표 | 값 |', '|---|---|');
   const r3: [string, (r: SeedResult) => number][] = [
     ['FA 신청', (r) => r.faEntries], ['FA 이적', (r) => r.faMoved], ['FA 잔류', (r) => r.faStayed], ['FA 미계약', (r) => r.faLeft], ['그중 요구 5억+', (r) => r.faLeftBig], ['그중 2차 드래프트·육성선수로', (r) => r.faRescued ?? 0], ['그중 시즌 중 자유계약으로', (r) => r.faFree ?? 0],
-    ['입대 (리그 합)', (r) => sumBy(r.enlistByTeam, (x) => x)], ['입대 최다 구단', (r) => Math.max(...r.enlistByTeam)], ['입대 최소 구단', (r) => Math.min(...r.enlistByTeam)], ['복무 중 (개막 직전)', (r) => r.servingAfter],
+    ['입대 (리그 합)', (r) => sumBy(r.enlistByTeam, (x) => x)], ['입대 최다 구단', (r) => Math.max(...r.enlistByTeam)], ['입대 최소 구단', (r) => Math.min(...r.enlistByTeam)],
+    ['입대: 군 야구단', (r) => r.enlistKinds?.unit ?? 0], ['입대: 현역', (r) => r.enlistKinds?.active ?? 0], ['입대: 보충역', (r) => r.enlistKinds?.reserve ?? 0], ['복무 중 (개막 직전)', (r) => r.servingAfter],
     ['은퇴', (r) => r.retired], ['은퇴 (실존)', (r) => r.retiredReal],
     ['성장 평균 (런)', (r) => r.growth.meanDelta], ['+5런 이상', (r) => r.growth.up5], ['-5런 이하', (r) => r.growth.down5],
     ['소속 인원 최소', (r) => r.rosterSizes.min], ['소속 인원 최대', (r) => r.rosterSizes.max],

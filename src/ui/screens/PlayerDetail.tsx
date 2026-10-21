@@ -1,4 +1,5 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
+import { serviceName } from '../../league/careers';
 import { lineTeam } from '../../engine';
 import { ReleaseButton } from './Market';
 import { postseasonLines, psFromRecord, psLineText } from '../../league/postseason';
@@ -281,7 +282,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
   );
 }
 
-const MILITARY_LABEL: Record<string, string> = { pending: '미필', serving: '복무 중', done: '마침', exempt: '면제' };
+const MILITARY_LABEL: Record<string, string> = { pending: '미필', serving: '복무 중', homeOnly: '방위병 복무 중 (홈경기만)', done: '마침', exempt: '면제' };
 
 /** 몸 상태와 병역: 이번 시즌 부상·이탈, 지난 시즌 부상 이력, 병역 */
 function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
@@ -300,6 +301,7 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
             <dt>병역</dt>
             <dd>
               {MILITARY_LABEL[lp.military?.state ?? 'done']}
+              {lp.military?.state === 'serving' && ` (${serviceName(lp.military)}, ${lp.military.returnYear}년 복귀)`}
               {lp.military?.state === 'pending' && lp.real && year === session.league.startYear && <span className="muted small"> (병역 자료가 없어 나이·기록 공백으로 가늠한 값)</span>}
             </dd>
           </>

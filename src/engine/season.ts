@@ -430,6 +430,14 @@ export class Season {
         }
       }
     }
+    // 방위병이 있는 구단은 홈·원정이 바뀌는 날 엔트리를 다시 짠다 (없는 구단은 away 값만 바뀌고 결과는 같다)
+    for (const g of games) {
+      for (const [t, away] of [[g.home, false], [g.away, true]] as const) {
+        const ts = season[t];
+        if (ts.away !== away && ts.team.org.some((p) => p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day)) ts.dirty = true;
+        ts.away = away;
+      }
+    }
     for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
     for (const g of games) {
       for (const ts of [season[g.home], season[g.away]]) {
@@ -541,6 +549,8 @@ export class Season {
     const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
+    h.away = false;
+    a.away = true;
     refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const hl = todaysLineup(h, this.world.league, params, rng);

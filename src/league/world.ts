@@ -13,6 +13,7 @@ import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkFactor } from './stadium';
+import { homeOnlyUntil } from './careers';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
@@ -126,6 +127,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       ...(lp.dev ? { dev: true } : {}),
       ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
+      ...(homeOnlyUntil(lp, year) ? { homeOnlyUntil: homeOnlyUntil(lp, year)! } : {}),
       // 이도류 (league/twoway.ts): 반대쪽 실제 능력치
       ...(lp.twoWay && (lp.alt?.bat || lp.alt?.pit) ? { alt: { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) } } : {}),
       ...(lp.birthYearEstimated ? { ageEstimated: true } : {}),

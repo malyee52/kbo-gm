@@ -79,6 +79,8 @@ export interface SimPlayer {
   reserve?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
+  /** 방위병 (league/careers.ts, 1982~1994): 이 날(개막 뒤 일수) 전까지는 홈경기에만 나온다 */
+  homeOnlyUntil?: number;
   /** 이도류로 쓰는 선수의 반대쪽 능력 (투수의 타격 bat, 타자의 투구 pit). 있으면 refreshActive가 반대쪽 자리 후보에도 넣는다 */
   alt?: { bat?: BatSkill; pit?: PitSkill };
   /** 나이가 추정값 (생년 자료 없음, M8) */

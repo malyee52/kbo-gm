@@ -72,6 +72,8 @@ export interface TeamSeason {
   restDays?: number;
   /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
   tactics?: { steal: number; bunt: number; hook: number };
+  /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
+  away?: boolean;
 }
 
 /**
@@ -302,7 +304,9 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const manual = ts.manual ?? null;
   const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump));
+  // 방위병(1982~1994)은 원정 경기에 못 나간다 (league/careers.ts)
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump))
+    && !(ts.away && p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day);
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
   if (manual) {
@@ -425,6 +429,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   ts.dirty = false;
   let next = Number.MAX_SAFE_INTEGER;
   for (const p of ts.team.org) if (st.absentUntil[p.idx] > day && st.absentUntil[p.idx] < next) next = st.absentUntil[p.idx];
+  for (const p of ts.team.org) if (p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day && p.homeOnlyUntil < next) next = p.homeOnlyUntil;
   if (rotating) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
   // 이도류 선수가 있으면 날마다 다시 짠다 (등판 다음 날 타석 휴식)
   if (ts.team.org.some((p) => p.alt)) next = Math.min(next, day + 1);

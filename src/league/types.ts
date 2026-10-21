@@ -131,6 +131,8 @@ export type MilitaryState =
   | 'pending'
   /** 복무 중 (월드에서 빠진다) */
   | 'serving'
+  /** 방위병 복무 중 (1994년 입대까지, careers.ts): 리그에 남아 홈경기에만 나온다 */
+  | 'homeOnly'
   /** 마침 (또는 시작 때 마친 것으로 본 선수) */
   | 'done'
   /** 면제 (아시안게임 금메달 등) */
@@ -142,9 +144,13 @@ export interface Military {
   enlisted?: number;
   /** 복무 중일 때: 복귀하는 시즌 */
   returnYear?: number;
+  /** 복귀하는 시즌의 개막 뒤 복귀 일수 (0 = 개막 전). 없으면 MILITARY_RETURN_DAY (시작 자료의 복무, 2026-10-21 전 저장) */
+  returnDay?: number;
+  /** 복무 형태 (careers.ts ServiceKind): unit = 군 야구단(상무·경찰), active = 현역, reserve = 보충역. 없으면 unit (예전 저장·시작 자료) */
+  kind?: 'unit' | 'active' | 'reserve';
   /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), estimate = 나이·1군 기록 공백으로 짐작 */
   basis?: 'record' | 'estimate';
-  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달') */
+  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달'). 군 야구단 복무 중이면 '상무'·'경찰' */
   note?: string;
 }
 

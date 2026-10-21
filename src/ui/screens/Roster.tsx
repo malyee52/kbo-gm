@@ -1,5 +1,6 @@
 // 선수단: 1군·2군 명단과 엔트리 이동. 라인업·로테이션은 AI 감독이 1군 안에서 정한다.
 // 2026-10-12 개편: 1군/2군을 탭으로 나눠 한 번에 한 표만, 줄을 누르면 오른쪽에 선수 요약(좁은 화면은 바로 상세 창).
+import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar } from './PlayerDetail';
 import { seasonWar } from '../../league/awards';
@@ -458,7 +459,7 @@ function ServingList() {
   if (!list.length) return null;
   return (
     <p className="note small">
-      군 복무 중 {list.length}명 (정원 제외): {list.map((p) => `${p.name}(${p.isPitcher ? '투수' : posName(p.pos)}, ${p.military?.returnYear}년 시즌 중 복귀)`).join(', ')}
+      군 복무 중 {list.length}명 (정원 제외): {list.map((p) => `${p.name}(${p.isPitcher ? '투수' : posName(p.pos)}, ${serviceName(p.military)}, ${p.military?.returnYear}년 ${p.military?.returnDay === 0 ? '개막 전' : '시즌 중'} 복귀)`).join(', ')}
     </p>
   );
 }

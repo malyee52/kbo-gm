@@ -57,7 +57,7 @@ import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
-import { aiEnlistPicks, enlistCandidates, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
+import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
@@ -181,8 +181,9 @@ export type GameAction =
   | { year: number; day: number; type: 'event'; choice: number }
   /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인 */
   | { year: number; day: number; type: 'command'; choices: CommandChoice[] }
-  /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장) */
-  | { year: number; type: 'begin-off'; enlist?: string[] }
+  /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장).
+   *  apply: 그중 군 야구단(상무·경찰) 지원 명단. 없으면 지원할 수 있는 선수 모두 (2026-10-21 전 기록) */
+  | { year: number; type: 'begin-off'; enlist?: string[]; apply?: string[] }
   | { year: number; type: 'fa-offer'; id: string; salary: number; years: number }
   | { year: number; type: 'fa-withdraw'; id: string }
   | { year: number; type: 'foreign-keep'; id: string; keep: boolean }
@@ -297,6 +298,8 @@ export interface GameSaveV2 {
   offseason?: Off.OffseasonState;
   /** 시즌이 끝난 뒤 고른 우리 구단 입대 명단 (결산 전까지만. 없으면 추천대로) */
   enlistChoice?: string[];
+  /** 그중 군 야구단 지원 명단 (결산 전까지만. 없으면 지원할 수 있는 선수 모두) */
+  applyChoice?: string[];
   news: NewsItem[];
   actions: GameAction[];
 }
@@ -377,6 +380,8 @@ export class GameSession {
   trades: TradeRecord[] = [];
   /** 시즌이 끝난 뒤 플레이어가 고른 입대 명단 (결산 때 쓴다). null이면 추천대로 */
   enlistChoice: string[] | null = null;
+  /** 그중 군 야구단(상무·경찰) 지원 명단. null이면 지원할 수 있는 선수 모두 */
+  applyChoice: string[] | null = null;
   private lastCallUps = new Set<number>();
   /** 기사 판정용 기준값 (메모리에만, 불러오기·재현 때 같은 규칙으로 다시 만든다) */
   private articleState: ArticleState | null = null;
@@ -667,6 +672,7 @@ export class GameSession {
     g.news.push(...save.news);
     g.actions.push(...save.actions);
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
+    g.applyChoice = save.phase === 'season' && save.applyChoice ? [...save.applyChoice] : null;
     g.ensureOwner();
     ensureFinance(g.league);
     ensureCoaches(g.league);
@@ -2201,7 +2207,8 @@ export class GameSession {
   /** 시즌이 끝났으면 결산하고 오프시즌을 연다 */
   beginOffseason(): void {
     if (this.phase !== 'season' || !this.done) throw new Error('정규시즌이 끝나야 오프시즌을 열 수 있습니다');
-    this.dispatchOff({ year: this.year, type: 'begin-off', enlist: this.enlistOptions().chosen });
+    const { chosen, apply } = this.enlistOptions();
+    this.dispatchOff({ year: this.year, type: 'begin-off', enlist: chosen, apply });
   }
 
   // ---- 입대 선택 (시즌이 끝난 뒤, 결산 때 입대)
@@ -2210,21 +2217,33 @@ export class GameSession {
    * 우리 구단 입대 후보와 추천·지금 고른 명단. 기여는 지금 능력 기준 (결산의 성장 판정 전).
    * 시즌 중 트레이드로 바뀐 소속은 월드에서 읽는다 (리그 상태는 결산 때 반영된다).
    */
-  enlistOptions(): { cands: EnlistCandidate[]; recommended: string[]; chosen: string[] } {
+  enlistOptions(): { cands: EnlistCandidate[]; recommended: string[]; chosen: string[]; apply: string[] } {
     const L = this.league;
     const teamOf = new Map(this.world.players.map((p) => [p.id, p.teamIdx]));
     const now = { ...L, players: L.players.map((p) => (teamOf.has(p.id) ? { ...p, team: teamOf.get(p.id)! } : p)) };
     const ctx = this.values;
     const cands = enlistCandidates(now, this.teamIdx, this.year, (p) => runsNow(p, ctx, this.year));
     const recommended = aiEnlistPicks(L, this.year, cands);
-    return { cands, recommended, chosen: this.enlistChoice ? normalizeEnlist(cands, this.enlistChoice) : recommended };
+    const chosen = this.enlistChoice ? normalizeEnlist(cands, this.enlistChoice) : recommended;
+    return { cands, recommended, chosen, apply: normalizeApply(cands, chosen, this.applyChoice) };
   }
 
-  /** 입대 명단을 고른다 (null = 추천대로). 강제 입대는 늘 포함되고, 그 밖에는 상한까지만 남는다 */
+  /** 입대 명단을 고른다 (null = 추천대로). 강제 입대는 늘 포함된다 */
   setEnlist(ids: string[] | null): string[] {
     if (this.phase !== 'season' || !this.done) throw new Error('입대 선택은 정규시즌이 끝난 뒤 결산 전에 합니다');
     this.enlistChoice = ids === null ? null : normalizeEnlist(this.enlistOptions().cands, ids);
     return this.enlistOptions().chosen;
+  }
+
+  /**
+   * 입대 명단 중 군 야구단(상무·경찰)에 지원할 선수를 고른다 (null = 지원할 수 있는 선수 모두). 떨어지면 현역으로 입대한다.
+   * 입대 명단에서 빠진 선수는 지원 명단에서도 빠진다
+   */
+  setApply(ids: string[] | null): string[] {
+    if (this.phase !== 'season' || !this.done) throw new Error('입대 선택은 정규시즌이 끝난 뒤 결산 전에 합니다');
+    const { cands, chosen } = this.enlistOptions();
+    this.applyChoice = ids === null ? null : normalizeApply(cands, chosen, ids);
+    return this.enlistOptions().apply;
   }
 
   /** 오프시즌 조작을 적용하고 기록한다. 결과 메시지가 있으면 돌려준다 */
@@ -2251,8 +2270,9 @@ export class GameSession {
         this.finishedLeague = clone(L);
         const prevStandings = L.lastSeason?.standings ?? null;
         settleMarketContracts(L, this.year);
-        this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist);
+        this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist, a.apply);
         this.enlistChoice = null;
+        this.applyChoice = null;
         L.lastSeason!.postseason = ps;
         // 가을야구 개인 기록: 선수의 이번 시즌 줄에 붙인다 (postseason.ts, 2026-10-12)
         {
@@ -2365,7 +2385,7 @@ export class GameSession {
             p.contract = { ...p.contract, kind: 'foreign', salary: Math.max(300_000, Math.round(p.contract.salary / WON_PER_USD)) };
             delete p.military;
           }
-          if (p.military?.state === 'serving' || (p.foreign && p.startAbsentReason === 'military')) {
+          if (p.military?.state === 'serving' || p.military?.state === 'homeOnly' || (p.foreign && p.startAbsentReason === 'military')) {
             if (p.military) p.military = { state: 'done', basis: 'estimate', note: '자유 모드 영입 (병역 해당 없음)' };
             if (p.startAbsentReason === 'military') { delete p.startAbsent; delete p.startAbsentReason; }
             twoWayNews.push(`${p.name} 병역 정정 (리그 밖에서 데려온 선수라 해당 없음)`);
@@ -3305,7 +3325,8 @@ export class GameSession {
     if (this.phase === 'offseason') {
       return { ...base, phase: 'offseason', league: clone(this.league), finishedLeague: clone(this.finishedLeague!), offseason: clone(this.offseason!) };
     }
-    return { ...base, phase: 'season', league: clone(this.league), ...(this.enlistChoice ? { enlistChoice: [...this.enlistChoice] } : {}) };
+    return { ...base, phase: 'season', league: clone(this.league), ...(this.enlistChoice ? { enlistChoice: [...this.enlistChoice] } : {}),
+      ...(this.applyChoice ? { applyChoice: [...this.applyChoice] } : {}) };
   }
 }
 
