@@ -18,7 +18,7 @@ import { homeOnlyUntil } from './careers';
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -123,6 +123,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       pit,
       lastSaves: lp.lastSaves,
       ...(lp.penTrust ? { penTrust: lp.penTrust } : {}),
+      // 예전 저장의 실존 투수는 underhand가 없어 선수 마스터로 채운다
+      ...(lp.underhand || (lp.isPitcher && store.players?.get(lp.id)?.underhand) ? { underhand: true } : {}),
       value: lp.isPitcher ? pitValue(pit!, lg) : batValue(bat!, lg),
       debutEstimate: lp.estimated,
       real: lp.real,
