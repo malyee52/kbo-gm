@@ -10,6 +10,7 @@
   data-src/hardhit_derived/clutch_bat.csv    타자 클러치·득점권 (2015~, 타자 clutch): WPA, WPA/LI, CLUTCH, pLI, 득점권 타율, SD/MD
   data-src/hardhit_derived/clutch_pit.csv    투수 상황 기록 (1982~, 투수 situation): WPA, RE24, SD/MD, gmLI, pLI, 홀드, 세이브, 블론
   data-src/hardhit_derived/park.csv          구단(계보)·연도별 파크팩터 (2015~, 타자 saber 선수 행의 타석 가중 평균)
+  data-src/hardhit_derived/war.csv           선수-시즌 WAR (타자 saber 2015~의 o-WAR, 투수 saber의 fWAR·rWAR. 투수 WAR은 2015~·약 30이닝 이상만 있다). tools/hardhit_war_check.ts가 쓴다
   reports/hardhit-unmatched.md               연결률과 못 맞춘 행
 
 원본 표를 그대로 옮기지 않고, 게임 선수 ID에 연결한 필요한 값만 남긴다.
@@ -230,6 +231,31 @@ def park(M, log):
     write_csv('park.csv', ['연도', '계보', '파크팩터', '타석'], out)
 
 
+def war(M, log, names, fill):
+    """타자 saber (2015~)·투수 saber (WAR 값은 2015~) → 연도, 선수ID, 구분, 보직, 타석·아웃, WAR, rWAR
+
+    타자 WAR은 하드힛의 o-WAR(= WAR_타격주루 + WAR_출장)이다. 수비와 포지션 보정이 없는 공격 WAR이라
+    소수 둘째 자리까지 있는 두 열을 더해 쓴다. 투수 WAR은 fWAR, rWAR은 따로 둔다. 투수 saber는 1982년부터 있지만 WAR 열은 2015년부터,
+    그해 약 30이닝 이상 던진 투수만 값이 있어 나머지 행은 뺀다.
+    투수 saber는 이름이 가려져 있어 situation과 같은 맞대기(named_pitchers)를 쓴다.
+    타자 saber 연결 결과는 park()에서 이미 세므로 여기서는 따로 세지 않는다."""
+    out = []
+    for y, _, p in files('batter', 'saber'):
+        if y not in M.seasons:
+            continue
+        for r in read_file(p)[1]:
+            pid, _why = M.match(y, r['이름'], r['팀'], num(r['나이']), 'bat', {'pa': num(r['타석'])})
+            w1, w2 = num(r['WAR_타격주루']), num(r['WAR_출장'])
+            if pid and w1 is not None:
+                out.append([y, pid, '타자', '', int(num(r['타석']) or 0), round(w1 + (w2 or 0), 2), ''])
+    for y, hand, pid, r in named_pitchers(M, log, 'saber', names, fill):
+        if num(r['fWAR']) is None:
+            continue
+        out.append([y, pid, '투수', r['보직'], outs_of(r['이닝']) or 0, cell(r['fWAR'], 2), cell(r['rWAR'], 2)])
+    out.sort(key=lambda r: (r[0], r[1], r[2]))
+    write_csv('war.csv', ['연도', '선수ID', '구분', '보직', '타석·아웃', 'WAR', 'rWAR'], out)
+
+
 def main():
     if not RAW.exists():
         raise SystemExit(f'원본 폴더가 없다: {RAW} (하드힛 CSV는 사용자가 직접 받아 넣는다)')
@@ -243,6 +269,7 @@ def main():
     clutch_bat(M, log)
     clutch_pit(M, log, names, fill)
     park(M, log)
+    war(M, log, names, fill)
     extra += ['## 이름이 가려진 투수 표 (saber·situation)', '',
               '같은 연도·같은 손의 kbb(와 classic) 파일과 (나이, 보직, 경기, 이닝)으로 맞대 이름과 팀을 채웠다. 둘 이상 맞으면 kbb와 공통인 열(SD, MD, gmLI, pLI, BABIP, K%, BB%)이 모두 같은 한 명으로 가르고, 그래도 둘 이상이면 짐작하지 않고 비운다.', '',
               '| 표 | 채움 | 그중 겹침을 공통 열로 가름 | 겹침(비움) | 못 맞춤 |', '|---|---:|---:|---:|---:|']
