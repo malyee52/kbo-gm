@@ -37,13 +37,27 @@ def read_file(path):
     return meta, data
 
 
+# 파일 이름의 연도와 속 메타의 시즌이 다른 파일 (다른 해 파일과 내용이 같다) → 건너뛴다
+SKIPPED = []
+
+
 def files(kind, table):
-    """종류(batter/pitcher)·표(classic/clutch/saber/...)의 원본 파일 → [(연도, 손 접미사 또는 None, 경로)]"""
+    """종류(batter/pitcher)·표(classic/clutch/saber/...)의 원본 파일 → [(연도, 손 접미사 또는 None, 경로)]
+
+    연도는 파일 속 메타('기준 시즌' 또는 '표시 시즌')를 믿는다. 파일 이름과 다르면 잘못 받은 파일이라 건너뛴다
+    (2026-10-22 확인: pitcher_kbb_2025_좌 = 2024 자료, batter_saber_2022 = 2020 자료로 각각 그 해 파일과 같다)."""
     out = []
     for p in sorted(RAW.glob(f'hardhit_{kind}_{table}_*.csv')):
         m = NAME_RE.match(p.name)
-        if m:
-            out.append((int(m.group(3)), m.group(4), p))
+        if not m:
+            continue
+        meta, _ = read_file(p)
+        season = meta.get('기준 시즌') or meta.get('표시 시즌')
+        if season and int(season) != int(m.group(3)):
+            if p.name not in [s for s, _ in SKIPPED]:
+                SKIPPED.append((p.name, int(season)))
+            continue
+        out.append((int(m.group(3)), m.group(4), p))
     return out
 
 
