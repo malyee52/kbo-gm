@@ -26,6 +26,9 @@
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
                                  이것만 다시 만들려면: build_data.py --managers-only
+  data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
+                                 원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
+                                 bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다 (값이 있으면 자료집 값을 두고 다른 건수만 센다)
 """
 import csv
 import json
@@ -43,6 +46,8 @@ FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
+HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
+HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
@@ -454,6 +459,58 @@ def build_military(profiles, out_dir):
         print(f'  병역_면제명단.csv 연결 못 함: {u}')
 
 
+def hardhit_csv(name):
+    path = HARDHIT / name
+    if not path.exists():
+        return []
+    with path.open(encoding='utf-8', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def fill_running(bat):
+    """하드힛 도루·도루실패·병살타로 자료집의 빈 값을 채운다. 값이 이미 있는데 다르면 자료집 값을 두고 센다.
+    → 보고서 줄 목록"""
+    hh = {(int(r['연도']), r['선수ID']): r for r in hardhit_csv('bat_running.csv')}
+    if not hh:
+        return []
+    cols = (('sb', '도루'), ('cs', '도루실패'), ('gdp', '병살타'))
+    idx = {f: BAT_FIELDS.index(f) for f, _ in cols}
+    filled, differ, same = defaultdict(int), defaultdict(int), defaultdict(int)
+    filled_y = defaultdict(lambda: defaultdict(int))
+    examples = defaultdict(list)
+    for y, rows_ in bat.items():
+        for row in rows_:
+            h = hh.get((y, row[0]))
+            if not h:
+                continue
+            for f, k in cols:
+                if h[k] == '':
+                    continue
+                v = int(h[k])
+                cur = row[idx[f]]
+                if cur is None:
+                    row[idx[f]] = v
+                    filled[f] += 1
+                    filled_y[y][f] += 1
+                elif cur != v:
+                    differ[f] += 1
+                    if len(examples[f]) < 10:
+                        examples[f].append(f'{y} {row[0]} 자료집 {cur} / 하드힛 {v}')
+                else:
+                    same[f] += 1
+    out = ['## 타자 도루·도루실패·병살타 (bat_running.csv)', '',
+           '빈 값은 하드힛 값으로 채우고, 값이 있으면 자료집 값을 둔다 (다른 건수만 센다).', '',
+           '| 항목 | 채움 | 같음 | 다름(자료집 값 유지) |', '|---|---:|---:|---:|']
+    out += [f'| {k} | {filled[f]} | {same[f]} | {differ[f]} |' for f, k in cols]
+    out += ['', '연도별 채움 (도루 / 도루실패 / 병살타):', '']
+    out += [f'- {y}: {d["sb"]} / {d["cs"]} / {d["gdp"]}' for y, d in sorted(filled_y.items())]
+    for f, k in cols:
+        if examples[f]:
+            out += ['', f'{k} 다른 예 (연도 선수ID):', ''] + [f'- {e}' for e in examples[f]]
+    print(f'하드힛 채움: 도루 {filled["sb"]}, 도루실패 {filled["cs"]}, 병살타 {filled["gdp"]} / 다름(자료집 유지) {dict(differ)}')
+    return out
+
+
 def profiles_of(wb):
     return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
 
@@ -553,6 +610,9 @@ def main():
         wpbk[r['시즌']] += (r['WP'] or 0) + (r['BK'] or 0)
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '역할(보조)' else r[c]) for c in PIT_COLS]
         pit[r['시즌']].append(row)
+
+    # ---- 하드힛 가공값으로 빈 기록 채우기
+    hardhit_report = fill_running(bat)
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -706,6 +766,9 @@ def main():
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    if hardhit_report:
+        head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
+        HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')
