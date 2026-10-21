@@ -7,6 +7,7 @@
 만드는 것:
   data-src/hardhit_derived/bat_running.csv   타자 도루·도루실패·병살타 (2003~, 타자 classic)
   data-src/hardhit_derived/pitch_hand.csv    투수 투구손·언더핸드 (1982~, 투수 classic 파일의 투구손 구분 _좌/_우/_좌언/_우언)
+  data-src/hardhit_derived/pit_classic.csv   투수 보직·경기·아웃·퀄리티 스타트·홀드·세이브·블론 (1982~, 투수 classic. 퀄스 2002~, 블론 2006~, 홀드 2000~에만 값이 있다)
   data-src/hardhit_derived/clutch_bat.csv    타자 클러치·득점권 (2015~, 타자 clutch): WPA, WPA/LI, CLUTCH, pLI, 득점권 타율, SD/MD
   data-src/hardhit_derived/clutch_pit.csv    투수 상황 기록 (1982~, 투수 situation): WPA, RE24, SD/MD, gmLI, pLI, 홀드, 세이브, 블론
   data-src/hardhit_derived/park.csv          구단(계보)·연도별 파크팩터 (2015~, 타자 saber 선수 행의 타석 가중 평균)
@@ -112,6 +113,7 @@ def pitcher_stats(r):
 def pitch_hand(M, log):
     """투수 classic (투구손별 파일) → 연도, 선수ID, 손, 언더"""
     out = []
+    usage = []
     for y, hand, p in files('pitcher', 'classic'):
         if y not in M.seasons or hand is None:
             continue
@@ -121,8 +123,12 @@ def pitch_hand(M, log):
             log.add('투수 classic', y, hand, r, pid, why)
             if pid:
                 out.append([y, pid, th, int(under)])
+                usage.append([y, pid, r['보직'], int(num(r['경기']) or 0), outs_of(r['이닝']) or 0,
+                              *[icell(r[k]) for k in ('퀄스', '홀드', '세', '블론')]])
     out.sort(key=lambda r: (r[0], r[1]))
     write_csv('pitch_hand.csv', ['연도', '선수ID', '손', '언더'], out)
+    usage.sort(key=lambda r: (r[0], r[1]))
+    write_csv('pit_classic.csv', ['연도', '선수ID', '보직', '경기', '아웃', '퀄스', '홀드', '세이브', '블론'], usage)
 
 
 def kbb_names(M):
@@ -175,6 +181,11 @@ def named_pitchers(M, log, table, names, fill):
             if pid:
                 out.append((y, hand, pid, r))
     return out
+
+
+def icell(v):
+    x = num(v)
+    return '' if x is None else int(round(x))
 
 
 def cell(v, digits=3):

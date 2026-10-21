@@ -164,6 +164,10 @@ export interface PitLine {
   er: number;
   /** 홀드 (2026-10-12 추가, 맨 뒤라 예전 저장의 배열에는 없다 → 0) */
   hld: number;
+  /** 퀄리티 스타트: 선발 6이닝 이상·3자책 이하 (2026-10-22 추가, 맨 뒤라 예전 저장에는 없다 → 0) */
+  qs: number;
+  /** 블론 세이브: 세이브 상황(1~3점 리드)에 나와 동점·역전을 허용 (2026-10-22 추가) */
+  bsv: number;
 }
 
 export interface TeamRecord {
@@ -188,7 +192,7 @@ export function lineTeam(p: Pick<SimPlayer, 'teamIdx' | 'formerTeam'>): number {
 }
 
 export function emptyPitLine(): PitLine {
-  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0 };
+  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0, qs: 0, bsv: 0 };
 }
 
 export function emptyTeamRecord(): TeamRecord {

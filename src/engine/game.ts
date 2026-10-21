@@ -164,6 +164,10 @@ interface PitcherInGame {
   isStarter: boolean;
   /** 등판 시점의 점수 차 (자기 팀 기준) */
   enteredLead: number;
+  /** 이 경기 자책점 (퀄리티 스타트 판정) */
+  er: number;
+  /** 이 등판에서 블론 세이브를 기록했나 */
+  blown: boolean;
 }
 
 interface Runner {
@@ -248,7 +252,7 @@ function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameC
   if (isStarter) line.gs++;
   // 선발 한계는 기록으로 추정한 체력보다 조금 길게 (체력 추정이 평균 쪽으로 당겨져 있어 실제 선발 타자 수 23.4명에 맞춤, 임시값)
   const base = isStarter ? skill.stamina * STARTER_LIMIT_SCALE * (ctx.startLimitScale ?? 1) : skill.reliefStint;
-  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead };
+  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead, er: 0, blown: false };
 }
 
 /** 직접 정한 롱릴리프가 이른 이닝에 나왔을 때 한계 타자 수 배율 (임시값) */
@@ -511,9 +515,16 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     runner.resp.line.r++;
     if (runner.earned && !halfUnearned && !rng.chance(ctx.env.unearnedRun)) {
       runner.resp.line.er++;
+      runner.resp.er++;
       totals.er++;
     }
     const after = before + 1;
+    // 블론 세이브: 세이브 상황(1~3점 리드)에 나온 구원 투수가 마운드에 있을 때 리드가 사라지면. 승리 투수가 될 수는 있다
+    const cur = fld.pitcher;
+    if (before === -1 && !cur.isStarter && !cur.blown && cur.enteredLead >= 1 && cur.enteredLead <= 3) {
+      cur.blown = true;
+      cur.line.bsv++;
+    }
     if (before <= 0 && after > 0) {
       rec.win = bat.pitcher;
       rec.loss = runner.resp;
@@ -857,7 +868,10 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   for (const side of [home, away]) {
     for (const pg of side.staff) {
       const i = pg.p.idx;
-      if (pg.isStarter) st.lastStartDay[i] = ctx.day;
+      if (pg.isStarter) {
+        st.lastStartDay[i] = ctx.day;
+        if (pg.outs >= 18 && pg.er <= 3) pg.line.qs++;
+      }
       st.fatigue[i] = currentFatigue(st, i, ctx.day) + pg.bf;
       st.streak[i] = st.fatigueDay[i] === ctx.day - 1 ? st.streak[i] + 1 : st.fatigueDay[i] === ctx.day ? Math.max(1, st.streak[i]) : 1;
       st.fatigueDay[i] = ctx.day;
@@ -889,11 +903,11 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     }
   }
   // 홀드 (2026-10-12): 3점 차 이내 리드에서 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
-  // 경기를 끝낸 투수와 승리 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
+  // 경기를 끝낸 투수, 승리 투수, 블론 세이브를 한 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
   for (const side of [home, away]) {
     const fin = side.staff[side.staff.length - 1];
     for (const pg of side.staff) {
-      if (pg.isStarter || pg === fin || pg.p.idx === win) continue;
+      if (pg.isStarter || pg === fin || pg.p.idx === win || pg.blown) continue;
       if (pg.enteredLead >= 1 && pg.enteredLead <= 3 && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
     }
   }
