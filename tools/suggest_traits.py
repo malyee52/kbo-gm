@@ -10,6 +10,10 @@
 - 레전드: 통산 12시즌 이상이고 누적 기록이 충분한 선수 (타자 4,000타석 또는 150홈런, 투수 1,000이닝 또는 100세이브 또는 150세이브+홀드 또는 900탈삼진)
   → 늦게 지는 꽃. 타점 700 이상 타자는 승부사, 100세이브 이상 투수는 위기 탈출, 1,000이닝 이상 선발은 에이스 체력.
 - 철인: 통산 10시즌 이상이고 시즌당 평균 출전이 많은 선수 (야수 110경기, 선발 140이닝, 구원 55경기).
+- 클러치 (2026-10-22, 하드힛 가공값 data-src/hardhit_derived/clutch_bat.csv·clutch_pit.csv, 파일이 없으면 건너뜀):
+  최근 5시즌(그 해 제외) 1,000타석 이상이고 CLUTCH 합 +2.0 이상인 타자 → 승부사.
+  최근 5시즌 구원(세이브+홀드 30 이상)으로 SD+MD 60 이상이고 SD 비율(SD/(SD+MD)) 0.72 이상인 투수 → 위기 탈출.
+  CLUTCH = 레버리지를 뺀 WPA와 실제 WPA의 차이 (팬그래프식), SD/MD = 승리 확률을 6%p 넘게 올린/내린 등판.
 - 한 선수에 최대 2개 (우선순위: 안방 사나이 → 승부사·위기 탈출·에이스 체력 → 늦게 지는 꽃 → 철인).
 - 가을 사나이, 좌완 킬러, 우완 킬러는 기록으로 가릴 수 없어 자동으로 주지 않는다. CSV를 직접 고쳐 넣는다.
 
@@ -36,6 +40,13 @@ OUT = Path(arg('out', ROOT / 'data-src' / '특수능력.csv'))
 
 # 기준값 (임시값)
 FRANCHISE_SEASONS = 8
+CLUTCH_SEASONS = 5
+CLUTCH_MIN_PA = 1000
+CLUTCH_SUM = 2.0
+SHUTDOWN_MIN = 60
+SHUTDOWN_RATE = 0.72
+SHUTDOWN_RELIEF = 30
+HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
 LEGEND_SEASONS = 12
 IRON_SEASONS = 10
 
@@ -47,6 +58,24 @@ def load(p):
 def rows(d, k):
     fields = d[k + 'Fields']
     return [dict(zip(fields, r)) for r in d[k]]
+
+
+def clutch_tables():
+    """하드힛 가공값 → (타자 id → {타석, CLUTCH}, 투수 id → {SD, MD, 세이브, 홀드}) 최근 CLUTCH_SEASONS시즌 합"""
+    def read(name):
+        path = HARDHIT / name
+        if not path.exists():
+            return []
+        with path.open(encoding='utf-8', newline='') as f:
+            return [r for r in csv.DictReader(f) if YEAR - CLUTCH_SEASONS <= int(r['연도']) < YEAR]
+    bat, pit = defaultdict(Counter), defaultdict(Counter)
+    for r in read('clutch_bat.csv'):
+        bat[r['선수ID']]['pa'] += int(r['타석'])
+        bat[r['선수ID']]['clutch'] += float(r['CLUTCH'] or 0)
+    for r in read('clutch_pit.csv'):
+        for k in ('SD', 'MD', '세이브', '홀드'):
+            pit[r['선수ID']][k] += float(r[k] or 0)
+    return bat, pit
 
 
 def main():
@@ -93,6 +122,7 @@ def main():
 
     # 특별 엔트리(은퇴 경기 등)로 새 게임에서 빠지는 선수는 뺀다
     special = set(meta.get('specialEntries', {}).get(str(YEAR), []))
+    clutch_b, clutch_p = clutch_tables()
     out = []
     for pid, team in team_of.items():
         p = players.get(pid)
@@ -111,6 +141,14 @@ def main():
         if fn >= FRANCHISE_SEASONS:
             traits.append('안방 사나이')
             why.append(f'{fr} {fn}시즌')
+
+        cb, cp = clutch_b.get(pid), clutch_p.get(pid)
+        if not is_pit and cb and cb['pa'] >= CLUTCH_MIN_PA and cb['clutch'] >= CLUTCH_SUM:
+            traits.append('승부사')
+            why.append(f'최근 {CLUTCH_SEASONS}시즌 CLUTCH {cb["clutch"]:+.1f} ({cb["pa"]}타석)')
+        if is_pit and cp and cp['세이브'] + cp['홀드'] >= SHUTDOWN_RELIEF and cp['SD'] + cp['MD'] >= SHUTDOWN_MIN                 and cp['SD'] / (cp['SD'] + cp['MD']) >= SHUTDOWN_RATE:
+            traits.append('위기 탈출')
+            why.append(f'최근 {CLUTCH_SEASONS}시즌 SD {cp["SD"]:.0f} / MD {cp["MD"]:.0f}')
 
         ip = q['outs'] / 3
         starter = is_pit and q['gs'] >= q['g'] * 0.5
