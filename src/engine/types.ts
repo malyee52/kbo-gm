@@ -57,6 +57,8 @@ export interface SimPlayer {
   pit: PitSkill | null;
   /** 직전 시즌 세이브 수 (마무리 지정용) */
   lastSaves: number;
+  /** 불펜 신뢰도 (ratings.ts penTrustOf): 지난 시즌 실제 쓰임으로 정한 시작 불펜 서열. 없으면 능력 순 (2026-10-22) */
+  penTrust?: number;
   /** 타자: 기대 타석 가치(클수록 좋음). 투수: 기대 실점 가치(작을수록 좋음) */
   value: number;
   /** 직전 기록이 없어 해당 시즌 기록으로 능력을 추정한 선수 */

@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import {
-  assignSlots, bestAssignment, computeGrades, DEFAULT_PARAMS, defenseAt, defenseGrade, LINEUP_SLOTS, makeDefense, moveRuns, Season, worldForYear,
+  assignSlots, bestAssignment, bullpenOrder, computeGrades, DEFAULT_PARAMS, defenseAt, defenseGrade, LINEUP_SLOTS, makeDefense, moveRuns, Season, worldForYear,
   type DepthPlan,
 } from '../src/engine';
 import { newPlayerStates, refreshActive, type TeamSeason } from '../src/engine/team';
@@ -149,7 +149,8 @@ describe('기용표 (주전 자리, 선발·중계·마무리)', () => {
   it('불펜 역할: 필승조·롱릴리프·패전조를 정하면 그대로 쓰이고, 처음 하나 정해도 기존 필승조는 남는다 (2026-10-12 사용자 요청)', () => {
     const g = lgGame('pen-roles');
     const ts = g.activeTeam();
-    const pen = ts.bullpen.filter((p) => p !== ts.closer).sort((a, b) => a.value - b.value);
+    // AI 서열: 개막에는 지난 시즌 실제 쓰임 순, 시즌이 지나며 능력 순 (2026-10-22)
+    const pen = bullpenOrder(ts.bullpen.filter((p) => p !== ts.closer), g.season.day, FAST.penBlendDays);
     const [su1, su2] = pen;
     const worst = pen[pen.length - 1];
     const long = pen.slice(2, -1).sort((a, b) => b.pit!.reliefStint - a.pit!.reliefStint)[0];

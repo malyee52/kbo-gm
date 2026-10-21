@@ -112,7 +112,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
-      service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, history: [], ...(ten ? { tenure0: ten } : {}),
+      service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), history: [], ...(ten ? { tenure0: ten } : {}),
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };
   };

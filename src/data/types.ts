@@ -129,6 +129,8 @@ export interface PitRow {
   so: number;
   r: number;
   er: number;
+  /** 등판 때 평균 레버리지 gmLI (하드힛, 2010~). 없으면 null·undefined (2026-10-22) */
+  gmli?: number | null;
 }
 
 export interface SeasonData {

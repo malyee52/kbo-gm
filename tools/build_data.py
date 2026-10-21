@@ -243,7 +243,8 @@ HAND = {'우': 'R', '좌': 'L', '양': 'S'}
 
 BAT_FIELDS = ['id', 'team', 'pos', 'g', 'pa', 'ab', 'r', 'h', 'd', 't', 'hr', 'rbi', 'sb', 'cs', 'bb', 'hbp', 'so', 'gdp', 'sf', 'sac']
 BAT_COLS = ['선수ID', '팀', '포지션(보조)', 'G', 'PA', 'AB', 'R', 'H', '2B', '3B', 'HR', 'RBI', 'SB', 'CS', 'BB', 'HBP', 'SO', 'GDP', 'SF', 'SAC']
-PIT_FIELDS = ['id', 'team', 'role', 'g', 'gs', 'w', 'l', 'sv', 'hld', 'outs', 'tbf', 'h', 'hr', 'bb', 'hbp', 'so', 'r', 'er']
+# gmli: 하드힛 투수 situation의 등판 때 평균 레버리지 (2010~, 없으면 null). 시작 불펜 서열에 쓴다 (2026-10-22)
+PIT_FIELDS = ['id', 'team', 'role', 'g', 'gs', 'w', 'l', 'sv', 'hld', 'outs', 'tbf', 'h', 'hr', 'bb', 'hbp', 'so', 'r', 'er', 'gmli']
 PIT_COLS = ['선수ID', '팀', '역할(보조)', 'G', 'GS(보조)', 'W', 'L', 'SV', 'HLD', '아웃카운트', 'TBF', 'H', 'HR', 'BB', 'HBP', 'SO', 'R', 'ER']
 
 
@@ -516,6 +517,28 @@ def fill_running(bat):
     return out
 
 
+def fill_gmli(pit):
+    """하드힛 투수 situation의 gmLI(등판 때 평균 레버리지, 2010~)를 시즌 투수 행의 gmli에 넣는다. 자료집에는 없는 값이다.
+    시즌 중 이적한 투수는 하드힛 값이 시즌 합계 하나라 그 해 모든 행에 같은 값을 넣는다. → 보고서 줄 목록"""
+    gi = PIT_FIELDS.index('gmli')
+    hh = {}
+    for r in hardhit_csv('clutch_pit.csv'):
+        if r['gmLI'] != '' and float(r['gmLI']) > 0:
+            hh[(int(r['연도']), r['선수ID'])] = round(float(r['gmLI']), 2)
+    if not hh:
+        return []
+    filled = defaultdict(int)
+    for y, rows_ in pit.items():
+        for row in rows_:
+            v = hh.get((y, row[0]))
+            if v is not None:
+                row[gi] = v
+                filled[y] += 1
+    print(f'하드힛 gmLI: {sum(filled.values())}행')
+    return ['## 투수 gmLI (clutch_pit.csv)', '', '등판 때 평균 레버리지. 자료집에 없는 값이라 넣기만 한다 (0인 행은 값 없음으로 본다).', '',
+            ', '.join(f'{y}: {c}' for y, c in sorted(filled.items())), '']
+
+
 def fill_hands(players):
     """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있는데 다르면 하드힛 값으로 바꾼다.
     → 보고서 줄 목록"""
@@ -690,11 +713,11 @@ def main():
     for r in rows(wb['투수시즌']):
         wpbk[r['시즌']] += (r['WP'] or 0) + (r['BK'] or 0)
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '역할(보조)' else r[c]) for c in PIT_COLS]
-        pit[r['시즌']].append(row)
+        pit[r['시즌']].append(row + [None] * (len(PIT_FIELDS) - len(PIT_COLS)))
 
     # ---- 하드힛 가공값으로 빈 기록 채우기
     parks, park_report = park_factors(teams)
-    hardhit_report = fill_running(bat) + hand_report + park_report
+    hardhit_report = fill_running(bat) + fill_gmli(pit) + hand_report + park_report
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -713,7 +736,7 @@ def main():
                     continue
                 if is_pit:
                     role = m.get('pos') if m.get('pos') in ('SP', 'RP', 'CL') else None
-                    pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 3))
+                    pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 4) + [None])
                 else:
                     pos = m.get('pos') if m.get('pos') not in ('SP', 'RP', 'CL', 'P') else None
                     bat[y].append([pid, team, pos] + [0] * (len(BAT_FIELDS) - 3))

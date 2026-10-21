@@ -121,6 +121,11 @@ export interface EngineParams {
   catcherStealPerRun: number;
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
+  /**
+   * 불펜 서열 섞는 속도 (2026-10-22): 시즌 개막에는 지난 시즌 실제 쓰임(SimPlayer.penTrust) 순서, 경기일이 이만큼 지나면 능력 순.
+   * 그 사이는 두 순위를 날짜 비율로 섞는다 (임시값)
+   */
+  penBlendDays: number;
 
   // ---- 환경 맞춤
   /** 시즌 시작 전에 리그 비율을 목표값에 맞추려고 돌리는 예비 시즌 수 */
@@ -226,6 +231,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
   starterRestDays: 5,
+  penBlendDays: 100,
 
   pilotSeasons: 3,
 
