@@ -29,6 +29,7 @@
   data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
                                  원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
                                  bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다 (값이 있으면 자료집 값을 두고 다른 건수만 센다)
+                                 pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
 """
 import csv
 import json
@@ -511,6 +512,37 @@ def fill_running(bat):
     return out
 
 
+def fill_hands(players):
+    """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있으면 다른 건수만 센다.
+    → 보고서 줄 목록"""
+    seen = defaultdict(lambda: defaultdict(int))
+    for r in hardhit_csv('pitch_hand.csv'):
+        seen[r['선수ID']][(r['손'], r['언더'] == '1')] += 1
+    if not seen:
+        return []
+    pmap = {p['id']: p for p in players}
+    filled, same, varies = 0, 0, 0
+    differ = []
+    for pid, cnt in seen.items():
+        p = pmap.get(pid)
+        if not p:
+            continue
+        varies += len(cnt) > 1
+        th, under = max(cnt.items(), key=lambda kv: kv[1])[0]
+        if p.get('throws') is None:
+            p['throws'] = th
+            if under:
+                p['underhand'] = True
+            filled += 1
+        elif p['throws'] != th or bool(p.get('underhand')) != under:
+            differ.append(f'{p["name"]}({pid}) 자료집 {p["throws"]}{" 언더" if p.get("underhand") else ""} / 하드힛 {th}{" 언더" if under else ""}')
+        else:
+            same += 1
+    print(f'하드힛 투구손: 채움 {filled}, 같음 {same}, 다름(자료집 유지) {len(differ)}, 해마다 갈림 {varies}')
+    return ['', '## 투수 투구손 (pitch_hand.csv)', '',
+            f'하드힛 투수 {len(seen)}명: 빈 투타 채움 {filled}명, 같음 {same}명, 다름 {len(differ)}명(자료집 값 유지), 해마다 손 구분이 갈린 선수 {varies}명.', ''] + [f'- {d}' for d in differ]
+
+
 def profiles_of(wb):
     return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
 
@@ -557,6 +589,8 @@ def main():
     for p in players:
         for k in [k for k, v in p.items() if v is None]:
             del p[k]
+
+    hand_report = fill_hands(players)
 
     # ---- 외국인 개막 명단 (CSV)
     foreign_opening = defaultdict(lambda: defaultdict(list))
@@ -612,7 +646,7 @@ def main():
         pit[r['시즌']].append(row)
 
     # ---- 하드힛 가공값으로 빈 기록 채우기
-    hardhit_report = fill_running(bat)
+    hardhit_report = fill_running(bat) + hand_report
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()

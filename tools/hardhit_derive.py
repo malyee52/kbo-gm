@@ -6,6 +6,7 @@
 읽는 것: data-src/hardhit/ (원본, 커밋하지 않는다), public/data/players.json·meta.json·seasons/ (선수 연결용)
 만드는 것:
   data-src/hardhit_derived/bat_running.csv   타자 도루·도루실패·병살타 (2003~, 타자 classic)
+  data-src/hardhit_derived/pitch_hand.csv    투수 투구손·언더핸드 (1982~, 투수 classic 파일의 투구손 구분 _좌/_우/_좌언/_우언)
   reports/hardhit-unmatched.md               연결률과 못 맞춘 행
 
 원본 표를 그대로 옮기지 않고, 게임 선수 ID에 연결한 필요한 값만 남긴다.
@@ -17,7 +18,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hardhit_common import RAW, ROOT, Matcher, files, num, read_file  # noqa: E402
+from hardhit_common import HAND_SUFFIX, RAW, ROOT, Matcher, files, num, read_file  # noqa: E402
 
 OUT = ROOT / 'data-src' / 'hardhit_derived'
 REPORT = ROOT / 'reports' / 'hardhit-unmatched.md'
@@ -91,6 +92,35 @@ def bat_running(M, log):
     write_csv('bat_running.csv', ['연도', '선수ID', '도루', '도루실패', '병살타'], out)
 
 
+def outs_of(ip):
+    """'178.2' → 536"""
+    v = num(ip)
+    if v is None:
+        return None
+    whole = int(v)
+    return whole * 3 + round((v - whole) * 10)
+
+
+def pitcher_stats(r):
+    return {'g': num(r['경기']), 'outs': outs_of(r['이닝'])}
+
+
+def pitch_hand(M, log):
+    """투수 classic (투구손별 파일) → 연도, 선수ID, 손, 언더"""
+    out = []
+    for y, hand, p in files('pitcher', 'classic'):
+        if y not in M.seasons or hand is None:
+            continue
+        th, under = HAND_SUFFIX[hand]
+        for r in read_file(p)[1]:
+            pid, why = M.match(y, r['이름'], r['팀'], num(r['나이']), 'pit', pitcher_stats(r))
+            log.add('투수 classic', y, hand, r, pid, why)
+            if pid:
+                out.append([y, pid, th, int(under)])
+    out.sort(key=lambda r: (r[0], r[1]))
+    write_csv('pitch_hand.csv', ['연도', '선수ID', '손', '언더'], out)
+
+
 def main():
     if not RAW.exists():
         raise SystemExit(f'원본 폴더가 없다: {RAW} (하드힛 CSV는 사용자가 직접 받아 넣는다)')
@@ -98,6 +128,7 @@ def main():
     log = Log()
     extra = []
     bat_running(M, log)
+    pitch_hand(M, log)
     log.write(extra)
     print(f'보고: {REPORT}')
 
