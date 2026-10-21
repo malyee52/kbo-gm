@@ -275,6 +275,10 @@ def main():
               '| 표 | 채움 | 그중 겹침을 공통 열로 가름 | 겹침(비움) | 못 맞춤 |', '|---|---:|---:|---:|---:|']
     extra += [f'| {t} | {c["채움"]} | {c["겹침 → 공통 열로 가름"]} | {c["겹침"]} | {c["못 맞춤"]} |' for t, c in fill.items()]
     extra.append('')
+    extra += ['## 다시 받은 원본 파일', '',
+              '처음 받은 두 파일은 속 메타 시즌이 파일 이름과 달라(다른 해 파일과 내용이 같음) 건너뛰었다. 2026-10-22 사용자가 다시 받아 같은 이름으로 바꿔 넣었다.', '',
+              '- hardhit_batter_saber_2022.csv ← hardhit_batter_modern_leaderboard_2022.csv (처음 파일은 2020 자료)',
+              '- hardhit_pitcher_kbb_2025_좌.csv ← hardhit_pitcher_kbb_2025.csv (처음 파일은 2024 자료)', '']
     if SKIPPED:
         extra += ['## 건너뛴 원본 파일', '', '파일 이름의 연도와 속 메타의 시즌이 달라 건너뛰었다 (다른 해 파일과 내용이 같다). 그 해 자료는 빠져 있다.', '']
         extra += [f'- {n}: 속은 {y}년 자료' for n, y in SKIPPED] + ['']
