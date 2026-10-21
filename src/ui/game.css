@@ -348,6 +348,7 @@ table.roster td.l:first-child { min-width: 110px; }
 
 /* ---- 기록 */
 .leader-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.leader-grid.six { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 @media (max-width: 1300px) { .leader-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); } }
 .board { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow-sm); }
 .board h3 { margin-top: 0; font-size: 12.5px; color: var(--muted); letter-spacing: 0.03em; }

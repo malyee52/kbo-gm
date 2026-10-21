@@ -31,7 +31,7 @@ export function Leaders() {
         지금 우리 구단 기준 규정 타석 {qualifiedPa(g)}, 규정 이닝 {qualifiedOuts(g) / 3}.
       </p>
       {s.log.length === 0 ? <p className="muted">아직 치른 경기가 없습니다.</p> : (
-        <div className="leader-grid">
+        <div className={kind === 'bat' ? 'leader-grid' : 'leader-grid six'}>
           <WarBoard war={war} players={players} />
           {kind === 'bat'
             ? BAT_CATEGORIES.map((c) => <Board<BatLine> key={c.key} cat={c} lines={s.bat} players={players} q={batQualified} />)
