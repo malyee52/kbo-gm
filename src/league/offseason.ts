@@ -40,7 +40,7 @@ import { isFuturesTeam, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, coverFaBonus, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
+  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
 } from './finance';
 import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
@@ -829,6 +829,12 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
   const bonus = signingBonus(salary, years);
   const otherBonus = Object.entries(off.fa.userOffers).filter(([k]) => k !== id).reduce((s, [, o]) => s + signingBonus(o.salary, o.years), 0);
   const short = bonus + otherBonus - Math.max(0, cashOf(league, t));
+  // 모기업 지원에는 한 해 한도가 있다 (finance.ts faSupportLeft, 2026-10-21 사용자 결정)
+  const left = faSupportLeft(league, t, off.year + 1);
+  if (short > left) {
+    const cash = Math.max(0, cashOf(league, t));
+    return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 30%)${otherBonus ? `과 다른 제시의 계약금 ${(otherBonus / 10000).toFixed(1)}억 원` : ''}을 낼 자금이 모자라 제시할 수 없습니다 (자금 ${(cash / 10000).toFixed(1)}억 원, 남은 모기업 지원 한도 ${(left / 10000).toFixed(1)}억 원).` };
+  }
   const limit = spendLimit(league, t, off.year + 1);
   if (limit !== null) {
     const p = league.players.find((x) => x.id === id)!;
@@ -874,6 +880,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
       const base = e.ask * FA_AI_OFFER[round - 1];
       if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + base > limits[t]!) continue;
+      if (!canPayFaBonus(league, t, signingBonus(base * 1.15, e.years), off.year + 1)) continue; // 계약금: 자금 + 남은 모기업 지원 한도
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
       const comp = home || e.returnee ? 0 : COMPENSATION[e.grade] * e.prevSalary;
       // 단장 성향 (gm.ts): 윈나우형은 적극적, 짠돌이형은 소극적, 육성형은 28세 이하만 적극적
@@ -926,6 +933,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (!home && worth < MIN_SALARY) continue;
       const salary = Math.max(MIN_SALARY, Math.round(Math.min(e.ask * 0.8, worth)));
       if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + salary > limits[t]!) continue;
+      if (!canPayFaBonus(league, t, signingBonus(salary, 1), off.year + 1)) continue;
       if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years: 1 };
     }
     if (best) {

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { activeLevel, cashOf, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
+import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 
 let store: DataStore;
@@ -152,11 +152,13 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     g.beginOffseason();
   }, 120_000);
 
-  it('FA: 계약하면 계약금(총액의 30%)이 장부에 남고 그만큼 월말 연봉에서 빠진다. 자금이 모자라면 모기업이 모자란 몫을 대 준다', () => {
+  it('FA: 계약하면 계약금(총액의 30%)이 장부에 남고 그만큼 월말 연봉에서 빠진다. 자금이 모자라면 모기업이 한 해 한도 안에서 모자란 몫을 대 준다', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
     // 자금으로 계약금을 낼 수 있는 FA (시즌 결과에 따라 첫 FA가 너무 비쌀 수 있다)
     const cash = cashOf(h.league, lg);
-    const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < cash * 0.8)!;
+    // 모기업 지원 한도(2026-10-21) 안의 계약금
+    const cap = faSupportCap(h.league, lg);
+    const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < Math.min(cash * 0.8, cap))!;
     expect(e).toBeDefined();
     // 자금을 바닥내도 제시할 수 있고, 계약하면 모자란 계약금을 모기업이 대 준다 (2026-10-21 사용자 결정. 그 전에는 제시가 막혔다)
     h.league.ledger.push({ year: 2027, from: lg, to: -1, amount: cash, note: '테스트 지출' });
@@ -175,6 +177,17 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     expect(help).toMatchObject({ from: -1, to: lg, amount: fee.amount });
     expect(cashOf(h.league, lg)).toBe(0);
     expect(h.offseason!.log.some((l) => l.mine && l.text.includes('모기업이 지원'))).toBe(true);
+    // 그해 남은 한도를 넘는 계약금은 예전처럼 제시할 수 없다
+    const left = faSupportLeft(h.league, lg, 2027);
+    expect(left).toBe(cap - help.amount);
+    const big = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open');
+    if (big) {
+      const years = 4;
+      const salary = Math.ceil(((left + 10_000) / 0.3) / years);
+      const r2 = h.offerFa(big.id, salary, years);
+      expect(r2.ok).toBe(false);
+      expect(r2.message).toContain('제시할 수 없');
+    }
   });
 
   it('외국인: 새 후보에는 이적료가 붙고, 계약하면 자금에서 나간다. 자금이 모자라면 계약할 수 없다', () => {
