@@ -11,6 +11,7 @@
   data-src/hardhit_derived/clutch_bat.csv    타자 클러치·득점권 (2015~, 타자 clutch): WPA, WPA/LI, CLUTCH, pLI, 득점권 타율, SD/MD
   data-src/hardhit_derived/clutch_pit.csv    투수 상황 기록 (1982~, 투수 situation): WPA, RE24, SD/MD, gmLI, pLI, 홀드, 세이브, 블론
   data-src/hardhit_derived/park.csv          구단(계보)·연도별 파크팩터 (2015~, 타자 saber 선수 행의 타석 가중 평균)
+  data-src/hardhit_derived/position.csv      타자 그 시즌 주 포지션 (2003~, 2009 없음. 포지션 필터를 건 타자 classic, data-src/hardhit/positions/)
   data-src/hardhit_derived/war.csv           선수-시즌 WAR (타자 saber 2015~의 o-WAR, 투수 saber의 fWAR·rWAR. 투수 WAR은 2015~·약 30이닝 이상만 있다). tools/hardhit_war_check.ts가 쓴다
   reports/hardhit-unmatched.md               연결률과 못 맞춘 행
 
@@ -18,6 +19,7 @@
 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.
 """
 import csv
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -267,6 +269,59 @@ def war(M, log, names, fill):
     write_csv('war.csv', ['연도', '선수ID', '구분', '보직', '타석·아웃', 'WAR', 'rWAR'], out)
 
 
+POS_FILE_RE = re.compile(r'^hardhit_batter_classic_(\d{4})_(C|1B|2B|3B|SS|LF|CF|RF)\.csv$')
+
+
+def position(M, log):
+    """포지션 필터를 건 타자 classic (data-src/hardhit/positions/, 2003~, 2009 없음) → 연도, 선수ID, 주 포지션
+
+    한 해에 한 선수는 한 파일에만 나온다 (2026-10-22 클사장 확인) → 필터는 "그 시즌 주 포지션"이다. 출장한 모든 자리가 아니다.
+    파일은 8개 수비 자리뿐이고 지명타자 파일은 없다. 게임 기록에 타석이 있는데 어느 파일에도 없는 타자는 지명타자 후보로 센다.
+    → 보고서 줄 목록"""
+    out, seen, years = [], set(), set()
+    for p in sorted((RAW / 'positions').glob('hardhit_batter_classic_*.csv')):
+        m = POS_FILE_RE.match(p.name)
+        if not m:
+            continue
+        y, pos = int(m.group(1)), m.group(2)
+        meta, rows_ = read_file(p)
+        if meta.get('표시 시즌') and int(meta['표시 시즌']) != y:
+            SKIPPED.append((p.name, int(meta['표시 시즌'])))
+            continue
+        if y not in M.seasons:
+            continue
+        years.add(y)
+        for r in rows_:
+            pid, why = M.match(y, r['이름'], r['팀'], num(r['나이']), 'bat', {'pa': num(r['타석']), 'h': num(r['안타'])})
+            log.add('타자 포지션', y, pos, r, pid, why)
+            if pid and (y, pid) not in seen:
+                seen.add((y, pid))
+                out.append([y, pid, pos])
+    out.sort(key=lambda r: (r[0], r[1]))
+    write_csv('position.csv', ['연도', '선수ID', '주 포지션'], out)
+    # 지명타자 후보: 그 해 타자 기록(투수 제외)에 타석이 있는데 포지션 파일 어디에도 없는 선수
+    dh = defaultdict(list)
+    for y in sorted(years):
+        pa = Counter()
+        for pid, rs in M.rows[(y, 'bat')].items():
+            if M.players.get(pid, {}).get('kind') == 'P':
+                continue
+            pa[pid] += sum(r.get('pa') or 0 for r in rs)
+        for pid, v in pa.items():
+            if v > 0 and (y, pid) not in seen:
+                pos = '/'.join(sorted({r.get('pos') or '-' for r in M.rows[(y, 'bat')][pid]}))
+                dh[y].append((v, pid, M.players.get(pid, {}).get('name', '?'), pos))
+    lines = ['## 타자 주 포지션 (position.csv)', '',
+             '포지션 필터(C·1B·2B·3B·SS·LF·CF·RF)를 건 타자 classic 파일. 한 해에 한 선수는 한 파일에만 나와 그 시즌 주 포지션으로 쓴다.',
+             '2009년 파일은 아직 없다. 지명타자 파일이 없어, 그 해 타석이 있는데 어느 파일에도 없는 타자(투수 제외)를 지명타자 후보로 센다.', '',
+             '| 연도 | 지명타자 후보 | 그중 100타석 이상 | 100타석 이상 (이름 선수ID 타석 자료집 표기) |', '|---|---:|---:|---|']
+    for y in sorted(years):
+        big = sorted([d for d in dh[y] if d[0] >= 100], reverse=True)
+        lines.append(f'| {y} | {len(dh[y])} | {len(big)} | ' + ', '.join(f'{n} {i} {v} {q}' for v, i, n, q in big) + ' |')
+    lines.append('')
+    return lines
+
+
 def main():
     if not RAW.exists():
         raise SystemExit(f'원본 폴더가 없다: {RAW} (하드힛 CSV는 사용자가 직접 받아 넣는다)')
@@ -281,6 +336,7 @@ def main():
     clutch_pit(M, log, names, fill)
     park(M, log)
     war(M, log, names, fill)
+    extra += position(M, log) if (RAW / 'positions').exists() else []
     extra += ['## 이름이 가려진 투수 표 (saber·situation)', '',
               '같은 연도·같은 손의 kbb(와 classic) 파일과 (나이, 보직, 경기, 이닝)으로 맞대 이름과 팀을 채웠다. 둘 이상 맞으면 kbb와 공통인 열(SD, MD, gmLI, pLI, BABIP, K%, BB%)이 모두 같은 한 명으로 가르고, 그래도 둘 이상이면 짐작하지 않고 비운다.', '',
               '| 표 | 채움 | 그중 겹침을 공통 열로 가름 | 겹침(비움) | 못 맞춤 |', '|---|---:|---:|---:|---:|']
