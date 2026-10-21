@@ -11,6 +11,7 @@ import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
 import { envFrom } from './war';
+import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
   ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, penTrustOf, Rng, traitsOf,
@@ -353,6 +354,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const T = season.totals;
     (league.seasonEnv ??= {})[String(year)] = envFrom({ pa: T.pa, h: T.h, d: T.d, t: T.t, hr: T.hr, bb: T.bb, hbp: T.hbp, so: T.so,
       runsAllowed: T.r, outs: T.outs, teamGames: season.teams.reduce((a, t) => a + t.g, 0), runs: T.r });
+    (league.seasonSaber ??= {})[String(year)] = leagueBase(season.bat, season.pit);
   }
   // 창단 퓨처스 구단 선수는 1군 월드에 없어 아래 시즌 줄 만들기에서 빠진다: 퓨처스 성적만 따로 남긴다 (2026-10-12 퓨처스 기록 보관)
   for (const e of extras) {

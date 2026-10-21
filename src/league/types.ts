@@ -258,6 +258,8 @@ export interface LeagueState {
   archive?: ArchivedPlayer[];
   /** 게임 안 시즌의 리그 환경 (war.ts, 결산 때). 시즌 가치(WAR)를 다시 계산할 때 쓴다. 예전 저장에는 없다 (그 해 실제 자료로 대신) */
   seasonEnv?: Record<string, import('./war').WarEnv>;
+  /** 게임 안 시즌의 세이버 리그 기준값 (game/saber.ts leagueBase, 결산 때). 선수 상세의 지난 시즌 wRC+·FIP. 예전 저장에는 없다 (2026-10-22) */
+  seasonSaber?: Record<string, { woba: number; runsPerPa: number; fipConst: number }>;
   /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
   yearbook?: YearRecord[];
   /** 게임 안 시즌의 단일 시즌 기록 부문별 상위 (history.ts) */

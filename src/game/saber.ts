@@ -3,6 +3,7 @@
 
 import { LINEAR_WEIGHTS, type BatLine, type PitLine } from '../engine';
 import { WOBA_SCALE } from '../ai/value';
+import type { LeagueTotals } from '../data/types';
 
 export interface LeagueBase {
   /** 리그 wOBA */
@@ -53,6 +54,23 @@ export function leagueBase(bat: BatLine[], pit: PitLine[]): LeagueBase {
     woba: den > 0 ? num / den : 0,
     runsPerPa: pa > 0 ? r / pa : 0,
     fipConst: ip > 0 ? lgEra - (13 * hr + 3 * bbhbp - 2 * so) / ip : 3.1,
+  };
+}
+
+/**
+ * 실제 시즌의 리그 기준값 (2026-10-22): 자료집 리그 합계(SeasonData.league)로 leagueBase와 같은 식을 계산한다.
+ * 선수 상세에서 실제 기록의 wRC+·FIP를 그 해 리그 기준으로 보여 줄 때 쓴다
+ */
+export function realLeagueBase(L: LeagueTotals): LeagueBase {
+  const s1 = L.h - L.d - L.t - L.hr;
+  const num = W.bb * L.bb + W.hbp * L.hbp + W.s1 * s1 + W.d2 * L.d + W.t3 * L.t + W.hr * L.hr;
+  const den = L.ab + L.bb + L.sf + L.hbp;
+  const ip = L.outs / 3;
+  const lgEra = ip > 0 ? (L.er * 9) / ip : 0;
+  return {
+    woba: den > 0 ? num / den : 0,
+    runsPerPa: L.pa > 0 ? L.r / L.pa : 0,
+    fipConst: ip > 0 ? lgEra - (13 * L.hrAllowed + 3 * (L.bb + L.hbp) - 2 * L.so) / ip : 3.1,
   };
 }
 
