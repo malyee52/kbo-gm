@@ -258,6 +258,8 @@ export const ATTENTION_DAYS = DEFAULT_STOPS.injuryDays;
 
 /** 육성선수 정식 등록이 되는 첫날 (KBO 규정 5월 1일) */
 export const DEV_REGISTER_FROM = { month: 5, date: 1 };
+/** AI 구단은 5월 1일에 지금 기여가 이 런 이상인 육성선수를 정원 안에서 정식 등록한다 (2026-10-21 사용자 결정, 기준값은 임시값: 대체 선수 수준) */
+export const AI_DEV_REGISTER_RUNS = 0;
 
 /** 1군 말소 뒤 다시 등록할 수 있을 때까지 (KBO 규정 10일) */
 export const REREGISTER_DAYS = 10;
@@ -1244,14 +1246,40 @@ export class GameSession {
     return { ok: true, message: `${p.name} 정식 등록` };
   }
 
-  private applyConvert(id: string): void {
+  private applyConvert(id: string, quiet = false): void {
     const p = this.world.players.find((x) => x.id === id);
     if (!p) return;
     p.dev = false;
     const lp = this.leaguePlayer(id);
     if (lp) lp.dev = false;
     this.season.teamSeasons[p.teamIdx].dirty = true;
-    this.addNews(this.day, 'entry', `${p.name}, 육성선수에서 정식 선수로 등록`);
+    if (!quiet) this.addNews(this.day, 'entry', `${p.name}, 육성선수에서 정식 선수로 등록`);
+  }
+
+  /**
+   * AI 구단의 육성선수 정식 등록 (5월 1일 경기 전, 하루 진행 뒤 훅): 플레이어와 같은 조건(정식 등록 첫날, 정식 선수 정원 안)으로,
+   * 지금 기여가 AI_DEV_REGISTER_RUNS 이상인 선수를 기여 순으로. 난수를 쓰지 않아 재현·불러오기와 같다
+   */
+  private aiDevRegister(): void {
+    if (this.season.day !== this.devRegisterDay || this.season.day > this.tradeDeadlineDay) return;
+    const limit = ruleOf(this.league, 'orgLimit');
+    const names: string[] = [];
+    for (const t of this.world.teams) {
+      if (t.idx === this.teamIdx) continue;
+      let room = limit - t.org.filter((p) => !p.dev).length;
+      const devs = t.org.filter((p) => p.dev).map((p) => ({ p, r: currentRuns(p, this.values) }))
+        .filter((x) => x.r >= AI_DEV_REGISTER_RUNS)
+        .sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id));
+      for (const { p } of devs) {
+        if (room <= 0) break;
+        this.applyConvert(p.id, true);
+        names.push(`${p.name}(${t.name})`);
+        room--;
+      }
+    }
+    if (!names.length) return;
+    this.valueCtx = null;
+    this.addNews(this.season.day, 'trade', `[육성선수 정식 등록] 다른 구단: ${names.join(', ')}`);
   }
 
   /**
@@ -1671,6 +1699,7 @@ export class GameSession {
       this.dailyArticles();
       this.aiTradeDay();
       this.aiMarket();
+      this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());

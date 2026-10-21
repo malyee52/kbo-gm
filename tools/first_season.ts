@@ -34,6 +34,8 @@ export interface SeedResult {
   newsByKind: Record<string, number>;
   eventTitles: Record<string, number>;
   foreignSwaps: number; aiTrades: number; userOffers: number;
+  /** AI 구단 육성선수: 5월 1일 정식 등록 수, 개막 때 수 (2026-10-21) */
+  devRegistered?: number; devAi?: number;
   // 가을야구
   champion: string; seeds: string[];
   // 구단주
@@ -145,6 +147,8 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
   const foreignSwaps = regNews.filter((n) => n.text.startsWith('[외국인 교체]')).length;
   const aiTrades = regNews.filter((n) => n.kind === 'trade' && !n.text.startsWith('[외국인 교체]')).length;
   const userOffers = evTitles['트레이드 제안 접수'] ?? 0;
+  const devRegistered = regNews.filter((n) => n.text.startsWith('[육성선수 정식 등록]')).reduce((a, n) => a + n.text.split(', ').length, 0);
+  const devAi = devRegistered + w.players.filter((p) => p.dev && p.teamIdx >= 0 && p.teamIdx !== g.teamIdx).length;
 
   // 재정 (결산 전 흐름)
   const flows = w.teams.map((t) => g.seasonFinance(t.idx));
@@ -246,7 +250,7 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
     injuries: inj.length, injMajor: inj.filter((a) => a.kind === 'major').length, injLong: inj.filter((a) => a.kind === 'long').length, injMinor: inj.filter((a) => a.kind === 'minor').length,
     events: abs.filter((a) => a.kind === 'event').length,
     longOut: abs.filter((a) => a.until - a.day >= 30).length, seasonOut: abs.filter((a) => a.until >= len).length,
-    newsByKind, eventTitles: evTitles, foreignSwaps, aiTrades, userOffers,
+    newsByKind, eventTitles: evTitles, foreignSwaps, aiTrades, userOffers, devRegistered, devAi,
     champion: ps?.champion != null ? name(ps.champion) : '-', seeds: (ps?.seeds ?? []).map(name),
     trust, fired,
     attendance: { min: Math.min(...att), max: Math.max(...att), mean: att.reduce((a, b) => a + b, 0) / att.length },
@@ -375,7 +379,7 @@ export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnT
   out.push('', '### 결장·이벤트·알림 (평균, 범위)\n', '| 지표 | 값 |', '|---|---|');
   const r2: [string, (r: SeedResult) => number][] = [
     ['부상 (전체)', (r) => r.injuries], ['큰 부상', (r) => r.injMajor], ['긴 부상', (r) => r.injLong], ['작은 부상', (r) => r.injMinor], ['이탈 이벤트', (r) => r.events],
-    ['30일 이상 결장', (r) => r.longOut], ['시즌 아웃', (r) => r.seasonOut], ['외국인 교체 (AI)', (r) => r.foreignSwaps], ['AI끼리 트레이드 알림', (r) => r.aiTrades], ['우리에게 온 트레이드 제안', (r) => r.userOffers], ['그중 제안 없음(통화만)', (r) => r.offersNone],
+    ['30일 이상 결장', (r) => r.longOut], ['시즌 아웃', (r) => r.seasonOut], ['외국인 교체 (AI)', (r) => r.foreignSwaps], ['AI 육성선수 (개막)', (r) => r.devAi ?? 0], ['그중 5월 1일 정식 등록', (r) => r.devRegistered ?? 0], ['AI끼리 트레이드 알림', (r) => r.aiTrades], ['우리에게 온 트레이드 제안', (r) => r.userOffers], ['그중 제안 없음(통화만)', (r) => r.offersNone],
   ];
   for (const [k2, fn] of r2) out.push(`| ${k2} | ${stat(rs.map(fn), 1)} |`);
   const kinds = [...new Set(rs.flatMap((r) => Object.keys(r.newsByKind)))];
