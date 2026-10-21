@@ -54,13 +54,18 @@ describe('2차 드래프트', () => {
     expect(g.league.ledger.length).toBeGreaterThan(ledger);
     const fa = new Set(off.fa.entries.map((e) => e.id));
     const lost = new Map<number, number>();
+    let faFees = 0;
     for (const k of picks) {
       const p = g.leaguePlayer(k.id!)!;
       expect(p.foreign).toBe(false);
       if (k.from! < 0) {
-        // 계약하지 못한 FA: 양도금 없이 최저 연봉, 무적 표시가 지워진다
-        expect(k.fee).toBeUndefined();
+        // 계약하지 못한 FA: 최저 연봉, 무적 표시가 지워진다. 양도금은 그 라운드 값을 원 소속 구단에 (2026-10-21, 예전에는 양도금 없음)
         expect(p.freeAgent).toBeUndefined();
+        if (k.origin !== undefined) {
+          expect(k.origin).not.toBe(k.team);
+          expect(g.league.ledger.some((e) => e.from === k.team && e.to === k.origin && e.amount === k.fee && e.note.includes(p.name))).toBe(true);
+          faFees++;
+        }
         continue;
       }
       expect(fa.has(p.id)).toBe(false);
@@ -69,6 +74,7 @@ describe('2차 드래프트', () => {
       lost.set(k.from!, (lost.get(k.from!) ?? 0) + 1);
     }
     for (const n of lost.values()) expect(n).toBeLessThanOrEqual(Off.SECOND_MAX_LOSS);
+    expect(faFees).toBeGreaterThan(0);
   }, 600_000);
 
   it('2026 시즌 뒤에는 열리지 않는다 (짝수 해)', () => {

@@ -226,7 +226,7 @@ export interface ProtectDraft {
   /** 창단 특별 지명의 창단 구단 */
   team?: number;
   /** 끝난 뒤 결과 */
-  picks?: { round: number; team: number; id: string | null; from?: number; fee?: number }[];
+  picks?: { round: number; team: number; id: string | null; from?: number; fee?: number; origin?: number }[];
 }
 
 /** 한 선수의 성장 판정 결과. before·after는 같은 기준(다음 시즌 나이 반영 전)의 한 시즌 기여(런) */
@@ -1125,7 +1125,7 @@ export function unsignedFas(league: LeagueState, off: OffseasonState): LeaguePla
   return league.players.filter((p) => p.team === -1 && p.freeAgent?.since === off.year);
 }
 
-/** 지명 후보: 다른 구단의 보호 명단 밖 선수 (2차 드래프트는 계약하지 못한 FA도, 양도금 없이) */
+/** 지명 후보: 다른 구단의 보호 명단 밖 선수 (2차 드래프트는 계약하지 못한 FA도, 양도금은 원 소속 구단에) */
 export function protectDraftCandidates(league: LeagueState, off: OffseasonState, d: ProtectDraft, team: number): LeaguePlayer[] {
   const out: LeaguePlayer[] = d.kind === 'second' ? unsignedFas(league, off) : [];
   for (const t of protectDraftTeams(league, off, d)) {
@@ -1227,17 +1227,22 @@ function finishProtectDrafts(league: LeagueState, off: OffseasonState, store: St
         if (!pick) continue;
         const from = pick.team;
         taken.add(pick.id);
+        const fee = rule.fees[Math.min(round, rule.fees.length - 1)];
         if (from < 0) {
-          // 계약하지 못한 FA: 양도금 없이 최저 연봉 1년 (임시값)
+          // 계약하지 못한 FA: 최저 연봉 1년 (임시값). 양도금은 그 라운드 값 그대로 마지막 소속(원 소속) 구단에 낸다 (2026-10-21 사용자 결정).
+          // 원 소속이 다시 데려가면 내지 않는다. 구단당 잃는 인원 상한에는 세지 않는다
+          const origin = pick.freeAgent?.from ?? -1;
           pick.team = t;
           pick.contract = { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
           delete pick.freeAgent;
           moveInView(view, view.sim.get(pick.id)!, t);
-          d.picks.push({ round: round + 1, team: t, id: pick.id, from });
-          log(off, 'second', `2차 드래프트 ${round + 1}라운드: ${league.teams[t].name}, 무적 FA ${pick.name} 지명 (양도금 없음, 최저 연봉 1년)`, t === off.userTeam, t === off.userTeam);
+          const paid = origin >= 0 && origin !== t;
+          if (paid) league.ledger.push({ year: off.year + 1, from: t, to: origin, amount: fee, note: `${pick.name} 2차 드래프트 양도금 (${round + 1}라운드, 무적 FA)`, kind: 'transfer' });
+          d.picks.push({ round: round + 1, team: t, id: pick.id, from, ...(paid ? { fee, origin } : {}) });
+          log(off, 'second', `2차 드래프트 ${round + 1}라운드: ${league.teams[t].name}, 무적 FA ${pick.name} 지명 (${paid ? `${league.teams[origin].name}에 양도금 ${(fee / 10000).toFixed(0)}억 원` : '양도금 없음'}, 최저 연봉 1년)`,
+            t === off.userTeam || origin === off.userTeam, t === off.userTeam || origin === off.userTeam);
           continue;
         }
-        const fee = rule.fees[Math.min(round, rule.fees.length - 1)];
         lost.set(from, (lost.get(from) ?? 0) + 1);
         pick.team = t;
         moveInView(view, view.sim.get(pick.id)!, t);
