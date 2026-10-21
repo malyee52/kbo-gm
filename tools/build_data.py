@@ -539,6 +539,45 @@ def fill_gmli(pit):
             ', '.join(f'{y}: {c}' for y, c in sorted(filled.items())), '']
 
 
+# 선발 등판 추정 (src/engine/params.ts estimatedStarts와 같은 식): 경기당 아웃이 구원 3.5 ~ 선발 14 사이 어디인가
+GS_EST_RELIEF_OUTS, GS_EST_START_OUTS = 3.5, 14
+
+
+def fill_pitch_roles(pit):
+    """자료집에 보직(role)·선발 등판(gs)이 빈 투수 행을 하드힛 투수 classic(pit_classic.csv)으로 채운다 (2026년은 296명이 비어 있다).
+    하드힛 classic에는 선발 등판 열이 없어 gs는 경기당 아웃 추정에 퀄리티 스타트를 하한으로 둔 값이다 (2015~2025 자료집 gs와 견준 오차 투수당 약 0.5번).
+    하드힛 보직 라벨은 "선발"만 쓴다 (마무리·셋업 라벨은 해마다 1~16명뿐이라 안 쓴다, 기획안 1.3).
+    role: 라벨 선발이거나 추정 선발 비율 0.5 이상이면 SP, 아니고 세이브 10개 이상이면 CL, 나머지 RP. 값이 있는 행은 건드리지 않는다.
+    선발 등판 자료가 통째로 빠진 해만 채운다 (추정값이 실제 기록 사이에 섞이지 않게). → 보고서 줄 목록"""
+    hh = {(int(r['연도']), r['선수ID']): r for r in hardhit_csv('pit_classic.csv')}
+    if not hh:
+        return []
+    ix = {f: i for i, f in enumerate(PIT_FIELDS)}
+    filled = defaultdict(lambda: [0, 0])
+    for y, rows_ in pit.items():
+        # 선발 등판 자료가 통째로 빠진 해(자료집 보조 열이 없는 2026 스냅샷)만 채운다. 다른 해의 빈 칸은 엔진이 경기 때 같은 식으로 추정한다
+        if sum(r[ix['gs']] is None for r in rows_) < 0.9 * len(rows_):
+            continue
+        for row in rows_:
+            h = hh.get((y, row[0]))
+            if not h or (row[ix['role']] is not None and row[ix['gs']] is not None):
+                continue
+            g, outs = row[ix['g']] or 0, row[ix['outs']] or 0
+            share = 0 if g <= 0 else min(1, max(0, (outs / g - GS_EST_RELIEF_OUTS) / (GS_EST_START_OUTS - GS_EST_RELIEF_OUTS)))
+            qs = int(h['퀄스'] or 0)
+            gs = min(g, max(qs, round(g * share)))
+            if row[ix['gs']] is None:
+                row[ix['gs']] = gs
+                filled[y][1] += 1
+            if row[ix['role']] is None:
+                row[ix['role']] = 'SP' if h['보직'] == '선발' or share >= 0.5 else 'CL' if (row[ix['sv']] or 0) >= 10 else 'RP'
+                filled[y][0] += 1
+    print(f'하드힛 보직·선발 채움: {sum(v[0] for v in filled.values())}행 / {sum(v[1] for v in filled.values())}행')
+    return ['## 투수 보직·선발 등판 (pit_classic.csv)', '',
+            '선발 등판 자료가 통째로 빠진 해(2026 스냅샷)의 빈 보직·선발 등판만 채운다. 선발 등판은 **추정값**, 경기당 아웃 추정에 퀄리티 스타트를 하한으로 둔 값 (하드힛에 선발 등판 열이 없다).', '',
+            '연도별 채움 (보직 / 선발 등판):', ''] + [f'- {y}: {a} / {b}' for y, (a, b) in sorted(filled.items())] + ['']
+
+
 def fill_hands(players):
     """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있는데 다르면 하드힛 값으로 바꾼다.
     → 보고서 줄 목록"""
@@ -717,7 +756,7 @@ def main():
 
     # ---- 하드힛 가공값으로 빈 기록 채우기
     parks, park_report = park_factors(teams)
-    hardhit_report = fill_running(bat) + fill_gmli(pit) + hand_report + park_report
+    hardhit_report = fill_running(bat) + fill_gmli(pit) + fill_pitch_roles(pit) + hand_report + park_report
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
