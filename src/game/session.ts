@@ -25,13 +25,13 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, MIN_SALARY, wonText } from '../league/salary';
+import { dollarText, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
-import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
+import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
@@ -71,7 +71,7 @@ import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
-import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
+import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
@@ -3238,7 +3238,7 @@ export class GameSession {
     const view = Off.leagueView(this.league, this.store, this.params);
     const ys = Array.from({ length: ruleOf(this.league, 'extMaxYears') - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
     return Off.extensionCandidates(this.league, off).map((p) => ({
-      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Math.max(MIN_SALARY, Math.round(Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) * repDemand(this.league))) })),
+      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.extensionAsk(this.league, view, p, off.year, years) })),
     }));
   }
 

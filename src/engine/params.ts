@@ -134,6 +134,23 @@ export const DECLINE_START_AGE = 32;
  */
 export const STARTER_SHARE = 0.4;
 
+/**
+ * 선발 등판 기록이 없는 시즌(2026 자료 전부, 그 밖의 해 일부 행)의 선발 비율 추정 (2026-10-21): 경기당 아웃이
+ * GS_EST_RELIEF_OUTS 이하면 구원만, GS_EST_START_OUTS 이상이면 선발만, 그 사이는 선형으로.
+ * 2019·2021~2025 선발 기록이 있는 1,342 시즌(5경기 이상)에 맞춘 값: 경기 가중 선발 비율 오차 0.051 → 0.018,
+ * 선발·구원 구분 정확도 94.5% → 97.5%. 예전 규칙(경기당 12아웃 이상이면 모두 선발, 아니면 0)은 짧게 던진
+ * 선발(2026 배제성 21경기 77이닝, 오원석 27경기 99이닝)을 구원으로 보아, 로테이션이 2군 신인으로 채워졌다
+ */
+export const GS_EST_RELIEF_OUTS = 3.5;
+export const GS_EST_START_OUTS = 14;
+
+/** 선발 등판 기록이 없을 때 경기당 아웃으로 가늠한 선발 등판 수 */
+export function estimatedStarts(row: { g: number; outs: number }): number {
+  if (row.g <= 0) return 0;
+  const share = (row.outs / row.g - GS_EST_RELIEF_OUTS) / (GS_EST_START_OUTS - GS_EST_RELIEF_OUTS);
+  return row.g * Math.min(1, Math.max(0, share));
+}
+
 /** 선발 투수인가 (STARTER_SHARE) */
 export function isStarterSkill(pit: { startShare: number } | null | undefined): boolean {
   return !!pit && pit.startShare >= STARTER_SHARE;

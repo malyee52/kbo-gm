@@ -8,7 +8,7 @@
 import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
 import type { DefenseAward } from '../data/types';
-import type { EngineParams } from './params';
+import { estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -92,7 +92,7 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
   }
   skill.sample = rows.reduce((s, x) => s + x.w * x.row.tbf, 0);
 
-  // 선발 비율과 체력. 선발 등판 수 기록이 없으면 경기당 아웃 수로 선발 여부를 가늠
+  // 선발 비율과 체력. 선발 등판 수 기록이 없으면 경기당 아웃 수로 선발 등판 수를 가늠한다 (params.ts estimatedStarts)
   let g = 0;
   let gs = 0;
   let bfStart = 0;
@@ -101,7 +101,7 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
   let gRelief = 0;
   for (const { row, w } of rows) {
     if (row.g <= 0) continue;
-    const starts = row.gs !== null ? row.gs : row.outs / row.g >= 12 ? row.g : 0;
+    const starts = row.gs !== null ? row.gs : estimatedStarts(row);
     g += w * row.g;
     gs += w * starts;
     if (starts / row.g >= 0.7) {
@@ -110,7 +110,7 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
     } else if (starts / row.g <= 0.2) {
       bfRelief += w * row.tbf;
       gRelief += w * row.g;
-    } else if (row.gs !== null && starts > 0) {
+    } else if (starts > 0) {
       // 선발과 구원을 겸한 시즌 (1980년대 에이스 등, 2026-10-12): 구원 등판은 한 번에 6명쯤 상대했다고 보고 나머지를 선발 몫으로
       const relief = row.g - starts;
       const perStart = Math.max(0, row.tbf - relief * MIXED_RELIEF_BF) / starts;

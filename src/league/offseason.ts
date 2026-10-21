@@ -555,6 +555,17 @@ export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number,
   return Math.max(MIN_SALARY, p.contract.salary, Math.round((base * factor) / 100) * 100);
 }
 
+/**
+ * 비FA 다년 계약 요구액 (화면 표시와 계약이 같은 값을 쓴다): 요구 연봉에 판타지 협상 할인·할증, 단장 평판을 곱한다.
+ * 2026-10-21: 평판 할인은 지금 연봉 아래로 내리지 않는다 (요구액이 지금 연봉 5,700만 원에 붙어 있을 때 평판 52로 5,687만 원이 되던 것).
+ * 판타지 협상으로 지금 연봉보다 낮게 합의한 것은 그대로 둔다
+ */
+export function extensionAsk(league: LeagueState, view: LeagueView, p: LeaguePlayer, year: number, years: number): number {
+  const agreed = applyDiscount(extensionDemand(view, p, year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === year)?.pct ?? 0);
+  const withRep = Math.round(agreed * repDemand(league));
+  return Math.max(MIN_SALARY, Math.min(agreed, Math.max(withRep, p.contract.salary)));
+}
+
 /** 판타지 협상 할인(+)·할증(−)을 요구액에 (최저 연봉 아래로는 안 간다) */
 export function applyDiscount(salary: number, pct: number): number {
   return pct ? Math.max(MIN_SALARY, Math.round((salary * (1 - pct)) / 100) * 100) : salary;
@@ -575,7 +586,7 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
   const p = extensionCandidates(league, off).find((x) => x.id === id);
   if (!p) return { ok: false, message: '다년 계약을 맺을 수 없는 선수입니다 (국내 보류·신인 계약 선수, FA 시장에 나오지 않은 선수만).' };
   const view = leagueView(league, store, params);
-  const salary = Math.max(MIN_SALARY, Math.round(applyDiscount(extensionDemand(view, p, off.year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === off.year)?.pct ?? 0) * repDemand(league)));
+  const salary = extensionAsk(league, view, p, off.year, years);
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);

@@ -242,13 +242,22 @@ function allowedForeigners(avail: SimPlayer[], limit: number): Set<number> {
 /** 엔트리 순환 주기 (일정 색인 일수) */
 export const CHURN_DAYS = 10;
 
-/** 0~1 해시 (FNV-1a). 엔트리 순환이 난수 흐름을 건드리지 않게 */
+/**
+ * 0~1 해시 (FNV-1a + murmur3 마무리 섞기). 엔트리 순환이 난수 흐름을 건드리지 않게.
+ * 2026-10-21: 마무리 섞기 추가. FNV-1a만 쓰면 끝 글자(주기 번호)만 다른 문자열의 값이 서로 붙어 있어서,
+ * 같은 투수가 시즌 내내 순환으로 빠지거나(2026 KT 배제성: 17주기 모두, 시드와 상관없이 0이닝) 한 번도 빠지지 않았다
+ */
 function unitHash(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
 

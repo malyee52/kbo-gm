@@ -9,7 +9,8 @@ beforeAll(() => { store = loadDataStore(); }, 120_000);
 
 describe('기준표 정렬', () => {
   it('선발·구원을 겸한 1980년대 에이스는 선발 로테이션에 들어간다 (예전에는 마무리가 되어 한 해 50~60이닝)', () => {
-    const params = { ...DEFAULT_PARAMS, ratingBasis: 'season' as const, pilotSeasons: 1 };
+    // 엔트리 순환(rosterChurn)은 끈다: 이 시험은 선발 분류를 본다. 순환이 첫날 에이스를 2군에 보내면 로테이션에 없다 (2026-10-21 순환 해시 고침 뒤 1986 선동열)
+    const params = { ...DEFAULT_PARAMS, ratingBasis: 'season' as const, pilotSeasons: 1, rosterChurn: 0 };
     for (const [y, name] of [[1986, '선동열'], [1984, '최동원']] as const) {
       const w = worldForYear(store, y, params);
       const p = w.players.find((x) => x.name === name && x.isPitcher)!;
