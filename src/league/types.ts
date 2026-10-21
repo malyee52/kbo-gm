@@ -58,6 +58,11 @@ export interface LeaguePlayer {
   twoWayTalent?: boolean;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
+  /**
+   * 계약하지 못한 FA (team = -1, 2026-10-21 사용자: "그걸 이제 육성선수나 2차드랩으로 만들어야지"). since = 미계약이 된 오프시즌, from = 원 소속.
+   * 그 오프시즌 2차 드래프트 지명·육성선수 계약 후보가 되고, 남으면 다음 시즌 중 자유계약 선수(market)로 남는다. 그 시즌도 계약하지 못하면 은퇴 (offseason.ts)
+   */
+  freeAgent?: { since: number; from: number };
   /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */
   market?: number;
   /** 자유 모드의 빈 자리 (그 해, src/fantasy/free.ts): 시즌 중 AI가 새 선수를 만들 때 채워 쓴다. 쓰기 전에는 어디에도 보이지 않는다 */

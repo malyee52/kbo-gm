@@ -430,7 +430,7 @@ function FaPanel({ act }: { act: Act }) {
                     {e.status === 'signed' ? (
                       <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
                     ) : e.status === 'left' ? (
-                      <span className="muted">미계약 (리그 이탈)</span>
+                      <span className="muted">미계약 (무적: 2차 드래프트·육성선수 후보)</span>
                     ) : mine ? (
                       <span className="inline">제시함: {mine.years}년 연 {won(mine.salary)}
                         <button type="button" className="small-btn" onClick={() => act(session.withdrawFa(e.id), '제시를 거뒀습니다.')}>거두기</button>
@@ -882,7 +882,7 @@ function ReleasePanel({ act }: { act: Act }) {
       </div>
       {devPool.length > 0 && (
         <div className="panel">
-          <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수 {devPool.length}명</span></h3>
+          <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수·무적 FA {devPool.length}명</span></h3>
           <div className="scroll pick">
             <table>
               <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재(평가)</th><th /></tr></thead>

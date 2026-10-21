@@ -467,6 +467,16 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };
+  // 계약하지 못한 FA (freeAgent): 시즌 중 구단을 찾았으면 보통 선수, 끝내 못 찾았으면 은퇴 (리그 명단에는 오프시즌 끝까지 남아 통산이 보관된다)
+  for (const p of league.players) {
+    if (!p.freeAgent) continue;
+    if (p.team >= 0) { delete p.freeAgent; continue; }
+    if (p.team !== -1 || p.freeAgent.since >= year) continue;
+    const age = p.birthYear ? year - p.birthYear : null;
+    (league.retired ??= []).push({ id: p.id, name: p.name, real: p.real, year, age, team: p.freeAgent.from, reason: (age ?? 30) >= 33 ? 'age' : 'performance' });
+    delete p.freeAgent;
+    delete p.market;
+  }
   // 시즌 중 시장 (market.ts): 끝내 계약하지 않은 선수는 리그에서 지운다. 계약한 선수는 이제 보통 선수다
   league.players = league.players.filter((p) => !((p.market === year || p.reserve === year) && p.team === -1 && !p.history.some((h) => h.year === year)));
   for (const p of league.players) { delete p.market; delete p.reserve; }
@@ -917,8 +927,11 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     } else {
       e.status = 'left';
       p.team = -1;
+      // 리그를 떠나지 않고 무적 선수로 남는다: 2차 드래프트 지명·육성선수 계약 후보, 남으면 다음 시즌 중 자유계약 (unsignedFas)
+      if (!e.returnee) p.freeAgent = { since: off.year, from: e.from };
       moveInView(view, sp, -1);
-      log(off, 'fa', `${p.name}: 계약하지 못하고 리그를 떠났습니다.`, e.from === off.userTeam);
+      log(off, 'fa', e.returnee ? `${p.name}: 계약하지 못하고 리그를 떠났습니다.`
+        : `${p.name}: 계약하지 못해 무적 선수가 됐습니다 (2차 드래프트 지명·육성선수 계약을 받을 수 있고, 남으면 시즌 중 자유계약 선수).`, e.from === off.userTeam);
     }
   }
   enterComp(league, off, store, params);
@@ -1101,9 +1114,14 @@ function suggestDraftProtect(league: LeagueState, off: OffseasonState, d: Protec
     .slice(0, d.limit).map((x) => x.id);
 }
 
-/** 지명 후보: 다른 구단의 보호 명단 밖 선수 */
+/** 이번 오프시즌 FA에서 계약하지 못하고 아직 아무도 데려가지 않은 선수 (2차 드래프트·육성선수 후보) */
+export function unsignedFas(league: LeagueState, off: OffseasonState): LeaguePlayer[] {
+  return league.players.filter((p) => p.team === -1 && p.freeAgent?.since === off.year);
+}
+
+/** 지명 후보: 다른 구단의 보호 명단 밖 선수 (2차 드래프트는 계약하지 못한 FA도, 양도금 없이) */
 export function protectDraftCandidates(league: LeagueState, off: OffseasonState, d: ProtectDraft, team: number): LeaguePlayer[] {
-  const out: LeaguePlayer[] = [];
+  const out: LeaguePlayer[] = d.kind === 'second' ? unsignedFas(league, off) : [];
   for (const t of protectDraftTeams(league, off, d)) {
     if (t === team) continue;
     const prot = new Set(d.protect[String(t)] ?? []);
@@ -1192,7 +1210,7 @@ function finishProtectDrafts(league: LeagueState, off: OffseasonState, store: St
     for (let round = 0; round < rule.rounds + rule.extra; round++) {
       for (const t of order) {
         if (round >= rule.rounds && !bottom.has(t)) continue;
-        const cands = protectDraftCandidates(league, off, d, t).filter((p) => !taken.has(p.id) && (lost.get(p.team) ?? 0) < SECOND_MAX_LOSS);
+        const cands = protectDraftCandidates(league, off, d, t).filter((p) => !taken.has(p.id) && (p.team < 0 || (lost.get(p.team) ?? 0) < SECOND_MAX_LOSS));
         let pick: LeaguePlayer | undefined;
         if (t === off.userTeam) pick = d.wish.map((id) => cands.find((p) => p.id === id)).find((p) => !!p);
         else {
@@ -1202,8 +1220,18 @@ function finishProtectDrafts(league: LeagueState, off: OffseasonState, store: St
         }
         if (!pick) continue;
         const from = pick.team;
-        const fee = rule.fees[Math.min(round, rule.fees.length - 1)];
         taken.add(pick.id);
+        if (from < 0) {
+          // 계약하지 못한 FA: 양도금 없이 최저 연봉 1년 (임시값)
+          pick.team = t;
+          pick.contract = { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
+          delete pick.freeAgent;
+          moveInView(view, view.sim.get(pick.id)!, t);
+          d.picks.push({ round: round + 1, team: t, id: pick.id, from });
+          log(off, 'second', `2차 드래프트 ${round + 1}라운드: ${league.teams[t].name}, 무적 FA ${pick.name} 지명 (양도금 없음, 최저 연봉 1년)`, t === off.userTeam, t === off.userTeam);
+          continue;
+        }
+        const fee = rule.fees[Math.min(round, rule.fees.length - 1)];
         lost.set(from, (lost.get(from) ?? 0) + 1);
         pick.team = t;
         moveInView(view, view.sim.get(pick.id)!, t);
@@ -1908,7 +1936,9 @@ function devContract(off: OffseasonState): Contract {
 export function devPool(league: LeagueState, off: OffseasonState): LeaguePlayer[] {
   const lp = byId(league);
   const ids = new Set([...(off.draft?.pool ?? []), ...(off.devExtra ?? []), ...(off.released ?? []).map((r) => r.id)]);
-  return [...ids].map((id) => lp.get(id)).filter((p): p is LeaguePlayer => !!p && p.team === -1 && !p.foreign && ageIn(p, off.year + 1) <= ruleOf(league, 'devMaxAge'));
+  const young = [...ids].map((id) => lp.get(id)).filter((p): p is LeaguePlayer => !!p && p.team === -1 && !p.foreign && !p.freeAgent && ageIn(p, off.year + 1) <= ruleOf(league, 'devMaxAge'));
+  // 계약하지 못한 FA는 나이와 상관없이 육성선수로 데려올 수 있다 (2026-10-21 사용자 결정)
+  return [...young, ...unsignedFas(league, off)];
 }
 
 /** 정원 정리 단계: 우리 선수를 육성선수로 돌린다 (방출하지 않고 정원에서 뺀다) */
@@ -1935,7 +1965,9 @@ export function signDevByUser(league: LeagueState, off: OffseasonState, id: stri
   p.dev = true;
   p.entryYear ??= off.year + 1;
   p.contract = devContract(off);
-  log(off, 'release', `육성선수 ${p.name} 영입 (최저 연봉)`, true);
+  const fa = !!p.freeAgent;
+  delete p.freeAgent;
+  log(off, 'release', `육성선수 ${p.name} 영입 (${fa ? '무적 FA, ' : ''}최저 연봉)`, true);
   return { ok: true, message: `${p.name}을(를) 육성선수로 데려왔습니다.` };
 }
 
@@ -1982,8 +2014,8 @@ function aiDevMarket(league: LeagueState, off: OffseasonState): void {
       p.dev = false;
     }
   }
-  // 미지명·방출 선수는 최저 연봉이라 기대치가 낮아도 데려간다 (DEV_SIGN_MIN_POTENTIAL)
-  const pool = devPool(league, off).filter((p) => pot(p) >= DEV_SIGN_MIN_POTENTIAL).sort((a, b) => pot(b) - pot(a) || a.id.localeCompare(b.id));
+  // 미지명·방출 선수는 최저 연봉이라 기대치가 낮아도 데려간다 (DEV_SIGN_MIN_POTENTIAL). 계약하지 못한 FA는 따로 (aiSignUnsignedFa)
+  const pool = devPool(league, off).filter((p) => !p.freeAgent && pot(p) >= DEV_SIGN_MIN_POTENTIAL).sort((a, b) => pot(b) - pot(a) || a.id.localeCompare(b.id));
   let i = 0;
   for (let round = 0; round < AI_DEV_TARGET && i < pool.length; round++) {
     for (const t of ai) {
@@ -1995,6 +2027,37 @@ function aiDevMarket(league: LeagueState, off: OffseasonState): void {
       p.entryYear ??= off.year + 1;
       p.contract = devContract(off);
     }
+  }
+}
+
+/** AI 구단이 계약하지 못한 FA를 육성선수로 데려갈 만한 다음 시즌 가치 (런, 임시값) */
+const FA_DEV_MIN_RUNS = 2;
+/** AI 구단이 한 오프시즌에 육성선수로 데려가는 무적 FA 수 (임시값) */
+const FA_DEV_PER_TEAM = 1;
+
+/**
+ * 정원 정리를 마칠 때 AI 구단이 계약하지 못한 FA를 육성선수(최저 연봉)로 데려간다 (2026-10-21 사용자 결정).
+ * 다음 시즌 가치가 높은 선수부터, 성적 역순으로 육성선수 자리가 남은 구단이 하나씩. 잠재력 대신 지금 가치로 본다 (대개 베테랑이라)
+ */
+function aiSignUnsignedFa(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
+  const pool = unsignedFas(league, off);
+  if (!pool.length) return;
+  const view = leagueView(league, store, params);
+  const runs = new Map(pool.map((p) => [p.id, currentRuns(view.sim.get(p.id)!, view.ctx)]));
+  const st = league.lastSeason?.standings ?? [];
+  const order = [...league.teams.map((_, t) => t).filter((t) => !st.includes(t)), ...[...st].reverse()]
+    .filter((t) => t !== off.userTeam && !isFuturesTeam(league, t, off.year + 1));
+  const took = new Map<number, number>();
+  for (const p of pool.filter((x) => runs.get(x.id)! >= FA_DEV_MIN_RUNS).sort((a, b) => runs.get(b.id)! - runs.get(a.id)! || a.id.localeCompare(b.id))) {
+    const t = order.find((x) => (took.get(x) ?? 0) < FA_DEV_PER_TEAM && devCount(league, x) < ruleOf(league, 'devLimit'));
+    if (t === undefined) break;
+    took.set(t, (took.get(t) ?? 0) + 1);
+    const from = p.freeAgent!.from;
+    p.team = t;
+    p.dev = true;
+    p.contract = devContract(off);
+    delete p.freeAgent;
+    log(off, 'release', `${league.teams[t].name}: 무적 FA ${p.name} 육성선수 계약 (최저 연봉)`, from === off.userTeam);
   }
 }
 
@@ -2214,6 +2277,7 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
     case 'release':
       releaseMarket(league, off, store, params);
       aiDevMarket(league, off);
+      aiSignUnsignedFa(league, off, store, params);
       off.stage = 'ready';
       return;
     case 'ready':
@@ -2228,7 +2292,9 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   // 떠나는 선수의 게임 안 통산을 남긴다 (history.ts)
   // 포스팅 요청에 답하지 않았으면 붙잡은 것으로 본다
   archiveDeparting(league, off.year);
-  league.players = league.players.filter((p) => p.team >= 0 || isAbroad(p));
+  // 아무도 데려가지 않은 무적 FA는 다음 시즌 중 자유계약 선수(market.ts)로 남는다
+  for (const p of league.players) if (p.team === -1 && p.freeAgent) p.market = off.year + 1;
+  league.players = league.players.filter((p) => p.team >= 0 || isAbroad(p) || (p.team === -1 && !!p.freeAgent));
   // 코치 빈자리: AI 구단은 자금에 맞춰, 플레이어 구단은 가장 싼 후보로 임시로 채운다 (coaches.ts)
   const left = aiHireCoaches(league, off.coachMarket ?? [], off.year, off.userTeam, (t) => cashOf(league, t));
   if (off.userTeam >= 0) {

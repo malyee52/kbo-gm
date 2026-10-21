@@ -58,6 +58,8 @@ export interface SeedResult {
   faUnsigned: string[];
   /** 요구 연봉 5억 원 이상인데 계약하지 못하고 떠난 FA */
   faLeftBig: number;
+  /** 계약하지 못한 FA 가운데 2차 드래프트·육성선수로 데려간 수 / 끝까지 남아 시즌 중 자유계약이 된 수 (2026-10-21) */
+  faRescued: number; faFree: number;
   cashMinTeam: string;
   offersNone: number;
   /** 결산 직후 자금이 0 이하인 구단 (FA 계약금을 못 내 FA를 잡지 못한다) */
@@ -229,7 +231,9 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
 
   return {
     seed, team: name(teamIdx),
-    teamW: Object.fromEntries(teams.map((x, i) => [name(i), x.w])), top5, lines, faUnsigned, cashMinTeam: name(ci), stars, info, faLeftBig: fa.filter((e) => e.status !== 'signed' && e.ask >= 50000).length, zeroCash, cashSettle, offersNone: regNews.filter((n) => n.text.includes('통화를 마쳤습니다')).length,
+    teamW: Object.fromEntries(teams.map((x, i) => [name(i), x.w])), top5, lines, faUnsigned, cashMinTeam: name(ci), stars, info, faLeftBig: fa.filter((e) => e.status !== 'signed' && e.ask >= 50000).length,
+    faRescued: fa.filter((e) => e.status === 'left' && (L2.players.find((p) => p.id === e.id)?.team ?? -1) >= 0).length,
+    faFree: fa.filter((e) => e.status === 'left' && L2.players.find((p) => p.id === e.id)?.team === -1).length, zeroCash, cashSettle, offersNone: regNews.filter((n) => n.text.includes('통화를 마쳤습니다')).length,
     sd, maxW: Math.max(...teams.map((x) => x.w)), minW: Math.min(...teams.map((x) => x.w)),
     standings: s.standings().map((t) => `${name(t)} ${teams[t].w}-${teams[t].l}-${teams[t].t}`),
     avg, obp, slg, ops: obp + slg, era: (er * 27) / outs, rpg: runs / games, hrPerTeam: hr / teams.length, sbPerTeam: sb / teams.length,
@@ -386,7 +390,7 @@ export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnT
   out.push(`| 다음 해 캡 초과 구단 | ${stat(rs.map((r) => r.capOver), 1)} |`, `| 캡 대비 연봉 (평균 구단) | ${stat(rs.map((r) => r.capShare.mean * 100), 0)}% |`, `| 캡 대비 최대 구단 | ${stat(rs.map((r) => r.capShare.max * 100), 0)}% |`, `| 캡 대비 최소 구단 | ${stat(rs.map((r) => r.capShare.min * 100), 0)}% |`);
   out.push('', '### 첫 오프시즌\n', '| 지표 | 값 |', '|---|---|');
   const r3: [string, (r: SeedResult) => number][] = [
-    ['FA 신청', (r) => r.faEntries], ['FA 이적', (r) => r.faMoved], ['FA 잔류', (r) => r.faStayed], ['FA 미계약', (r) => r.faLeft], ['그중 요구 5억+', (r) => r.faLeftBig],
+    ['FA 신청', (r) => r.faEntries], ['FA 이적', (r) => r.faMoved], ['FA 잔류', (r) => r.faStayed], ['FA 미계약', (r) => r.faLeft], ['그중 요구 5억+', (r) => r.faLeftBig], ['그중 2차 드래프트·육성선수로', (r) => r.faRescued ?? 0], ['그중 시즌 중 자유계약으로', (r) => r.faFree ?? 0],
     ['입대 (리그 합)', (r) => sumBy(r.enlistByTeam, (x) => x)], ['입대 최다 구단', (r) => Math.max(...r.enlistByTeam)], ['입대 최소 구단', (r) => Math.min(...r.enlistByTeam)], ['복무 중 (개막 직전)', (r) => r.servingAfter],
     ['은퇴', (r) => r.retired], ['은퇴 (실존)', (r) => r.retiredReal],
     ['성장 평균 (런)', (r) => r.growth.meanDelta], ['+5런 이상', (r) => r.growth.up5], ['-5런 이하', (r) => r.growth.down5],
