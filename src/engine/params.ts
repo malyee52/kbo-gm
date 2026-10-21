@@ -65,6 +65,8 @@ export interface EngineParams {
   /**
    * 구장 효과 (홈 구장 득점 계수 f, meta.parkFactors): 그 구장 경기의 안타 확률 × f^hitExp, 홈런 확률 × f^hrExp.
    * 능력 산출은 같은 지수로 기록을 중립 구장 기준으로 되돌린다 (시즌 단위 계수 (1 + f) / 2로 나눔)
+   * 2026-10-22 점검 (tools/park_check.ts, reports/park-check.md): 구단별 홈÷원정 득점 비가 f를 기울기 0.98(±0.08)로 따라가 그대로 둔다.
+   * 안타·홈런 지수의 나눔 비(1 : 3)는 득점 계수만으로는 정할 수 없어 임시값이다
    */
   park: { hitExp: number; hrExp: number };
   /** 투수가 체력 한계를 넘긴 뒤 타자 1명마다 나빠지는 정도 (임시값) */
