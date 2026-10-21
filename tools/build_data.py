@@ -31,6 +31,7 @@
                                  bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다
                                  자료집 값과 다르면 하드힛 값을 쓴다 (2026-10-22 사용자 결정, 모든 하드힛 가공값에 같은 규칙)
                                  pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
+                                 park.csv: 구단·연도별 홈 구장 계수 (meta.json의 parkFactors, park_factors 참조)
 """
 import csv
 import json
@@ -551,6 +552,43 @@ def fill_hands(players):
             f'하드힛 투수 {len(seen)}명: 빈 투타 채움 {filled}명, 같음 {same}명, 하드힛 값으로 바꿈 {len(differ)}명, 해마다 손 구분이 갈린 선수 {varies}명.', ''] + [f'- {d}' for d in differ]
 
 
+def park_factors(teams):
+    """하드힛 파크팩터(선수 행의 타석 가중 평균, 홈 경기 절반만 반영한 시즌 단위 값) → 연도 → 계보 → 홈 구장 득점 계수.
+
+    홈 구장 계수 = (2 × 파크팩터 − 100) / 100 (원정 경기는 리그 평균 구장으로 본다). 해마다 구단 평균이 1이 되게 나눈다.
+    자료가 빠진 해(2022, 원본 파일이 2020 자료였다)는 앞뒤 해의 평균, 한쪽만 있으면 그 값 (임시값).
+    2015년 이전은 자료가 없어 넣지 않는다 (엔진에서 1 = 중립)."""
+    raw = {(int(r['연도']), r['계보']): float(r['파크팩터']) for r in hardhit_csv('park.csv')}
+    if not raw:
+        return {}, []
+    first = min(y for y, _ in raw)
+    out, filled = {}, []
+    for y in sorted(teams):
+        if y < first:
+            continue
+        year = {}
+        for t in teams[y]:
+            fr = t['franchise']
+            if (y, fr) in raw:
+                pf = raw[(y, fr)]
+            else:
+                near = [raw[(y + d, fr)] for d in (-1, 1) if (y + d, fr) in raw]
+                if not near:
+                    continue
+                pf = sum(near) / len(near)
+                filled.append(f'{y} {fr}')
+            year[fr] = (2 * pf - 100) / 100
+        mean = sum(year.values()) / len(year)
+        out[str(y)] = {fr: round(v / mean, 3) for fr, v in year.items()}
+    print(f'하드힛 파크팩터: {len(out)}개 연도, 앞뒤 해로 채움 {len(filled)}건')
+    lines = ['', '## 홈 구장 계수 (park.csv → meta.json parkFactors)', '',
+             '홈 구장 계수 = (2 × 파크팩터 − 100) / 100, 해마다 구단 평균 1로 나눔. 앞뒤 해 평균으로 채운 것(임시값): ' + (', '.join(filled) or '없음'), '',
+             '| 연도 | ' + ' | '.join(sorted(next(iter(out.values())))) + ' |', '|---|' + '---:|' * len(next(iter(out.values())))]
+    for y, v in out.items():
+        lines.append(f'| {y} | ' + ' | '.join(f'{v.get(fr, 1):.3f}' for fr in sorted(next(iter(out.values())))) + ' |')
+    return out, lines
+
+
 def profiles_of(wb):
     return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
 
@@ -654,7 +692,8 @@ def main():
         pit[r['시즌']].append(row)
 
     # ---- 하드힛 가공값으로 빈 기록 채우기
-    hardhit_report = fill_running(bat) + hand_report
+    parks, park_report = park_factors(teams)
+    hardhit_report = fill_running(bat) + hand_report + park_report
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -805,6 +844,7 @@ def main():
         'rules': {y: rules_for(y) for y in years}, 'priors': priors,
         **({'foreignOpening': foreign_opening} if foreign_opening else {}),
         'specialEntries': special,
+        **({'parkFactors': parks} if parks else {}),
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)

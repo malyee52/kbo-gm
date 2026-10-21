@@ -39,7 +39,7 @@ export interface StadiumState {
   done?: { kind: 'remodel' | 'new'; open: number; cost: number }[];
   /**
    * 구장 특성 (2026-10-14): 홈런 배율과 돔. 게임 안에서 지은 신구장만 1이 아니다.
-   * 원래 있던 구장은 선수 능력이 그 구장에서 낸 실제 기록에서 나와 구장 효과가 이미 들어 있으므로 1로 둔다 (두 번 세지 않게)
+   * 원래 있던 실제 구장의 효과는 득점 계수(parkRunFactor, meta.parkFactors)로 따로 넣고, 능력 산출이 그만큼 기록에서 걷어 낸다 (2026-10-22)
    */
   hr?: number;
   dome?: boolean;
@@ -78,6 +78,23 @@ export const AI_NEW_BELOW = 35;
 export const AI_NEW_AGE = 25;
 
 /** 경기에 쓰는 구장 특성 (world.ts SimTeam.park) */
+/**
+ * 실제 홈 구장의 득점 계수 (meta.parkFactors, 하드힛 파크팩터 2015~). 1 = 중립.
+ * - 게임 안에서 지은 신구장(done에 'new')은 1: 크기별 홈런 배율(hr)만 쓴다.
+ * - 자료가 있는 해는 그 값. 자료 뒤 해는 같은 실제 구장을 쓰는 동안 자료 마지막 해 값을 이어 쓰고, 실제 새 구장으로 옮겼으면 1 (임시값).
+ * - 2015년 이전은 자료가 없어 1.
+ */
+export function parkRunFactor(parkFactors: Record<string, Record<string, number>> | undefined, franchise: string, year: number,
+                              s: StadiumState | undefined): number {
+  if (!parkFactors || (s?.done ?? []).some((d) => d.kind === 'new')) return 1;
+  const known = parkFactors[String(year)];
+  if (known) return known[franchise] ?? 1;
+  const last = Math.max(...Object.keys(parkFactors).map(Number));
+  if (year < last) return 1;
+  const moved = (realParkAt(franchise, year)?.from ?? 0) > last;
+  return moved ? 1 : (parkFactors[String(last)][franchise] ?? 1);
+}
+
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
   return { hr: s?.hr ?? 1, dome: !!s?.dome };
 }

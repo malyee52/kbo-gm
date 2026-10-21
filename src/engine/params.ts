@@ -62,6 +62,11 @@ export interface EngineParams {
   platoon: number;
   /** 홈 이점. 홈 타자의 안타·홈런·볼넷이 이만큼 늘고 원정은 그만큼 준다 */
   homeEdge: number;
+  /**
+   * 구장 효과 (홈 구장 득점 계수 f, meta.parkFactors): 그 구장 경기의 안타 확률 × f^hitExp, 홈런 확률 × f^hrExp.
+   * 능력 산출은 같은 지수로 기록을 중립 구장 기준으로 되돌린다 (시즌 단위 계수 (1 + f) / 2로 나눔)
+   */
+  park: { hitExp: number; hrExp: number };
   /** 투수가 체력 한계를 넘긴 뒤 타자 1명마다 나빠지는 정도 (임시값) */
   fatiguePerBatter: number;
 
@@ -182,6 +187,8 @@ export const DEFAULT_PARAMS: EngineParams = {
 
   platoon: 0.035,
   homeEdge: 0.013,
+  // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
+  park: { hitExp: 0.4, hrExp: 1.2 },
   fatiguePerBatter: 0.012,
 
   roePerUnearnedShare: 0.2,

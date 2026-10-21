@@ -174,6 +174,11 @@ export interface Meta {
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.
    */
   specialEntries?: Record<string, string[]>;
+  /**
+   * 연도 → 구단 계보 → 홈 구장 득점 계수 (1 = 중립). 하드힛 파크팩터(2015~)에서 build_data.py가 만든다.
+   * 없는 해(2015년 이전)는 중립으로 본다.
+   */
+  parkFactors?: Record<string, Record<string, number>>;
 }
 
 /**

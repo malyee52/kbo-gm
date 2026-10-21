@@ -25,7 +25,8 @@ function finishOffseason(s: GameSession): void {
 beforeAll(() => {
   store = loadDataStore();
   lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'history' }, FAST);
+  // 시드: 게임 안 시즌 홈런이 56개를 넘으면 첫 시험이 성립하지 않는다 (2026-10-22 구장 효과 때 history → history-2)
+  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'history-2' }, FAST);
   g.advance(100000);
   g.beginOffseason();
   finishOffseason(g);

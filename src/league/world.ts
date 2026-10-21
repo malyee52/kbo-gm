@@ -12,7 +12,7 @@ import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
-import { parkFactor } from './stadium';
+import { parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
@@ -93,8 +93,9 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
     // 구장 특성 (stadium.ts): 게임 안에서 지은 신구장만
     const park = parkFactor(league.stadiums?.[idx]);
+    const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 ? { park: { hr: park.hr } } : {}) };
+      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}) } } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
