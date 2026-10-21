@@ -78,7 +78,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           <div>
             <h2 id="player-name">{p.name}{p.foreign && <span className="tag">외국인</span>}</h2>
             <p className="muted">
-              <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투)` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
+              <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' · 언더·사이드' : ''})` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
               {' · '}{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}
               {master?.entryYear ? ` · ${master.entryYear}년 입단` : ''}
             </p>

@@ -105,6 +105,8 @@ export interface LeaguePlayer {
   lastFaYear: number | null;
   /** 직전 시즌 세이브 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (실존은 자료, 가상 투수는 생성 때 실제 비율로). 없으면 정통파 (2026-10-22) */
+  underhand?: boolean;
   /** 불펜 신뢰도 (engine/ratings.ts penTrustOf). 없으면 0 = 능력 순 (2026-10-22 추가, 예전 저장에는 없다) */
   penTrust?: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */

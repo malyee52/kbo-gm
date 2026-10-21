@@ -2526,7 +2526,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   const p = makeVirtual(league, view, rng, taken, {
     foreign: false, asia: false, age, runs: start, potential,
     real: true, name: m?.name ?? d.name, isPitcher, pos, id: m?.id ?? `d${entryYear}-${index + 1}`,
-    birthYear: m ? m.birthYear ?? estimatedBirthYear(m) : undefined, bats: m?.bats, throws: m?.throws,
+    birthYear: m ? m.birthYear ?? estimatedBirthYear(m) : undefined, bats: m?.bats, throws: m?.throws, underhand: m?.underhand,
     starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
   }, entryYear - 1);
   p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
@@ -2572,7 +2572,16 @@ interface VirtualSpec {
   bats?: 'R' | 'L' | 'S';
   throws?: 'R' | 'L';
   starter?: boolean;
+  /** 실존 선수의 언더·사이드 여부 (가상 선수는 makeVirtual이 실제 비율로 정한다) */
+  underhand?: boolean;
 }
+
+/**
+ * 가상 국내 투수가 언더·사이드일 확률 (투구손별). 하드힛 투수 classic 2010~2025 이닝 몫: 우완 중 15.4%, 좌완 중 0.4% (임시값)
+ * 그리고 언더·사이드의 삼진·볼넷 배율 (우완 정통 대비 K/9 6.67 ÷ 7.06, BB/9 3.19 ÷ 3.60, 피홈런은 같음, docs/하드힛_현실감_기획안.md 2.5, 임시값)
+ */
+export const UNDERHAND_SHARE = { R: 0.154, L: 0.004 } as const;
+export const UNDERHAND_SKILL = { so: 0.945, bb: 0.886 } as const;
 
 /** 가상 선수 한 명을 만들어 리그(무소속)에 넣는다. 능력은 리그 평균(모든 비율 1.00) 선수에서 목표 런에 맞게 옮긴다 */
 function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, spec: VirtualSpec, year: number): LeaguePlayer {
@@ -2610,6 +2619,14 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     ...(spec.foreign ? {} : { military: { state: 'pending' as const } }),
   };
   if (p.bat) p.bat.def = makeDefense(p.id, pos, [], p.bat.speed, spec.age);
+  // 투구 유형 (2026-10-22): 실존은 자료 그대로, 가상 국내 투수는 실제 비율로. 공유 난수 흐름을 바꾸지 않게 선수별 시드로 정한다.
+  // 언더·사이드는 삼진·볼넷을 함께 낮추고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
+  const underhand = spec.real ? spec.underhand === true
+    : isPitcher && !spec.foreign && new Rng(`${league.seed}/pitchtype/${p.id}`).chance(UNDERHAND_SHARE[p.throws ?? 'R']);
+  if (underhand && p.pit) {
+    p.underhand = true;
+    p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so, bb: p.pit.bb * UNDERHAND_SKILL.bb };
+  }
   Object.assign(p, skillForRuns(p, spec.runs, view.ctx, nextYear));
   p.potential = Math.max(spec.runs, spec.potential ?? spec.runs + 4 * rng.next());
   league.players.push(p);

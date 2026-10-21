@@ -57,6 +57,8 @@ export interface SimPlayer {
   pit: PitSkill | null;
   /** 직전 시즌 세이브 수 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (자료집·하드힛 투구손 우언·좌언, 가상 투수는 생성 때). 표시용, 엔진 효과는 없다 (2026-10-22) */
+  underhand?: boolean;
   /** 불펜 신뢰도 (ratings.ts penTrustOf): 지난 시즌 실제 쓰임으로 정한 시작 불펜 서열. 없으면 능력 순 (2026-10-22) */
   penTrust?: number;
   /** 타자: 기대 타석 가치(클수록 좋음). 투수: 기대 실점 가치(작을수록 좋음) */

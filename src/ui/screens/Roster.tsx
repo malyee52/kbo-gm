@@ -338,7 +338,7 @@ export function Roster() {
     }
     if (pg === 'ability') {
       return [
-        { h: '나이', v: (p) => p.age ?? '-' }, { h: '투', v: (p) => (p.throws ? HAND[p.throws] : '-') },
+        { h: '나이', v: (p) => p.age ?? '-' }, { h: '투', title: '투구손. 언 = 언더·사이드', v: (p) => (p.throws ? `${HAND[p.throws]}${p.underhand ? '언' : ''}` : '-') },
         { h: '구위', v: (p) => <Grade v={grades.pitchers.get(p.id)?.stuff} /> },
         { h: '제구', v: (p) => <Grade v={grades.pitchers.get(p.id)?.control} /> },
         { h: '장타 억제', v: (p) => <Grade v={grades.pitchers.get(p.id)?.hrSuppression} /> },
@@ -420,7 +420,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
   return (
     <aside className="card roster-side" aria-label={`${p.name} 요약`}>
       <header className="side-head">
-        <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
+        <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' (언더·사이드)' : ''}` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
         <strong>{p.name}{p.foreign && <span className="tag">외국인</span>}</strong>
       </header>
       <div className="side-body">

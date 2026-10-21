@@ -313,6 +313,7 @@ export function buildWorld(input: BuildWorldInput): World {
       pit,
       lastSaves,
       ...(penTrust > 0 ? { penTrust } : {}),
+      ...(isPitcher && m.underhand ? { underhand: true } : {}),
       value: bat ? batValue(bat, lg) : pitValue(pit!, lg),
       debutEstimate,
       real: m.real,
