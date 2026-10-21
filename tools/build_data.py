@@ -28,7 +28,8 @@
                                  이것만 다시 만들려면: build_data.py --managers-only
   data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
                                  원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
-                                 bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다 (값이 있으면 자료집 값을 두고 다른 건수만 센다)
+                                 bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다
+                                 자료집 값과 다르면 하드힛 값을 쓴다 (2026-10-22 사용자 결정, 모든 하드힛 가공값에 같은 규칙)
                                  pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
 """
 import csv
@@ -469,7 +470,8 @@ def hardhit_csv(name):
 
 
 def fill_running(bat):
-    """하드힛 도루·도루실패·병살타로 자료집의 빈 값을 채운다. 값이 이미 있는데 다르면 자료집 값을 두고 센다.
+    """하드힛 도루·도루실패·병살타로 자료집의 빈 값을 채운다. 값이 이미 있는데 다르면 하드힛 값으로 바꾼다
+    (2026-10-22 사용자 결정: 같은 값이 서로 다르면 하드힛 값을 쓴다).
     → 보고서 줄 목록"""
     hh = {(int(r['연도']), r['선수ID']): r for r in hardhit_csv('bat_running.csv')}
     if not hh:
@@ -494,26 +496,27 @@ def fill_running(bat):
                     filled[f] += 1
                     filled_y[y][f] += 1
                 elif cur != v:
+                    row[idx[f]] = v
                     differ[f] += 1
-                    if len(examples[f]) < 10:
+                    if len(examples[f]) < 20:
                         examples[f].append(f'{y} {row[0]} 자료집 {cur} / 하드힛 {v}')
                 else:
                     same[f] += 1
     out = ['## 타자 도루·도루실패·병살타 (bat_running.csv)', '',
-           '빈 값은 하드힛 값으로 채우고, 값이 있으면 자료집 값을 둔다 (다른 건수만 센다).', '',
-           '| 항목 | 채움 | 같음 | 다름(자료집 값 유지) |', '|---|---:|---:|---:|']
+           '빈 값은 하드힛 값으로 채우고, 값이 있는데 다르면 하드힛 값으로 바꾼다 (2026-10-22 사용자 결정).', '',
+           '| 항목 | 채움 | 같음 | 하드힛 값으로 바꿈 |', '|---|---:|---:|---:|']
     out += [f'| {k} | {filled[f]} | {same[f]} | {differ[f]} |' for f, k in cols]
     out += ['', '연도별 채움 (도루 / 도루실패 / 병살타):', '']
     out += [f'- {y}: {d["sb"]} / {d["cs"]} / {d["gdp"]}' for y, d in sorted(filled_y.items())]
     for f, k in cols:
         if examples[f]:
-            out += ['', f'{k} 다른 예 (연도 선수ID):', ''] + [f'- {e}' for e in examples[f]]
-    print(f'하드힛 채움: 도루 {filled["sb"]}, 도루실패 {filled["cs"]}, 병살타 {filled["gdp"]} / 다름(자료집 유지) {dict(differ)}')
+            out += ['', f'{k} 하드힛 값으로 바꾼 것 (연도 선수ID):', ''] + [f'- {e}' for e in examples[f]]
+    print(f'하드힛 채움: 도루 {filled["sb"]}, 도루실패 {filled["cs"]}, 병살타 {filled["gdp"]} / 하드힛 값으로 바꿈 {dict(differ)}')
     return out
 
 
 def fill_hands(players):
-    """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있으면 다른 건수만 센다.
+    """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있는데 다르면 하드힛 값으로 바꾼다.
     → 보고서 줄 목록"""
     seen = defaultdict(lambda: defaultdict(int))
     for r in hardhit_csv('pitch_hand.csv'):
@@ -536,11 +539,16 @@ def fill_hands(players):
             filled += 1
         elif p['throws'] != th or bool(p.get('underhand')) != under:
             differ.append(f'{p["name"]}({pid}) 자료집 {p["throws"]}{" 언더" if p.get("underhand") else ""} / 하드힛 {th}{" 언더" if under else ""}')
+            p['throws'] = th
+            if under:
+                p['underhand'] = True
+            else:
+                p.pop('underhand', None)
         else:
             same += 1
-    print(f'하드힛 투구손: 채움 {filled}, 같음 {same}, 다름(자료집 유지) {len(differ)}, 해마다 갈림 {varies}')
+    print(f'하드힛 투구손: 채움 {filled}, 같음 {same}, 하드힛 값으로 바꿈 {len(differ)}, 해마다 갈림 {varies}')
     return ['', '## 투수 투구손 (pitch_hand.csv)', '',
-            f'하드힛 투수 {len(seen)}명: 빈 투타 채움 {filled}명, 같음 {same}명, 다름 {len(differ)}명(자료집 값 유지), 해마다 손 구분이 갈린 선수 {varies}명.', ''] + [f'- {d}' for d in differ]
+            f'하드힛 투수 {len(seen)}명: 빈 투타 채움 {filled}명, 같음 {same}명, 하드힛 값으로 바꿈 {len(differ)}명, 해마다 손 구분이 갈린 선수 {varies}명.', ''] + [f'- {d}' for d in differ]
 
 
 def profiles_of(wb):
