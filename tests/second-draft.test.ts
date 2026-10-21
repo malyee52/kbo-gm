@@ -28,7 +28,7 @@ describe('2차 드래프트', () => {
   });
 
   it('2025: 보호 35명, 우리 명단을 고치고 지명 희망대로 데려온다. 자동 제외 대상은 지명되지 않고, 양도금이 장부에 남는다', () => {
-    const g = toSecond(2025, 'sd-1');
+    const g = toSecond(2025, 'sd-3');
     const off = g.offseason!;
     expect(off.stage).toBe('second');
     const d = off.second!;

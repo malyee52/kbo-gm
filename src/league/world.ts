@@ -122,6 +122,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       bat,
       pit,
       lastSaves: lp.lastSaves,
+      ...(lp.penTrust ? { penTrust: lp.penTrust } : {}),
       value: lp.isPitcher ? pitValue(pit!, lg) : batValue(bat!, lg),
       debutEstimate: lp.estimated,
       real: lp.real,

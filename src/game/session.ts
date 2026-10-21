@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -1375,10 +1375,11 @@ export class GameSession {
     if (pl.rotation.includes(p.idx)) return 'SP';
     const r = pl.pen?.[p.idx];
     if (r) return r;
-    // 역할을 아무것도 정하지 않았으면 AI 감독처럼 마무리를 뺀 불펜 서열 1·2번째를 필승조로 보인다 (game.ts pickReliever)
+    // 역할을 아무것도 정하지 않았으면 AI 감독처럼 마무리를 뺀 불펜 서열 1·2번째를 필승조로 보인다 (game.ts pickReliever·bullpenOrder:
+    // 개막에는 지난 시즌 실제 쓰임 순, 시즌이 지나며 능력 순)
     if (!pl.pen || !Object.keys(pl.pen).length) {
       const ts = this.activeTeam();
-      const order = ts.bullpen.filter((x) => x.idx !== pl.closer && !pl.rotation.includes(x.idx)).sort((a, b) => a.value - b.value);
+      const order = bullpenOrder(ts.bullpen.filter((x) => x.idx !== pl.closer && !pl.rotation.includes(x.idx)), this.season.day, this.params.penBlendDays);
       const k = order.findIndex((x) => x.idx === p.idx);
       if (k >= 0 && k < 2) return 'SU';
     }

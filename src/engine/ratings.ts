@@ -244,6 +244,7 @@ export function buildWorld(input: BuildWorldInput): World {
     let debutEstimate = false;
     let pos: string | null = null;
     let lastSaves = 0;
+    let penTrust = 0;
 
     if (isPitcher) {
       const rows: Weighted<PitRow>[] = [];
@@ -259,6 +260,9 @@ export function buildWorld(input: BuildWorldInput): World {
       pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, rp);
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
+      // 시작 불펜 서열: 세이브와 같은 기준 시즌(예측은 직전, 역사 재현은 그 해)의 실제 쓰임
+      const usage = seasonBasis || debutEstimate ? pRow : histPit[0]?.get(id);
+      if (usage) penTrust = penTrustOf(usage.g - (usage.gs ?? 0), usage.sv, usage.hld ?? 0, usage.gmli ?? null);
     } else {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
@@ -308,6 +312,7 @@ export function buildWorld(input: BuildWorldInput): World {
       bat,
       pit,
       lastSaves,
+      ...(penTrust > 0 ? { penTrust } : {}),
       value: bat ? batValue(bat, lg) : pitValue(pit!, lg),
       debutEstimate,
       real: m.real,
@@ -337,4 +342,15 @@ export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' 
     unearnedRun: params.unearnedRunScale * league.unearnedShare,
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
   };
+}
+
+/**
+ * 불펜 신뢰도 (2026-10-22, docs/하드힛_현실감_기획안.md 2.1): 감독이 지난 시즌 이 구원 투수를 얼마나 중요한 상황에 썼나. 클수록 앞 순번.
+ * gmLI(등판 때 평균 레버리지, 하드힛 2010~)가 있으면 그 값, 없으면 1 + (세이브 + 홀드) ÷ 구원 등판 (마무리 약 1.5, 셋업 약 1.3, 추격조 1).
+ * 구원 등판이 10번 미만이면 0 (쓰임을 알 수 없음 → 능력 순)
+ */
+export function penTrustOf(reliefGames: number, sv: number, hld: number, gmli: number | null): number {
+  if (reliefGames < 10) return 0;
+  if (gmli !== null && gmli > 0) return gmli;
+  return 1 + (sv + hld) / reliefGames;
 }

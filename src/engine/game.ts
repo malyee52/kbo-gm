@@ -272,6 +272,19 @@ function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
  * 좋은 순 1·2번째를 필승조(8회·7회 셋업), 나머지를 추격조로 본다 (롱릴리프는 그중 가장 길게 던지는 투수).
  * 역할 나누기와 점수 차 기준은 임시값.
  */
+/**
+ * 불펜 서열 (2026-10-22, docs/하드힛_현실감_기획안.md 2.1). 개막에는 지난 시즌 실제 쓰임 순(penTrust 큰 순, 쓰임을 모르는 투수는 그 뒤에 능력 순),
+ * blendDays가 지나면 능력 순. 그 사이는 두 순위를 날짜 비율로 섞는다. 난수를 쓰지 않는다
+ */
+export function bullpenOrder(pen: SimPlayer[], day: number, blendDays: number): SimPlayer[] {
+  const byValue = [...pen].sort((a, b) => a.value - b.value);
+  const w = blendDays > 0 ? Math.min(1, Math.max(0, day / blendDays)) : 1;
+  if (w >= 1 || !pen.some((p) => p.penTrust)) return byValue;
+  const byTrust = [...byValue].sort((a, b) => (b.penTrust ?? 0) - (a.penTrust ?? 0));
+  const key = new Map(pen.map((p) => [p, (1 - w) * byTrust.indexOf(p) + w * byValue.indexOf(p)]));
+  return byValue.sort((a, b) => key.get(a)! - key.get(b)! || a.value - b.value);
+}
+
 function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext): SimPlayer | null {
   const { ts } = fld;
   const st = ctx.states;
@@ -287,8 +300,8 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
   const closerOk = !!closer && pool.includes(closer);
   // 마무리: 9회 이후 3점 차 이내 리드, 또는 9회 이후 동점(홈은 끝내기를 기다리며, 원정은 연장)
   if (closerOk && inning >= 9 && lead >= 0 && lead <= 3) return closer;
-  // 불펜 서열: 좋은 순 (value가 낮을수록 좋다). 마무리는 빼고
-  const order = ts.bullpen.filter((p) => p !== closer).sort((a, b) => a.value - b.value);
+  // 불펜 서열 (마무리는 빼고): 능력 순(value가 낮을수록 좋다)과 지난 시즌 실제 쓰임 순(penTrust)을 날짜에 따라 섞는다
+  const order = bullpenOrder(ts.bullpen.filter((p) => p !== closer), ctx.day, ctx.params.penBlendDays);
   const avail = order.filter((p) => pool.includes(p));
   if (avail.length === 0) return closerOk ? closer : null;
   const rank = (p: SimPlayer) => order.indexOf(p);

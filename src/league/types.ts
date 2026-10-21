@@ -105,6 +105,8 @@ export interface LeaguePlayer {
   lastFaYear: number | null;
   /** 직전 시즌 세이브 (마무리 지정용) */
   lastSaves: number;
+  /** 불펜 신뢰도 (engine/ratings.ts penTrustOf). 없으면 0 = 능력 순 (2026-10-22 추가, 예전 저장에는 없다) */
+  penTrust?: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
   /** 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다 */

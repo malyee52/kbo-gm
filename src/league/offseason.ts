@@ -13,7 +13,7 @@ import { archiveDeparting } from './history';
 import { envFrom } from './war';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
-  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, Rng, traitsOf,
+  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, penTrustOf, Rng, traitsOf,
   type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -383,6 +383,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       ...futuresRecord(futById.get(sp.id)),
     });
     p.lastSaves = pt.sv;
+    const trust = penTrustOf(pt.g - pt.gs, pt.sv, pt.hld, null);
+    if (trust > 0) p.penTrust = trust;
+    else delete p.penTrust;
     if (season.activeDays[sp.idx] >= SERVICE_SHARE * season.teams[team].g) p.service++;
 
     // 부상 후유증 (careers.ts): 잠재력·능력 감소, 다음 시즌으로 넘어가는 결장
