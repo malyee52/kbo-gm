@@ -9,6 +9,7 @@
   data-src/hardhit_derived/pitch_hand.csv    투수 투구손·언더핸드 (1982~, 투수 classic 파일의 투구손 구분 _좌/_우/_좌언/_우언)
   data-src/hardhit_derived/clutch_bat.csv    타자 클러치·득점권 (2015~, 타자 clutch): WPA, WPA/LI, CLUTCH, pLI, 득점권 타율, SD/MD
   data-src/hardhit_derived/clutch_pit.csv    투수 상황 기록 (1982~, 투수 situation): WPA, RE24, SD/MD, gmLI, pLI, 홀드, 세이브, 블론
+  data-src/hardhit_derived/park.csv          구단(계보)·연도별 파크팩터 (2015~, 타자 saber 선수 행의 타석 가중 평균)
   reports/hardhit-unmatched.md               연결률과 못 맞춘 행
 
 원본 표를 그대로 옮기지 않고, 게임 선수 ID에 연결한 필요한 값만 남긴다.
@@ -207,6 +208,28 @@ def clutch_pit(M, log, names, fill):
     write_csv('clutch_pit.csv', ['연도', '선수ID', '보직', '경기', '아웃', 'WPA', 'RE24', 'SD', 'MD', 'gmLI', 'pLI', '홀드', '세이브', '블론'], out)
 
 
+def park(M, log):
+    """타자 saber (2015~)의 선수별 파크팩터 → 연도, 계보, 파크팩터, 타석
+
+    선수 행의 파크팩터는 그 선수가 뛴 구장들을 섞은 시즌 단위 값이다 (100 = 중립, 홈 경기 절반만 반영한 값).
+    구단별로 타석 가중 평균을 낸다. 홈 구장 자체의 계수는 build_data.py에서 2 × 값 − 100으로 바꾼다."""
+    agg = defaultdict(lambda: [0.0, 0.0])
+    for y, _, p in files('batter', 'saber'):
+        if y not in M.seasons:
+            continue
+        for r in read_file(p)[1]:
+            pid, why = M.match(y, r['이름'], r['팀'], num(r['나이']), 'bat', {'pa': num(r['타석'])})
+            log.add('타자 saber', y, None, r, pid, why)
+            pf, pa = num(r['파크팩터']), num(r['타석'])
+            fr = M.franchise(r['팀'], y)
+            if pf is None or not pa or not fr:
+                continue
+            agg[(y, fr)][0] += pf * pa
+            agg[(y, fr)][1] += pa
+    out = [[y, fr, round(a / b, 2), int(b)] for (y, fr), (a, b) in sorted(agg.items())]
+    write_csv('park.csv', ['연도', '계보', '파크팩터', '타석'], out)
+
+
 def main():
     if not RAW.exists():
         raise SystemExit(f'원본 폴더가 없다: {RAW} (하드힛 CSV는 사용자가 직접 받아 넣는다)')
@@ -219,6 +242,7 @@ def main():
     fill = defaultdict(Counter)
     clutch_bat(M, log)
     clutch_pit(M, log, names, fill)
+    park(M, log)
     extra += ['## 이름이 가려진 투수 표 (saber·situation)', '',
               '같은 연도·같은 손의 kbb(와 classic) 파일과 (나이, 보직, 경기, 이닝)으로 맞대 이름과 팀을 채웠다. 둘 이상 맞으면 kbb와 공통인 열(SD, MD, gmLI, pLI, BABIP, K%, BB%)이 모두 같은 한 명으로 가르고, 그래도 둘 이상이면 짐작하지 않고 비운다.', '',
               '| 표 | 채움 | 그중 겹침을 공통 열로 가름 | 겹침(비움) | 못 맞춤 |', '|---|---:|---:|---:|---:|']
