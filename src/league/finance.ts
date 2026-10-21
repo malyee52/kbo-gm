@@ -149,13 +149,13 @@ export interface FinanceYear {
 }
 
 export type FinanceKind =
-  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
+  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
-  parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
+  parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
 };
@@ -522,7 +522,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
-    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start' && k !== 'dividend') items[k] = other[k];
+    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'faSupport' && k !== 'start' && k !== 'dividend') items[k] = other[k];
     // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다
     if (other.stadium) items.stadium = other.stadium;
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
@@ -548,6 +548,18 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
   league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
   return out;
+}
+
+/**
+ * FA 계약금 중 자금이 모자란 몫을 모기업이 대 준다 (2026-10-21 사용자: "대줘"). AI 구단·플레이어 구단 모두.
+ * 장부에 '모기업 지원 (FA 계약금)'으로 남기고 지원액을 돌려준다 (없으면 0).
+ * 구단주 평가와는 잇지 않는다: 결산 수지(net)와 긴급 지원(rescue)에 넣지 않는다
+ */
+export function coverFaBonus(league: LeagueState, team: number, bonus: number, year: number, who: string): number {
+  const need = Math.round(bonus - Math.max(0, cashOf(league, team)));
+  if (need <= 0) return 0;
+  league.ledger.push({ year, from: -1, to: team, amount: need, note: `${who} FA 계약금 모기업 지원`, kind: 'faSupport' });
+  return need;
 }
 
 /** 적자 보전에 따른 구단주 신뢰도 변화 (−(메운 금액 ÷ 20억), 최대 −15). 흑자면 +2 */

@@ -40,7 +40,7 @@ import { isFuturesTeam, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
+  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, cashOf, coverFaBonus, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
 } from './finance';
 import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
@@ -809,13 +809,10 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
       return { ok: false, message: `외부 FA는 한 오프시즌에 ${ruleOf(league, 'maxFaSignings')}명까지 데려올 수 있습니다 (계약 ${off.fa.signings[t]}명, 이번 라운드 다른 외부 제시 ${pending}명${left ? `, 남은 자리 ${left}명` : ''}). 다른 제시를 거두면 제시할 수 있습니다.` };
     }
   }
-  // 계약금: 이번 라운드 다른 제시의 계약금까지 합쳐 지금 자금으로 낼 수 있어야 한다 (finance.ts)
+  // 계약금: 이번 라운드 다른 제시의 계약금까지 합쳐 지금 자금이 모자라면 계약할 때 모기업이 모자란 몫을 대 준다 (finance.ts coverFaBonus)
   const bonus = signingBonus(salary, years);
   const otherBonus = Object.entries(off.fa.userOffers).filter(([k]) => k !== id).reduce((s, [, o]) => s + signingBonus(o.salary, o.years), 0);
-  const cash = cashOf(league, t);
-  if (bonus + otherBonus > cash) {
-    return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 30%)${otherBonus ? `과 다른 제시의 계약금 ${(otherBonus / 10000).toFixed(1)}억 원` : ''}을 낼 자금이 모자랍니다 (자금 ${(cash / 10000).toFixed(1)}억 원).` };
-  }
+  const short = bonus + otherBonus - Math.max(0, cashOf(league, t));
   const limit = spendLimit(league, t, off.year + 1);
   if (limit !== null) {
     const p = league.players.find((x) => x.id === id)!;
@@ -828,7 +825,8 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
     }
   }
   off.fa.userOffers[id] = { team: t, salary: Math.round(salary), years };
-  return { ok: true, message: '제시했습니다. 라운드가 끝나면 선수가 답합니다.' };
+  const help = short > 0 ? ` 계약하면 자금이 모자란 계약금 약 ${(Math.min(bonus, short) / 10000).toFixed(1)}억 원은 모기업이 지원합니다.` : '';
+  return { ok: true, message: `제시했습니다. 라운드가 끝나면 선수가 답합니다.${help}` };
 }
 
 export function withdrawFa(off: OffseasonState, id: string): void {
@@ -860,7 +858,6 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
       const base = e.ask * FA_AI_OFFER[round - 1];
       if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + base > limits[t]!) continue;
-      if (cashOf(league, t) < signingBonus(base * 1.15, e.years)) continue; // 계약금을 낼 자금
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
       const comp = home || e.returnee ? 0 : COMPENSATION[e.grade] * e.prevSalary;
       // 단장 성향 (gm.ts): 윈나우형은 적극적, 짠돌이형은 소극적, 육성형은 28세 이하만 적극적
@@ -913,7 +910,6 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (!home && worth < MIN_SALARY) continue;
       const salary = Math.max(MIN_SALARY, Math.round(Math.min(e.ask * 0.8, worth)));
       if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + salary > limits[t]!) continue;
-      if (cashOf(league, t) < signingBonus(salary, 1)) continue; // 계약금을 낼 자금
       if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years: 1 };
     }
     if (best) {
@@ -1238,7 +1234,10 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
   p.team = o.team;
   const bonus = signingBonus(o.salary, o.years);
   p.contract = { kind: 'fa', salary: o.salary, until: year + o.years, prepaid: Math.round(bonus / o.years) };
+  // 자금이 모자라면 모기업이 모자란 몫을 대 준다 (2026-10-21 사용자 결정, finance.ts coverFaBonus)
+  const support = coverFaBonus(league, o.team, bonus, year + 1, p.name);
   league.ledger.push({ year: year + 1, from: o.team, to: -1, amount: bonus, note: `${p.name} FA 계약금`, kind: 'signing' });
+  if (support) log(off, 'fa', `${p.name} FA 계약금 중 자금이 모자란 ${(support / 10000).toFixed(1)}억 원을 모기업이 지원했습니다.`, o.team === off.userTeam, o.team === off.userTeam);
   p.faCount++;
   p.lastFaYear = year + 1;
   p.service = 0;

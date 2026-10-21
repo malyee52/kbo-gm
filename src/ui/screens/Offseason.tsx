@@ -398,7 +398,7 @@ function FaPanel({ act }: { act: Act }) {
         <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {ruleOf(session.league, 'maxFaSignings')}명</p>
         <p className="small">
           지금 자금 <strong>{won(session.cashNow())}</strong> · 계약금은 계약 총액(연봉 × 기간)의 30%를 계약할 때 한 번에 내고, 나머지는 시즌 중 월말에 나갑니다.
-          계약금을 낼 자금이 없으면 제시할 수 없습니다 (이번 라운드의 다른 제시 계약금까지 합쳐서).
+          계약금을 낼 자금이 모자라면 계약할 때 모기업이 모자란 몫을 지원합니다 (장부에 '모기업 지원 (FA 계약금)').
         </p>
         <CapLine />
         {mineLeaving.length > 0 && (

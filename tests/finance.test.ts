@@ -152,20 +152,18 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     g.beginOffseason();
   }, 120_000);
 
-  it('FA: 계약금(총액의 30%)을 낼 자금이 없으면 제시할 수 없고, 계약하면 계약금이 장부에 남고 그만큼 월말 연봉에서 빠진다', () => {
+  it('FA: 계약하면 계약금(총액의 30%)이 장부에 남고 그만큼 월말 연봉에서 빠진다. 자금이 모자라면 모기업이 모자란 몫을 대 준다', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
     // 자금으로 계약금을 낼 수 있는 FA (시즌 결과에 따라 첫 FA가 너무 비쌀 수 있다)
     const cash = cashOf(h.league, lg);
     const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < cash * 0.8)!;
     expect(e).toBeDefined();
-    // 자금을 바닥내면 제시가 막힌다
+    // 자금을 바닥내도 제시할 수 있고, 계약하면 모자란 계약금을 모기업이 대 준다 (2026-10-21 사용자 결정. 그 전에는 제시가 막혔다)
     h.league.ledger.push({ year: 2027, from: lg, to: -1, amount: cash, note: '테스트 지출' });
     const salary = Math.round(e.ask * 1.3);
     const r = h.offerFa(e.id, salary, e.years);
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain('계약금');
-    h.league.ledger.pop();
-    expect(h.offerFa(e.id, salary, e.years)).toMatchObject({ ok: true });
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain('모기업');
     h.nextStage();
     const p = h.leaguePlayer(e.id)!;
     expect(p.team).toBe(lg);
@@ -173,6 +171,10 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     expect(fee.amount).toBe(signingBonus(salary, e.years));
     expect(fee.from).toBe(lg);
     expect(payOf(p)).toBe(salary - Math.round(fee.amount / e.years));
+    const help = h.league.ledger.find((x) => x.kind === 'faSupport' && x.note.startsWith(p.name))!;
+    expect(help).toMatchObject({ from: -1, to: lg, amount: fee.amount });
+    expect(cashOf(h.league, lg)).toBe(0);
+    expect(h.offseason!.log.some((l) => l.mine && l.text.includes('모기업이 지원'))).toBe(true);
   });
 
   it('외국인: 새 후보에는 이적료가 붙고, 계약하면 자금에서 나간다. 자금이 모자라면 계약할 수 없다', () => {
