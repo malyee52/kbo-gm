@@ -9,7 +9,7 @@ import { injuryScale } from './traits';
 import { eraPitching } from './eras';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
-import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -208,6 +208,8 @@ export interface SeasonSave {
   rngEvents?: number;
   /** 구단별 기용표 (선수 색인) */
   plans?: (DepthPlan | null)[];
+  /** 엔트리 순환 대상 부진 투수: [순환 주기, 선수 색인들]. 2026-10-21 추가, 예전 저장에는 없다 (불러온 날 기록으로 다시 정한다) */
+  slump?: [number, number[]];
 }
 
 /** 월드의 선수 구성 지문 (FNV-1a) */
@@ -265,6 +267,9 @@ export class Season {
   readonly activeDays: Int32Array;
   /** 직접 관리 1군에서 마지막으로 말소된 날 (−1 = 없음) */
   readonly demotedDay: Int32Array;
+  /** 엔트리 순환 대상인 부진한 투수: 순환 주기(slumpCycle)가 시작할 때 기록으로 정해 그 주기 동안 그대로 쓴다 (저장에 넣는다) */
+  private slump: Uint8Array | null = null;
+  private slumpCycle = -1;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
   constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
@@ -375,10 +380,22 @@ export class Season {
     this.transfers.push([this.day, playerIdx, toTeam]);
   }
 
+  /** 그날 순환 주기의 부진한 투수 (EngineParams.churnSlump이 없으면 null = 모든 국내 투수가 순환 대상) */
+  private slumpOn(day: number): Uint8Array | null {
+    const rule = this.params.churnSlump;
+    if (!rule || !(this.params.rosterChurn ?? 0)) return null;
+    const cycle = Math.floor(day / CHURN_DAYS);
+    if (cycle !== this.slumpCycle || !this.slump) {
+      this.slump = slumpingPitchers(this.world, this.pit, rule);
+      this.slumpCycle = cycle;
+    }
+    return this.slump;
+  }
+
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
   refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     return ts;
   }
 
@@ -413,7 +430,7 @@ export class Season {
         }
       }
     }
-    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0);
+    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
     for (const g of games) {
       for (const ts of [season[g.home], season[g.away]]) {
         for (const p of ts.hitters) this.activeDays[p.idx]++;
@@ -524,8 +541,8 @@ export class Season {
     const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
-    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
-    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
+    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
+    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const hl = todaysLineup(h, this.world.league, params, rng);
     const al = todaysLineup(a, this.world.league, params, rng);
     const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
@@ -608,6 +625,7 @@ export class Season {
       absences: this.absences.map((a) => ({ ...a })),
       rngEvents: this.eventRng.state(),
       plans: this.teamSeasons.map((ts) => (ts.plan ? structuredClone(ts.plan) : null)),
+      ...(this.slump ? { slump: [this.slumpCycle, [...this.slump.keys()].filter((i) => this.slump![i])] as [number, number[]] } : {}),
     };
   }
 
@@ -646,6 +664,11 @@ export class Season {
     save.manual.forEach((m, i) => { s.teamSeasons[i].manual = m ? new Set(m) : null; });
     (save.plans ?? []).forEach((pl, i) => { s.teamSeasons[i].plan = pl ? structuredClone(pl) : null; });
     s.fixedAbsence = new Map(save.fixedAbsence);
+    if (save.slump) {
+      s.slump = new Uint8Array(world.players.length);
+      for (const i of save.slump[1]) if (i < s.slump.length) s.slump[i] = 1;
+      s.slumpCycle = save.slump[0];
+    }
     return s;
   }
 }

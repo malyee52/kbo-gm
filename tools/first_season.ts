@@ -51,6 +51,8 @@ export interface SeedResult {
   rosterSizes: { min: number; max: number };
   /** 구단별 승 (구단 이름 → 승) */
   teamW: Record<string, number>;
+  /** 구단별 이닝 상위 5명 비중 (구단 이름 → 비중, 정규시즌. 소속은 시즌 끝 기준) */
+  top5: Record<string, number>;
   /** 선수별 주요 기록 (이름(구단) → 값): 반복 독식 확인용 */
   lines: Record<string, { hr: number; rbi: number; avg: number; pa: number; so: number; w: number; sv: number; hld: number; era: number; ip: number }>;
   faUnsigned: string[];
@@ -69,6 +71,12 @@ export interface SeedResult {
 }
 
 const lineTeamOf = (p: { teamIdx: number; formerTeam?: number }) => (p.teamIdx >= 0 ? p.teamIdx : p.formerTeam ?? -1);
+
+/** 큰 값 n개가 합에서 차지하는 비중 */
+function topShare(v: number[], n: number): number {
+  const tot = v.reduce((a, b) => a + b, 0);
+  return tot ? [...v].sort((a, b) => b - a).slice(0, n).reduce((a, b) => a + b, 0) / tot : 0;
+}
 
 function sumBy<T>(xs: T[], f: (x: T) => number): number { return xs.reduce((s, x) => s + f(x), 0); }
 
@@ -116,6 +124,11 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
   const abs = s.absences;
   const len = s.schedule.length;
   const inj = abs.filter((a) => a.kind !== 'event');
+
+  // 구단별 이닝 상위 5명 비중
+  const outsBy = teams.map(() => [] as number[]);
+  for (const p of players) { const t = lineTeamOf(p); if (t >= 0 && P[p.idx].outs > 0) outsBy[t].push(P[p.idx].outs); }
+  const top5 = Object.fromEntries(outsBy.map((v, t) => [name(t), topShare(v, 5)]));
 
   // 정규시즌 알림 (결산 전)
   const regNews = g.news.filter((n) => n.year === year);
@@ -216,7 +229,7 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
 
   return {
     seed, team: name(teamIdx),
-    teamW: Object.fromEntries(teams.map((x, i) => [name(i), x.w])), lines, faUnsigned, cashMinTeam: name(ci), stars, info, faLeftBig: fa.filter((e) => e.status !== 'signed' && e.ask >= 50000).length, zeroCash, cashSettle, offersNone: regNews.filter((n) => n.text.includes('통화를 마쳤습니다')).length,
+    teamW: Object.fromEntries(teams.map((x, i) => [name(i), x.w])), top5, lines, faUnsigned, cashMinTeam: name(ci), stars, info, faLeftBig: fa.filter((e) => e.status !== 'signed' && e.ask >= 50000).length, zeroCash, cashSettle, offersNone: regNews.filter((n) => n.text.includes('통화를 마쳤습니다')).length,
     sd, maxW: Math.max(...teams.map((x) => x.w)), minW: Math.min(...teams.map((x) => x.w)),
     standings: s.standings().map((t) => `${name(t)} ${teams[t].w}-${teams[t].l}-${teams[t].t}`),
     avg, obp, slg, ops: obp + slg, era: (er * 27) / outs, rpg: runs / games, hrPerTeam: hr / teams.length, sbPerTeam: sb / teams.length,
@@ -322,6 +335,14 @@ export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnT
   const realW = new Map((real?.teams ?? []).map((t) => [t.name, `${t.w} (${t.g})`]));
   const tnames = Object.keys(rs[0].teamW).sort((a, b) => sumBy(rs, (r) => r.teamW[b]) - sumBy(rs, (r) => r.teamW[a]));
   for (const t of tnames) out.push(`| ${t} | ${stat(rs.map((r) => r.teamW[t]), 1)} | ${realW.get(t) ?? '-'} |`);
+  // 구단별 이닝 상위 5명 비중 (실제는 그 해 기록의 구단 열)
+  const realOuts = new Map<string, number[]>();
+  for (const r of real?.pit ?? []) { if (r.outs > 0) { const v = realOuts.get(r.team) ?? []; v.push(r.outs); realOuts.set(r.team, v); } }
+  const realTop5 = new Map([...realOuts].map(([t, v]) => [t, topShare(v, 5)]));
+  out.push('', '### 구단별 이닝 상위 5명 비중 (시뮬 평균·범위, 실제)\n', '| 구단 | 시뮬 | 실제 |', '|---|---|---|');
+  for (const t of tnames) out.push(`| ${t} | ${stat(rs.map((r) => r.top5[t]), 3)} | ${realTop5.has(t) ? realTop5.get(t)!.toFixed(3) : '-'} |`);
+  const rt = [...realTop5.values()];
+  out.push(`| 리그 평균 | ${stat(rs.map((r) => Object.values(r.top5).reduce((a, b) => a + b, 0) / Object.values(r.top5).length), 3)} | ${rt.length ? (rt.reduce((a, b) => a + b, 0) / rt.length).toFixed(3) : '-'} |`);
   // 선수별 반복 상위 (부문마다 시드 평균 상위 6명과 1위 횟수)
   out.push('', '### 선수별 주요 기록 (시드 평균 상위, 괄호는 1위 횟수)\n', '| 부문 | 선수: 평균 (1위 횟수) |', '|---|---|');
   type Line = SeedResult['lines'][string];

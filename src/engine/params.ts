@@ -31,9 +31,16 @@ export interface EngineParams {
   seasonPitRegressScale?: number;
   /**
    * 엔트리 순환 (team.ts churnedOut): 직접 정하지 않은 1군에서 10일마다 국내 투수가 2군에 내려갈 확률. 없으면 0.
-   * 2026-10-13 tools/pitch_usage.ts로 맞춘 값 (docs/temp-values.md)
+   * 2026-10-13 tools/pitch_usage.ts로 맞춘 값 0.25 (모든 국내 투수). 2026-10-21 대상을 부진한 투수(churnSlump)로 좁히며 0.5로
+   * 다시 맞췄다: 구단별 이닝 상위 5명 비중과 하위 1/3 이닝 몫을 함께 본 값 (docs/temp-values.md)
    */
   rosterChurn?: number;
+  /**
+   * 엔트리 순환 대상 = 그 시즌 부진한 투수만 (2026-10-21 사용자: "부진한 투수 한정으로 고쳐"). 없으면 모든 국내 투수가 대상 (예전 규칙).
+   * 순환 주기(CHURN_DAYS)가 시작할 때의 시즌 기록으로 정한다: 아웃 minOuts 이상이고,
+   * 평균자책을 리그 평균자책 priorOuts아웃만큼 섞어 당긴 값이 리그 평균자책 × eraRatio 이상이면 부진. 모두 임시값
+   */
+  churnSlump?: { minOuts: number; priorOuts: number; eraRatio: number };
   /** 엔트리 순환 중 불펜 고를 때 가치에 더하는 흔들림 폭 (런). 2군에서 "요즘 좋은" 투수가 올라오는 몫 */
   rosterJitter?: number;
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
@@ -163,7 +170,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   seasonBlend: [1.0, 0.3, 0.1],
   seasonRegressScale: 0.5,
   seasonPitRegressScale: 0.25,
-  rosterChurn: 0.25,
+  rosterChurn: 0.5,
+  churnSlump: { minOuts: 15, priorOuts: 30, eraRatio: 1.15 },
   rosterJitter: 0.06,
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },

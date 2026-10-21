@@ -8,7 +8,7 @@ import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
 import { batValue, pitValue } from './ratings';
-import type { SimPlayer, SimTeam, World } from './types';
+import type { PitLine, SimPlayer, SimTeam, World } from './types';
 
 /** 시즌 중 바뀌는 선수 상태. 색인은 SimPlayer.idx */
 export interface PlayerStates {
@@ -266,18 +266,43 @@ function unitHash(s: string): number {
  * 국내 투수 몇 명이 부진·피로·잔부상으로 2군에 내려가고 다음 투수가 올라온다 (확률 churn). 실제로는 약한 투수도 꽤 던진다.
  * 해시로 정해 난수 흐름과 저장·재현에 영향이 없다
  */
-export function churnedOut(world: World, p: SimPlayer, day: number, churn: number): boolean {
+export function churnedOut(world: World, p: SimPlayer, day: number, churn: number, slump?: ArrayLike<number> | null): boolean {
   if (churn <= 0 || !p.isPitcher || p.foreign) return false;
+  // 부진한 투수만 (slumpingPitchers). 잘 던지는 투수는 에이스든 아니든 내려가지 않는다
+  if (slump && !slump[p.idx]) return false;
   return unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}`) < churn;
 }
 
-/** 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다) */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0): void {
+/**
+ * 엔트리 순환 대상인 부진한 투수 (선수 색인 → 1). 그 시즌 기록(pit)으로 정한다. 난수를 쓰지 않는다.
+ * 평균자책을 리그 평균자책 쪽으로 rule.priorOuts아웃만큼 당긴 값이 리그 평균자책 × rule.eraRatio 이상이고 아웃이 rule.minOuts 이상이면 부진
+ */
+export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { minOuts: number; priorOuts: number; eraRatio: number }): Uint8Array {
+  const out = new Uint8Array(world.players.length);
+  let er = 0, outs = 0;
+  for (const q of pit) { er += q.er; outs += q.outs; }
+  if (outs <= 0) return out;
+  const lg = (er * 27) / outs;
+  for (const p of world.players) {
+    if (!p.isPitcher) continue;
+    const q = pit[p.idx];
+    if (!q || q.outs < rule.minOuts) continue;
+    const era = (q.er * 27 + rule.priorOuts * lg) / (q.outs + rule.priorOuts);
+    if (era >= lg * rule.eraRatio) out[p.idx] = 1;
+  }
+  return out;
+}
+
+/**
+ * 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다).
+ * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
+ */
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null): void {
   const limit = world.rules.foreignLimit;
   const manual = ts.manual ?? null;
   const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn));
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump));
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
   if (manual) {
