@@ -9,7 +9,7 @@ import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
   dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS,
-  FRANCHISE_TAG_SHARE, isPreGrade, MIN_SALARY, salaryCap, salaryFloor, teamCapPayroll,
+  FRANCHISE_TAG_SHARE, foreignCap, isPreGrade, minSalary, salaryCap, salaryFloor, teamCapPayroll,
 } from '../../league/salary';
 import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
@@ -452,7 +452,7 @@ function FaPanel({ act }: { act: Act }) {
                       </span>
                     ) : (
                       <span className="inline">
-                        <input type="number" min={(MIN_SALARY * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+                        <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
                           onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
                         <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
                           {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
@@ -490,8 +490,8 @@ function ForeignPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>외국인 선수</h2>
         <p className="muted small">
-          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(ruleOf(session.league, 'foreignNewCap'))}, 아시아쿼터 신규는 {dollarText(ruleOf(session.league, 'asiaNewCap'))}까지,{' '}
-          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(ruleOf(session.league, 'foreignTotalCap'))}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
+          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))}, 아시아쿼터 신규는 {dollarText(foreignCap(session.league, 'asiaNewCap', off.year + 1))}까지,{' '}
+          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(foreignCap(session.league, 'foreignTotalCap', off.year + 1))}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
           우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
@@ -800,7 +800,7 @@ function SalaryPanel({ act }: { act: Act }) {
                   <td>{won(p.contract.salary)}</td><td>{won(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={(MIN_SALARY * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
+                      <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
                         onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
@@ -920,7 +920,7 @@ function ReleasePanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>방출 선수 영입 <span className="muted small">{claimable.length}명</span></h2>
         <p className="muted small">
-          다른 구단이 이번에 방출한 선수를 최저 연봉({won(Off.CLAIM_SALARY)}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
+          다른 구단이 이번에 방출한 선수를 최저 연봉({won(minSalary(session.offseason!.year + 1, session.league))}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
           단계를 마감하면 AI 구단이 남은 방출 선수 중 쓸 만한 선수를 데려갑니다 (구단당 {Off.CLAIM_PER_TEAM}명까지).
         </p>
       </div>

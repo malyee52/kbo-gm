@@ -5,7 +5,7 @@
 
 import { faServiceNeeded } from './eras';
 import type { LeagueState, LeaguePlayer, School } from './types';
-import { ruleOf } from './rules';
+import { RULE_DEFAULTS, ruleOf } from './rules';
 import { seasonsWith } from './stadium';
 import { futureValue } from './futureRules';
 
@@ -44,9 +44,45 @@ export function wageIndex(year: number, league?: Pick<LeagueState, 'ruleShifts'>
   return baseCap(year, league ?? undefined) / CAP[2026];
 }
 
-/** 신인 계약 연봉: 최저 연봉 × 연봉 상승 지수 (100만 원 단위 아래는 반올림) */
+/** 신인 계약 연봉: 최저 연봉 × 연봉 상승 지수 (100만 원 단위 아래는 반올림). 그 해 최저 연봉(minSalary)보다 낮지 않다 */
 export function rookieSalary(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
-  return Math.round((MIN_SALARY * wageIndex(year, league)) / 100) * 100;
+  return Math.max(minSalary(year, league), Math.round((MIN_SALARY * wageIndex(year, league)) / 100) * 100);
+}
+
+/**
+ * 최저 연봉·외국인 금액 상한의 규정 인상 주기 (임시값, 2026-10-22 사용자 결정 "계단식"): 2026년 뒤 이만큼마다(2030·2034…)
+ * 그동안의 연봉 상승 지수만큼 규정을 올린다. 해마다 오르는 연봉(wageIndex)과 달리 규정은 몇 년에 한 번 바뀐다
+ */
+export const MIN_SALARY_STEP_YEARS = 4;
+const RULE_STEP_BASE = 2026;
+
+/** 그 해에 적용되는 마지막 규정 인상 해 (아직 인상이 없으면 null) */
+export function ruleStepYear(year: number): number | null {
+  if (year < RULE_STEP_BASE + MIN_SALARY_STEP_YEARS) return null;
+  return RULE_STEP_BASE + Math.floor((year - RULE_STEP_BASE) / MIN_SALARY_STEP_YEARS) * MIN_SALARY_STEP_YEARS;
+}
+
+/** 규정 인상 배율: 마지막 인상 해의 연봉 상승 지수 (인상 전이면 1) */
+export function ruleStepIndex(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  const s = ruleStepYear(year);
+  return s === null ? 1 : wageIndex(s, league);
+}
+
+/** 그 해 최저 연봉 (만 원): MIN_SALARY × 규정 인상 배율, 100만 원 단위 반올림. 연봉 하한 검사는 계약이 시작되는 해 값을 쓴다 */
+export function minSalary(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  return Math.round((MIN_SALARY * ruleStepIndex(year, league)) / 100) * 100;
+}
+
+export type ForeignCapKey = 'foreignNewCap' | 'asiaNewCap' | 'foreignTotalCap';
+
+/**
+ * 그 해 외국인 금액 상한 (달러): 2026 규정 × 규정 인상 배율, 1만 달러 단위 반올림 (최저 연봉과 같은 주기, 2026-10-22 사용자 결정).
+ * 자유 모드에서 규정을 바꿨으면(league.rules) 그 값을 그대로 쓴다
+ */
+export function foreignCap(league: Pick<LeagueState, 'rules' | 'ruleShifts'> | null | undefined, key: ForeignCapKey, year: number): number {
+  const v = league?.rules?.[key];
+  if (v !== undefined) return v;
+  return Math.round((RULE_DEFAULTS[key] * ruleStepIndex(year, league)) / 10_000) * 10_000;
 }
 /** 샐러리캡 도입 전(2022년까지)의 구단 예산 기준: 2023년 캡 값을 그대로 쓴다 (임시값. 내부 연봉은 2026년 물가라 캡 값과 같은 단위다) */
 export const PRE_CAP_BUDGET = 1142638;
@@ -154,10 +190,11 @@ export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules'>): 
 
 /**
  * FA 시장 연봉 (연평균, 만 원): 계약 기간 평균 기여(런)에 따라 오른다 (임시값).
- * 기준점 (2026년): 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억. wage = 계약 시작 해의 연봉 상승 지수(wageIndex)
+ * 기준점 (2026년): 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억. wage = 계약 시작 해의 연봉 상승 지수(wageIndex),
+ * floor = 계약 시작 해의 최저 연봉(minSalary)
  */
-export function marketSalary(runs: number, wage = 1): number {
-  return Math.max(MIN_SALARY, Math.round(1200 * wage * Math.max(0, runs) ** 1.31));
+export function marketSalary(runs: number, wage = 1, floor = MIN_SALARY): number {
+  return Math.max(floor, Math.round(1200 * wage * Math.max(0, runs) ** 1.31));
 }
 
 /** 시장 연봉식의 역함수: 이 연봉이면 시장에서 몇 런짜리 선수 값인가 */
@@ -176,10 +213,11 @@ const RUN_PAY = 220;
 
 /**
  * 보류 선수 다음 해 연봉: 목표값을 향하되 한 해 변동 폭을 제한한다 (삭감 25%, 인상 150%까지. 임시값, 실제 삭감 한도 규정 미확인).
- * afterContract: FA·비FA 다년 계약이 끝난 뒤 첫 협상이면 삭감 한도 50% (임시값, 2026-10-22. 전에는 25%라 FA 연봉이 보류 연봉으로 거의 그대로 이어졌다)
+ * afterContract: FA·비FA 다년 계약이 끝난 뒤 첫 협상이면 삭감 한도 50% (임시값, 2026-10-22. 전에는 25%라 FA 연봉이 보류 연봉으로 거의 그대로 이어졌다).
+ * floor = 계약 시작 해의 최저 연봉(minSalary)
  */
-export function nextReserveSalary(prev: number, target: number, afterContract = false): number {
-  return Math.max(MIN_SALARY, Math.round(Math.min(prev * 2.5, Math.max(prev * (afterContract ? 0.5 : 0.75), target))));
+export function nextReserveSalary(prev: number, target: number, afterContract = false, floor = MIN_SALARY): number {
+  return Math.max(floor, Math.round(Math.min(prev * 2.5, Math.max(prev * (afterContract ? 0.5 : 0.75), target))));
 }
 
 /** FA 계약 기간 (임시값): 나이가 많을수록 짧다 */
@@ -288,14 +326,19 @@ export const ASIA_NEW_CAP = 200_000;
 export const FOREIGN_REGULAR = 3;
 export const FOREIGN_ASIA = 1;
 
-/** 외국인 연봉 (달러, 임시값): 기여에 따라 */
-export function foreignSalary(runs: number, isNew: boolean, asia: boolean, league?: Pick<LeagueState, 'rules'>): number {
-  if (asia) return Math.min(ruleOf(league, 'asiaNewCap'), Math.round((80_000 + 6_000 * Math.max(0, runs)) / 10_000) * 10_000);
+/**
+ * 외국인 연봉 (달러, 임시값): 기여에 따라. year = 계약이 시작되는 해 (없으면 2026 규정).
+ * 금액 상한이 규정 인상(foreignCap)으로 오르면 시장 금액도 같은 배율로 오른다 (상한 아래 퍼짐을 그대로 두려고, 2026-10-22)
+ */
+export function foreignSalary(runs: number, isNew: boolean, asia: boolean, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>, year?: number): number {
+  const k = year === undefined ? 1 : ruleStepIndex(year, league);
+  const cap = (key: ForeignCapKey) => (year === undefined ? ruleOf(league, key) : foreignCap(league, key, year));
+  if (asia) return Math.min(cap('asiaNewCap'), Math.round((k * (80_000 + 6_000 * Math.max(0, runs))) / 10_000) * 10_000);
   // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
   const r = Math.max(0, runs);
   // 신규: 20런 약 51만, 33런 약 74만, 46런 약 98만 달러 (외국인 능력을 올린 뒤 다시 맞춤, 2026-10-12)
-  const v = Math.round((isNew ? 150_000 + 18_000 * r : 400_000 + 25_000 * r) / 50_000) * 50_000;
-  return isNew ? Math.min(ruleOf(league, 'foreignNewCap'), v) : Math.min(2_000_000, v);
+  const v = Math.round((k * (isNew ? 150_000 + 18_000 * r : 400_000 + 25_000 * r)) / 50_000) * 50_000;
+  return isNew ? Math.min(cap('foreignNewCap'), v) : Math.min(Math.round((2_000_000 * k) / 50_000) * 50_000, v);
 }
 
 /** 소속선수 정원 68명 (2026~, 출처 확인) */

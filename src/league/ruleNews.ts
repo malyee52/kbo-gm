@@ -7,7 +7,7 @@
 import type { BallYear, Meta, RuleCat, RuleChangeData, RuleChangeItem, RuleEffect, RuleStatus } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { faEnabled, faServiceNeeded, foreignRule } from './eras';
-import { salaryCap } from './salary';
+import { dollarText, foreignCap, MIN_SALARY_STEP_YEARS, minSalary, ruleStepYear, salaryCap } from './salary';
 import type { LeagueState } from './types';
 import { FUTURE_RULE_LABEL, futureDelta, futureValueText, type FutureRuleKey, type RuleShift } from './futureRules';
 
@@ -31,6 +31,10 @@ export interface RuleSnapshot {
   faServiceUniv: number;
   /** 샐러리캡 (만 원, 2026년 물가). 없으면 null */
   salaryCap: number | null;
+  /** 최저 연봉 (만 원, salary.ts minSalary). 2030년부터 몇 년마다 규정 인상 */
+  minSalary?: number;
+  /** 외국인 금액 상한 (달러, salary.ts foreignCap): 신규·아시아쿼터 신규·총액 */
+  foreignCaps?: { new: number; asia: number; total: number };
   /** 시즌 자료가 있는 해: 구단 수·팀당 경기 수 */
   teams?: number;
   games?: number;
@@ -61,6 +65,8 @@ export function ruleSnapshot(meta: Meta, year: number, league?: Pick<LeagueState
     faServiceHs: faServiceNeeded(year, false),
     faServiceUniv: faServiceNeeded(year, true),
     salaryCap: cap,
+    minSalary: minSalary(year, league),
+    foreignCaps: { new: foreignCap(league, 'foreignNewCap', year), asia: foreignCap(league, 'asiaNewCap', year), total: foreignCap(league, 'foreignTotalCap', year) },
     ...(season ? { teams: season.teams, games: season.games } : {}),
     sources: {
       rosterSize: d('roster') ? 'virtual' : src(r?.rosterSizeSource), foreignLimit: d('foreign') ? 'virtual' : src(r?.foreignLimitSource),
@@ -175,6 +181,9 @@ const KEY_TITLE: Record<RuleValueKey, string> = {
   rosterSize: '1군 엔트리', foreignLimit: '외국인 보유 한도', maxInnings: '정규시즌 연장 최대 이닝', postseasonTeams: '포스트시즌 진출 구단',
   faEnabled: 'FA 제도 (시즌 뒤)', faService: 'FA 자격 연한 (시즌 뒤)', salaryCap: '샐러리캡',
 };
+
+/** 만 원 표기 (3,000만 원) */
+const manText = (man: number) => `${man.toLocaleString('ko-KR')}만 원`;
 
 /** 억 원 표기 (만 원 단위 값) */
 function eokText(man: number): string {
@@ -291,6 +300,17 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
         note: key === 'salaryCap' && status !== 'confirmed' ? '발표값 없음: 게임은 매년 5% 상향 (임시값)' : '게임 규칙 값의 변화',
       });
     }
+    // 규정 인상 (최저 연봉·외국인 금액 상한, salary.ts ruleStepIndex): 게임 속 가상 결정
+    // 인상 해에만 (자유 모드에서 규정을 직접 바꾼 것은 여기서 알리지 않는다)
+    const stepped = ruleStepYear(year) === year;
+    const stepNote = `${MIN_SALARY_STEP_YEARS}년마다 그동안 오른 연봉만큼 규정을 올린다 (게임 속 가상 결정, 임시값)`;
+    if (stepped && now.minSalary !== undefined && prev.minSalary !== undefined && now.minSalary !== prev.minSalary) {
+      lines.push({ cat: 'league', title: '최저 연봉 인상', before: manText(prev.minSalary), after: manText(now.minSalary), effect: 'league', status: 'virtual', note: stepNote });
+    }
+    const fc = (c: NonNullable<RuleSnapshot['foreignCaps']>) => `신규 ${dollarText(c.new)} · 아시아쿼터 신규 ${dollarText(c.asia)} · 총액 ${dollarText(c.total)}`;
+    if (stepped && now.foreignCaps && prev.foreignCaps && fc(now.foreignCaps) !== fc(prev.foreignCaps)) {
+      lines.push({ cat: 'foreign', title: '외국인 금액 상한 인상', before: fc(prev.foreignCaps), after: fc(now.foreignCaps), effect: 'league', status: 'virtual', note: stepNote });
+    }
     if (now.games !== undefined && prev.games !== undefined && now.games !== prev.games) {
       lines.push({ cat: 'league', title: '팀당 경기 수', before: `${prev.games}경기`, after: `${now.games}경기`, effect: 'league', status: 'confirmed', source: '시즌 자료' });
     }
@@ -300,7 +320,7 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
   }
 
   // 공인구 줄 (위 칸 맨 앞). 2027년부터는 게임이 정한 그 해 반발계수
-  const ball = input.cor ? corLine(input.cor, year, input.seasonDays, dated) : ballLine(data, year, input.seasonDays, dated, closing, !!input.start);
+  const ball = input.cor ? corLine(withRealPrev(input.cor, data, year), year, input.seasonDays, dated) : ballLine(data, year, input.seasonDays, dated, closing, !!input.start);
   if (ball) lines.unshift(ball);
 
   const ordered = (ls: RuleLine[]) => ls.map((l, i) => ({ l, i })).sort((a, b) => CAT_ORDER.indexOf(a.l.cat) - CAT_ORDER.indexOf(b.l.cat) || a.i - b.i).map((x) => x.l);
@@ -359,8 +379,18 @@ function ballLine(data: RuleChangeData | undefined, year: number, seasonDays: nu
   return line;
 }
 
+/**
+ * 지난해 게임 값이 없으면(2027년: 2026년은 실제 자료의 해) 자료(data-src/공인구.csv → rule_changes.json)의 지난해 1차 수시검사 평균을 "전"으로.
+ * 바뀌는 수치는 늘 전 → 후로 보인다 (2026-10-22 사용자 결정)
+ */
+function withRealPrev(c: NonNullable<RuleNewsInput['cor']>, data: RuleChangeData | undefined, year: number): NonNullable<RuleNewsInput['cor']> & { prevReal?: boolean } {
+  if (c.prev !== null) return c;
+  const avg = data?.ball.find((b) => b.year === year - 1)?.tests?.find((t) => t.round === 1 && t.avg !== undefined)?.avg;
+  return avg === undefined ? c : { ...c, prev: avg, prevReal: true };
+}
+
 /** 2027년부터: 그 해 반발계수 줄 (개막)과 시즌 중 2차 수시검사 소식 (게임 속 가상 검사, 임시값) */
-function corLine(c: NonNullable<RuleNewsInput['cor']>, year: number, seasonDays: number | undefined, dated: DatedRuleNews[]): RuleLine {
+function corLine(c: NonNullable<RuleNewsInput['cor']> & { prevReal?: boolean }, year: number, seasonDays: number | undefined, dated: DatedRuleNews[]): RuleLine {
   const dir = c.prev === null ? '' : c.value > c.prev ? ' (상승)' : c.value < c.prev ? ' (하락)' : '';
   const feel = c.hrMul >= 1.15 ? '타구가 멀리 뻗는다' : c.hrMul <= 0.87 ? '타구가 담장 앞에서 잡힌다' : '예년 수준';
   const day = dayOfDate(year, '06-15');
@@ -371,7 +401,10 @@ function corLine(c: NonNullable<RuleNewsInput['cor']>, year: number, seasonDays:
     cat: 'ball', title: `반발계수 변경${dir}`, effect: 'engine', status: 'virtual',
     ...(c.prev !== null ? { before: c.prev.toFixed(4) } : {}),
     after: c.value.toFixed(4),
-    detail: [`1차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)})`, `리그 홈런 기준 ×${c.hrMul.toFixed(2)} — ${feel}`],
+    detail: [
+      `1차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)})${c.prevReal && c.prev !== null ? `, 지난해 ${year - 1} 실제 1차 ${c.prev.toFixed(4)} (조사값)` : ''}`,
+      `리그 홈런 기준 ×${c.hrMul.toFixed(2)} — ${feel}`,
+    ],
     note: '시즌마다 공 반발계수가 실제 검사값의 퍼짐(2018~2026년 0.406~0.425) 안에서 바뀐다 (게임 속 가상 검사)',
   };
 }

@@ -5,6 +5,7 @@ import { DEFAULT_PARAMS, Season, worldForYear, type EngineParams } from '../src/
 import { GameSession } from '../src/game/session';
 import { DOME, NEW_PARK, PARK_SIZES, parkFactor, stadiumFill, stadiumYearEnd } from '../src/league/stadium';
 import { worldFromLeague } from '../src/league/world';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const NO_PILOT: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
@@ -20,7 +21,7 @@ describe('구장 특성', () => {
     const r = g.orderStadium('new-0', { size: 'hitter', dome: true });
     expect(r.ok).toBe(true);
     const p = L.stadiums![0].project!;
-    expect(p).toMatchObject({ kind: 'new', hr: PARK_SIZES.hitter.hr, dome: true, cost: Math.round(NEW_PARK.options[0].cost * DOME.cost) });
+    expect(p).toMatchObject({ kind: 'new', hr: PARK_SIZES.hitter.hr, dome: true, cost: Math.round(Math.round(NEW_PARK.options[0].cost * wageIndex(2027)) * DOME.cost) });
     // 원래 구장의 홈런 배율은 ×1. 실제 구장 효과는 득점 계수(run, meta.parkFactors)로 따로 들어간다
     expect(parkFactor(L.stadiums![1])).toEqual({ hr: 1, dome: false });
     expect(worldFromLeague(L, store, DEFAULT_PARAMS).teams[0].park?.hr ?? 1).toBe(1);

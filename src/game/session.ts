@@ -26,7 +26,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, wageIndex, wonText } from '../league/salary';
+import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -2521,7 +2521,7 @@ export class GameSession {
       case 'foreign-sign': res = Off.signForeignByUser(L, off, a.id); break;
       case 'draft': res = Off.draftByUser(L, off, a.id); break;
       case 'draft-auto': Off.autoDraftRest(L, off); break;
-      case 'salary-offer': res = Off.setSalaryOffer(off, a.id, a.amount); break;
+      case 'salary-offer': res = Off.setSalaryOffer(off, a.id, a.amount, minSalary(off.year + 1, this.league)); break;
       case 'comp-protect': res = Off.setProtectByUser(L, off, a.fa, a.ids); break;
       case 'comp-pick': res = Off.pickCompByUser(L, off, a.fa, a.pick); break;
       case 'comp-auto': Off.autoCompUser(L, off, this.store, this.params); break;

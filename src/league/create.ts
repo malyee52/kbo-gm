@@ -8,7 +8,7 @@ import { makeDraftee, openMarket, POST_FA_RESERVE, takenNames } from './offseaso
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
-import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
+import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
@@ -100,10 +100,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
-        salary: Math.max(MIN_SALARY, Math.round((active.guaranteed * 10000) / active.years)),
+        salary: Math.max(minSalary(startYear), Math.round((active.guaranteed * 10000) / active.years)),
         until: active.first + active.years - 1,
       };
-    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: MIN_SALARY, until: startYear };
+    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: minSalary(startYear), until: startYear };
     // FA를 다녀왔지만 계약 자료가 없는 선수: 보류 연봉 협상과 같은 하한 (offseason.ts POST_FA_RESERVE. 2026-10-22 시장 연봉의 0.8 → 0.5)
     else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(reserveTarget(now, service), Math.round(marketSalary(now) * POST_FA_RESERVE)), until: startYear };
     else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
@@ -177,7 +177,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
   const have = new Set(league.players.map((p) => `${p.team}/${p.name}`));
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear) };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
   const rng = new Rng(`${seed}/rookies/${startYear}`);
   const taken = takenNames(league, store);
   const all = store.drafts![String(startYear)];
@@ -319,7 +319,7 @@ function addAbsentVeterans(league: LeagueState, store: Store, startYear: number,
 function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex): number {
   const list = lateDebutDraftees(store, league, startYear);
   if (!list.length) return 0;
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear) };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
   const taken = takenNames(league, store);
   let n = 0;
   for (const x of list) {
