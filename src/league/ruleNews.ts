@@ -135,6 +135,8 @@ export interface RuleNewsInput {
   lastSeason?: { year: number; runsPerGame: number; hrPerGame: number };
   /** 이 해에 적용되는 미래 규칙 변경 ② (게임 속 가상 결정, futureRules.ts shiftsFor) */
   shifts?: RuleShift[];
+  /** 2027년부터 시즌마다 정하는 반발계수 (futureRules.ts seasonCor): 이 해·지난해 값, 기준 범위, 홈런 목표 배율 */
+  cor?: { value: number; prev: number | null; range: [number, number]; hrMul: number };
 }
 
 /** 미래 규칙 변경 항목 → 알림 분류·반영·게임 규칙 키 */
@@ -297,8 +299,8 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
     }
   }
 
-  // 공인구 줄 (위 칸 맨 앞)
-  const ball = ballLine(data, year, input.seasonDays, dated, closing, !!input.start);
+  // 공인구 줄 (위 칸 맨 앞). 2027년부터는 게임이 정한 그 해 반발계수
+  const ball = input.cor ? corLine(input.cor, year, input.seasonDays, dated) : ballLine(data, year, input.seasonDays, dated, closing, !!input.start);
   if (ball) lines.unshift(ball);
 
   const ordered = (ls: RuleLine[]) => ls.map((l, i) => ({ l, i })).sort((a, b) => CAT_ORDER.indexOf(a.l.cat) - CAT_ORDER.indexOf(b.l.cat) || a.i - b.i).map((x) => x.l);
@@ -355,6 +357,23 @@ function ballLine(data: RuleChangeData | undefined, year: number, seasonDays: nu
   const src = by?.source ?? data.ball.find((b) => b.range)?.source;
   if (src) line.source = src;
   return line;
+}
+
+/** 2027년부터: 그 해 반발계수 줄 (개막)과 시즌 중 2차 수시검사 소식 (게임 속 가상 검사, 임시값) */
+function corLine(c: NonNullable<RuleNewsInput['cor']>, year: number, seasonDays: number | undefined, dated: DatedRuleNews[]): RuleLine {
+  const dir = c.prev === null ? '' : c.value > c.prev ? ' (상승)' : c.value < c.prev ? ' (하락)' : '';
+  const feel = c.hrMul >= 1.15 ? '타구가 멀리 뻗는다' : c.hrMul <= 0.87 ? '타구가 담장 앞에서 잡힌다' : '예년 수준';
+  const day = dayOfDate(year, '06-15');
+  if (day > 0 && (seasonDays === undefined || day < seasonDays)) {
+    dated.push({ day, text: `[공인구] ${year} 2차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)}, 홈런 기준 ×${c.hrMul.toFixed(2)}, 게임 속 가상 검사)` });
+  }
+  return {
+    cat: 'ball', title: `반발계수 변경${dir}`, effect: 'engine', status: 'virtual',
+    ...(c.prev !== null ? { before: c.prev.toFixed(4) } : {}),
+    after: c.value.toFixed(4),
+    detail: [`1차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)})`, `리그 홈런 기준 ×${c.hrMul.toFixed(2)} — ${feel}`],
+    note: '시즌마다 공 반발계수가 실제 검사값의 퍼짐(2018~2026년 0.406~0.425) 안에서 바뀐다 (게임 속 가상 검사)',
+  };
 }
 
 /** 시작 연도 규칙 요약 (2.4): 게임 값 + 공인구. 게임이 실제와 다른 곳은 그 해 자료 항목의 단순화 문구로 밝힌다 */

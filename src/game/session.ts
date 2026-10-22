@@ -58,7 +58,7 @@ import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
-import { shiftsFor } from '../league/futureRules';
+import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
@@ -823,6 +823,10 @@ export class GameSession {
       now: ruleSnapshot(this.store.meta, year, L, shape(year)), prev: ruleSnapshot(this.store.meta, year - 1, L, shape(year - 1)),
       seasonDays: year === this.year ? this.season.schedule.length : undefined,
       shifts: shiftsFor(L, year),
+      ...(() => {
+        const value = seasonCor(L, year);
+        return value === null ? {} : { cor: { value, prev: seasonCor(L, year - 1), range: corRange(L, year), hrMul: ballHrMul(L, year) } };
+      })(),
       lastSeason: last && g > 0 && last.hr !== undefined
         ? { year: last.year, runsPerGame: last.teams.reduce((n, t) => n + t.rs, 0) / g, hrPerGame: last.hr / (g / 2) } : undefined,
     });

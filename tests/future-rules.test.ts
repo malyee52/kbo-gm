@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { createLeague } from '../src/league/create';
 import { foreignRule } from '../src/league/eras';
 import {
-  FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureValue, judgeFutureRules, SHIFT_COOLDOWN, type FutureRuleKey, type RuleShift, type RuleSignal,
+  ballD2, ballHrMul, COR_HIGH, COR_LOW, corRange, FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureValue, judgeFutureRules, seasonCor, SHIFT_COOLDOWN, type FutureRuleKey, type RuleShift, type RuleSignal,
 } from '../src/league/futureRules';
 import { ruleNews, ruleSnapshot } from '../src/league/ruleNews';
 import { salaryCap } from '../src/league/salary';
@@ -109,7 +109,9 @@ describe('반영 (자료 없는 해만)', () => {
     league.ruleShifts = [shift('ball', 2031, 0.94), shift('zone', 2031, 0.97), shift('roster', 2031, 30), shift('extra', 2031, 12), shift('foreign', 2031, 4), shift('capGrowth', 2031, 0.07)];
     const w = worldFromLeague(structuredClone(league), store, FAST);
     expect(w.league.hr).toBeCloseTo(base.league.hr * 0.94, 10);
-    expect(w.league.d2).toBeCloseTo(base.league.d2 * 0.98, 10);
+    // 2027년부터는 시즌 반발계수가 홈런 배율에 곱해진다 (ballHrMul). 2루타는 그 배율 변화의 1/3
+    const m = ballHrMul(league, 2031);
+    expect(w.league.d2).toBeCloseTo((base.league.d2 * ballD2(m)) / ballD2(m / 0.94), 10);
     expect(w.league.so).toBeCloseTo(base.league.so * 0.97, 10);
     expect(w.league.bb).toBeCloseTo(base.league.bb * 1.05, 10);
     expect(w.league.s1).toBe(base.league.s1);
@@ -140,5 +142,36 @@ describe('반영 (자료 없는 해만)', () => {
 
   it(`시작 연도는 ${FUTURE_RULES_FROM}년 (2027년은 발표된 제도)`, () => {
     expect(FUTURE_RULES_FROM).toBe(2028);
+  });
+});
+
+describe('시즌 반발계수 (2026-10-22 사용자 결정)', () => {
+  const shift = (key: FutureRuleKey, year: number, after: number): RuleShift => ({ year, key, before: FUTURE_RULE_SPEC[key].base, after, reason: '시험 (게임 속 가상 결정)', signal: 0 });
+  it('2027년부터 기본 모드만, 시드로 재현되고 실제 퍼짐 안에서 정해지며 홈런 배율이 따라 움직인다', () => {
+    const L = bare('cor');
+    expect(seasonCor(L, 2026)).toBeNull();
+    expect(seasonCor(bare('cor', true), 2030)).toBeNull();
+    expect(ballHrMul(bare('cor', true), 2030)).toBe(1);
+    const vals = Array.from({ length: 40 }, (_, i) => seasonCor(L, 2027 + i)!);
+    expect(vals.every((v) => v >= COR_LOW - 1e-4 && v <= COR_HIGH + 1e-4)).toBe(true);
+    expect(seasonCor(bare('cor'), 2031)).toBe(vals[4]);
+    const muls = vals.map((_, i) => ballHrMul(L, 2027 + i));
+    expect(Math.min(...muls)).toBeLessThan(0.8);
+    expect(Math.max(...muls)).toBeGreaterThan(1.25);
+    // 검사값이 높은 해일수록 홈런 배율이 크다
+    const order = vals.map((v, i) => [v, muls[i]]).sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < order.length; i++) expect(order[i][1]).toBeGreaterThanOrEqual(order[i - 1][1] - 0.005);
+  });
+
+  it('기준 하향(ball 항목)은 검사값과 기준 범위를 함께 내리고 알림에 "반발계수 변경" 줄과 시즌 중 검사 소식이 나온다', () => {
+    const L = { ...bare('cor'), ruleShifts: [shift('ball', 2031, 0.94)] } as unknown as LeagueState;
+    expect(seasonCor(L, 2031)!).toBeLessThan(seasonCor(bare('cor'), 2031)!);
+    expect(corRange(L, 2031)[1]).toBeLessThan(corRange(bare('cor'), 2031)[1]);
+    const value = seasonCor(L, 2031)!;
+    const n = ruleNews({ year: 2031, data: store.ruleChanges, now: ruleSnapshot(store.meta, 2031, L), prev: ruleSnapshot(store.meta, 2030, L),
+      seasonDays: 180, cor: { value, prev: seasonCor(L, 2030), range: corRange(L, 2031), hrMul: ballHrMul(L, 2031) } });
+    expect(n.main[0].title).toContain('반발계수 변경');
+    expect(n.main[0].after).toBe(value.toFixed(4));
+    expect(n.dated.some((d) => d.text.includes('2차 수시검사') && d.text.includes(value.toFixed(4)))).toBe(true);
   });
 });

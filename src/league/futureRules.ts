@@ -17,7 +17,7 @@ export const SHIFT_COOLDOWN = 3;
 export type FutureRuleKey = 'ball' | 'zone' | 'extra' | 'roster' | 'foreign' | 'capGrowth';
 
 export const FUTURE_RULE_LABEL: Record<FutureRuleKey, string> = {
-  ball: '공인구 반발계수 기준', zone: '스트라이크존', extra: '정규시즌 연장 이닝', roster: '1군 엔트리', foreign: '외국인 보유 한도 (아시아쿼터 제외)', capGrowth: '샐러리캡 연간 상향률',
+  ball: '반발계수 기준', zone: '스트라이크존', extra: '정규시즌 연장 이닝', roster: '1군 엔트리', foreign: '외국인 보유 한도 (아시아쿼터 제외)', capGrowth: '샐러리캡 연간 상향률',
 };
 
 /**
@@ -45,9 +45,12 @@ export function zoneBb(so: number): number {
 
 /** 판정 기준 (임시값, 기획안 4.3) */
 export const SHIFT_LIMITS = {
-  /** 장타 압력이 이보다 크면 반발계수를 낮추고, 1/이 값보다 작으면 높인다 */
+  /** 삼진·볼넷 압력이 이보다 크면(작으면) 스트라이크존을 바꾼다 */
   pressureHigh: 1.1,
   pressureLow: 0.9,
+  /** 장타 압력이 이보다 크면 반발계수 기준을 낮추고, 이보다 작으면 높인다 (2026-10-22 사용자 결정 1.10/0.90 → 1.07/0.93) */
+  ballHigh: 1.07,
+  ballLow: 0.93,
   /** 무승부 비율: 넘으면 연장 +1회, 밑돌면 -1회 */
   drawHigh: 0.04,
   drawLow: 0.01,
@@ -164,7 +167,7 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const avg = (f: (s: RuleSignal) => number) => recent.reduce((a, s) => a + f(s), 0) / recent.length;
   // 공인구: 장타 압력이 높으면 반발계수를 낮춰 홈런 목표를 줄인다
   const hrP = avg((s) => s.hr);
-  add('ball', streak(sig, (s) => (s.hr > L.pressureHigh ? -1 : s.hr < L.pressureLow ? 1 : 0)), hrP,
+  add('ball', streak(sig, (s) => (s.hr > L.ballHigh ? -1 : s.hr < L.ballLow ? 1 : 0)), hrP,
     hrP > 1 ? `선수들의 장타력이 리그 기준보다 ${pct(hrP)} 높아 반발계수 기준을 낮춘다` : `선수들의 장타력이 리그 기준보다 ${pct(hrP)} 낮아 반발계수 기준을 높인다`);
   // 존: 삼진 압력이 높거나 볼넷 압력이 낮으면 존을 줄인다 (삼진 목표 ↓)
   const zoneSide = (s: RuleSignal) => (s.so > L.pressureHigh || s.bb < L.pressureLow ? -1 : s.so < L.pressureLow || s.bb > L.pressureHigh ? 1 : 0);
@@ -195,6 +198,65 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   league.ruleShifts.push(shift);
   return shift;
 }
+
+// ---- 시즌마다 바뀌는 반발계수 (2026-10-22 사용자 결정 "반발계수 변경")
+// 2027년부터 매 시즌 반발계수 검사값을 실제 퍼짐 안에서 시드 난수로 정하고, 그만큼 리그 홈런 목표 배율을 바꾼다.
+// "2017처럼 40홈런이 뻥뻥 터지는 시즌도, 1점대 투수가 즐비한 시즌도" 나오게. 기준 범위 변경(ball 항목)은 이 값의 가운데를 옮긴다.
+
+/** 실제 반발계수 1차 수시검사 평균 (2018~2026, data-src/공인구.csv, 조사값)의 평균·최저·최고 */
+export const COR_CENTER = 0.416;
+export const COR_LOW = 0.4061;
+export const COR_HIGH = 0.4247;
+/**
+ * 반발계수 1당 홈런 목표의 로그 변화 (임시값): 2018→2019 기준 하향(기준 범위 가운데 0.4254 → 0.4134, −0.012)에
+ * 리그 타석당 홈런이 −41%였던 것으로 맞춤. ln(1/0.59) / 0.012 ≈ 44. 0.001 오르면 홈런 약 +4.5%
+ */
+export const COR_HR_K = Math.log(1 / 0.59) / 0.012;
+/** 2019년부터의 실제 기준 범위 (조사값). 게임 기준은 ball 항목만큼 옮긴다 */
+const COR_RANGE: [number, number] = [0.4034, 0.4234];
+
+/** 시즌 반발계수를 쓰는 해인가: 미래 규칙 변경을 쓰는 리그(기본 모드)의 자료 없는 해 (2027~) */
+export function seasonBallOn(league: Pick<LeagueState, 'fantasy'> | null | undefined, year: number): boolean {
+  return !!league && futureRulesOn(league) && year >= FUTURE_RULES_FROM - 1;
+}
+
+/** 기준 범위 가운데의 이동 (ball 항목 홈런 배율을 반발계수로) */
+function corShift(league: Pick<LeagueState, 'ruleShifts'> | null | undefined, year: number): number {
+  return Math.log(futureValue(league, 'ball', year)) / COR_HR_K;
+}
+
+/** 그 해 게임 기준 범위 (실제 2019년 기준을 ball 항목만큼 옮긴 값) */
+export function corRange(league: Pick<LeagueState, 'ruleShifts'> | null | undefined, year: number): [number, number] {
+  const d = corShift(league, year);
+  return [round4(COR_RANGE[0] + d), round4(COR_RANGE[1] + d)];
+}
+
+/**
+ * 그 해 반발계수 검사값 (소수 넷째 자리). 실제 퍼짐(COR_LOW~COR_HIGH)에서 고르게, 기준 이동만큼 옮긴다.
+ * 난수는 `${seed}/ball-cor/${year}` 갈래만 쓴다 (다른 진행의 난수를 건드리지 않는다). 쓰지 않는 해는 null
+ */
+export function seasonCor(league: Pick<LeagueState, 'fantasy' | 'ruleShifts' | 'seed'> | null | undefined, year: number): number | null {
+  const raw = corDraw(league, year);
+  return raw === null ? null : round4(raw + corShift(league, year));
+}
+
+/** 기준 이동 전 검사값 (반올림 전) */
+function corDraw(league: Pick<LeagueState, 'fantasy' | 'seed'> | null | undefined, year: number): number | null {
+  if (!league || !seasonBallOn(league, year)) return null;
+  return COR_LOW + (COR_HIGH - COR_LOW) * new Rng(`${league.seed}/ball-cor/${year}`).next();
+}
+
+/**
+ * 그 해 리그 홈런 목표 배율: ball 항목 값 × exp(K × (검사값 − 가운데)). 시즌 반발계수를 쓰지 않는 해는 ball 항목 값.
+ * 기준 이동(ball 항목)은 검사값의 가운데를 옮기는 것과 같아 곱으로 쓴다 (반올림 전 값으로 계산)
+ */
+export function ballHrMul(league: Pick<LeagueState, 'fantasy' | 'ruleShifts' | 'seed'> | null | undefined, year: number): number {
+  const ball = futureValue(league, 'ball', year);
+  const raw = corDraw(league, year);
+  return raw === null ? ball : ball * Math.exp(COR_HR_K * (raw - COR_CENTER));
+}
+
+const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
 /** 값 문구 (알림 전·후) */
 export function futureValueText(key: FutureRuleKey, v: number): string {

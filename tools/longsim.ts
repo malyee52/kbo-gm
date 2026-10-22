@@ -18,7 +18,7 @@ import type { LeagueState } from '../src/league/types';
 import { worldFromLeague } from '../src/league/world';
 import { capFloorShorts } from '../src/league/owner';
 import { salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
-import { FUTURE_RULE_SPEC, futureValue, futureValueText, type FutureRuleKey } from '../src/league/futureRules';
+import { ballHrMul, FUTURE_RULE_SPEC, futureValue, futureValueText, type FutureRuleKey } from '../src/league/futureRules';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -147,7 +147,7 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
     rescued: hist.filter((h) => h.rescue > 0).length, faSigned,
   };
   const ball = {
-    hrMul: futureValue(league, 'ball', world.year), hrPa: t.hr / (t.pa || 1), era: (27 * t.er) / (outs || 1),
+    hrMul: ballHrMul(league, world.year), hrPa: t.hr / (t.pa || 1), era: (27 * t.er) / (outs || 1),
     topHr: Math.max(...world.players.map((p) => season.bat[p.idx].hr)),
     subTwo: qualified.filter((p) => (27 * season.pit[p.idx].er) / season.pit[p.idx].outs < 2).length,
     foreign: futureValue(league, 'foreign', league.year),
