@@ -8,14 +8,14 @@ import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
-  capPayroll, dollarText, FA_COMP, MIN_SALARY, salaryCap,
+  capPayroll, dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, isPreGrade, MIN_SALARY, salaryCap,
 } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { ruleOf } from '../../league/rules';
 import { previewOrder } from '../../league/ruleNews';
-import { RuleNewsBody } from '../RuleNews';
+import { RuleNewsBody, StatusBadge } from '../RuleNews';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -165,11 +165,19 @@ function CompPanel({ act }: { act: Act }) {
     <section className="stack">
       <div className="panel">
         <h2>FA 보상선수</h2>
-        <p className="muted small">
-          A·B등급 FA를 데려간 구단은 보호선수 명단(A 20명, B 25명)을 내고, 원 소속 구단은 명단 밖 선수 1명과 보상금
-          (A 직전 연봉 200%, B 100%) 또는 보상금만(A 300%, B 200%)을 고릅니다. 외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다.
-          "다음" 단계로 넘어가면 확정됩니다.
-        </p>
+        {off.year >= FA_GRADE_FROM ? (
+          <p className="muted small">
+            A·B등급 FA를 데려간 구단은 보호선수 명단(A 20명, B 25명)을 내고, 원 소속 구단은 명단 밖 선수 1명과 보상금
+            (A 직전 연봉 200%, B 100%) 또는 보상금만(A 300%, B 200%)을 고릅니다. 외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다.
+            "다음" 단계로 넘어가면 확정됩니다.
+          </p>
+        ) : (
+          <p className="muted small">
+            등급제(2020 시즌 뒤) 전이라 모든 FA가 같은 보상입니다: 데려간 구단은 보호선수 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].protect}명을 내고,
+            원 소속 구단은 명단 밖 선수 1명과 직전 연봉 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].withPlayer! * 100}% 또는 보상금만 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].cashOnly * 100}%를 고릅니다.
+            외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다. <StatusBadge status="research" />
+          </p>
+        )}
       </div>
 
       {mineIn.map((c) => <ProtectEditor key={c.fa} c={c} act={act} />)}
@@ -181,7 +189,7 @@ function CompPanel({ act }: { act: Act }) {
         return (
           <div className="panel mine" key={c.fa}>
             <h2>
-              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {c.grade}등급 · 직전 연봉 {won(c.prevSalary)}</span>
+              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {faGradeLabel(c.grade)} · 직전 연봉 {won(c.prevSalary)}</span>
             </h2>
             <p className="small">
               지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${won(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${won(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
@@ -216,7 +224,7 @@ function CompPanel({ act }: { act: Act }) {
           <h2>다른 구단 보상 건</h2>
           <ul className="small">
             {others.map((c) => (
-              <li key={c.fa}>{name(c.fa)} ({c.grade}등급): {session.league.teams[c.from].name} → {session.league.teams[c.to].name}. 단계를 마감하면 원 소속 구단이 고릅니다.</li>
+              <li key={c.fa}>{name(c.fa)} ({faGradeLabel(c.grade)}): {session.league.teams[c.from].name} → {session.league.teams[c.to].name}. 단계를 마감하면 원 소속 구단이 고릅니다.</li>
             ))}
           </ul>
         </div>
@@ -427,8 +435,8 @@ function FaPanel({ act }: { act: Act }) {
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
-                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${e.grade}등급, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
+                  <td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{isPreGrade(e.grade) ? '-' : e.grade}</td><td>{won(e.prevSalary)}</td>
+                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
                   <td className="l">
                     {e.status === 'signed' ? (
                       <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>

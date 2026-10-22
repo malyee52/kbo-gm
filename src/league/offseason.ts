@@ -26,7 +26,7 @@ import {
 } from './careers';
 import { foreignName, josa, koreanName } from './names';
 import {
-  capPayroll, COMPENSATION, faEligible, faGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR,
+  capPayroll, COMPENSATION, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
   FA_RE_ELIGIBLE, foreignSalary, marketSalary, MIN_SALARY, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
@@ -783,11 +783,12 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     off.fa.entries.push({ id, from: p.abroad?.origin ?? -1, grade: 'C', prevSalary: ask, ask, years, status: 'open', returnee: true });
   }
   off.fa.entries.sort((a, b) => b.ask - a.ask || a.id.localeCompare(b.id));
-  // 정상급 FA 일부는 국내 FA 대신 해외로 간다 (overseas.ts): A등급, 31세 이하, 한 해 1명까지, 확률 20%
+  // 정상급 FA 일부는 국내 FA 대신 해외로 간다 (overseas.ts): A등급(등급제 전에는 등급 계산으로 A), 31세 이하, 한 해 1명까지, 확률 20%
   const departing = new Set<string>();
   for (const e of off.fa.entries) {
-    if (departing.size >= 1 || e.returnee || e.grade !== 'A') continue;
+    if (departing.size >= 1 || e.returnee) continue;
     const p = league.players.find((x) => x.id === e.id)!;
+    if ((isPreGrade(e.grade) ? faRankGrade(p, league.players, year) : e.grade) !== 'A') continue;
     if (p.foreign || ageIn(p, year + 1) > 31) continue;
     if (!new Rng(`${league.seed}/fa-abroad/${year}/${p.id}`).chance(0.2)) continue;
     e.status = 'left';
@@ -799,7 +800,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     if (departing.has(e.id)) continue;
     const p = league.players.find((x) => x.id === e.id)!;
     log(off, 'fa', e.returnee ? `${p.name} 해외에서 복귀, FA 시장에 나옴 (보상 없음${league.teams[e.from] ? `, 원 소속 ${league.teams[e.from].name}` : ''})`
-      : `${p.name} FA 신청 (${e.grade}등급, ${league.teams[e.from].name})`, e.from === off.userTeam || !!e.returnee);
+      : `${p.name} FA 신청 (${faGradeLabel(e.grade)}, ${league.teams[e.from].name})`, e.from === off.userTeam || !!e.returnee);
   }
 }
 
@@ -998,7 +999,7 @@ function enterComp(league: LeagueState, off: OffseasonState, store: Store, param
     cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
   }
   if (!cases.length) {
-    log(off, 'comp', 'A·B등급 FA의 구단 이동이 없어 보상선수 단계를 건너뜁니다.', true);
+    log(off, 'comp', '보상선수 대상 FA의 구단 이동이 없어 보상선수 단계를 건너뜁니다.', true);
     enterSecond(league, off, store, params);
     return;
   }
@@ -1067,14 +1068,14 @@ function finishComp(league: LeagueState, off: OffseasonState, store: Store, para
     const mine = c.from === off.userTeam || c.to === off.userTeam;
     if (pick === 'cash') {
       const amount = Math.round(rule.cashOnly * c.prevSalary);
-      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${c.grade}등급, 보상선수 없이)` });
-      log(off, 'comp', `${faName} 보상: ${league.teams[c.from].name}, 보상금만 ${(amount / 10000).toFixed(1)}억 원 (${c.grade}등급)`, mine);
+      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${faGradeLabel(c.grade)}, 보상선수 없이)` });
+      log(off, 'comp', `${faName} 보상: ${league.teams[c.from].name}, 보상금만 ${(amount / 10000).toFixed(1)}억 원 (${faGradeLabel(c.grade)})`, mine);
     } else {
       const amount = Math.round(rule.withPlayer! * c.prevSalary);
       const p = players.get(pick)!;
       p.team = c.from;
       moveInView(view, view.sim.get(p.id)!, c.from);
-      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${c.grade}등급, 보상선수 ${p.name})` });
+      league.ledger.push({ year: off.year + 1, from: c.to, to: c.from, amount, note: `${faName} FA 보상금 (${faGradeLabel(c.grade)}, 보상선수 ${p.name})` });
       log(off, 'comp', `${faName} 보상선수: ${p.name}, ${league.teams[c.to].name} → ${league.teams[c.from].name} (보상금 ${(amount / 10000).toFixed(1)}억 원)`, mine, true);
     }
   }

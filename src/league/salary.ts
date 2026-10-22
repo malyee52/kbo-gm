@@ -119,20 +119,42 @@ export function faEligible(p: LeaguePlayer, year: number): boolean {
   return p.service >= need;
 }
 
-export type FaGrade = 'A' | 'B' | 'C';
+/** A·B·C: 등급제 (2020 시즌 뒤부터). P1·P2: 등급제 전 모든 FA에 같은 보상 (P1 1999~2010 시즌 뒤, P2 2011~2019 시즌 뒤) */
+export type FaGrade = 'A' | 'B' | 'C' | 'P1' | 'P2';
+
+/** 등급제가 시작된 시즌 (그 시즌 뒤 FA부터, 자료집 확인) */
+export const FA_GRADE_FROM = 2020;
 
 /**
  * FA 보상 (KBO 등급제, 2026-10-08 사용자 요청으로 보상선수 도입. 처음 기획서 8장은 보상금만이었다).
  * 원 소속 구단은 "직전 연봉 × withPlayer + 보호선수 밖 1명" 또는 "직전 연봉 × cashOnly"를 고른다. C등급은 보상선수 없이 150%.
  * protect: 영입 구단이 내는 보호선수 수 (외국인·군 보류·이번 FA 계약 선수는 자동 보호라 세지 않는다).
+ * 등급제 전 (조사값, 웹 조사 2026-10-22, 자료집 제도연표 확인 전): 1999~2010 시즌 뒤 보호 18명 외 1명 + 300% 또는 450%,
+ * 2011~2019 시즌 뒤 보호 20명 외 1명 + 200% 또는 300%.
  */
 export const FA_COMP: Record<FaGrade, { cashOnly: number; withPlayer: number | null; protect: number | null }> = {
   A: { cashOnly: 3, withPlayer: 2, protect: 20 },
   B: { cashOnly: 2, withPlayer: 1, protect: 25 },
   C: { cashOnly: 1.5, withPlayer: null, protect: null },
+  P1: { cashOnly: 4.5, withPlayer: 3, protect: 18 },
+  P2: { cashOnly: 3, withPlayer: 2, protect: 20 },
 };
+
+/** 화면 표시: "A등급", 등급제 전은 "등급 없음 (1999~2010 보상)" */
+export function faGradeLabel(g: FaGrade): string {
+  if (g === 'P1') return '등급제 전 (1999~2010 보상)';
+  if (g === 'P2') return '등급제 전 (2011~2019 보상)';
+  return `${g}등급`;
+}
+
+/** 등급제 전 보상인가 (값이 조사값) */
+export function isPreGrade(g: FaGrade): boolean {
+  return g === 'P1' || g === 'P2';
+}
 /** AI가 FA 영입 비용을 셀 때 쓰는 보상 비율 (보상금만 고를 때 기준) */
-export const COMPENSATION: Record<FaGrade, number> = { A: FA_COMP.A.cashOnly, B: FA_COMP.B.cashOnly, C: FA_COMP.C.cashOnly };
+export const COMPENSATION: Record<FaGrade, number> = {
+  A: FA_COMP.A.cashOnly, B: FA_COMP.B.cashOnly, C: FA_COMP.C.cashOnly, P1: FA_COMP.P1.cashOnly, P2: FA_COMP.P2.cashOnly,
+};
 
 /**
  * FA 등급 (2020년 시즌 뒤 등급제, 출처 확인): 구단 연봉 순위와 리그 전체 연봉 순위로 정한다.
@@ -141,11 +163,18 @@ export const COMPENSATION: Record<FaGrade, number> = { A: FA_COMP.A.cashOnly, B:
  * 순위는 외국인을 뺀 연봉 순. "이내"를 두 조건 모두로 읽었다 (해석).
  */
 export function faGrade(p: LeaguePlayer, all: LeaguePlayer[], year: number): FaGrade {
+  // 등급제 전에는 모든 FA가 같은 보상 (year = 끝난 시즌)
+  if (year < FA_GRADE_FROM) return year <= 2010 ? 'P1' : 'P2';
+  return faRankGrade(p, all, year);
+}
+
+/** 등급제의 등급 계산 (등급제 전 시대에도 "정상급 FA" 판정에 쓴다: 해외 진출) */
+export function faRankGrade(p: LeaguePlayer, all: LeaguePlayer[], year: number): 'A' | 'B' | 'C' {
   const domestic = all.filter((x) => !x.foreign && x.team >= 0);
   const rankIn = (list: LeaguePlayer[]) => 1 + list.filter((x) => x.contract.salary > p.contract.salary).length;
   const teamRank = rankIn(domestic.filter((x) => x.team === p.team));
   const leagueRank = rankIn(domestic);
-  let g: FaGrade = teamRank <= 3 && leagueRank <= 30 ? 'A' : teamRank <= 10 && leagueRank <= 60 ? 'B' : 'C';
+  let g: 'A' | 'B' | 'C' = teamRank <= 3 && leagueRank <= 30 ? 'A' : teamRank <= 10 && leagueRank <= 60 ? 'B' : 'C';
   const age = p.birthYear ? year + 1 - p.birthYear : 30;
   if (p.faCount === 0 && age >= 35) g = 'C';
   if (p.faCount === 1 && g === 'A') g = 'B';
