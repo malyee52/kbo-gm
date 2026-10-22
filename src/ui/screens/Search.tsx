@@ -75,11 +75,12 @@ export function sortRows(rows: SearchRow[], key: SortKey): SearchRow[] {
 
 const numOrNull = (s: string): number | null => (s.trim() === '' || !Number.isFinite(Number(s)) ? null : Number(s));
 
-export function Search() {
+/** initialText: 상태 줄 검색 칸에서 넘어온 이름 (2026-10-22 UI 대개편 1차). 이름으로 찾을 때는 우리 구단도 포함한다 */
+export function Search({ initialText = '' }: { initialText?: string }) {
   const { session, version } = useGame();
   const won = useWon();
   const year = session.world.year;
-  const [f, setF] = useState<SearchFilter>(EMPTY_FILTER);
+  const [f, setF] = useState<SearchFilter>(initialText ? { ...EMPTY_FILTER, text: initialText, team: 'all' } : EMPTY_FILTER);
   const [sort, setSort] = useState<SortKey>('now');
   const [shown, setShown] = useState(PAGE);
   const set = (patch: Partial<SearchFilter>) => { setF((x) => ({ ...x, ...patch })); setShown(PAGE); };

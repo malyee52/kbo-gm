@@ -44,14 +44,15 @@ interface Column {
 }
 
 
-export function Roster() {
+/** board: 전력 > 기용 보드 (2026-10-22 UI 대개편 1차). 지금은 1군 능력·상태 표의 '역할' 칸과 타순으로 정한다 */
+export function Roster({ board = false }: { board?: boolean }) {
   const { session, grades, changed, version, openPlayer } = useGame();
   const [kind, setKind] = useState<Kind>('hit');
   const [inFirst, setInFirst] = useState(true);
   const [sel, setSel] = useState<number | null>(null);
   const [sort, setSort] = useState<SortKey>('value');
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
-  const [page, setPageState] = useState<Page>(savedPage);
+  const [page, setPageState] = useState<Page>(board ? 'ability' : savedPage);
   const setPage = (v: Page) => {
     setPageState(v);
     try { localStorage.setItem(PAGE_KEY, v); } catch { /* 기억하지 못해도 화면은 그대로 */ }
@@ -221,6 +222,7 @@ export function Roster() {
         </div>
       )}
 
+      {board && <p className="muted small">1군 표의 <strong>역할</strong> 칸에서 야수 자리(서브 포함)와 투수 보직을 정하고, 아래 타순 칸에서 타순을 정합니다. 엔트리를 직접 관리할 때만 바꿀 수 있습니다.</p>}
       <ServingList />
 
       <div className="roster-split">

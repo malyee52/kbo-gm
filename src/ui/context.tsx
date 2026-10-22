@@ -9,7 +9,9 @@ import { priceIndex, wonText } from '../league/salary';
 
 export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
   | 'finance' | 'stadium' | 'staff' | 'club-history'
-  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about' | 'search' | 'allstar';
+  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about' | 'search' | 'allstar'
+  // 2026-10-22 UI 대개편 1차 (menu.ts): 결정함, 구단 소식, 기용 보드, 입대, 구단주
+  | 'inbox' | 'news' | 'lineup' | 'enlist' | 'owner';
 
 export interface GameUi {
   store: BrowserStore;
