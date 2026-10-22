@@ -42,12 +42,14 @@ export interface LeagueCounters {
   roe: number;
   outsOnBases: number;
   wildPitches: number;
+  /** 투구 수 (엔진 2 3단계) */
+  pitches: number;
 }
 
 export function emptyLeagueCounters(): LeagueCounters {
   return {
     games: 0, ties: 0, extraInningGames: 0, homeWins: 0, pa: 0, ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hbp: 0, so: 0,
-    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0,
+    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0, pitches: 0,
   };
 }
 
@@ -57,6 +59,7 @@ export interface GameContext {
   /** 환경 맞춤 계수 (사건별). 타자 쪽 비율에 곱한다 */
   cal: Rates;
   params: EngineParams;
+  /** 최대 이닝. 0 = 무제한 (승부가 날 때까지) */
   maxInnings: number;
   day: number;
   rng: Rng;
@@ -68,6 +71,8 @@ export interface GameContext {
   postseason?: boolean;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
+  /** AI 감독의 투구 수 기준 (선발, 구원). 시즌마다 managerNorms로 정한다. 없으면 그 투수의 한계 투구 수(몸 상태 뺀 값) */
+  planNorms?: { starter: number; relief: number };
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
@@ -186,7 +191,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   const mkSide = (ts: TeamSeason, lineup: SimPlayer[], starter: SimPlayer, isHome: boolean): Side => {
     const pitcher = enterPitcher(starter, true, 0, ctx);
     // 감독 작전: 선발을 일찍(작으면)·늦게 바꾸는 정도 (league/managers.ts). 난수를 더 쓰지 않는다
-    if (ts.tactics) pitcher.limit *= ts.tactics.hook;
+    if (ts.tactics) pitcher.plan *= ts.tactics.hook;
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
@@ -223,7 +228,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     lineScore.home.push(home.runs - h0);
     if (walkOff) break;
     if (inning >= 9 && home.runs !== away.runs) break;
-    if (inning >= ctx.maxInnings) break;
+    if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
   }
   return finishGame(st, inning, lineScore);
 }
@@ -296,11 +301,17 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const { batter, bl, pg } = beginPlateAppearance(st);
     // 지휘한 희생번트: 2아웃 전, 주자가 있을 때
     if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !fc?.walk) {
-      if (orderedBunt(st, batter, bl, pg)) return true;
+      const end = orderedBunt(st, batter, bl, pg);
+      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
+      if (end) return true;
       continue;
     }
-    if (!tactic && !fc?.walk && autoSacBunt(st, batter, bl, pg)) continue;
+    if (!tactic && !fc?.walk && autoSacBunt(st, batter, bl, pg)) {
+      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
+      continue;
+    }
 
+    // 지휘한 고의4구는 공 없이 (자동 고의4구)
     let ev: Ev;
     if (fc?.walk) ev = Ev.BB;
     else {
@@ -309,7 +320,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       }, st.park);
       const res = resolver.resolve(rates, ctx.rng);
       ev = res.ev;
-      pg.pitches += res.pitches;
+      addPitches(ctx, pg, res.pitches);
     }
     const r0 = bat.runs;
     const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk);
@@ -317,6 +328,13 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     if (st.walkOff()) return true;
   }
   return false;
+}
+
+/** 마운드 투수의 투구 수를 센다 (기록·박스스코어, 경기 안 피로·교체·불펜 피로) */
+function addPitches(ctx: GameContext, pg: PitcherInGame, n: number): void {
+  pg.pitches += n;
+  pg.line.np += n;
+  ctx.totals.pitches += n;
 }
 
 /** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */
@@ -332,7 +350,7 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
         ps.lastStartDay[i] = ctx.day;
         if (pg.outs >= 18 && pg.er <= 3) pg.line.qs++;
       }
-      ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.bf;
+      ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.pitches;
       ps.streak[i] = ps.fatigueDay[i] === ctx.day - 1 ? ps.streak[i] + 1 : ps.fatigueDay[i] === ctx.day ? Math.max(1, ps.streak[i]) : 1;
       ps.fatigueDay[i] = ctx.day;
     }

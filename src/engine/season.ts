@@ -7,7 +7,9 @@ import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, 
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
-import type { EngineParams } from './params';
+import { chainShapeFor, type EngineParams } from './params';
+import { chainResolver, type PaResolver } from './resolver';
+import { managerNorms } from './manager';
 import { Rng } from './rng';
 import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
@@ -130,6 +132,8 @@ export interface BoxPitcher {
   bb: number;
   so: number;
   hr: number;
+  /** 투구 수 (엔진 2) */
+  np: number;
 }
 
 export interface BoxSide {
@@ -226,6 +230,8 @@ export function rosterFingerprint(world: World): string {
 export interface SeasonInit {
   /** 박스스코어를 남길 팀 색인 (보통 플레이어 구단). 기본은 남기지 않음 */
   boxTeams?: number[];
+  /** 타석 해결기. 기본은 볼카운트 사슬 B1 (params.chainShape) */
+  resolver?: PaResolver;
 }
 
 export class Season {
@@ -300,8 +306,9 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors,
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)),
     };
+    this.ctx.planNorms = managerNorms(world.players, this.ctx);
 
     // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다
     for (const p of world.players) if (p.startAbsent && p.startAbsent > 0) this.states.absentUntil[p.idx] = p.startAbsent;
@@ -497,7 +504,7 @@ export class Season {
           const was = pitBefore.get(idx)!;
           return {
             idx, outs: now.outs - was.outs, bf: now.bf - was.bf, h: now.h - was.h, r: now.r - was.r, er: now.er - was.er,
-            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr,
+            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np,
           };
         });
         if (plays) {

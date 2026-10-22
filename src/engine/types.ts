@@ -175,6 +175,8 @@ export interface PitLine {
   qs: number;
   /** 블론 세이브: 세이브 상황(1~3점 리드)에 나와 동점·역전을 허용 (2026-10-22 추가) */
   bsv: number;
+  /** 투구 수 (엔진 2 3단계, 2026-10-22 추가. 기록·박스스코어에만 쓰고 피로·교체에는 아직 쓰지 않는다) */
+  np: number;
 }
 
 export interface TeamRecord {
@@ -199,7 +201,7 @@ export function lineTeam(p: Pick<SimPlayer, 'teamIdx' | 'formerTeam'>): number {
 }
 
 export function emptyPitLine(): PitLine {
-  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0, qs: 0, bsv: 0 };
+  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0, qs: 0, bsv: 0, np: 0 };
 }
 
 export function emptyTeamRecord(): TeamRecord {

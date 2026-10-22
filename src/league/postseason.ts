@@ -205,7 +205,7 @@ function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], sub
 function boxPit(staff: number[], pit: ReturnType<typeof emptyPitLine>[]): BoxPitcher[] {
   return staff.map((idx) => {
     const q = pit[idx];
-    return { idx, outs: q.outs, bf: q.bf, h: q.h, r: q.r, er: q.er, bb: q.bb, so: q.so, hr: q.hr };
+    return { idx, outs: q.outs, bf: q.bf, h: q.h, r: q.r, er: q.er, bb: q.bb, so: q.so, hr: q.hr, np: q.np };
   });
 }
 

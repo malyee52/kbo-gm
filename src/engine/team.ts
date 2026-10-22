@@ -1,7 +1,7 @@
 // 선수 기용: 1군 엔트리, 선발 라인업, 타순, 선발 로테이션, 불펜.
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
-import { isStarterSkill } from './params';
+import { BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
 import type { EngineParams } from './params';
@@ -14,7 +14,7 @@ import type { PitLine, SimPlayer, SimTeam, World } from './types';
 export interface PlayerStates {
   /** 이 날짜 전까지 결장 */
   absentUntil: Int32Array;
-  /** 불펜 피로도와 그 값을 기록한 날짜. 하루에 5씩 회복 */
+  /** 불펜 피로도(공 수)와 그 값을 기록한 날짜. 하루에 BULLPEN_RECOVERY_PER_DAY씩 회복 (params.ts) */
   fatigue: Float32Array;
   fatigueDay: Int32Array;
   /** fatigueDay까지 연속으로 던진 날 수 (연투 관리) */
@@ -32,16 +32,17 @@ export function newPlayerStates(n: number): PlayerStates {
   };
 }
 
-export const FATIGUE_RECOVERY_PER_DAY = 5;
-export const FATIGUE_AVAILABLE_BELOW = 6;
+export { BULLPEN_AVAILABLE_BELOW as FATIGUE_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY as FATIGUE_RECOVERY_PER_DAY } from './params';
 
-/** 어제까지 이틀 연속 던져 오늘 쉬어야 하는가 (3연투는 피한다) */
+/** 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만) */
 export function needsRest(st: PlayerStates, idx: number, day: number): boolean {
-  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2;
+  // 어제 경기 뒤 피로(오늘 회복 전)로 본다: 이틀 모두 짧게 던졌으면 사흘째도 나온다
+  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW;
 }
 
+/** 오늘 경기 전 피로 (공 수). 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
 export function currentFatigue(st: PlayerStates, idx: number, day: number): number {
-  return Math.max(0, st.fatigue[idx] - FATIGUE_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
+  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
 }
 
 export interface TeamSeason {
