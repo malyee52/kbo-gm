@@ -304,7 +304,7 @@ export class Season {
     this.gamesRoot = rng.fork('games');
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
-      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
+      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale, startPitchCap: eraPitching(world.year).pitchCap,
       errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)),
     };
 
