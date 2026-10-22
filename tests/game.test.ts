@@ -130,13 +130,13 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
     for (const n of absences) expect(n.text).not.toMatch(/부상|골절|징계|음주|도박|폭행|사생활/);
   });
 
-  it('시즌 일정이 규칙 표의 개막일(3월 28일 토요일)에 시작하고 월요일에는 경기가 없다', () => {
+  it('시즌 일정이 규칙 표의 개막일(3월 28일 토요일)에 시작하고 발표 일정의 월요일에는 경기가 없다 (월요일 경기는 우천 순연·잔여 경기)', () => {
     const first = dateOf(2026, 0);
     const last = dateOf(2026, g.season.schedule.length - 1);
     expect(g.season.plan.opening).toBe('2026-03-28');
     expect([first.month, first.date, first.weekday]).toEqual([3, 28, 6]);
     expect(last.month).toBeLessThan(11);
-    g.season.schedule.forEach((games, i) => { if (dateOf(2026, i).weekday === 1) expect(games).toEqual([]); });
+    g.season.plan.planned.forEach((games, i) => { if (dateOf(2026, i).weekday === 1) expect(games).toEqual([]); });
   });
 });
 

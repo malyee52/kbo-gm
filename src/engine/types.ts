@@ -119,6 +119,8 @@ export interface SimTeam {
    * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
    */
   park?: { hr: number; run?: number; ev?: ParkEvents };
+  /** 홈 구장이 돔: 우천 취소·경기 중 비가 없다 (engine/weather.ts). 리그 상태 월드만 붙인다 (league/stadium.ts homeIsDome) */
+  dome?: boolean;
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */

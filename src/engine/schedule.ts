@@ -1,5 +1,5 @@
 // 연전 단위 정규시즌 일정 생성기 (일정 개편 기획안 3장). 순수 함수이고 난수는 Rng만 쓴다: 같은 시드 = 같은 일정.
-// Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천·순연(7단계)은 아직 없다.
+// Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천 취소·순연은 그 뒤에 날씨를 굴려 붙인다 (weather.ts applyWeather, 7단계).
 // 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-99(1999 양대 리그)·S33-9(2013~2014)·S33F(2023~)
 // (3·5·6단계). 아직 만들지 않은 틀(S33L2 2015~2022, 2연전기 시작 결정 대기)과 규칙 표에 맞지 않는 월드(리그 나눔이 없는 1999 월드 포함)는
 // 같은 달력(개막일·월요일·쉬는 기간) 위에 원형 대진을 하루 한 경기씩 편다 (spreadPlan, 연전 없음).
@@ -15,6 +15,7 @@ import type { YearScheduleRule } from '../data/schedule';
 import { addDays, daysBetween, defaultOpening, weekdayOf } from '../data/schedule';
 import { Rng } from './rng';
 import type { World } from './types';
+import { applyWeather } from './weather';
 
 export interface PlanGame {
   home: number;
@@ -740,17 +741,19 @@ function tryBuild(input: ScheduleInput, rng: Rng, attempt: number): SchedulePlan
 }
 
 /** 5. 검사: 상대별 경기 수, 상대별 홈 목표, 하루 한 팀 한 경기, 월요일(어린이날 빼고)·쉬는 기간 경기 없음, 원정 연전 연속 한도.
+ * rain이면 날씨를 굴린 일정(weather.ts): 월요일 경기(우천 순연·잔여 경기)와 같은 대진 더블헤더(1·2차전)를 허용한다.
  * 걸린 것을 문장으로 돌려준다 (없으면 빈 배열) */
-export function planProblems(plan: SchedulePlan, input: ScheduleInput): string[] {
+export function planProblems(plan: SchedulePlan, input: ScheduleInput, opts: { rain?: boolean } = {}): string[] {
   const { rule, teams: n } = input;
   const out: string[] = [];
   const meet = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   plan.days.forEach((games, i) => {
     const d = addDays(rule.opening, i);
-    if (games.length && !playable(rule, d)) out.push(`${d}: 경기 없는 날에 경기`);
+    if (games.length && !(opts.rain ? !rule.breaks.some((b) => b.from <= d && d <= b.to) : playable(rule, d))) out.push(`${d}: 경기 없는 날에 경기`);
     const seen = new Set<number>();
     for (const g of games) {
-      if (seen.has(g.home) || seen.has(g.away)) out.push(`${d}: 한 팀이 두 경기`);
+      const dh = opts.rain && g.dh === 2 && games.some((x) => x.dh === 1 && x.home === g.home && x.away === g.away);
+      if (!dh && (seen.has(g.home) || seen.has(g.away))) out.push(`${d}: 한 팀이 두 경기`);
       seen.add(g.home);
       seen.add(g.away);
       meet[g.home][g.away]++;
@@ -878,15 +881,20 @@ export function framedRule(world: Pick<World, 'teams' | 'gamesPerTeam' | 'schedu
   return rule.vs * (n - 1) === rule.games ? rule : undefined;
 }
 
-/** 시즌 일정 (Season이 쓴다). rng는 시즌 뿌리 난수 ('schedule' 줄기를 갈라 쓴다) */
+/**
+ * 시즌 일정 (Season이 쓴다). rng는 시즌 뿌리 난수 ('schedule' 줄기를 갈라 쓴다).
+ * 일정 규칙이 있는 월드는 날씨를 굴려 우천 취소·순연·더블헤더를 넣는다 ('weather'·'remaining' 줄기, weather.ts). 규칙이 없으면 비가 없다
+ */
 export function planForWorld(world: Pick<World, 'year' | 'teams' | 'gamesPerTeam' | 'schedule' | 'openingHosts' | 'divisions'>, rng: Rng): SchedulePlan {
   const rule = framedRule(world);
-  if (rule) {
-    return generatePlan({
+  const base = rule
+    ? generatePlan({
       rule, teams: world.teams.length, franchises: world.teams.map((t) => t.franchise), openingHosts: world.openingHosts,
       ...(world.divisions ? { divisions: world.divisions.teams } : {}), rng,
-    });
-  }
-  const cal = world.schedule ?? { opening: defaultOpening(world.year), breaks: [] };
-  return spreadPlan(cal, world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
+    })
+    : spreadPlan(world.schedule ?? { opening: defaultOpening(world.year), breaks: [] }, world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
+  if (!world.schedule) return base;
+  return applyWeather(base, {
+    rule: world.schedule, teams: world.teams.length, parks: world.teams.map((t) => t.franchise), domes: world.teams.map((t) => !!t.dome), rng,
+  });
 }

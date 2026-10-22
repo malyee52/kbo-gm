@@ -299,14 +299,16 @@ describe('생성기 연결 (월드와 시즌)', () => {
     expect(games).toEqual(new Array(10).fill(144));
   });
 
-  it('연전 틀이 아직 없는 해(2019 S33L2)는 같은 달력에 하루 한 경기씩: 개막일, 월요일·쉬는 기간 경기 없음, 팀당 144경기', () => {
+  it('연전 틀이 아직 없는 해(2019 S33L2)는 같은 달력에 하루 한 경기씩: 개막일, 발표 일정의 월요일·쉬는 기간 경기 없음, 팀당 144경기', () => {
     expect(framedRule(w2019)).toBeUndefined();
     const p = planForWorld(w2019, new Rng('sched-2019'));
     expect(p.opening).toBe(w2019.schedule!.opening);
     const games = new Array(10).fill(0);
+    // 월요일 경기는 우천 순연뿐 (발표 일정 planned에는 없다), 쉬는 기간에는 실제 일정에도 없다
+    p.planned.forEach((d, i) => { if (weekdayOf(addDays(p.opening, i)) === 1) expect(d).toEqual([]); });
     p.days.forEach((d, i) => {
       const date = addDays(p.opening, i);
-      if (weekdayOf(date) === 1 || w2019.schedule!.breaks.some((b) => b.from <= date && date <= b.to)) expect(d).toEqual([]);
+      if (w2019.schedule!.breaks.some((b) => b.from <= date && date <= b.to)) expect(d).toEqual([]);
       for (const g of d) { games[g.home]++; games[g.away]++; }
     });
     expect(games).toEqual(new Array(10).fill(144));
@@ -467,7 +469,7 @@ describe('전 시대 연전 틀 (5단계)', () => {
     expect(framedRule(w)).toBeDefined();
     for (let s = 0; s < 10; s++) {
       const p = planForWorld(w, new Rng(`eleven-${s}`));
-      expect(planProblems(p, { rule: w.schedule!, teams: 11, franchises: w.teams.map((t) => t.franchise), rng: new Rng('x') }), `${s}`).toEqual([]);
+      expect(planProblems(p, { rule: w.schedule!, teams: 11, franchises: w.teams.map((t) => t.franchise), rng: new Rng('x') }, { rain: true }), `${s}`).toEqual([]);
       const m = meetings(p, 11);
       for (let a = 0; a < 11; a++) {
         for (let b = a + 1; b < 11; b++) expect(m[a][b] + m[b][a]).toBe(14);

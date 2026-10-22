@@ -452,12 +452,12 @@ export class Season {
       }
     }
     for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
-    for (const g of games) {
-      for (const ts of [season[g.home], season[g.away]]) {
-        for (const p of ts.hitters) this.activeDays[p.idx]++;
-        for (const p of ts.rotation) this.activeDays[p.idx]++;
-        for (const p of ts.bullpen) this.activeDays[p.idx]++;
-      }
+    // 1군 연차는 경기가 있는 날을 하루로 센다 (더블헤더 날도 하루)
+    for (const t of new Set(games.flatMap((g) => [g.home, g.away]))) {
+      const ts = season[t];
+      for (const p of ts.hitters) this.activeDays[p.idx]++;
+      for (const p of ts.rotation) this.activeDays[p.idx]++;
+      for (const p of ts.bullpen) this.activeDays[p.idx]++;
     }
 
     for (const g of games) {
@@ -529,7 +529,8 @@ export class Season {
    * 한 경기의 난수 소비가 그날 다른 경기나 다음 날 경기에 영향을 주지 않고, 저장에 경기 난수 위치가 필요 없다
    */
   gameRng(day: number, g: ScheduledGame): Rng {
-    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}`);
+    // 더블헤더 2차전은 /2를 붙인다 (1차전과 한 경기 날의 키는 그대로, 일정 개편 기획안 1장)
+    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}${g.dh === 2 ? '/2' : ''}`);
   }
 
   /** 그 선수를 until 전날까지 쉬게 한다 (무작위 이벤트의 휴식 처방). 부상 기록에는 남기지 않는다 */

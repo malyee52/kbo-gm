@@ -13,7 +13,7 @@ import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
-import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
+import { homeIsDome, parkEventFactor, parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
 import { divisionsFor } from './eras';
 
@@ -98,7 +98,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
     const ev = run !== 1 ? parkEventFactor(store.meta.parkEvents, t.franchise, year, league.stadiums?.[idx]) : undefined;
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}) };
+      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}),
+      ...(homeIsDome(league.stadiums?.[idx], t.franchise, year) ? { dome: true } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
