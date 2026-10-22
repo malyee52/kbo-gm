@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>안 A 부서형 — 정규시즌 홈 (데스크톱)</title>
+<!-- UI 개편 시안 (안 A 부서형, 정규시즌 홈). 기준: docs/UI개편_기획안.md 6.2 칸 순서·층, 6.4 안 A 와이어프레임, docs/UI시안_지시서.md A-2.
+     색은 src/ui/base.css 라이트 테마 토큰과 game.css의 구단 색 규칙(.tv), 구단 색 값은 src/ui/teams.ts. 화면 사진 크기 1440×900.
+     "다음 경기" 칸만 2층(자세히)을 펼친 모습이고 나머지 칸은 1층. 이름은 모두 가상 선수. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&display=swap" />
+<style>
+:root {
+  --panel: #ffffff; --panel-2: #f6f5f3; --fg: #17181b; --muted: #62666d; --faint: #9a9ea5;
+  --line: #e7e4e0; --line-strong: #d3cfca;
+  --warn-bg: #fff4d6; --warn-fg: #5c4300; --error: #b42318; --error-bg: #fbe1de; --info-bg: #e4edfb;
+  --nav-bg: #131b2b; --nav-fg: #eef2f8; --nav-muted: #9aa7bc; --nav-line: rgba(255,255,255,0.1); --nav-hover: rgba(255,255,255,0.08); --nav-on: rgba(255,255,255,0.14);
+  --radius: 14px; --radius-sm: 9px; --shadow-sm: 0 1px 2px rgba(20,16,18,0.05); --shadow-md: 0 6px 18px rgba(20,16,18,0.1);
+  --font: 'Pretendard Variable', 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
+  --font-num: 'Oswald', 'Pretendard Variable', system-ui, sans-serif;
+  /* 두산 (teams.ts) → game.css .tv 규칙 */
+  --team-primary: #131230; --team-button: #ed1c24; --team-tint: #e6e6f2; --team-tint-text: #131230;
+  --team: var(--team-primary); --accent: var(--team-button); --accent-fg: #ffffff; --accent-soft: var(--team-tint);
+  --me-bg: var(--team-tint); --me-fg: var(--team-tint-text);
+  --bg: color-mix(in srgb, var(--team-primary) 3%, #f7f6f4);
+  /* 승패·좋다나쁘다 (문서에 색 토큰이 없어 채움) */
+  --good: #1f7a45; --good-bg: #e2f2e8; --bad: #b42318; --bad-bg: #fbe1de;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1440px; height: 900px; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.num { font-family: var(--font-num); letter-spacing: 0.01em; }
+
+.app { display: grid; grid-template-columns: 216px 1fr; grid-template-rows: 64px 1fr; height: 900px; }
+
+/* 왼쪽 세로 메뉴 */
+.brand { grid-row: 1; grid-column: 1; background: var(--nav-bg); display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--nav-line); color: var(--nav-fg); font-weight: 800; font-size: 17px; }
+.brand .band { width: 6px; height: 26px; border-radius: 2px; background: var(--team-button); }
+.side { grid-row: 2; grid-column: 1; background: var(--nav-bg); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+.item { height: 46px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: var(--radius-sm); color: var(--nav-muted); font-size: 15px; font-weight: 600; position: relative; }
+.item svg { width: 20px; height: 20px; stroke: currentColor; flex: none; }
+.item.on { background: var(--nav-on); color: var(--nav-fg); font-weight: 800; }
+.item.on::before { content: ''; position: absolute; left: 0; top: 11px; bottom: 11px; width: 3px; border-radius: 2px; background: var(--team-button); }
+.side .fold { margin-top: auto; color: var(--nav-muted); font-size: 12.5px; padding: 8px 12px; display: flex; align-items: center; gap: 6px; }
+
+/* 위쪽 고정 막대 */
+.top { grid-row: 1; grid-column: 2; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; padding: 0 16px 0 0; box-shadow: var(--shadow-sm); }
+.seg { padding: 0 20px; height: 32px; display: flex; align-items: center; gap: 8px; border-right: 1px solid var(--line); white-space: nowrap; color: var(--muted); font-size: 14px; }
+.seg strong { color: var(--fg); font-weight: 800; font-size: 15px; }
+.seg .rec { font-size: 18px; font-weight: 700; color: var(--fg); }
+.todo { color: var(--fg); font-weight: 700; }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--error); color: #fff; font-size: 12px; font-weight: 800; }
+.grow { flex: 1; }
+.search { width: 200px; height: 36px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--faint); font-size: 13px; margin-right: 12px; }
+.search svg { width: 15px; height: 15px; stroke: var(--faint); }
+.go { display: flex; }
+.go .main { background: var(--accent); color: var(--accent-fg); font-weight: 800; font-size: 15px; padding: 0 18px; height: 40px; display: flex; align-items: center; gap: 6px; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.go .more { background: color-mix(in srgb, var(--accent) 84%, #000); color: #fff; height: 40px; width: 32px; display: flex; align-items: center; justify-content: center; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; }
+.gear { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; margin-left: 8px; color: var(--muted); }
+.gear svg { width: 22px; height: 22px; stroke: currentColor; }
+
+/* 본문 */
+.main-area { grid-row: 2; grid-column: 2; padding: 18px 22px 18px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 420px; gap: 14px; }
+.col { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 14px 18px; display: flex; flex-direction: column; min-height: 0; }
+.card h2 { margin: 0 0 10px; font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 8px; letter-spacing: -0.01em; }
+.card h2 .cnt { color: var(--muted); font-weight: 600; }
+.card h2 .r { margin-left: auto; font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.more-link { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.fill { flex: 1; }
+
+/* 지금 할 일 */
+.task { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); }
+.task:first-of-type { border-top: 0; padding-top: 2px; }
+.mark { width: 24px; height: 24px; border-radius: 50%; background: var(--warn-bg); color: #c2410c; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+.task .t { font-weight: 700; }
+.task .s { color: var(--muted); font-size: 12.5px; }
+.btn { margin-left: auto; height: 32px; padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--panel); font-weight: 700; font-size: 13px; display: flex; align-items: center; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
+
+/* 받은 소식 */
+.chips { display: flex; gap: 6px; }
+.chip { height: 26px; padding: 0 11px; border-radius: 13px; border: 1px solid var(--line-strong); font-size: 12.5px; font-weight: 600; color: var(--muted); display: flex; align-items: center; }
+.chip.on { background: var(--fg); color: #fff; border-color: transparent; }
+.news { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-top: 1px solid var(--line); font-size: 14px; }
+.news:first-of-type { border-top: 0; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.dot.read { background: transparent; }
+.kind { font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; height: 20px; display: flex; align-items: center; flex: none; }
+.news .when { margin-left: auto; color: var(--faint); font-size: 12.5px; }
+.news.unread .txt { font-weight: 700; }
+.foot { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--line); }
+
+/* 팀 표시: 글자 + 팀 색 띠 */
+.tm { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+.tm::before { content: ''; width: 4px; height: 16px; border-radius: 2px; background: var(--c); }
+
+/* 최근 경기 */
+.game { display: grid; grid-template-columns: 72px 30px 54px 1fr; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.game:first-of-type { border-top: 0; }
+.game .d { color: var(--muted); font-size: 13px; }
+.wl { width: 24px; height: 24px; border-radius: 6px; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.wl.w { background: var(--good-bg); color: var(--good); }
+.wl.l { background: var(--bad-bg); color: var(--bad); }
+.game .sc { font-size: 16px; font-weight: 700; }
+
+/* 순위 */
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 5px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--panel-2); }
+td.l, th.l { text-align: left; }
+tr.me td { background: var(--me-bg); color: var(--me-fg); font-weight: 800; }
+tbody tr:last-child td { border-bottom: 0; }
+
+/* 다음 경기 */
+.match { display: grid; grid-template-columns: 1fr 34px 1fr; align-items: center; gap: 6px; }
+.side-t { display: flex; flex-direction: column; gap: 6px; }
+.side-t.r { align-items: flex-end; text-align: right; }
+.side-t .nm { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.side-t .nm::before { content: ''; width: 5px; height: 24px; border-radius: 2px; background: var(--c); }
+.side-t.r .nm { flex-direction: row-reverse; }
+.side-t .rk { color: var(--muted); font-size: 12.5px; }
+.vs { text-align: center; color: var(--faint); font-weight: 800; font-size: 15px; }
+.sp { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border-radius: 8px; padding: 4px 10px; font-weight: 700; font-size: 14px; }
+.sp .pos { font-size: 11px; font-weight: 800; color: var(--muted); }
+.when-line { color: var(--muted); font-size: 13px; }
+.layer2 { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line-strong); display: grid; grid-template-columns: 78px 1fr 1fr; gap: 7px 10px; font-size: 13px; align-items: center; }
+.layer2 .k { color: var(--muted); font-size: 12px; font-weight: 700; }
+.layer2 .v.r { text-align: right; }
+.form { display: inline-flex; gap: 3px; vertical-align: -1px; }
+.form i { width: 9px; height: 9px; border-radius: 50%; background: var(--good); display: inline-block; }
+.form i.l { background: var(--bad); }
+
+/* 우리 팀 한눈에 */
+.glance { display: flex; align-items: center; gap: 16px; }
+.big { font-size: 44px; font-weight: 700; line-height: 1; }
+.big small { font-size: 18px; font-family: var(--font); font-weight: 800; margin-left: 2px; }
+.pill-good { display: inline-flex; align-items: center; gap: 6px; background: var(--good-bg); color: var(--good); font-weight: 800; font-size: 13px; border-radius: 13px; padding: 3px 11px; }
+.pill-good::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+
+/* 선수 화제 */
+.buzz { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.buzz:first-of-type { border-top: 0; padding-top: 2px; }
+.tagx { font-size: 11.5px; font-weight: 800; border-radius: 6px; padding: 1px 7px; flex: none; width: 62px; text-align: center; }
+.tagx.hot { background: var(--good-bg); color: var(--good); }
+.tagx.cold { background: var(--bad-bg); color: var(--bad); }
+.tagx.back { background: var(--info-bg); color: #1d4f91; }
+.buzz .nm { font-weight: 800; }
+.buzz .pos { font-size: 11.5px; font-weight: 800; color: var(--muted); }
+.buzz .s { color: var(--muted); font-size: 12.5px; margin-left: auto; }
+
+/* 구단 상태 띠 */
+.strip { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); height: 48px; display: flex; align-items: center; gap: 20px; padding: 0 18px; font-size: 14px; flex: none; }
+.strip .k { font-weight: 800; }
+.bar { width: 160px; height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 62%; background: var(--team); border-radius: 4px; }
+.strip .v { font-weight: 800; }
+.sep { width: 1px; height: 20px; background: var(--line); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></symbol>
+    <symbol id="i-squad" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M16 14.2c2.4 0 4 1.6 4.5 4.3"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 20 12 12 20 4 12z"/><circle cx="12" cy="12" r="1.6"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8.5h13"/><path d="M15 5.5l3 3-3 3"/><path d="M19 15.5H6"/><path d="M9 12.5l-3 3 3 3"/></symbol>
+    <symbol id="i-club" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M6 20V9l6-4 6 4v11"/><path d="M10 20v-4h4v4"/><path d="M9.5 11h5"/></symbol>
+    <symbol id="i-league" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V13"/><path d="M10 19V8"/><path d="M15 19v-8"/><path d="M20 19V5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h9.5a3 3 0 0 1 3 3V19H8a3 3 0 0 1-3-3z"/><path d="M5 16a3 3 0 0 1 3-3h9.5"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <div class="brand"><span class="band"></span>두산</div>
+
+  <!-- 위쪽 고정 막대 -->
+  <header class="top">
+    <div class="seg"><strong>7월 12일(토)</strong>남은 경기 55</div>
+    <div class="seg"><span class="rec num">48-39-2</span><strong>3위</strong>선두와 4.5</div>
+    <div class="seg todo">할 일 <span class="badge">2</span></div>
+    <div class="grow"></div>
+    <div class="search"><svg><use href="#i-search"/></svg>선수 검색</div>
+    <div class="go"><div class="main">다음 경기 ▶</div><div class="more">▾</div></div>
+    <div class="gear"><svg><use href="#i-gear"/></svg></div>
+  </header>
+
+  <nav class="side">
+    <div class="item on"><svg><use href="#i-home"/></svg>홈</div>
+    <div class="item"><svg><use href="#i-squad"/></svg>선수단</div>
+    <div class="item"><svg><use href="#i-game"/></svg>경기</div>
+    <div class="item"><svg><use href="#i-move"/></svg>선수 이동</div>
+    <div class="item"><svg><use href="#i-club"/></svg>구단 운영</div>
+    <div class="item"><svg><use href="#i-league"/></svg>리그</div>
+    <div class="item"><svg><use href="#i-archive"/></svg>기록실</div>
+    <div class="fold">◀ 접기</div>
+  </nav>
+
+  <main class="main-area">
+    <div class="grid">
+      <div class="col">
+        <!-- 1. 지금 할 일 -->
+        <section class="card">
+          <h2>지금 할 일 <span class="cnt">2</span><span class="r">자세히 ▾</span></h2>
+          <div class="task"><span class="mark">!</span><div><div class="t">LG의 트레이드 제안</div><div class="s">답 기다림 · 내일까지</div></div><span class="btn primary">보기</span></div>
+          <div class="task"><span class="mark">!</span><div><div class="t">선수 이벤트 · 도겸우</div><div class="s">선택지 중 하나를 고르기</div></div><span class="btn">고르기</span></div>
+        </section>
+
+        <!-- 4. 받은 소식 -->
+        <section class="card">
+          <h2>받은 소식 <span class="r"><span class="chips"><span class="chip on">전체</span><span class="chip">선수</span><span class="chip">이동</span><span class="chip">구단</span></span></span></h2>
+          <div class="news unread"><span class="dot"></span><span class="kind">선수</span><span class="txt">차윤혁, 1군 복귀 (결장 끝)</span><span class="when">7/12</span></div>
+          <div class="news unread"><span class="dot"></span><span class="kind">이동</span><span class="txt"><span class="tm" style="--c:#1A1A1A">KT</span>, 마도윤 영입</span><span class="when">7/12</span></div>
+          <div class="news"><span class="dot read"></span><span class="kind">선수</span><span class="txt">백승하, 통산 100홈런</span><span class="when">7/11</span></div>
+          <div class="news"><span class="dot read"></span><span class="kind">시즌</span><span class="txt">올스타전 명단 발표 · 우리 팀 3명</span><span class="when">7/11</span></div>
+          <div class="news"><span class="dot read"></span><span class="kind">이동</span><span class="txt"><span class="tm" style="--c:#A50034">LG</span> ↔ <span class="tm" style="--c:#1D467F">NC</span> 트레이드 (투수 1 ↔ 야수 1)</span><span class="when">7/10</span></div>
+          <div class="foot"><span class="more-link">전체 보기 ›</span></div>
+        </section>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; flex:1; min-height:0;">
+          <!-- 5. 최근 경기 -->
+          <section class="card">
+            <h2>최근 경기<span class="r">자세히 ▾</span></h2>
+            <div class="game"><span class="d">7/12(토)</span><span class="wl w">W</span><span class="sc num">5:3</span><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+            <div class="game"><span class="d">7/11(금)</span><span class="wl l">L</span><span class="sc num">2:4</span><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+            <div class="game"><span class="d">7/10(목)</span><span class="wl w">W</span><span class="sc num">7:1</span><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+          </section>
+          <!-- 6. 순위 -->
+          <section class="card">
+            <h2>순위<span class="r">전체 순위 ›</span></h2>
+            <table>
+              <thead><tr><th class="l">순위</th><th class="l">구단</th><th>승-패-무</th><th>승차</th></tr></thead>
+              <tbody>
+                <tr><td class="l">1</td><td class="l"><span class="tm" style="--c:#A50034">LG</span></td><td>53-35-1</td><td>–</td></tr>
+                <tr><td class="l">2</td><td class="l"><span class="tm" style="--c:#F37321">한화</span></td><td>50-37-2</td><td>2.5</td></tr>
+                <tr class="me"><td class="l">3</td><td class="l"><span class="tm" style="--c:#131230">두산</span></td><td>48-39-2</td><td>4.5</td></tr>
+                <tr><td class="l">4</td><td class="l"><span class="tm" style="--c:#CE0E2D">SSG</span></td><td>45-41-3</td><td>7.0</td></tr>
+                <tr><td class="l">5</td><td class="l"><span class="tm" style="--c:#1A1A1A">KT</span></td><td>44-43-1</td><td>8.5</td></tr>
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </div>
+
+      <div class="col">
+        <!-- 2. 다음 경기 (2층 펼친 모습) -->
+        <section class="card">
+          <h2>다음 경기<span class="r">접기 ▴</span></h2>
+          <div class="when-line" style="margin-bottom:10px">7월 13일(일) · 홈</div>
+          <div class="match">
+            <div class="side-t"><span class="nm" style="--c:#131230">두산</span><span class="sp"><span class="pos">SP</span>서하람</span></div>
+            <div class="vs">vs</div>
+            <div class="side-t r"><span class="nm" style="--c:#A50034">LG</span><span class="sp"><span class="pos">SP</span>염태린</span></div>
+          </div>
+          <div class="layer2">
+            <span class="k">선발 성적</span><span class="v">9승 4패 · 평균자책 3.21</span><span class="v r">8승 5패 · 평균자책 3.64</span>
+            <span class="k">상대 전적</span><span class="v">6승 4패</span><span class="v r">4승 6패</span>
+            <span class="k">최근 5경기</span><span class="v"><span class="form"><i></i><i></i><i class="l"></i><i></i><i></i></span> 4-1</span><span class="v r">3-2 <span class="form"><i></i><i class="l"></i><i></i><i></i><i class="l"></i></span></span>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:12px;"><span class="btn primary" style="margin-left:0">다음 경기 ▶</span></div>
+        </section>
+
+        <!-- 3. 우리 팀 한눈에 -->
+        <section class="card">
+          <h2>우리 팀 한눈에<span class="r">자세히 ▾</span></h2>
+          <div class="glance">
+            <span class="big num">3<small>위</small></span>
+            <div>
+              <div style="font-weight:800; font-size:16px;"><span class="num">48</span>승 <span class="num">39</span>패 <span class="num">2</span>무</div>
+              <div class="when-line">가을야구 선(5위)보다 4.0경기 앞</div>
+            </div>
+          </div>
+          <div style="margin-top:10px"><span class="pill-good">가을야구 안정권</span></div>
+        </section>
+
+        <!-- 7. 선수 화제 -->
+        <section class="card fill">
+          <h2>선수 화제<span class="r">자세히 ▾</span></h2>
+          <div class="buzz"><span class="tagx hot">상승세</span><span class="nm">도겸우</span><span class="pos">CF</span><span class="s">7경기 연속 안타</span></div>
+          <div class="buzz"><span class="tagx cold">부진</span><span class="nm">표지안</span><span class="pos">SP</span><span class="s">최근 3번 등판 흔들림</span></div>
+          <div class="buzz"><span class="tagx back">복귀 예정</span><span class="nm">남궁지율</span><span class="pos">RP</span><span class="s">7월 15일 무렵</span></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 8. 구단 상태 (작은 띠) -->
+    <div class="strip">
+      <span class="k">구단 상태</span>
+      <span class="sep"></span>
+      <span>구단주 신뢰도</span><span class="bar"><i></i></span><span class="v num">62</span>
+      <span class="sep"></span>
+      <span>자금</span><span class="v">34억</span>
+      <span class="grow"></span>
+      <span class="more-link">자세히 ▾</span>
+    </div>
+  </main>
+</div>
+</body>
+</html>

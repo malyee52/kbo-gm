@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>안 A 부서형 — 정규시즌 홈 (휴대폰)</title>
+<!-- UI 개편 시안 (안 A 부서형, 휴대폰 홈). 기준: docs/UI개편_기획안.md 3장 공통 뼈대(휴대폰), 6.5 와이어프레임, docs/UI시안_지시서.md M-1.
+     색은 src/ui/base.css 라이트 테마 토큰과 game.css의 구단 색 규칙(.tv), 구단 색 값은 src/ui/teams.ts. 화면 사진 크기 390×844.
+     아래 탭은 안 A 대분류 앞 5개 + "더" (리그·기록실은 "더" 안). 이름은 모두 가상 선수. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&display=swap" />
+<style>
+:root {
+  --panel: #ffffff; --panel-2: #f6f5f3; --fg: #17181b; --muted: #62666d; --faint: #9a9ea5;
+  --line: #e7e4e0; --line-strong: #d3cfca;
+  --warn-bg: #fff4d6; --error: #b42318; --info-bg: #e4edfb;
+  --nav-bg: #131b2b; --nav-fg: #eef2f8; --nav-muted: #9aa7bc; --nav-line: rgba(255,255,255,0.1);
+  --radius: 14px; --radius-sm: 9px; --shadow-sm: 0 1px 2px rgba(20,16,18,0.05); --shadow-md: 0 6px 18px rgba(20,16,18,0.1);
+  --font: 'Pretendard Variable', 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
+  --font-num: 'Oswald', 'Pretendard Variable', system-ui, sans-serif;
+  /* 두산 (teams.ts) → game.css .tv 규칙 */
+  --team-primary: #131230; --team-button: #ed1c24; --team-tint: #e6e6f2;
+  --team: var(--team-primary); --accent: var(--team-button); --accent-fg: #ffffff;
+  --bg: color-mix(in srgb, var(--team-primary) 3%, #f7f6f4);
+  /* 승패·좋다나쁘다 (문서에 색 토큰이 없어 채움) */
+  --good: #1f7a45; --good-bg: #e2f2e8; --bad: #b42318; --bad-bg: #fbe1de;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 390px; height: 844px; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; position: relative; }
+.num { font-family: var(--font-num); letter-spacing: 0.01em; }
+
+/* 위쪽 막대 (두 줄) */
+.top { background: var(--nav-bg); color: var(--nav-fg); padding: 10px 16px 12px; }
+.row1 { display: flex; align-items: center; gap: 10px; height: 34px; }
+.team { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.team::before { content: ''; width: 5px; height: 22px; border-radius: 2px; background: var(--team-button); }
+.rec { font-size: 17px; font-weight: 700; }
+.rk { font-weight: 800; }
+.gear { margin-left: auto; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; margin-right: -10px; color: var(--nav-muted); }
+.gear svg { width: 22px; height: 22px; stroke: currentColor; }
+.row2 { display: flex; align-items: center; margin-top: 6px; }
+.date { color: var(--nav-muted); font-size: 14px; font-weight: 600; }
+.go { margin-left: auto; display: flex; }
+.go .main { background: var(--accent); color: var(--accent-fg); font-weight: 800; font-size: 16px; height: 46px; padding: 0 20px; display: flex; align-items: center; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.go .more { background: color-mix(in srgb, var(--accent) 84%, #000); color: #fff; width: 36px; height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 12px; }
+
+/* 칸 */
+.list { padding: 12px 12px 0; display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 12px 14px; }
+.card h2 { margin: 0 0 8px; font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+.card h2 .cnt { color: var(--muted); font-weight: 600; }
+.card h2 .r { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--muted); }
+.chev { margin-left: auto; color: var(--faint); font-size: 18px; line-height: 1; }
+
+.task { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.mark { width: 24px; height: 24px; border-radius: 50%; background: var(--warn-bg); color: #c2410c; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+.task .t { font-weight: 700; }
+.task .s { color: var(--muted); font-size: 12.5px; }
+
+.when { color: var(--muted); font-size: 13px; }
+.match { display: grid; grid-template-columns: 1fr 28px 1fr; align-items: center; margin-top: 8px; }
+.side-t { display: flex; flex-direction: column; gap: 6px; }
+.side-t.r { align-items: flex-end; }
+.nm { font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 7px; }
+.nm::before { content: ''; width: 5px; height: 20px; border-radius: 2px; background: var(--c); }
+.side-t.r .nm { flex-direction: row-reverse; }
+.vs { text-align: center; color: var(--faint); font-weight: 800; }
+.sp { display: inline-flex; align-items: center; gap: 5px; background: var(--panel-2); border-radius: 8px; padding: 3px 9px; font-weight: 700; font-size: 14px; }
+.sp .pos { font-size: 11px; font-weight: 800; color: var(--muted); }
+
+.status { display: flex; align-items: center; gap: 10px; }
+.big { font-size: 30px; font-weight: 700; line-height: 1; }
+.big small { font-size: 15px; font-family: var(--font); font-weight: 800; }
+.pill-good { display: inline-flex; align-items: center; gap: 5px; background: var(--good-bg); color: var(--good); font-weight: 800; font-size: 13px; border-radius: 13px; padding: 3px 10px; }
+.pill-good::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.last10 { margin-left: auto; text-align: right; font-size: 12.5px; color: var(--muted); }
+.last10 b { color: var(--fg); font-size: 15px; }
+
+.news { display: flex; align-items: center; gap: 8px; min-height: 36px; border-top: 1px solid var(--line); font-size: 14px; }
+.news:first-of-type { border-top: 0; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.dot.read { background: transparent; }
+.news.unread .txt { font-weight: 700; }
+.news .w { margin-left: auto; color: var(--faint); font-size: 12px; }
+
+.game { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: 14px; }
+.wl { width: 22px; height: 22px; border-radius: 6px; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.wl.w { background: var(--good-bg); color: var(--good); }
+.wl.l { background: var(--bad-bg); color: var(--bad); }
+.tm { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; }
+.tm::before { content: ''; width: 4px; height: 14px; border-radius: 2px; background: var(--c); }
+
+/* 아래 탭 */
+.tabs { position: absolute; left: 0; right: 0; bottom: 0; height: 68px; background: var(--panel); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(6, 1fr); padding-bottom: 6px; box-shadow: 0 -4px 14px rgba(20,16,18,0.06); }
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); font-size: 11.5px; font-weight: 600; position: relative; white-space: nowrap; }
+.tab svg { width: 22px; height: 22px; stroke: currentColor; }
+.tab.on { color: var(--fg); font-weight: 800; }
+.tab.on::before { content: ''; position: absolute; top: 0; left: 22%; right: 22%; height: 3px; border-radius: 0 0 3px 3px; background: var(--team-button); }
+.tab .b { position: absolute; top: 7px; left: calc(50% + 6px); min-width: 16px; height: 16px; border-radius: 8px; background: var(--error); color: #fff; font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></symbol>
+    <symbol id="i-squad" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M16 14.2c2.4 0 4 1.6 4.5 4.3"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 20 12 12 20 4 12z"/><circle cx="12" cy="12" r="1.6"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8.5h13"/><path d="M15 5.5l3 3-3 3"/><path d="M19 15.5H6"/><path d="M9 12.5l-3 3 3 3"/></symbol>
+    <symbol id="i-club" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M6 20V9l6-4 6 4v11"/><path d="M10 20v-4h4v4"/><path d="M9.5 11h5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h.01M12 12h.01M18 12h.01"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6"/></symbol>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="row1">
+    <span class="team">두산</span>
+    <span class="rec num">48-39-2</span>
+    <span class="rk">3위</span>
+    <span class="gear"><svg><use href="#i-gear"/></svg></span>
+  </div>
+  <div class="row2">
+    <span class="date">7/12(토)</span>
+    <div class="go"><div class="main">다음 경기 ▶</div><div class="more">▾</div></div>
+  </div>
+</header>
+
+<div class="list">
+  <section class="card">
+    <h2>지금 할 일 <span class="cnt">2</span><span class="chev">›</span></h2>
+    <div class="task"><span class="mark">!</span><div><div class="t">LG의 트레이드 제안</div><div class="s">답 기다림 · 내일까지</div></div></div>
+  </section>
+
+  <section class="card">
+    <h2>다음 경기<span class="r">7/13(일) · 홈</span></h2>
+    <div class="match">
+      <div class="side-t"><span class="nm" style="--c:#131230">두산</span><span class="sp"><span class="pos">SP</span>서하람</span></div>
+      <div class="vs">vs</div>
+      <div class="side-t r"><span class="nm" style="--c:#A50034">LG</span><span class="sp"><span class="pos">SP</span>염태린</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="status">
+      <span class="big num">3<small>위</small></span>
+      <span class="pill-good">가을야구 안정권</span>
+      <span class="last10">최근 10경기<br><b class="num">7-3</b></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>받은 소식<span class="r">전체 ›</span></h2>
+    <div class="news unread"><span class="dot"></span><span class="txt">차윤혁, 1군 복귀 (결장 끝)</span><span class="w">7/12</span></div>
+    <div class="news unread"><span class="dot"></span><span class="txt"><span class="tm" style="--c:#1A1A1A">KT</span>, 마도윤 영입</span><span class="w">7/12</span></div>
+    <div class="news"><span class="dot read"></span><span class="txt">백승하, 통산 100홈런</span><span class="w">7/11</span></div>
+  </section>
+
+  <section class="card">
+    <h2>최근 경기<span class="r">›</span></h2>
+    <div class="game"><span class="when">7/12(토)</span><span class="wl w">W</span><b class="num">5:3</b><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+    <div class="game"><span class="when">7/11(금)</span><span class="wl l">L</span><b class="num">2:4</b><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+    <div class="game"><span class="when">7/10(목)</span><span class="wl w">W</span><b class="num">7:1</b><span>vs <span class="tm" style="--c:#CE0E2D">SSG</span></span></div>
+  </section>
+</div>
+
+<nav class="tabs">
+  <div class="tab on"><svg><use href="#i-home"/></svg>홈</div>
+  <div class="tab"><svg><use href="#i-squad"/></svg>선수단</div>
+  <div class="tab"><svg><use href="#i-game"/></svg>경기</div>
+  <div class="tab"><svg><use href="#i-move"/></svg>선수 이동</div>
+  <div class="tab"><svg><use href="#i-club"/></svg>구단 운영</div>
+  <div class="tab"><svg><use href="#i-more"/></svg>더</div>
+</nav>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>안 A 부서형 — 메뉴 구조</title>
+<!-- UI 개편 시안 (안 A 부서형, 메뉴 구조 그림). 기준: docs/UI개편_기획안.md 3장 안 A, docs/UI시안_지시서.md A-1.
+     색은 src/ui/base.css 라이트 테마 토큰 값, 구단 색은 src/ui/teams.ts 값. 화면 사진 크기 1440×900. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+<style>
+:root {
+  --bg: #f6f5f3; --panel: #ffffff; --panel-2: #f6f5f3; --fg: #17181b; --muted: #62666d; --faint: #9a9ea5;
+  --line: #e7e4e0; --line-strong: #d3cfca; --accent: #1a1a1a; --accent-fg: #ffffff; --accent-soft: #ecebe8;
+  --warn-bg: #fff4d6; --warn-fg: #5c4300; --error: #b42318; --info-bg: #e4edfb;
+  --nav-bg: #131b2b; --nav-fg: #eef2f8; --nav-muted: #9aa7bc; --nav-line: rgba(255,255,255,0.1); --nav-on: rgba(255,255,255,0.14);
+  --radius: 14px; --radius-sm: 9px; --shadow-sm: 0 1px 2px rgba(20,16,18,0.05); --shadow-md: 0 6px 18px rgba(20,16,18,0.1);
+  --font: 'Pretendard Variable', 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
+  /* 두산 (teams.ts) */
+  --team: #131230; --team-2: #ed1c24; --team-tint: #e6e6f2;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1440px; height: 900px; overflow: hidden; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+
+.page { padding: 22px 32px 24px; display: flex; flex-direction: column; height: 900px; }
+.title { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+.title h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+.title span { color: var(--muted); font-size: 14px; }
+
+/* 위쪽 고정 막대 모형 */
+.topbar { display: flex; align-items: center; gap: 0; height: 52px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 0 8px 0 0; overflow: hidden; }
+.topbar .tag { align-self: stretch; display: flex; align-items: center; padding: 0 14px; background: var(--panel-2); border-right: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--muted); }
+.tb { padding: 0 16px; border-right: 1px solid var(--line); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+.tb.team { font-weight: 800; font-size: 15px; }
+.band { display: inline-block; width: 5px; height: 22px; border-radius: 2px; background: var(--team); }
+.tb b { font-weight: 800; }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--error); color: #fff; font-size: 12px; font-weight: 800; }
+.search { width: 170px; height: 32px; border: 1.5px dashed var(--line-strong); border-radius: var(--radius-sm); display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--faint); font-size: 13px; }
+.search svg { width: 14px; height: 14px; stroke: var(--faint); }
+.spacer { flex: 1; }
+.go { display: flex; }
+.go .main { background: var(--team-2); color: var(--accent-fg); font-weight: 800; padding: 0 16px; height: 34px; display: flex; align-items: center; border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.go .more { background: #c4161d; color: #fff; height: 34px; width: 30px; display: flex; align-items: center; justify-content: center; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 11px; }
+.gear { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; margin-left: 8px; }
+.gear svg { width: 20px; height: 20px; stroke: var(--muted); }
+
+/* 본문: 왼쪽 세로 메뉴 + 부서별 세부 화면 */
+.body { display: grid; grid-template-columns: 236px 1fr 300px; gap: 0 22px; margin-top: 16px; flex: 1; min-height: 0; }
+.side { background: var(--nav-bg); border-radius: var(--radius); padding: 12px 10px; display: flex; flex-direction: column; box-shadow: var(--shadow-md); }
+.side .brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 12px; border-bottom: 1px solid var(--nav-line); margin-bottom: 8px; color: var(--nav-fg); font-weight: 800; font-size: 15px; }
+.side .brand .band { background: var(--team-2); box-shadow: -3px 0 0 var(--nav-fg) inset; width: 6px; }
+.item { height: 80px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: var(--radius-sm); color: var(--nav-fg); position: relative; }
+.item svg { width: 22px; height: 22px; stroke: var(--nav-muted); flex: none; }
+.item .name { font-size: 16px; font-weight: 700; }
+.item .desc { font-size: 12px; color: var(--nav-muted); }
+.item.on { background: var(--nav-on); }
+.item.on::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; width: 3px; border-radius: 2px; background: var(--team-2); }
+.item.on svg { stroke: var(--nav-fg); }
+.side .div { border-top: 1px solid var(--nav-line); margin: 8px 6px; }
+.item.story { height: 52px; opacity: 0.8; }
+.item.story .name { font-size: 14px; }
+.side .fold { margin-top: auto; color: var(--nav-muted); font-size: 12px; padding: 6px 12px; }
+
+.groups { display: flex; flex-direction: column; padding-top: 57px; }
+.group { height: 80px; display: flex; align-items: center; position: relative; }
+.group::before { content: ''; position: absolute; left: -22px; width: 22px; top: 50%; border-top: 1.5px solid var(--line-strong); }
+.group::after { content: ''; position: absolute; left: -26px; top: calc(50% - 3.5px); width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
+.box { width: 100%; height: 68px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-sm); display: flex; align-items: center; gap: 8px; padding: 0 14px; flex-wrap: nowrap; overflow: hidden; }
+.box .k { font-size: 13px; font-weight: 800; color: var(--muted); width: 64px; flex: none; }
+.pills { display: flex; flex-wrap: wrap; gap: 5px 6px; align-content: center; }
+.pill { display: inline-flex; align-items: baseline; gap: 4px; height: 24px; padding: 0 10px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line-strong); font-size: 12.5px; font-weight: 600; white-space: nowrap; line-height: 22px; }
+.pill i { font-style: normal; font-weight: 500; color: var(--muted); font-size: 11.5px; }
+.pill.prop { background: transparent; border: 1.5px dashed var(--faint); color: var(--muted); }
+.group.story { height: 52px; margin-top: 17px; }
+.group.story .box { height: 46px; background: var(--panel-2); box-shadow: none; }
+
+/* 오른쪽 설명 */
+.notes { padding-top: 57px; display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 14px 16px; }
+.card h2 { margin: 0 0 8px; font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+.card h2 svg { width: 16px; height: 16px; stroke: var(--muted); }
+.card ul { margin: 0; padding: 0 0 0 16px; font-size: 12.5px; color: var(--fg); }
+.card li { margin: 2px 0; }
+.card p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.legend { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.legend div { display: flex; align-items: center; gap: 8px; }
+.dim { opacity: 0.45; }
+.why { font-size: 11.5px; color: var(--faint); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></symbol>
+    <symbol id="i-squad" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.5" r="3"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M16 14.2c2.4 0 4 1.6 4.5 4.3"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 20 12 12 20 4 12z"/><circle cx="12" cy="12" r="1.6"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8.5h13"/><path d="M15 5.5l3 3-3 3"/><path d="M19 15.5H6"/><path d="M9 12.5l-3 3 3 3"/></symbol>
+    <symbol id="i-club" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M6 20V9l6-4 6 4v11"/><path d="M10 20v-4h4v4"/><path d="M9.5 11h5"/></symbol>
+    <symbol id="i-league" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V13"/><path d="M10 19V8"/><path d="M15 19v-8"/><path d="M20 19V5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h9.5a3 3 0 0 1 3 3V19H8a3 3 0 0 1-3-3z"/><path d="M5 16a3 3 0 0 1 3-3h9.5"/></symbol>
+    <symbol id="i-story" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14v9H10l-4 3.5V15H5z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+  <div class="title">
+    <h1>안 A 부서형 · 단장 사무실</h1>
+    <span>구단 업무를 부서처럼 나눈다. 왼쪽 세로 메뉴가 늘 보이고 대분류 7개 (휴대폰은 아래 탭)</span>
+  </div>
+
+  <!-- 위쪽 고정 막대: 어느 화면에서든 같은 모습 -->
+  <div class="topbar">
+    <div class="tag">위쪽 고정 막대</div>
+    <div class="tb">7월 12일(토) · 남은 경기 55</div>
+    <div class="tb team"><span class="band"></span>두산</div>
+    <div class="tb"><b>48-39-2</b> · 3위 · 선두와 4.5</div>
+    <div class="tb">할 일 <span class="badge">2</span></div>
+    <div class="spacer"></div>
+    <div class="search"><svg><use href="#i-search"/></svg>선수 검색 (제안)</div>
+    <div style="width:12px"></div>
+    <div class="go"><div class="main">다음 경기 ▶</div><div class="more">▾</div></div>
+    <div class="gear"><svg><use href="#i-gear"/></svg></div>
+  </div>
+
+  <div class="body">
+    <!-- 왼쪽 세로 메뉴 -->
+    <nav class="side">
+      <div class="brand"><span class="band"></span>두산 단장실</div>
+      <div class="item on"><svg><use href="#i-home"/></svg><div><div class="name">홈</div><div class="desc">오늘 할 일과 소식</div></div></div>
+      <div class="item"><svg><use href="#i-squad"/></svg><div><div class="name">선수단</div><div class="desc">우리 선수와 기용</div></div></div>
+      <div class="item"><svg><use href="#i-game"/></svg><div><div class="name">경기</div><div class="desc">일정과 경기 결과</div></div></div>
+      <div class="item"><svg><use href="#i-move"/></svg><div><div class="name">선수 이동</div><div class="desc">트레이드·FA·영입</div></div></div>
+      <div class="item"><svg><use href="#i-club"/></svg><div><div class="name">구단 운영</div><div class="desc">돈·구장·사람</div></div></div>
+      <div class="item"><svg><use href="#i-league"/></svg><div><div class="name">리그</div><div class="desc">순위와 리그 소식</div></div></div>
+      <div class="item"><svg><use href="#i-archive"/></svg><div><div class="name">기록실</div><div class="desc">역사와 기록</div></div></div>
+      <div class="div"></div>
+      <div class="item story"><svg><use href="#i-story"/></svg><div><div class="name">이야기</div><div class="desc">판타지 모드 게임에서만</div></div></div>
+      <div class="fold">◀ 접기</div>
+    </nav>
+
+    <!-- 부서별 세부 화면 -->
+    <div class="groups">
+      <div class="group"><div class="box"><span class="k">홈</span><div class="pills">
+        <span class="pill">홈</span><span class="pill">받은 소식 전체</span><span class="pill">기사</span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">선수단</span><div class="pills">
+        <span class="pill">명단 <i>1군·2군·육성</i></span><span class="pill">기용 <i>주전·서브·투수 역할·타순</i></span><span class="pill">부상·결장</span><span class="pill">병역 <i>입대 계획</i></span><span class="pill">성장·훈련 <i>시즌 뒤 성장 결과, 스프링캠프</i></span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">경기</span><div class="pills">
+        <span class="pill">일정·결과 달력</span><span class="pill">오늘 경기 <i>중계·직접 지휘</i></span><span class="pill">박스스코어</span><span class="pill">가을야구</span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">선수 이동</span><div class="pills">
+        <span class="pill">트레이드 <i>직접 제안·선수 내놓기·지명권</i></span><span class="pill">선수 시장 <i>외국인·자유계약·웨이버</i></span><span class="pill">FA</span><span class="pill">드래프트·지명권</span><span class="pill">선수 찾기</span><span class="pill prop">관심 명단 (제안)</span><span class="pill">이동 기록</span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">구단 운영</span><div class="pills">
+        <span class="pill">구단주·평가</span><span class="pill">재정</span><span class="pill">연봉·샐러리캡</span><span class="pill">구장·팬</span><span class="pill">감독·코치</span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">리그</span><div class="pills">
+        <span class="pill">순위 <i>1군·퓨처스</i></span><span class="pill">개인 기록</span><span class="pill">올스타전</span><span class="pill">시상식</span><span class="pill">시즌 결과</span>
+      </div></div></div>
+      <div class="group"><div class="box"><span class="k">기록실</span><div class="pills">
+        <span class="pill">연표</span><span class="pill">통산 순위</span><span class="pill">단일 시즌 기록</span><span class="pill">구단 역사</span><span class="pill">왕조·라이벌</span><span class="pill">명예의 전당</span><span class="pill">내 이력·업적</span>
+      </div></div></div>
+      <div class="group story"><div class="box"><span class="k">이야기</span><div class="pills">
+        <span class="pill">행동</span><span class="pill">이야기</span><span class="pill">대화</span><span class="pill">기억 노트</span><span class="pill">연대기</span><span class="pill">기자회견</span><span class="pill">구단주 면담</span><span class="pill">AI 설정</span>
+      </div></div></div>
+    </div>
+
+    <!-- 공통 뼈대 설명 -->
+    <aside class="notes">
+      <div class="card">
+        <h2><svg><use href="#i-gear"/></svg>설정 톱니 안</h2>
+        <ul>
+          <li>저장·불러오기·파일</li>
+          <li>세부 난이도</li>
+          <li>진행 멈춤 설정</li>
+          <li>용어 풀이 켜기·끄기 <span class="why">(제안)</span></li>
+          <li>정보·출처</li>
+          <li>시작 화면으로</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>선수 창 <span class="why" style="font-weight:500">어디서든 이름을 누르면</span></h2>
+        <div class="pills" style="margin-top:2px">
+          <span class="pill">요약</span><span class="pill">능력</span><span class="pill">기록</span><span class="pill">계약·이력</span><span class="pill">등판 기록 <i>투수</i></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>시기에 맞지 않는 항목</h2>
+        <p style="margin-bottom:8px">숨기지 않고 흐리게 + 이유를 붙인다 (4장)</p>
+        <div class="pills">
+          <span class="pill dim">FA</span><span class="why">오프시즌에 열림</span>
+        </div>
+      </div>
+      <div class="card legend">
+        <div><span class="pill">실선</span> 지금 게임에 있는 기능</div>
+        <div><span class="pill prop">점선</span> 제안 (허락 전, 확정 아님)</div>
+        <div><span class="pill"><i>회색 글</i></span> 그 화면 안의 탭·내용</div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>
