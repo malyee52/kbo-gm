@@ -23,6 +23,8 @@ export interface PaRates {
   d2: number;
   t3: number;
   scale: number;
+  /** 볼카운트 사슬의 길이 손잡이 (타자 × 투수, 선수별 P/PA). 없으면 1. B0은 쓰지 않는다 */
+  len?: number;
 }
 
 /** 주자·이닝·점수 상황 (숨겨진 특수능력 판정용) */
@@ -50,6 +52,17 @@ function platoonEdge(b: SimPlayer, p: SimPlayer, size: number): number {
 }
 
 /** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
+/**
+ * 선수 한 명의 사슬 길이 손잡이: 리그 평균 상대로 삼진·볼넷·사구가 K·W·H인 이 선수의 기대 투구 수가 (ppaRel × 리그 기대 투구 수)가 되는 값.
+ * ppaRel이 없거나(자료 없음) 투구 수를 세지 않는 해결기면 1
+ */
+export function lengthOf(ctx: GameContext, ppaRel: number | undefined, K: number, W: number, H: number): number {
+  const r = ctx.resolver;
+  if (ppaRel === undefined || !r?.lengthFor || !r.pitchesPerPa) return 1;
+  const lg = ctx.league;
+  return r.lengthFor(K, W, H, ppaRel * r.pitchesPerPa(lg.so, lg.bb, lg.hbp));
+}
+
 export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE, park = NEUTRAL_PARK): PaRates {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
@@ -69,6 +82,9 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const so = combine(bs.so * cal.so * lg.so * down, ps.so * lg.so * (1 - fat), lg.so);
   const bb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
   const hbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
+  // 사슬 길이 손잡이: 타자(끈질김)와 투수(투구 효율)의 선수별 P/PA를 리그 평균 상대에서 맞춘 값을 곱한다 (D단계 가공값, 없으면 1)
+  const len = lengthOf(ctx, bs.ppaRel, bs.so * cal.so * lg.so, bs.bb * cal.bb * lg.bb, bs.hbp * cal.hbp * lg.hbp)
+    * lengthOf(ctx, ps.ppaRel, ps.so * lg.so, ps.bb * lg.bb, ps.hbp * lg.hbp);
   // 홈 구장 효과 (실제 구장 계수 meta.parkFactors + 게임 안에서 지은 신구장의 홈런 배율, league/stadium.ts): 양 팀 타자 모두에게
   // 치는 손별 구장 표: 좌타 L, 우타 R, 양타는 상대 투수 손의 반대쪽, 모르면 전체
   const side = b.bats === 'S' ? (pg.p.throws === 'L' ? 'R' : pg.p.throws === 'R' ? 'L' : null) : b.bats === 'L' || b.bats === 'R' ? b.bats : null;
@@ -80,5 +96,5 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const t3 = combine(bs.t3 * cal.t3 * lg.t3 * up * pk.t3, hitP * lg.t3, lg.t3);
 
   const sum = so + bb + hbp + hr + s1 + d2 + t3;
-  return { so, bb, hbp, hr, s1, d2, t3, scale: sum > 0.93 ? 0.93 / sum : 1 };
+  return { so, bb, hbp, hr, s1, d2, t3, scale: sum > 0.93 ? 0.93 / sum : 1, len };
 }

@@ -50,6 +50,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
 HOMES_CSV = ROOT / 'data-src' / '연고지.csv'
+PBP_DERIVED = ROOT / 'data-src' / 'pbp_derived'
+HARDHIT_DERIVED = ROOT / 'data-src' / 'hardhit_derived'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
@@ -407,6 +409,41 @@ def service_unit(career):
             if part.startswith(u):
                 return u
     return None
+
+
+def build_ppa():
+    """선수별 타석당 투구 수 → public/data/ppa.json (경기 엔진 2 D단계, 사슬 길이 손잡이).
+    {bat|pit: {선수 ID: {연도: [타석, 리그 대비 비율]}}}. 비율 = 그 선수 P/PA ÷ 같은 자료·같은 정의의 그 해 리그 P/PA.
+    투구 단위 자료(2023~, data-src/pbp_derived/{batter,pitcher}_ppa.csv, 고의4구 뺌)가 먼저, 투수 2015~2022는 하드힛 월별 표
+    (data-src/hardhit_derived/pitcher_ppa.csv, 자동 고의4구 포함 정의, 리그 값은 league_ppa.csv)."""
+    out = {'bat': defaultdict(dict), 'pit': defaultdict(dict)}
+    lg = {}
+    with (PBP_DERIVED / 'pa_pitches.csv').open(encoding='utf-8') as f:
+        lg = {int(r['year']): float(r['mean']) for r in csv.DictReader(f) if r['group'] == 'all'}
+    for side, name in (('bat', 'batter_ppa.csv'), ('pit', 'pitcher_ppa.csv')):
+        with (PBP_DERIVED / name).open(encoding='utf-8') as f:
+            for r in csv.DictReader(f):
+                y = int(r['year'])
+                out[side][r['id']][str(y)] = [int(r['pa']), round(float(r['ppa']) / lg[y], 4)]
+    with (HARDHIT_DERIVED / 'league_ppa.csv').open(encoding='utf-8') as f:
+        hlg = {int(r['year']): float(r['ppa']) for r in csv.DictReader(f)}
+    acc = defaultdict(lambda: [0, 0])
+    with (HARDHIT_DERIVED / 'pitcher_ppa.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            if int(r['year']) < min(lg):
+                a = acc[(r['id'], int(r['year']))]
+                a[0] += int(r['pa'])
+                a[1] += int(r['pitches'])
+    for (pid, y), (pa, pitches) in sorted(acc.items()):
+        if pa > 0 and pitches > 0:
+            out['pit'][pid][str(y)] = [pa, round(pitches / pa / hlg[y], 4)]
+    (OUT / 'ppa.json').write_text(json.dumps({
+        'version': 1,
+        'note': '선수별 타석당 투구 수의 리그 대비 비율 [타석, 비율]. 투구 단위 자료(slothman3878 KBO Play-by-Play v0, CC BY 4.0) 2023~, '
+                '투수 2015~2022는 하드힛(https://hardhit.ai) 월별 표. tools/build_data.py build_ppa',
+        'bat': out['bat'], 'pit': out['pit'],
+    }, ensure_ascii=False, separators=(',', ':'), sort_keys=True), encoding='utf-8')
+    return sum(len(v) for v in out['bat'].values()), sum(len(v) for v in out['pit'].values())
 
 
 def build_homes():
@@ -965,6 +1002,10 @@ def main():
         # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
         build_managers(OUT)
         return
+    if '--ppa-only' in sys.argv:
+        # 선수별 P/PA만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
+        print('선수별 P/PA 타자 %d·투수 %d 시즌' % build_ppa())
+        return
     if '--homes-only' in sys.argv:
         # 연고지 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         print(f'연고지 {len(build_homes())}행')
@@ -1220,6 +1261,7 @@ def main():
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
     build_homes()
+    build_ppa()
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')

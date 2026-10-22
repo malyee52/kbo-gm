@@ -5,6 +5,7 @@ import type { PitcherInGame, Side } from './state';
 import { isStarterSkill } from './params';
 import { currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest } from './team';
 import type { SimPlayer } from './types';
+import { lengthOf } from './pa';
 
 const STARTER_LIMIT_SCALE = 1.15;
 /** 어제 던진 필승조를 오늘 아낄 확률 (임시값, 상위 구원 투수 시즌 등판 80경기 안팎에 맞춤) */
@@ -23,7 +24,8 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
   // 몸의 한계(limit)는 그날 몸 상태(0.82~1.18배)를 곱한 값이다. AI 감독은 투수의 한계를 보지 않고 자기 투구 수 기준(plan)으로만
   // 바꾼다 (사용자 결정 2026-10-22: 감독이 보는 한계는 감독 성향으로만. 성향 hook은 game.ts에서 곱한다)
   const lg = ctx.league;
-  const ppa = ctx.resolver?.pitchesPerPa?.(skill.so * lg.so, skill.bb * lg.bb, skill.hbp * lg.hbp) ?? ctx.params.pitchesPerPaDefault;
+  const ppa = ctx.resolver?.pitchesPerPa?.(skill.so * lg.so, skill.bb * lg.bb, skill.hbp * lg.hbp,
+    lengthOf(ctx, skill.ppaRel, skill.so * lg.so, skill.bb * lg.bb, skill.hbp * lg.hbp)) ?? ctx.params.pitchesPerPaDefault;
   const base = (isStarter ? skill.stamina * STARTER_LIMIT_SCALE * (ctx.startLimitScale ?? 1) : skill.reliefStint) * ppa;
   const limit = base * ctx.rng.range(0.82, 1.18);
   const sp = ctx.params.planScale.spread;

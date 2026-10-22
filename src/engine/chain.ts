@@ -20,19 +20,23 @@ export type Knobs = [number, number, number];
 
 const cell = (b: number, s: number) => b * 3 + s;
 
-/** 손잡이를 곱한 칸별 옮겨 갈 확률 (2스트라이크 파울은 칸을 바꾸지 않으므로 그대로 둔다). 반환: 칸 × [b, s, f, x, h] */
-export function cellProbs(shape: ChainShape, k: Knobs): Float64Array {
+/**
+ * 손잡이를 곱한 칸별 옮겨 갈 확률 (2스트라이크 파울은 칸을 바꾸지 않으므로 그대로 둔다). 반환: 칸 × [b, s, f, x, h].
+ * len = 길이 손잡이 (파울 배율, 1 = 리그 모양): 선수별 타석당 투구 수(D단계 가공값)를 맞추는 데 쓴다. 끝 확률은 나머지 손잡이를 다시 풀어 지킨다
+ */
+export function cellProbs(shape: ChainShape, k: Knobs, len = 1): Float64Array {
   const out = new Float64Array(60);
   for (let c = 0; c < 12; c++) {
     const [b, s, f, x, h] = shape[c];
     const wb = b * k[0];
     const ws = s * k[1];
     const wh = h * k[2];
-    const t = wb + ws + f + x + wh;
+    const wf = f * len;
+    const t = wb + ws + wf + x + wh;
     const o = c * 5;
     out[o] = wb / t;
     out[o + 1] = ws / t;
-    out[o + 2] = f / t;
+    out[o + 2] = wf / t;
     out[o + 3] = x / t;
     out[o + 4] = wh / t;
   }
@@ -72,8 +76,8 @@ function endFrom(p: Float64Array): Float64Array {
 }
 
 /** 0-0에서 시작한 타석의 끝 확률 */
-export function endProbs(shape: ChainShape, k: Knobs): EndProbs {
-  const e = endFrom(cellProbs(shape, k));
+export function endProbs(shape: ChainShape, k: Knobs, len = 1): EndProbs {
+  const e = endFrom(cellProbs(shape, k, len));
   return [e[0], e[1], e[2], e[3]];
 }
 
@@ -81,11 +85,11 @@ export function endProbs(shape: ChainShape, k: Knobs): EndProbs {
  * 끝 확률이 목표 (K, W, H)가 되는 손잡이 (로그 공간 뉴턴법, 처음은 늘 1, 1, 1: 같은 목표면 늘 같은 답).
  * 목표를 정확히 맞추지 못하면(극단값) 가장 가까운 값에서 멈춘다
  */
-export function solveKnobs(shape: ChainShape, K: number, W: number, H: number, tol = 1e-12): Knobs {
+export function solveKnobs(shape: ChainShape, K: number, W: number, H: number, len = 1, tol = 1e-12): Knobs {
   let lk = [0, 0, 0];
   const target = [K, W, H];
   const f = (l: number[]) => {
-    const e = endProbs(shape, [Math.exp(l[0]), Math.exp(l[1]), Math.exp(l[2])]);
+    const e = endProbs(shape, [Math.exp(l[0]), Math.exp(l[1]), Math.exp(l[2])], len);
     return [e[End.K] - target[0], e[End.W] - target[1], e[End.H] - target[2]];
   };
   let r = f(lk);
@@ -127,8 +131,8 @@ export interface SolvedChain {
   e: Float64Array;
 }
 
-export function solvedChain(shape: ChainShape, knobs: Knobs): SolvedChain {
-  const p = cellProbs(shape, knobs);
+export function solvedChain(shape: ChainShape, knobs: Knobs, len = 1): SolvedChain {
+  const p = cellProbs(shape, knobs, len);
   return { knobs, p, e: endFrom(p) };
 }
 

@@ -18,6 +18,8 @@ export interface BatSkill {
   speed: number;
   /** 능력 산출에 쓴 가중 타석 수 */
   sample: number;
+  /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
+  ppaRel?: number;
   /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
 }
@@ -38,6 +40,8 @@ export interface PitSkill {
   startShare: number;
   /** 능력 산출에 쓴 가중 상대 타자 수 */
   sample: number;
+  /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
+  ppaRel?: number;
 }
 
 export interface SimPlayer {

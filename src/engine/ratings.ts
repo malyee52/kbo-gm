@@ -7,7 +7,7 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward } from '../data/types';
+import type { DefenseAward, PpaData } from '../data/types';
 import { estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
@@ -193,6 +193,24 @@ export function seasonRegress(p: EngineParams, pitScale = p.seasonRegressScale):
   return { ...p, batRegress: scale(p.batRegress, k), pitRegress: scale(p.pitRegress, pitScale) };
 }
 
+/**
+ * 선수별 P/PA 비율을 능력과 같은 시즌·가중치로 섞고 regress 타석만큼 1 쪽으로 당긴다 (D단계 가공값, 사슬 길이 손잡이).
+ * 자료가 있는 시즌이 하나도 없으면 undefined (사슬 값 그대로)
+ */
+export function ppaRelOf(rows: Record<string, [number, number]> | undefined, seasons: (SeasonData | undefined)[], w: readonly number[], regress: number): number | undefined {
+  if (!rows) return undefined;
+  let num = 0;
+  let den = 0;
+  seasons.forEach((s, i) => {
+    const r = s && rows[String(s.year)];
+    if (r && r[0] > 0) {
+      num += (w[i] ?? 0) * r[0] * r[1];
+      den += (w[i] ?? 0) * r[0];
+    }
+  });
+  return den > 0 ? (num + regress) / (den + regress) : undefined;
+}
+
 export interface BuildWorldInput {
   year: number;
   /** 로스터와 소속 팀을 정하는 시즌 (보통 year와 같다) */
@@ -208,6 +226,8 @@ export interface BuildWorldInput {
   career?: SeasonData[];
   /** KBO 수비상 순위 (선수 ID → 수상). 없으면 보정하지 않는다 */
   defenseAwards?: Record<string, DefenseAward[]>;
+  /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
+  ppa?: PpaData;
 }
 
 /**
@@ -330,6 +350,7 @@ export function buildWorld(input: BuildWorldInput): World {
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
       pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, rp);
+      pit.ppaRel = ppaRelOf(input.ppa?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
       // 시작 불펜 서열: 세이브와 같은 기준 시즌(예측은 직전, 역사 재현은 그 해)의 실제 쓰임
@@ -346,6 +367,7 @@ export function buildWorld(input: BuildWorldInput): World {
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
+      bat.ppaRel = ppaRelOf(input.ppa?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다

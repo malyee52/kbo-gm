@@ -76,6 +76,8 @@ export interface EngineParams {
   fatiguePerPitch: number;
   /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
   fatigueMax: number;
+  /** 선수별 P/PA(리그 대비 비율)를 1 쪽으로 당기는 가상 타석 수 */
+  ppaRegress: number;
   /** AI 감독의 투구 수 기준 = 그 시즌 리그 평균 선발·구원의 한계 투구 수 × 이 배율 (manager.ts managerNorms) */
   planScale: { starter: number; relief: number; earlyRelief: number; spread: number };
   /** 볼카운트 사슬이 없는 해결기(B0)일 때 타석당 투구 수 (임시값, 2023~2025 리그 3.9구) */
@@ -216,6 +218,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   fatiguePerPitch: 0.02,
   // 임시값 (2026-10-22 사용자 승인): 30구 넘김에서 멈춘다 (엔진 1은 0.3)
   fatigueMax: 0.6,
+  // 임시값: 0·50·150을 재 보아 차이가 표본 흔들림 안이었다 (2025 × 4시즌, 실제 300타자 이상 투수 ±0.10구 안 45~47%). 직전 시즌으로 그 해를 맞히는 한계가 더 크다
+  ppaRegress: 50,
   pitchesPerPaDefault: 3.9,
   // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
   // 기준 × 이 값까지 맡긴다 (임시값 (2026-10-22 사용자 승인), 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다

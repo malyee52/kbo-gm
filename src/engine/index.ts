@@ -34,7 +34,7 @@ export { eraPitching, leagueQuality, type EraPitching } from './eras';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -48,5 +48,6 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     // 수비 포지션 이력은 커리어 전체에서 (2026-10-13 사용자 "수비 포지션 능력치가 실제와 다르게 작동")
     career: store.meta.years.filter((y) => y < year).map((y) => store.season(y)).filter((s): s is SeasonData => !!s),
     defenseAwards: store.defenseAwards,
+    ppa: store.ppa,
   });
 }

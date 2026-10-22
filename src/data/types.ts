@@ -269,6 +269,14 @@ export interface DataStore {
   managers?: ManagerData;
   /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 원정 거리 컨디션(엔진 2 12단계)에 쓴다. 없으면 거리를 모른다 */
   homes?: HomeCity[];
+  /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
+  ppa?: PpaData;
+}
+
+/** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
+export interface PpaData {
+  bat: Record<string, Record<string, [number, number]>>;
+  pit: Record<string, Record<string, [number, number]>>;
 }
 
 /** 계보의 연고 도시 한 구간 (homes.json). to가 없으면 지금까지. 위·경도는 임시값 (data-src/연고지.csv 출처 열) */
