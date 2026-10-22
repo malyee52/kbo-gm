@@ -20,8 +20,10 @@ beforeAll(() => {
 describe('재정 기반', () => {
   it('새 게임: 모든 구단이 시작 자금으로 출발한다', () => {
     const g = GameSession.create(store, opts('fin-a'), FAST);
-    for (let t = 0; t < g.league.teams.length; t++) expect(cashOf(g.league, t)).toBe(START_CASH);
-    expect(g.cashNow()).toBe(START_CASH);
+    // 개막 샐러리캡 판정(applyCapSanctions)의 제재금만 빠질 수 있다 (2026-10-22 하드힛 포지션 반영 뒤 삼성 생성 연봉이 캡을 조금 넘는다)
+    const fine = (t: number) => g.league.ledger.filter((e) => e.from === t && e.note.startsWith('샐러리캡 초과')).reduce((s, e) => s + e.amount, 0);
+    for (let t = 0; t < g.league.teams.length; t++) expect(cashOf(g.league, t) + fine(t)).toBe(START_CASH);
+    expect(g.cashNow() + fine(g.teamIdx)).toBe(START_CASH);
   });
 
   it('시즌 중 수입·지출은 진행 방식과 상관없이 같다 (하루씩 vs 한 번에), 홈 경기마다 관중 수입이 들어온다', () => {

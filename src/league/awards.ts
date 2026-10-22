@@ -2,6 +2,7 @@
 // 시뮬레이션 기록으로 정한다. 투표가 없으므로 기준은 종합 가치(WAR 근사)와 KBO 규정타석·규정이닝이다. 가중치는 임시값.
 import { lineTeam } from '../engine/types';
 import { defenseAt } from '../engine/defense';
+import { assignSlots } from '../engine/team';
 import type { Season } from '../engine/season';
 import type { BatLine, PitLine, SimPlayer, World } from '../engine/types';
 import { fip, leagueBase, wraa, type LeagueBase } from '../game/saber';
@@ -196,13 +197,17 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   const rookie = rookies.length ? win(rookies.reduce((a, b) => (b.war > a.war ? b : a))) : null;
 
   // ---- 골든글러브: 부문별 종합 가치 1위 (외야 3명). 수비수는 그 자리에서 팀 경기의 절반 이상, 지명타자는 규정타석의 2/3 이상, 투수는 규정이닝 또는 20세이브
+  // 지명타자 부문: 주 포지션이 지명타자인 선수와 시즌 끝 1군 최적 배정에서 지명타자 자리에 서는 선수 (경기별 수비 자리는 기록하지 않는다).
+  // 하드힛 주 포지션(2026-10-22)에는 지명타자가 없어서, 지명타자를 주로 맡는 타자도 주 포지션은 수비 자리다. 이 선수들은 수비 부문에서 뺀다
+  const teamDh = new Set(season.teamSeasons.flatMap((ts) => assignSlots(ts.hitters).filter((x) => x.slot === 'DH').map((x) => x.p.idx)));
+  const isDh = (c: Cand) => mainPos(c.sp) === 'DH' || teamDh.has(c.sp.idx);
   const goldenGlove: SeasonAwards['goldenGlove'] = [];
   for (const pos of GG_ORDER) {
     let pool: Cand[];
     if (pos === 'P') pool = pits.filter((c) => c.p.outs >= qualOuts || c.p.sv >= 20);
-    else if (pos === 'DH') pool = bats.filter((c) => mainPos(c.sp) === 'DH' && c.b.pa >= qualPa * (2 / 3));
-    else if (pos === 'OF') pool = bats.filter((c) => ['LF', 'CF', 'RF'].includes(mainPos(c.sp)) && c.b.g >= teamGames / 2);
-    else pool = bats.filter((c) => mainPos(c.sp) === pos && c.b.g >= teamGames / 2);
+    else if (pos === 'DH') pool = bats.filter((c) => isDh(c) && c.b.pa >= qualPa * (2 / 3));
+    else if (pos === 'OF') pool = bats.filter((c) => !isDh(c) && ['LF', 'CF', 'RF'].includes(mainPos(c.sp)) && c.b.g >= teamGames / 2);
+    else pool = bats.filter((c) => !isDh(c) && mainPos(c.sp) === pos && c.b.g >= teamGames / 2);
     const sorted = [...pool].sort((a, b) => b.war - a.war);
     for (const c of sorted.slice(0, pos === 'OF' ? 3 : 1)) goldenGlove.push({ pos, winner: win(c) });
   }

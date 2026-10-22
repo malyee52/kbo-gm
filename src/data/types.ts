@@ -108,6 +108,8 @@ export interface BatRow {
   gdp: number | null;
   sf: number | null;
   sac: number | null;
+  /** 포지션 출처: 'H' 하드힛 확인값, 'E' 하드힛 해의 추정값(2009년·포지션 파일에 없는 타자), 없으면 자료집 그대로 (build_data.py fill_positions) */
+  posSrc?: 'H' | 'E' | null;
 }
 
 export interface PitRow {

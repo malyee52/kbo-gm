@@ -243,7 +243,8 @@ POS = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격
        '마무리투수': 'CL', '투수': 'P'}
 HAND = {'우': 'R', '좌': 'L', '양': 'S'}
 
-BAT_FIELDS = ['id', 'team', 'pos', 'g', 'pa', 'ab', 'r', 'h', 'd', 't', 'hr', 'rbi', 'sb', 'cs', 'bb', 'hbp', 'so', 'gdp', 'sf', 'sac']
+# posSrc: 포지션 출처. 'H' 하드힛 확인값, 'E' 하드힛 해의 추정값(2009·파일 없는 타자), null 자료집 그대로 (fill_positions)
+BAT_FIELDS = ['id', 'team', 'pos', 'g', 'pa', 'ab', 'r', 'h', 'd', 't', 'hr', 'rbi', 'sb', 'cs', 'bb', 'hbp', 'so', 'gdp', 'sf', 'sac', 'posSrc']
 BAT_COLS = ['선수ID', '팀', '포지션(보조)', 'G', 'PA', 'AB', 'R', 'H', '2B', '3B', 'HR', 'RBI', 'SB', 'CS', 'BB', 'HBP', 'SO', 'GDP', 'SF', 'SAC']
 # gmli: 하드힛 투수 situation의 등판 때 평균 레버리지 (2010~, 없으면 null). 시작 불펜 서열에 쓴다 (2026-10-22)
 PIT_FIELDS = ['id', 'team', 'role', 'g', 'gs', 'w', 'l', 'sv', 'hld', 'outs', 'tbf', 'h', 'hr', 'bb', 'hbp', 'so', 'r', 'er', 'gmli']
@@ -517,6 +518,181 @@ def fill_running(bat):
             out += ['', f'{k} 하드힛 값으로 바꾼 것 (연도 선수ID):', ''] + [f'- {e}' for e in examples[f]]
     print(f'하드힛 채움: 도루 {filled["sb"]}, 도루실패 {filled["cs"]}, 병살타 {filled["gdp"]} / 하드힛 값으로 바꿈 {dict(differ)}')
     return out
+
+
+FIELD_POS = ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF')
+
+
+def pos_2009(row_pos, hh_pos):
+    """2009년 타자 주 포지션 (하드힛 2009년 파일 없음). 2026-10-22 사용자 결정 (나):
+    자료집 시즌 행에 세부 포지션이 있으면 그 값, 없으면(빈 값·내야수·외야수) 하드힛 2008·2010 중 있는 해
+    (둘 다 있고 다르면 2008), 둘 다 없으면 하드힛에 나온 가장 가까운 해(같은 거리면 앞 해).
+    hh_pos: 그 선수의 {연도: 하드힛 주 포지션}. → (포지션, 출처) 출처는 '자료집' / '빌림' / None(정할 수 없음)"""
+    if row_pos in FIELD_POS or row_pos == 'DH':
+        return row_pos, '자료집'
+    near = [y for y in (2008, 2010) if y in hh_pos]
+    if near:
+        return hh_pos[near[0]], '빌림'
+    if hh_pos:
+        y = min(hh_pos, key=lambda k: (abs(k - 2009), k))
+        return hh_pos[y], '빌림'
+    return None, None
+
+
+def fill_positions(bat, kind_of):
+    """하드힛 그 시즌 주 포지션(position.csv, 2003~)으로 타자 시즌 행의 포지션을 채우고 바로잡는다 (2026-10-22 사용자 결정).
+    - 하드힛에 나온 선수-시즌: 하드힛 값 (자료집 값이 다르면 하드힛 값으로 바꾼다). 한 해 여러 구단 행은 모두 같은 값.
+    - 하드힛 해인데 어느 포지션 파일에도 없는 타자 [B]: 직전 시즌 하드힛 주 포지션 → 그 앞 가장 가까운 시즌
+      → (앞 시즌이 없으면) 뒤의 가장 가까운 시즌 → 하드힛 전체에 없으면 DH. 타석 0인 행은 DH 대신 자료집 값을 둔다.
+    - 2009년(하드힛 파일 없음): pos_2009.
+    posSrc 열: 'H' 하드힛 확인값, 'E' 추정값(2009, [B]), None 자료집 그대로(2002년 이전 등). 엔진은 'H'만 규정타석 판정에 쓴다.
+    → (보고서 줄 목록, 빈 포지션 선수 목록용 정보)"""
+    hh = {}
+    by_player = defaultdict(dict)
+    for r in hardhit_csv('position.csv'):
+        y, pid = int(r['연도']), r['선수ID']
+        hh[(y, pid)] = r['주 포지션']
+        by_player[pid][y] = r['주 포지션']
+    if not hh:
+        return [], []
+    hh_years = sorted({y for y, _ in hh})
+    span = range(hh_years[0], hh_years[-1] + 1)
+    pi, si, ai = BAT_FIELDS.index('pos'), BAT_FIELDS.index('posSrc'), BAT_FIELDS.index('pa')
+    stat = defaultdict(lambda: defaultdict(int))
+    examples = []
+    unresolved = []  # (사유, 연도, 선수ID) — 하드힛 해인데 하드힛 포지션을 끝내 얻지 못한 선수-시즌
+    for y in span:
+        pa_of = defaultdict(int)
+        for row in bat.get(y, []):
+            pa_of[row[0]] += row[ai] or 0
+        for row in bat.get(y, []):
+            pid, cur = row[0], row[pi]
+            if kind_of.get(pid) == 'P':
+                continue
+            S = stat[y]
+            if y not in hh_years:
+                v, how = pos_2009(cur, by_player.get(pid, {}))
+                if how == '자료집':
+                    S['2009 자료집'] += 1
+                elif how == '빌림':
+                    S['2009 빌림'] += 1
+                    row[pi], row[si] = v, 'E'
+                else:
+                    S['2009 못 정함'] += 1
+                    unresolved.append(('2009 자료 없음, 다른 시즌 확인 불가', y, pid))
+                if how == '자료집':
+                    row[si] = 'E'
+                continue
+            v = hh.get((y, pid))
+            if v:
+                if cur is None or cur in ('IF', 'OF'):
+                    S['채움'] += 1
+                elif cur != v:
+                    S['바꿈'] += 1
+                    if len(examples) < 40:
+                        examples.append(f'{y} {pid} 자료집 {cur} → 하드힛 {v}')
+                else:
+                    S['같음'] += 1
+                row[pi], row[si] = v, 'H'
+                continue
+            # [B] 어느 포지션 파일에도 없는 타자
+            seen = by_player.get(pid, {})
+            before = [k for k in seen if k < y]
+            after = [k for k in seen if k > y]
+            if before:
+                v = seen[max(before)]
+            elif after:
+                v = seen[min(after)]
+            elif pa_of[pid] > 0:
+                v = 'DH'
+                unresolved.append(('하드힛 전 시즌 포지션 없음', y, pid))
+            else:
+                S['[B] 타석 0 그대로'] += 1
+                continue
+            S['[B] DH' if v == 'DH' else '[B] 다른 해에서'] += 1
+            row[pi], row[si] = v, 'E'
+    keys = ['채움', '바꿈', '같음', '[B] 다른 해에서', '[B] DH', '[B] 타석 0 그대로', '2009 자료집', '2009 빌림', '2009 못 정함']
+    tot = {k: sum(stat[y][k] for y in stat) for k in keys}
+    print('하드힛 주 포지션: ' + ', '.join(f'{k} {tot[k]}' for k in keys if tot[k]))
+    out = ['', '## 타자 주 포지션 (position.csv)', '',
+           '하드힛 그 시즌 주 포지션으로 채우고, 자료집 값이 다르면 하드힛 값으로 바꾼다 (2026-10-22 사용자 결정). 단위: 타자 시즌 행 (한 해 여러 구단이면 행마다).',
+           '- 채움: 자료집이 빈 값이거나 내야수·외야수뿐이던 행. 바꿈: 세부 포지션이 하드힛과 달라 바꾼 행.',
+           '- [B]: 하드힛 해인데 어느 포지션 파일에도 없는 타자 (지명타자 후보). 직전 시즌 → 앞의 가장 가까운 시즌 → 뒤의 가장 가까운 시즌의 하드힛 주 포지션, 하드힛 전체에 없으면 DH.',
+           '- 2009년 (하드힛 파일 없음, 사용자 결정 (나)): 자료집 세부 포지션이 있으면 그 값, 없으면 2008·2010 하드힛(다르면 2008), 그것도 없으면 가장 가까운 해. 2009년 값은 규정타석 판정에 쓰지 않는다.', '',
+           '| 연도 | ' + ' | '.join(keys) + ' |', '|---|' + '---:|' * len(keys)]
+    out += [f'| {y} | ' + ' | '.join(str(stat[y][k]) for k in keys) + ' |' for y in sorted(stat)]
+    out += [f'| 합계 | ' + ' | '.join(str(tot[k]) for k in keys) + ' |']
+    if examples:
+        out += ['', '바꾼 예 (앞 40건):', ''] + [f'- {e}' for e in examples]
+    return out, unresolved
+
+
+NO_POSITION_XLSX = ROOT / 'reports' / 'hardhit-no-position.xlsx'
+KO_POS = {'C': '포수', '1B': '1루수', '2B': '2루수', '3B': '3루수', 'SS': '유격수', 'LF': '좌익수', 'CF': '중견수', 'RF': '우익수',
+          'DH': '지명타자', 'IF': '내야수', 'OF': '외야수'}
+
+
+def write_no_position(unresolved, bat, players):
+    """하드힛 해(2003~)에 타석이 있는데 하드힛 주 포지션을 끝내 얻지 못한 타자 목록 → reports/hardhit-no-position.xlsx.
+    한 선수가 두 사유에 다 걸리면 사유마다 한 줄. 타석 합 많은 순"""
+    if not unresolved:
+        return
+    from datetime import date
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    pmap = {p['id']: p for p in players}
+    pi, si, ai, ti = (BAT_FIELDS.index(k) for k in ('pos', 'posSrc', 'pa', 'team'))
+    reasons = defaultdict(set)
+    for why, _, pid in unresolved:
+        reasons[pid].add(why)
+    out = []
+    for pid, whys in reasons.items():
+        seasons = defaultdict(lambda: [0, [], defaultdict(int)])  # 연도 → 타석, 팀, 포지션별 타석
+        for y in range(2003, max(bat) + 1):
+            for row in bat.get(y, []):
+                if row[0] == pid and (row[ai] or 0) > 0:
+                    s = seasons[y]
+                    s[0] += row[ai]
+                    s[1].append(row[ti])
+                    s[2][row[pi]] += row[ai]
+        pos_pa = defaultdict(int)
+        for s in seasons.values():
+            for q, v in s[2].items():
+                pos_pa[q] += v
+        game_pos = max(pos_pa.items(), key=lambda kv: kv[1])[0] if pos_pa else None
+        m = pmap.get(pid, {})
+        for why in sorted(whys):
+            out.append([pid, m.get('name', ''), '실존' if m.get('real', True) else '가상',
+                        ', '.join(str(y) for y in sorted(seasons)),
+                        ', '.join(f'{y} {"/".join(dict.fromkeys(seasons[y][1]))}' for y in sorted(seasons)),
+                        sum(s[0] for s in seasons.values()),
+                        KO_POS.get(m.get('pos'), m.get('pos') or ''), KO_POS.get(game_pos, game_pos or ''), why])
+    out.sort(key=lambda r: (-r[5], r[0]))
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '포지션 없음'
+    ws.append([f'만든 날짜 {date.today().isoformat()} · python tools/build_data.py가 다시 만든다'])
+    ws.append(['기준: 하드힛 포지션 자료가 있는 해(2003~2026, 2009년 파일 없음)에 타석이 있는데 하드힛 주 포지션을 얻지 못한 타자. '
+               '"하드힛 전 시즌 포지션 없음" = 어느 해 포지션 파일에도 없어 지명타자로 둠, '
+               '"2009 자료 없음, 다른 시즌 확인 불가" = 2009년 자료집에 세부 포지션이 없고 다른 해 하드힛에도 없음. '
+               '게임 주 포지션은 하드힛 해 시즌 행에서 타석이 가장 많은 포지션 (시작 연도마다 엔진이 직전 시즌으로 다시 고른다).'])
+    ws['A1'].font = Font(bold=True)
+    ws.append([])
+    head = ['선수ID', '이름', '실존 여부', '하드힛 타석 있는 해', '그 해들의 팀', '타석 합', '선수마스터 포지션', '게임 주 포지션', '사유']
+    ws.append(head)
+    for c in ws[4]:
+        c.font = Font(bold=True)
+    for r in out:
+        ws.append(r)
+    for col, w in zip('ABCDEFGHI', (9, 10, 8, 22, 34, 8, 14, 12, 34)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = 'A5'
+    NO_POSITION_XLSX.parent.mkdir(exist_ok=True)
+    wb.save(NO_POSITION_XLSX)
+    cnt = defaultdict(int)
+    for r in out:
+        cnt[r[8]] += 1
+    print(f'포지션 없음 목록: {len(out)}줄 ({", ".join(f"{k} {v}" for k, v in cnt.items())}) → {NO_POSITION_XLSX.name}')
 
 
 def fill_gmli(pit):
@@ -846,7 +1022,7 @@ def main():
     pit = defaultdict(list)
     for r in rows(wb['타자시즌']):
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '포지션(보조)' else r[c]) for c in BAT_COLS]
-        bat[r['시즌']].append(row)
+        bat[r['시즌']].append(row + [None] * (len(BAT_FIELDS) - len(BAT_COLS)))
     wpbk = defaultdict(int)
     for r in rows(wb['투수시즌']):
         wpbk[r['시즌']] += (r['WP'] or 0) + (r['BK'] or 0)
@@ -877,10 +1053,15 @@ def main():
                     pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 4) + [None])
                 else:
                     pos = m.get('pos') if m.get('pos') not in ('SP', 'RP', 'CL', 'P') else None
-                    bat[y].append([pid, team, pos] + [0] * (len(BAT_FIELDS) - 3))
+                    bat[y].append([pid, team, pos] + [0] * (len(BAT_COLS) - 3) + [None] * (len(BAT_FIELDS) - len(BAT_COLS)))
                 extra_ids.add((y, pid))
                 if m.get('last', 0) < y:
                     m['last'] = y
+
+    # ---- 하드힛 주 포지션 (추가 명단 행까지 채운다)
+    pos_report, pos_unresolved = fill_positions(bat, kind_of)
+    hardhit_report += pos_report
+    write_no_position(pos_unresolved, bat, players)
 
     years = sorted(teams)
     bi = {f: i for i, f in enumerate(BAT_FIELDS)}
