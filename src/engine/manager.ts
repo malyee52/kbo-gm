@@ -3,7 +3,7 @@
 import type { GameContext } from './game';
 import { isSaveSituation, type GameState, type PitcherInGame, type Side } from './state';
 import { isStarterSkill } from './params';
-import { availableBelow, currentFatigue, needsRest } from './team';
+import { availableBelow, currentFatigue, currentOveruse, needsRest } from './team';
 import type { SimPlayer } from './types';
 import { lengthOf } from './pa';
 
@@ -84,7 +84,14 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
   const limit = base * ctx.rng.range(0.82, 1.18);
   const sp = ctx.params.planScale.spread;
   const plan = ctx.planNorms ? (isStarter ? ctx.planNorms.starter : ctx.planNorms.relief) * ctx.rng.range(1 - sp, 1 + sp) : base;
-  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit, plan, isStarter, enteredLead: lead, saveSit: !isStarter && isSaveSituation(lead, 0), er: 0, blown: false, pitches: 0, ppa };
+  // 실제 한계 투구 수 (기획안 4.6, 엔진 2 11단계): 몸 상태를 뺀 한계 × 선수별 배율 (ctx.realLimitScale, 리그 시드 해시). 혹사지수는 등판 때 값
+  const o = ctx.params.injury.overuse;
+  const realLimit = base * (ctx.realLimitScale?.[p.idx] ?? 1);
+  const overuse = o.on ? currentOveruse(ctx.states, p.idx, ctx.day, o) : 0;
+  return {
+    p, skill, line, bf: 0, runs: 0, outs: 0, limit, realLimit, overuse, injChecked: 0, plan, isStarter, enteredLead: lead,
+    saveSit: !isStarter && isSaveSituation(lead, 0), er: 0, blown: false, pitches: 0, ppa,
+  };
 }
 
 /**
@@ -242,6 +249,8 @@ export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEm
   } else {
     pull = pg.runs >= 3 || np >= pg.plan + 3 * u || (halfRuns >= 2 && !basesEmpty && Math.abs(lead) <= 2 && inning >= 7);
   }
+  // 경기 중 다친 투수는 바로 바꾼다 (엔진 2 11단계)
+  if (pg.injured) pull = true;
   // 9회 세이브 상황에서 마무리가 쉬었으면 이닝 시작에 마무리로
   if (!pull && start && inning >= 9 && lead >= 1 && lead <= 3 && closer && pg.p !== closer && availableRelievers(fld, ctx).includes(closer)) pull = true;
   if (!pull) return;

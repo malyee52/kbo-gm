@@ -19,7 +19,9 @@ describe('AI 감독 1 (엔진 2 9단계)', () => {
     const on = play(DEFAULT_PARAMS, 'subs-a').run;
     expect(on.ph).toBeGreaterThan(0);
     expect(on.def).toBeGreaterThan(0);
-    const off = play({ ...DEFAULT_PARAMS, sub: { ...DEFAULT_PARAMS.sub, phInning: 99, prInning: 99, defInning: 99 } }, 'subs-a').run;
+    // 경기 중 부상 교체(엔진 2 11단계)도 대주자·대수비로 세므로 끈다
+    const noInjury = { ...DEFAULT_PARAMS.injury, inGame: { ...DEFAULT_PARAMS.injury.inGame, perPitch: 0, perRun: 0, perField: 0 } };
+    const off = play({ ...DEFAULT_PARAMS, injury: noInjury, sub: { ...DEFAULT_PARAMS.sub, phInning: 99, prInning: 99, defInning: 99 } }, 'subs-a').run;
     expect(off.ph + off.pr + off.def).toBe(0);
   });
 

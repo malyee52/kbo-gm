@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -632,7 +632,7 @@ export class GameSession {
       ensureAlts(league, opts.year);
       w = worldFromLeague(structuredClone(league), store, params);
     }
-    const season = Season.start(w, params, seasonSeed(league), { boxTeams: [opts.teamIdx] });
+    const season = Season.start(w, params, seasonSeed(league), { boxTeams: [opts.teamIdx], hiddenSeed: league.seed });
     ensureCoaches(league);
     ensureGm(league);
     const g = new GameSession(store, params, opts.teamIdx, league, w, season);
@@ -883,14 +883,15 @@ export class GameSession {
     return null;
   }
 
-  /** 결장 까닭 (짧은 문구). 실존 선수의 이탈은 중립 문구만 나온다 (eventLabel이 막는다) */
+  /** 결장 까닭 (짧은 문구). 부상은 부위·정도, 실존 선수의 이탈은 중립 문구만 나온다 (eventLabel이 막는다) */
   absenceReason(p: SimPlayer): string | null {
     if (!this.isAbsent(p)) return null;
     const a = this.absenceOf(p);
     if (a) return absenceLabel(a, p, a.until >= this.season.schedule.length);
     const lp = this.leaguePlayer(p.id);
     if (lp?.startAbsentReason === 'military') return '군 복무 (전역 전)';
-    if (lp?.startAbsentReason === 'injury') return isVirtual(p) ? '지난 시즌 부상 재활' : '지난 시즌부터 결장';
+    // 부상은 실존·가상 선수가 같은 문구 (엔진 2 11단계)
+    if (lp?.startAbsentReason === 'injury') return '지난 시즌 부상 재활';
     return '결장';
   }
 
@@ -2430,7 +2431,7 @@ export class GameSession {
           L.fantasy.prospects = [];
         }
         this.world = worldFromLeague(clone(L), this.store, this.params);
-        this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx] });
+        this.season = Season.start(this.world, this.params, seasonSeed(L), { boxTeams: [this.teamIdx], hiddenSeed: L.seed });
         this.applyTactics();
         this.trades = [];
         this.lastCallUps = new Set();

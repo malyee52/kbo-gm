@@ -17,6 +17,14 @@ export interface PitcherInGame {
   outs: number;
   /** 그날 몸의 한계 투구 수 (공 수). 넘기면 능력이 꺾인다 (pa.ts). AI 감독은 이 값을 모른다 */
   limit: number;
+  /** 실제 한계 투구 수 (숨은 능력, 기획안 4.6): 넘긴 공은 부상 확률을 올리고 혹사지수를 쌓는다. AI 감독은 모른다 */
+  realLimit: number;
+  /** 등판 때 혹사지수 (경기 중 부상 확률 배율, 엔진 2 11단계) */
+  overuse: number;
+  /** 경기 중 부상을 마지막으로 따진 때의 투구 수 (그 뒤 던진 공만 다음에 따진다) */
+  injChecked: number;
+  /** 경기 중 다쳤다: 다음 타석 전에 바꾼다 */
+  injured?: boolean;
   /** AI 감독이 보는 한계 투구 수: 보이는 체력 × 타석당 기대 투구 수 (그날의 몸 상태는 모른다), 감독 성향(hook)·시대 상한을 넣은 값. 교체 판단에 쓴다 */
   plan: number;
   isStarter: boolean;
@@ -93,6 +101,8 @@ export interface Side {
   subs: GameSub[];
   /** 대타·대주자가 들어와 다음 수비 때 수비 위치를 다시 정해야 한다 (AI 감독, subs.ts aiDefense) */
   realign?: boolean;
+  /** 선발 출전 선수와 시작 수비 위치 (경기 뒤 야수 피로, 엔진 2 11단계) */
+  starters: { p: SimPlayer; slot: Slot | undefined }[];
 }
 
 /** 선발 라인업의 수비 위치 (선수 색인 → 자리) */
@@ -163,6 +173,8 @@ export class GameState {
   infieldIn = false;
   /** 직접 지휘 물음 번호 */
   cmdN = 0;
+  /** 이번 타석 인플레이 타구를 맡은 수비 자리 (없으면 null). 경기 중 수비 부상에 쓴다 (엔진 2 11단계) */
+  ballSlot: Slot | 'P' | null = null;
 
   inning = 0;
   bat!: Side;

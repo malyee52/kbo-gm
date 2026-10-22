@@ -9,9 +9,11 @@ import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
 import { addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
-import { fieldDefense, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
-import { aiDefense, pickPinchHitter, pickPinchRunner } from './subs';
-import { currentFatigue, type PlayerStates, type TeamSeason } from './team';
+import { fieldDefense, fielderAt, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
+import { aiDefense, pickPinchHitter, pickPinchRunner, replaceInjured } from './subs';
+import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type TeamSeason } from './team';
+import { drawInjury, hitterAgeFactor, injuryProneness, type AbsenceKind, type InjuryCause, type InjuryPart } from './injury';
+import { injuryScale } from './traits';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
 export { BUNT_SUCCESS, emptyRunTally, type RunTally } from './rules';
@@ -97,6 +99,21 @@ export interface GameContext {
   splits?: Record<string, Partial<Record<PlayKind, number>>>;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
   resolver?: PaResolver;
+  /** 있으면 경기 중 부상을 뽑아 여기에 남긴다 (정규시즌, Season이 경기마다 비운다). 없으면 경기 중 부상이 없다 (가을야구·올스타전·시험) */
+  injuries?: GameInjury[];
+  /** 선수별 실제 한계 투구 수 배율 (선수 색인, 기획안 4.6, Season이 리그 시드로 만든다). 없으면 1 */
+  realLimitScale?: Float32Array;
+}
+
+/** 경기 중 부상 한 건 (엔진 2 11단계). 다음 날부터 days일 결장 */
+export interface GameInjury {
+  idx: number;
+  cause: InjuryCause;
+  /** 혹사로 생긴 부상 (혹사지수로 더해진 몫, 실제 한계를 넘긴 공) */
+  overuse?: true;
+  kind: Exclude<AbsenceKind, 'event'>;
+  days: number;
+  part: InjuryPart;
 }
 
 /** 직접 지휘하는 구단과 판단 함수 (game/session.ts가 조작 기록·미리보기로 채운다) */
@@ -211,7 +228,10 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const medianValue = vals[vals.length >> 1] ?? 0;
     const slots = fieldSlots(ts, lineup);
     const fd = fieldDefense(lineup, slots);
-    return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [] };
+    return {
+      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [],
+      starters: lineup.map((p) => ({ p, slot: slots.get(p.idx) })),
+    };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
   // 홈 구장 사건별 배율: 실제 구장 표가 있으면 그 배율(meta.parkEvents, 좌타·우타 포함), 없으면 득점 계수 f를 지수로 나눈다.
@@ -285,7 +305,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const was = fld.pitcher;
     const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
     if (next) bringIn(fld, next, fld.runs - bat.runs, ctx);
-    else if (!fc?.keep) {
+    else if (!fc?.keep || fld.pitcher.injured) {
       maybeChangePitcher(fld, bat, inning, st.basesEmpty, first, bat.runs - st.runsAtStart, ctx);
       // 좌우 원포인트 (엔진 2 10단계): 바꾸지 않았으면 좌타 강타자에 좌완 구원
       if (fld.pitcher === was) maybeOnePoint(fld, bat, inning, ctx);
@@ -378,6 +398,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
       if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
       st.note(kind, batter.idx, pg.p.idx, r0);
+      if (ctx.injuries) inGameInjury(st, batter, pg, kind);
       if (st.walkOff()) return true;
       continue;
     }
@@ -411,9 +432,63 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const kind = applyPlateAppearance(st, ev, batter, bl, pg, walk, rates);
     if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
     st.note(kind, batter.idx, pg.p.idx, r0);
+    if (ctx.injuries) inGameInjury(st, batter, pg, kind);
     if (st.walkOff()) return true;
   }
   return false;
+}
+
+/** 타자가 1루로 달린 타석 (주루 부상): 홈런·볼넷·삼진 등은 아니다 */
+const RAN = new Set<PlayKind>(['1B', '2B', '3B', 'E', 'GDP', 'GO', 'FO', 'SF']);
+
+/** 부상 확률 배율: 특수능력 '철인', 구단 의료 투자, 숨은 능력 '부상 경향' (지금은 1.00) */
+function injuryMult(p: SimPlayer, ts: TeamSeason, ctx: GameContext): number {
+  return injuryScale(p, ctx.params.traits) * (ts.team.injuryRate ?? 1) * injuryProneness(p);
+}
+
+/**
+ * 경기 중 부상 (엔진 2 11단계, docs/경기엔진2_기획안.md 3.10·4.6): 타석이 끝날 때 그 경기 난수를 한 번 뽑아 투구·주루·수비 부상을 함께 정한다.
+ * 투구: 지난번 판정 뒤 던진 공 수 × inGame.perPitch × (1 + 혹사 배율), 그리고 실제 한계를 넘긴 공 × overuse.overInjury (혹사 부상).
+ * 주루: 타자가 1루로 달린 타석. 수비: 인플레이 타구를 맡은 수비수. 다친 투수는 다음 타석 전에, 야수는 바로 바뀐다 (AI 감독).
+ * 한 경기에 한 선수는 한 번만 다친다. 정도·부위는 다친 뒤에만 뽑는다
+ */
+function inGameInjury(st: GameState, batter: SimPlayer, pg: PitcherInGame, kind: PlayKind): void {
+  const { ctx, bat, fld } = st;
+  const list = ctx.injuries!;
+  const ip = ctx.params.injury;
+  const g = ip.inGame;
+  const o = ip.overuse;
+  const n = pg.pitches - pg.injChecked;
+  const overN = o.on ? Math.max(0, pg.pitches - Math.max(pg.injChecked, pg.realLimit)) : 0;
+  pg.injChecked = pg.pitches;
+  const hurt = (p: SimPlayer) => list.some((x) => x.idx === p.idx);
+  const mPit = pg.injured || hurt(pg.p) ? 0 : injuryMult(pg.p, fld.ts, ctx);
+  const pPit = g.perPitch * n * mPit;
+  const pOver = (o.on ? pPit * o.injury * pg.overuse : 0) + o.overInjury * overN * mPit;
+  const pRun = RAN.has(kind) && !hurt(batter) ? g.perRun * injuryMult(batter, bat.ts, ctx) * hitterAgeFactor(batter.age) : 0;
+  const fIdx = st.ballSlot && kind !== 'HR' ? fielderAt(fld, st.ballSlot) : -1;
+  const fielder = fIdx < 0 ? null : fIdx === pg.p.idx ? pg.p : fld.lineup.find((p) => p.idx === fIdx) ?? null;
+  const pField = fielder && !hurt(fielder) && !(fielder === pg.p && pg.injured)
+    ? g.perField * injuryMult(fielder, fld.ts, ctx) * hitterAgeFactor(fielder.isPitcher ? null : fielder.age) : 0;
+  const total = pPit + pOver + pRun + pField;
+  if (total <= 0) return;
+  const u = ctx.rng.next();
+  if (u >= total) return;
+  const record = (p: SimPlayer, cause: InjuryCause, overuse: boolean) => {
+    const inj = drawInjury(ctx.rng, ip, p.isPitcher, cause);
+    list.push({ idx: p.idx, cause, ...(overuse ? { overuse: true as const } : {}), ...inj });
+  };
+  if (u < pPit + pOver) {
+    record(pg.p, 'pitch', u >= pPit);
+    pg.injured = true;
+  } else if (u < pPit + pOver + pRun) {
+    record(batter, 'run', false);
+    replaceInjured(st, bat, batter);
+  } else if (fielder) {
+    record(fielder, 'field', false);
+    if (fielder === pg.p) pg.injured = true;
+    else replaceInjured(st, fld, fielder);
+  }
 }
 
 /** 좌우 4칸 집계 한 타석 (점검 도구) */
@@ -438,12 +513,36 @@ function hitAndRun(st: GameState): boolean {
   return true;
 }
 
+/**
+ * 혹사지수 쌓기 (기획안 4.6, 경기 뒤): 오늘까지 빠진 값 + 실제 한계를 넘긴 공 × overPitch + 연투 b2b·3연투 이상 b3b
+ * + 선발이 정해진 휴식보다 일찍 나온 날 수 × shortRest. 투구 피로 회복 배율도 새 값으로 (ps.streak은 오늘 등판을 넣은 값)
+ */
+function addOveruse(ps: PlayerStates, pg: PitcherInGame, side: Side, prevStart: number, ctx: GameContext): void {
+  const o = ctx.params.injury.overuse;
+  const i = pg.p.idx;
+  let v = currentOveruse(ps, i, ctx.day, o) + Math.max(0, pg.pitches - pg.realLimit) * o.overPitch;
+  if (ps.streak[i] === 2) v += o.b2b;
+  else if (ps.streak[i] >= 3) v += o.b3b;
+  if (pg.isStarter) {
+    const rest = side.ts.restDays ?? ctx.params.starterRestDays;
+    const gap = ctx.day - prevStart;
+    if (gap < rest) v += o.shortRest * (rest - gap);
+  }
+  ps.overuse[i] = v;
+  // 저장된 값(Float32)으로 계산해야 불러온 뒤에도 같다
+  ps.recoverMul[i] = 1 / (1 + o.recovery * ps.overuse[i]);
+}
+
 /** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */
 function finishGame(st: GameState, inning: number, lineScore: GameResult['lineScore']): GameResult {
   const { ctx, home, away, rec } = st;
   ctx.totals.games++;
   if (inning > 9) ctx.totals.extraInningGames++;
   const ps = ctx.states;
+  const o = ctx.params.injury.overuse;
+  // 짧은 휴식 판정용: 이번 등판 전 마지막 선발일
+  const prevStart = new Map<number, number>();
+  for (const side of [home, away]) for (const pg of side.staff) if (pg.isStarter) prevStart.set(pg.p.idx, ps.lastStartDay[pg.p.idx]);
   for (const side of [home, away]) {
     for (const pg of side.staff) {
       const i = pg.p.idx;
@@ -453,7 +552,23 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
       }
       ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.pitches;
       ps.streak[i] = ps.fatigueDay[i] === ctx.day - 1 ? ps.streak[i] + 1 : ps.fatigueDay[i] === ctx.day ? Math.max(1, ps.streak[i]) : 1;
+      if (o.on) addOveruse(ps, pg, side, prevStart.get(i) ?? -99, ctx);
       ps.fatigueDay[i] = ctx.day;
+    }
+  }
+  // 야수 피로 (엔진 2 11단계): 선발 출전은 load(포수·지명타자 배율, 30세 넘으면 나이 몫, 연장이면 이닝 ÷ 9배), 교체 출전은 sub
+  const bp = ctx.params.body;
+  const long = Math.max(1, inning / 9);
+  for (const side of [home, away]) {
+    const add = (p: SimPlayer, load: number) => {
+      const age = 1 + bp.agePer * Math.max(0, (p.age ?? 30) - 30);
+      ps.body[p.idx] = Math.min(bp.cap, currentBody(ps, p.idx, ctx.day, bp) + load * age);
+      ps.bodyDay[p.idx] = ctx.day;
+    };
+    for (const { p, slot } of side.starters) if (!p.isPitcher) add(p, bp.load * (slot === 'C' ? bp.catcher : slot === 'DH' ? bp.dh : 1) * long);
+    for (const s of side.subs) {
+      const p = side.ts.hitters.find((x) => x.idx === s.idx);
+      if (p && !side.starters.some((x) => x.p === p)) add(p, bp.sub);
     }
   }
 

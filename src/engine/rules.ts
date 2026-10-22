@@ -380,11 +380,13 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   // 인플레이 타구 (홈런 제외): 유형·방향·담당 수비수. 양타는 투수 손의 반대쪽 타석, 모르면 우타.
   // 땅볼 성향 = 그 해 리그 값 × 타자 × 투수 (엔진 2 6단계)
   let ball: BattedBall | null = null;
+  st.ballSlot = null;
   if (ev === Ev.S1 || ev === Ev.D2 || ev === Ev.T3 || ev === Ev.OUT) {
     const pullLeft = batter.bats === 'L' ? false : batter.bats === 'S' ? pg.p.throws === 'L' : true;
     const gb = (ctx.env.gbOdds ?? 1) * (batter.bat!.gb ?? 1) * (pg.skill.gb ?? 1);
     ball = battedBall(ev, rates, ctx.league, pullLeft, (s) => fld.slotDef[s as keyof typeof fld.slotDef] ?? 0, params, rng, gb);
     ev = ball.ev;
+    st.ballSlot = ball.slot;
     // 전진 수비 (엔진 2 10단계): 앞으로 나온 내야를 빠지는 땅볼 안타가 는다 (임시값)
     if (st.infieldIn && ball.type === Ball.GB) {
       if (ctx.pen) ctx.pen.ifInGb++;

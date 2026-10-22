@@ -309,10 +309,15 @@ export interface EngineParams {
   stealScale: number;
 
   // ---- 선수 기용
-  /** 주전 야수가 하루 쉴 확률 */
+  /**
+   * 야수 휴식 (엔진 2 11단계): 경기 전 피로(body)가 body.restFrom을 넘은 만큼에 곱하는 휴식 확률 (피로 1당).
+   * 0이면 쉬지 않는다 (가을야구·올스타전)
+   */
   restChance: number;
-  /** 주전 포수가 하루 쉴 확률 */
+  /** 포수의 휴식 확률 배율 (피로 1당, restChance와 같은 쓰임) */
   catcherRestChance: number;
+  /** 야수 체력 (엔진 2 11단계, team.ts hitterFatigue). 모두 임시값 */
+  body: BodyParams;
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -388,6 +393,30 @@ export function estimatedStarts(row: { g: number; outs: number }): number {
 /** 선발 투수인가 (STARTER_SHARE) */
 export function isStarterSkill(pit: { startShare: number } | null | undefined): boolean {
   return !!pit && pit.startShare >= STARTER_SHARE;
+}
+
+/** 야수 체력 (엔진 2 11단계, 단위는 '경기'). 모두 임시값 */
+export interface BodyParams {
+  /** 선발 출전 한 경기에 쌓이는 피로. 연장이면 이닝 ÷ 9배 */
+  load: number;
+  /** 포수 자리로 선발 출전한 경기의 배율 */
+  catcher: number;
+  /** 지명타자로 선발 출전한 경기의 배율 */
+  dh: number;
+  /** 교체로 나온 경기 (대타·대주자·대수비) */
+  sub: number;
+  /** 30세부터 한 살마다 쌓이는 피로에 더하는 몫 */
+  agePer: number;
+  /** 하루(경기 없는 날 포함)에 빠지는 피로 */
+  recover: number;
+  /** 피로 상한 */
+  cap: number;
+  /** 휴식을 생각하기 시작하는 피로 (restChance) */
+  restFrom: number;
+  /** 이 피로부터 타석이 조금 나빠진다: 넘은 1당 penaltyPer, 최대 penaltyMax (타자 유리도에서 뺀다, pa.ts) */
+  penaltyFrom: number;
+  penaltyPer: number;
+  penaltyMax: number;
 }
 
 export const DEFAULT_PARAMS: EngineParams = {
@@ -566,8 +595,12 @@ export const DEFAULT_PARAMS: EngineParams = {
   twoOutBonus: 0.15,
   stealScale: 1.2,
 
-  restChance: 0.2,
-  catcherRestChance: 0.25,
+  restChance: 0.6,
+  catcherRestChance: 0.6,
+  // 야수 체력 (엔진 2 11단계, 임시값): 2025 상위 9명 타석 비중 실제 0.708에 tools/injury_check.ts 6시즌으로 맞춤 (0.788 → 0.706)
+  body: {
+    load: 1, catcher: 1.3, dh: 0.6, sub: 0.3, agePer: 0.02, recover: 0.6, cap: 4, restFrom: 1, penaltyFrom: 2, penaltyPer: 0.01, penaltyMax: 0.02,
+  },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md
@@ -578,6 +611,14 @@ export const DEFAULT_PARAMS: EngineParams = {
     eventChance: 0.00005,
     specificShare: 0.5,
     offseasonDays: 150,
+    // 경기 중 부상 (엔진 2 11단계, 임시값): 1군 선수의 경기 전 부상을 preShare로 줄이고 나머지를 경기 중 사건이 맡는다.
+    // 경기 전 + 경기 중 합한 리그 결장 비율·주축 부상 횟수가 바꾸기 전과 같도록 tools/injury_check.ts로 맞춘 값
+    inGame: { preShare: 0.55, perPitch: 0.0002, perRun: 0.00045, perField: 0.00028 },
+    // 혹사지수 (기획안 4.6, 임시값). 혹사 부상은 결장 비율 기준과 따로 정한다 (사용자 결정 2026-10-22)
+    overuse: {
+      on: true, realSpread: 0.15, overPitch: 0.05, b2b: 0.5, b3b: 1.5, shortRest: 1, decay1: 0.02, decay2: 0.002, offseason: 0.25,
+      recovery: 0.1, injury: 0.3, overInjury: 0.0002,
+    },
   },
 
   positionWeights: [1, 0.7, 0.5],

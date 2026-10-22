@@ -102,6 +102,10 @@ export interface SimPlayer {
   ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */
   traits?: readonly import('./traits').Trait[];
+  /** 숨은 능력 '부상 경향' (부상 확률 배율, 엔진 2 16단계에서 붙는다). 없으면 1.00 */
+  injuryProne?: number;
+  /** 개막 때 혹사지수 (지난 시즌에서 넘어온 값, league/offseason.ts). 없으면 0 */
+  overuseStart?: number;
 }
 
 export interface SimTeam {

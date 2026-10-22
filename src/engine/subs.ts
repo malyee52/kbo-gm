@@ -131,3 +131,29 @@ function realignSlots(side: Side): void {
   side.slots = new Map(placed.map(({ p, slot }) => [p.idx, slot]));
   Object.assign(side, fieldDefense(side.lineup, side.slots));
 }
+
+/**
+ * 경기 중 다친 야수를 바로 바꾼다 (엔진 2 11단계). 누상에 있으면 대주자, 아니면 그 타순·수비 자리에 벤치 선수 (대수비로 기록).
+ * 고르는 기준은 라인업 배치와 같은 (타석 가치 × 500 + 그 자리 수비 런). 포수 자리는 포수를 맡을 수 있는 선수부터. 벤치가 비면 그대로 둔다
+ */
+export function replaceInjured(st: GameState, side: Side, p: SimPlayer): void {
+  const order = side.lineup.indexOf(p);
+  if (order < 0) return;
+  const slot = side.slots.get(p.idx);
+  const bench = benchOf(side);
+  const fit = slot === 'C' && bench.some(canCatch) ? bench.filter(canCatch) : bench.filter((b) => keepsCatcher(side, p, b));
+  let best: SimPlayer | null = null;
+  let bestScore = -Infinity;
+  for (const b of fit.length ? fit : bench) {
+    const score = b.value * 500 + (slot && slot !== 'DH' ? defenseAt(b, slot) : 0);
+    if (score > bestScore) { bestScore = score; best = b; }
+  }
+  if (!best) return;
+  const base = st.bases.findIndex((r) => r?.p === p);
+  substitute(side, order, best, base >= 0 ? 'PR' : 'DEF');
+  if (base >= 0) st.bases[base] = { ...st.bases[base]!, p: best };
+  else if (slot) side.slots.set(best.idx, slot);
+  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  st.ctx.bat[best.idx].g++;
+  st.note(base >= 0 ? 'PR' : 'DEF', best.idx, st.fld.pitcher.p.idx, st.bat.runs);
+}

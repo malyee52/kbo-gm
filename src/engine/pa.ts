@@ -6,6 +6,13 @@ import type { GameContext } from './game';
 import type { PitcherInGame } from './state';
 import { fatigueScale, traitEdge, type Situation } from './traits';
 import type { SimPlayer } from './types';
+import type { BodyParams } from './params';
+import { currentBody } from './team';
+
+/** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
+export function tiredPenalty(body: number, bp: BodyParams): number {
+  return body > bp.penaltyFrom ? Math.min(bp.penaltyMax, (body - bp.penaltyFrom) * bp.penaltyPer) : 0;
+}
 
 /** 타석 결과: 삼진, 볼넷, 사구, 홈런, 단타, 2루타, 3루타, 인플레이 아웃이 될 타구 */
 export enum Ev { SO, BB, HBP, HR, S1, D2, T3, OUT }
@@ -70,7 +77,8 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   // 타자에게 유리한 정도: 좌우 상성 + 홈 이점 + 숨겨진 특수능력 (둘 다 없으면 0)
   const edge = platoonEdge(b, pg.p, params.platoon) + (batIsHome ? params.homeEdge : -params.homeEdge)
     + (b.traits || pg.p.traits ? traitEdge(b, pg.p, { ...state, postseason: !!ctx.postseason, home: batIsHome }, params.traits) : 0)
-    + (ctx.form ? ctx.form[b.idx] - ctx.form[pg.p.idx] : 0);
+    + (ctx.form ? ctx.form[b.idx] - ctx.form[pg.p.idx] : 0)
+    - tiredPenalty(currentBody(ctx.states, b.idx, ctx.day, params.body), params.body);
   // 투수 피로: 한계 투구 수를 넘긴 공 수에 비례. 타석 하나를 한 번에 뽑으므로 타석 중간(기대 투구 수의 절반) 시점의 투구 수로 본다
   // (docs/경기엔진2_기획안.md 3.6.3). 에이스 체력(특수능력)은 피로 누적 배율 그대로 (임시, 다시 정의는 공개 스킬 때)
   const over = pg.pitches + pg.ppa / 2 - pg.limit;

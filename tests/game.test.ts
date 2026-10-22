@@ -115,9 +115,11 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
     }
   });
 
-  it('알림에 실존 선수의 결장 사유를 적지 않는다', () => {
+  // 엔진 2 11단계 (2026-10-22 사용자 결정): 부상은 실존 선수도 부위·정도를 쓴다. 부상이 아닌 사유(징계·사건)는 여전히 적지 않는다
+  it('알림에 실존 선수의 부상 아닌 결장 사유를 적지 않는다 (부상은 부위·정도를 쓴다)', () => {
     const absences = g.news.filter((n) => n.kind === 'absence');
-    for (const n of absences) expect(n.text).not.toMatch(/부상|골절|징계|음주|도박|폭행|사생활/);
+    for (const n of absences) expect(n.text).not.toMatch(/골절|징계|음주|도박|폭행|사생활|갈등/);
+    expect(absences.some((n) => /부상, (경미|중간 정도|심각)/.test(n.text))).toBe(true);
   });
 
   it('시즌 일정이 달력 날짜로 3월 말에 시작해 10월 전에 끝난다', () => {

@@ -4,7 +4,8 @@
 import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
-import type { EngineParams } from './params';
+import type { BodyParams, EngineParams } from './params';
+import { overuseDecay, type OveruseParams } from './injury';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
 import { batValue, pitValue } from './ratings';
@@ -20,6 +21,13 @@ export interface PlayerStates {
   /** fatigueDay까지 연속으로 던진 날 수 (연투 관리) */
   streak: Int32Array;
   lastStartDay: Int32Array;
+  /** 혹사지수 (투수, fatigueDay에 기록한 값. 기획안 4.6). 등판 없는 날이 이어지면 overuseDecay만큼 빠진다 */
+  overuse: Float32Array;
+  /** 투구 피로 하루 회복량 배율 (혹사지수로 정한다, 1 = 보통). 숨은 능력 '회복력'(16단계)이 곱해질 자리 */
+  recoverMul: Float32Array;
+  /** 야수 피로 (경기 단위, 엔진 2 11단계)와 그 값을 기록한 날짜. 하루에 params.body.recover씩 빠진다 */
+  body: Float32Array;
+  bodyDay: Int32Array;
 }
 
 export function newPlayerStates(n: number): PlayerStates {
@@ -29,7 +37,22 @@ export function newPlayerStates(n: number): PlayerStates {
     fatigueDay: new Int32Array(n),
     streak: new Int32Array(n),
     lastStartDay: new Int32Array(n).fill(-99),
+    overuse: new Float32Array(n),
+    recoverMul: new Float32Array(n).fill(1),
+    body: new Float32Array(n),
+    bodyDay: new Int32Array(n).fill(-99),
   };
+}
+
+/** 오늘 경기 전 야수 피로 */
+export function currentBody(st: PlayerStates, idx: number, day: number, body: BodyParams): number {
+  return Math.max(0, st.body[idx] - body.recover * (day - st.bodyDay[idx]));
+}
+
+/** 오늘 경기 전 혹사지수 (마지막 등판 뒤 쉰 날만큼 빠진 값) */
+export function currentOveruse(st: PlayerStates, idx: number, day: number, o: OveruseParams): number {
+  const v = st.overuse[idx];
+  return v > 0 ? v * overuseDecay(day - st.fatigueDay[idx], o) : 0;
 }
 
 export { BULLPEN_AVAILABLE_BELOW as FATIGUE_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY as FATIGUE_RECOVERY_PER_DAY } from './params';
@@ -51,9 +74,9 @@ export function availableBelow(pen = 1): number {
   return pen === 1 ? BULLPEN_AVAILABLE_BELOW : (BULLPEN_RECOVERY_PER_DAY + BULLPEN_AVAILABLE_BELOW) * pen - BULLPEN_RECOVERY_PER_DAY;
 }
 
-/** 오늘 경기 전 피로 (공 수). 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
+/** 오늘 경기 전 피로 (공 수). 하루 회복량에 혹사 배율(recoverMul)을 곱한다. 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
 export function currentFatigue(st: PlayerStates, idx: number, day: number): number {
-  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
+  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * st.recoverMul[idx] * (day - st.fatigueDay[idx]));
 }
 
 export interface TeamSeason {
@@ -276,7 +299,7 @@ export const CHURN_DAYS = 10;
  * 2026-10-21: 마무리 섞기 추가. FNV-1a만 쓰면 끝 글자(주기 번호)만 다른 문자열의 값이 서로 붙어 있어서,
  * 같은 투수가 시즌 내내 순환으로 빠지거나(2026 KT 배제성: 17주기 모두, 시드와 상관없이 0이닝) 한 번도 빠지지 않았다
  */
-function unitHash(s: string): number {
+export function unitHash(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -477,10 +500,11 @@ function planFixed(ts: TeamSeason, pool: SimPlayer[]): Map<Slot, SimPlayer> | un
 }
 
 /**
- * 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다.
+ * 오늘의 선발 라인업 (타순 포함). 지친 주전에게 휴식을 준다 (tired: 경기 전 야수 피로, 없으면 쉬지 않는다). 수비 배치는 ts.field에 남긴다.
  * 플래툰 (엔진 2 9단계): 상대 선발의 손(oppThrows)을 알면 좌우 상성을 넣은 타격 런으로 자리를 배정한다 (주전 휴식 순위는 그대로)
  */
-export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, oppThrows: string | null = null): SimPlayer[] {
+export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, oppThrows: string | null = null,
+                             tired?: (p: SimPlayer) => number): SimPlayer[] {
   ts.lineupCache ??= new Map();
   const hand = oppThrows === 'L' || oppThrows === 'R' ? oppThrows : '';
   const runsOf = hand ? (p: SimPlayer, slot: Slot) => batRunsVs(p, hand, params.platoon) + defenseAt(p, slot) : slotRuns;
@@ -492,12 +516,20 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   const byValue = [...regulars].sort((a, b) => b.value - a.value);
   // 플레이어가 직접 정한 주전은 AI가 쉬게 하지 않는다 (2026-10-11 사용자: 직접 짠 라인업을 AI가 무단으로 바꾸지 않게). 결장 때만 서브가 채운다
   const planned = ts.plan && ts.manual ? new Set(Object.values(ts.plan.starters)) : null;
+  // 휴식은 피로로 정한다 (엔진 2 11단계, 확률 휴식 대신): 경기 전 피로가 body.restFrom을 넘은 만큼 쉴 확률이 오른다.
+  // 감독은 상위 3명을 지쳐도 더 내보내고 하위 3명은 일찍 쉬게 한다 (배율 0.4·1·1.8, 최대 60%)
   byValue.forEach((p, rank) => {
     if (planned?.has(p.idx)) return;
     const factor = rank < 3 ? 0.4 : rank < 6 ? 1 : 1.8;
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
-    if (rng.chance(Math.min(0.6, base * factor))) resting.add(p.idx);
+    const over = Math.max(0, (tired ? tired(p) : 0) - params.body.restFrom);
+    if (rng.chance(Math.min(0.6, base * factor * over))) resting.add(p.idx);
   });
+  // 벤치가 모자라 9명을 못 채우면 가치 높은 주전부터 다시 내보낸다 (예전에는 모두 쉬지 않았다: 많이 지칠수록 오히려 덜 쉬었다)
+  for (const p of byValue) {
+    if (ts.hitters.length - resting.size >= 9) break;
+    resting.delete(p.idx);
+  }
   const key = `${hand}:${[...resting].sort((a, b) => a - b).join(',')}`;
   ts.lineupCache ??= new Map();
   let placed = ts.lineupCache.get(key);
