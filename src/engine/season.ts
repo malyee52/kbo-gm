@@ -3,6 +3,7 @@
 // 저장 후 이어서 돌린 결과는 끊지 않고 돌린 결과와 같다 (테스트로 확인).
 
 import type { Rates } from '../data/types';
+import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
@@ -232,6 +233,8 @@ export interface SeasonInit {
   boxTeams?: number[];
   /** 타석 해결기. 기본은 볼카운트 사슬 B1 (params.chainShape) */
   resolver?: PaResolver;
+  /** 인플레이 타구 집계 (검증 도구용). 저장하지 않는다 */
+  balls?: BallTally;
 }
 
 export class Season {
@@ -306,7 +309,7 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)),
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls,
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
 
@@ -589,7 +592,7 @@ export class Season {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
     const ctx: GameContext = {
       ...this.ctx, params, rng, bat, pit, totals: emptyLeagueCounters(), states: newPlayerStates(n),
-      plays: null, command: null, form: undefined, errors: undefined, postseason: false,
+      plays: null, command: null, form: undefined, errors: undefined, balls: undefined, postseason: false,
     };
     const side = (s: ExhibitionSide, idx: number): TeamSeason => ({
       team: { idx, name: s.name, franchise: s.name, org: [...s.hitters, ...s.pitchers] },

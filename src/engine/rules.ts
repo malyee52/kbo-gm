@@ -1,8 +1,9 @@
 // 공통 규칙 계층: 타석 전 주루(도루·폭투), 희생번트, 타석 결과에 따른 주자 진루·아웃·기록.
 // 해결기가 무엇이든 같은 코드를 쓴다 (docs/경기엔진2_기획안.md 3.2).
 
+import { Ball, battedBall } from './battedball';
 import type { PlayKind } from './game';
-import { Ev } from './pa';
+import { Ev, type PaRates } from './pa';
 import type { GameState, PitcherInGame, Runner } from './state';
 import type { BatLine, SimPlayer } from './types';
 
@@ -106,11 +107,29 @@ export function autoSacBunt(st: GameState, batter: SimPlayer, bl: BatLine, pg: P
   return false;
 }
 
-/** 타석 결과를 경기에 적용한다: 기록, 주자 진루, 인플레이 아웃 처리(실책·병살·희생플라이). 중계 기록 종류를 돌려준다 */
-export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, bl: BatLine, pg: PitcherInGame, intentional: boolean): PlayKind {
+/**
+ * 타석 결과를 경기에 적용한다: 인플레이 타구(타구 모형, 수비수가 안타 ↔ 아웃을 바꿈), 기록, 주자 진루, 인플레이 아웃 처리(실책·병살·희생플라이).
+ * rates: 이 타석의 결과 확률 (나쁜 수비가 아웃을 안타로 바꿀 때 안타 ÷ 아웃 비). 없으면 리그 비율. 중계 기록 종류를 돌려준다
+ */
+export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, bl: BatLine, pg: PitcherInGame, intentional: boolean, rates: PaRates | null = null): PlayKind {
   const { bases, fld, ctx } = st;
   const { params, rng, totals } = ctx;
   const me: Runner = { p: batter, resp: pg, earned: true };
+  // 인플레이 타구 (홈런 제외): 유형·방향·담당 수비수. 양타는 투수 손의 반대쪽 타석, 모르면 우타
+  let ground = false;
+  if (ev === Ev.S1 || ev === Ev.D2 || ev === Ev.T3 || ev === Ev.OUT) {
+    const pullLeft = batter.bats === 'L' ? false : batter.bats === 'S' ? pg.p.throws === 'L' : true;
+    const ball = battedBall(ev, rates, ctx.league, pullLeft, (s) => fld.slotDef[s as keyof typeof fld.slotDef] ?? 0, params, rng);
+    ev = ball.ev;
+    ground = ball.type === Ball.GB;
+    const t = ctx.balls;
+    if (t) {
+      t.type[ball.type]++;
+      t.dir[ball.dir]++;
+      t.slot[ball.slot] = (t.slot[ball.slot] ?? 0) + 1;
+      if (ball.converted) { if (ev === Ev.OUT) t.toOut++; else t.toHit++; }
+    }
+  }
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
   const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
   const twoOut = st.outs === 2 ? params.twoOutBonus : 0;
@@ -210,7 +229,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
         bases[0] = me;
         break;
       }
-      if (rng.chance(params.groundBallShare)) {
+      if (ground) {
         // 땅볼
         if (bases[0] && st.outs < 2) {
           if (rng.chance(params.doublePlay)) {

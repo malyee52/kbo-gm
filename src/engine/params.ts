@@ -7,6 +7,21 @@ import type { ChainShape } from './chain';
 import type { InjuryParams } from './injury';
 import { DEFAULT_TRAIT_PARAMS, type TraitParams } from './traits';
 
+/** 타구 모형 조정값 (battedball.ts). 자리 표는 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽] 순서 */
+export interface BallParams {
+  /** 인플레이 타구 방향 [당겨, 가운데, 밀어] (치는 손 기준) */
+  dir: [number, number, number];
+  /** 안타 종류별 타구 유형 [땅볼, 라인드라이브, 뜬공, 내야 뜬공] */
+  type: { S1: [number, number, number, number]; D2: [number, number, number, number]; T3: [number, number, number, number] };
+  /** 아웃 타구 중 땅볼이 아닌 것의 유형 [라인드라이브, 뜬공, 내야 뜬공] (땅볼 몫은 groundBallShare) */
+  airOut: [number, number, number];
+  /** 라인드라이브·뜬공이 내야 공중 구역(내야수가 맡음)으로 가는 몫 */
+  infieldAir: { LD: number; FB: number };
+  /** 깊이별·구장 쪽별 담당 자리 가중치 (ground 내야 땅볼, air 내야 공중, outfield 외야) */
+  zones: Record<'ground' | 'air' | 'outfield', [ZoneFielders, ZoneFielders, ZoneFielders]>;
+}
+export type ZoneFielders = Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF', number>>;
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -98,6 +113,8 @@ export interface EngineParams {
   outOnAdvance: number;
   /** 인플레이 아웃 중 땅볼 비율 (임시값) */
   groundBallShare: number;
+  /** 타구 모형 (battedball.ts, 엔진 2 5단계) */
+  ball: BallParams;
   /**
    * 볼카운트 사슬의 리그 모양 (chain.ts): 칸(볼-스트라이크)별 다음 공이 볼·스트라이크·파울·맞힘·사구일 비율.
    * 매치업마다 손잡이를 풀어 끝 확률을 타석 결과 함수에 맞추므로, 이 모양은 투구 수와 카운트 분포만 정한다 (엔진 2 3단계)
@@ -133,7 +150,10 @@ export interface EngineParams {
   injury: InjuryParams;
 
   // ---- 수비 (defense.ts)
-  /** 팀 수비 1런당 인플레이 안타·실책 출루 확률이 줄어드는 비율. 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값) */
+  /**
+   * 수비수 한 명의 수비 1런당 팀 인플레이 안타가 아웃으로 바뀌는 몫 (battedball.ts: 그 수비수에게 간 타구에서만 바꾼다).
+   * 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값). 엔진 1의 팀 수비 합(T5)과 같은 크기
+   */
   defenseHitPerRun: number;
   /** 포수 수비 1런당 폭투·포일이 줄어드는 비율 (임시값) */
   catcherWildPitchPerRun: number;
@@ -233,6 +253,19 @@ export const DEFAULT_PARAMS: EngineParams = {
   sacBuntScale: 11.6,
   outOnAdvance: 0.11,
   groundBallShare: 0.5,
+  ball: {
+    // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
+    dir: [0.49, 0.2, 0.31],
+    // 아래는 모두 임시값 (자료 없음. 라인드라이브·안타의 유형 분포는 자료에 없다, batted_ball_derived/README.md)
+    type: { S1: [0.38, 0.44, 0.18, 0], D2: [0.06, 0.46, 0.48, 0], T3: [0, 0.3, 0.7, 0] },
+    airOut: [0.2, 0.62, 0.18],
+    infieldAir: { LD: 0.25, FB: 0.08 },
+    zones: {
+      ground: [{ '3B': 0.5, SS: 0.5 }, { SS: 0.4, '2B': 0.4, P: 0.2 }, { '2B': 0.45, '1B': 0.55 }],
+      air: [{ '3B': 0.45, SS: 0.35, C: 0.2 }, { SS: 0.35, '2B': 0.35, P: 0.1, C: 0.2 }, { '1B': 0.45, '2B': 0.35, C: 0.2 }],
+      outfield: [{ LF: 0.75, CF: 0.25 }, { CF: 1 }, { RF: 0.75, CF: 0.25 }],
+    },
+  },
   // 아래 chainShapeByYear 세 해(2023~2025 맞춘 모양)를 칸마다 실제 공 수로 가중 평균. 스트라이크 = 루킹 + 헛스윙 + 번트 헛스윙
   // (+ 2스트라이크 번트 파울), 파울 = 파울 + 2스트라이크 전 번트 파울. 그 해 모양(chainShapeByYear)이 없는 해(2022년 이전, 2026년 이후)에 쓴다 (임시값: 그 시대 카운트 자료 없음.
   // 2015~2022 리그 P/PA는 하드힛 월별 표 3.80~3.94구와 비교만 한다, reports/engine2-step3.md)

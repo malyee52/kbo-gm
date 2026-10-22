@@ -51,7 +51,6 @@ function platoonEdge(b: SimPlayer, p: SimPlayer, size: number): number {
   return b.bats === p.throws ? -size : size;
 }
 
-/** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
 /**
  * 선수 한 명의 사슬 길이 손잡이: 리그 평균 상대로 삼진·볼넷·사구가 K·W·H인 이 선수의 기대 투구 수가 (ppaRel × 리그 기대 투구 수)가 되는 값.
  * ppaRel이 없거나(자료 없음) 투구 수를 세지 않는 해결기면 1
@@ -63,7 +62,8 @@ export function lengthOf(ctx: GameContext, ppaRel: number | undefined, K: number
   return r.lengthFor(K, W, H, ppaRel * r.pitchesPerPa(lg.so, lg.bb, lg.hbp));
 }
 
-export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE, park = NEUTRAL_PARK): PaRates {
+/** 타석 결과 확률. 수비는 여기서 보지 않는다: 인플레이 타구를 맡은 수비수가 안타 ↔ 아웃을 바꾼다 (battedball.ts, 엔진 2 5단계) */
+export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, state: PaState = NO_STATE, park = NEUTRAL_PARK): PaRates {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
@@ -90,7 +90,7 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const side = b.bats === 'S' ? (pg.p.throws === 'L' ? 'R' : pg.p.throws === 'R' ? 'L' : null) : b.bats === 'L' || b.bats === 'R' ? b.bats : null;
   const pk: ParkRates = (side && park[side]) || park;
   const hr = combine(bs.hr * cal.hr * lg.hr * up * pk.hr, ps.hr * lg.hr * worse, lg.hr);
-  const hitP = ps.hit * worse * Math.max(0.5, 1 - fieldDef * params.defenseHitPerRun);
+  const hitP = ps.hit * worse;
   const s1 = combine(bs.s1 * cal.s1 * lg.s1 * up * pk.s1, hitP * lg.s1, lg.s1);
   const d2 = combine(bs.d2 * cal.d2 * lg.d2 * up * pk.d2, hitP * lg.d2, lg.d2);
   const t3 = combine(bs.t3 * cal.t3 * lg.t3 * up * pk.t3, hitP * lg.t3, lg.t3);

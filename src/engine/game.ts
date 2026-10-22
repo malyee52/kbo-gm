@@ -2,8 +2,9 @@
 // 타석은 공통 규칙(감독 판단 manager.ts, 주루·진루 rules.ts)과 해결기(resolver.ts)로 푼다 (docs/경기엔진2_기획안.md 3.2).
 
 import type { ParkRates, Rates } from '../data/types';
+import type { BallTally } from './battedball';
 import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher } from './manager';
-import { Ev, NEUTRAL_PARK, paRates, type GamePark } from './pa';
+import { Ev, NEUTRAL_PARK, paRates, type GamePark, type PaRates } from './pa';
 import type { EngineParams } from './params';
 import { B0, type PaResolver } from './resolver';
 import type { Rng } from './rng';
@@ -81,6 +82,8 @@ export interface GameContext {
   command?: GameCommand | null;
   /** 수비수별 실책 수 (선수 색인). 없으면 남기지 않는다 */
   errors?: number[];
+  /** 인플레이 타구 집계 (검증 도구용, battedball.ts). 없으면 세지 않는다. 난수를 쓰지 않아 결과는 같다 */
+  balls?: BallTally;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
   resolver?: PaResolver;
 }
@@ -313,9 +316,10 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
 
     // 지휘한 고의4구는 공 없이 (자동 고의4구)
     let ev: Ev;
+    let rates: PaRates | null = null;
     if (fc?.walk) ev = Ev.BB;
     else {
-      const rates = paRates(batter, pg, bat.isHome, ctx, fld.def, {
+      rates = paRates(batter, pg, bat.isHome, ctx, {
         runnersOn: !st.basesEmpty, scoring: !!(st.bases[1] || st.bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
       }, st.park);
       const res = resolver.resolve(rates, ctx.rng);
@@ -323,7 +327,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       addPitches(ctx, pg, res.pitches);
     }
     const r0 = bat.runs;
-    const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk);
+    const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk, rates);
     st.note(kind, batter.idx, pg.p.idx, r0);
     if (st.walkOff()) return true;
   }

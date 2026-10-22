@@ -56,8 +56,8 @@ export interface Side {
   isHome: boolean;
   /** 라인업 가치의 중앙값 (희생번트를 누가 대는지 정할 때 쓴다) */
   medianValue: number;
-  /** 수비 8명의 수비 런 합 (defense.ts) */
-  def: number;
+  /** 자리별 수비 런 (defense.ts). 타구 모형(battedball.ts)이 그 타구를 맡은 수비수의 값을 쓴다 */
+  slotDef: Partial<Record<Slot, number>>;
   /** 포수의 수비 런 */
   catcherDef: number;
   /** 실책 배율 (수비수별 실책률을 타구 몫으로 가중한 합, 평균 수비진 ≈ 1) */
@@ -91,9 +91,9 @@ export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.ex
 /** 리그 실책 수를 예전(팀 수비 합 방식)과 같게 맞추는 배율 (2025 두 시드로 잼: 수비수별로 바꾸니 약 8% 많았다) */
 const ERROR_NORM = 0.93;
 
-/** 수비 배치에서 팀 수비 런, 포수 수비 런, 실책 배율 */
-export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { def: number; catcherDef: number; errMult: number; errBy: { idx: number; w: number }[] } {
-  let def = 0;
+/** 수비 배치에서 자리별 수비 런, 포수 수비 런, 실책 배율 */
+export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { slotDef: Partial<Record<Slot, number>>; catcherDef: number; errMult: number; errBy: { idx: number; w: number }[] } {
+  const slotDef: Partial<Record<Slot, number>> = {};
   let catcherDef = 0;
   let errMult = 0;
   const errBy: { idx: number; w: number }[] = [];
@@ -101,7 +101,7 @@ export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { d
     const slot = slots.get(p.idx);
     if (!slot) continue;
     const r = defenseAt(p, slot);
-    def += r;
+    slotDef[slot] = r;
     if (slot === 'C') catcherDef = r;
     const share = ERROR_SHARE[slot] ?? 0;
     if (share > 0) {
@@ -110,7 +110,7 @@ export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { d
       errBy.push({ idx: p.idx, w });
     }
   }
-  return { def, catcherDef, errMult: (errMult || 1) * ERROR_NORM, errBy };
+  return { slotDef, catcherDef, errMult: (errMult || 1) * ERROR_NORM, errBy };
 }
 
 /**
