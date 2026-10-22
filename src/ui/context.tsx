@@ -6,6 +6,7 @@ import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
 import { darkBand, teamPalette } from './teams';
 import { priceIndex, wonText } from '../league/salary';
+import { foreignTag } from './foreignTag';
 
 export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
   | 'finance' | 'stadium' | 'staff' | 'club-history'
@@ -77,13 +78,20 @@ export function TeamName({ idx, short = false }: { idx: number; short?: boolean 
   );
 }
 
+/** 외국인 태그: 아시아쿼터는 "아"·"아시아쿼터", 일반 외국인은 "외"·"외국인" (foreignTag.ts). 국내 선수는 아무것도 없다 */
+export function ForeignMark({ p, long = false }: { p: SimPlayer; long?: boolean }) {
+  const { session } = useGame();
+  const t = foreignTag(p, (id) => session.leaguePlayer(id));
+  return t && <span className="tag" title={t.title}>{long ? t.long : t.short}</span>;
+}
+
 /** 선수 이름. 누르면 선수 상세가 열린다 */
 export function PlayerLink({ p, showTeam = false }: { p: SimPlayer; showTeam?: boolean }) {
   const { openPlayer, session } = useGame();
   return (
     <button type="button" className="link" onClick={() => openPlayer(p.idx)}>
       {p.name}
-      {p.foreign && <span className="tag" title="외국인 선수">외</span>}
+      <ForeignMark p={p} />
       {showTeam && <span className="muted small"> {lineTeam(p) >= 0 ? session.teamInfo(lineTeam(p)).name : '자유계약'}{p.teamIdx < 0 && p.formerTeam !== undefined ? ' (방출)' : ''}</span>}
     </button>
   );

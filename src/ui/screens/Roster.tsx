@@ -15,7 +15,7 @@ import {
   type LeagueBase,
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
-import { Grade, HAND, posName, useGame, useWon } from '../context';
+import { ForeignMark, Grade, HAND, posName, useGame, useWon } from '../context';
 import { dollarText } from '../../league/salary';
 import type { FuturesLine } from '../../league/futures';
 import { ruleOf } from '../../league/rules';
@@ -213,7 +213,7 @@ export function Roster() {
                     <tr key={p.idx} className={`pick${picked?.idx === p.idx ? ' sel' : ''}`} onClick={(e) => { if (!(e.target as HTMLElement).closest('select, button')) pick(p); }}>
                       <td className="l">
                         <button type="button" className="link name-btn" onClick={(e) => { e.stopPropagation(); pick(p); }}>{p.name}</button>
-                        {p.foreign && <span className="tag">외</span>}
+                        <ForeignMark p={p} />
                         {p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}
                       </td>
                       <td className="l small">{roleText}</td>
@@ -355,7 +355,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
     <aside className="card roster-side" aria-label={`${p.name} 요약`}>
       <header className="side-head">
         <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' (언더·사이드)' : ''}` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
-        <strong>{p.name}{p.foreign && <span className="tag">외국인</span>}</strong>
+        <strong>{p.name}<ForeignMark p={p} long /></strong>
       </header>
       <div className="side-body">
         {status && <p>{status}</p>}

@@ -1615,7 +1615,10 @@ export function canSignForeign(league: LeagueState, off: OffseasonState, team: n
   }
   if (s.regular >= lim.regular) return { ok: false, message: `외국인 선수는 ${lim.asia ? '아시아쿼터를 빼고 ' : ''}${lim.regular}명까지입니다.` };
   if (p.contract.salary > ruleOf(league, 'foreignNewCap')) return { ok: false, message: `신규 외국인 계약 상한(${dollarText(ruleOf(league, 'foreignNewCap'))})을 넘습니다.` };
-  if (s.regularPay + p.contract.salary > ruleOf(league, 'foreignTotalCap')) return { ok: false, message: `외국인 총액 상한(${dollarText(ruleOf(league, 'foreignTotalCap'))})을 넘습니다.` };
+  // 재계약하기로 한 선수는 지난 연봉으로 센다 (아시아쿼터는 총액에 넣지 않는다). 숫자를 함께 보여 준다 (2026-10-22 사용자: 왜 막혔는지 몰랐다)
+  if (s.regularPay + p.contract.salary > ruleOf(league, 'foreignTotalCap')) {
+    return { ok: false, message: `외국인 총액 상한(${dollarText(ruleOf(league, 'foreignTotalCap'))})을 넘습니다 (아시아쿼터를 뺀 우리 외국인 ${dollarText(s.regularPay)} + 요구액 ${dollarText(p.contract.salary)}).` };
+  }
   return feeCheck(league, team, p);
 }
 

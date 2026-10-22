@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type GameSession, type PitcherRole } from '../../game/session';
-import { Grade, POS_KO, posName, useGame } from '../context';
+import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
 import { recentLines } from '../recent';
 import { futuresText } from './Roster';
 
@@ -597,7 +597,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
                     <td className="l">
                       <button type="button" className="link name-btn" onClick={() => openPlayer(p.idx)}>{p.name}</button>
                       {!pit && <span className="muted small"> {posName(p.pos)}</span>}
-                      {p.foreign && <span className="tag">외</span>}
+                      <ForeignMark p={p} />
                       {best?.p.idx === p.idx && <span className="tag rec-tag" title={whyText(p, target)}>추천</span>}
                       <span className="cand-recent muted">{d.entry.has(p.idx) ? (recent.get(p.idx) ?? '최근 10경기 출전 없음') : '2군'}</span>
                     </td>
@@ -654,7 +654,7 @@ function EntryLists({ d, curReg, toggle, statusOf, nowText, recent, fut, editabl
                     <li key={p.idx} className={moved ? 'changed' : undefined}>
                       <span className="entry-name">
                         <button type="button" className="link name-btn" onClick={() => openPlayer(p.idx)}>{p.name}</button>
-                        {p.foreign && <span className="tag">외</span>}
+                        <ForeignMark p={p} />
                         {p.dev && <span className="tag">육성</span>}
                         <span className="muted small"> {p.isPitcher ? '투수' : posName(p.pos)} · {nowText(p)}</span>
                         <br />

@@ -11,7 +11,7 @@ import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIEL
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
-import { Grade, gradeClass, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
+import { ForeignMark, Grade, gradeClass, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
@@ -76,7 +76,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
       <div className="dialog-body">
         <header className="row-between">
           <div>
-            <h2 id="player-name">{p.name}{p.foreign && <span className="tag">외국인</span>}</h2>
+            <h2 id="player-name">{p.name}<ForeignMark p={p} long /></h2>
             <p className="muted">
               <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' · 언더·사이드' : ''})` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
               {' · '}{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}
