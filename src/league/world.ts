@@ -4,7 +4,7 @@
 
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
-import { scheduleRule } from '../data/schedule';
+import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import {
   batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pitValue, rankedFromSeason, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
@@ -144,8 +144,11 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
-  // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다)
-  const rule = store.schedule ? scheduleRule(store.schedule, year) : undefined;
+  // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다).
+  // 자료 없는 해에 구단 수가 10이 아니면(가상 창단) 규칙을 구단 수에 맞추고 팀당 경기 수도 그것을 따른다
+  const rule0 = store.schedule ? scheduleRule(store.schedule, year) : undefined;
+  const rule = rule0 && fitRuleToTeams(rule0, kept);
+  if (!data && rule) games = rule.games;
   const franchises = teams.map((t) => t.franchise);
   const last = league.lastSeason;
   const ranked = last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : rankedFromSeason(store.season(year - 1), franchises);

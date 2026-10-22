@@ -115,6 +115,20 @@ export function scheduleRule(data: ScheduleData, year: number): YearScheduleRule
   return undefined;
 }
 
+/**
+ * 자료 없는 해(2027~) 규칙을 월드의 구단 수에 맞춘다 (기획안 2.3, 임시 규칙): 그 줄은 10구단 모양(16차전 × 9 = 144)이라,
+ * 구단 수가 다르면(가상 창단) 상대별 경기 수를 팀당 경기 수에 가장 가깝게 다시 나누고 잔여 경기도 상대별 같은 수로 둔다.
+ * 자료가 있는 해(구단 수가 정해진 줄)는 그대로
+ */
+export function fitRuleToTeams(rule: YearScheduleRule, n: number): YearScheduleRule {
+  if (rule.teams !== undefined || n < 2) return rule;
+  const base = Math.round(rule.games / rule.vs) + 1;
+  if (base === n) return rule;
+  const vs = Math.max(1, Math.round(rule.games / (n - 1)));
+  const perOpp = Math.round(rule.unscheduled / (base - 1));
+  return { ...rule, vs, games: vs * (n - 1), unscheduled: perOpp * (n - 1) };
+}
+
 /** 규칙 표가 없을 때의 개막일: 3월 넷째 토요일 (3/22~3/28, 2027~ 규칙과 같다) */
 export function defaultOpening(year: number): IsoDate {
   return ruleDay(year, { weekday: 6, from: '03-22', to: '03-28' });
