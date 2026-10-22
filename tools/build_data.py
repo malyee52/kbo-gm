@@ -322,6 +322,10 @@ def rules_for(year):
 
 # ---- 감독 (managers.json)
 
+# 양대 리그 시대(1999·2000)는 리그마다 최종 순위 1위가 있어 한국시리즈 우승 구단(그 해 이름)을 따로 둔다
+# (src/league/history.ts TWO_LEAGUE_FINAL과 같은 값)
+TWO_LEAGUE_CHAMPION = {1999: '한화', 2000: '현대'}
+
 def build_managers(out_dir):
     """감독.csv → {seasons: {연도: {계보: [{name, kind, mid}]}}, people: {이름: 경력·운영 경향}}.
     운영 경향은 그 감독이 개막부터 끝까지 맡은 시즌(중도 교체가 없는 해)의 팀 기록을 그 해 리그 평균과 견준 배율이다.
@@ -349,7 +353,7 @@ def build_managers(out_dir):
             on1 = singles + g(b, 'bb', bi) + g(b, 'hbp', bi)
             out[t['franchise']] = {
                 'steal': (g(b, 'sb', bi) + g(b, 'cs', bi)), 'on1': on1, 'sac': g(b, 'sac', bi), 'pa': g(b, 'pa', bi),
-                'relief': g(p, 'g', pi) - g(p, 'gs', pi), 'games': t['g'], 'rank': t['rank'],
+                'relief': g(p, 'g', pi) - g(p, 'gs', pi), 'games': t['g'], 'rank': t['rank'], 'name': t['name'],
             }
         return out
 
@@ -373,7 +377,8 @@ def build_managers(out_dir):
                 continue
             name = full[0]['name']
             t = ts[fr]
-            if t['rank'] == 1 and y not in meta.get('inProgress', []):  # 진행 중인 시즌의 1위는 우승이 아니다
+            champion = (t['name'] == TWO_LEAGUE_CHAMPION[y]) if y in TWO_LEAGUE_CHAMPION else t['rank'] == 1
+            if champion and y not in meta.get('inProgress', []):  # 진행 중인 시즌의 1위는 우승이 아니다
                 people[name]['titles'] += 1
             ratio = lambda a, b, la, lb: (a / b) / (la / lb) if b and lb and la else None
             for k, v in (('steal', ratio(t['steal'], t['on1'], lg['steal'], lg['on1'])), ('bunt', ratio(t['sac'], t['pa'], lg['sac'], lg['pa'])),
