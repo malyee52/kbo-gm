@@ -8,3 +8,6 @@ __pycache__
 
 # 하드힛 유료 CSV 원본 (사용자가 직접 받음, 공개 저장소에 올리지 않는다)
 data-src/hardhit/
+
+# 네이버 문자중계 기반 투구 단위 원본 (Hugging Face slothman3878/kbo_playbyplay, 가공값만 커밋)
+data-src/naver_pbp/
