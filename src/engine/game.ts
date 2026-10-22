@@ -9,7 +9,7 @@ import type { EngineParams } from './params';
 import { B0, type PaResolver } from './resolver';
 import type { Rng } from './rng';
 import { applyPlateAppearance, autoSacBunt, beginPlateAppearance, orderedBunt, stealSecond, wildPitch } from './rules';
-import { fieldDefense, fieldSlots, GameState, substitute, type GameSub, type PitcherInGame, type Side } from './state';
+import { fieldDefense, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
 import { currentFatigue, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
@@ -266,6 +266,8 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
     if (next) bringIn(fld, next, fld.runs - bat.runs, ctx);
     else if (!fc?.keep) maybeChangePitcher(fld, bat, inning, st.basesEmpty, first, bat.runs - st.runsAtStart, ctx);
+    // 세이브 상황은 등판 때 누상 주자까지 보고 정한다 (4점 이상 리드에 동점 주자가 누상·타석·대기 타석)
+    if (fld.pitcher !== was) fld.pitcher.saveSit = isSaveSituation(fld.pitcher.enteredLead, st.bases.filter(Boolean).length);
     if (ctx.plays && fld.pitcher !== was) st.note('PC', -1, fld.pitcher.p.idx, bat.runs);
     first = false;
     const ours = !!cmd && bat.ts.team.idx === cmd.team;
@@ -379,18 +381,18 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
       loss = lp.p.idx;
     }
     const last = winner.staff[winner.staff.length - 1];
-    if (last !== wp && !last.isStarter && ((last.enteredLead >= 1 && last.enteredLead <= 3 && last.outs >= 1) || last.outs >= 9)) {
+    if (last !== wp && !last.isStarter && ((last.saveSit && last.outs >= 1) || last.outs >= 9)) {
       last.line.sv++;
       save = last.p.idx;
     }
   }
-  // 홀드 (2026-10-12): 3점 차 이내 리드에서 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
+  // 홀드 (2026-10-12): 세이브 상황(isSaveSituation, 2026-10-22부터 4점 이상 리드에 동점 주자가 누상·타석·대기 타석인 때 포함)에 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
   // 경기를 끝낸 투수, 승리 투수, 블론 세이브를 한 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
   for (const side of [home, away]) {
     const fin = side.staff[side.staff.length - 1];
     for (const pg of side.staff) {
       if (pg.isStarter || pg === fin || pg.p.idx === win || pg.blown) continue;
-      if (pg.enteredLead >= 1 && pg.enteredLead <= 3 && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
+      if (pg.saveSit && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
     }
   }
   return {

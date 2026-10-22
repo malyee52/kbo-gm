@@ -1,7 +1,7 @@
 // AI 감독 판단 (공통 규칙 계층, 타석 경계에서): 투수 등판·교체, 구원 투수 고르기.
 
 import type { GameContext } from './game';
-import type { PitcherInGame, Side } from './state';
+import { isSaveSituation, type PitcherInGame, type Side } from './state';
 import { isStarterSkill } from './params';
 import { currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest } from './team';
 import type { SimPlayer } from './types';
@@ -30,7 +30,7 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
   const limit = base * ctx.rng.range(0.82, 1.18);
   const sp = ctx.params.planScale.spread;
   const plan = ctx.planNorms ? (isStarter ? ctx.planNorms.starter : ctx.planNorms.relief) * ctx.rng.range(1 - sp, 1 + sp) : base;
-  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit, plan, isStarter, enteredLead: lead, er: 0, blown: false, pitches: 0, ppa };
+  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit, plan, isStarter, enteredLead: lead, saveSit: !isStarter && isSaveSituation(lead, 0), er: 0, blown: false, pitches: 0, ppa };
 }
 
 /**

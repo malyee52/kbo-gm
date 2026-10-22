@@ -21,6 +21,8 @@ export interface PitcherInGame {
   isStarter: boolean;
   /** 등판 시점의 점수 차 (자기 팀 기준) */
   enteredLead: number;
+  /** 세이브 상황에 등판했나 (isSaveSituation). 세이브·홀드·블론 세이브 기록에 쓴다 */
+  saveSit: boolean;
   /** 이 경기 자책점 (퀄리티 스타트 판정) */
   er: number;
   /** 이 등판에서 블론 세이브를 기록했나 */
@@ -30,6 +32,12 @@ export interface PitcherInGame {
   /** 이 투수의 타석당 기대 투구 수 (리그 평균 타자 상대, 볼카운트 사슬에서). 타자 수로 정한 체력·교체 기준을 공 수로 바꿀 때 쓴다 */
   ppa: number;
 }
+
+/**
+ * 세이브 상황의 등판 조건 (기록 규정 ①②, 2026-10-22 사용자 결정): 1~3점 리드, 또는 4점 이상 앞서도 동점 주자가 누상·타석·대기 타석에 있을 때
+ * (리드 ≤ 누상 주자 + 2). 기록에만 쓰고 경기 진행에는 쓰지 않는다
+ */
+export const isSaveSituation = (lead: number, runners: number): boolean => lead >= 1 && (lead <= 3 || lead <= runners + 2);
 
 export interface Runner {
   p: SimPlayer;
@@ -200,9 +208,9 @@ export class GameState {
       ctx.totals.er++;
     }
     const after = before + 1;
-    // 블론 세이브: 세이브 상황(1~3점 리드)에 나온 구원 투수가 마운드에 있을 때 리드가 사라지면. 승리 투수가 될 수는 있다
+    // 블론 세이브: 세이브 상황(isSaveSituation)에 나온 구원 투수가 마운드에 있을 때 리드가 사라지면. 승리 투수가 될 수는 있다
     const cur = fld.pitcher;
-    if (before === -1 && !cur.isStarter && !cur.blown && cur.enteredLead >= 1 && cur.enteredLead <= 3) {
+    if (before === -1 && !cur.isStarter && !cur.blown && cur.saveSit) {
       cur.blown = true;
       cur.line.bsv++;
     }
