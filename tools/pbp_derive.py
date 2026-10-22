@@ -344,7 +344,7 @@ def main():
     write_csv('platoon.csv', rows['platoon'], ['year', 'partial', 'stand', 'pa', 'avg', 'obp', 'slg', 'k_rate', 'bb_rate', 'hr_rate'])
     write_csv('league_summary.csv', rows['summary'], ['year', 'partial', 'metric', 'value'])
     write_csv('validation.csv', rows['validation'], ['year', 'metric', 'pbp', 'game_data', 'diff'])
-    (OUT / 'count_chain.json').write_text(json.dumps(chain, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    (OUT / 'count_chain.json').write_text(json.dumps(chain, ensure_ascii=False, indent=1) + '\n', encoding='utf-8', newline='\n')
     print(f'→ {OUT.relative_to(ROOT)}')
 
 
