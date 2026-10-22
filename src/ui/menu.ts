@@ -44,9 +44,11 @@ export const MENU: MenuItem[] = [
   one('market', '영입', '시장', 'market'),
   one('trade', '영입', '트레이드', 'trade'),
   one('offseason', '영입', '계약·지명', 'offseason'),
+  one('watch', '영입', '관심 명단', 'watch'),
 
   one('schedule', '시즌', '일정·결과', 'schedule', '지난 시즌 일정'),
   one('standings', '시즌', '순위', 'standings', '지난 시즌 순위'),
+  one('teams', '시즌', '구단들', 'team'),
   one('leaders', '시즌', '개인 기록', 'leaders', '지난 시즌 기록'),
   one('allstar', '시즌', '올스타', 'allstar'),
   one('postseason', '시즌', '가을야구', 'postseason'),
@@ -65,6 +67,7 @@ export const MENU: MenuItem[] = [
   one('rec-hof', '아카이브', '명예의 전당', 'rec-hof'),
   one('club-history', '아카이브', '이력·업적', 'club-history'),
 
+  one('find', '공통', '전체 검색', 'find'),
   one('save', '공통', '저장·설정', 'save'),
   one('about', '공통', '정보·출처', 'about'),
 ];

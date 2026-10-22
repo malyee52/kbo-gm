@@ -8,7 +8,7 @@ import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
 import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, obp, ops, rate3, whip } from '../../game/stats';
-import { Grade, PlayerLink, Pos, TeamName, useGame, usePriceIndex, useWon } from '../context';
+import { Grade, PlayerLink, Pos, TeamLink, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { currentRuns } from '../../ai/value';
 import { runsGrade } from '../grades';
 import { teamColor } from '../teams';
@@ -154,7 +154,7 @@ function Candidates() {
   const cols: Column<Cand>[] = [
     { key: 'name', label: '이름', fixed: true, text: true, value: (c) => c.p.name, cell: (c) => <PlayerLink p={c.p} /> },
     { key: 'team', label: '팀', brief: true, text: true, value: (c) => session.world.teams[c.p.teamIdx].name,
-      cell: (c) => <><TeamName idx={c.p.teamIdx} /> <span className="tag" title="상대 구단 성향">{TENDENCY_LABEL[tendency.get(c.p.teamIdx)!]}</span></> },
+      cell: (c) => <><TeamLink idx={c.p.teamIdx} /> <span className="tag" title="상대 구단 성향">{TENDENCY_LABEL[tendency.get(c.p.teamIdx)!]}</span></> },
     { key: 'slot', label: '자리', brief: true, value: (c) => SLOTS.indexOf(c.slot as typeof SLOTS[number]), cell: (c) => (c.p.isPitcher ? c.slot : <Pos pos={c.slot} />) },
     { key: 'age', label: '나이', brief: true, lower: true, value: (c) => c.p.age },
     { key: 'ov', label: '종합', brief: true, value: (c) => c.ov, cell: (c) => <Grade v={c.ov} /> },

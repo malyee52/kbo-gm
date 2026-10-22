@@ -22,6 +22,9 @@ import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Market } from './screens/Market';
 import { Search } from './screens/Search';
+import { TeamView } from './screens/TeamView';
+import { Watch } from './screens/Watch';
+import { Find } from './screens/Find';
 import { AllStar } from './screens/AllStar';
 import { Fantasy } from './screens/Fantasy';
 import { autoEventDue, makeEvent } from '../fantasy/ai';
@@ -101,7 +104,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   // 진행 설정 (하루·일주일·한 달·시즌 끝까지·멈춤 설정)과 휴대폰 '전체' 메뉴
   const [progressOpen, setProgressOpen] = useState(false);
   const [allOpen, setAllOpen] = useState(false);
-  // 상태 줄 검색 칸 → 영입 > 선수 검색의 이름 조건
+  // 상태 줄 검색 칸 → 전체 검색 (선수·은퇴 선수·구단·경기·소식). 영입 > 선수 검색의 이름 조건으로도 넘긴다
   const [searchText, setSearchText] = useState('');
   const [searchKey, setSearchKey] = useState(0);
   const [density, setDensityState] = useState<Density>(loadDensity);
@@ -490,8 +493,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {head && head.g === 0 && <span className="muted">개막 전</span>}
               {off && lastRank > 0 && <><b>{lastRank}위</b> <span className="muted small">지난 시즌</span></>}
             </span>
-            <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('search'); }}>
-              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="선수 찾기" aria-label="선수 이름으로 찾기" />
+            <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('find'); }}>
+              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="검색: 선수·구단·날짜" aria-label="전체 검색 (선수·은퇴 선수·구단·경기·소식)" />
             </form>
             <span className={`sb-save${saveError ? ' error-text' : ''}`} role="status">{saveText}</span>
             <DensityToggle />
@@ -561,6 +564,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'enlist' && <EnlistPanel />}
                 {screen === 'schedule' && <Schedule focusGame={screenArg} />}
                 {screen === 'standings' && <Standings />}
+                {screen === 'team' && <TeamView team={screenArg} />}
+                {screen === 'watch' && <Watch />}
+                {screen === 'find' && <Find key={searchKey} initialText={searchText.trim()} />}
                 {screen === 'leaders' && <Leaders />}
                 {screen === 'trade' && <Trade />}
                 {screen === 'market' && <Market />}
@@ -635,7 +641,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               ))}
               <section>
                 <h2>공통</h2>
-                <button type="button" className="sub-item" onClick={() => go('search')}>선수 찾기</button>
+                <button type="button" className="sub-item" onClick={() => go('find')}>전체 검색</button>
                 <button type="button" className="sub-item" onClick={() => go('save')}>저장·설정</button>
                 <button type="button" className="sub-item" onClick={() => go('about')}>정보·출처</button>
                 <button type="button" className="sub-item" onClick={onQuit}>시작 화면</button>

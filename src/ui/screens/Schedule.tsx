@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import type { GameLog } from '../../engine';
 import { dateOf, formatDate, WEEKDAYS } from '../../game/calendar';
-import { PlayerLink, TeamName, useGame } from '../context';
+import { PlayerLink, TeamLink, useGame } from '../context';
 import { GameCast } from '../GameCast';
 import { BoxView } from '../BoxScore';
 import { useShell } from '../shell';
@@ -102,7 +102,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
         {dayGames.length === 0 && s.schedule[selDay]?.length > 0 && (
           <ul className="plain">
             {s.schedule[selDay].map((g, k) => (
-              <li key={k}><TeamName idx={g.away} /> @ <TeamName idx={g.home} /> <span className="muted small">예정</span></li>
+              <li key={k}><TeamLink idx={g.away} /> @ <TeamLink idx={g.home} /> <span className="muted small">예정</span></li>
             ))}
           </ul>
         )}
@@ -117,7 +117,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
               return (
                 <li key={i} className={g.home === me || g.away === me ? 'me' : ''}>
                   <div className="dg-score">
-                    <TeamName idx={g.away} /> <strong>{g.awayRuns} : {g.homeRuns}</strong> <TeamName idx={g.home} />
+                    <TeamLink idx={g.away} /> <strong>{g.awayRuns} : {g.homeRuns}</strong> <TeamLink idx={g.home} />
                     {g.innings !== 9 && <span className="muted small"> ({g.innings}회)</span>}
                     <span className="dg-links">
                       {s.boxes.has(i) && <button type="button" className="link small" onClick={() => setSelGame(i)}>박스</button>}

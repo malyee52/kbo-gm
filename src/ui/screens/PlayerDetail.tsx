@@ -17,7 +17,7 @@ import {
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, qualifiedOuts, qualifiedPa, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
-import { ForeignMark, Grade, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
+import { ForeignMark, Grade, HAND, POS_KO, posName, TeamLink, useGame, useWon } from '../context';
 import { potentialText, runsGrade, type PotentialView } from '../grades';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
@@ -32,6 +32,7 @@ import type { Column } from '../table';
 import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
 import { addToCompare, addToDraft, COMPARE_MAX, deskOf, tradeBlockReason, updateDesk, useDesk } from '../tradeDesk';
+import { WatchStar } from './Watch';
 
 type Tab = 'sum' | 'abil' | 'rec' | 'deal' | 'pit';
 const TABS: { key: Tab; label: string }[] = [
@@ -145,7 +146,7 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
         <div>
           <h2 id="player-name">{p.name}<ForeignMark p={p} long /></h2>
           <p className="pd-line small">
-            <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted">(전 {session.teamInfo(p.formerTeam).name}, 방출)</span>}
+            <TeamLink idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted">(전 {session.teamInfo(p.formerTeam).name}, 방출)</span>}
             <span title={p.isPitcher ? '투수' : POS_KO[p.pos ?? ''] ?? undefined}>{pos}</span>
             <span>{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}</span>
             <span>{hand}</span>
@@ -199,6 +200,7 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
         {c && <span>연봉 {c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</span>}
       </p>
       <div className="pd-line">
+        {!mine && <WatchStar id={p.id} name={p.name} small />}
         {mine && <button type="button" className="ghost small-btn" onClick={() => { go('lineup'); onClose(); }}>기용 보드에서 보기</button>}
         {mine && session.canManage && <button type="button" className="ghost small-btn" onClick={move}>{registered ? '2군으로 내리기' : '1군에 등록하기'}</button>}
         {mine && session.phase === 'season' && !session.done && <ReleaseButton p={p} onDone={onClose} />}

@@ -1120,3 +1120,21 @@ dialog.player.side .dialog-body { max-height: none; height: 100%; }
 .np-v { font-variant-numeric: tabular-nums; font-weight: 700; }
 .np-d { font-size: 10.5px; white-space: nowrap; }
 .rank-no { display: inline-block; min-width: 1.6em; text-align: right; margin-right: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* ---- UI 2단계 공통 기능 (2026-10-23): 다른 구단 보기·관심 명단·전체 검색 */
+button.link.team-link { text-decoration: none; padding: 0; }
+button.link.team-link:hover:not(:disabled) .team { text-decoration: underline; text-underline-offset: 3px; }
+.team-pick { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.team-pick > button { flex: none; border-radius: 999px; padding: 4px 12px; min-height: 30px; font-size: 13px; background: var(--panel); }
+.team-pick > button.on { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); font-weight: 700; }
+.team-hero { border-top: 4px solid var(--team-band); }
+.team-hero-name { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; font-size: 22px; }
+.slot-grades { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px 10px; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.depth-table { width: auto; min-width: 60%; }
+.depth-table th { width: 5.5em; color: var(--muted); font-weight: 600; }
+.watch-star { color: var(--muted); }
+.watch-star.on { color: var(--fg); font-weight: 700; }
+.find-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.find-form input[type='search'] { flex: 1 1 260px; min-width: 0; }
+.find-group h2 { margin-bottom: 6px; }
+.find-list li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.find-list li:last-child { border-bottom: 0; }

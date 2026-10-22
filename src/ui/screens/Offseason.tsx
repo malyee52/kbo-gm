@@ -16,6 +16,7 @@ import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
 import { ruleOf } from '../../league/rules';
+import { WatchStar } from './Watch';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -428,7 +429,7 @@ function FaPanel({ act }: { act: Act }) {
               const d = draft[e.id] ?? { salary: (Math.ceil((e.ask * px) / 1000) / 10).toFixed(1), years: String(e.years) };
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
-                  <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
+                  <td className="l">{p.name} <WatchStar id={p.id} name={p.name} small /></td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
                   <td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
                   <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${e.grade}등급, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
                   <td className="l">
@@ -591,7 +592,7 @@ function DraftPanel({ act }: { act: Act }) {
                   const i = info(p);
                   return (
                     <tr key={p.id}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
+                      <td className="l">{p.name} <WatchStar id={p.id} name={p.name} small /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                       <td><button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(p.id))}>지명</button></td>
                     </tr>
                   );

@@ -3,7 +3,7 @@
 import { winPct, type TeamRecord } from '../../engine';
 import { gamesBehind, rate3, recentForm } from '../../game/stats';
 import { useMemo, useState } from 'react';
-import { TeamName, useGame } from '../context';
+import { TeamLink, useGame } from '../context';
 import { DataTable } from '../parts';
 import { useShell } from '../shell';
 import type { Column } from '../table';
@@ -15,7 +15,7 @@ const diffText = (n: number) => (n > 0 ? `+${n}` : String(n));
 
 export const STAND_COLS: Column<StandRow>[] = [
   // 순위와 팀은 한 칸 (휴대폰에서 첫 열이 고정되므로 팀 이름이 늘 보이게)
-  { key: 'rank', label: '순위 · 팀', value: (r) => r.rank, fixed: true, text: true, lower: true, cell: (r) => <><span className="rank-no">{r.rank}</span> <TeamName idx={r.team} /></> },
+  { key: 'rank', label: '순위 · 팀', value: (r) => r.rank, fixed: true, text: true, lower: true, cell: (r) => <><span className="rank-no">{r.rank}</span> <TeamLink idx={r.team} /></> },
   { key: 'g', label: '경기', value: (r) => r.t.g, brief: true, group: '기본' },
   { key: 'w', label: '승', value: (r) => r.t.w, brief: true, group: '기본' },
   { key: 'l', label: '패', value: (r) => r.t.l, brief: true, group: '기본', lower: true },
@@ -87,7 +87,7 @@ export function Standings() {
           <tbody>
             {fut.map((t, k) => (
               <tr key={t.team} className={t.team === session.teamIdx ? 'me' : ''}>
-                <td>{k + 1}</td><td className="l"><TeamName idx={t.team} /></td><td>{t.g}</td><td>{t.w}</td><td>{t.l}</td>
+                <td>{k + 1}</td><td className="l"><TeamLink idx={t.team} /></td><td>{t.g}</td><td>{t.w}</td><td>{t.l}</td>
                 <td>{t.g ? rate3(t.w / t.g) : '-'}</td><td>{t.rs}</td><td>{t.ra}</td>
               </tr>
             ))}

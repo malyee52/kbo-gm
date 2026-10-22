@@ -4,6 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
+import { pruneUndrafted, watchStatus, type WatchEntry, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
 import {
   absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
@@ -304,6 +305,8 @@ export interface GameSaveV2 {
   enlistChoice?: string[];
   /** 그중 군 야구단 지원 명단 (결산 전까지만. 없으면 지원할 수 있는 선수 모두) */
   applyChoice?: string[];
+  /** 관심 명단 (game/watch.ts, 2026-10-23). 조작 기록 밖 화면 상태라 예전 저장에는 없다 (빈 목록) */
+  watch?: WatchEntry[];
   news: NewsItem[];
   actions: GameAction[];
 }
@@ -386,6 +389,8 @@ export class GameSession {
   enlistChoice: string[] | null = null;
   /** 그중 군 야구단(상무·경찰) 지원 명단. null이면 지원할 수 있는 선수 모두 */
   applyChoice: string[] | null = null;
+  /** 관심 명단 (game/watch.ts). 저장 파일에 담지만 조작 기록에는 넣지 않는다 (재현과 상관없음) */
+  watch: WatchEntry[] = [];
   private lastCallUps = new Set<number>();
   /** 기사 판정용 기준값 (메모리에만, 불러오기·재현 때 같은 규칙으로 다시 만든다) */
   private articleState: ArticleState | null = null;
@@ -677,6 +682,7 @@ export class GameSession {
     g.actions.push(...save.actions);
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
     g.applyChoice = save.phase === 'season' && save.applyChoice ? [...save.applyChoice] : null;
+    g.watch = save.watch ? clone(save.watch) : [];
     g.ensureOwner();
     ensureFinance(g.league);
     ensureCoaches(g.league);
@@ -2028,6 +2034,26 @@ export class GameSession {
     return todaysStarter(ts, this.season.states, next?.day ?? this.season.day, this.season.params);
   }
 
+  // ---- 관심 명단 (game/watch.ts, 조작 기록 밖)
+
+  isWatched(id: string): boolean {
+    return this.watch.some((w) => w.id === id);
+  }
+
+  /** 담거나 뺀다. 돌려주는 값: 이제 담겨 있나 */
+  toggleWatch(id: string, name: string): boolean {
+    if (this.isWatched(id)) {
+      this.watch = this.watch.filter((w) => w.id !== id);
+      return false;
+    }
+    this.watch = [...this.watch, { id, name, year: this.year }];
+    return true;
+  }
+
+  watchStatus(id: string): WatchStatus {
+    return watchStatus({ phase: this.phase, league: this.league, worldPlayers: this.world.players, offseason: this.offseason }, id);
+  }
+
   // ---- 리그 상태 조회
 
   /** 선수 id → 리그 상태의 선수 (계약·잠재력). 시즌 중에는 개막 때 값 */
@@ -2449,7 +2475,9 @@ export class GameSession {
       case 'open': {
         if (!off || off.stage !== 'ready') return { ok: false, message: '오프시즌 단계를 모두 마쳐야 개막할 수 있습니다.' };
         const changes = off.changes ?? [];
+        const undrafted = new Set(off.draft?.pool ?? []);
         Off.closeOffseason(L, off);
+        this.watch = pruneUndrafted(this.watch, undrafted, L); // 지명 안 된 신인 후보는 관심 명단에서 뺀다 (결정 9)
         // 감독: 재계약·실제 개막 감독·교체 (managers.ts). 지난 시즌 순위로 판단한다
         const mgrNews = openManagers(L, this.store, this.teamIdx, L.lastSeason?.standings ?? [],
           this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5);
@@ -3418,6 +3446,7 @@ export class GameSession {
       ...(this.postseason ? { postseason: clone(this.postseason) } : {}),
       news: this.news.map((n) => ({ ...n })),
       actions: this.actions.map((a) => clone(a)),
+      ...(this.watch.length ? { watch: clone(this.watch) } : {}),
     };
     if (this.phase === 'offseason') {
       return { ...base, phase: 'offseason', league: clone(this.league), finishedLeague: clone(this.finishedLeague!), offseason: clone(this.offseason!) };

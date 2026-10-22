@@ -6,7 +6,7 @@ import { currentRuns } from '../../ai/value';
 import { seasonWar } from '../../league/awards';
 import { dollarText } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
-import { Grade, PlayerLink, posName, TeamName, useGame, useWon } from '../context';
+import { Grade, PlayerLink, posName, TeamLink, useGame, useWon } from '../context';
 import { runsGrade, type PotentialView } from '../grades';
 import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
 
@@ -173,7 +173,7 @@ export function Search({ initialText = '' }: { initialText?: string }) {
                 {rows.slice(0, shown).map(({ p, lp, now, potView, war }) => (
                   <tr key={p.idx}>
                     <td className="l"><PlayerLink p={p} /></td>
-                    <td className="l small"><TeamName idx={p.teamIdx} /></td>
+                    <td className="l small"><TeamLink idx={p.teamIdx} /></td>
                     <td>{role(p)}</td>
                     <td>{p.age === null ? '-' : p.ageEstimated ? `약 ${p.age}` : p.age}</td>
                     <td><Grade v={now} /></td>
