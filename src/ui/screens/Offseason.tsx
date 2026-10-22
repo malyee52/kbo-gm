@@ -14,20 +14,23 @@ import {
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
+import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
 import { ruleOf } from '../../league/rules';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
   const { session } = useGame();
   const next = session.year + 1;
+  const potOf = usePotentialOf();
   return (p: LeaguePlayer) => {
     const age = p.birthYear ? next - p.birthYear : null;
     return {
       age,
       role: p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos),
       now: runsGrade(session.nextRuns(p.id), session.year),
-      // 잠재력은 전성기 상한이라 31세 이상에게는 뜻이 없다 (2026-10-09 전수조사 M5)
-      pot: age !== null && age >= 31 ? null : runsGrade(p.scoutPotential ?? p.potential, session.year),
+      // 잠재 표시는 선수 상세와 같은 규칙 (UI 2단계 결정 5): 27세 이하 범위, 28~30세 숫자, 31세 이상 숨김
+      // (31세 이상은 잠재력이 전성기 상한이라 뜻이 없다, 2026-10-09 전수조사 M5)
+      pot: potOf(p, age),
     };
   };
 }
@@ -198,7 +201,7 @@ function CompPanel({ act }: { act: Act }) {
                   const i = info(p);
                   return (
                     <tr key={p.id} className={c.pick === p.id ? 'me' : ''}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                       <td>{won(p.contract.salary)}</td>
                       <td><button type="button" className="small-btn" onClick={() => act(session.pickComp(c.fa, p.id))}>지명</button></td>
                     </tr>
@@ -254,7 +257,7 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
             return (
               <tr key={p.id} className={on ? 'me' : ''}>
                 <td><input type="checkbox" checked={on} disabled={!on && c.protect.length >= limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
-                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{won(p.contract.salary)}</td>
+                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
               </tr>
             );
           })}
@@ -325,7 +328,7 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
                   return (
                     <tr key={p.id} className={on ? 'me' : ''}>
                       <td><input type="checkbox" checked={on} disabled={!on && prot.size >= d.limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{won(p.contract.salary)}</td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
                     </tr>
                   );
                 })}
@@ -350,7 +353,7 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
                   return (
                     <tr key={p.id} className={on ? 'me' : ''}>
                       <td><input type="checkbox" checked={on} onChange={() => toggleWish(p.id)} aria-label={`${p.name} 지명 희망`} /></td>
-                      <td className="l">{p.name}</td><td className="l"><TeamName idx={p.team} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{won(p.contract.salary)}</td>
+                      <td className="l">{p.name}</td><td className="l"><TeamName idx={p.team} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
                     </tr>
                   );
                 })}
@@ -426,7 +429,7 @@ function FaPanel({ act }: { act: Act }) {
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name}</td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
+                  <td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
                   <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${e.grade}등급, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
                   <td className="l">
                     {e.status === 'signed' ? (
@@ -527,7 +530,7 @@ function ForeignPanel({ act }: { act: Act }) {
                 return (
                   <tr key={p.id}>
                     <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
-                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{dollarText(p.contract.salary)}</td>
+                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{dollarText(p.contract.salary)}</td>
                     <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
                     <td className="l">
                       <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}
@@ -588,7 +591,7 @@ function DraftPanel({ act }: { act: Act }) {
                   const i = info(p);
                   return (
                     <tr key={p.id}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                       <td><button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(p.id))}>지명</button></td>
                     </tr>
                   );
@@ -605,7 +608,7 @@ function DraftPanel({ act }: { act: Act }) {
                 {mine.map((pk) => {
                   const p = players.get(pk.id)!;
                   const i = info(p);
-                  return <tr key={pk.id}><td>{pickShort(pk.round)}</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>잠재 {i.pot ?? '-'}</td></tr>;
+                  return <tr key={pk.id}><td>{pickShort(pk.round)}</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>잠재 <PotCell v={i.pot} /></td></tr>;
                 })}
               </tbody>
             </table>
@@ -630,7 +633,9 @@ function ExtensionPanel({ act }: { act: Act }) {
   const [open, setOpen] = useState(false);
   const [years, setYears] = useState<Record<string, number>>({});
   const rows = useMemo(() => (open ? session.extensionOffers() : []), [session, version, open]);
-  const sorted = [...rows].sort((a, b) => b.p.potential - a.p.potential || a.p.id.localeCompare(b.p.id)).slice(0, 25);
+  // 보이는 잠재(스카우트 짐작) 순. 실제 잠재로 늘어놓으면 순서로 정답이 드러난다
+  const potKey = (p: LeaguePlayer) => potentialSortValue(info(p).pot) ?? -1;
+  const sorted = [...rows].sort((a, b) => potKey(b.p) - potKey(a.p) || a.p.id.localeCompare(b.p.id)).slice(0, 25);
   return (
     <section className="panel">
       <div className="row-between">
@@ -652,7 +657,7 @@ function ExtensionPanel({ act }: { act: Act }) {
                 const d = demands.find((x) => x.years === y)!;
                 return (
                   <tr key={p.id}>
-                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                     <td>{toFa}시즌</td><td className="small">{won(p.contract.salary)}</td>
                     <td>
                       <select value={y} onChange={(e) => setYears({ ...years, [p.id]: Number(e.target.value) })} aria-label={`${p.name} 계약 기간`}>
@@ -850,7 +855,7 @@ function ReleasePanel({ act }: { act: Act }) {
                     {p.name}{p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}{p.contract.kind === 'rookie' && <span className="tag">신인</span>}
                     {over > 0 && plan.order.indexOf(p) >= 0 && plan.order.indexOf(p) < over && <span className="tag" title="정원까지 자동 방출하면 나갑니다">방출 대상</span>}
                   </td>
-                  <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                  <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                   <td className="small">{p.foreign ? dollarText(p.contract.salary) : won(p.contract.salary)}</td>
                   <td>
                     {canDev(p) && <button type="button" className="small-btn" title="방출하지 않고 육성선수로 돌립니다 (정원에서 빠지고, 시즌 중 5월 1일부터 정식 등록)" onClick={() => act(session.toDev(p.id))}>육성 전환</button>}{' '}
@@ -875,7 +880,7 @@ function ReleasePanel({ act }: { act: Act }) {
                 const i = info(p);
                 return (
                   <tr key={p.id}>
-                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>잠재 {i.pot ?? '-'}</td>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>잠재 <PotCell v={i.pot} /></td>
                     <td><button type="button" className="small-btn" disabled={mine.length >= ruleOf(session.league, 'orgLimit')} title={mine.length >= ruleOf(session.league, 'orgLimit') ? '정원이 차 있습니다' : undefined} onClick={() => act(session.promoteDevOff(p.id))}>정식 등록</button></td>
                   </tr>
                 );
@@ -895,7 +900,7 @@ function ReleasePanel({ act }: { act: Act }) {
                   const i = info(p);
                   return (
                     <tr key={p.id}>
-                      <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                      <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                       <td><button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(p.id))}>육성 영입</button></td>
                     </tr>
                   );
@@ -925,7 +930,7 @@ function ReleasePanel({ act }: { act: Act }) {
                   <tr key={p.id}>
                     <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td>
                     <td className="l"><TeamName idx={from} /></td>
-                    <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td>
+                    <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
                     <td><button type="button" className="small-btn" onClick={() => act(session.claim(p.id))}>영입</button></td>
                   </tr>
                 );

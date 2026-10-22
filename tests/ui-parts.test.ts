@@ -1,4 +1,6 @@
 // UI 2단계 공통 부품 (2026-10-23 U2-1): 리그 대비 자리, 표 정렬·거르기·열 고르기·표 보기 저장, 잠재 범위.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { leagueRank, topPercent, vsMark } from '../src/ui/compare';
 import { EMPTY_VIEW, filterRows, loadView, nextSort, saveView, sortRows, toggleColumn, toggleGroup, visibleColumns, type Column } from '../src/ui/table';
@@ -107,5 +109,12 @@ describe('잠재 범위 (결정 5)', () => {
   it('스카우트 평가가 있는 선수(신인)는 그 값을 가운데로 쓴다', () => {
     const v = potentialView({ id: 'r', potential: 40, scoutPotential: 30 }, 19, { seed: 'g', noise });
     expect(v).toMatchObject({ kind: 'range', guess: runsGrade(30) });
+  });
+  it('화면은 잠재를 potentialView(범위 규칙)로만 보인다: 등급 함수에 잠재 런을 바로 넣지 않는다', () => {
+    const dir = 'src/ui';
+    const files = [...readdirSync(dir).map((f) => join(dir, f)), ...readdirSync(join(dir, 'screens')).map((f) => join(dir, 'screens', f))]
+      .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('grades.ts'));
+    const bad = files.filter((f) => /(runsGrade|gradeAt)\([^)]*\.potential/i.test(readFileSync(f, 'utf8')));
+    expect(bad).toEqual([]);
   });
 });

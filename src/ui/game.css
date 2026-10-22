@@ -272,6 +272,7 @@ button.go { min-height: 40px; padding: 8px 18px; border-radius: 10px; font-size:
   display: inline-flex; justify-content: center; min-width: 2.6em; padding: 0 5px; border-radius: 4px; font-weight: 700; font-size: 12.5px; line-height: 20px;
   background: var(--panel-2); color: var(--muted);
 }
+.grade.pot-range { white-space: nowrap; }
 .grade.g-hi { background: color-mix(in srgb, var(--g-hi) 18%, transparent); color: var(--g-hi); }
 .grade.g-up { background: color-mix(in srgb, var(--g-up) 13%, transparent); color: var(--g-up); }
 .grade.g-dn { background: color-mix(in srgb, var(--g-dn) 13%, transparent); color: var(--g-dn); }
@@ -1040,6 +1041,9 @@ dialog.player.side .dialog-body { max-height: none; height: 100%; }
   dialog.player .dialog-body > header { margin: 0 -14px 6px; padding: 10px 14px 10px; }
   .pd-tabs { margin: 8px -14px -10px; padding: 0 8px; }
   .pd-tabs > button { padding: 8px 8px; }
+  /* 탭 다섯 + 요약/상세가 390px을 넘어서, 요약/상세는 탭 줄 위 오른쪽 줄로 올린다 */
+  .pd-tabs { flex-wrap: wrap; overflow-x: visible; }
+  .pd-density { order: -1; flex-basis: 100%; display: flex; justify-content: flex-end; padding: 0 6px 2px; }
   .pd-split { grid-template-columns: minmax(0, 1fr); }
   .pd-head .pd-more { display: none; }
 }

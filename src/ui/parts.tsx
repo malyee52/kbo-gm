@@ -1,7 +1,9 @@
 // 화면 공통 부품 (2026-10-23 UI 2단계 U2-1, 기획안 1.3): 등급 칸, 리그 평균 대비, 짐작 문구 칸, 없음 표시, 공통 표.
 // 계산은 compare.ts(리그 대비)·table.ts(정렬·거르기·열 고르기·표 보기 저장)·grades.ts(잠재 범위)에 두고 여기서는 그리기만 한다.
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import { Grade, gradeClass } from './context';
+import { Grade, gradeClass, useGame } from './context';
+import { potentialText, potentialView, type PotentialView } from './grades';
+import { activeLevel, SCOUT_NOISE } from '../league/finance';
 import { topPercent, vsMark } from './compare';
 import { EMPTY_VIEW, filterRows, loadView, nextSort, saveView, sortRows, toggleColumn, toggleGroup, visibleColumns, type Column, type TableView } from './table';
 
@@ -33,6 +35,30 @@ export function GradeBar({ label, v, title, pot, delta, note }: {
       )}
     </div>
   );
+}
+
+/**
+ * 잠재 표시 규칙 (결정 5, 모든 화면): 27세 이하 범위, 28~30세 숫자 하나, 31세 이상 숨김.
+ * 스카우트 오차는 우리 구단 스카우트 투자 단계. age는 그 화면이 쓰는 나이 (오프시즌은 다음 시즌 나이)
+ */
+export function usePotentialOf(): (p: { id: string; potential: number; scoutPotential?: number }, age: number | null) => PotentialView {
+  const { session } = useGame();
+  const noise = SCOUT_NOISE[activeLevel(session.league, session.teamIdx, 'scout')];
+  const seed = session.league.seed;
+  const year = session.year;
+  return (p, age) => potentialView(p, age, { seed, noise, year });
+}
+
+/** 정렬·거르기용 잠재 등급: 범위는 가운데(짐작값), 숨김은 null */
+export function potentialSortValue(v: PotentialView): number | null {
+  return !v ? null : v.kind === 'one' ? v.v : v.guess;
+}
+
+/** 표 안 잠재 칸. 범위는 가운데(짐작값) 색으로 칠한다 */
+export function PotCell({ v }: { v: PotentialView }) {
+  if (!v) return <span className="muted" title="31세 이상은 잠재를 보이지 않습니다">-</span>;
+  if (v.kind === 'one') return <Grade v={v.v} />;
+  return <span className={`grade pot-range ${gradeClass(v.guess)}`} title="스카우트 짐작 범위 (실제 값이 범위 밖일 수도 있다)">{potentialText(v)}</span>;
 }
 
 /** 지난 시즌 대비 변화 (+3 / −2 / 0). null은 비교할 값 없음 */

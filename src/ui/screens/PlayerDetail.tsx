@@ -18,17 +18,16 @@ import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, qualifiedOuts, qualifiedPa, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
 import { ForeignMark, Grade, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
-import { potentialText, potentialView, runsGrade, type PotentialView } from '../grades';
+import { potentialText, runsGrade, type PotentialView } from '../grades';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
 import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
 import { currentRuns } from '../../ai/value';
-import { activeLevel, SCOUT_NOISE } from '../../league/finance';
 import { DensityToggle, useShell } from '../shell';
 import { leagueRank } from '../compare';
-import { DataTable, Delta, GradeBar, Missing, ScoutNote, VsLeague } from '../parts';
+import { DataTable, Delta, GradeBar, Missing, PotCell, ScoutNote, usePotentialOf, VsLeague } from '../parts';
 import type { Column } from '../table';
 import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
@@ -200,10 +199,9 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
 
 function usePotential(p: SimPlayer): PotentialView {
   const { session } = useGame();
+  const potOf = usePotentialOf();
   const lp = session.leaguePlayer(p.id);
-  if (!lp) return null;
-  const noise = SCOUT_NOISE[activeLevel(session.league, session.teamIdx, 'scout')];
-  return potentialView(lp, p.age, { seed: session.league.seed, noise, year: session.year });
+  return lp ? potOf(lp, p.age) : null;
 }
 
 // ---- 리그 대비 (그 해 리그, 규정 이상 선수)
@@ -675,8 +673,11 @@ function ContractInfo({ id, p }: { id: string; p: SimPlayer }) {
 function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const { session, changed, autosave } = useGame();
   const [msg, setMsg] = useState<string | null>(null);
+  const potOf = usePotentialOf();
   const lp = session.leaguePlayer(p.id);
   if (!lp?.alt) return null;
+  // 반대쪽 잠재도 같은 표시 규칙 (결정 5). 짐작 어긋남은 본업과 따로 정한다 (id 뒤에 :alt)
+  const altPot = potOf({ id: `${lp.id}:alt`, potential: lp.alt.potential }, p.age);
   const year = session.phase === 'season' ? session.world.year : session.year + 1;
   const side = p.isPitcher ? '타격' : '투구';
   const mine = lp.team === session.teamIdx;
@@ -688,7 +689,7 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   return (
     <div className="defense">
       <h4 className="small">
-        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <Grade v={gradeAt(lp.alt.runs, year)} /> · 잠재 <Grade v={gradeAt(lp.alt.potential, year)} />{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
+        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <Grade v={gradeAt(lp.alt.runs, year)} /> · 잠재 {altPot ? <PotCell v={altPot} /> : <Missing why="31세 이상" />}{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
         {mine && <button type="button" className="link small" onClick={toggle}>{lp.twoWay ? '본업만 맡기기' : '이도류로 쓰기'}</button>}
       </h4>
       {full && <p className="muted small">모든 선수가 반대쪽 능력을 갖지만 대부분은 낮고 자라지 않습니다. 겸업 재능이 있는 몇 명만 크게 자랍니다. 이도류로 쓰면 {p.isPitcher ? '등판하지 않는 날 지명타자로 나가고(등판 날도 타석에 서고, 다음 날은 쉰다)' : '선발 투수 후보에도 들어가고, 던진 다음 날은 타석에서 쉰다'}.</p>}

@@ -4,9 +4,8 @@
 // 이 화면은 보기와 육성선수 정식 등록만 한다.
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
-import { GradeBar } from '../parts';
+import { GradeBar, PotCell, usePotentialOf } from '../parts';
 import { seasonWar } from '../../league/awards';
-import { runsGrade } from '../grades';
 import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
@@ -342,6 +341,7 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
 /** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
 function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number }) {
   const { session, grades, openPlayer } = useGame();
+  const potOf = usePotentialOf();
   const won = useWon();
   const lp = session.leaguePlayer(p.id);
   const bg = grades.batters.get(p.id);
@@ -375,7 +375,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
         <p className="small">{session.world.year} {line}{war !== undefined ? ` · WAR ${war.toFixed(1)}` : ''}</p>
         {lp && (
           <p className="small muted">
-            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential, session.year)} />
+            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재 <PotCell v={potOf(lp, p.age)} />
           </p>
         )}
         <p className="inline">
