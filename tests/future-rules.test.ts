@@ -21,7 +21,7 @@ beforeAll(() => {
 
 /** 기준 안의 평범한 신호 */
 const calm = (year: number, o: Partial<RuleSignal> = {}): RuleSignal => ({
-  year, hr: 1, so: 1, bb: 1, draw: 0.025, absence: 1000, depth: 3000, capOver: 0, capUse: 0.7, ...o,
+  year, hr: 1, so: 1, bb: 1, draw: 0.025, absence: 1000, attendance: 12000, foreignShare: 0.08, deficit: 1, capOver: 0, capUse: 0.7, ...o,
 });
 
 const bare = (seed = 'fr', fantasy = false): LeagueState => ({ seed, ...(fantasy ? { fantasy: {} } : {}) }) as unknown as LeagueState;
@@ -55,7 +55,7 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
   it('후보가 여럿이어도 한 해에 하나, 같은 시드 → 같은 선택', () => {
     const run = (seed: string) => {
       const L = bare(seed);
-      for (let y = 2027; y < 2040; y++) judgeFutureRules(L, calm(y, { hr: 1.3, draw: 0.06, absence: y > 2027 ? 1500 : 1000, depth: y > 2027 ? 2500 : 3000, capOver: 5 }));
+      for (let y = 2027; y < 2040; y++) judgeFutureRules(L, calm(y, { hr: 1.3, draw: 0.06, absence: y > 2027 ? 1500 : 1000, attendance: 12000 - 300 * (y - 2027), capOver: 5 }));
       return L.ruleShifts!;
     };
     const a = run('same');
@@ -66,12 +66,31 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     expect(new Set(a.map((s) => s.key)).size).toBeGreaterThan(2);
   });
 
-  it('선수층 기준이 다 모이기 전(2027~2031 시즌)에는 외국인 한도를 판정하지 않고, 기준은 여러 해 평균이다', () => {
-    const L = bare();
-    const got: RuleShift[] = [];
-    // 2027년만 낮고 그 뒤 두꺼워지는 흐름: 예전(2027년 기준)이면 2029년에 한도가 줄었다
-    for (let y = 2027; y < 2036; y++) { const s = judgeFutureRules(L, calm(y, { depth: y === 2027 ? 2600 : 3000 })); if (s) got.push(s); }
-    expect(got.filter((s) => s.key === 'foreign')).toEqual([]);
+  it('외국인 한도는 흥행·재정으로: 관중이 3년 이어 줄면 +1, 외국인 연봉 부담·적자가 3년 이어 크면 −1, 엇갈리거나 작은 흔들림은 그대로', () => {
+    const run = (o: (y: number) => Partial<RuleSignal>) => {
+      const L = bare();
+      const got: RuleShift[] = [];
+      for (let y = 2027; y < 2036; y++) { const s = judgeFutureRules(L, calm(y, o(y))); if (s) got.push(s); }
+      return got.filter((s) => s.key === 'foreign');
+    };
+    // 2027 → 2030 시즌 세 해 이어 줄어 (−9%) 2031년 +1. 까닭에 관중 수가 보인다
+    const up = run((y) => ({ attendance: 12000 - 360 * (y - 2027) }));
+    expect(up[0]).toMatchObject({ year: 2031, before: 3, after: 4 });
+    expect(up[0].reason).toContain('관중이 3년 이어 줄어');
+    expect(up[0].reason).toContain('12,000명');
+    expect(up[0].reason).toContain('외국인 보유 한도 확대에 합의');
+    // 줄다가 한 해 늘면 이어지지 않는다, 줄어든 폭이 3% 밑이면 그대로
+    expect(run((y) => ({ attendance: y === 2029 ? 12500 : 12000 - 300 * (y - 2027) }))[0]?.year ?? Infinity).toBeGreaterThan(2031);
+    expect(run((y) => ({ attendance: 12000 - 50 * (y - 2027) }))).toEqual([]);
+    // 부담: 2027~2029 시즌 이어서 → 2030년 −1
+    const down = run(() => ({ foreignShare: 0.15, deficit: 5 }));
+    expect(down[0]).toMatchObject({ year: 2030, before: 3, after: 2 });
+    expect(down[0].reason).toContain('적자 구단이 3년 이어 5곳 이상');
+    expect(run(() => ({ foreignShare: 0.15, deficit: 2 }))).toEqual([]);
+    // 엇갈리면 판정하지 않는다 (2030 시즌에 둘 다 처음 채워진다)
+    expect(run((y) => ({ attendance: 12000 - 360 * (y - 2027), ...(y >= 2028 ? { foreignShare: 0.15, deficit: 5 } : {}) }))[0]?.year ?? Infinity).toBeGreaterThan(2031);
+    // 예전 저장의 신호(흥행·재정 값 없음)는 판정하지 않는다
+    expect(run(() => ({ attendance: undefined, foreignShare: undefined, deficit: undefined }))).toEqual([]);
   });
 
   it('판타지·자유 모드에서는 바뀌지 않는다', () => {
@@ -79,7 +98,7 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     for (let y = 2027; y < 2035; y++) expect(judgeFutureRules(L, calm(y, { hr: 1.3 }))).toBeNull();
   });
 
-  it('항목별 방향: 무승부 많음 → 연장 +1, 결장 증가 → 엔트리 +1, 선수층 얇아짐 → 외국인 +1, 캡 초과 많음 → 상향률 +2%p', () => {
+  it('항목별 방향: 무승부 많음 → 연장 +1, 결장 증가 → 엔트리 +1, 관중 감소 → 외국인 +1, 캡 초과 많음 → 상향률 +2%p', () => {
     const one = (o: (y: number) => Partial<RuleSignal>, key: FutureRuleKey) => {
       const L = bare();
       let s: RuleShift | null = null;
@@ -89,8 +108,7 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     };
     expect(one(() => ({ draw: 0.05 }), 'extra')).toMatchObject({ before: 11, after: 12 });
     expect(one((y) => ({ absence: y === 2027 ? 1000 : 1300 }), 'roster')).toMatchObject({ before: 29, after: 30 });
-    // 선수층 기준은 2027~2031 평균 (DEPTH_BASE_YEARS), 2032·2033 시즌 이어서 8% 넘게 얇으면 2034년 한도 +1
-    expect(one((y) => ({ depth: y <= 2031 ? 3000 : 2600 }), 'foreign')).toMatchObject({ year: 2034, before: 3, after: 4 });
+    expect(one((y) => ({ attendance: 12000 - 400 * (y - 2027) }), 'foreign')).toMatchObject({ year: 2031, before: 3, after: 4 });
     expect(one(() => ({ capOver: 4 }), 'capGrowth')).toMatchObject({ before: 0.05, after: 0.07 });
     expect(one(() => ({ so: 1.15 }), 'zone')).toMatchObject({ before: 1, after: 0.97 });
   });

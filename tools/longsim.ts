@@ -17,8 +17,9 @@ import * as Off from '../src/league/offseason';
 import type { LeagueState } from '../src/league/types';
 import { worldFromLeague } from '../src/league/world';
 import { capFloorShorts } from '../src/league/owner';
-import { salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
+import { foreignCap, minSalary, salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
 import { ballHrMul, FUTURE_RULE_SPEC, futureValue, futureValueText, type FutureRuleKey } from '../src/league/futureRules';
+import { realSpread, sdOf, SPREAD_HEAD, spreadLine } from './real_spread';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -69,6 +70,8 @@ export interface YearMetrics {
   econ: { wage: number; capGrowth: number; cashAvg: number; cashMin: number; rescued: number; faSigned: number };
   /** 그 시즌 공·타격: 홈런 목표 배율, 타석당 홈런, 리그 평균자책, 최다 홈런, 규정이닝 평균자책 2점 미만 투수 수, 다음 해 외국인 한도 */
   ball: { hrMul: number; hrPa: number; era: number; topHr: number; subTwo: number; foreign: number };
+  /** 규정·흥행 (외국인 한도 판정 신호): 다음 해 최저 연봉(만 원)·외국인 신규·총액 상한(달러), 그 시즌 경기당 관중·외국인 연봉 부담·적자 구단 */
+  rule: { minPay: number; foreignNew: number; foreignTotal: number; attendance: number; foreignShare: number; deficit: number };
 }
 
 /** 리그 상태에서 한 시즌을 돌리고 오프시즌을 AI로 끝까지 진행한다 */
@@ -153,6 +156,12 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
     foreign: futureValue(league, 'foreign', league.year),
   };
 
+  const sig = (league.ruleSignals ?? []).find((s) => s.year === world.year);
+  const rule = {
+    minPay: minSalary(league.year, league), foreignNew: foreignCap(league, 'foreignNewCap', league.year), foreignTotal: foreignCap(league, 'foreignTotalCap', league.year),
+    attendance: sig?.attendance ?? 0, foreignShare: sig?.foreignShare ?? 0, deficit: sig?.deficit ?? 0,
+  };
+
   return {
     world,
     m: {
@@ -176,7 +185,7 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
       cap,
       shift: newShift ? `${newShift.year} ${newShift.key} ${futureValueText(newShift.key, newShift.before)}→${futureValueText(newShift.key, newShift.after)}` : '',
       pressure: { hr: 1 / season.cal.hr, so: 1 / season.cal.so, bb: 1 / season.cal.bb },
-      econ, ball,
+      econ, ball, rule,
     },
   };
 }
@@ -191,7 +200,10 @@ function table(rows: YearMetrics[]): string {
     ...rows.map((r) => `| ${r.year} | ${f(r.econ.wage)} | ${f(r.econ.capGrowth * 100, 0)}% | ${r.cap ? f(r.cap.use * 100, 0) + '%' : '-'} | ${eok(r.econ.cashAvg)}·${eok(r.econ.cashMin)} | ${r.econ.rescued} | ${r.fa.filed}·${r.econ.faSigned} |`)];
   const ball = ['| 연도 | 홈런 배율 | 타석당 홈런 | 평균자책 | 최다 홈런 | 2점 미만 투수 | 다음 해 외국인 한도 |', '|---|---|---|---|---|---|---|',
     ...rows.map((r) => `| ${r.year} | ${f(r.ball.hrMul, 3)} | ${f(r.ball.hrPa * 100, 2)}% | ${f(r.ball.era)} | ${r.ball.topHr} | ${r.ball.subTwo} | ${r.ball.foreign} |`)];
-  return [head, sep, ...body, '', ...econ, '', ...ball].join('\n');
+  const man = (v: number) => Math.round(v / 10000);
+  const rule = ['| 연도 | 다음 해 최저 연봉(만 원) | 다음 해 외국인 신규·총액 상한(만 달러) | 경기당 관중 | 외국인 연봉 부담 | 적자 구단 | 다음 해 외국인 한도 | 다음 해 규칙 변경 (가상) |', '|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.year} | ${r.rule.minPay.toLocaleString('ko-KR')} | ${man(r.rule.foreignNew)}·${man(r.rule.foreignTotal)} | ${r.rule.attendance ? r.rule.attendance.toLocaleString('ko-KR') : '-'} | ${r.rule.attendance ? f(r.rule.foreignShare * 100, 1) + '%' : '-'} | ${r.rule.attendance ? r.rule.deficit : '-'} | ${r.ball.foreign} | ${r.shift} |`)];
+  return [head, sep, ...body, '', ...econ, '', ...ball, '', ...rule].join('\n');
 }
 
 async function main(): Promise<void> {
@@ -201,6 +213,8 @@ async function main(): Promise<void> {
   const params: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: Number(arg('pilot') ?? DEFAULT_PARAMS.pilotSeasons) };
   const out = arg('out');
   const store = loadDataStore();
+  const real = realSpread(store, 2010, 2026).summary;
+  const spreads: string[] = [];
   const parts: string[] = [`# 장기 시뮬레이션 (${start}년부터 ${n}시즌)\n`, `만든 날: ${new Date().toISOString().slice(0, 10)}. 도구: \`npx tsx tools/longsim.ts\`. 모든 구단 AI.\n`];
   for (const seed of seeds) {
     const t0 = Date.now();
@@ -212,6 +226,15 @@ async function main(): Promise<void> {
       console.log(`[${seed}] ${m.year}: 득점 ${m.runs.toFixed(2)}, cal 홈런 ${m.cal.hr.toFixed(2)}, SD ${m.sd.toFixed(3)}, 은퇴 ${m.retired}, 복무 ${m.serving}, 실존 ${(m.realPa * 100).toFixed(0)}%, 구체적 사건(실존) ${m.specificOnReal}`);
     }
     parts.push(`## 시드 ${seed} (${((Date.now() - t0) / 1000).toFixed(0)}초)\n`, table(rows), '');
+    // 공·타격 퍼짐: 시즌 반발계수를 쓰는 해(2027~)만, 실제 2010~2026과 나란히
+    const fut = rows.filter((r) => r.year >= 2027);
+    if (fut.length) {
+      const range = (xs: number[]): [number, number] => [Math.min(...xs), Math.max(...xs)];
+      spreads.push(spreadLine(`게임 ${seed} ${fut[0].year}~${fut.at(-1)!.year}`, {
+        hrPa: range(fut.map((r) => r.ball.hrPa)), hrPaSd: sdOf(fut.map((r) => r.ball.hrPa)), era: range(fut.map((r) => r.ball.era)), eraSd: sdOf(fut.map((r) => r.ball.era)),
+        topHr: range(fut.map((r) => r.ball.topHr)), subTwo: range(fut.map((r) => r.ball.subTwo)),
+      }));
+    }
     const shifts = league.ruleShifts ?? [];
     if (shifts.length || league.year > 2028) {
       const runs = rows.filter((r) => r.year >= 2028).map((r) => r.runs);
@@ -222,6 +245,7 @@ async function main(): Promise<void> {
         (runs.length ? `2028년부터 득점 ${Math.min(...runs).toFixed(2)}~${Math.max(...runs).toFixed(2)}.` : ''), '');
     }
   }
+  if (spreads.length) parts.push('## 공·타격 퍼짐 (실제와 나란히)\n', SPREAD_HEAD, spreadLine(`실제 ${real.from}~${real.to}`, real), ...spreads, '');
   const text = parts.join('\n');
   if (out) {
     mkdirSync(dirname(out), { recursive: true });

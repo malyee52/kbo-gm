@@ -12,11 +12,25 @@ export const FUTURE_RULES_FROM = 2028;
 /** 같은 쪽으로 이만큼 시즌 이어서 벗어나면 후보 (임시값) */
 export const SHIFT_STREAK = 2;
 /**
- * 국내 선수층 지표(외국인 한도 판정)의 기준: 첫 신호 해부터 이만큼 시즌의 평균 (임시값, 2026-10-22).
- * 전에는 2027년 한 해가 기준이라, 시작 때 실존 유망주가 자라는 언덕(2030년대 초)이 "선수층이 두꺼워졌다"로 읽혀
- * 2031년쯤 외국인 한도가 2명으로 줄었다. 기준이 다 모이기 전(2027~2031 시즌 결산)에는 외국인 한도 판정을 미룬다
+ * 외국인 보유 한도 판정 (2026-10-22 사용자 결정 "국내 선수 비율 이런 거 말고"): 리그 흥행·재정 신호로 정한다 (모두 임시값).
+ * 전에는 국내 선수층 두께(상위 270명 기여 합)로 정했는데, 시작 때 실존 유망주가 자라는 언덕(2030년대 초)을 "선수층이 두꺼워졌다"로 읽어
+ * 외국인 한도가 줄었다. 국제대회 성적 신호는 국가대표 기획 뒤 (intlForeignSignal)
  */
-export const DEPTH_BASE_YEARS = 5;
+export const FOREIGN_JUDGE = {
+  /** 리그 경기당 관중이 이만큼 시즌 이어서 줄면 (해마다 전해보다 적으면) 볼거리를 늘리려 한도 +1 */
+  attendanceYears: 3,
+  /** 그동안 줄어든 폭이 이 비율 이상일 때만 (작은 흔들림은 넘긴다) */
+  attendanceDrop: 0.03,
+  /** 외국인 연봉 부담과 적자가 이만큼 시즌 이어서 크면 한도 −1 */
+  burdenYears: 3,
+  /**
+   * 외국인 연봉 부담: 1군 구단 외국인 연봉 합 ÷ 수입 합이 이 이상. longsim 2026 시작 15시즌(시드 a)의 평소 값이 9.5~13.7%라
+   * 그보다 무거울 때만 (한도가 4명으로 늘면 부담이 커져 다시 줄이는 쪽으로 돌아온다)
+   */
+  foreignShare: 0.15,
+  /** 적자 구단(그 해 수지 < 0) 수가 이 이상. 같은 실행의 평소 값 2~6곳 */
+  deficitTeams: 5,
+};
 /** 바뀐 항목은 이만큼 시즌 동안 다시 후보가 되지 않는다 (임시값) */
 export const SHIFT_COOLDOWN = 3;
 
@@ -62,8 +76,6 @@ export const SHIFT_LIMITS = {
   drawLow: 0.01,
   /** 구단당 결장 선수-일: 기준 해(첫 신호 해)보다 이 비율 넘게 많으면 엔트리 +1, 적으면 -1 */
   absence: 0.2,
-  /** 국내 선수층 지표: 기준 해보다 이 비율 넘게 낮으면 외국인 +1, 높으면 -1 */
-  depth: 0.08,
   /** 캡 초과 구단이 2시즌 평균 이만큼 이상이면 상향률 +2%p */
   capOverTeams: 3,
   /**
@@ -89,8 +101,13 @@ export interface RuleSignal {
   draw: number;
   /** 구단당 부상·이탈 결장 선수-일 */
   absence: number;
-  /** 국내 선수층 지표: 국내 선수 상위 270명 기여 합 (런) */
-  depth: number;
+  /**
+   * 리그 흥행·재정 (외국인 한도 판정, 2026-10-22): 1군 구단 정규시즌 경기당 관중(명), 외국인 연봉 부담(외국인 연봉 합 ÷ 수입 합),
+   * 적자 구단 수(그 해 수지 < 0). 예전 저장의 신호에는 없다 (그 해는 판정에서 빠진다)
+   */
+  attendance?: number;
+  foreignShare?: number;
+  deficit?: number;
   /** 캡 초과 구단 수와 평균 사용률 (캡이 없으면 0) */
   capOver: number;
   capUse: number;
@@ -186,16 +203,9 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const ab = base.absence > 0 ? avg((s) => s.absence) / base.absence : 1;
   add('roster', streak(sig, (s) => (base.absence <= 0 ? 0 : s.absence / base.absence > 1 + L.absence ? 1 : s.absence / base.absence < 1 - L.absence ? -1 : 0)), ab,
     ab > 1 ? `부상·이탈 결장이 ${base.year}년보다 ${pct(ab)} 늘어 선수 보호를 위해 1군 엔트리를 1명 늘린다` : `결장이 ${base.year}년보다 ${pct(ab)} 줄어 1군 엔트리를 1명 줄인다`);
-  // 국내 선수층: 첫 DEPTH_BASE_YEARS시즌 평균이 기준. 기준이 다 모인 뒤 시즌부터 판정한다
-  if (sig.length > DEPTH_BASE_YEARS) {
-    const baseSig = sig.slice(0, DEPTH_BASE_YEARS);
-    const baseDepth = baseSig.reduce((a, s) => a + s.depth, 0) / DEPTH_BASE_YEARS;
-    const baseText = `${baseSig[0].year}~${baseSig.at(-1)!.year}년 평균`;
-    const after = sig.slice(DEPTH_BASE_YEARS);
-    const dp = baseDepth > 0 ? avg((s) => s.depth) / baseDepth : 1;
-    add('foreign', streak(after, (s) => (baseDepth <= 0 ? 0 : s.depth / baseDepth < 1 - L.depth ? 1 : s.depth / baseDepth > 1 + L.depth ? -1 : 0)), dp,
-      dp < 1 ? `국내 선수층이 ${baseText}보다 ${pct(dp)} 얇아져 외국인 보유 한도를 1명 늘린다` : `국내 선수층이 ${baseText}보다 ${pct(dp)} 두꺼워져 외국인 보유 한도를 1명 줄인다`);
-  }
+  // 외국인 보유 한도: 리그 흥행·재정 (국제대회 성적은 국가대표 기획 뒤)
+  const fj = foreignJudge(sig) ?? intlForeignSignal(league, signal.year);
+  if (fj) add('foreign', fj.dir, fj.signal, fj.why);
   const over = avg((s) => s.capOver);
   const use = avg((s) => s.capUse);
   const capDir: 1 | -1 | 0 = recent.length < SHIFT_STREAK || recent.some((s) => s.capUse <= 0) ? 0
@@ -210,6 +220,43 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   league.ruleShifts ??= [];
   league.ruleShifts.push(shift);
   return shift;
+}
+
+/** 외국인 한도 판정 하나 (방향 +1 확대·−1 축소, 판단에 쓴 신호 값, 까닭 문구) */
+export interface ForeignJudgement { dir: 1 | -1; signal: number; why: string }
+
+/**
+ * 리그 흥행·재정으로 본 외국인 한도 (FOREIGN_JUDGE, 임시값). 관중이 이어서 줄면 확대(+1), 외국인 연봉 부담이 무겁고 적자 구단이 많은 해가 이어지면 축소(−1).
+ * 둘이 함께 나오면 엇갈린 신호라 판정하지 않는다
+ */
+export function foreignJudge(sig: RuleSignal[]): ForeignJudgement | null {
+  const J = FOREIGN_JUDGE;
+  const man = (x: number) => Math.round(x).toLocaleString('ko-KR');
+  let up: ForeignJudgement | null = null;
+  const att = sig.slice(-(J.attendanceYears + 1));
+  if (att.length === J.attendanceYears + 1 && att.every((s) => (s.attendance ?? 0) > 0)) {
+    const a = att.map((s) => s.attendance!);
+    const falling = a.every((v, i) => i === 0 || v < a[i - 1]);
+    const ratio = a.at(-1)! / a[0];
+    if (falling && ratio <= 1 - J.attendanceDrop) {
+      up = { dir: 1, signal: round(ratio), why: `관중이 ${J.attendanceYears}년 이어 줄어 (${att[0].year}년 경기당 ${man(a[0])}명 → ${att.at(-1)!.year}년 ${man(a.at(-1)!)}명, −${pct(ratio)}) 구단들이 볼거리를 늘리려 외국인 보유 한도 확대에 합의했다` };
+    }
+  }
+  let down: ForeignJudgement | null = null;
+  const bur = sig.slice(-J.burdenYears);
+  if (bur.length === J.burdenYears && bur.every((s) => (s.foreignShare ?? 0) >= J.foreignShare && (s.deficit ?? 0) >= J.deficitTeams)) {
+    const share = bur.reduce((x, s) => x + s.foreignShare!, 0) / bur.length;
+    const fewest = Math.min(...bur.map((s) => s.deficit!));
+    down = { dir: -1, signal: round(share), why: `외국인 연봉이 구단 수입의 평균 ${Math.round(share * 100)}%로 무겁고 적자 구단이 ${J.burdenYears}년 이어 ${fewest}곳 이상이라 구단들이 외국인 보유 한도 축소에 합의했다` };
+  }
+  return up && down ? null : up ?? down;
+}
+
+/**
+ * 국제대회 성적으로 본 외국인 한도 (부진 → 국내 육성 여론으로 축소, 호성적 → 여유). 국가대표 기획 뒤에 채운다: 지금은 늘 null
+ */
+export function intlForeignSignal(_league: Pick<LeagueState, 'seed'>, _year: number): ForeignJudgement | null {
+  return null;
 }
 
 // ---- 시즌마다 바뀌는 반발계수 (2026-10-22 사용자 결정 "반발계수 변경")

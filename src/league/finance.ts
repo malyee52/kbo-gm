@@ -153,6 +153,9 @@ export interface FinanceYear {
   rescue: number;
   /** 모기업 환원 (결산 뒤 자금이 DIVIDEND_RESERVE를 넘은 몫의 일부, 수지에는 넣지 않는다) */
   dividend?: number;
+  /** 정규시즌 홈 관중 합과 홈 경기 수 (미래 규칙 변경의 흥행 신호, 2026-10-22. 예전 저장에는 없다) */
+  attendance?: number;
+  homeGames?: number;
 }
 
 export type FinanceKind =
@@ -254,8 +257,11 @@ export interface MonthPoint {
 
 export interface SeasonFlows {
   items: Partial<Record<FinanceKind, number>>;
-  /** 홈 경기 관중 합 */
+  /** 홈 경기 관중 합 (가을야구 포함) */
   attendance: number;
+  /** 정규시즌 홈 관중 합 */
+  regular: number;
+  /** 정규시즌 홈 경기 수 */
   homeGames: number;
   months: MonthPoint[];
 }
@@ -393,6 +399,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const byMonth = new Map<number, number>();
   const addM = (day: number, v: number) => { const m = dateOf(year, day).month; byMonth.set(m, (byMonth.get(m) ?? 0) + v); };
   let attendance = 0;
+  let regular = 0;
   let homeGames = 0;
 
   // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로
@@ -410,6 +417,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
         const pct = w[team] + l[team] > 0 ? w[team] / (w[team] + l[team]) : 0.5;
         const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year, g.away));
         attendance += fans;
+        regular += fans;
         homeGames++;
         const v = Math.round(fans * ticket);
         add('gate', v);
@@ -448,7 +456,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     for (const [k, v] of parts) { add(k, v); byMonth.set(pd.month, (byMonth.get(pd.month) ?? 0) + v); }
   }
   const months = pays.map((pd) => ({ day: pd.day, month: pd.month, net: byMonth.get(pd.month) ?? 0 }));
-  return { items, attendance, homeGames, months };
+  return { items, attendance, regular, homeGames, months };
 }
 
 /**
@@ -556,7 +564,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       league.ledger.push({ year, from: t, to: -1, amount: dividend, note: `${year} 모기업 환원 (쌓인 자금)`, kind: 'dividend' });
       cash -= dividend;
     }
-    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}) };
+    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), attendance: flows.regular, homeGames: flows.homeGames };
     league.finance![t].history.push(y);
     out.push(y);
     // 팬 만족도 결산 (stadium.ts): 스폰서를 매긴 뒤에
