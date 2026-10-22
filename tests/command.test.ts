@@ -58,7 +58,8 @@ describe('직접 지휘', () => {
     expect(pv.plays.some((p) => p.kind === 'PH')).toBe(usedPh);
     // 주자 작전은 1루 주자·2루 빈 때만 묻고, 도루 시도를 고르면 도루 기록이 남는다. 도루 뒤에도 같은 타석의 타격 작전을 묻는다
     expect(steals).toBeGreaterThan(0);
-    expect(pv.plays.filter((p) => (p.kind === 'SB' || p.kind === 'CS') && !p.top === (pv.home === lg)).length).toBe(steals);
+    // 주자 작전을 물은 뒤 견제사(PO)면 도루 없이 끝난다 (견제는 주자 작전과 같은 1루 주자·2루 빈 때만)
+    expect(pv.plays.filter((p) => (p.kind === 'SB' || p.kind === 'CS' || p.kind === 'PO') && !p.top === (pv.home === lg)).length).toBe(steals);
     g.commitCommand(pv.choices);
     const last = g.ourGames().at(-1)!;
     expect({ away: last.awayRuns, home: last.homeRuns }).toEqual(pv.final);

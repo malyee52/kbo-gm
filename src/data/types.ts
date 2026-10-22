@@ -315,6 +315,13 @@ export interface ManagerInfo {
   steal: number;
   bunt: number;
   relief: number;
+  /**
+   * 투구 단위 자료(2023~)의 팀 선발 평균 투구 수 ÷ 리그, 팀 구원 연투 비율 ÷ 리그 (시즌 내내 맡은 해 평균, 시즌이 적으면 1 쪽으로 당김).
+   * byYear: 개막 감독으로 맡은 해의 팀 값 그대로 (엔진 2 10단계). 자료가 없으면 없다
+   */
+  push?: number;
+  pen?: number;
+  byYear?: Record<string, { push: number; pen: number }>;
 }
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */

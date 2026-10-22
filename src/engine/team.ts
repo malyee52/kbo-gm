@@ -1,7 +1,7 @@
 // 선수 기용: 1군 엔트리, 선발 라인업, 타순, 선발 로테이션, 불펜.
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
-import { BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
+import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
 import type { EngineParams } from './params';
@@ -34,10 +34,21 @@ export function newPlayerStates(n: number): PlayerStates {
 
 export { BULLPEN_AVAILABLE_BELOW as FATIGUE_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY as FATIGUE_RECOVERY_PER_DAY } from './params';
 
-/** 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만) */
-export function needsRest(st: PlayerStates, idx: number, day: number): boolean {
+/**
+ * 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만).
+ * pen: 감독 성향 '불펜 연투 허용' (엔진 2 10단계, 1이면 기준 그대로, 클수록 3연투를 더 허용)
+ */
+export function needsRest(st: PlayerStates, idx: number, day: number, pen = 1): boolean {
   // 어제 경기 뒤 피로(오늘 회복 전)로 본다: 이틀 모두 짧게 던졌으면 사흘째도 나온다
-  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW;
+  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW * pen;
+}
+
+/**
+ * 등판할 수 있는 경기 전 피로 기준 (공). pen(감독 성향 '불펜 연투 허용')은 "전날 몇 구까지 던졌으면 오늘도 나오나"
+ * (회복량 + 기준 = 15구)에 곱한다. 1이면 BULLPEN_AVAILABLE_BELOW 그대로
+ */
+export function availableBelow(pen = 1): number {
+  return pen === 1 ? BULLPEN_AVAILABLE_BELOW : (BULLPEN_RECOVERY_PER_DAY + BULLPEN_AVAILABLE_BELOW) * pen - BULLPEN_RECOVERY_PER_DAY;
 }
 
 /** 오늘 경기 전 피로 (공 수). 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
@@ -71,9 +82,11 @@ export interface TeamSeason {
   plan?: DepthPlan | null;
   /** 선발 등판 사이 최소 휴식일 (시대별, eras.ts). 없으면 params.starterRestDays */
   restDays?: number;
-  /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
-  /** 감독 성향 배율 (league/managers.ts Tactics). sub = 대타·대주자 빈도 (엔진 2 9단계, 없으면 1) */
-  tactics?: { steal: number; bunt: number; hook: number; sub?: number };
+  /**
+   * 감독 성향 배율 (league/managers.ts Tactics): 도루 시도, 희생번트, hook 투수 밀어붙이기(선발 투구 수 기준·여유), 없으면 모두 1.
+   * sub = 대타·대주자 빈도 (엔진 2 9단계), pen = 불펜 연투 허용 (엔진 2 10단계). 없으면 1
+   */
+  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
 }

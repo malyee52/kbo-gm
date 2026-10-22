@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { eraPitching } from './eras';
+import { AUTO_IBB_YEAR, eraPitching } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -240,6 +240,8 @@ export interface SeasonInit {
   running?: RunTally;
   /** 좌우 4칸 타석 결과 집계 (검증 도구용, 엔진 2 9단계). 저장하지 않는다 */
   splits?: GameContext['splits'];
+  /** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계). 저장하지 않는다 */
+  pen?: GameContext['pen'];
 }
 
 export class Season {
@@ -314,7 +316,8 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits,
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
+      autoIbb: world.year >= AUTO_IBB_YEAR,
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
     this.ctx.sbShift = sbShiftOf(world.players, world.env);

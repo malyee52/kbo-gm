@@ -3,19 +3,19 @@
 
 import type { ParkRates, Rates } from '../data/types';
 import type { BallTally } from './battedball';
-import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher } from './manager';
+import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher, maybeOnePoint, tallySaveEntry, wantInfieldIn, wantIntentionalWalk, type PenTally } from './manager';
 import { Ev, NEUTRAL_PARK, paRates, type GamePark, type PaRates } from './pa';
 import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
-import { applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
+import { addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
 import { fieldDefense, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
 import { aiDefense, pickPinchHitter, pickPinchRunner } from './subs';
 import { currentFatigue, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
 export { BUNT_SUCCESS, emptyRunTally, type RunTally } from './rules';
-export { bullpenOrder } from './manager';
+export { bullpenOrder, emptyPenTally, type PenTally } from './manager';
 export { errorRateOf, type GameSub } from './state';
 
 /** 시즌 전체 리그 합계 (검증용) */
@@ -89,6 +89,10 @@ export interface GameContext {
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */
   running?: RunTally;
+  /** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계): 고의4구·전진 수비·원포인트·세이브 상황 등판과 블론 */
+  pen?: PenTally;
+  /** 고의4구를 공 없이 하나 (자동 고의4구, eras.ts AUTO_IBB_YEAR 이후). false면 공 4개를 실제로 던진다. 없으면 자동 */
+  autoIbb?: boolean;
   /** 좌우 4칸 집계 (엔진 2 9단계 점검 도구만): 'LL'(좌타·좌투) 'LR' 'RL' 'RR' → 타석 결과 수. 양타는 투수 반대 손. 없으면 세지 않는다 */
   splits?: Record<string, Partial<Record<PlayKind, number>>>;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
@@ -229,6 +233,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const a0 = away.runs;
     playHalf(st, away, home, inning);
     lineScore.away.push(away.runs - a0);
+    if (ctx.pen && inning >= 7) ctx.pen.lateRuns += away.runs - a0;
     if (inning >= 9 && home.runs > away.runs) {
       lineScore.home.push(-1);
       break;
@@ -236,6 +241,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const h0 = home.runs;
     const walkOff = playHalf(st, home, away, inning);
     lineScore.home.push(home.runs - h0);
+    if (ctx.pen && inning >= 7) ctx.pen.lateRuns += home.runs - h0;
     if (walkOff) break;
     if (inning >= 9 && home.runs !== away.runs) break;
     if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
@@ -263,6 +269,10 @@ function ask(st: GameState, side: 'bat' | 'field', step: 'run' | 'bat' | 'field'
 function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean {
   st.startHalf(bat, fld, inning);
   const { ctx } = st;
+  if (ctx.pen && inning >= 7) {
+    ctx.pen.lateHalf++;
+    ctx.pen.lateLead[Math.max(-4, Math.min(4, fld.runs - bat.runs)) + 4]++;
+  }
   // AI 감독 수비 교체 (엔진 2 9단계): 대타·대주자 뒤 수비 위치 다시 정하기, 후반 리드 때 대수비
   aiDefense(st, fld, bat);
   const resolver = ctx.resolver ?? B0;
@@ -275,9 +285,18 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const was = fld.pitcher;
     const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
     if (next) bringIn(fld, next, fld.runs - bat.runs, ctx);
-    else if (!fc?.keep) maybeChangePitcher(fld, bat, inning, st.basesEmpty, first, bat.runs - st.runsAtStart, ctx);
+    else if (!fc?.keep) {
+      maybeChangePitcher(fld, bat, inning, st.basesEmpty, first, bat.runs - st.runsAtStart, ctx);
+      // 좌우 원포인트 (엔진 2 10단계): 바꾸지 않았으면 좌타 강타자에 좌완 구원
+      if (fld.pitcher === was) maybeOnePoint(fld, bat, inning, ctx);
+    }
     // 세이브 상황은 등판 때 누상 주자까지 보고 정한다 (4점 이상 리드에 동점 주자가 누상·타석·대기 타석)
-    if (fld.pitcher !== was) fld.pitcher.saveSit = isSaveSituation(fld.pitcher.enteredLead, st.bases.filter(Boolean).length);
+    if (fld.pitcher !== was) {
+      const runners = st.bases.filter(Boolean).length;
+      fld.pitcher.saveSit = isSaveSituation(fld.pitcher.enteredLead, runners);
+      fld.pitcher.entryInning = inning;
+      if (ctx.pen) tallySaveEntry(fld, fld.pitcher, inning, runners, ctx);
+    }
     if (ctx.plays && fld.pitcher !== was) st.note('PC', -1, fld.pitcher.p.idx, bat.runs);
     first = false;
     const ours = !!cmd && bat.ts.team.idx === cmd.team;
@@ -343,10 +362,14 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       st.note('PH', hitter.idx, fld.pitcher.p.idx, bat.runs);
     }
     const tactic = bc?.tactic === 'steal' ? undefined : bc?.tactic;
+    // 고의4구 (지휘, 또는 AI 감독 엔진 2 10단계)와 전진 수비 (AI 감독). 자동 고의4구 전 시대는 공 4개를 실제로 던진다 (타석이 끝나기 전 폭투로 끝내기면 타석 없음)
+    const walk = !!fc?.walk || (!going && wantIntentionalWalk(st));
+    st.infieldIn = !walk && wantInfieldIn(st);
+    if (walk && ctx.autoIbb === false && manualIntentionalWalk(st, fld.pitcher)) return true;
 
     const { batter, bl, pg } = beginPlateAppearance(st);
     // 히트앤드런 첫 공 인플레이: 그 공으로 타석이 끝난다 (그 사이 지휘로 대타·번트·고의4구를 골랐으면 작전은 풀린다)
-    if (going && !tactic && !fc?.walk && !hitter) {
+    if (going && !tactic && !walk && !hitter) {
       const rates = paRates(batter, pg, bat.isHome, ctx, {
         runnersOn: true, scoring: false, late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
       }, st.park);
@@ -359,23 +382,23 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       continue;
     }
     // 지휘한 번트: 2아웃 전, 주자가 있을 때 (3루 주자가 있으면 스퀴즈)
-    if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !fc?.walk) {
+    if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !walk) {
       if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
       if (orderedBunt(st, batter, bl, pg)) return true;
       continue;
     }
     // 감독 판단 번트 (희생번트·스퀴즈). 번트 타석 투구 수는 HF 투구 자료 (투구 수를 세지 않는 해결기는 0)
-    const bunted = !tactic && !fc?.walk ? autoBunt(st, batter, bl, pg) : null;
+    const bunted = !tactic && !walk ? autoBunt(st, batter, bl, pg) : null;
     if (bunted !== null) {
       if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
       if (bunted) return true;
       continue;
     }
 
-    // 지휘한 고의4구는 공 없이 (자동 고의4구)
+    // 고의4구: 공은 위에서 던졌다 (자동 고의4구 시대는 공 없이)
     let ev: Ev;
     let rates: PaRates | null = null;
-    if (fc?.walk) ev = Ev.BB;
+    if (walk) ev = Ev.BB;
     else {
       rates = paRates(batter, pg, bat.isHome, ctx, {
         runnersOn: !st.basesEmpty, scoring: !!(st.bases[1] || st.bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
@@ -385,7 +408,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       addPitches(ctx, pg, res.pitches);
     }
     const r0 = bat.runs;
-    const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk, rates);
+    const kind = applyPlateAppearance(st, ev, batter, bl, pg, walk, rates);
     if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
     st.note(kind, batter.idx, pg.p.idx, r0);
     if (st.walkOff()) return true;
@@ -413,13 +436,6 @@ function hitAndRun(st: GameState): boolean {
   if (!ctx.rng.chance(run.hnr * (bat.ts.tactics?.steal ?? 1))) return false;
   if (ctx.running) ctx.running.hnr++;
   return true;
-}
-
-/** 마운드 투수의 투구 수를 센다 (기록·박스스코어, 경기 안 피로·교체·불펜 피로) */
-function addPitches(ctx: GameContext, pg: PitcherInGame, n: number): void {
-  pg.pitches += n;
-  pg.line.np += n;
-  ctx.totals.pitches += n;
 }
 
 /** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */

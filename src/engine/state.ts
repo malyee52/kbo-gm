@@ -3,6 +3,7 @@
 
 import type { GameContext, Play, PlayKind } from './game';
 import { defenseAt } from './defense';
+import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
 import { assignSlots, type Slot, type TeamSeason } from './team';
 import type { BatLine, PitLine, PitSkill, SimPlayer } from './types';
@@ -31,6 +32,14 @@ export interface PitcherInGame {
   pitches: number;
   /** 이 투수의 타석당 기대 투구 수 (리그 평균 타자 상대, 볼카운트 사슬에서). 타자 수로 정한 체력·교체 기준을 공 수로 바꿀 때 쓴다 */
   ppa: number;
+  /** 구원 등판한 회 (블론 기록 BLOWN_FROM_INNING, 엔진 2 10단계) */
+  entryInning?: number;
+  /** 좌우 원포인트로 올라왔다 (엔진 2 10단계): 맡은 좌타자 뒤 다음 타자가 좌타가 아니면 바꾼다 */
+  onePoint?: boolean;
+  /** 세이브 상황 등판 집계 칸 (검증 도구 ctx.pen이 있을 때만, manager.ts tallySaveEntry) */
+  entryKey?: string;
+  entryTired?: boolean;
+  entryRunners?: number;
 }
 
 /**
@@ -38,6 +47,13 @@ export interface PitcherInGame {
  * (리드 ≤ 누상 주자 + 2). 기록에만 쓰고 경기 진행에는 쓰지 않는다
  */
 export const isSaveSituation = (lead: number, runners: number): boolean => lead >= 1 && (lead <= 3 || lead <= runners + 2);
+
+/**
+ * 블론 세이브를 기록하는 등판 회 (엔진 2 10단계): 이 회 이후 세이브 상황에 나온 투수만 리드를 잃으면 블론으로 센다.
+ * 근거: 투구 단위 자료(2023~2025)에서 세이브 상황 구원 등판이 리드를 잃은 수 가운데 7회 이후 등판분이 하드힛 블론 합과 세 해 모두 정확히 같다
+ * (2023 183 · 2024 199 · 2025 185, tools/pbp_saves.py). KBO 규정 문구로는 확인하지 못했다 (조사값). 6회 이전 등판이 리드를 잃어도 홀드는 받지 못한다
+ */
+export const BLOWN_FROM_INNING = 7;
 
 export interface Runner {
   p: SimPlayer;
@@ -143,6 +159,8 @@ export class GameState {
    * 예전 "2아웃 실책 뒤 그 이닝 실점은 비자책"을 1·0아웃 실책까지 넓혔다
    */
   errOuts = 0;
+  /** 이번 타석에 수비 팀이 전진 수비를 했나 (AI 감독, 엔진 2 10단계). 타석마다 game.ts가 정한다 */
+  infieldIn = false;
   /** 직접 지휘 물음 번호 */
   cmdN = 0;
 
@@ -216,7 +234,8 @@ export class GameState {
     const cur = fld.pitcher;
     if (before === -1 && !cur.isStarter && !cur.blown && cur.saveSit) {
       cur.blown = true;
-      cur.line.bsv++;
+      if ((cur.entryInning ?? BLOWN_FROM_INNING) >= BLOWN_FROM_INNING) cur.line.bsv++;
+      if (ctx.pen) tallyBlown(cur, runner.resp !== cur, ctx);
     }
     if (before <= 0 && after > 0) {
       rec.win = bat.pitcher;

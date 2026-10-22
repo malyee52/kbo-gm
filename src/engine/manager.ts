@@ -1,11 +1,65 @@
 // AI 감독 판단 (공통 규칙 계층, 타석 경계에서): 투수 등판·교체, 구원 투수 고르기.
 
 import type { GameContext } from './game';
-import { isSaveSituation, type PitcherInGame, type Side } from './state';
+import { isSaveSituation, type GameState, type PitcherInGame, type Side } from './state';
 import { isStarterSkill } from './params';
-import { currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest } from './team';
+import { availableBelow, currentFatigue, needsRest } from './team';
 import type { SimPlayer } from './types';
 import { lengthOf } from './pa';
+
+/** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계, tools/pen_check.ts). 저장하지 않는다. 세지 않아도 결과는 같다 (난수를 쓰지 않는다) */
+export interface PenTally {
+  /** 고의4구: 모두, 공 4개를 던진 수동 고의4구, 끝까지 던진 수동 고의4구의 공 수, 그 사이 폭투·포일, 폭투 끝내기로 끊긴 수 */
+  ibb: number; ibbManual: number; ibbPitches: number; ibbWp: number; ibbCut: number;
+  /** 전진 수비 타석, 그 타석의 땅볼, 내야를 빠진 안타로 바뀐 땅볼, 땅볼 아웃에 3루 주자 득점·묶임 */
+  ifIn: number; ifInGb: number; ifInHit: number; ifInScored: number; ifInHeld: number;
+  /** 좌우 원포인트 등판 */
+  loogy: number;
+  /** 세이브 상황 등판·블론 (키 = 등판 회 '~6'·'7'·'8'·'9~' + '/' + 역할 'CL'·'SU'·'MR') */
+  saveSit: Record<string, number>; blown: Record<string, number>;
+  /** 블론 중 동점 주자가 앞 투수 책임이던 수, 전날도 던진 투수의 세이브 상황 등판·블론 */
+  blownInherited: number; saveSitTired: number; blownTired: number;
+  /** 등판 때 리드 1·2·3·4점 이상별 세이브 상황 등판·블론, 등판 때 누상 주자 0~3별 */
+  leadSit: number[]; leadBlown: number[]; runnerSit: number[]; runnerBlown: number[];
+  /** 7회 이후 반 이닝 수와 득점, 반 이닝 시작 때 수비 팀 리드 −4 이하 … +4 이상 (9칸) */
+  lateHalf: number; lateRuns: number; lateLead: number[];
+}
+
+export function emptyPenTally(): PenTally {
+  return {
+    ibb: 0, ibbManual: 0, ibbPitches: 0, ibbWp: 0, ibbCut: 0, ifIn: 0, ifInGb: 0, ifInHit: 0, ifInScored: 0, ifInHeld: 0, loogy: 0,
+    saveSit: {}, blown: {}, blownInherited: 0, saveSitTired: 0, blownTired: 0,
+    leadSit: [0, 0, 0, 0], leadBlown: [0, 0, 0, 0], runnerSit: [0, 0, 0, 0], runnerBlown: [0, 0, 0, 0],
+    lateHalf: 0, lateRuns: 0, lateLead: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+  };
+}
+
+/** 세이브 상황 등판을 센다 (집계가 있을 때만). 역할: 마무리, 서열 1·2번째(필승조), 나머지 */
+export function tallySaveEntry(fld: Side, pg: PitcherInGame, inning: number, runners: number, ctx: GameContext): void {
+  const t = ctx.pen;
+  if (!t || !pg.saveSit) return;
+  const ts = fld.ts;
+  const order = bullpenOrder(ts.bullpen.filter((p) => p !== ts.closer), ctx.day, ctx.params.penBlendDays);
+  const role = pg.p === ts.closer ? 'CL' : order.indexOf(pg.p) >= 0 && order.indexOf(pg.p) < ctx.params.mgr.setup ? 'SU' : 'MR';
+  pg.entryKey = `${inning <= 6 ? '~6' : inning >= 9 ? '9~' : inning}/${role}`;
+  pg.entryTired = ctx.states.fatigueDay[pg.p.idx] === ctx.day - 1;
+  pg.entryRunners = runners;
+  t.saveSit[pg.entryKey] = (t.saveSit[pg.entryKey] ?? 0) + 1;
+  if (pg.entryTired) t.saveSitTired++;
+  t.leadSit[Math.min(4, pg.enteredLead) - 1]++;
+  t.runnerSit[runners]++;
+}
+
+/** 블론을 센다 (state.ts score). inherited: 동점 주자가 앞 투수 책임 */
+export function tallyBlown(pg: PitcherInGame, inherited: boolean, ctx: GameContext): void {
+  const t = ctx.pen;
+  if (!t || !pg.entryKey) return;
+  t.blown[pg.entryKey] = (t.blown[pg.entryKey] ?? 0) + 1;
+  if (inherited) t.blownInherited++;
+  if (pg.entryTired) t.blownTired++;
+  t.leadBlown[Math.min(4, pg.enteredLead) - 1]++;
+  t.runnerBlown[pg.entryRunners ?? 0]++;
+}
 
 const STARTER_LIMIT_SCALE = 1.15;
 /** 어제 던진 필승조를 오늘 아낄 확률 (임시값, 상위 구원 투수 시즌 등판 80경기 안팎에 맞춤) */
@@ -53,11 +107,13 @@ export function managerNorms(players: readonly SimPlayer[], ctx: GameContext): {
   };
 }
 
-/** 쓸 수 있는 구원 투수: 이번 경기에 안 나왔고, 쉴 만큼 쉬었고, 3연투가 아닌 투수 */
+/** 쓸 수 있는 구원 투수: 이번 경기에 안 나왔고, 쉴 만큼 쉬었고, 3연투가 아닌 투수. 기준은 감독 성향 '불펜 연투 허용'(pen)만큼 */
 export function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
   const st = ctx.states;
+  const pen = fld.ts.tactics?.pen ?? 1;
+  const below = availableBelow(pen);
   return fld.ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx)
-    && currentFatigue(st, p.idx, ctx.day) < FATIGUE_AVAILABLE_BELOW && !needsRest(st, p.idx, ctx.day));
+    && currentFatigue(st, p.idx, ctx.day) < below && !needsRest(st, p.idx, ctx.day, pen));
 }
 
 /**
@@ -88,7 +144,7 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
     // 쉴 만큼 쉰 투수가 없으면 덜 지친 투수부터 (3연투는 마지막까지 미룬다)
     const rest = ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx));
     if (rest.length === 0) return null;
-    const cost = (p: SimPlayer) => currentFatigue(st, p.idx, ctx.day) + (needsRest(st, p.idx, ctx.day) ? 100 : 0);
+    const cost = (p: SimPlayer) => currentFatigue(st, p.idx, ctx.day) + (needsRest(st, p.idx, ctx.day, ts.tactics?.pen ?? 1) ? 100 : 0);
     return rest.reduce((a, b) => (cost(b) < cost(a) ? b : a));
   }
   const closer = ts.closer;
@@ -102,7 +158,7 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
   const rank = (p: SimPlayer) => order.indexOf(p);
   // 역할: 직접 정한 기용표에 있으면 그것. 역할을 하나라도 정했으면 나머지는 추격조, 아무것도 안 정했으면 서열 1·2번째가 필승조
   const pen = ts.manual && ts.plan?.pen && Object.keys(ts.plan.pen).length ? ts.plan.pen : null;
-  const role = (p: SimPlayer): 'SU' | 'LR' | 'MOP' | 'MR' => (pen ? pen[p.idx] ?? 'MR' : rank(p) < 2 ? 'SU' : 'MR');
+  const role = (p: SimPlayer): 'SU' | 'LR' | 'MOP' | 'MR' => (pen ? pen[p.idx] ?? 'MR' : rank(p) < ctx.params.mgr.setup ? 'SU' : 'MR');
   const of = (...rs: string[]) => avail.filter((p) => rs.includes(role(p)));
   const close = lead >= -2 && lead <= 3; // 이기고 있거나 근소하게 지는 접전
   const late = inning >= 7;
@@ -114,20 +170,27 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
     const su = of('SU');
     const main = [...su.filter((p) => suAll.indexOf(p) >= want), ...of('MR'), ...of('LR'), ...of('MOP')];
     const list = main.length ? main : su;
-    // 어제 던졌으면 확률적으로 아끼고 다음 투수를 쓴다
-    const pick = list.find((p) => st.fatigueDay[p.idx] !== ctx.day - 1 || !ctx.rng.chance(SPARE_YESTERDAY));
+    // 어제 던졌으면 확률적으로 아끼고 다음 투수를 쓴다 (불펜 연투 허용이 클수록 덜 아낀다)
+    const pen = ts.tactics?.pen ?? 1;
+    const spare = pen === 1 ? SPARE_YESTERDAY : Math.min(1, Math.max(0, SPARE_YESTERDAY * (2 - pen)));
+    const pick = list.find((p) => st.fatigueDay[p.idx] !== ctx.day - 1 || !ctx.rng.chance(spare));
     return pick ?? list[0];
   }
   if (late && close) {
     // 근소하게 지는 후반: 필승조는 아끼고 추격조부터
     return of('MR')[0] ?? of('LR')[0] ?? of('MOP')[0] ?? avail[avail.length - 1];
   }
+  const midLead = lead >= 1 && lead <= 3; // 중반 세이브 상황 리드 (엔진 2 10단계)
   if (inning <= 5) {
-    // 이른 강판: 롱릴리프. 정하지 않았으면 필승조를 뺀 투수 중 가장 길게 던질 투수
+    // 이른 강판: 롱릴리프. 정하지 않았으면 필승조를 뺀 투수 중 가장 길게 던질 투수.
+    // 1~3점 리드면 (엔진 2 10단계) 추격조 서열 위쪽 절반 가운데 가장 길게 던질 투수 (패전조로 리드를 넘기지 않는다)
     const lr = of('LR');
-    const cands = lr.length ? lr : of('MR', 'MOP').length ? of('MR', 'MOP') : avail;
+    const mr = of('MR');
+    const cands = lr.length ? lr : midLead && mr.length ? mr.slice(0, Math.max(1, Math.ceil(mr.length / 2))) : of('MR', 'MOP').length ? of('MR', 'MOP') : avail;
     return cands.reduce((a, b) => (b.pit!.reliefStint > a.pit!.reliefStint ? b : a));
   }
+  // 6회 1~3점 리드 (엔진 2 10단계): 필승조 다음 서열의 추격조부터 (예전에는 패전조까지 무작위라 6회 이전 세이브 상황 블론이 많았다)
+  if (midLead) return of('MR')[0] ?? of('LR')[0] ?? of('SU')[0] ?? of('MOP')[0] ?? avail[0];
   // 점수 차가 큰 경기나 중반: 패전조. 정하지 않았으면 필승조를 빼고 아래쪽에서 고른다
   const mop = of('MOP');
   const cands = mop.length ? mop : of('MR', 'LR').length ? of('MR', 'LR') : avail;
@@ -151,11 +214,15 @@ export function bringIn(fld: Side, p: SimPlayer, lead: number, ctx: GameContext)
 export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEmpty: boolean, start: boolean, halfRuns: number, ctx: GameContext): void {
   const pg = fld.pitcher;
   const np = pg.pitches;
-  const u = pg.ppa;
+  // 감독 성향 '투수 밀어붙이기'(hook, 엔진 2 10단계): 선발 기준(plan)에 곱했고(game.ts), 기준 뒤 여유도 같은 배율로
+  const u = pg.isStarter ? pg.ppa * (fld.ts.tactics?.hook ?? 1) : pg.ppa;
   const lead = fld.runs - bat.runs;
   const closer = fld.ts.closer;
   let pull = false;
-  if (pg.isStarter) {
+  if (pg.onePoint && pg.bf >= 1) {
+    // 원포인트: 맡은 좌타자를 상대했으면 다음 타자가 좌타가 아닐 때 바꾼다
+    pull = bat.lineup[bat.spot].bats !== 'L';
+  } else if (pg.isStarter) {
     if (start) {
       // 이닝 시작: 한 이닝을 더 못 버티거나, 이미 많이 내줬으면 내린다
       pull = np + 2 * u >= pg.plan || pg.runs >= 6 || (pg.runs >= 5 && inning <= 4);
@@ -185,4 +252,52 @@ export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEm
   if (inning <= 5 && ctx.planNorms) fld.pitcher.plan *= ctx.params.planScale.earlyRelief;
   // 직접 정한 롱릴리프가 이른 이닝에 나오면 평소보다 길게 맡긴다 (임시값). AI 감독 배치에는 쓰지 않는다
   if (inning <= 6 && fld.ts.manual && fld.ts.plan?.pen?.[next.idx] === 'LR') fld.pitcher.plan *= LONG_RELIEF_STRETCH;
+}
+
+/**
+ * 고의4구 (AI 감독, 엔진 2 10단계): 1루가 비고 득점권 주자가 있을 때, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 params.mgr.ibb.gap 이상 높으면
+ * 확률로 거른다. 후반(7회~) 접전(2점 차 이내)이 아니면 early 배율, minInning회 전에는 후반 접전이 아니므로 하지 않는다. 걸면 true (임시값)
+ */
+export function wantIntentionalWalk(st: GameState): boolean {
+  const { bases, bat, fld, ctx } = st;
+  const ib = ctx.params.mgr.ibb;
+  if (bases[0] || (!bases[1] && !bases[2]) || st.inning < ib.minInning) return false;
+  const batter = bat.lineup[bat.spot];
+  const next = bat.lineup[(bat.spot + 1) % 9];
+  if (batter.value < bat.medianValue || batter.value - next.value < ib.gap) return false;
+  const late = st.inning >= 7 && Math.abs(fld.runs - bat.runs) <= 2;
+  if (!ctx.rng.chance(ib.rate * ib.outs[st.outs] * (late ? 1 : ib.early))) return false;
+  if (ctx.pen) ctx.pen.ibb++;
+  return true;
+}
+
+/** 전진 수비 (AI 감독, 엔진 2 10단계): 3루 주자, 2아웃 전, 후반에 수비 팀이 동점~maxLead점 앞설 때 (그 점수가 동점·역전이 된다). 걸면 true (임시값) */
+export function wantInfieldIn(st: GameState): boolean {
+  const { bases, bat, fld, ctx } = st;
+  const fi = ctx.params.mgr.infieldIn;
+  const lead = fld.runs - bat.runs;
+  if (!bases[2] || st.outs >= 2 || st.inning < fi.inning || lead < 0 || lead > fi.maxLead || !ctx.rng.chance(fi.rate)) return false;
+  if (ctx.pen) ctx.pen.ifIn++;
+  return true;
+}
+
+/**
+ * 좌우 원포인트 (AI 감독, 엔진 2 10단계): 후반 접전에 우투수가 마운드에 있고 타석의 좌타자(양타 제외)가 팀 중간 이상이면,
+ * 필승조(서열 1·2)·마무리가 아닌 좌완 구원 중 서열이 가장 좋은 투수를 확률로 올린다. 올렸으면 true (임시값)
+ */
+export function maybeOnePoint(fld: Side, bat: Side, inning: number, ctx: GameContext): boolean {
+  const op = ctx.params.mgr.onePoint;
+  const pg = fld.pitcher;
+  const batter = bat.lineup[bat.spot];
+  if (inning < op.inning || Math.abs(fld.runs - bat.runs) > op.maxDiff || pg.p.throws !== 'R' || pg.p === fld.ts.closer
+    || batter.bats !== 'L' || batter.value < bat.medianValue) return false;
+  const ts = fld.ts;
+  const order = bullpenOrder(ts.bullpen.filter((p) => p !== ts.closer), ctx.day, ctx.params.penBlendDays);
+  const pool = availableRelievers(fld, ctx);
+  const lefty = order.slice(ctx.params.mgr.setup).find((p) => p.throws === 'L' && pool.includes(p));
+  if (!lefty || !ctx.rng.chance(op.rate)) return false;
+  bringIn(fld, lefty, fld.runs - bat.runs, ctx);
+  fld.pitcher.onePoint = true;
+  if (ctx.pen) ctx.pen.loogy++;
+  return true;
 }

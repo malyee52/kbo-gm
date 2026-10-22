@@ -143,6 +143,27 @@ export interface SubParams {
   defGain: number;
 }
 
+/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv에 맞춤) */
+export interface Manager2Params {
+  /**
+   * 고의4구: 1루가 비고 득점권 주자, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 gap 이상 높을 때 확률 rate × 아웃별 배율(outs) × (후반 접전이 아니면 early).
+   * minInning 전에는 후반 접전이 아니면 하지 않는다. wildShare: 수동 고의4구 공 하나의 폭투·포일 확률 = 보통 공 하나의 확률 × 이 값
+   */
+  ibb: { rate: number; gap: number; outs: [number, number, number]; early: number; minInning: number; wildShare: number };
+  /**
+   * 전진 수비: 3루 주자, 2아웃 전, inning회 이후 수비 팀 리드가 0~maxLead점일 때 확률 rate. 그 타석 동안 땅볼 아웃의 hit만큼이 내야를 빠진 단타,
+   * 땅볼 아웃 때 3루 주자 득점 확률 × score
+   */
+  infieldIn: { inning: number; maxLead: number; rate: number; hit: number; score: number };
+  /**
+   * 좌우 원포인트: inning회 이후 점수 차 maxDiff 이내, 우투수가 마운드에 있고 좌타자(양타 제외)가 팀 중간 이상일 때, 필승조·마무리가 아닌 좌완 구원으로 확률 rate.
+   * 그 타자를 상대한 뒤 다음 타자가 좌타가 아니면 바꾼다
+   */
+  onePoint: { inning: number; maxDiff: number; rate: number };
+  /** 기용표로 역할을 정하지 않은 불펜에서 필승조로 보는 서열 수 (마무리 빼고) */
+  setup: number;
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -247,6 +268,7 @@ export interface EngineParams {
   bunt: BuntParams;
   /** AI 감독 경기 중 교체 (엔진 2 9단계, subs.ts, 모두 임시값) */
   sub: SubParams;
+  mgr: Manager2Params;
   /** 추가 진루를 시도한 주자가 아웃될 확률. 견제사 등 그 밖의 주루사 몫까지 여기에 담았다 */
   outOnAdvance: number;
   /**
@@ -429,6 +451,12 @@ export const DEFAULT_PARAMS: EngineParams = {
   bunt: { hit: 0.05, leadOut: 0.11, popOut: 0.07, dp: 0.02, squeeze: 0.05, squeezeOut: 0.2, squeezeDp: 0.05,
     pitches: [0.509, 0.301, 0.142, 0.038, 0.01] },
   sub: { phInning: 7, phMaxDiff: 3, phGain: 0.02, prInning: 8, prMaxDiff: 2, prSlow: 0.4, prGap: 0.25, defInning: 7, defGain: 8 },
+  mgr: {
+    ibb: { rate: 0.3, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
+    infieldIn: { inning: 7, maxLead: 1, rate: 0.8, hit: 0.1, score: 0.4 },
+    onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
+    setup: 2,
+  },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
   groundBallShare: 0.52,

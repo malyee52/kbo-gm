@@ -606,7 +606,7 @@ export class GameSession {
   private applyTactics(): void {
     for (const ts of this.season.teamSeasons) {
       const m = managerOf(this.league, ts.team.idx);
-      ts.tactics = m ? tacticsOf(infoOf(this.store, m.name), m.name) : undefined;
+      ts.tactics = m ? tacticsOf(infoOf(this.store, m.name), m.name, this.season.world.year) : undefined;
     }
   }
 
