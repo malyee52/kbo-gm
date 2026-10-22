@@ -267,6 +267,18 @@ export interface DataStore {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 연도별 구단 감독과 감독 경력·운영 경향 (managers.json). 없으면 감독 기능을 쓰지 않는다 */
   managers?: ManagerData;
+  /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 원정 거리 컨디션(엔진 2 12단계)에 쓴다. 없으면 거리를 모른다 */
+  homes?: HomeCity[];
+}
+
+/** 계보의 연고 도시 한 구간 (homes.json). to가 없으면 지금까지. 위·경도는 임시값 (data-src/연고지.csv 출처 열) */
+export interface HomeCity {
+  franchise: string;
+  from: number;
+  to?: number;
+  city: string;
+  lat: number;
+  lon: number;
 }
 
 /** 감독 자료 (tools/build_data.py build_managers, data-src/감독.csv) */

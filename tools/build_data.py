@@ -22,6 +22,8 @@
                                  입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
                                  같은 폴더의 SOURCE.md 참조. 지명받고 그해 입단하지 않은 선수(해외 진출 등)는 실제 입단 해로 옮긴다 (defer_unsigned).
                                  이것만 다시 만들려면: build_data.py --drafts-only
+  data-src/연고지.csv            구단 계보별 연고 도시·위도·경도 (homes.json, 원정 거리 컨디션). 출처 열 참조, 모두 임시값.
+                                 이것만 다시 만들려면: build_data.py --homes-only
   data-src/감독.csv              연도별 구단 감독 실명 (managers.json). 한국어 위키백과 구단별 감독 틀·감독 목록, 2026 보도로 만든 것.
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
@@ -47,6 +49,7 @@ from openpyxl import load_workbook
 ROOT = Path(__file__).resolve().parent.parent
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
+HOMES_CSV = ROOT / 'data-src' / '연고지.csv'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
@@ -404,6 +407,22 @@ def service_unit(career):
             if part.startswith(u):
                 return u
     return None
+
+
+def build_homes():
+    """data-src/연고지.csv → public/data/homes.json: 계보별 연도 구간의 연고 도시와 위·경도 (원정 거리 컨디션, 경기 엔진 2 12단계).
+    끝 연도가 빈 칸이면 지금까지. 거리는 엔진(src/league/distance.ts)이 위·경도로 계산한다 (직선 거리, 임시값)."""
+    rows = []
+    with HOMES_CSV.open(encoding='utf-8-sig') as f:
+        for r in csv.DictReader(f):
+            rows.append({'franchise': r['계보'], 'from': int(r['시작']), **({'to': int(r['끝'])} if r['끝'] else {}),
+                         'city': r['도시'], 'lat': float(r['위도']), 'lon': float(r['경도'])})
+    (OUT / 'homes.json').write_text(json.dumps({
+        'version': 1,
+        'note': '구단 계보별 연고 도시와 위·경도. 출처·확인 상태는 data-src/연고지.csv (모두 임시값).',
+        'homes': rows,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return rows
 
 
 def build_military(profiles, out_dir):
@@ -946,6 +965,10 @@ def main():
         # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
         build_managers(OUT)
         return
+    if '--homes-only' in sys.argv:
+        # 연고지 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        print(f'연고지 {len(build_homes())}행')
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1196,6 +1219,7 @@ def main():
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    build_homes()
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')
