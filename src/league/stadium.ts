@@ -7,6 +7,7 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
+import type { ParkEvents } from '../data/types';
 import { Rng } from '../engine';
 import { realParkAt, realParkOpening } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -39,7 +40,7 @@ export interface StadiumState {
   done?: { kind: 'remodel' | 'new'; open: number; cost: number }[];
   /**
    * 구장 특성 (2026-10-14): 홈런 배율과 돔. 게임 안에서 지은 신구장만 1이 아니다.
-   * 원래 있던 구장은 선수 능력이 그 구장에서 낸 실제 기록에서 나와 구장 효과가 이미 들어 있으므로 1로 둔다 (두 번 세지 않게)
+   * 원래 있던 실제 구장의 효과는 득점 계수(parkRunFactor, meta.parkFactors)로 따로 넣고, 능력 산출이 그만큼 기록에서 걷어 낸다 (2026-10-22)
    */
   hr?: number;
   dome?: boolean;
@@ -78,6 +79,33 @@ export const AI_NEW_BELOW = 35;
 export const AI_NEW_AGE = 25;
 
 /** 경기에 쓰는 구장 특성 (world.ts SimTeam.park) */
+/**
+ * 실제 홈 구장의 득점 계수 (meta.parkFactors, 하드힛 파크팩터 2015~). 1 = 중립.
+ * - 게임 안에서 지은 신구장(done에 'new')은 1: 크기별 홈런 배율(hr)만 쓴다.
+ * - 자료가 있는 해는 그 값. 자료 뒤 해는 같은 실제 구장을 쓰는 동안 자료 마지막 해 값을 이어 쓰고, 실제 새 구장으로 옮겼으면 1 (임시값).
+ * - 2015년 이전은 자료가 없어 1.
+ */
+export function parkRunFactor(parkFactors: Record<string, Record<string, number>> | undefined, franchise: string, year: number,
+                              s: StadiumState | undefined): number {
+  return realParkValue(parkFactors, franchise, year, s) ?? 1;
+}
+
+/** 실제 홈 구장의 사건별 배율 (meta.parkEvents). 없으면 undefined (엔진이 득점 계수를 지수로 나눈다). 자료 뒤 해·신구장 규칙은 parkRunFactor와 같다 */
+export function parkEventFactor(parkEvents: Record<string, Record<string, ParkEvents>> | undefined, franchise: string, year: number,
+                                s: StadiumState | undefined): ParkEvents | undefined {
+  return realParkValue(parkEvents, franchise, year, s);
+}
+
+function realParkValue<T>(table: Record<string, Record<string, T>> | undefined, franchise: string, year: number, s: StadiumState | undefined): T | undefined {
+  if (!table || (s?.done ?? []).some((d) => d.kind === 'new')) return undefined;
+  const known = table[String(year)];
+  if (known) return known[franchise];
+  const last = Math.max(...Object.keys(table).map(Number));
+  if (year < last) return undefined;
+  const moved = (realParkAt(franchise, year)?.from ?? 0) > last;
+  return moved ? undefined : table[String(last)][franchise];
+}
+
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
   return { hr: s?.hr ?? 1, dome: !!s?.dome };
 }

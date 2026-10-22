@@ -37,8 +37,9 @@ describe('수비 포지션·능력치', () => {
   });
 
   it('지명타자도 커리어에 맡은 수비 자리가 있다', () => {
+    // 2026-10-22 하드힛 주 포지션 반영: 하드힛 주 포지션에는 지명타자가 없어 강백호도 수비 자리(포수·1루·우익수 이력)로 잡힌다
     const p = hitter('강백호');
-    expect(p.pos).toBe('DH');
+    expect(p.pos).not.toBe('DH');
     expect(defenseGrade(defenseAt(p, '1B'))).toBeGreaterThanOrEqual(40);
   });
 

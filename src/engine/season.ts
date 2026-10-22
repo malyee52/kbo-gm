@@ -7,9 +7,11 @@ import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, 
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
-import type { EngineParams } from './params';
+import { chainShapeFor, type EngineParams } from './params';
+import { chainResolver, type PaResolver } from './resolver';
+import { managerNorms } from './manager';
 import { Rng } from './rng';
-import { newPlayerStates, refreshActive, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -130,6 +132,8 @@ export interface BoxPitcher {
   bb: number;
   so: number;
   hr: number;
+  /** 투구 수 (엔진 2) */
+  np: number;
 }
 
 export interface BoxSide {
@@ -171,7 +175,8 @@ interface FixedAbsence {
 export interface SeasonSave {
   /** 수비수별 실책 (예전 저장에는 없다) */
   errors?: number[];
-  format: 1;
+  /** 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1(엔진 1)은 불러오지 않는다 */
+  format: 2;
   seed: string;
   year: number;
   /** 월드의 선수 구성 지문. 데이터가 바뀌면 선수 색인이 어긋나므로 불러오기를 막는다 */
@@ -179,7 +184,6 @@ export interface SeasonSave {
   cal: Rates;
   day: number;
   rngDays: number;
-  rngGames: number;
   absentUntil: number[];
   fatigue: number[];
   fatigueDay: number[];
@@ -208,6 +212,8 @@ export interface SeasonSave {
   rngEvents?: number;
   /** 구단별 기용표 (선수 색인) */
   plans?: (DepthPlan | null)[];
+  /** 엔트리 순환 대상 부진 투수: [순환 주기, 선수 색인들]. 2026-10-21 추가, 예전 저장에는 없다 (불러온 날 기록으로 다시 정한다) */
+  slump?: [number, number[]];
 }
 
 /** 월드의 선수 구성 지문 (FNV-1a) */
@@ -224,6 +230,8 @@ export function rosterFingerprint(world: World): string {
 export interface SeasonInit {
   /** 박스스코어를 남길 팀 색인 (보통 플레이어 구단). 기본은 남기지 않음 */
   boxTeams?: number[];
+  /** 타석 해결기. 기본은 볼카운트 사슬 B1 (params.chainShape) */
+  resolver?: PaResolver;
 }
 
 export class Season {
@@ -252,6 +260,8 @@ export class Season {
   commander: GameCommand | null = null;
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
+  /** 정규시즌 경기 난수의 뿌리. 경기마다 여기서 따로 줄기를 갈라 쓴다 (gameRng) */
+  private readonly gamesRoot: Rng;
   /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
   private eventRng: Rng;
   private ctx: GameContext;
@@ -265,6 +275,9 @@ export class Season {
   readonly activeDays: Int32Array;
   /** 직접 관리 1군에서 마지막으로 말소된 날 (−1 = 없음) */
   readonly demotedDay: Int32Array;
+  /** 엔트리 순환 대상인 부진한 투수: 순환 주기(slumpCycle)가 시작할 때 기록으로 정해 그 주기 동안 그대로 쓴다 (저장에 넣는다) */
+  private slump: Uint8Array | null = null;
+  private slumpCycle = -1;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
   constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
@@ -289,11 +302,13 @@ export class Season {
     this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
     this.dayRng = rng.fork('days');
     this.eventRng = rng.fork('events');
+    this.gamesRoot = rng.fork('games');
     this.ctx = {
-      league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: rng.fork('games'),
+      league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors,
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)),
     };
+    this.ctx.planNorms = managerNorms(world.players, this.ctx);
 
     // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다
     for (const p of world.players) if (p.startAbsent && p.startAbsent > 0) this.states.absentUntil[p.idx] = p.startAbsent;
@@ -375,10 +390,22 @@ export class Season {
     this.transfers.push([this.day, playerIdx, toTeam]);
   }
 
+  /** 그날 순환 주기의 부진한 투수 (EngineParams.churnSlump이 없으면 null = 모든 국내 투수가 순환 대상) */
+  private slumpOn(day: number): Uint8Array | null {
+    const rule = this.params.churnSlump;
+    if (!rule || !(this.params.rosterChurn ?? 0)) return null;
+    const cycle = Math.floor(day / CHURN_DAYS);
+    if (cycle !== this.slumpCycle || !this.slump) {
+      this.slump = slumpingPitchers(this.world, this.pit, rule);
+      this.slumpCycle = cycle;
+    }
+    return this.slump;
+  }
+
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
   refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     return ts;
   }
 
@@ -413,7 +440,15 @@ export class Season {
         }
       }
     }
-    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0);
+    // 방위병이 있는 구단은 홈·원정이 바뀌는 날 엔트리를 다시 짠다 (없는 구단은 away 값만 바뀌고 결과는 같다)
+    for (const g of games) {
+      for (const [t, away] of [[g.home, false], [g.away, true]] as const) {
+        const ts = season[t];
+        if (ts.away !== away && ts.team.org.some((p) => p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day)) ts.dirty = true;
+        ts.away = away;
+      }
+    }
+    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
     for (const g of games) {
       for (const ts of [season[g.home], season[g.away]]) {
         for (const p of ts.hitters) this.activeDays[p.idx]++;
@@ -433,6 +468,7 @@ export class Season {
       const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
+      ctx.rng = this.gameRng(day, g);
       const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
       const plays = ctx.plays;
       ctx.plays = null;
@@ -468,7 +504,7 @@ export class Season {
           const was = pitBefore.get(idx)!;
           return {
             idx, outs: now.outs - was.outs, bf: now.bf - was.bf, h: now.h - was.h, r: now.r - was.r, er: now.er - was.er,
-            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr,
+            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np,
           };
         });
         if (plays) {
@@ -483,6 +519,14 @@ export class Season {
       }
     }
     this.day++;
+  }
+
+  /**
+   * 정규시즌 경기 하나의 난수 줄기 (docs/경기엔진2_기획안.md 3.7.1). 날짜와 대진으로만 정해지므로
+   * 한 경기의 난수 소비가 그날 다른 경기나 다음 날 경기에 영향을 주지 않고, 저장에 경기 난수 위치가 필요 없다
+   */
+  gameRng(day: number, g: ScheduledGame): Rng {
+    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}`);
   }
 
   /** 그 선수를 until 전날까지 쉬게 한다 (무작위 이벤트의 휴식 처방). 부상 기록에는 남기지 않는다 */
@@ -524,8 +568,10 @@ export class Season {
     const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
-    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
-    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0);
+    h.away = false;
+    a.away = true;
+    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
+    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const hl = todaysLineup(h, this.world.league, params, rng);
     const al = todaysLineup(a, this.world.league, params, rng);
     const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
@@ -579,14 +625,13 @@ export class Season {
   toSave(): SeasonSave {
     const st = this.states;
     return {
-      format: 1,
+      format: 2,
       seed: this.seed,
       year: this.world.year,
       roster: this.baseRoster,
       cal: { ...this.cal },
       day: this.day,
       rngDays: this.dayRng.state(),
-      rngGames: this.ctx.rng.state(),
       absentUntil: Array.from(st.absentUntil),
       fatigue: Array.from(st.fatigue),
       fatigueDay: Array.from(st.fatigueDay),
@@ -608,12 +653,14 @@ export class Season {
       absences: this.absences.map((a) => ({ ...a })),
       rngEvents: this.eventRng.state(),
       plans: this.teamSeasons.map((ts) => (ts.plan ? structuredClone(ts.plan) : null)),
+      ...(this.slump ? { slump: [this.slumpCycle, [...this.slump.keys()].filter((i) => this.slump![i])] as [number, number[]] } : {}),
     };
   }
 
   /** 저장한 위치에서 시즌을 다시 연다. world는 저장할 때와 같은 데이터·연도로 만든 것이어야 한다 */
   static restore(world: World, params: EngineParams, save: SeasonSave): Season {
-    if (save.format !== 1) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
+    if ((save.format as number) === 1) throw new Error('엔진 2 이전 저장이라 쓸 수 없습니다 (경기 엔진이 바뀌어 이어 할 수 없음)');
+    if (save.format !== 2) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
     if (save.year !== world.year) throw new Error(`저장한 연도(${save.year})와 월드 연도(${world.year})가 다릅니다`);
     if (save.roster !== rosterFingerprint(world)) {
       throw new Error('게임 데이터가 저장할 때와 달라 이 저장을 이어갈 수 없습니다 (선수 구성이 바뀜)');
@@ -628,7 +675,6 @@ export class Season {
     s.dayRng = Rng.fromState(root.fork('days').seed, save.rngDays);
     if (save.rngEvents !== undefined) s.eventRng = Rng.fromState(root.fork('events').seed, save.rngEvents);
     s.absences.push(...(save.absences ?? []).map((a) => ({ ...a })));
-    s.ctx.rng = Rng.fromState(root.fork('games').seed, save.rngGames);
     if (save.activeDays) s.activeDays.set(save.activeDays);
     if (save.demotedDay) s.demotedDay.set(save.demotedDay);
     s.states.absentUntil.set(save.absentUntil);
@@ -646,6 +692,11 @@ export class Season {
     save.manual.forEach((m, i) => { s.teamSeasons[i].manual = m ? new Set(m) : null; });
     (save.plans ?? []).forEach((pl, i) => { s.teamSeasons[i].plan = pl ? structuredClone(pl) : null; });
     s.fixedAbsence = new Map(save.fixedAbsence);
+    if (save.slump) {
+      s.slump = new Uint8Array(world.players.length);
+      for (const i of save.slump[1]) if (i < s.slump.length) s.slump[i] = 1;
+      s.slumpCycle = save.slump[0];
+    }
     return s;
   }
 }

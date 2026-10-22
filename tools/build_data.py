@@ -26,9 +26,17 @@
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
                                  이것만 다시 만들려면: build_data.py --managers-only
+  data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
+                                 원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
+                                 bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다
+                                 자료집 값과 다르면 하드힛 값을 쓴다 (2026-10-22 사용자 결정, 모든 하드힛 가공값에 같은 규칙)
+                                 pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
+                                 park.csv: 구단·연도별 홈 구장 계수 (meta.json의 parkFactors, park_factors 참조)
+                                 park_components.csv: 구장별 구성 지수 → 사건별 구장 배율 (meta.json의 parkEvents, park_events 참조)
 """
 import csv
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -43,6 +51,8 @@ FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
+HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
+HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
@@ -233,9 +243,11 @@ POS = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격
        '마무리투수': 'CL', '투수': 'P'}
 HAND = {'우': 'R', '좌': 'L', '양': 'S'}
 
-BAT_FIELDS = ['id', 'team', 'pos', 'g', 'pa', 'ab', 'r', 'h', 'd', 't', 'hr', 'rbi', 'sb', 'cs', 'bb', 'hbp', 'so', 'gdp', 'sf', 'sac']
+# posSrc: 포지션 출처. 'H' 하드힛 확인값, 'E' 하드힛 해의 추정값(2009·파일 없는 타자), null 자료집 그대로 (fill_positions)
+BAT_FIELDS = ['id', 'team', 'pos', 'g', 'pa', 'ab', 'r', 'h', 'd', 't', 'hr', 'rbi', 'sb', 'cs', 'bb', 'hbp', 'so', 'gdp', 'sf', 'sac', 'posSrc']
 BAT_COLS = ['선수ID', '팀', '포지션(보조)', 'G', 'PA', 'AB', 'R', 'H', '2B', '3B', 'HR', 'RBI', 'SB', 'CS', 'BB', 'HBP', 'SO', 'GDP', 'SF', 'SAC']
-PIT_FIELDS = ['id', 'team', 'role', 'g', 'gs', 'w', 'l', 'sv', 'hld', 'outs', 'tbf', 'h', 'hr', 'bb', 'hbp', 'so', 'r', 'er']
+# gmli: 하드힛 투수 situation의 등판 때 평균 레버리지 (2010~, 없으면 null). 시작 불펜 서열에 쓴다 (2026-10-22)
+PIT_FIELDS = ['id', 'team', 'role', 'g', 'gs', 'w', 'l', 'sv', 'hld', 'outs', 'tbf', 'h', 'hr', 'bb', 'hbp', 'so', 'r', 'er', 'gmli']
 PIT_COLS = ['선수ID', '팀', '역할(보조)', 'G', 'GS(보조)', 'W', 'L', 'SV', 'HLD', '아웃카운트', 'TBF', 'H', 'HR', 'BB', 'HBP', 'SO', 'R', 'ER']
 
 
@@ -296,7 +308,9 @@ def rules_for(year):
     return {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
-        'maxInnings': 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
+        # 2008 정규시즌은 무제한 연장(끝장승부)·무승부 없음 → 0 = 무제한 (사용자 확인 2026-10-22. 자료집 엑셀 '제도연표'는 openpyxl 저장 때
+        # 서식이 깨질 수 있어 고치지 않았다). 다른 해의 연장 연표(1982~2002 15회 등)는 경기 엔진 2 14단계에서 고친다
+        'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
 
@@ -454,6 +468,467 @@ def build_military(profiles, out_dir):
         print(f'  병역_면제명단.csv 연결 못 함: {u}')
 
 
+def hardhit_csv(name):
+    path = HARDHIT / name
+    if not path.exists():
+        return []
+    with path.open(encoding='utf-8', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def fill_running(bat):
+    """하드힛 도루·도루실패·병살타로 자료집의 빈 값을 채운다. 값이 이미 있는데 다르면 하드힛 값으로 바꾼다
+    (2026-10-22 사용자 결정: 같은 값이 서로 다르면 하드힛 값을 쓴다).
+    → 보고서 줄 목록"""
+    hh = {(int(r['연도']), r['선수ID']): r for r in hardhit_csv('bat_running.csv')}
+    if not hh:
+        return []
+    cols = (('sb', '도루'), ('cs', '도루실패'), ('gdp', '병살타'))
+    idx = {f: BAT_FIELDS.index(f) for f, _ in cols}
+    filled, differ, same = defaultdict(int), defaultdict(int), defaultdict(int)
+    filled_y = defaultdict(lambda: defaultdict(int))
+    examples = defaultdict(list)
+    for y, rows_ in bat.items():
+        for row in rows_:
+            h = hh.get((y, row[0]))
+            if not h:
+                continue
+            for f, k in cols:
+                if h[k] == '':
+                    continue
+                v = int(h[k])
+                cur = row[idx[f]]
+                if cur is None:
+                    row[idx[f]] = v
+                    filled[f] += 1
+                    filled_y[y][f] += 1
+                elif cur != v:
+                    row[idx[f]] = v
+                    differ[f] += 1
+                    if len(examples[f]) < 20:
+                        examples[f].append(f'{y} {row[0]} 자료집 {cur} / 하드힛 {v}')
+                else:
+                    same[f] += 1
+    out = ['## 타자 도루·도루실패·병살타 (bat_running.csv)', '',
+           '빈 값은 하드힛 값으로 채우고, 값이 있는데 다르면 하드힛 값으로 바꾼다 (2026-10-22 사용자 결정).', '',
+           '| 항목 | 채움 | 같음 | 하드힛 값으로 바꿈 |', '|---|---:|---:|---:|']
+    out += [f'| {k} | {filled[f]} | {same[f]} | {differ[f]} |' for f, k in cols]
+    out += ['', '연도별 채움 (도루 / 도루실패 / 병살타):', '']
+    out += [f'- {y}: {d["sb"]} / {d["cs"]} / {d["gdp"]}' for y, d in sorted(filled_y.items())]
+    for f, k in cols:
+        if examples[f]:
+            out += ['', f'{k} 하드힛 값으로 바꾼 것 (연도 선수ID):', ''] + [f'- {e}' for e in examples[f]]
+    print(f'하드힛 채움: 도루 {filled["sb"]}, 도루실패 {filled["cs"]}, 병살타 {filled["gdp"]} / 하드힛 값으로 바꿈 {dict(differ)}')
+    return out
+
+
+FIELD_POS = ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF')
+
+
+def pos_2009(row_pos, hh_pos):
+    """2009년 타자 주 포지션 (하드힛 2009년 파일 없음). 2026-10-22 사용자 결정 (나):
+    자료집 시즌 행에 세부 포지션이 있으면 그 값, 없으면(빈 값·내야수·외야수) 하드힛 2008·2010 중 있는 해
+    (둘 다 있고 다르면 2008), 둘 다 없으면 하드힛에 나온 가장 가까운 해(같은 거리면 앞 해).
+    hh_pos: 그 선수의 {연도: 하드힛 주 포지션}. → (포지션, 출처) 출처는 '자료집' / '빌림' / None(정할 수 없음)"""
+    if row_pos in FIELD_POS or row_pos == 'DH':
+        return row_pos, '자료집'
+    near = [y for y in (2008, 2010) if y in hh_pos]
+    if near:
+        return hh_pos[near[0]], '빌림'
+    if hh_pos:
+        y = min(hh_pos, key=lambda k: (abs(k - 2009), k))
+        return hh_pos[y], '빌림'
+    return None, None
+
+
+def fill_positions(bat, kind_of):
+    """하드힛 그 시즌 주 포지션(position.csv, 2003~)으로 타자 시즌 행의 포지션을 채우고 바로잡는다 (2026-10-22 사용자 결정).
+    - 하드힛에 나온 선수-시즌: 하드힛 값 (자료집 값이 다르면 하드힛 값으로 바꾼다). 한 해 여러 구단 행은 모두 같은 값.
+    - 하드힛 해인데 어느 포지션 파일에도 없는 타자 [B]: 직전 시즌 하드힛 주 포지션 → 그 앞 가장 가까운 시즌
+      → (앞 시즌이 없으면) 뒤의 가장 가까운 시즌 → 하드힛 전체에 없으면 DH. 타석 0인 행은 DH 대신 자료집 값을 둔다.
+    - 2009년(하드힛 파일 없음): pos_2009.
+    posSrc 열: 'H' 하드힛 확인값, 'E' 추정값(2009, [B]), None 자료집 그대로(2002년 이전 등). 엔진은 'H'만 규정타석 판정에 쓴다.
+    → (보고서 줄 목록, 빈 포지션 선수 목록용 정보)"""
+    hh = {}
+    by_player = defaultdict(dict)
+    for r in hardhit_csv('position.csv'):
+        y, pid = int(r['연도']), r['선수ID']
+        hh[(y, pid)] = r['주 포지션']
+        by_player[pid][y] = r['주 포지션']
+    if not hh:
+        return [], []
+    hh_years = sorted({y for y, _ in hh})
+    span = range(hh_years[0], hh_years[-1] + 1)
+    pi, si, ai = BAT_FIELDS.index('pos'), BAT_FIELDS.index('posSrc'), BAT_FIELDS.index('pa')
+    stat = defaultdict(lambda: defaultdict(int))
+    examples = []
+    unresolved = []  # (사유, 연도, 선수ID) — 하드힛 해인데 하드힛 포지션을 끝내 얻지 못한 선수-시즌
+    for y in span:
+        pa_of = defaultdict(int)
+        for row in bat.get(y, []):
+            pa_of[row[0]] += row[ai] or 0
+        for row in bat.get(y, []):
+            pid, cur = row[0], row[pi]
+            if kind_of.get(pid) == 'P':
+                continue
+            S = stat[y]
+            if y not in hh_years:
+                v, how = pos_2009(cur, by_player.get(pid, {}))
+                if how == '자료집':
+                    S['2009 자료집'] += 1
+                elif how == '빌림':
+                    S['2009 빌림'] += 1
+                    row[pi], row[si] = v, 'E'
+                else:
+                    S['2009 못 정함'] += 1
+                    unresolved.append(('2009 자료 없음, 다른 시즌 확인 불가', y, pid))
+                if how == '자료집':
+                    row[si] = 'E'
+                continue
+            v = hh.get((y, pid))
+            if v:
+                if cur is None or cur in ('IF', 'OF'):
+                    S['채움'] += 1
+                elif cur != v:
+                    S['바꿈'] += 1
+                    if len(examples) < 40:
+                        examples.append(f'{y} {pid} 자료집 {cur} → 하드힛 {v}')
+                else:
+                    S['같음'] += 1
+                row[pi], row[si] = v, 'H'
+                continue
+            # [B] 어느 포지션 파일에도 없는 타자
+            seen = by_player.get(pid, {})
+            before = [k for k in seen if k < y]
+            after = [k for k in seen if k > y]
+            if before:
+                v = seen[max(before)]
+            elif after:
+                v = seen[min(after)]
+            elif pa_of[pid] > 0:
+                v = 'DH'
+                unresolved.append(('하드힛 전 시즌 포지션 없음', y, pid))
+            else:
+                S['[B] 타석 0 그대로'] += 1
+                continue
+            S['[B] DH' if v == 'DH' else '[B] 다른 해에서'] += 1
+            row[pi], row[si] = v, 'E'
+    keys = ['채움', '바꿈', '같음', '[B] 다른 해에서', '[B] DH', '[B] 타석 0 그대로', '2009 자료집', '2009 빌림', '2009 못 정함']
+    tot = {k: sum(stat[y][k] for y in stat) for k in keys}
+    print('하드힛 주 포지션: ' + ', '.join(f'{k} {tot[k]}' for k in keys if tot[k]))
+    out = ['', '## 타자 주 포지션 (position.csv)', '',
+           '하드힛 그 시즌 주 포지션으로 채우고, 자료집 값이 다르면 하드힛 값으로 바꾼다 (2026-10-22 사용자 결정). 단위: 타자 시즌 행 (한 해 여러 구단이면 행마다).',
+           '- 채움: 자료집이 빈 값이거나 내야수·외야수뿐이던 행. 바꿈: 세부 포지션이 하드힛과 달라 바꾼 행.',
+           '- [B]: 하드힛 해인데 어느 포지션 파일에도 없는 타자 (지명타자 후보). 직전 시즌 → 앞의 가장 가까운 시즌 → 뒤의 가장 가까운 시즌의 하드힛 주 포지션, 하드힛 전체에 없으면 DH.',
+           '- 2009년 (하드힛 파일 없음, 사용자 결정 (나)): 자료집 세부 포지션이 있으면 그 값, 없으면 2008·2010 하드힛(다르면 2008), 그것도 없으면 가장 가까운 해. 2009년 값은 규정타석 판정에 쓰지 않는다.', '',
+           '| 연도 | ' + ' | '.join(keys) + ' |', '|---|' + '---:|' * len(keys)]
+    out += [f'| {y} | ' + ' | '.join(str(stat[y][k]) for k in keys) + ' |' for y in sorted(stat)]
+    out += [f'| 합계 | ' + ' | '.join(str(tot[k]) for k in keys) + ' |']
+    if examples:
+        out += ['', '바꾼 예 (앞 40건):', ''] + [f'- {e}' for e in examples]
+    return out, unresolved
+
+
+NO_POSITION_XLSX = ROOT / 'reports' / 'hardhit-no-position.xlsx'
+KO_POS = {'C': '포수', '1B': '1루수', '2B': '2루수', '3B': '3루수', 'SS': '유격수', 'LF': '좌익수', 'CF': '중견수', 'RF': '우익수',
+          'DH': '지명타자', 'IF': '내야수', 'OF': '외야수'}
+
+
+def write_no_position(unresolved, bat, players):
+    """하드힛 해(2003~)에 타석이 있는데 하드힛 주 포지션을 끝내 얻지 못한 타자 목록 → reports/hardhit-no-position.xlsx.
+    한 선수가 두 사유에 다 걸리면 사유마다 한 줄. 타석 합 많은 순"""
+    if not unresolved:
+        return
+    from datetime import date
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    pmap = {p['id']: p for p in players}
+    pi, si, ai, ti = (BAT_FIELDS.index(k) for k in ('pos', 'posSrc', 'pa', 'team'))
+    reasons = defaultdict(set)
+    for why, _, pid in unresolved:
+        reasons[pid].add(why)
+    out = []
+    for pid, whys in reasons.items():
+        seasons = defaultdict(lambda: [0, [], defaultdict(int)])  # 연도 → 타석, 팀, 포지션별 타석
+        for y in range(2003, max(bat) + 1):
+            for row in bat.get(y, []):
+                if row[0] == pid and (row[ai] or 0) > 0:
+                    s = seasons[y]
+                    s[0] += row[ai]
+                    s[1].append(row[ti])
+                    s[2][row[pi]] += row[ai]
+        pos_pa = defaultdict(int)
+        for s in seasons.values():
+            for q, v in s[2].items():
+                pos_pa[q] += v
+        game_pos = max(pos_pa.items(), key=lambda kv: kv[1])[0] if pos_pa else None
+        m = pmap.get(pid, {})
+        for why in sorted(whys):
+            out.append([pid, m.get('name', ''), '실존' if m.get('real', True) else '가상',
+                        ', '.join(str(y) for y in sorted(seasons)),
+                        ', '.join(f'{y} {"/".join(dict.fromkeys(seasons[y][1]))}' for y in sorted(seasons)),
+                        sum(s[0] for s in seasons.values()),
+                        KO_POS.get(m.get('pos'), m.get('pos') or ''), KO_POS.get(game_pos, game_pos or ''), why])
+    out.sort(key=lambda r: (-r[5], r[0]))
+    wb = Workbook()
+    ws = wb.active
+    ws.title = '포지션 없음'
+    ws.append([f'만든 날짜 {date.today().isoformat()} · python tools/build_data.py가 다시 만든다'])
+    ws.append(['기준: 하드힛 포지션 자료가 있는 해(2003~2026, 2009년 파일 없음)에 타석이 있는데 하드힛 주 포지션을 얻지 못한 타자. '
+               '"하드힛 전 시즌 포지션 없음" = 어느 해 포지션 파일에도 없어 지명타자로 둠, '
+               '"2009 자료 없음, 다른 시즌 확인 불가" = 2009년 자료집에 세부 포지션이 없고 다른 해 하드힛에도 없음. '
+               '게임 주 포지션은 하드힛 해 시즌 행에서 타석이 가장 많은 포지션 (시작 연도마다 엔진이 직전 시즌으로 다시 고른다).'])
+    ws['A1'].font = Font(bold=True)
+    ws.append([])
+    head = ['선수ID', '이름', '실존 여부', '하드힛 타석 있는 해', '그 해들의 팀', '타석 합', '선수마스터 포지션', '게임 주 포지션', '사유']
+    ws.append(head)
+    for c in ws[4]:
+        c.font = Font(bold=True)
+    for r in out:
+        ws.append(r)
+    for col, w in zip('ABCDEFGHI', (9, 10, 8, 22, 34, 8, 14, 12, 34)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = 'A5'
+    NO_POSITION_XLSX.parent.mkdir(exist_ok=True)
+    wb.save(NO_POSITION_XLSX)
+    cnt = defaultdict(int)
+    for r in out:
+        cnt[r[8]] += 1
+    print(f'포지션 없음 목록: {len(out)}줄 ({", ".join(f"{k} {v}" for k, v in cnt.items())}) → {NO_POSITION_XLSX.name}')
+
+
+def fill_gmli(pit):
+    """하드힛 투수 situation의 gmLI(등판 때 평균 레버리지, 2010~)를 시즌 투수 행의 gmli에 넣는다. 자료집에는 없는 값이다.
+    시즌 중 이적한 투수는 하드힛 값이 시즌 합계 하나라 그 해 모든 행에 같은 값을 넣는다. → 보고서 줄 목록"""
+    gi = PIT_FIELDS.index('gmli')
+    hh = {}
+    for r in hardhit_csv('clutch_pit.csv'):
+        if r['gmLI'] != '' and float(r['gmLI']) > 0:
+            hh[(int(r['연도']), r['선수ID'])] = round(float(r['gmLI']), 2)
+    if not hh:
+        return []
+    filled = defaultdict(int)
+    for y, rows_ in pit.items():
+        for row in rows_:
+            v = hh.get((y, row[0]))
+            if v is not None:
+                row[gi] = v
+                filled[y] += 1
+    print(f'하드힛 gmLI: {sum(filled.values())}행')
+    return ['## 투수 gmLI (clutch_pit.csv)', '', '등판 때 평균 레버리지. 자료집에 없는 값이라 넣기만 한다 (0인 행은 값 없음으로 본다).', '',
+            ', '.join(f'{y}: {c}' for y, c in sorted(filled.items())), '']
+
+
+# 선발 등판 추정 (src/engine/params.ts estimatedStarts와 같은 식): 경기당 아웃이 구원 3.5 ~ 선발 14 사이 어디인가
+GS_EST_RELIEF_OUTS, GS_EST_START_OUTS = 3.5, 14
+
+
+def fill_pitch_roles(pit):
+    """자료집에 보직(role)·선발 등판(gs)이 빈 투수 행을 하드힛 투수 classic(pit_classic.csv)으로 채운다 (2026년은 296명이 비어 있다).
+    하드힛 classic에는 선발 등판 열이 없어 gs는 경기당 아웃 추정에 퀄리티 스타트를 하한으로 둔 값이다 (2015~2025 자료집 gs와 견준 오차 투수당 약 0.5번).
+    하드힛 보직 라벨은 "선발"만 쓴다 (마무리·셋업 라벨은 해마다 1~16명뿐이라 안 쓴다, 기획안 1.3).
+    role: 라벨 선발이거나 추정 선발 비율 0.5 이상이면 SP, 아니고 세이브 10개 이상이면 CL, 나머지 RP. 값이 있는 행은 건드리지 않는다.
+    선발 등판 자료가 통째로 빠진 해만 채운다 (추정값이 실제 기록 사이에 섞이지 않게). → 보고서 줄 목록"""
+    hh = {(int(r['연도']), r['선수ID']): r for r in hardhit_csv('pit_classic.csv')}
+    if not hh:
+        return []
+    ix = {f: i for i, f in enumerate(PIT_FIELDS)}
+    filled = defaultdict(lambda: [0, 0])
+    for y, rows_ in pit.items():
+        # 선발 등판 자료가 통째로 빠진 해(자료집 보조 열이 없는 2026 스냅샷)만 채운다. 다른 해의 빈 칸은 엔진이 경기 때 같은 식으로 추정한다
+        if sum(r[ix['gs']] is None for r in rows_) < 0.9 * len(rows_):
+            continue
+        for row in rows_:
+            h = hh.get((y, row[0]))
+            if not h or (row[ix['role']] is not None and row[ix['gs']] is not None):
+                continue
+            g, outs = row[ix['g']] or 0, row[ix['outs']] or 0
+            share = 0 if g <= 0 else min(1, max(0, (outs / g - GS_EST_RELIEF_OUTS) / (GS_EST_START_OUTS - GS_EST_RELIEF_OUTS)))
+            qs = int(h['퀄스'] or 0)
+            gs = min(g, max(qs, round(g * share)))
+            if row[ix['gs']] is None:
+                row[ix['gs']] = gs
+                filled[y][1] += 1
+            if row[ix['role']] is None:
+                row[ix['role']] = 'SP' if h['보직'] == '선발' or share >= 0.5 else 'CL' if (row[ix['sv']] or 0) >= 10 else 'RP'
+                filled[y][0] += 1
+    print(f'하드힛 보직·선발 채움: {sum(v[0] for v in filled.values())}행 / {sum(v[1] for v in filled.values())}행')
+    return ['## 투수 보직·선발 등판 (pit_classic.csv)', '',
+            '선발 등판 자료가 통째로 빠진 해(2026 스냅샷)의 빈 보직·선발 등판만 채운다. 선발 등판은 **추정값**, 경기당 아웃 추정에 퀄리티 스타트를 하한으로 둔 값 (하드힛에 선발 등판 열이 없다).', '',
+            '연도별 채움 (보직 / 선발 등판):', ''] + [f'- {y}: {a} / {b}' for y, (a, b) in sorted(filled.items())] + ['']
+
+
+def fill_hands(players):
+    """하드힛 투구손(좌/우/좌언/우언)으로 선수 마스터의 빈 throws·underhand를 채운다. 이미 있는데 다르면 하드힛 값으로 바꾼다.
+    → 보고서 줄 목록"""
+    seen = defaultdict(lambda: defaultdict(int))
+    for r in hardhit_csv('pitch_hand.csv'):
+        seen[r['선수ID']][(r['손'], r['언더'] == '1')] += 1
+    if not seen:
+        return []
+    pmap = {p['id']: p for p in players}
+    filled, same, varies = 0, 0, 0
+    differ = []
+    for pid, cnt in seen.items():
+        p = pmap.get(pid)
+        if not p:
+            continue
+        varies += len(cnt) > 1
+        th, under = max(cnt.items(), key=lambda kv: kv[1])[0]
+        if p.get('throws') is None:
+            p['throws'] = th
+            if under:
+                p['underhand'] = True
+            filled += 1
+        elif p['throws'] != th or bool(p.get('underhand')) != under:
+            differ.append(f'{p["name"]}({pid}) 자료집 {p["throws"]}{" 언더" if p.get("underhand") else ""} / 하드힛 {th}{" 언더" if under else ""}')
+            p['throws'] = th
+            if under:
+                p['underhand'] = True
+            else:
+                p.pop('underhand', None)
+        else:
+            same += 1
+    print(f'하드힛 투구손: 채움 {filled}, 같음 {same}, 하드힛 값으로 바꿈 {len(differ)}, 해마다 갈림 {varies}')
+    return ['', '## 투수 투구손 (pitch_hand.csv)', '',
+            f'하드힛 투수 {len(seen)}명: 빈 투타 채움 {filled}명, 같음 {same}명, 하드힛 값으로 바꿈 {len(differ)}명, 해마다 손 구분이 갈린 선수 {varies}명.', ''] + [f'- {d}' for d in differ]
+
+
+def park_factors(teams):
+    """하드힛 파크팩터(선수 행의 타석 가중 평균, 홈 경기 절반만 반영한 시즌 단위 값) → 연도 → 계보 → 홈 구장 득점 계수.
+
+    홈 구장 계수 = (2 × 파크팩터 − 100) / 100 (원정 경기는 리그 평균 구장으로 본다). 해마다 구단 평균이 1이 되게 나눈다.
+    자료가 빠진 해는 앞뒤 해의 평균, 한쪽만 있으면 그 값 (임시값). 지금은 빠진 해가 없다
+    (2022는 원본 파일이 2020 자료라 한때 앞뒤 해 평균을 썼고, 2026-10-22 다시 받은 파일로 실제 값이 되었다).
+    2015년 이전은 자료가 없어 넣지 않는다 (엔진에서 1 = 중립)."""
+    raw = {(int(r['연도']), r['계보']): float(r['파크팩터']) for r in hardhit_csv('park.csv')}
+    if not raw:
+        return {}, []
+    first = min(y for y, _ in raw)
+    out, filled = {}, []
+    for y in sorted(teams):
+        if y < first:
+            continue
+        year = {}
+        for t in teams[y]:
+            fr = t['franchise']
+            if (y, fr) in raw:
+                pf = raw[(y, fr)]
+            else:
+                near = [raw[(y + d, fr)] for d in (-1, 1) if (y + d, fr) in raw]
+                if not near:
+                    continue
+                pf = sum(near) / len(near)
+                filled.append(f'{y} {fr}')
+            year[fr] = (2 * pf - 100) / 100
+        mean = sum(year.values()) / len(year)
+        out[str(y)] = {fr: round(v / mean, 3) for fr, v in year.items()}
+    print(f'하드힛 파크팩터: {len(out)}개 연도, 앞뒤 해로 채움 {len(filled)}건')
+    lines = ['', '## 홈 구장 계수 (park.csv → meta.json parkFactors)', '',
+             '홈 구장 계수 = (2 × 파크팩터 − 100) / 100, 해마다 구단 평균 1로 나눔. 앞뒤 해 평균으로 채운 것(임시값): ' + (', '.join(filled) or '없음'), '',
+             '| 연도 | ' + ' | '.join(sorted(next(iter(out.values())))) + ' |', '|---|' + '---:|' * len(next(iter(out.values())))]
+    for y, v in out.items():
+        lines.append(f'| {y} | ' + ' | '.join(f'{v.get(fr, 1):.3f}' for fr in sorted(next(iter(out.values())))) + ' |')
+    return out, lines
+
+
+# 구장 표의 구장 → (계보들, 그 구장이 홈이 된 해). 개장 해는 src/league/ballparks.ts와 같다.
+# 포항(삼성)·울산(롯데)은 제2구장이라 엔진에 없어 쓰지 않는다 (몇 경기씩만 열린다)
+PARK_STADIUMS = {'대구': (['삼성'], 2016), '인천': (['SSG'], 2002), '부산': (['롯데'], 1986), '대전': (['한화'], 2025),
+                 '수원': (['KT'], 2014), '창원': (['NC'], 2019), '광주': (['KIA'], 2014), '잠실': (['LG', '두산'], 1985),
+                 '고척': (['히어로즈'], 2016)}
+# 구성 지수를 100 쪽으로 당기는 정도: 로그 지수 × 경기 / (경기 + PARK_SHRINK_GAMES). 288경기(4시즌) 구장 0.67, 대전 73경기 0.34 (임시값)
+PARK_SHRINK_GAMES = 144
+# 좌타·우타 표를 전체 표 쪽으로 당기는 정도: (좌우 log 지수 − 전체 log 지수) × 반 경기 / (반 경기 + PARK_SIDE_SHRINK_GAMES) (임시값.
+# 좌우 표는 표본이 전체의 절반쯤이다. 288경기 구장 0.5, 대전 0.2)
+PARK_SIDE_SHRINK_GAMES = 144
+# 사건별 득점 가치: 그 사건이 1개 더 날 때 엔진에서 느는 득점 (tools/park_run_value.ts, 2025년 6시드). 구성 배율이 내는 득점 계수를 셀 때만 쓴다.
+# 흔한 선형 가중치(단타 0.74, 2루타 1.05, 홈런 1.68)를 쓰면 엔진 득점 비가 f보다 1.25배 크게 움직였다 (reports/park-check.md).
+# 3루타는 잰 값(0.47)이 표본이 작아 2루타 값을 쓴다 (임시값)
+PARK_RUN_VALUE = {'s1': 0.61, 'd2': 0.69, 't3': 0.69, 'hr': 1.67}
+# 수준 맞춤에 쓰는 기본 나눔 (엔진 params.park의 hitExp·hrExp와 같다)
+PARK_DEFAULT_EXP = {'s1': 0.4, 'd2': 0.4, 't3': 0.4, 'hr': 1.2}
+
+
+def park_events(parks, league):
+    """구장 표의 구성 모양 + 연도별 홈 구장 계수 f(수준) → 연도 → 계보 → 사건별 구장 배율 {s1, d2, t3, hr}.
+
+    배율 = exp(w × log 구성 지수 + 기본 지수 × d). w는 경기 수로 당긴 정도, d는 그 해 리그 비율·득점 가치로 센 득점 계수가
+    그 해 f와 같아지게 정한다 (모양은 표에서, 수준은 해마다 f에서). 볼넷·삼진 지수는 쓰지 않는다:
+    표의 득점 지수와 견주면 안타·홈런 네 가지로 센 득점 계수가 더 잘 맞는다 (상관 0.96, 볼넷·삼진까지 넣으면 0.84).
+    그 구장이 홈이 된 해부터만 쓴다. 표가 없는 구장(예전 구장)은 엔진이 기본 지수(f^hitExp, f^hrExp)를 쓴다."""
+    rows = hardhit_csv('park_components.csv')
+    if not rows or not parks:
+        return {}, []
+    col = {'s1': '단타', 'd2': '2루타', 't3': '3루타', 'hr': '홈런'}
+    shape = {}  # 계보 → (개장 해, {사건: 당긴 log 지수}, 구장, 경기, {'L'|'R': {사건: 당긴 log 지수}})
+    side_rows = {}
+    for r in rows:
+        if r['구장'] not in PARK_STADIUMS:
+            continue
+        if r['타자'] != 'ALL':
+            side_rows[(r['구장'], r['타자'])] = r
+            continue
+        frs, since = PARK_STADIUMS[r['구장']]
+        g = int(r['경기'])
+        w = g / (g + PARK_SHRINK_GAMES)
+        for fr in frs:
+            shape[fr] = (since, {e: w * math.log(float(r[c]) / 100) for e, c in col.items()}, r['구장'], g, {})
+    for fr, (since, base, st, g, sides) in shape.items():
+        all_row = next(r for r in rows if r['구장'] == st and r['타자'] == 'ALL')
+        for sd in ('L', 'R'):
+            r = side_rows.get((st, sd))
+            if not r:
+                continue
+            half = int(r['경기']) / 2
+            ws = half / (half + PARK_SIDE_SHRINK_GAMES)
+            sides[sd] = {e: base[e] + ws * (math.log(float(r[c]) / 100) - math.log(float(all_row[c]) / 100)) for e, c in col.items()}
+    out = {}
+    for y, year in parks.items():
+        R = league[int(y)]['rates']
+        rpa = league[int(y)]['r'] / league[int(y)]['pa']
+        ev = {}
+        for fr, f in year.items():
+            if fr not in shape or int(y) < shape[fr][0]:
+                continue
+            base, sides = shape[fr][1], shape[fr][4]
+
+            def mult(d, b=base):
+                return {e: math.exp(b[e] + PARK_DEFAULT_EXP[e] * d) for e in b}
+
+            def run(d):
+                m = mult(d)
+                return 1 + sum(PARK_RUN_VALUE[e] * R[e] * (m[e] - 1) for e in m) / rpa
+
+            lo, hi = -1.0, 1.0
+            for _ in range(60):
+                mid = (lo + hi) / 2
+                lo, hi = (mid, hi) if run(mid) < f else (lo, mid)
+            d = (lo + hi) / 2
+            ev[fr] = {e: round(v, 3) for e, v in mult(d).items()}
+            # 좌타·우타: 모양만 좌우 표에서, 수준 맞춤 d는 전체와 같다
+            for sd, b in sides.items():
+                ev[fr][sd] = {e: round(v, 3) for e, v in mult(d, b).items()}
+        if ev:
+            out[y] = ev
+    lines = ['', '## 사건별 구장 배율 (park_components.csv → meta.json parkEvents)', '',
+             '구장 표(2022~2025 묶음)는 100 = 리그 평균인 **구장 자체 지수**다. 표의 득점 지수와 연도별 홈 구장 계수 f(2022~2025 평균)의 기울기 0.72·상관 0.96,',
+             '하드힛 선수 행 파크팩터(홈 경기 절반을 섞은 시즌 값)와는 기울기 0.35라 절반 값이 아니다.',
+             f'모양: 단타·2루타·3루타·홈런 지수를 log로, 경기 / (경기 + {PARK_SHRINK_GAMES})만큼 100 쪽으로 당김 (임시값). 수준: 그 해 f에 맞춤. 볼넷·삼진은 쓰지 않음.',
+             f'좌타(L)·우타(R): 좌우 표의 전체 대비 log 차이를 반 경기 / (반 경기 + {PARK_SIDE_SHRINK_GAMES})만큼만 더한다 (임시값). 수준 맞춤은 전체와 같다.',
+             '엔진: 좌타는 L, 우타는 R, 양타는 상대 투수 손의 반대쪽, 치는 손을 모르면 전체. 방향별 홈런(좌·중·우)은 엔진에 타구 방향이 없어 쓰지 않는다.',
+             '제2구장 포항(삼성 14경기)·울산(롯데 20경기)은 엔진에 없어 쓰지 않는다.', '',
+             '| 계보 | 구장 | 표 경기 | 쓰는 해 | 2025 f | 타자 | 2025 단타 | 2루타 | 3루타 | 홈런 |', '|---|---|---:|---|---:|---|---:|---:|---:|---:|']
+    for fr, (since, _, st, g, _s) in sorted(shape.items()):
+        yrs = [y for y in out if fr in out[y]]
+        e = out.get('2025', {}).get(fr) or {}
+        for label, x in (('전체', e), ('좌타', e.get('L') or {}), ('우타', e.get('R') or {})):
+            head = f'| {fr} | {st} | {g} | {yrs[0] if yrs else "-"}~{yrs[-1] if yrs else ""} | {parks.get("2025", {}).get(fr, 1):.3f} |' if label == '전체' else '| | | | | |'
+            lines.append(f'{head} {label} | ' + ' | '.join(f'{x.get(k, 1):.3f}' for k in ('s1', 'd2', 't3', 'hr')) + ' |')
+    print(f'사건별 구장 배율: {len(out)}개 연도, {sum(len(v) for v in out.values())}건')
+    return out, lines
+
+
 def profiles_of(wb):
     return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
 
@@ -501,6 +976,8 @@ def main():
         for k in [k for k, v in p.items() if v is None]:
             del p[k]
 
+    hand_report = fill_hands(players)
+
     # ---- 외국인 개막 명단 (CSV)
     foreign_opening = defaultdict(lambda: defaultdict(list))
     asia_ids = set()
@@ -547,12 +1024,16 @@ def main():
     pit = defaultdict(list)
     for r in rows(wb['타자시즌']):
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '포지션(보조)' else r[c]) for c in BAT_COLS]
-        bat[r['시즌']].append(row)
+        bat[r['시즌']].append(row + [None] * (len(BAT_FIELDS) - len(BAT_COLS)))
     wpbk = defaultdict(int)
     for r in rows(wb['투수시즌']):
         wpbk[r['시즌']] += (r['WP'] or 0) + (r['BK'] or 0)
         row = [str(r['선수ID']) if c == '선수ID' else (POS.get(r[c]) if c == '역할(보조)' else r[c]) for c in PIT_COLS]
-        pit[r['시즌']].append(row)
+        pit[r['시즌']].append(row + [None] * (len(PIT_FIELDS) - len(PIT_COLS)))
+
+    # ---- 하드힛 가공값으로 빈 기록 채우기
+    parks, park_report = park_factors(teams)
+    hardhit_report = fill_running(bat) + fill_gmli(pit) + fill_pitch_roles(pit) + hand_report + park_report
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -571,13 +1052,18 @@ def main():
                     continue
                 if is_pit:
                     role = m.get('pos') if m.get('pos') in ('SP', 'RP', 'CL') else None
-                    pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 3))
+                    pit[y].append([pid, team, role] + [0] * (len(PIT_FIELDS) - 4) + [None])
                 else:
                     pos = m.get('pos') if m.get('pos') not in ('SP', 'RP', 'CL', 'P') else None
-                    bat[y].append([pid, team, pos] + [0] * (len(BAT_FIELDS) - 3))
+                    bat[y].append([pid, team, pos] + [0] * (len(BAT_COLS) - 3) + [None] * (len(BAT_FIELDS) - len(BAT_COLS)))
                 extra_ids.add((y, pid))
                 if m.get('last', 0) < y:
                     m['last'] = y
+
+    # ---- 하드힛 주 포지션 (추가 명단 행까지 채운다)
+    pos_report, pos_unresolved = fill_positions(bat, kind_of)
+    hardhit_report += pos_report
+    write_no_position(pos_unresolved, bat, players)
 
     years = sorted(teams)
     bi = {f: i for i, f in enumerate(BAT_FIELDS)}
@@ -615,6 +1101,8 @@ def main():
         L['unearnedShare'] = 1 - L['er'] / L['runsAllowed']
         L['wpbkPerPa'] = L['wpbk'] / tbf if L['wpbk'] else None  # 폭투+보크. 2001년부터 기록
         league[y] = L
+    park_ev, park_ev_report = park_events(parks, league)
+    hardhit_report += park_ev_report
 
     # ---- 능력 산출용 사전 평균: 출전이 적은 선수-시즌의 리그 대비 비율 (전 시즌 합산)
     ev_b = {'s1': None, 'd2': 'd', 't3': 't', 'hr': 'hr', 'bb': 'bb', 'hbp': 'hbp', 'so': 'so'}
@@ -703,9 +1191,14 @@ def main():
         'rules': {y: rules_for(y) for y in years}, 'priors': priors,
         **({'foreignOpening': foreign_opening} if foreign_opening else {}),
         'specialEntries': special,
+        **({'parkFactors': parks} if parks else {}),
+        **({'parkEvents': park_ev} if park_ev else {}),
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    if hardhit_report:
+        head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
+        HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')
     total = sum(f.stat().st_size for f in OUT.rglob('*.json'))
     print(f'선수 {len(players):,}명, 시즌 {len(years)}개({years[0]}~{years[-1]}), '
           f'타자 시즌 {sum(len(v) for v in bat.values()):,}행, 투수 시즌 {sum(len(v) for v in pit.values()):,}행')

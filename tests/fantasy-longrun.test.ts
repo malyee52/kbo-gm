@@ -74,6 +74,9 @@ describe('자유 모드 여러 시즌', () => {
         { op: 'pick', draft: year + 2, round: 1, from: g.league.teams[rival].name, to: 'LG' },
         { op: 'future', name: FUTURE[s], team: 'LG', pos: 'P', role: 'SP', birthYear: year - 18, joinYear: year + 1, now: 50, potential: 70 },
         { op: 'teamCash', team: g.league.teams[rival].name, amount: 30 },
+        // 구단주 신뢰: 해고되면 오프시즌이 제의 수락에서 멈춘다. 2026-10-21 입대 규칙(상무 정원·현역)을 만들다 결과가 바뀌어
+        // 이 시드의 LG가 3년째(2028) 해고됐다. 시험하려는 것이 해고가 아니라서 신뢰를 올려 둔다 (조작 기록에 남아 재현된다)
+        { op: 'trust', delta: 15 },
       ]);
       // 이름은 그때 리그에서 찾으므로, 방금 만든 선수는 다음 판정에서 고친다
       apply(`${year} 능력`, [{ op: 'ability', player: name, potential: 76 }]);

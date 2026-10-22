@@ -172,9 +172,12 @@ function slumping(c: EventContext): EventPlayer | undefined {
 function workhorse(c: EventContext): EventPlayer | undefined {
   return c.players.filter((p) => p.isPitcher && p.starter && p.outs >= 300).sort((a, b) => b.outs - a.outs || a.id.localeCompare(b.id))[0];
 }
-/** 지친 구원진: 구원 투수 피로 합이 5 이상 (하루 회복 뒤 값이라 작다. 2026 시즌 상위 10% 안팎의 날) */
+/**
+ * 지친 구원진: 구원 투수 피로(공 수, 하루 회복 뒤) 합이 125 이상. 2026 시즌 2시드에서 구단·날짜별 합의 백분위 90이 127
+ * (엔진 2 4단계에서 피로 단위가 타자 수 → 공 수로 바뀌어 다시 잼, 2026-10-22)
+ */
 function bullpenTired(c: EventContext): boolean {
-  return c.players.filter((p) => p.isPitcher && !p.starter).reduce((s, p) => s + p.fatigue, 0) >= 5;
+  return c.players.filter((p) => p.isPitcher && !p.starter).reduce((s, p) => s + p.fatigue, 0) >= 125;
 }
 const num = (v: PendingEvent['vars'], k: string) => Number(v[k]);
 

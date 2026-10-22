@@ -7,7 +7,7 @@ export interface EraPitching {
   rotation: number;
   /** 선발 등판 사이 최소 휴식일 */
   restDays: number;
-  /** 선발 한계 투구(상대 타자 수) 배율 */
+  /** 선발 한계 투구 수 배율 (엔진 1에서는 상대 타자 수 배율. 엔진 2 4단계부터 체력 × 타석당 기대 투구 수에 곱한다) */
   limitScale: number;
 }
 

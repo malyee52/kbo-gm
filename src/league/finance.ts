@@ -38,10 +38,20 @@ export const POSTSEASON_TICKET = 3.0;
 export const BROADCAST = 1_000_000;
 /** 스폰서·상품 기본액 (인기도 1일 때, 만 원). 2026-10-11 90억 → 75억 (사용자: 돈이 너무 넉넉하다) */
 export const SPONSOR_BASE = 750_000;
-/** 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원). 2026-10-11 200억 → 220억 */
-export const OPS_COST = 2_200_000;
+/**
+ * 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원). 2026-10-11 200억 → 220억 (재정 긴축).
+ * 2026-10-21 220억 → 202억: 긴축 뒤에 들어온 코치 시스템(84c8083)이 감독·코치 연봉(첫 시즌 구단 평균 약 18억)을
+ * 따로 떼어 내면서 운영비의 인건비를 줄이지 않아 두 번 냈다. 그 탓에 첫 시즌 결산 뒤 10구단 중 평균 4.8곳이 자금 0이 되어
+ * FA 계약금을 못 내고 자기 FA도 잡지 못했다 (reports/first-season-balance.md). 긴축 때 맞춘 지출 합으로 되돌린다
+ */
+export const OPS_COST = 2_020_000;
 /** 모기업 지원금 기본액 (등급별, 한 해, 만 원) */
 export const PARENT_BASE: Record<ParentGrade, number> = { A: 600_000, B: 450_000, C: 0 };
+/**
+ * 모기업 FA 계약금 지원의 한 해 한도 = 모기업 지원금 기본액(PARENT_BASE) × 이 비율 (2026-10-21 사용자 결정 "한도를 둔다", 비율은 임시값).
+ * A 30억 · B 22.5억 · C(모기업 없는 히어로즈) 0. 한도 전 10시드 첫 오프시즌에 한 구단이 최대 43.7억, 히어로즈가 18억을 받았다
+ */
+export const FA_SUPPORT_SHARE = 0.5;
 /** 구단 이름 스폰서 (모기업 없는 히어로즈, 한 해, 만 원) */
 export const NAMING_SPONSOR: Record<string, number> = { 히어로즈: 500_000 };
 /** 자금이 이만큼을 넘으면 모기업 지원금을 넘는 금액의 PARENT_CLAWBACK만큼 줄인다 (자금이 끝없이 쌓이지 않게) */
@@ -144,13 +154,13 @@ export interface FinanceYear {
 }
 
 export type FinanceKind =
-  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
+  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
-  parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
+  parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
 };
@@ -517,7 +527,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
-    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start' && k !== 'dividend') items[k] = other[k];
+    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'faSupport' && k !== 'start' && k !== 'dividend') items[k] = other[k];
     // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다
     if (other.stadium) items.stadium = other.stadium;
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
@@ -543,6 +553,35 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
   league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
   return out;
+}
+
+/**
+ * FA 계약금 중 자금이 모자란 몫을 모기업이 대 준다 (2026-10-21 사용자: "대줘"). AI 구단·플레이어 구단 모두.
+ * 장부에 '모기업 지원 (FA 계약금)'으로 남기고 지원액을 돌려준다 (없으면 0).
+ * 구단주 평가와는 잇지 않는다: 결산 수지(net)와 긴급 지원(rescue)에 넣지 않는다
+ */
+export function coverFaBonus(league: LeagueState, team: number, bonus: number, year: number, who: string): number {
+  // 한도(faSupportLeft)는 제시할 때 검사한다. 같은 라운드에 여럿을 계약해 한도를 넘는 몫은 지원하지 않는다 (자금이 0 아래로 내려간다)
+  const need = Math.min(Math.round(bonus - Math.max(0, cashOf(league, team))), faSupportLeft(league, team, year));
+  if (need <= 0) return 0;
+  league.ledger.push({ year, from: -1, to: team, amount: need, note: `${who} FA 계약금 모기업 지원`, kind: 'faSupport' });
+  return need;
+}
+
+/** 그 해(장부 연도 = 계약한 오프시즌 다음 해) 모기업 FA 계약금 지원 한도 (만 원) */
+export function faSupportCap(league: LeagueState, team: number): number {
+  return Math.round(PARENT_BASE[parentGrade(league, team)] * FA_SUPPORT_SHARE);
+}
+
+/** 그 해 남은 모기업 FA 계약금 지원 (만 원) */
+export function faSupportLeft(league: LeagueState, team: number, year: number): number {
+  const used = league.ledger.reduce((s, e) => s + (e.kind === 'faSupport' && e.to === team && e.year === year ? e.amount : 0), 0);
+  return Math.max(0, faSupportCap(league, team) - used);
+}
+
+/** 계약금 bonus를 지금 자금 + 남은 모기업 지원으로 낼 수 있나 */
+export function canPayFaBonus(league: LeagueState, team: number, bonus: number, year: number): boolean {
+  return bonus <= Math.max(0, cashOf(league, team)) + faSupportLeft(league, team, year);
 }
 
 /** 적자 보전에 따른 구단주 신뢰도 변화 (−(메운 금액 ÷ 20억), 최대 −15). 흑자면 +2 */

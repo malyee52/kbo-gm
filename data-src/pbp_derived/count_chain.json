@@ -1,0 +1,565 @@
+{
+ "source": "slothman3878/kbo_playbyplay v0 (CC BY 4.0)",
+ "note": "카운트(볼-스트라이크)별 다음 공 결과 확률. 투구 없는 자동 고의4구 제외. 2스트라이크 파울은 카운트 유지, 2스트라이크 번트 파울(bunt_foul)은 삼진. hbp는 사구로 끝난 공",
+ "years": {
+  "2023": {
+   "partial": false,
+   "counts": {
+    "0-0": {
+     "n": 56299,
+     "ball": 0.40509,
+     "called_strike": 0.31601,
+     "swinging_strike": 0.0605,
+     "foul": 0.09686,
+     "in_play": 0.10846,
+     "hbp": 0.0027,
+     "bunt_foul": 0.00895,
+     "bunt_miss": 0.00144
+    },
+    "0-1": {
+     "n": 27223,
+     "ball": 0.4253,
+     "called_strike": 0.12368,
+     "swinging_strike": 0.0997,
+     "foul": 0.16372,
+     "in_play": 0.17882,
+     "hbp": 0.00334,
+     "bunt_foul": 0.00452,
+     "bunt_miss": 0.00092
+    },
+    "0-2": {
+     "n": 13025,
+     "ball": 0.48837,
+     "called_strike": 0.03424,
+     "swinging_strike": 0.11071,
+     "foul": 0.18073,
+     "in_play": 0.18265,
+     "hbp": 0.00322,
+     "bunt_foul": 8e-05,
+     "bunt_miss": 0.0
+    },
+    "1-0": {
+     "n": 22768,
+     "ball": 0.34021,
+     "called_strike": 0.25246,
+     "swinging_strike": 0.08046,
+     "foul": 0.15342,
+     "in_play": 0.16466,
+     "hbp": 0.00303,
+     "bunt_foul": 0.00501,
+     "bunt_miss": 0.00075
+    },
+    "1-1": {
+     "n": 22763,
+     "ball": 0.35272,
+     "called_strike": 0.12753,
+     "swinging_strike": 0.10886,
+     "foul": 0.19374,
+     "in_play": 0.20986,
+     "hbp": 0.00264,
+     "bunt_foul": 0.00417,
+     "bunt_miss": 0.00048
+    },
+    "1-2": {
+     "n": 21200,
+     "ball": 0.36991,
+     "called_strike": 0.03236,
+     "swinging_strike": 0.12698,
+     "foul": 0.23415,
+     "in_play": 0.2325,
+     "hbp": 0.00406,
+     "bunt_foul": 5e-05,
+     "bunt_miss": 0.0
+    },
+    "2-0": {
+     "n": 7711,
+     "ball": 0.32629,
+     "called_strike": 0.33394,
+     "swinging_strike": 0.06056,
+     "foul": 0.12865,
+     "in_play": 0.14395,
+     "hbp": 0.00233,
+     "bunt_foul": 0.00363,
+     "bunt_miss": 0.00065
+    },
+    "2-1": {
+     "n": 12077,
+     "ball": 0.3038,
+     "called_strike": 0.12967,
+     "swinging_strike": 0.1006,
+     "foul": 0.22265,
+     "in_play": 0.23714,
+     "hbp": 0.00248,
+     "bunt_foul": 0.00298,
+     "bunt_miss": 0.00066
+    },
+    "2-2": {
+     "n": 18438,
+     "ball": 0.27601,
+     "called_strike": 0.03411,
+     "swinging_strike": 0.12924,
+     "foul": 0.27698,
+     "in_play": 0.27888,
+     "hbp": 0.00477,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-0": {
+     "n": 2480,
+     "ball": 0.36855,
+     "called_strike": 0.57863,
+     "swinging_strike": 0.00887,
+     "foul": 0.01976,
+     "in_play": 0.02056,
+     "hbp": 0.00363,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-1": {
+     "n": 5163,
+     "ball": 0.30777,
+     "called_strike": 0.22468,
+     "swinging_strike": 0.06682,
+     "foul": 0.1902,
+     "in_play": 0.20666,
+     "hbp": 0.00155,
+     "bunt_foul": 0.00213,
+     "bunt_miss": 0.00019
+    },
+    "3-2": {
+     "n": 10692,
+     "ball": 0.23027,
+     "called_strike": 0.04246,
+     "swinging_strike": 0.1156,
+     "foul": 0.29125,
+     "in_play": 0.3164,
+     "hbp": 0.00402,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    }
+   }
+  },
+  "2024": {
+   "partial": false,
+   "counts": {
+    "0-0": {
+     "n": 57297,
+     "ball": 0.40405,
+     "called_strike": 0.31347,
+     "swinging_strike": 0.06402,
+     "foul": 0.09927,
+     "in_play": 0.10791,
+     "hbp": 0.00344,
+     "bunt_foul": 0.00658,
+     "bunt_miss": 0.00126
+    },
+    "0-1": {
+     "n": 27750,
+     "ball": 0.39849,
+     "called_strike": 0.13146,
+     "swinging_strike": 0.10746,
+     "foul": 0.17341,
+     "in_play": 0.18155,
+     "hbp": 0.00288,
+     "bunt_foul": 0.00389,
+     "bunt_miss": 0.00086
+    },
+    "0-2": {
+     "n": 14332,
+     "ball": 0.4679,
+     "called_strike": 0.04235,
+     "swinging_strike": 0.1122,
+     "foul": 0.19369,
+     "in_play": 0.18071,
+     "hbp": 0.00314,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "1-0": {
+     "n": 23131,
+     "ball": 0.35359,
+     "called_strike": 0.23574,
+     "swinging_strike": 0.09083,
+     "foul": 0.15542,
+     "in_play": 0.15676,
+     "hbp": 0.00311,
+     "bunt_foul": 0.00372,
+     "bunt_miss": 0.00082
+    },
+    "1-1": {
+     "n": 22290,
+     "ball": 0.34751,
+     "called_strike": 0.12737,
+     "swinging_strike": 0.11543,
+     "foul": 0.19762,
+     "in_play": 0.20458,
+     "hbp": 0.00372,
+     "bunt_foul": 0.00314,
+     "bunt_miss": 0.00063
+    },
+    "1-2": {
+     "n": 21756,
+     "ball": 0.36004,
+     "called_strike": 0.03884,
+     "swinging_strike": 0.1316,
+     "foul": 0.23764,
+     "in_play": 0.22697,
+     "hbp": 0.00487,
+     "bunt_foul": 5e-05,
+     "bunt_miss": 0.0
+    },
+    "1-3": {
+     "n": 1,
+     "ball": 0.0,
+     "called_strike": 0.0,
+     "swinging_strike": 0.0,
+     "foul": 1.0,
+     "in_play": 0.0,
+     "hbp": 0.0,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "2-0": {
+     "n": 8154,
+     "ball": 0.33714,
+     "called_strike": 0.28808,
+     "swinging_strike": 0.06757,
+     "foul": 0.14165,
+     "in_play": 0.16066,
+     "hbp": 0.0027,
+     "bunt_foul": 0.00172,
+     "bunt_miss": 0.00049
+    },
+    "2-1": {
+     "n": 11807,
+     "ball": 0.30372,
+     "called_strike": 0.12654,
+     "swinging_strike": 0.11104,
+     "foul": 0.22266,
+     "in_play": 0.2313,
+     "hbp": 0.00296,
+     "bunt_foul": 0.00161,
+     "bunt_miss": 0.00017
+    },
+    "2-2": {
+     "n": 18352,
+     "ball": 0.26831,
+     "called_strike": 0.03765,
+     "swinging_strike": 0.13415,
+     "foul": 0.27708,
+     "in_play": 0.27823,
+     "hbp": 0.00452,
+     "bunt_foul": 5e-05,
+     "bunt_miss": 0.0
+    },
+    "3-0": {
+     "n": 2726,
+     "ball": 0.37674,
+     "called_strike": 0.573,
+     "swinging_strike": 0.0077,
+     "foul": 0.01651,
+     "in_play": 0.02348,
+     "hbp": 0.00257,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-1": {
+     "n": 5205,
+     "ball": 0.29625,
+     "called_strike": 0.21499,
+     "swinging_strike": 0.0755,
+     "foul": 0.195,
+     "in_play": 0.21479,
+     "hbp": 0.00211,
+     "bunt_foul": 0.00115,
+     "bunt_miss": 0.00019
+    },
+    "3-2": {
+     "n": 10380,
+     "ball": 0.24499,
+     "called_strike": 0.04682,
+     "swinging_strike": 0.12158,
+     "foul": 0.28218,
+     "in_play": 0.30039,
+     "hbp": 0.00405,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    }
+   }
+  },
+  "2025": {
+   "partial": false,
+   "counts": {
+    "0-0": {
+     "n": 55858,
+     "ball": 0.40137,
+     "called_strike": 0.32319,
+     "swinging_strike": 0.06321,
+     "foul": 0.09429,
+     "in_play": 0.10518,
+     "hbp": 0.00367,
+     "bunt_foul": 0.00766,
+     "bunt_miss": 0.00141
+    },
+    "0-1": {
+     "n": 27396,
+     "ball": 0.39823,
+     "called_strike": 0.14031,
+     "swinging_strike": 0.11002,
+     "foul": 0.16878,
+     "in_play": 0.17404,
+     "hbp": 0.00372,
+     "bunt_foul": 0.00412,
+     "bunt_miss": 0.00077
+    },
+    "0-2": {
+     "n": 14387,
+     "ball": 0.45437,
+     "called_strike": 0.04351,
+     "swinging_strike": 0.12428,
+     "foul": 0.19399,
+     "in_play": 0.18058,
+     "hbp": 0.00306,
+     "bunt_foul": 0.00021,
+     "bunt_miss": 0.0
+    },
+    "1-0": {
+     "n": 22486,
+     "ball": 0.35031,
+     "called_strike": 0.24348,
+     "swinging_strike": 0.09086,
+     "foul": 0.14867,
+     "in_play": 0.15823,
+     "hbp": 0.00338,
+     "bunt_foul": 0.00414,
+     "bunt_miss": 0.00093
+    },
+    "1-1": {
+     "n": 21852,
+     "ball": 0.33905,
+     "called_strike": 0.12846,
+     "swinging_strike": 0.11642,
+     "foul": 0.1965,
+     "in_play": 0.21133,
+     "hbp": 0.00339,
+     "bunt_foul": 0.00407,
+     "bunt_miss": 0.00078
+    },
+    "1-2": {
+     "n": 21334,
+     "ball": 0.35474,
+     "called_strike": 0.03844,
+     "swinging_strike": 0.13692,
+     "foul": 0.23784,
+     "in_play": 0.2279,
+     "hbp": 0.00412,
+     "bunt_foul": 5e-05,
+     "bunt_miss": 0.0
+    },
+    "2-0": {
+     "n": 7856,
+     "ball": 0.34152,
+     "called_strike": 0.30537,
+     "swinging_strike": 0.06632,
+     "foul": 0.1348,
+     "in_play": 0.1474,
+     "hbp": 0.00229,
+     "bunt_foul": 0.00153,
+     "bunt_miss": 0.00076
+    },
+    "2-1": {
+     "n": 11395,
+     "ball": 0.29934,
+     "called_strike": 0.12944,
+     "swinging_strike": 0.1032,
+     "foul": 0.22519,
+     "in_play": 0.23774,
+     "hbp": 0.00333,
+     "bunt_foul": 0.00158,
+     "bunt_miss": 0.00018
+    },
+    "2-2": {
+     "n": 17562,
+     "ball": 0.27258,
+     "called_strike": 0.03906,
+     "swinging_strike": 0.13985,
+     "foul": 0.27167,
+     "in_play": 0.27144,
+     "hbp": 0.00541,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-0": {
+     "n": 2656,
+     "ball": 0.38742,
+     "called_strike": 0.57267,
+     "swinging_strike": 0.00565,
+     "foul": 0.01393,
+     "in_play": 0.01845,
+     "hbp": 0.00188,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-1": {
+     "n": 4983,
+     "ball": 0.31868,
+     "called_strike": 0.21854,
+     "swinging_strike": 0.07124,
+     "foul": 0.17981,
+     "in_play": 0.20831,
+     "hbp": 0.00241,
+     "bunt_foul": 0.0008,
+     "bunt_miss": 0.0002
+    },
+    "3-2": {
+     "n": 10083,
+     "ball": 0.22959,
+     "called_strike": 0.04661,
+     "swinging_strike": 0.12407,
+     "foul": 0.29317,
+     "in_play": 0.3017,
+     "hbp": 0.00486,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    }
+   }
+  },
+  "2026": {
+   "partial": true,
+   "counts": {
+    "0-0": {
+     "n": 37098,
+     "ball": 0.41062,
+     "called_strike": 0.31786,
+     "swinging_strike": 0.06267,
+     "foul": 0.09386,
+     "in_play": 0.10321,
+     "hbp": 0.00391,
+     "bunt_foul": 0.00668,
+     "bunt_miss": 0.00119
+    },
+    "0-1": {
+     "n": 17903,
+     "ball": 0.40647,
+     "called_strike": 0.13562,
+     "swinging_strike": 0.1087,
+     "foul": 0.16673,
+     "in_play": 0.17489,
+     "hbp": 0.00296,
+     "bunt_foul": 0.00408,
+     "bunt_miss": 0.00056
+    },
+    "0-2": {
+     "n": 9223,
+     "ball": 0.46167,
+     "called_strike": 0.04098,
+     "swinging_strike": 0.12144,
+     "foul": 0.1943,
+     "in_play": 0.17706,
+     "hbp": 0.00445,
+     "bunt_foul": 0.00011,
+     "bunt_miss": 0.0
+    },
+    "1-0": {
+     "n": 15237,
+     "ball": 0.35184,
+     "called_strike": 0.24821,
+     "swinging_strike": 0.0867,
+     "foul": 0.14307,
+     "in_play": 0.16224,
+     "hbp": 0.00308,
+     "bunt_foul": 0.00427,
+     "bunt_miss": 0.00059
+    },
+    "1-1": {
+     "n": 14619,
+     "ball": 0.34154,
+     "called_strike": 0.13366,
+     "swinging_strike": 0.11437,
+     "foul": 0.18968,
+     "in_play": 0.2141,
+     "hbp": 0.00369,
+     "bunt_foul": 0.00239,
+     "bunt_miss": 0.00055
+    },
+    "1-2": {
+     "n": 13992,
+     "ball": 0.35685,
+     "called_strike": 0.04181,
+     "swinging_strike": 0.13258,
+     "foul": 0.23628,
+     "in_play": 0.22792,
+     "hbp": 0.00457,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "2-0": {
+     "n": 5337,
+     "ball": 0.34458,
+     "called_strike": 0.31197,
+     "swinging_strike": 0.06446,
+     "foul": 0.13153,
+     "in_play": 0.14296,
+     "hbp": 0.00206,
+     "bunt_foul": 0.00206,
+     "bunt_miss": 0.00037
+    },
+    "2-1": {
+     "n": 7706,
+     "ball": 0.30184,
+     "called_strike": 0.136,
+     "swinging_strike": 0.10161,
+     "foul": 0.21736,
+     "in_play": 0.23735,
+     "hbp": 0.00363,
+     "bunt_foul": 0.00182,
+     "bunt_miss": 0.00039
+    },
+    "2-2": {
+     "n": 11603,
+     "ball": 0.27915,
+     "called_strike": 0.04326,
+     "swinging_strike": 0.12954,
+     "foul": 0.26786,
+     "in_play": 0.27476,
+     "hbp": 0.00534,
+     "bunt_foul": 9e-05,
+     "bunt_miss": 0.0
+    },
+    "3-0": {
+     "n": 1826,
+     "ball": 0.40361,
+     "called_strike": 0.56134,
+     "swinging_strike": 0.00438,
+     "foul": 0.01752,
+     "in_play": 0.0115,
+     "hbp": 0.00164,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    },
+    "3-1": {
+     "n": 3382,
+     "ball": 0.31638,
+     "called_strike": 0.212,
+     "swinging_strike": 0.07688,
+     "foul": 0.17978,
+     "in_play": 0.20905,
+     "hbp": 0.00266,
+     "bunt_foul": 0.00296,
+     "bunt_miss": 0.0003
+    },
+    "3-2": {
+     "n": 6802,
+     "ball": 0.23978,
+     "called_strike": 0.04954,
+     "swinging_strike": 0.12217,
+     "foul": 0.28962,
+     "in_play": 0.2955,
+     "hbp": 0.00338,
+     "bunt_foul": 0.0,
+     "bunt_miss": 0.0
+    }
+   }
+  }
+ }
+}

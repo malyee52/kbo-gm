@@ -1,4 +1,5 @@
 // 선수 상세: 능력치(20~80), 이번 시즌 기록, 직전 시즌 기록(게임에서 치른 시즌은 게임 기록, 그 전은 실제 기록), 계약.
+import { serviceName } from '../../league/careers';
 import { lineTeam } from '../../engine';
 import { ReleaseButton } from './Market';
 import { postseasonLines, psFromRecord, psLineText } from '../../league/postseason';
@@ -16,6 +17,7 @@ import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
+import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -38,10 +40,12 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   const start = session.league.startYear;
   const decode = <T extends object>(empty: T, arr: number[]): T => Object.fromEntries(Object.keys(empty).map((k, i) => [k, arr[i] ?? 0])) as T;
   // 투타 겸업 (2026-10-13): 타격·투구 기록을 둘 다 모은다 (본업 쪽 표가 먼저, 반대쪽은 기록이 있을 때만)
-  const history: { label: string; bat?: BatLike; pit?: PitLike }[] = [year - 1, year - 2, year - 3].flatMap((y) => {
+  // 세이버 지표의 리그 기준값 (2026-10-22): 게임 안 시즌은 결산 때 남긴 값(예전 저장은 없음 → 표시 안 함), 실제 시즌은 자료집 리그 합계
+  type Hist = { label: string; bat?: BatLike; pit?: PitLike; lg: LeagueBase | null };
+  const history: Hist[] = [year - 1, year - 2, year - 3].flatMap<Hist>((y) => {
     if (y >= start) {
       return (lp?.history ?? []).filter((h) => h.year === y && (h.pit || h.bat)).map((h) => ({
-        label: `${y} ${h.team}`,
+        label: `${y} ${h.team}`, lg: session.league.seasonSaber?.[String(y)] ?? null,
         ...(h.pit ? { pit: decode(emptyPitLine(), h.pit) } : {}),
         ...(h.bat ? { bat: decode(emptyBatLine(), h.bat) } : {}),
       }));
@@ -51,8 +55,10 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
     const br = s?.bat.find((r) => r.id === p.id);
     if (!pr && !br) return [];
     const label = `${y} ${(pr ?? br)!.team} (게임 전 실제)`;
-    return [{ label, ...(pr ? { pit: pitFromRow(pr as PitRow) } : {}), ...(br ? { bat: batFromRow(br as BatRow) } : {}) }];
+    return [{ label, lg: realLeagueBase(s!.league), ...(pr ? { pit: pitFromRow(pr as PitRow) } : {}), ...(br ? { bat: batFromRow(br as BatRow) } : {}) }];
   });
+  // 이번 시즌 세이버 지표의 리그 기준 (시뮬 리그 전체 기록)
+  const lgNow = leagueBase(session.season.bat, session.season.pit);
   const batHist = history.filter((h) => h.bat && (h.bat.pa ?? 0) > 0);
   const pitHist = history.filter((h) => h.pit && ((h.pit as { bf?: number }).bf ?? (h.pit as { outs?: number }).outs ?? 0) > 0);
 
@@ -72,7 +78,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           <div>
             <h2 id="player-name">{p.name}{p.foreign && <span className="tag">외국인</span>}</h2>
             <p className="muted">
-              <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투)` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
+              <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' · 언더·사이드' : ''})` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
               {' · '}{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}
               {master?.entryYear ? ` · ${master.entryYear}년 입단` : ''}
             </p>
@@ -115,6 +121,9 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             {/* 이도류: 반대쪽 기록 */}
             {p.isPitcher && session.season.bat[p.idx].pa > 0 && <BatTable rows={[{ label: `${year} 타격`, l: session.season.bat[p.idx] }]} />}
             {!p.isPitcher && session.season.pit[p.idx].bf > 0 && <PitTable rows={[{ label: `${year} 투구`, l: session.season.pit[p.idx] }]} />}
+            {p.isPitcher
+              ? session.season.pit[p.idx].bf > 0 && <PitSaberTable rows={[{ label: String(year), l: session.season.pit[p.idx], lg: lgNow }]} />
+              : session.season.bat[p.idx].pa > 0 && <BatSaberTable rows={[{ label: String(year), l: session.season.bat[p.idx], lg: lgNow }]} />}
           </div>
           {session.phase === 'season' && p.teamIdx >= 0 && (() => {
             const f = futuresText(session.futures().lines.get(p.idx));
@@ -152,17 +161,19 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
         })()}
 
         <section>
-          <h3>직전 시즌 기록 <span className="muted small">게임에서 치른 시즌은 이 게임의 기록</span></h3>
+          <h3>직전 시즌 기록 <span className="muted small">게임에서 치른 시즌은 이 게임의 기록 · 세이버 지표는 기록으로 직접 계산 (리그 기준은 그 해 리그 기록)</span></h3>
           {(p.isPitcher ? pitHist : batHist).length === 0 && (p.isPitcher ? batHist : pitHist).length === 0 ? <p className="muted small">직전 3시즌에 1군 기록이 없습니다.</p> : (
             <div className="scroll">
               {p.isPitcher ? (
                 <>
                   {pitHist.length > 0 && <PitTable rows={pitHist.map((h) => ({ label: h.label, l: h.pit! }))} />}
+                  {pitHist.length > 0 && <PitSaberTable rows={pitHist.map((h) => ({ label: h.label, l: h.pit!, lg: h.lg }))} />}
                   {batHist.length > 0 && <BatTable rows={batHist.map((h) => ({ label: `${h.label} 타격`, l: h.bat! }))} />}
                 </>
               ) : (
                 <>
                   {batHist.length > 0 && <BatTable rows={batHist.map((h) => ({ label: h.label, l: h.bat! }))} />}
+                  {batHist.length > 0 && <BatSaberTable rows={batHist.map((h) => ({ label: h.label, l: h.bat!, lg: h.lg }))} />}
                   {pitHist.length > 0 && <PitTable rows={pitHist.map((h) => ({ label: `${h.label} 투구`, l: h.pit! }))} />}
                 </>
               )}
@@ -281,7 +292,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
   );
 }
 
-const MILITARY_LABEL: Record<string, string> = { pending: '미필', serving: '복무 중', done: '마침', exempt: '면제' };
+const MILITARY_LABEL: Record<string, string> = { pending: '미필', serving: '복무 중', homeOnly: '방위병 복무 중 (홈경기만)', done: '마침', exempt: '면제' };
 
 /** 몸 상태와 병역: 이번 시즌 부상·이탈, 지난 시즌 부상 이력, 병역 */
 function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
@@ -300,6 +311,7 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
             <dt>병역</dt>
             <dd>
               {MILITARY_LABEL[lp.military?.state ?? 'done']}
+              {lp.military?.state === 'serving' && ` (${serviceName(lp.military)}, ${lp.military.returnYear}년 복귀)`}
               {lp.military?.state === 'pending' && lp.real && year === session.league.startYear && <span className="muted small"> (병역 자료가 없어 나이·기록 공백으로 가늠한 값)</span>}
             </dd>
           </>
@@ -332,14 +344,14 @@ export function GradeBar({ label, v }: { label: string; v: number | null }) {
 }
 
 type BatLike = { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; rbi: number; r: number; bb: number; hbp: number; so: number; sb: number; sf: number };
-type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number };
+type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number; qs?: number; bsv?: number; bf?: number; hbp?: number };
 
 function batFromRow(r: BatRow): BatLike {
   return { g: r.g, pa: r.pa, ab: r.ab, h: r.h, d: r.d, t: r.t, hr: r.hr, rbi: r.rbi, r: r.r, bb: r.bb ?? 0, hbp: r.hbp ?? 0, so: r.so ?? 0, sb: r.sb ?? 0, sf: r.sf ?? 0 };
 }
 
 function pitFromRow(r: PitRow): PitLike {
-  return { g: r.g, gs: r.gs ?? 0, w: r.w, l: r.l, sv: r.sv, outs: r.outs, h: r.h, hr: r.hr, bb: r.bb, so: r.so, er: r.er };
+  return { g: r.g, gs: r.gs ?? 0, w: r.w, l: r.l, sv: r.sv, outs: r.outs, h: r.h, hr: r.hr, bb: r.bb, so: r.so, er: r.er, hld: r.hld ?? undefined, bf: r.tbf, hbp: r.hbp ?? 0 };
 }
 
 function BatTable({ rows }: { rows: { label: string; l: BatLike }[] }) {
@@ -361,16 +373,71 @@ function BatTable({ rows }: { rows: { label: string; l: BatLike }[] }) {
   );
 }
 
+// ---- 세이버 지표 (2026-10-22, 기획안 2.8): 실제 기록도 게임 기록도 같은 식(game/saber.ts)으로 직접 계산한다. 리그 상수는 그 해 리그 기록
+const SABER_TIP = {
+  wrc: 'wRC+: 득점 생산력. 100이 그 해 리그 평균, 120이면 평균보다 20% 더 낸다 (구장 보정 없음)',
+  woba: 'wOBA: 볼넷·안타 종류마다 득점 가치를 매긴 출루율 꼴 지표',
+  iso: 'ISO: 순장타율 (장타율 - 타율)',
+  babip: 'BABIP: 인플레이 타구 타율 (홈런·삼진 제외). 크게 높거나 낮으면 운이 섞였을 수 있다',
+  bb: 'BB%: 타석당 볼넷',
+  k: 'K%: 타석당 삼진',
+  fip: 'FIP: 수비와 운을 뺀 평균자책. 삼진·볼넷·사구·홈런만으로 계산 (그 해 리그 평균자책에 맞춘 상수)',
+  eraFip: 'ERA-FIP: 크면 수비·운 덕을 덜 본 것 (다음 해 평균자책이 나아지기 쉽다)',
+  pk: 'K%: 상대 타자당 삼진',
+  pb: 'BB%: 상대 타자당 볼넷',
+  pbabip: '피BABIP: 인플레이 타구 피안타율 (희생타 기록이 없어 근사값)',
+} as const;
+
+function BatSaberTable({ rows }: { rows: { label: string; l: BatLike; lg: LeagueBase | null }[] }) {
+  return (
+    <table>
+      <thead><tr><th className="l">시즌 (세이버)</th><th title={SABER_TIP.wrc}>wRC+</th><th title={SABER_TIP.woba}>wOBA</th><th title={SABER_TIP.iso}>ISO</th><th title={SABER_TIP.babip}>BABIP</th><th title={SABER_TIP.bb}>BB%</th><th title={SABER_TIP.k}>K%</th></tr></thead>
+      <tbody>
+        {rows.map(({ label, l, lg }) => {
+          const b = { ...l, cs: 0, gdp: 0, sac: 0 };
+          const w = lg ? wrcPlus(b, lg) : NaN;
+          return (
+            <tr key={label}>
+              <td className="l">{label}</td><td>{Number.isFinite(w) ? Math.round(w) : '-'}</td><td>{rate3(woba(b))}</td><td>{rate3(iso(b))}</td>
+              <td>{rate3(babip(b))}</td><td>{pct1(bbPct(b))}</td><td>{pct1(kPct(b))}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function PitSaberTable({ rows }: { rows: { label: string; l: PitLike; lg: LeagueBase | null }[] }) {
+  return (
+    <table>
+      <thead><tr><th className="l">시즌 (세이버)</th><th title={SABER_TIP.fip}>FIP</th><th title={SABER_TIP.eraFip}>ERA-FIP</th><th title={SABER_TIP.pk}>K%</th><th title={SABER_TIP.pb}>BB%</th><th title={SABER_TIP.pbabip}>피BABIP</th></tr></thead>
+      <tbody>
+        {rows.map(({ label, l, lg }) => {
+          const p = { ...l, bf: l.bf ?? 0, hbp: l.hbp ?? 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0, np: 0 };
+          const f = lg ? fip(p, lg) : NaN;
+          return (
+            <tr key={label}>
+              <td className="l">{label}</td><td>{Number.isFinite(f) ? fixed2(f) : '-'}</td><td>{Number.isFinite(f) ? fixed2(era(p) - f) : '-'}</td>
+              <td>{p.bf ? pct1(pitKPct(p)) : '-'}</td><td>{p.bf ? pct1(pitBbPct(p)) : '-'}</td><td>{p.bf ? rate3(pitBabip(p)) : '-'}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 function PitTable({ rows }: { rows: { label: string; l: PitLike }[] }) {
   return (
     <table>
-      <thead><tr><th className="l">시즌</th><th>경기</th><th>선발</th><th>승</th><th>패</th><th>세이브</th><th>홀드</th><th>이닝</th><th>평균자책</th><th>WHIP</th><th>피안타</th><th>피홈런</th><th>볼넷</th><th>탈삼진</th></tr></thead>
+      <thead><tr><th className="l">시즌</th><th>경기</th><th>선발</th><th>승</th><th>패</th><th>세이브</th><th>홀드</th><th title="퀄리티 스타트: 선발로 6이닝 이상 던지고 3자책 이하">QS</th><th title="블론 세이브: 1~3점 리드에 나와 동점·역전을 허용">블론</th><th>이닝</th><th>평균자책</th><th>WHIP</th><th>피안타</th><th>피홈런</th><th>볼넷</th><th>탈삼진</th></tr></thead>
       <tbody>
         {rows.map(({ label, l }) => {
-          const p = { ...l, bf: 0, hbp: 0, r: 0, hld: l.hld ?? 0 };
+          const p = { ...l, bf: 0, hbp: 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0, np: 0 };
           return (
             <tr key={label}>
-              <td className="l">{label}</td><td>{l.g}</td><td>{l.gs}</td><td>{l.w}</td><td>{l.l}</td><td>{l.sv}</td><td>{l.hld ?? '-'}</td><td>{ipText(l.outs)}</td>
+              <td className="l">{label}</td><td>{l.g}</td><td>{l.gs}</td><td>{l.w}</td><td>{l.l}</td><td>{l.sv}</td><td>{l.hld ?? '-'}</td><td>{l.qs ?? '-'}</td><td>{l.bsv ?? '-'}</td><td>{ipText(l.outs)}</td>
               <td>{fixed2(era(p))}</td><td>{fixed2(whip(p))}</td><td>{l.h}</td><td>{l.hr}</td><td>{l.bb}</td><td>{l.so}</td>
             </tr>
           );

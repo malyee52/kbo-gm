@@ -12,12 +12,13 @@ import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
-import { parkFactor } from './stadium';
+import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
+import { homeOnlyUntil } from './careers';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -92,8 +93,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
     // 구장 특성 (stadium.ts): 게임 안에서 지은 신구장만
     const park = parkFactor(league.stadiums?.[idx]);
+    const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
+    const ev = run !== 1 ? parkEventFactor(store.meta.parkEvents, t.franchise, year, league.stadiums?.[idx]) : undefined;
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 ? { park: { hr: park.hr } } : {}) };
+      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
@@ -120,12 +123,16 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       bat,
       pit,
       lastSaves: lp.lastSaves,
+      ...(lp.penTrust ? { penTrust: lp.penTrust } : {}),
+      // 예전 저장의 실존 투수는 underhand가 없어 선수 마스터로 채운다
+      ...(lp.underhand || (lp.isPitcher && store.players?.get(lp.id)?.underhand) ? { underhand: true } : {}),
       value: lp.isPitcher ? pitValue(pit!, lg) : batValue(bat!, lg),
       debutEstimate: lp.estimated,
       real: lp.real,
       ...(lp.dev ? { dev: true } : {}),
       ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
+      ...(homeOnlyUntil(lp, year) ? { homeOnlyUntil: homeOnlyUntil(lp, year)! } : {}),
       // 이도류 (league/twoway.ts): 반대쪽 실제 능력치
       ...(lp.twoWay && (lp.alt?.bat || lp.alt?.pit) ? { alt: { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) } } : {}),
       ...(lp.birthYearEstimated ? { ageEstimated: true } : {}),

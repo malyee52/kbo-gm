@@ -108,6 +108,8 @@ export interface BatRow {
   gdp: number | null;
   sf: number | null;
   sac: number | null;
+  /** 포지션 출처: 'H' 하드힛 확인값, 'E' 하드힛 해의 추정값(2009년·포지션 파일에 없는 타자), 없으면 자료집 그대로 (build_data.py fill_positions) */
+  posSrc?: 'H' | 'E' | null;
 }
 
 export interface PitRow {
@@ -129,6 +131,8 @@ export interface PitRow {
   so: number;
   r: number;
   er: number;
+  /** 등판 때 평균 레버리지 gmLI (하드힛, 2010~). 없으면 null·undefined (2026-10-22) */
+  gmli?: number | null;
 }
 
 export interface SeasonData {
@@ -146,6 +150,7 @@ export interface SeasonData {
 export interface YearRules {
   rosterSize: number;
   foreignLimit: number;
+  /** 정규시즌 최대 이닝. 0 = 무제한 (2008 끝장승부, 무승부 없음) */
   maxInnings: number;
   postseasonTeams: number;
   [source: string]: number | string;
@@ -174,6 +179,30 @@ export interface Meta {
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.
    */
   specialEntries?: Record<string, string[]>;
+  /**
+   * 연도 → 구단 계보 → 홈 구장 득점 계수 (1 = 중립). 하드힛 파크팩터(2015~)에서 build_data.py가 만든다.
+   * 없는 해(2015년 이전)는 중립으로 본다.
+   */
+  parkFactors?: Record<string, Record<string, number>>;
+  /**
+   * 연도 → 구단 계보 → 사건별 홈 구장 배율 (구장 자체 값, 1 = 중립). 하드힛 구장 표(2022~2025 묶음)의 구성 모양에
+   * 그 해 parkFactors 수준을 맞춰 build_data.py(park_events)가 만든다. 표에 있는 구장을 쓰는 해만 있고, 없으면 엔진이 f^hitExp·f^hrExp로 나눈다.
+   */
+  parkEvents?: Record<string, Record<string, ParkEvents>>;
+}
+
+/** 사건별 구장 배율: 단타·2루타·3루타·홈런 (볼넷·삼진은 구장 효과를 넣지 않는다) */
+export interface ParkRates {
+  s1: number;
+  d2: number;
+  t3: number;
+  hr: number;
+}
+
+/** 전체 타자 배율 + 좌타(L)·우타(R) 배율 */
+export interface ParkEvents extends ParkRates {
+  L?: ParkRates;
+  R?: ParkRates;
 }
 
 /**

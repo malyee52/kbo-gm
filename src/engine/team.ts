@@ -1,20 +1,20 @@
 // 선수 기용: 1군 엔트리, 선발 라인업, 타순, 선발 로테이션, 불펜.
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
-import { isStarterSkill } from './params';
+import { BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
 import { batValue, pitValue } from './ratings';
-import type { SimPlayer, SimTeam, World } from './types';
+import type { PitLine, SimPlayer, SimTeam, World } from './types';
 
 /** 시즌 중 바뀌는 선수 상태. 색인은 SimPlayer.idx */
 export interface PlayerStates {
   /** 이 날짜 전까지 결장 */
   absentUntil: Int32Array;
-  /** 불펜 피로도와 그 값을 기록한 날짜. 하루에 5씩 회복 */
+  /** 불펜 피로도(공 수)와 그 값을 기록한 날짜. 하루에 BULLPEN_RECOVERY_PER_DAY씩 회복 (params.ts) */
   fatigue: Float32Array;
   fatigueDay: Int32Array;
   /** fatigueDay까지 연속으로 던진 날 수 (연투 관리) */
@@ -32,16 +32,17 @@ export function newPlayerStates(n: number): PlayerStates {
   };
 }
 
-export const FATIGUE_RECOVERY_PER_DAY = 5;
-export const FATIGUE_AVAILABLE_BELOW = 6;
+export { BULLPEN_AVAILABLE_BELOW as FATIGUE_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY as FATIGUE_RECOVERY_PER_DAY } from './params';
 
-/** 어제까지 이틀 연속 던져 오늘 쉬어야 하는가 (3연투는 피한다) */
+/** 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만) */
 export function needsRest(st: PlayerStates, idx: number, day: number): boolean {
-  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2;
+  // 어제 경기 뒤 피로(오늘 회복 전)로 본다: 이틀 모두 짧게 던졌으면 사흘째도 나온다
+  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW;
 }
 
+/** 오늘 경기 전 피로 (공 수). 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
 export function currentFatigue(st: PlayerStates, idx: number, day: number): number {
-  return Math.max(0, st.fatigue[idx] - FATIGUE_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
+  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
 }
 
 export interface TeamSeason {
@@ -72,6 +73,8 @@ export interface TeamSeason {
   restDays?: number;
   /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
   tactics?: { steal: number; bunt: number; hook: number };
+  /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
+  away?: boolean;
 }
 
 /**
@@ -242,13 +245,22 @@ function allowedForeigners(avail: SimPlayer[], limit: number): Set<number> {
 /** 엔트리 순환 주기 (일정 색인 일수) */
 export const CHURN_DAYS = 10;
 
-/** 0~1 해시 (FNV-1a). 엔트리 순환이 난수 흐름을 건드리지 않게 */
+/**
+ * 0~1 해시 (FNV-1a + murmur3 마무리 섞기). 엔트리 순환이 난수 흐름을 건드리지 않게.
+ * 2026-10-21: 마무리 섞기 추가. FNV-1a만 쓰면 끝 글자(주기 번호)만 다른 문자열의 값이 서로 붙어 있어서,
+ * 같은 투수가 시즌 내내 순환으로 빠지거나(2026 KT 배제성: 17주기 모두, 시드와 상관없이 0이닝) 한 번도 빠지지 않았다
+ */
 function unitHash(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
 
@@ -257,18 +269,45 @@ function unitHash(s: string): number {
  * 국내 투수 몇 명이 부진·피로·잔부상으로 2군에 내려가고 다음 투수가 올라온다 (확률 churn). 실제로는 약한 투수도 꽤 던진다.
  * 해시로 정해 난수 흐름과 저장·재현에 영향이 없다
  */
-export function churnedOut(world: World, p: SimPlayer, day: number, churn: number): boolean {
+export function churnedOut(world: World, p: SimPlayer, day: number, churn: number, slump?: ArrayLike<number> | null): boolean {
   if (churn <= 0 || !p.isPitcher || p.foreign) return false;
+  // 부진한 투수만 (slumpingPitchers). 잘 던지는 투수는 에이스든 아니든 내려가지 않는다
+  if (slump && !slump[p.idx]) return false;
   return unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}`) < churn;
 }
 
-/** 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다) */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0): void {
+/**
+ * 엔트리 순환 대상인 부진한 투수 (선수 색인 → 1). 그 시즌 기록(pit)으로 정한다. 난수를 쓰지 않는다.
+ * 평균자책을 리그 평균자책 쪽으로 rule.priorOuts아웃만큼 당긴 값이 리그 평균자책 × rule.eraRatio 이상이고 아웃이 rule.minOuts 이상이면 부진
+ */
+export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { minOuts: number; priorOuts: number; eraRatio: number }): Uint8Array {
+  const out = new Uint8Array(world.players.length);
+  let er = 0, outs = 0;
+  for (const q of pit) { er += q.er; outs += q.outs; }
+  if (outs <= 0) return out;
+  const lg = (er * 27) / outs;
+  for (const p of world.players) {
+    if (!p.isPitcher) continue;
+    const q = pit[p.idx];
+    if (!q || q.outs < rule.minOuts) continue;
+    const era = (q.er * 27 + rule.priorOuts * lg) / (q.outs + rule.priorOuts);
+    if (era >= lg * rule.eraRatio) out[p.idx] = 1;
+  }
+  return out;
+}
+
+/**
+ * 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다).
+ * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
+ */
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null): void {
   const limit = world.rules.foreignLimit;
   const manual = ts.manual ?? null;
   const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn));
+  // 방위병(1982~1994)은 원정 경기에 못 나간다 (league/careers.ts)
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump))
+    && !(ts.away && p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day);
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
   if (manual) {
@@ -391,6 +430,7 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   ts.dirty = false;
   let next = Number.MAX_SAFE_INTEGER;
   for (const p of ts.team.org) if (st.absentUntil[p.idx] > day && st.absentUntil[p.idx] < next) next = st.absentUntil[p.idx];
+  for (const p of ts.team.org) if (p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day && p.homeOnlyUntil < next) next = p.homeOnlyUntil;
   if (rotating) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
   // 이도류 선수가 있으면 날마다 다시 짠다 (등판 다음 날 타석 휴식)
   if (ts.team.org.some((p) => p.alt)) next = Math.min(next, day + 1);

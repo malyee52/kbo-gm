@@ -21,9 +21,9 @@ describe('구장 특성', () => {
     expect(r.ok).toBe(true);
     const p = L.stadiums![0].project!;
     expect(p).toMatchObject({ kind: 'new', hr: PARK_SIZES.hitter.hr, dome: true, cost: Math.round(NEW_PARK.options[0].cost * DOME.cost) });
-    // 원래 구장은 ×1 (실제 기록에 구장 효과가 이미 들어 있다)
+    // 원래 구장의 홈런 배율은 ×1. 실제 구장 효과는 득점 계수(run, meta.parkFactors)로 따로 들어간다
     expect(parkFactor(L.stadiums![1])).toEqual({ hr: 1, dome: false });
-    expect(worldFromLeague(L, store, DEFAULT_PARAMS).teams[0].park).toBeUndefined();
+    expect(worldFromLeague(L, store, DEFAULT_PARAMS).teams[0].park?.hr ?? 1).toBe(1);
     // 완공 (결산 정리)
     stadiumYearEnd(L, p.open - 1, () => 0, 0);
     expect(L.stadiums![0]).toMatchObject({ hr: PARK_SIZES.hitter.hr, dome: true, opened: p.open });

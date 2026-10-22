@@ -6,7 +6,7 @@
 
 import type { DataStore, Meta, Rates } from '../data/types';
 import {
-  batSkillFrom, batValue, DECLINE_START_AGE, DEFAULT_PARAMS, leagueQuality, pitSkillFrom, pitValue, Rng, seasonRegress,
+  batSkillFrom, batValue, seasonPark, DECLINE_START_AGE, DEFAULT_PARAMS, leagueQuality, pitSkillFrom, pitValue, Rng, seasonRegress,
   type BatSkill, type EngineParams, type PitSkill, type SimPlayer,
 } from '../engine';
 import { currentRuns, expectedGrowth, growthCap, type ValueContext } from '../ai/value';
@@ -123,7 +123,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
+        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team) }] : [];
       });
       const skill = pitSkillFrom(rows, meta.priors.pitcher, seasonRegress(params));
       take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0) * qRatio(year));
@@ -136,7 +136,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates }] : [];
+        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats) }] : [];
       });
       const skill = batSkillFrom(rows, meta.priors.batter, seasonRegress(params));
       take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year));
