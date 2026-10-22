@@ -24,6 +24,7 @@ const out = arg('out', '');
 const store = loadDataStore();
 
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+const pct = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor(xs.length * q))];
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const f1 = (x: number) => x.toFixed(1);
 
@@ -117,7 +118,7 @@ if (replay1525.length) {
     '| 항목 | 목표 | 결과 |',
     '|---|---|---|',
     `| 한 시즌 다시 치르는 경기 평균 | 60~70 (조사값 65) | ${f1(mean(replay1525))} |`,
-    `| 시드별 범위 | 대략 40~90 (조사값 42~85) | ${Math.min(...replay1525)}~${Math.max(...replay1525)} |`,
+    `| 시드별 범위 | 대략 40~90 (조사값 42~85) | ${Math.min(...replay1525)}~${Math.max(...replay1525)} (5~95%: ${pct(replay1525, 0.05)}~${pct(replay1525, 0.95)}) |`,
     `| 경기당 비율 | 약 9% | ${(mean(perGame1525) * 100).toFixed(1)}% |`,
     '',
   );
