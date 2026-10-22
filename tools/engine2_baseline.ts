@@ -50,6 +50,8 @@ interface Measure {
   pull: number; center: number; oppo: number; toOut: number; toHit: number;
   /** 인플레이 아웃의 땅볼 ÷ (땅볼 + 뜬공 + 내야 뜬공) (엔진 2 6단계), 타석당 병살·희생플라이·실책 출루, 비자책 실점 비율 */
   gbOut: number; dpPa: number; sfPa: number; roePa: number; unearned: number;
+  /** 팀 경기당 실책 (엔진 2 7단계, 실제 값은 자료 없음) */
+  errPg: number;
 }
 
 function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<typeof calibrate>, seed: string): Measure {
@@ -136,6 +138,7 @@ function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<t
     toOut: balls.toOut / teamGames, toHit: balls.toHit / teamGames,
     gbOut: balls.outType[0] / (balls.outType[0] + balls.outType[2] + balls.outType[3]),
     dpPa: s.totals.gdp / s.totals.pa, sfPa: s.totals.sf / s.totals.pa, roePa: s.totals.roe / s.totals.pa, unearned: 1 - s.totals.er / s.totals.r,
+    errPg: s.errors.reduce((a, x) => a + x, 0) / teamGames,
     pitById: new Map(s.pit.map((q, i): [string, [number, number]] => [world.players[i].id, [q.bf, q.np]]).filter(([, v]) => v[0] > 0)),
   };
 }
@@ -310,6 +313,7 @@ for (const year of years) {
   row('타석당 희생플라이', 'sfPa', 4);
   row('타석당 실책 출루', 'roePa', 4);
   row('비자책 실점 비율 (실제는 시즌 자료)', 'unearned', 3, true);
+  row('팀 경기당 실책 (실제 자료 없음)', 'errPg', 3);
   emit('');
   emit(`구원 등판 전 휴식일 분포 (앞 등판이 있는 구원 등판 중):`);
   emit('');

@@ -1,15 +1,28 @@
 // 공통 규칙 계층: 타석 전 주루(도루·폭투), 희생번트, 타석 결과에 따른 주자 진루·아웃·기록.
 // 해결기가 무엇이든 같은 코드를 쓴다 (docs/경기엔진2_기획안.md 3.2).
 
-import { Ball, battedBall, type BattedBall } from './battedball';
+import { Ball, battedBall, errorPerBall, type BattedBall } from './battedball';
 import type { PlayKind } from './game';
 import { Ev, type PaRates } from './pa';
-import type { GameState, PitcherInGame, Runner } from './state';
+import { errorRateOf, fielderAt, type GameState, type PitcherInGame, type Runner } from './state';
 import type { BatLine, SimPlayer } from './types';
 
 /** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
 const OF_SIDE = ['LF', 'CF', 'RF'] as const;
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 0.98 ? 0.98 : x);
+
+/** 실책·포일로 모든 주자가 n 베이스 더 간다 (타점 없음). 더 간 주자는 비자책으로 본다 (기록원 재구성의 근사, 엔진 2 7단계) */
+function errorAdvance(st: GameState, n: number): void {
+  const b = st.bases;
+  for (let i = 2; i >= 0; i--) {
+    const r = b[i];
+    if (!r) continue;
+    b[i] = null;
+    r.earned = false;
+    if (i + n >= 3) st.score(r, null);
+    else b[i + n] = r;
+  }
+}
 
 /** 지휘한 희생번트가 성공할 확률 (임시값) */
 export const BUNT_SUCCESS = 0.85;
@@ -49,6 +62,8 @@ export function wildPitch(st: GameState): boolean {
   if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(ctx.env.wildPitch * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun))) {
     ctx.totals.wildPitches++;
     const r0 = bat.runs;
+    // 포일 몫 (엔진 2 7단계, 임시값): 포일로 간 주자는 비자책
+    if (ctx.rng.chance(ctx.params.error.passedBall)) for (const r of bases) if (r) r.earned = false;
     if (bases[2]) { st.score(bases[2], null); bases[2] = null; }
     if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
     if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
@@ -224,23 +239,26 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
     default: {
       // 인플레이 아웃이 될 타구
       bl.ab++; totals.ab++;
-      if (rng.chance(ctx.env.roe * fld.errMult)) {
-        // 실책 출루: 그 타구를 받은 수비수의 실책률로 (fieldDefense). 주자는 한 베이스씩, 타자 주자는 비자책
+      const slot = ball?.slot ?? 'SS';
+      const depth = ball ? Math.floor(ball.zone / 3) : 2;
+      const pe = params.error;
+      if (rng.chance(ctx.env.roe * pe.norm * errorPerBall(ctx.league, params)[slot] * errorRateOf(fld.slotDef[slot as keyof typeof fld.slotDef] ?? 0))) {
+        // 실책 출루 (엔진 2 7단계): 타구를 맡은 수비수가 자기 실책률로. 땅볼은 송구·포구 실책, 공중 타구는 포구 실책.
+        // 주자는 한 베이스씩, 송구 실책과 외야 포구 실책은 확률로 모두 한 베이스 더. 타자 주자는 비자책, 실책은 이닝 재구성의 아웃 하나 (errOuts)
         totals.roe++;
         kind = 'E';
-        let u = rng.next() * fld.errBy.reduce((s, x) => s + x.w, 0);
-        st.errFielder = fld.errBy.find((x) => (u -= x.w) < 0)?.idx ?? fld.errBy.at(-1)?.idx ?? -1;
+        st.errFielder = fielderAt(fld, slot);
         if (st.errFielder >= 0 && ctx.errors) ctx.errors[st.errFielder] = (ctx.errors[st.errFielder] ?? 0) + 1;
         me.earned = false;
-        if (st.outs === 2) st.halfUnearned = true;
+        st.errOuts++;
+        const extra = rng.chance(ball?.type === Ball.GB ? (pe.throwShare[slot] ?? 0) * pe.throwExtra : depth === 2 ? pe.outfieldExtra : 0);
         if (bases[2]) { st.score(bases[2], null); bases[2] = null; }
         if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
         if (bases[0]) { bases[1] = bases[0]; }
         bases[0] = me;
+        if (extra) errorAdvance(st, 1);
         break;
       }
-      const slot = ball?.slot ?? 'SS';
-      const depth = ball ? Math.floor(ball.zone / 3) : 2;
       if (ball?.type === Ball.GB) {
         // 땅볼: 병살은 받은 자리(유격·2루 쪽이 많다)와 타자 주력으로, 포스·야수선택(선행 주자 아웃, 타자 1루)도 받은 자리로
         const fs = slot as keyof typeof pp.dpSlot;
@@ -287,6 +305,13 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
         }
       }
     }
+  }
+  // 외야 안타에 외야수 실책 (공 빠뜨림·송구, 엔진 2 7단계): 모든 주자가 한 베이스 더. 실책은 그 외야수에게, 실책 출루 수에는 넣지 않는다
+  if (ball && (ev === Ev.S1 || ev === Ev.D2) && Math.floor(ball.zone / 3) === 2 && st.outs < 3
+    && rng.chance(ctx.env.roe * params.error.onHit * errorRateOf(fld.slotDef[ball.slot as keyof typeof fld.slotDef] ?? 0))) {
+    const f = fielderAt(fld, ball.slot);
+    if (f >= 0 && ctx.errors) ctx.errors[f] = (ctx.errors[f] ?? 0) + 1;
+    errorAdvance(st, 1);
   }
   return kind;
 }

@@ -134,6 +134,22 @@ function sharesFor(league: Rates, p: EngineParams): Shares {
   return s;
 }
 
+const ERR = new WeakMap<Rates, { p: EngineParams; e: Record<BallSlot, number> }>();
+/**
+ * 아웃이 될 타구 하나가 그 자리에서 실책이 될 확률 배율 (아웃 타구 평균 1, 엔진 2 7단계): 실책 몫(params.error.share) ÷ 그 자리 아웃 타구 몫.
+ * 그래서 리그 실책 출루 수는 자리 표와 관계없이 env.roe × norm 안팎이고, 실책은 타구를 맡은 수비수에게 간다
+ */
+export function errorPerBall(league: Rates, p: EngineParams): Record<BallSlot, number> {
+  const c = ERR.get(league);
+  if (c && c.p === p) return c.e;
+  const out = sharesFor(league, p).out;
+  const sh = p.error.share;
+  const sum = BALL_SLOTS.reduce((a, s) => a + (sh[s] ?? 0), 0);
+  const e = Object.fromEntries(BALL_SLOTS.map((s) => [s, out[s] > 0 ? (sh[s] ?? 0) / sum / out[s] : 0])) as Record<BallSlot, number>;
+  ERR.set(league, { p, e });
+  return e;
+}
+
 /**
  * 인플레이 타구 하나 (ev는 S1·D2·T3·OUT). 난수: 유형·방향·(깊이)·자리·수비 판정을 차례로 하나씩. 수비 판정 난수는 수비 런과 관계없이 늘 쓴다
  * (수비 능력을 바꿔도 다른 타구의 난수가 밀리지 않는다).

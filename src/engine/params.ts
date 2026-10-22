@@ -48,6 +48,26 @@ export interface PlayParams {
   armPerRun: number;
 }
 
+/**
+ * 실책 (rules.ts, 엔진 2 7단계). 타구를 맡은 수비수가 실책한다. 모두 임시값 (자료 없음: 리그 실책 수·자리별 실책·송구/포구 구분을 받지 않았다)
+ */
+export interface ErrorParams {
+  /** 실책 출루가 그 자리 수비수에게 가는 몫 (합으로 나눠 쓴다). 아웃이 될 타구 하나의 실책 확률 = 리그 값 × norm × (몫 ÷ 그 자리 아웃 타구 몫) × 수비 런 보정 */
+  share: ZoneFielders;
+  /** 리그 실책 출루를 맞추는 배율 (2023~2025 engine2_baseline으로 맞춤) */
+  norm: number;
+  /** 땅볼 실책 중 송구 실책 몫 (자리별). 나머지는 포구 실책 */
+  throwShare: ZoneFielders;
+  /** 송구 실책 때 타자를 포함한 모든 주자가 한 베이스 더 가는 확률 */
+  throwExtra: number;
+  /** 외야 공중 타구 포구 실책 때 모든 주자가 한 베이스 더 가는 확률 */
+  outfieldExtra: number;
+  /** 외야 안타(단타·2루타) 하나에 외야수 실책(공 빠뜨림·송구)으로 모든 주자가 한 베이스 더 갈 확률 ÷ 그 해 실책 출루 값 (env.roe) */
+  onHit: number;
+  /** 폭투·포일·보크 진루 중 포일 몫. 포일로 간 주자는 비자책 */
+  passedBall: number;
+}
+
 export type ZoneFielders = Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF', number>>;
 
 export interface EngineParams {
@@ -129,8 +149,13 @@ export interface EngineParams {
   // ---- 인플레이 아웃 처리
   /** 실책 출루 확률 = 이 값 × 그 해 리그의 비자책 실점 비율. 실책 출루 기록이 없어 가정한 값 */
   roePerUnearnedShare: number;
-  /** 득점이 비자책으로 기록될 확률 = 이 값 × 비자책 실점 비율. 송구 실책처럼 타자 출루가 아닌 실책 몫 (기록에만 영향) */
+  /**
+   * 경기 안 자책 판정(실책 출루 주자, 실책을 아웃으로 친 이닝 재구성, 실책·포일로 더 간 주자)으로 못 잡는 나머지 비자책 몫:
+   * 득점이 비자책이 될 확률 = 이 값 × 비자책 실점 비율 (기록에만 영향, 엔진 2 7단계에서 다시 맞춤)
+   */
   unearnedRunScale: number;
+  /** 실책 (rules.ts, 엔진 2 7단계) */
+  error: ErrorParams;
   /** 폭투·보크 확률 = 이 값 × 그 해 리그의 타석당 폭투+보크 (주자가 있는 타석 기준. 포일 몫 포함) */
   wildPitchScale: number;
   /** 폭투·보크 기록이 없는 해(2000년 이전)에 쓰는 타석당 값 */
@@ -282,7 +307,18 @@ export const DEFAULT_PARAMS: EngineParams = {
   planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.12 },
 
   roePerUnearnedShare: 0.2,
-  unearnedRunScale: 0.68,
+  // 엔진 2 7단계: 경기 안 자책 판정을 넣고 0.68 → 0.38로 다시 맞춤 (2023~2025 engine2_baseline 비자책 비율)
+  unearnedRunScale: 0.38,
+  // 모두 임시값 (자료 없음). share는 예전 수비진 실책 몫(SS 0.2·3B 0.17·2B 0.17·1B 0.12·외야 각 0.1·C 0.04)에 투수 0.04를 더했다
+  error: {
+    share: { SS: 0.2, '3B': 0.17, '2B': 0.17, '1B': 0.12, LF: 0.1, CF: 0.1, RF: 0.1, C: 0.04, P: 0.04 },
+    norm: 1,
+    throwShare: { '3B': 0.6, SS: 0.55, '2B': 0.4, '1B': 0.2, P: 0.5, C: 0.6 },
+    throwExtra: 0.35,
+    outfieldExtra: 0.3,
+    onHit: 0.25,
+    passedBall: 0.15,
+  },
   wildPitchScale: 2.6,
   wildPitchDefault: 0.012,
   sacBuntScale: 11.6,
@@ -384,8 +420,8 @@ export const DEFAULT_PARAMS: EngineParams = {
       [0.21864, 0.17276, 0.29984, 0.3044, 0.00436], // 3-2
     ],
   },
-  // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.46·0.95)
-  doublePlay: 0.46,
+  // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.478·0.95. 병살은 2012·2019가 낮고 2023~2025가 높아 다섯 해 가운데로)
+  doublePlay: 0.478,
   sacFly: 0.95,
   groundOutScores: 0.58,
 

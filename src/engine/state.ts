@@ -60,10 +60,6 @@ export interface Side {
   slotDef: Partial<Record<Slot, number>>;
   /** 포수의 수비 런 */
   catcherDef: number;
-  /** 실책 배율 (수비수별 실책률을 타구 몫으로 가중한 합, 평균 수비진 ≈ 1) */
-  errMult: number;
-  /** 실책이 났을 때 누가 했나 고르는 몫 (선수 색인, 타구 몫 × 실책률) */
-  errBy: { idx: number; w: number }[];
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
   removed: Set<number>;
   /** 지금 수비 위치 (선수 색인 → 자리). 대타·대주자는 바꾼 선수의 자리를 그대로 받는다 */
@@ -81,36 +77,30 @@ export function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slo
 }
 
 /**
- * 실책 날 타구가 그 자리로 가는 몫 (실책 출루 기준, 임시값): 내야 땅볼·송구가 대부분, 1루는 송구를 받는 쪽이라 적다.
- * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율": 전에는 팀 수비 합으로만 실책 출루 확률을 줄였다
- */
-const ERROR_SHARE: Partial<Record<Slot, number>> = { SS: 0.2, '3B': 0.17, '2B': 0.17, '1B': 0.12, C: 0.04, LF: 0.1, CF: 0.1, RF: 0.1 };
-/** 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
+ * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율". 엔진 2 7단계부터 실책은 타구를 맡은 수비수가 이 실책률로 한다 (rules.ts, params.error).
+ * 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
 const ERROR_PER_RUN = 0.045;
 export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
-/** 리그 실책 수를 예전(팀 수비 합 방식)과 같게 맞추는 배율 (2025 두 시드로 잼: 수비수별로 바꾸니 약 8% 많았다) */
-const ERROR_NORM = 0.93;
 
-/** 수비 배치에서 자리별 수비 런, 포수 수비 런, 실책 배율 */
-export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { slotDef: Partial<Record<Slot, number>>; catcherDef: number; errMult: number; errBy: { idx: number; w: number }[] } {
+/** 수비 배치에서 자리별 수비 런, 포수 수비 런 */
+export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { slotDef: Partial<Record<Slot, number>>; catcherDef: number } {
   const slotDef: Partial<Record<Slot, number>> = {};
   let catcherDef = 0;
-  let errMult = 0;
-  const errBy: { idx: number; w: number }[] = [];
   for (const p of lineup) {
     const slot = slots.get(p.idx);
     if (!slot) continue;
     const r = defenseAt(p, slot);
     slotDef[slot] = r;
     if (slot === 'C') catcherDef = r;
-    const share = ERROR_SHARE[slot] ?? 0;
-    if (share > 0) {
-      const w = share * errorRateOf(r);
-      errMult += w;
-      errBy.push({ idx: p.idx, w });
-    }
   }
-  return { slotDef, catcherDef, errMult: (errMult || 1) * ERROR_NORM, errBy };
+  return { slotDef, catcherDef };
+}
+
+/** 그 자리를 맡은 수비수의 선수 색인 (투수는 지금 마운드의 투수). 없으면 −1 */
+export function fielderAt(side: Side, slot: Slot | 'P'): number {
+  if (slot === 'P') return side.pitcher.p.idx;
+  for (const [idx, s] of side.slots) if (s === slot) return idx;
+  return -1;
 }
 
 /**
@@ -136,8 +126,11 @@ export class GameState {
   readonly park: GamePark;
   /** 승리·패전 후보: 리드를 잡은 시점의 투수와 그 점수를 내준 투수. 동점이 되면 지운다 */
   readonly rec: { win: PitcherInGame | null; loss: PitcherInGame | null; leader: Side | null } = { win: null, loss: null, leader: null };
-  /** 2아웃에서 실책이 나오면 그 이닝의 이후 실점은 비자책 */
-  halfUnearned = false;
+  /**
+   * 이번 반 이닝의 실책 출루 수 (엔진 2 7단계, 자책 판정): 실책을 아웃으로 친 아웃 수(outs + errOuts)가 3이 된 뒤의 실점은 비자책.
+   * 예전 "2아웃 실책 뒤 그 이닝 실점은 비자책"을 1·0아웃 실책까지 넓혔다
+   */
+  errOuts = 0;
   /** 직접 지휘 물음 번호 */
   cmdN = 0;
 
@@ -164,7 +157,7 @@ export class GameState {
     this.inning = inning;
     this.outs = 0;
     this.runsAtStart = bat.runs;
-    this.halfUnearned = false;
+    this.errOuts = 0;
     this.bases = [null, null, null];
     this.errFielder = -1;
   }
@@ -201,7 +194,7 @@ export class GameState {
     if (batterLine) batterLine.rbi++;
     runner.resp.runs++;
     runner.resp.line.r++;
-    if (runner.earned && !this.halfUnearned && !ctx.rng.chance(ctx.env.unearnedRun)) {
+    if (runner.earned && this.outs + this.errOuts < 3 && !ctx.rng.chance(ctx.env.unearnedRun)) {
       runner.resp.line.er++;
       runner.resp.er++;
       ctx.totals.er++;
