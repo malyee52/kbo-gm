@@ -211,6 +211,11 @@ export interface EngineParams {
 
   // ---- 수비 (defense.ts)
   /**
+   * 하드힛 이력 선수의 주 포지션을 정하는 시작 연도 앞 1·2·3시즌 자리별 타석 가중치 (ratings.ts hardhitPositions, 포지션 2안 2026-10-22 사용자 결정).
+   * 최근일수록 무겁게 (임시값)
+   */
+  positionWeights: [number, number, number];
+  /**
    * 수비수 한 명의 수비 1런당 팀 인플레이 안타가 아웃으로 바뀌는 몫 (battedball.ts: 그 수비수에게 간 타구에서만 바꾼다).
    * 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값). 엔진 1의 팀 수비 합(T5)과 같은 크기
    */
@@ -445,6 +450,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     offseasonDays: 150,
   },
 
+  positionWeights: [1, 0.7, 0.5],
   defenseHitPerRun: 1 / 880,
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,

@@ -8,7 +8,7 @@
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
 import type { DefenseAward, PpaData } from '../data/types';
-import { estimatedStarts, type EngineParams } from './params';
+import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -277,14 +277,19 @@ export interface BuildWorldInput {
 const QUAL_PA_PER_GAME = 3.1;
 
 /**
- * 하드힛 주 포지션 이력(시즌 행 posSrc 'H', 2003~)으로 정하는 수비 가능 포지션과 주 포지션 (2026-10-22 사용자 결정).
- * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 한 번이라도 있는 자리.
- * - 주 포지션: 규정타석 시즌이 가장 많은 자리 (같으면 더 최근에 채운 자리, 클사장 해석).
- * - 규정타석 시즌이 없으면 가장 많이 나온 자리 하나만 (시즌 수 → 타석 합 → 최근 순), 주 포지션도 그 자리.
+ * 하드힛 주 포지션 이력(시즌 행 posSrc 'H', 2003~)으로 정하는 수비 가능 포지션과 주 포지션 (포지션 2안, 2026-10-22 사용자 결정 "1로 하고 문제 있으면 다시 보자").
+ * - 주 포지션: 시작 연도 앞 최근 3시즌(year−1~year−3)의 자리별 타석을 최근일수록 무겁게(weights, 임시값) 더해 가장 많은 자리.
+ *   지명타자는 가중 타석의 70%를 넘을 때만 (직전 시즌 창 규칙과 같다). 같으면 더 최근에 맡은 자리.
+ *   그 3시즌에 하드힛 기록이 없으면(입대·부상 공백) 예전 규칙: 규정타석 시즌이 가장 많은 자리 → 시즌 수 → 타석 합 → 최근 순.
+ * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 있는 자리
+ *   + 2시즌 이상 맡은 자리 + 주 포지션.
  * 2009년·포지션 파일에 없는 타자의 추정값('E')은 쓰지 않는다. 하드힛 이력이 없는 선수는 맵에 없다 (기존 방식).
+ * year를 주지 않으면 seasons의 가장 늦은 해 다음 해로 본다.
  */
-export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[]): Map<string, { main: string; playable: string[] }> {
-  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number };
+export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[], year?: number,
+  weights: readonly number[] = DEFAULT_PARAMS.positionWeights): Map<string, { main: string; playable: string[] }> {
+  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number; recent: number };
+  const start = year ?? Math.max(...seasons.map((s) => s.year)) + 1;
   const per = new Map<string, Map<string, Acc>>();
   for (const s of seasons) {
     const games = new Map(s.teams.map((t) => [t.name, t.g]));
@@ -296,13 +301,15 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
       x.g = Math.max(x.g, games.get(r.team) ?? 0);
       seen.set(r.id, x);
     }
+    const w = weights[start - 1 - s.year] ?? 0;
     for (const [id, x] of seen) {
       let m = per.get(id);
       if (!m) per.set(id, (m = new Map()));
-      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0 };
+      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0, recent: 0 };
       a.n++;
       a.pa += x.pa;
       a.last = Math.max(a.last, s.year);
+      a.recent += Math.max(1, x.pa) * w;
       if (x.g > 0 && x.pa >= QUAL_PA_PER_GAME * x.g) {
         a.reg++;
         a.regLast = Math.max(a.regLast, s.year);
@@ -313,12 +320,17 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
   const out = new Map<string, { main: string; playable: string[] }>();
   for (const [id, m] of per) {
     const all = [...m.entries()];
-    const reg = all.filter(([, a]) => a.reg > 0).sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast);
-    if (reg.length) out.set(id, { main: reg[0][0], playable: reg.map(([q]) => q) });
-    else {
-      const top = all.sort((p, q) => q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
-      out.set(id, { main: top, playable: [top] });
+    const total = all.reduce((t, [, a]) => t + a.recent, 0);
+    let main: string;
+    if (total > 0) {
+      const field = all.filter(([q, a]) => q !== 'DH' && a.recent > 0).sort((p, q) => q[1].recent - p[1].recent || q[1].last - p[1].last)[0];
+      main = (m.get('DH')?.recent ?? 0) > 0.7 * total || !field ? 'DH' : field[0];
+    } else {
+      main = [...all].sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast || q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
     }
+    const playable = all.filter(([q, a]) => q === main || a.reg > 0 || a.n >= 2)
+      .sort((p, q) => Number(q[0] === main) - Number(p[0] === main) || q[1].reg - p[1].reg || q[1].n - p[1].n || q[1].last - p[1].last).map(([q]) => q);
+    out.set(id, { main, playable });
   }
   return out;
 }
@@ -359,7 +371,7 @@ export function buildWorld(input: BuildWorldInput): World {
     }
   }
   // 하드힛 이력이 있는 선수는 수비 가능 포지션·주 포지션을 규정타석 규칙으로 정하고 기존 추정의 다른 자리를 더하지 않는다 (2002년 이전·2009년만 있는 선수는 기존 방식)
-  const hhPos = hardhitPositions(careerSeasons);
+  const hhPos = hardhitPositions(careerSeasons, seasonBasis ? year + 1 : year, params.positionWeights);
 
   for (const id of ids) {
     const m = master.get(id);
