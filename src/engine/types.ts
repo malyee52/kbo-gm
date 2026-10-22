@@ -145,6 +145,8 @@ export interface LeagueEnv {
   wildPitch: number;
   /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */
   gbOdds?: number;
+  /** 그 해 리그 도루 성공률 (엔진 2 9단계 앞, 도루 실패 2025 +11.5% 고침). 시즌 시작 때 선수 성공률 평균과의 차를 모든 도루에 더한다 (GameCtx.sbShift). 없으면 0 */
+  sbPct?: number;
 }
 
 export interface BatLine {

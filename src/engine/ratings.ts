@@ -517,7 +517,7 @@ export function buildWorld(input: BuildWorldInput): World {
 }
 
 /** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
-export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams, year?: number): LeagueEnv {
+export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa' | 'sbPct'>, params: EngineParams, year?: number): LeagueEnv {
   const odds = (x: number) => x / (1 - x);
   const gb = year !== undefined ? params.groundBallShareByYear[year] : undefined;
   return {
@@ -527,6 +527,7 @@ export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' 
     unearnedRun: params.unearnedRunScale * Math.max(0, league.unearnedShare - params.unearnedInGame) / (1 - params.unearnedInGame),
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
     gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
+    ...(league.sbPct ? { sbPct: league.sbPct } : {}),
   };
 }
 

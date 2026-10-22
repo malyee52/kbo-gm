@@ -33,6 +33,7 @@ export function projectedEnvironment(store: Store, params: EngineParams = DEFAUL
     unearnedShare: avg((s) => s.league.unearnedShare),
     sacPerPa: avg((s) => s.league.sacPerPa),
     wpbkPerPa: avg((s) => s.league.wpbkPerPa ?? params.wildPitchDefault),
+    sbPct: avg((s) => s.league.sbPct ?? 0) || null,
   }, params);
   const lastYear = years[years.length - 1];
   return { rates, env, games: last.games, rules: store.meta.rules[String(lastYear)] };

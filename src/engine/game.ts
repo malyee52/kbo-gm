@@ -74,6 +74,8 @@ export interface GameContext {
   startLimitScale?: number;
   /** AI 감독의 투구 수 기준 (선발, 구원). 시즌마다 managerNorms로 정한다. 없으면 그 투수의 한계 투구 수(몸 상태 뺀 값) */
   planNorms?: { starter: number; relief: number };
+  /** 모든 도루 성공률에 더하는 값 = 그 해 리그 도루 성공률 − 선수 성공률 평균 (sbShiftOf). 없으면 0 */
+  sbShift?: number;
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */

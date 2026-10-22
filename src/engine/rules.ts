@@ -6,7 +6,7 @@ import type { PlayKind } from './game';
 import { Ev, type PaRates } from './pa';
 import { DEFAULT_PARAMS } from './params';
 import { errorRateOf, fielderAt, type GameState, type PitcherInGame, type Runner } from './state';
-import type { BatLine, SimPlayer } from './types';
+import type { BatLine, LeagueEnv, SimPlayer } from './types';
 
 /** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
 const OF_SIDE = ['LF', 'CF', 'RF'] as const;
@@ -72,8 +72,26 @@ export function stealOne(st: GameState, from: 0 | 1, pct: number): boolean {
 export function stealPct(st: GameState, r: Runner, third: boolean, extra = 0): number {
   const { params } = st.ctx;
   const run = params.run;
-  return r.p.bat!.sbPct - st.fld.catcherDef * params.catcherStealPerRun
+  return r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherDef * params.catcherStealPerRun
     + (third ? run.thirdPct : st.fld.pitcher.p.throws === 'L' ? run.leftyPct : run.rightyPct) + extra;
+}
+
+/**
+ * 리그 도루 환경 (2026-10-23): 선수 성공률은 직전 시즌들 기록이라 리그 성공률이 해마다 오르내리는 몫(2022 0.709 → 2025 0.749, 2009 0.726 → 2012 0.690)을 못 따라간다.
+ * 그 해 리그 성공률(env.sbPct)과 선수 성공률 평균(도루 시도율 × 표본 타석 가중, 표본 600타석까지)의 차. 리그 성공률을 모르면 0.
+ * 다른 환경 값(희생번트·폭투)처럼 그 해 리그 값에 맞춘다
+ */
+export function sbShiftOf(players: readonly SimPlayer[], env: LeagueEnv): number {
+  if (!env.sbPct) return 0;
+  let w = 0;
+  let s = 0;
+  for (const p of players) {
+    if (p.isPitcher || !p.bat) continue;
+    const x = p.bat.sbAtt * Math.min(600, Math.max(50, p.bat.sample));
+    w += x;
+    s += x * p.bat.sbPct;
+  }
+  return w > 0 ? env.sbPct - s / w : 0;
 }
 
 /**
