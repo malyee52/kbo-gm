@@ -1,9 +1,12 @@
 // 연전 단위 일정 생성기 (src/engine/schedule.ts). 일정 개편 기획안 8장 3단계, 7장 검증 기준
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
-import { addDays, daysBetween, scheduleRule, weekdayOf, type YearScheduleRule } from '../src/data/schedule';
+import { addDays, daysBetween, defaultOpening, openingOf, scheduleRule, weekdayOf, type YearScheduleRule } from '../src/data/schedule';
+import { DEFAULT_PARAMS, Season, worldForYear } from '../src/engine';
 import { Rng } from '../src/engine/rng';
-import { generatePlan, MAX_AWAY_RUN, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
+import { framedRule, generatePlan, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
+import { createLeague } from '../src/league/create';
+import { worldFromLeague } from '../src/league/world';
 
 const store = loadDataStore();
 const SEEDS = 50;
@@ -242,5 +245,72 @@ describe('연전 단위 일정 생성기 (S33·S33F)', () => {
   it('아직 만들지 않은 연전 틀과 구단 수가 다른 월드는 오류', () => {
     expect(() => generatePlan(inputFor(1986, 'x'))).toThrow(/연전 틀/);
     expect(() => generatePlan(inputFor(2026, 'x', { teams: 8 }))).toThrow(/구단/);
+  });
+});
+
+// 4단계: 월드에 붙는 일정 규칙, 개막 홈 구단, Season이 쓰는 일정 (planForWorld)
+describe('생성기 연결 (월드와 시즌)', () => {
+  const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
+  const w2026 = worldForYear(store, 2026, FAST);
+  const w2019 = worldForYear(store, 2019, FAST);
+
+  it('월드에 그 해 일정 규칙이 붙는다 (1999·2026, 자료 없는 해는 리그 상태 월드에서 2027~ 규칙)', () => {
+    expect(worldForYear(store, 1999, FAST).schedule?.frame).toBe('S33-99');
+    expect(w2026.schedule?.opening).toBe('2026-03-28');
+    const { league } = createLeague(store, 2026, 'sched-world', FAST);
+    const w2030 = worldFromLeague({ ...structuredClone(league), year: 2030 }, store, FAST);
+    expect(w2030.schedule?.projected).toBe(true);
+    expect(w2030.schedule?.opening).toBe(openingOf(2030));
+    expect(weekdayOf(openingOf(2030))).toBe(6);
+  });
+
+  it('개막 홈 구단: 2015년부터 지난 시즌 상위 5팀, 잠실 두 팀이 겹치면 아래 순위 대신 6위', () => {
+    const f = ['LG', '두산', '삼성', 'KIA', '롯데', '한화', 'SSG', 'NC', 'KT', '히어로즈'];
+    expect(pickOpeningHosts(2014, [0, 1, 2, 3, 4, 5], f)).toBeUndefined();
+    expect(pickOpeningHosts(2016, [2, 3, 4, 5, 6, 7], f)).toEqual([2, 3, 4, 5, 6]);
+    expect(pickOpeningHosts(2016, [2, 0, 3, 1, 4, 5, 6], f)).toEqual([2, 0, 3, 4, 5]); // 두산(4위) 대신 6위 한화
+    // 2026 시작: 2025 순위 LG·한화·SSG·삼성·NC
+    const names = w2026.openingHosts!.map((i) => w2026.teams[i].franchise).sort();
+    expect(names).toEqual(['LG', 'NC', 'SSG', '삼성', '한화'].sort());
+    expect(worldForYear(store, 2012, FAST).openingHosts).toBeUndefined();
+  });
+
+  it('리그 상태 월드도 시작 연도에는 worldForYear와 같은 개막 홈 구단, 다음 해부터는 게임 순위로', () => {
+    const { league, world } = createLeague(store, 2026, 'sched-hosts', FAST);
+    expect(world.openingHosts).toEqual(w2026.openingHosts);
+    const next = structuredClone(league);
+    next.year = 2027;
+    next.lastSeason = { year: 2026, teams: [], standings: [9, 8, 7, 6, 5, 4, 3, 2, 1, 0] };
+    const w = worldFromLeague(next, store, FAST);
+    expect(w.openingHosts).toEqual(pickOpeningHosts(2027, [9, 8, 7, 6, 5, 4, 3, 2, 1, 0], w.teams.map((t) => t.franchise)));
+  });
+
+  it('Season은 월드의 일정 규칙으로 만든 일정을 쓴다: 개막 연전은 개막 홈 구단 홈', () => {
+    const s = Season.start(w2026, FAST, 'sched-season', { cal: { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 } });
+    expect(s.plan).toMatchObject({ opening: '2026-03-28' });
+    expect(s.schedule).toBe(s.plan.days);
+    expect(s.schedule[0].map((g) => g.home).sort()).toEqual([...w2026.openingHosts!].sort());
+    const games = new Array(10).fill(0);
+    for (const d of s.schedule) for (const g of d) { games[g.home]++; games[g.away]++; }
+    expect(games).toEqual(new Array(10).fill(144));
+  });
+
+  it('연전 틀이 아직 없는 해(2019 S33L2)는 같은 달력에 하루 한 경기씩: 개막일, 월요일·쉬는 기간 경기 없음, 팀당 144경기', () => {
+    expect(framedRule(w2019)).toBeUndefined();
+    const p = planForWorld(w2019, new Rng('sched-2019'));
+    expect(p.opening).toBe(w2019.schedule!.opening);
+    const games = new Array(10).fill(0);
+    p.days.forEach((d, i) => {
+      const date = addDays(p.opening, i);
+      if (weekdayOf(date) === 1 || w2019.schedule!.breaks.some((b) => b.from <= date && date <= b.to)) expect(d).toEqual([]);
+      for (const g of d) { games[g.home]++; games[g.away]++; }
+    });
+    expect(games).toEqual(new Array(10).fill(144));
+  });
+
+  it('일정 규칙이 없는 월드는 기본 개막일(3월 넷째 토요일)에 하루 한 경기씩', () => {
+    const p = planForWorld({ ...w2026, schedule: undefined, openingHosts: undefined }, new Rng('no-rule'));
+    expect(p.opening).toBe(defaultOpening(2026));
+    expect(p.days[0].length).toBe(5);
   });
 });

@@ -1,5 +1,7 @@
 // 연전 단위 정규시즌 일정 생성기 (일정 개편 기획안 3장). 순수 함수이고 난수는 Rng만 쓴다: 같은 시드 = 같은 일정.
-// 아직 Season에 연결하지 않았다 (기획안 8장 4단계). 우천·순연(7단계)도 아직 없다.
+// Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천·순연(7단계)은 아직 없다.
+// 아직 만들지 않은 연전 틀(W82·W83·T3W2·S2·S33-99·S33-9·S33L2, 5·6단계)과 규칙 표에 맞지 않는 월드는
+// 같은 달력(개막일·월요일·쉬는 기간) 위에 원형 대진을 하루 한 경기씩 편다 (spreadPlan, 연전 없음).
 //
 // 만드는 순서 (기획안 3.2):
 //  1. 달력 칸: 개막일부터 날짜를 놓고 쉬는 기간·월요일을 빼고, 연전 틀의 요일 규칙으로 날짜를 연전 칸(1~4일)으로 묶는다
@@ -7,9 +9,11 @@
 //  3. 상대별 맞추기: 라운드가 다 차면 본 일정이 끝나고, 모자란 경기는 잔여 경기로 본 일정 뒤에 놓는다
 //  4. 홈·원정: 연전 하나는 한 구장. 상대별 홈 수(2.2)를 지키면서 같은 상대와 번갈아, 원정 연전은 3번 연속까지
 //  5. 검사: 어긋나면 시드 꼬리를 바꿔(schedule/2, …) 다시 만든다
+import type { SeasonData } from '../data/types';
 import type { YearScheduleRule } from '../data/schedule';
-import { addDays, daysBetween, weekdayOf } from '../data/schedule';
+import { addDays, daysBetween, defaultOpening, weekdayOf } from '../data/schedule';
 import { Rng } from './rng';
+import type { World } from './types';
 
 export interface PlanGame {
   home: number;
@@ -84,7 +88,7 @@ const isMonday = (d: string) => weekdayOf(d) === 1;
 const isChildrensDayMonday = (d: string) => d.slice(5) === '05-05' && isMonday(d);
 
 /** 경기를 둘 수 있는 날: 월요일(어린이날 월요일 빼고)과 쉬는 기간이 아닌 날 */
-function playable(rule: YearScheduleRule, d: string): boolean {
+function playable(rule: Pick<YearScheduleRule, 'breaks'>, d: string): boolean {
   if (isMonday(d) && !isChildrensDayMonday(d)) return false;
   return !rule.breaks.some((b) => b.from <= d && d <= b.to);
 }
@@ -502,4 +506,88 @@ export function generatePlan(input: ScheduleInput): SchedulePlan {
     why = plan;
   }
   throw new Error(`일정 생성기: ${input.rule.year}년 일정을 ${MAX_ATTEMPTS}번 만들어도 검사를 통과하지 못함 (마지막: ${why})`);
+}
+
+/** 개막 연전 홈 구단을 지난 시즌 순위로 고르는 첫 해 (조사값, 기획안 2.2). 그 전은 시드 */
+export const OPENING_HOSTS_FROM = 2015;
+/** 잠실을 함께 쓰는 계보: 둘 다 개막 홈 순위 안이면 아래 순위 쪽 대신 다음 순위가 홈 (조사값) */
+const JAMSIL = ['LG', '두산'];
+
+/**
+ * 개막 연전 홈 구단 (기획안 2.2): 지난 시즌 상위 5팀 (구단 수의 절반까지), 잠실 두 팀이 겹치면 6위가 대신.
+ * ranked는 지난 시즌 순위 순 구단 색인 (그 해 월드 색인). 2015년 전이나 순위가 없으면 undefined (시드로 정한다)
+ */
+export function pickOpeningHosts(year: number, ranked: number[], franchises: string[]): number[] | undefined {
+  if (year < OPENING_HOSTS_FROM || ranked.length < 2) return undefined;
+  const need = Math.min(5, Math.floor(franchises.length / 2));
+  const out: number[] = [];
+  let jamsil = false;
+  for (const t of ranked) {
+    if (out.length >= need) break;
+    if (t < 0 || t >= franchises.length || out.includes(t)) continue;
+    if (JAMSIL.includes(franchises[t])) {
+      if (jamsil) continue;
+      jamsil = true;
+    }
+    out.push(t);
+  }
+  return out;
+}
+
+/** 시즌 자료의 최종 순위를 그 해 월드 구단 색인으로 (계보로 잇는다. 지난 시즌에 없던 구단은 빠진다) */
+export function rankedFromSeason(prev: Pick<SeasonData, 'teams'> | undefined, franchises: string[]): number[] {
+  if (!prev) return [];
+  return [...prev.teams].sort((a, b) => a.rank - b.rank).map((t) => franchises.indexOf(t.franchise)).filter((i) => i >= 0);
+}
+
+/**
+ * 연전 틀이 아직 없는 해·규칙 표에 맞지 않는 월드: 원형 대진 라운드를 섞어 경기 둘 수 있는 날마다 하나씩 놓는다 (하루 한 경기, 연전 없음).
+ * 같은 상대와는 홈·원정을 번갈아. 팀당 경기 수는 games에서 멈춘다 (상대별 경기 수는 조금 어긋날 수 있다)
+ */
+export function spreadPlan(rule: Pick<YearScheduleRule, 'opening' | 'breaks'>, n: number, games: number, rng: Rng): SchedulePlan {
+  const base = roundRobin(Array.from({ length: n }, (_, i) => i));
+  const played = new Array<number>(n).fill(0);
+  const flip = Array.from({ length: n }, () => new Array<boolean>(n).fill(false));
+  const days: PlanGame[][] = [];
+  let guard = 0;
+  while (played.some((g) => g < games) && guard++ < 10000) {
+    for (const pairs of rng.shuffle([...base])) {
+      const day: PlanGame[] = [];
+      for (const [a, b] of pairs) {
+        if (played[a] >= games || played[b] >= games) continue;
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        const homeIsLo = !flip[lo][hi];
+        flip[lo][hi] = homeIsLo;
+        day.push(homeIsLo ? { home: lo, away: hi } : { home: hi, away: lo });
+        played[a]++;
+        played[b]++;
+      }
+      if (!day.length) continue;
+      while (!playable(rule, addDays(rule.opening, days.length))) days.push([]);
+      days.push(day.sort((x, y) => x.home - y.home));
+    }
+  }
+  return {
+    opening: rule.opening, days, planned: days.map((d) => [...d]), cancels: [], remainingFrom: -1, series: [], mainEnd: days.length - 1, attempt: 1,
+  };
+}
+
+/** 이 월드에 연전 생성기(generatePlan)를 쓸 수 있는가: 만든 연전 틀이고 구단 수·팀당 경기 수가 규칙 표와 같다 */
+export function framedRule(world: Pick<World, 'teams' | 'gamesPerTeam' | 'schedule'>): YearScheduleRule | undefined {
+  const rule = world.schedule;
+  const n = world.teams.length;
+  if (!rule || !SUPPORTED_FRAMES.includes(rule.frame)) return undefined;
+  if ((rule.teams ?? n) !== n || rule.games !== world.gamesPerTeam || rule.vs * (n - 1) !== rule.games) return undefined;
+  return rule;
+}
+
+/** 시즌 일정 (Season이 쓴다). rng는 시즌 뿌리 난수 ('schedule' 줄기를 갈라 쓴다) */
+export function planForWorld(world: Pick<World, 'year' | 'teams' | 'gamesPerTeam' | 'schedule' | 'openingHosts'>, rng: Rng): SchedulePlan {
+  const rule = framedRule(world);
+  if (rule) {
+    return generatePlan({ rule, teams: world.teams.length, franchises: world.teams.map((t) => t.franchise), openingHosts: world.openingHosts, rng });
+  }
+  const cal = world.schedule ?? { opening: defaultOpening(world.year), breaks: [] };
+  return spreadPlan(cal, world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
 }

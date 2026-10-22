@@ -7,7 +7,7 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
+import { deleteSave, isAutoSlot, listSaves, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { isSeasonDone, whenText } from './saving';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
@@ -57,9 +57,13 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   }, [store, year]);
 
   const refreshSaves = () => listSaves().then(setSaves, () => setSaves([]));
+  // 불러올 수 없는 예전 형식 저장은 지우고 한 번 알린다 (지운 뒤에는 남은 칸이 없어 다시 뜨지 않는다)
+  const [purged, setPurged] = useState(false);
   // 가장 최근에 저장한 게임 (이어 하기)
   const latest = saves?.length ? [...saves].sort((x, y) => y.savedAt.localeCompare(x.savedAt))[0] : null;
-  useEffect(() => { void refreshSaves(); }, []);
+  useEffect(() => {
+    void purgeOutdatedSaves().then((n) => { if (n) setPurged(true); }, () => undefined).finally(() => void refreshSaves());
+  }, []);
 
   const current = loadedYear === year ? store.season(year) : undefined;
   const prev = store.season(year - 1);
@@ -131,6 +135,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p className="note" role="status">{busy}</p>}
+      {purged && <p className="note" role="status">{OUTDATED_NOTICE}</p>}
 
       {/* 2026-10-12 UI 개편: 타이틀 화면처럼 큰 메뉴에서 시작한다 (이어 하기 · 새 게임 · 도전 시나리오 · 불러오기). 고르면 그 화면, '처음으로'로 돌아온다 */}
       {startTab === 'menu' ? (

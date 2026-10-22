@@ -12,61 +12,47 @@ import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
 import { Rng } from './rng';
+import { planForWorld, type PlanGame, type SchedulePlan } from './schedule';
 import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
-export interface ScheduledGame {
-  home: number;
-  away: number;
+/** 그날 치르는 경기 한 건 (engine/schedule.ts PlanGame) */
+export type ScheduledGame = PlanGame;
+
+/** 시즌이 쓰는 일정 (일정 개편 기획안 3.4). 시즌 저장에 그대로 들어간다 */
+export type SeasonPlan = Pick<SchedulePlan, 'opening' | 'days' | 'planned' | 'cancels' | 'remainingFrom'>;
+
+/** 저장한 일정. 경기는 [홈, 원정, 더블헤더 차전, 경기 중 비 회] (없는 값은 0, 뒤쪽 0은 줄인다) */
+export interface SavedSchedule {
+  opening: string;
+  days: number[][][];
+  planned: number[][][];
+  cancels: [number, number, number, number][];
+  remainingFrom: number;
 }
 
-/**
- * 일정 생성. 원형 대진(라운드 로빈)을 필요한 만큼 반복한다.
- * 반환값은 날짜별 경기 목록이며, 6일 경기 뒤 하루는 빈 날(휴식일)이다.
- */
-export function generateSchedule(nTeams: number, gamesPerTeam: number, rng: Rng): ScheduledGame[][] {
-  const ring: number[] = Array.from({ length: nTeams }, (_, i) => i);
-  if (nTeams % 2 === 1) ring.push(-1); // 홀수 구단이면 하루씩 쉬는 팀이 생긴다
-  const m = ring.length;
-  const played = new Array<number>(nTeams).fill(0);
-  const flip = Array.from({ length: nTeams }, () => new Array<boolean>(nTeams).fill(false));
-  const days: ScheduledGame[][] = [];
-  let gameDays = 0;
-  let guard = 0;
+function packGame(g: PlanGame): number[] {
+  const a = [g.home, g.away, g.dh ?? 0, g.rainInning ?? 0];
+  while (a.length > 2 && a[a.length - 1] === 0) a.pop();
+  return a;
+}
 
-  while (played.some((g) => g < gamesPerTeam) && guard++ < 10000) {
-    // 한 바퀴(모든 팀이 서로 한 번씩) 분량의 라운드를 만들고 순서를 섞는다
-    const rounds: [number, number][][] = [];
-    for (let r = 0; r < m - 1; r++) {
-      const pairs: [number, number][] = [];
-      for (let i = 0; i < m / 2; i++) {
-        const a = ring[i];
-        const b = ring[m - 1 - i];
-        if (a >= 0 && b >= 0) pairs.push([a, b]);
-      }
-      rounds.push(pairs);
-      ring.splice(1, 0, ring.pop()!);
-    }
-    rng.shuffle(rounds);
-    for (const pairs of rounds) {
-      const day: ScheduledGame[] = [];
-      for (const [a, b] of pairs) {
-        if (played[a] >= gamesPerTeam || played[b] >= gamesPerTeam) continue;
-        // 같은 상대와는 홈·원정을 번갈아
-        const lo = Math.min(a, b);
-        const hi = Math.max(a, b);
-        const homeIsLo = !flip[lo][hi];
-        flip[lo][hi] = homeIsLo;
-        day.push(homeIsLo ? { home: lo, away: hi } : { home: hi, away: lo });
-        played[a]++;
-        played[b]++;
-      }
-      if (day.length === 0) continue;
-      days.push(day);
-      if (++gameDays % 6 === 0) days.push([]);
-    }
-  }
-  return days;
+function unpackGame(a: number[]): PlanGame {
+  return { home: a[0], away: a[1], ...(a[2] ? { dh: a[2] as 1 | 2 } : {}), ...(a[3] ? { rainInning: a[3] } : {}) };
+}
+
+export function packSchedule(p: SeasonPlan): SavedSchedule {
+  return {
+    opening: p.opening, days: p.days.map((d) => d.map(packGame)), planned: p.planned.map((d) => d.map(packGame)),
+    cancels: p.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: p.remainingFrom,
+  };
+}
+
+export function unpackSchedule(s: SavedSchedule): SeasonPlan {
+  return {
+    opening: s.opening, days: s.days.map((d) => d.map(unpackGame)), planned: s.planned.map((d) => d.map(unpackGame)),
+    cancels: s.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: s.remainingFrom,
+  };
 }
 
 /** 시범 경기 한쪽 (Season.playExhibition): 야수 9명 이상, 투수 첫 번째가 선발 */
@@ -172,12 +158,19 @@ interface FixedAbsence {
   until: number;
 }
 
+/** 시즌 저장 형식 2(일정 개편 전)를 거절하는 문구 (일정 개편 기획안 6.1) */
+export const OLD_SCHEDULE_SAVE = '일정 개편 이전 저장이라 쓸 수 없습니다 (정규시즌 일정이 바뀌어 이어 할 수 없음)';
+/** 지금 시즌 저장 형식. 이보다 낮은 저장은 불러오지 않는다 (브라우저 정리 기준, game/storage.ts) */
+export const SEASON_SAVE_FORMAT = 3;
+
 /** 진행 중 시즌의 저장 형태 (JSON으로 그대로 쓸 수 있다) */
 export interface SeasonSave {
   /** 수비수별 실책 (예전 저장에는 없다) */
   errors?: number[];
-  /** 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1(엔진 1)은 불러오지 않는다 */
-  format: 2;
+  /** 3: 일정 개편 (연전 일정을 저장에 넣음, 2026-10-23). 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1·2는 불러오지 않는다 */
+  format: 3;
+  /** 이 시즌의 일정 (일정 개편 기획안 6.1). 불러올 때 다시 만들지 않고 이것을 쓴다 */
+  schedule: SavedSchedule;
   seed: string;
   year: number;
   /** 월드의 선수 구성 지문. 데이터가 바뀌면 선수 색인이 어긋나므로 불러오기를 막는다 */
@@ -237,6 +230,8 @@ export interface SeasonInit {
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계). 저장하지 않는다 */
   running?: RunTally;
+  /** 일정을 밖에서 줄 때 (저장에서 불러오기). 없으면 월드와 시드로 만든다 (engine/schedule.ts planForWorld) */
+  plan?: SeasonPlan;
 }
 
 export class Season {
@@ -244,7 +239,9 @@ export class Season {
   readonly params: EngineParams;
   readonly seed: string;
   readonly cal: Rates;
-  /** 날짜별 경기. 빈 배열은 휴식일 */
+  /** 이 시즌의 일정 (개막일, 날짜별 경기, 발표한 일정, 우천 취소). 시즌 중에 바뀌지 않는다 */
+  readonly plan: SeasonPlan;
+  /** 날짜별 경기 (plan.days). 빈 배열은 경기 없는 날 (월요일·쉬는 기간) */
   readonly schedule: ScheduledGame[][];
   /** 다음에 치를 날짜 (일정 색인) */
   day = 0;
@@ -304,7 +301,8 @@ export class Season {
     this.teamSeasons = world.teams.map((team) => ({
       team, hitters: [], rotation: [], bullpen: [], closer: null, nextReturnDay: 0, dirty: true, manual: null, callUps: [],
     }));
-    this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
+    this.plan = init.plan ?? planForWorld(world, rng);
+    this.schedule = this.plan.days;
     this.dayRng = rng.fork('days');
     this.eventRng = rng.fork('events');
     this.gamesRoot = rng.fork('games');
@@ -630,7 +628,8 @@ export class Season {
   toSave(): SeasonSave {
     const st = this.states;
     return {
-      format: 2,
+      format: 3,
+      schedule: packSchedule(this.plan),
       seed: this.seed,
       year: this.world.year,
       roster: this.baseRoster,
@@ -665,13 +664,14 @@ export class Season {
   /** 저장한 위치에서 시즌을 다시 연다. world는 저장할 때와 같은 데이터·연도로 만든 것이어야 한다 */
   static restore(world: World, params: EngineParams, save: SeasonSave): Season {
     if ((save.format as number) === 1) throw new Error('엔진 2 이전 저장이라 쓸 수 없습니다 (경기 엔진이 바뀌어 이어 할 수 없음)');
-    if (save.format !== 2) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
+    if ((save.format as number) === 2) throw new Error(OLD_SCHEDULE_SAVE);
+    if (save.format !== 3) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
     if (save.year !== world.year) throw new Error(`저장한 연도(${save.year})와 월드 연도(${world.year})가 다릅니다`);
     if (save.roster !== rosterFingerprint(world)) {
       throw new Error('게임 데이터가 저장할 때와 달라 이 저장을 이어갈 수 없습니다 (선수 구성이 바뀜)');
     }
     const root = new Rng(save.seed);
-    const s = new Season(world, params, root, save.cal, { boxTeams: save.boxTeams });
+    const s = new Season(world, params, root, save.cal, { boxTeams: save.boxTeams, plan: unpackSchedule(save.schedule) });
     for (const [d, idx, to] of save.transfers ?? []) {
       s.day = d;
       s.transfer(idx, to);

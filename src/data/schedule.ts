@@ -1,6 +1,6 @@
 // 연도별 정규시즌 일정 규칙 (schedule.json) → 그 해 날짜가 정해진 규칙.
 // 자료가 있는 해(1982~2026)는 그 해 줄을, 없는 해(2027~)는 자료 없는 해 줄의 요일 규칙으로 날짜를 계산한다 (일정 개편 기획안 2.3, 결정 8).
-// 아직 엔진은 이 규칙을 쓰지 않는다 (기획안 8장 4단계에서 연결).
+// 월드(World.schedule)가 이 규칙을 담고, 엔진의 일정 생성기(engine/schedule.ts)와 달력(game/calendar.ts)이 같은 개막일을 쓴다.
 import type { MonthDay, PostponeRule, ScheduleData, ScheduleFrame, ScheduleRuleRow, WeekdayRule } from './types';
 
 /** 'YYYY-MM-DD' */
@@ -113,4 +113,30 @@ export function scheduleRule(data: ScheduleData, year: number): YearScheduleRule
   const f = data.future;
   if (f && f.from !== undefined && year >= f.from) return resolve(f, year, true);
   return undefined;
+}
+
+/** 규칙 표가 없을 때의 개막일: 3월 넷째 토요일 (3/22~3/28, 2027~ 규칙과 같다) */
+export function defaultOpening(year: number): IsoDate {
+  return ruleDay(year, { weekday: 6, from: '03-22', to: '03-28' });
+}
+
+// 달력이 쓰는 개막일 표. 데이터를 불러올 때(loadNode·loadBrowser) 한 번 정한다.
+// 달력(dateOf)은 연도만 받는 곳이 많아 세션·시즌을 거치지 않고 여기서 읽는다 (일정 개편 기획안 5장)
+let calendarData: ScheduleData | undefined;
+const openingCache = new Map<number, IsoDate>();
+
+/** 달력이 쓸 일정 규칙 표를 정한다 (없으면 모든 해가 defaultOpening) */
+export function setCalendarSchedule(data: ScheduleData | undefined): void {
+  calendarData = data;
+  openingCache.clear();
+}
+
+/** 그 해 개막일 (날짜 색인 0). 규칙 표의 개막일, 표가 없거나 그 해 줄이 없으면 defaultOpening */
+export function openingOf(year: number): IsoDate {
+  let d = openingCache.get(year);
+  if (!d) {
+    d = (calendarData && scheduleRule(calendarData, year)?.opening) || defaultOpening(year);
+    openingCache.set(year, d);
+  }
+  return d;
 }

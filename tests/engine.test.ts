@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { computeGrades, DEFAULT_PARAMS, generateSchedule, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
+import { computeGrades, DEFAULT_PARAMS, planForWorld, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
 import { assignLineup, newPlayerStates, refreshActive, type TeamSeason } from '../src/engine/team';
+import { spreadPlan } from '../src/engine/schedule';
 
 let store: DataStore;
 let world: World;
@@ -39,10 +40,10 @@ describe('난수', () => {
 });
 
 describe('일정', () => {
-  // 시대별 구단 수와 팀당 경기 수 (자료집 시즌구조 시트)
+  // 시대별 구단 수와 팀당 경기 수 (자료집 시즌구조 시트). 연전 틀이 없는 해의 일정 (spreadPlan)
   const cases: [number, number][] = [[6, 80], [6, 100], [6, 110], [7, 108], [7, 120], [8, 126], [8, 132], [8, 133], [9, 128], [10, 144]];
   it.each(cases)('%i구단 %i경기: 모든 팀이 정확히 그만큼 치른다', (n, g) => {
-    const days = generateSchedule(n, g, new Rng(`s${n}-${g}`));
+    const { days } = spreadPlan({ opening: '2025-03-22', breaks: [] }, n, g, new Rng(`s${n}-${g}`));
     const played = new Array(n).fill(0);
     const home = new Array(n).fill(0);
     for (const day of days) {
@@ -61,8 +62,8 @@ describe('일정', () => {
     for (const h of home) expect(Math.abs(h - g / 2)).toBeLessThanOrEqual(n); // 홈·원정이 크게 치우치지 않는다
   });
 
-  it('상대별 경기 수가 같다 (10구단 144경기 = 상대당 16경기)', () => {
-    const days = generateSchedule(10, 144, new Rng('pairs'));
+  it('상대별 경기 수가 같다 (2025년 월드: 10구단 144경기 = 상대당 16경기)', () => {
+    const { days } = planForWorld(world, new Rng('pairs'));
     const m = new Map<string, number>();
     for (const day of days) for (const g of day) {
       const k = [g.home, g.away].sort((a, b) => a - b).join('-');

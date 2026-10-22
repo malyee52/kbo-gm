@@ -1,4 +1,5 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
+import { setCalendarSchedule } from './schedule';
 import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type PlayerMaster, type PpaData, type RawSeason, type ScheduleData, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
@@ -41,6 +42,7 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     const loaded = await Promise.all(need.map((y) => get<RawSeason>(`seasons/${y}.json`)));
     loaded.forEach((raw) => seasons.set(raw.year, decodeSeason(raw)));
   };
+  setCalendarSchedule(schedule);
   const store: BrowserStore = {
     meta,
     players: new Map(pl.players.map((p) => [p.id, p])),

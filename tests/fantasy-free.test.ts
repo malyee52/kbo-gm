@@ -138,8 +138,8 @@ describe('자유 모드', () => {
   }, 600_000);
 
   it('입단 예약·단장 노트: 2000년에 후원한 그레인키(1983년생)는 만 17세 이후 정한 해 개막 때 실제로 들어온다', () => {
-    // 시드: 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 엔진이 바뀌어 해고되면 시드를 바꾼다 (2026-10-21 첫 시즌 밸런스 때 pipe → pipe-2, 같은 날 입대 규칙(상무 정원·현역) 때 pipe-3, 2026-10-22 하드힛 투구손 채움 때 pipe-4, 같은 날 구장 효과 때 pipe-5, 엔진 2 6단계 타구 모형 2 때 pipe-6)
-    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-6', fantasy: { free: true } }, FAST);
+    // 시드: 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 엔진이 바뀌어 해고되면 시드를 바꾼다 (2026-10-21 첫 시즌 밸런스 때 pipe → pipe-2, 같은 날 입대 규칙(상무 정원·현역) 때 pipe-3, 2026-10-22 하드힛 투구손 채움 때 pipe-4, 같은 날 구장 효과 때 pipe-5, 엔진 2 6단계 타구 모형 2 때 pipe-6, 2026-10-23 일정 개편 4단계 때 pipe-7)
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-7', fantasy: { free: true } }, FAST);
     const team = g.league.teams[0].name;
     const { ops, dropped } = resolveOps(g, [
       { op: 'future', name: '잭 그레인키', team, pos: 'P', role: 'SP', birthYear: 1983, joinYear: 2002, now: 50, potential: 75 },

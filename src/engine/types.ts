@@ -1,5 +1,6 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense } from './defense';
+import type { YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -131,6 +132,10 @@ export interface World {
   env: LeagueEnv;
   teams: SimTeam[];
   players: SimPlayer[];
+  /** 그 해 정규시즌 일정 규칙 (schedule.json, 일정 개편 기획안 2장). 없으면 기본 개막일에 하루 한 경기씩 편다 (engine/schedule.ts planForWorld) */
+  schedule?: YearScheduleRule;
+  /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 5팀, 기획안 2.2). 없으면 시드로 */
+  openingHosts?: number[];
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */

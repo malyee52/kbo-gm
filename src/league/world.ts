@@ -4,8 +4,9 @@
 
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
+import { scheduleRule } from '../data/schedule';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pitValue, rankedFromSeason, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
@@ -18,7 +19,7 @@ import { homeOnlyUntil } from './careers';
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'schedule'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -143,5 +144,11 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
-  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players };
+  // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다)
+  const rule = store.schedule ? scheduleRule(store.schedule, year) : undefined;
+  const franchises = teams.map((t) => t.franchise);
+  const last = league.lastSeason;
+  const ranked = last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : rankedFromSeason(store.season(year - 1), franchises);
+  const hosts = pickOpeningHosts(year, ranked, franchises);
+  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players, ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}) };
 }
