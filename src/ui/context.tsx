@@ -100,10 +100,17 @@ export function Grade({ v }: { v: number | null | undefined }) {
 
 export const HAND: Record<string, string> = { R: '우', L: '좌', S: '양' };
 
+/** 수비 포지션 한글 이름. 화면에는 툴팁(title)으로만 쓴다 */
 export const POS_KO: Record<string, string> = {
-  C: '포수', '1B': '1루', '2B': '2루', '3B': '3루', SS: '유격', LF: '좌익', CF: '중견', RF: '우익', DH: '지명', IF: '내야', OF: '외야',
+  C: '포수', '1B': '1루수', '2B': '2루수', '3B': '3루수', SS: '유격수', LF: '좌익수', CF: '중견수', RF: '우익수', DH: '지명타자', IF: '내야수', OF: '외야수',
 };
 
-export function posName(pos: string | null): string {
-  return pos ? (POS_KO[pos] ?? pos) : '-';
+/** 화면의 수비 포지션 표기: 영문 약자 C·1B·2B·3B·SS·LF·CF·RF·DH, 세부를 모르면 IF·OF (2026-10-22 사용자 결정). 투수 보직은 따로 한글로 쓴다 */
+export function posName(pos: string | null | undefined): string {
+  return pos || '-';
+}
+
+/** 포지션 약자 + 한글 이름 툴팁 */
+export function Pos({ pos }: { pos: string | null | undefined }) {
+  return <span title={pos ? POS_KO[pos] : undefined}>{posName(pos)}</span>;
 }
