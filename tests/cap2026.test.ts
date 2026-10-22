@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { createLeague } from '../src/league/create';
-import { applyCapSanctions, capFloorShorts, capSanctionRule } from '../src/league/owner';
+import { applyCapSanctions, applyFloorSanctions, capFloorShorts, capSanctionRule } from '../src/league/owner';
 import {
   CAP_FLOOR_2027, capPayroll, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_SEASONS, salaryCap, salaryFloor, teamCapPayroll,
 } from '../src/league/salary';
@@ -95,13 +95,33 @@ describe('프랜차이즈 예외 (2026~, 구단당 1명, 7시즌 이상, 연봉 
 });
 
 describe('샐러리캡 하한 (2027~)', () => {
-  it('2026에는 없고 2027은 발표값, 2028부터 캡과 같은 비율로', () => {
+  it('2026에는 없고 2027은 발표값, 그 뒤 매년 5% (조사값)', () => {
     expect(salaryFloor(2026)).toBeNull();
     expect(salaryFloor(2027)).toBe(CAP_FLOOR_2027);
-    expect(salaryFloor(2028)!).toBe(Math.round(CAP_FLOOR_2027 * salaryCap(2028)! / salaryCap(2027)!));
+    expect(salaryFloor(2028)!).toBe(Math.round(CAP_FLOOR_2027 * 1.05));
+    expect(salaryFloor(2029)!).toBe(Math.round(Math.round(CAP_FLOOR_2027 * 1.05) * 1.05));
     const { league } = createLeague(store, 2026, 'floor', FAST);
     expect(capFloorShorts(league, 2026)).toEqual([]);
     for (const x of capFloorShorts(league, 2027)) expect(x.pay).toBeLessThan(x.floor);
+  });
+});
+
+describe('하한 미달 제재 (조사값: 미달액의 30·50·100%, 유소년 발전기금)', () => {
+  it('연속 미달이면 비율이 오르고, 한 해 지키면 1회부터 다시', () => {
+    const { league } = createLeague(store, 2026, 'floor2', FAST);
+    const t = 3;
+    for (const p of league.players) if (p.team === t) p.contract = { ...p.contract, salary: 3000 };
+    const rate = [0.3, 0.5, 1.0, 1.0];
+    [2027, 2028, 2029, 2030].forEach((y, i) => {
+      const x = applyFloorSanctions(league, y).find((s) => s.team === t)!;
+      expect(x.strike).toBe(i + 1);
+      expect(x.fine).toBe(Math.round((x.floor - x.pay) * rate[i]));
+    });
+    expect(league.ledger.filter((l) => l.from === t && l.note.includes('유소년 발전기금'))).toHaveLength(4);
+    expect(applyFloorSanctions(league, 2026)).toEqual([]);
+    for (const p of league.players) if (p.team === t) p.contract = { ...p.contract, salary: 100000 };
+    expect(applyFloorSanctions(league, 2031).some((s) => s.team === t)).toBe(false);
+    expect(league.floorStrikes![t]).toBe(0);
   });
 });
 

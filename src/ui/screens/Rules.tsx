@@ -1,14 +1,13 @@
 // 리그 > 규칙 연표: 지금 연도 규칙 전체와 지난 해들의 변화 (다시 보기). 표시만 한다 (league/ruleNews.ts).
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ruleSnapshot, ruleSummary } from '../../league/ruleNews';
 import { useGame } from '../context';
-import { RuleNewsBody, ruleDialogMuted, setRuleDialogMuted } from '../RuleNews';
+import { RuleNewsBody } from '../RuleNews';
 
 export function Rules() {
   const { session, store } = useGame();
   const year = session.phase === 'offseason' ? session.year + 1 : session.year;
   const first = store.meta.years[0];
-  const [muted, setMuted] = useState(ruleDialogMuted);
   const now = useMemo(() => {
     const sd = store.season(year);
     return ruleSummary(store.ruleChanges, ruleSnapshot(store.meta, year, session.league, sd ? { teams: sd.teams.length, games: sd.games } : undefined));
@@ -28,7 +27,7 @@ export function Rules() {
         </p>
         <h2>{year}년 리그 규칙{session.phase === 'offseason' ? ' (다음 시즌)' : ''}</h2>
         <ul className="rule-summary">{now.map((s) => <li key={s}>{s}</li>)}</ul>
-        <label className="small"><input type="checkbox" checked={!muted} onChange={(e) => { setRuleDialogMuted(!e.target.checked); setMuted(!e.target.checked); }} /> 개막 때 "달라지는 규칙" 창 띄우기 (이 브라우저 설정)</label>
+        <p className="muted small">개막 때 "달라지는 규칙" 창은 시즌마다 한 번 뜹니다. 자동 진행으로 개막일을 지나쳤으면 진행이 멈출 때 뜹니다.</p>
       </section>
       {years.map((y) => <YearRules key={y} year={y} open={y === year} />)}
     </div>

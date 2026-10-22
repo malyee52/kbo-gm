@@ -58,9 +58,10 @@ import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
+import { shiftsFor } from '../league/futureRules';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
-  ACHIEVEMENTS, aiPotential, applyCapSanctions, capFloorShorts, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
+  ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
@@ -629,6 +630,7 @@ export class GameSession {
     league.difficulty = opts.difficulty ?? 'normal';
     if (opts.settings) { league.settings = { ...opts.settings }; league.startSettings = { ...opts.settings }; }
     applyCapSanctions(league, league.year);
+    applyFloorSanctions(league, league.year);
     league.owner = newOwner(opts.teamIdx);
     let w = world;
     if (opts.fantasy?.free) {
@@ -820,6 +822,7 @@ export class GameSession {
       year, data: this.store.ruleChanges, start: year === L.startYear,
       now: ruleSnapshot(this.store.meta, year, L, shape(year)), prev: ruleSnapshot(this.store.meta, year - 1, L, shape(year - 1)),
       seasonDays: year === this.year ? this.season.schedule.length : undefined,
+      shifts: shiftsFor(L, year),
       lastSeason: last && g > 0 && last.hr !== undefined
         ? { year: last.year, runsPerGame: last.teams.reduce((n, t) => n + t.rs, 0) / g, hrPerGame: last.hr / (g / 2) } : undefined,
     });
@@ -2424,6 +2427,7 @@ export class GameSession {
         this.postseason = null;
         this.hallOfFameAndFarewells(L.year - 1);
         const sanctions = applyCapSanctions(L, L.year);
+        const floorSanctions = applyFloorSanctions(L, L.year);
         this.offseason = null;
         this.finishedLeague = null;
         this.phase = 'season';
@@ -2494,10 +2498,10 @@ export class GameSession {
           if (!mine && !x.pickDrop) continue;
           this.addNews(0, 'owner', `${this.league.teams[x.team].name}: 샐러리캡 ${x.strike}회 연속 초과 (초과 ${(x.over / 10000).toFixed(1)}억 원). 제재금 ${(x.fine / 10000).toFixed(1)}억 원${x.pickDrop ? ', 이번 시즌 뒤 드래프트 1라운드 지명권 9단계 하락' : ''}.`);
         }
-        // 샐러리캡 하한 (2027~): 미달 제재는 확인하지 못해 알림만 (owner.ts capFloorShorts)
-        for (const x of capFloorShorts(L, L.year)) {
+        // 샐러리캡 하한 (2027~): 미달하면 유소년 발전기금 (owner.ts applyFloorSanctions)
+        for (const x of floorSanctions) {
           if (x.team !== this.teamIdx) continue;
-          this.addNews(0, 'owner', `샐러리캡 하한 미달: 캡 대상 연봉 ${(x.pay / 10000).toFixed(1)}억 원으로 하한 ${(x.floor / 10000).toFixed(1)}억 원보다 ${((x.floor - x.pay) / 10000).toFixed(1)}억 원 적습니다 (하한 미달 제재는 확인 전이라 게임에서는 알림만 합니다).`);
+          this.addNews(0, 'owner', `샐러리캡 하한 ${x.strike}회 연속 미달: 캡 대상 연봉 ${(x.pay / 10000).toFixed(1)}억 원으로 하한 ${(x.floor / 10000).toFixed(1)}억 원보다 ${((x.floor - x.pay) / 10000).toFixed(1)}억 원 적습니다. 유소년 발전기금 ${(x.fine / 10000).toFixed(1)}억 원.`);
         }
         this.setSeasonGoal();
         return res;

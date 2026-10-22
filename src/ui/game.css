@@ -840,6 +840,7 @@ td .inline { flex-wrap: nowrap; }
 .rule-status.rule-confirmed { background: var(--accent-soft); color: var(--fg); border-color: var(--line-strong); }
 .rule-status.rule-research { background: var(--info-bg); color: var(--fg); border-color: var(--line); }
 .rule-status.rule-conflict, .rule-status.rule-unknown { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--line); }
+.rule-status.rule-virtual { background: var(--panel); color: var(--muted); border-color: var(--line-strong); border-style: dashed; }
 .rule-year > summary { font-size: 15px; }
 @media (max-width: 640px) {
   .rule-line { grid-template-columns: 1fr; }

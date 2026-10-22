@@ -9,6 +9,7 @@ import { dateOf } from '../game/calendar';
 import { faEnabled, faServiceNeeded, foreignRule } from './eras';
 import { salaryCap } from './salary';
 import type { LeagueState } from './types';
+import { FUTURE_RULE_LABEL, futureDelta, futureValueText, type FutureRuleKey, type RuleShift } from './futureRules';
 
 /** 게임 규칙 값 키 (tools/build_data.py의 RULE_KEYS와 같아야 한다) */
 export const RULE_KEYS = ['rosterSize', 'foreignLimit', 'maxInnings', 'postseasonTeams', 'faEnabled', 'faService', 'salaryCap'] as const;
@@ -38,19 +39,23 @@ export interface RuleSnapshot {
 }
 
 /** 그 해 게임 규칙 값. 자료가 없는 해(2027~)는 마지막 해의 meta 값 */
-export function ruleSnapshot(meta: Meta, year: number, league?: Pick<LeagueState, 'rules'>, season?: { teams: number; games: number }): RuleSnapshot {
+export function ruleSnapshot(meta: Meta, year: number, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>, season?: { teams: number; games: number }): RuleSnapshot {
   const ys = meta.years;
   const y = Math.min(Math.max(year, ys[0]), ys[ys.length - 1]);
   const r = meta.rules[String(y)];
   const f = foreignRule(meta, year, league);
   const src = (v?: string | number): RuleStatus => (v === 'confirmed' ? 'confirmed' : 'unknown');
   const cap = salaryCap(year, league);
+  // 자료 없는 해는 미래 규칙 변경 ② (futureRules.ts)
+  const future = year > ys[ys.length - 1];
+  const d = (k: FutureRuleKey) => (future ? futureDelta(league, k, year) : 0);
+  const capShifted = future && (league?.ruleShifts ?? []).some((s) => s.key === 'capGrowth' && s.year <= year);
   return {
     year,
-    rosterSize: r?.rosterSize ?? 26,
+    rosterSize: (r?.rosterSize ?? 26) + d('roster'),
     foreignTotal: f.total,
     foreignAsia: f.asia,
-    maxInnings: r?.maxInnings ?? 12,
+    maxInnings: (r?.maxInnings ?? 12) + d('extra'),
     postseasonTeams: r?.postseasonTeams ?? 4,
     faEnabled: faEnabled(year),
     faServiceHs: faServiceNeeded(year, false),
@@ -58,10 +63,11 @@ export function ruleSnapshot(meta: Meta, year: number, league?: Pick<LeagueState
     salaryCap: cap,
     ...(season ? { teams: season.teams, games: season.games } : {}),
     sources: {
-      rosterSize: src(r?.rosterSizeSource), foreignLimit: src(r?.foreignLimitSource), maxInnings: src(r?.maxInningsSource),
+      rosterSize: d('roster') ? 'virtual' : src(r?.rosterSizeSource), foreignLimit: d('foreign') ? 'virtual' : src(r?.foreignLimitSource),
+      maxInnings: d('extra') ? 'virtual' : src(r?.maxInningsSource),
       postseasonTeams: src(r?.postseasonTeamsSource),
-      // 캡: 2023~2028은 발표값(자료집 확인), 그 뒤는 매년 5% 상향 (임시값)
-      salaryCap: cap === null || year <= 2028 ? 'confirmed' : 'unknown',
+      // 캡: 2023~2028은 발표값(자료집 확인), 그 뒤는 매년 5% 상향 (임시값). 미래 규칙 변경으로 상향률이 바뀐 뒤는 가상 결정
+      salaryCap: cap === null || year <= 2028 ? 'confirmed' : capShifted ? 'virtual' : 'unknown',
     },
   };
 }
@@ -127,7 +133,16 @@ export interface RuleNewsInput {
   seasonDays?: number;
   /** 게임 안 지난 시즌 리그 기록 (미리 보기가 아니라 지난 결과) */
   lastSeason?: { year: number; runsPerGame: number; hrPerGame: number };
+  /** 이 해에 적용되는 미래 규칙 변경 ② (게임 속 가상 결정, futureRules.ts shiftsFor) */
+  shifts?: RuleShift[];
 }
+
+/** 미래 규칙 변경 항목 → 알림 분류·반영·게임 규칙 키 */
+const SHIFT_LINE: Record<FutureRuleKey, { cat: RuleCat; effect: RuleEffect; key?: RuleValueKey }> = {
+  ball: { cat: 'ball', effect: 'engine' }, zone: { cat: 'game', effect: 'engine' }, extra: { cat: 'game', effect: 'engine', key: 'maxInnings' },
+  roster: { cat: 'roster', effect: 'league', key: 'rosterSize' }, foreign: { cat: 'foreign', effect: 'league', key: 'foreignLimit' },
+  capGrowth: { cat: 'cap', effect: 'league', key: 'salaryCap' },
+};
 
 /** 위 칸 분류 순서 (2.2): 공인구 → 경기 → 엔트리·외국인 → FA·드래프트·캡 → 리그 운영 */
 const CAT_ORDER: RuleCat[] = ['ball', 'game', 'roster', 'foreign', 'fa', 'draft', 'cap', 'league'];
@@ -137,11 +152,12 @@ export const CAT_LABEL: Record<RuleCat, string> = {
 export const EFFECT_LABEL: Record<RuleEffect, string> = {
   show: '표시만', 'show-env': '표시만 (게임은 그 해 리그 평균으로 반영)', league: '리그 운영에 반영', engine: '경기에 반영',
 };
-export const STATUS_LABEL: Record<RuleStatus, string> = { confirmed: '자료집 확인', research: '조사값', conflict: '출처 갈림', unknown: '미확인' };
+export const STATUS_LABEL: Record<RuleStatus, string> = { confirmed: '자료집 확인', research: '조사값', conflict: '출처 갈림', unknown: '미확인', virtual: '게임 속 가상 결정' };
 export const STATUS_HELP: Record<RuleStatus, string> = {
   confirmed: '자료집 "제도연표"에서 출처를 확인한 값',
   research: '웹 조사 값, 자료집 제도연표 확인 전',
   conflict: '출처끼리 값이 갈린다',
+  virtual: '게임이 리그 흐름을 보고 정한 가상 결정 (실제 KBO 결정이 아님)',
   unknown: '확인하지 못한 값',
 };
 
@@ -248,6 +264,16 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
       continue;
     }
     lines.push(line);
+  }
+
+  // 미래 규칙 변경 ② (게임 속 가상 결정). 같은 게임 규칙 키의 자동 줄은 만들지 않는다
+  for (const s of input.shifts ?? []) {
+    const m = SHIFT_LINE[s.key];
+    if (m.key) usedKeys.add(m.key);
+    lines.push({
+      cat: m.cat, title: `${FUTURE_RULE_LABEL[s.key]} (게임 속 가상 결정)`, before: futureValueText(s.key, s.before), after: futureValueText(s.key, s.after),
+      effect: m.effect, status: 'virtual', note: s.reason, ...(m.key ? { key: m.key } : {}),
+    });
   }
 
   // 자료에 없는 게임 값 변화

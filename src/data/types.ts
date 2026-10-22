@@ -283,7 +283,8 @@ export type RuleCat = 'ball' | 'game' | 'roster' | 'foreign' | 'fa' | 'draft' | 
 /** 게임 반영: 표시만 / 표시만(그 해 리그 평균으로 녹음) / 리그 운영 / 경기 엔진 */
 export type RuleEffect = 'show' | 'show-env' | 'league' | 'engine';
 /** 확인 상태: 자료집 확인 / 조사값(웹 조사, 제도연표 확인 전) / 출처 갈림 / 미확인 */
-export type RuleStatus = 'confirmed' | 'research' | 'conflict' | 'unknown';
+/** virtual = 게임 속 가상 결정 (2028년 이후 미래 규칙 변경, league/futureRules.ts). 자료에는 없다 */
+export type RuleStatus = 'confirmed' | 'research' | 'conflict' | 'unknown' | 'virtual';
 
 export interface RuleChangeItem {
   year: number;

@@ -1031,10 +1031,10 @@ function CapRulesPanel({ act }: { act: Act }) {
       <h2>{year} 샐러리캡 <StatusBadge status="research" /></h2>
       <p className="muted small">
         캡 대상 연봉 {won(pay)} / 상한 {won(cap)}{floor ? ` · 하한 ${won(floor)}` : ''}.
-        초과 제재: 1회 30%, 2회 연속 50%, 3회 연속부터 100%와 1라운드 지명권 9단계 하락 (연속 횟수는 2023년부터 이어 셈, 임시값).
+        초과 제재: 1회 30%, 2회 연속 50%, 3회 연속부터 100%와 1라운드 지명권 9단계 하락 (한 해라도 지키면 1회부터 다시 셈).{floor ? ' 하한 미달은 미달액의 1회 30%, 2회 연속 50%, 3회 연속부터 100%를 유소년 발전기금으로 냅니다.' : ''}
       </p>
       {floor !== null && pay < floor && (
-        <p className="error-text small">하한보다 {won(floor - pay)} 적습니다. 하한 미달 제재는 확인 전이라 게임에서는 개막 때 알림만 합니다.</p>
+        <p className="error-text small">하한보다 {won(floor - pay)} 적습니다. 이대로 개막하면 유소년 발전기금을 냅니다.</p>
       )}
       <h3>프랜차이즈 예외</h3>
       <p className="muted small">

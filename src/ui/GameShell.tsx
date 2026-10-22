@@ -33,7 +33,7 @@ import { teamVars } from './teams';
 import { gamesBehind, recentForm } from '../game/stats';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
-import { RuleNewsDialog, ruleDialogMuted } from './RuleNews';
+import { RuleNewsDialog } from './RuleNews';
 import { Rules } from './screens/Rules';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
@@ -98,16 +98,15 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // 개막일 "달라지는 규칙" 창: 시즌마다 한 번 (진행 중이면 띄우지 않고 소식만). 본 해는 메모리에만 (불러오면 다시 볼 수 있다)
+  // 개막 "달라지는 규칙" 창: 시즌마다 한 번 꼭 띄운다 (2026-10-22 사용자 결정). 자동 진행으로 개막일을 지나쳤으면 진행이 멈춘 뒤에 띄운다.
+  // 본 해는 메모리에만 두고, 시즌 중간 저장을 불러온 경우(개막일이 지난 채로 화면을 연 경우)는 이미 본 것으로 친다
   const [ruleYear, setRuleYear] = useState<number | null>(null);
-  const ruleSeen = useRef<number | null>(null);
+  const ruleSeen = useRef<number | null>(session.phase === 'season' && session.day > 0 ? session.year : null);
   useEffect(() => {
-    if (session.phase !== 'season' || ruleSeen.current === session.year) return;
-    if (session.day !== 0 || session.done) { ruleSeen.current = session.year; return; }
-    if (busy) return;
+    if (session.phase !== 'season' || ruleSeen.current === session.year || busy) return;
     ruleSeen.current = session.year;
-    if (!ruleDialogMuted()) setRuleYear(session.year);
-  }, [session, session.phase, session.year, session.day, session.done, busy, version]);
+    setRuleYear(session.year);
+  }, [session, session.phase, session.year, busy, version]);
   // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다. 시즌 중에도 능력이 바뀌는 조작(자유 모드 선수 만들기·능력 변경,
   // 이도류 등)이 있어 조작마다 다시 계산한다 (2026-10-13 사용자 보고: 자유 모드로 만든 선동열이 오버롤 70인데 세부 능력은 빈 자리의 40대로 보였다)
   const world = session.world;

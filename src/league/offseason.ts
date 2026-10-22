@@ -31,6 +31,7 @@ import {
   SERVICE_SHARE, salaryFloor, teamCapPayroll, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
+import { FUTURE_RULE_LABEL, futureValueText, judgeFutureRules, type RuleSignal } from './futureRules';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
 import { settingsOf } from './difficulty';
@@ -310,6 +311,34 @@ function log(off: OffseasonState, stage: LogStage, text: string, mine: boolean, 
 
 // ---- 결산
 
+/** 국내 선수층 지표에 넣는 인원 (tools/flow_longterm.ts의 상위 270명 기여 합과 같은 뜻) */
+const DEPTH_TOP = 270;
+
+/** 결산 때 미래 규칙 변경 ②의 신호 (futureRules.ts RuleSignal) */
+function ruleSignalOf(league: LeagueState, world: World, season: Season, ctx: ValueContext): RuleSignal {
+  const year = league.year;
+  const g = season.teams.reduce((n, t) => n + t.g, 0);
+  const draws = season.teams.reduce((n, t) => n + t.t, 0);
+  const days = season.schedule.length;
+  const absence = season.absences.reduce((n, a) => n + Math.max(0, Math.min(a.until, days) - a.day), 0) / (season.teams.length || 1);
+  const depth = world.players.filter((p) => !p.foreign && p.teamIdx >= 0).map((p) => currentRuns(p, ctx)).sort((a, b) => b - a)
+    .slice(0, DEPTH_TOP).reduce((a, b) => a + b, 0);
+  const cap = salaryCap(year, league);
+  const pays = league.teams.map((_, t) => teamCapPayroll(league, t, year)).filter((_, t) => !isFuturesTeam(league, t, year));
+  const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  return {
+    year,
+    hr: r3(1 / season.cal.hr),
+    so: r3(1 / season.cal.so),
+    bb: r3(1 / season.cal.bb),
+    draw: r3(g ? draws / (g / 2) : 0),
+    absence: Math.round(absence),
+    depth: Math.round(depth),
+    capOver: cap === null ? 0 : pays.filter((x) => x > cap).length,
+    capUse: cap === null || !pays.length ? 0 : r3(pays.reduce((a, b) => a + b, 0) / pays.length / cap),
+  };
+}
+
 /**
  * 시즌 결산: 시즌 결과를 리그 상태에 반영하고(소속, 기록, 1군 연차), 성장 판정을 한 뒤 오프시즌을 연다.
  * world와 season은 막 끝난 시즌의 것이어야 한다.
@@ -478,6 +507,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0) };
+  // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 정한다
+  const shift = judgeFutureRules(league, ruleSignalOf(league, world, season, ctxNow));
   // 계약하지 못한 FA (freeAgent): 시즌 중 구단을 찾았으면 보통 선수, 끝내 못 찾았으면 은퇴 (리그 명단에는 오프시즌 끝까지 남아 통산이 보관된다)
   for (const p of league.players) {
     if (!p.freeAgent) continue;
@@ -522,6 +553,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   news.push(...militaryStep(c, (p, d) => { if (d > 0) Object.assign(p, skillForRuns({ ...p }, nextRuns(p) - d, ctxNow, year + 1)); },
     userTeam >= 0 && userEnlist ? { team: userTeam, ids: userEnlist, ...(userApply ? { apply: userApply } : {}) } : undefined));
   for (const n of news) log(off, 'settle', n.text, n.team === userTeam, n.major);
+  if (shift) log(off, 'settle', `${shift.year} 시즌 규칙 변경: ${FUTURE_RULE_LABEL[shift.key]} ${futureValueText(shift.key, shift.before)} → ${futureValueText(shift.key, shift.after)}. ${shift.reason}`, true, true);
 
   // 성장·하락 결과: 은퇴한 선수는 빼고, 입대한 선수는 표시한다
   off.growth = [];

@@ -1,19 +1,11 @@
 // "올해 달라지는 규칙" 알림 (docs/리그규칙변경_기획안.md 2장): 개막 전용 창, 목록 부품, 확인 상태 배지.
-// 표시만 한다. 창을 봤는지는 저장하지 않고, "띄우지 않기"만 브라우저 설정(localStorage)에 둔다.
+// 표시만 한다. 창을 봤는지는 저장하지 않는다. 개막 창은 시즌마다 한 번 꼭 띄운다 (2026-10-22 사용자 결정: "띄우지 않기"를 없앰).
 import { useEffect, useRef } from 'react';
 import type { RuleStatus } from '../data/types';
 import { CAT_LABEL, EFFECT_LABEL, STATUS_HELP, STATUS_LABEL, type RuleLine, type RuleNews } from '../league/ruleNews';
 import { useGame } from './context';
 import { teamVars } from './teams';
 
-const MUTE_KEY = 'kbo-rule-dialog-off';
-
-export function ruleDialogMuted(): boolean {
-  try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; }
-}
-export function setRuleDialogMuted(v: boolean): void {
-  try { if (v) localStorage.setItem(MUTE_KEY, '1'); else localStorage.removeItem(MUTE_KEY); } catch { /* 기억하지 못해도 화면은 그대로 */ }
-}
 
 export function StatusBadge({ status }: { status: RuleStatus }) {
   return <span className={`tag rule-status rule-${status}`} title={STATUS_HELP[status]} tabIndex={0}>{STATUS_LABEL[status]}</span>;
@@ -101,7 +93,6 @@ export function RuleNewsDialog({ news, onClose }: { news: RuleNews; onClose: () 
         <RuleNewsBody news={news} />
         <div className="actions">
           <button type="button" className="ghost" onClick={() => { close(); go('rules'); }}>규칙 연표 전체 보기</button>
-          <button type="button" className="ghost" onClick={() => { setRuleDialogMuted(true); close(); }}>다음부터 띄우지 않기</button>
         </div>
       </div>
     </dialog>

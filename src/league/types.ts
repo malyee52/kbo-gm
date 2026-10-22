@@ -256,6 +256,11 @@ export interface LeagueState {
    * 2026-10-22부터, 예전 저장에는 없다 (모두 자동 지정)
    */
   franchiseTags?: (string | null)[];
+  /** 미래 규칙 변경 ② (2028~, league/futureRules.ts): 바뀐 기록과 결산 때 남긴 신호. 2026-10-22부터, 예전 저장에는 없다 (변경 없음) */
+  ruleShifts?: import('./futureRules').RuleShift[];
+  ruleSignals?: import('./futureRules').RuleSignal[];
+  /** 구단별 샐러리캡 하한(2027~) 연속 미달 횟수 (owner.ts applyFloorSanctions). 예전 저장에는 없다 */
+  floorStrikes?: number[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
   /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */

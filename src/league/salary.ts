@@ -7,13 +7,14 @@ import { faServiceNeeded } from './eras';
 import type { LeagueState, LeaguePlayer, School } from './types';
 import { ruleOf } from './rules';
 import { seasonsWith } from './stadium';
+import { futureValue } from './futureRules';
 
 /** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
 export const MIN_SALARY = 3000;
 
-/** 샐러리캡 (만 원). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1) */
+/** 샐러리캡 (만 원). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1). 미래 규칙 변경 ②가 상향률을 바꿀 수 있다 */
 const CAP: Record<number, number> = { 2023: 1142638, 2024: 1142638, 2025: 1371165, 2026: 1439723, 2027: 1511709, 2028: 1587294 };
-export function salaryCap(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
+export function salaryCap(year: number, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>): number | null {
   if (year < 2023) return null;
   // 규정 변경 (league/rules.ts capScale, 0이면 폐지)
   const scale = ruleOf(league, 'capScale');
@@ -22,7 +23,7 @@ export function salaryCap(year: number, league?: Pick<LeagueState, 'rules'>): nu
   if (CAP[year]) v = CAP[year];
   else {
     v = CAP[2028];
-    for (let y = 2029; y <= year; y++) v = Math.round(v * 1.05);
+    for (let y = 2029; y <= year; y++) v = Math.round(v * (1 + futureValue(league, 'capGrowth', y)));
   }
   return scale === 1 ? v : Math.round(v * scale);
 }
@@ -114,12 +115,20 @@ export function capShareOf(league: Pick<LeagueState, 'teams' | 'players' | 'rule
   return franchiseTag(league, team, year)?.id === p.id ? Math.round(p.contract.salary * FRANCHISE_TAG_SHARE) : p.contract.salary;
 }
 
-/** 샐러리캡 하한 (만 원). 2027년 발표값, 2028년부터는 캡과 같은 비율로 오른다 (임시값). 캡이 없거나 2027년 전이면 null */
+/** 샐러리캡 하한의 연간 상향률 (조사값: 2027년 도입 뒤 매년 5%) */
+export const CAP_FLOOR_GROWTH = 0.05;
+
+/**
+ * 샐러리캡 하한 (만 원). 2027년 발표값, 그 뒤 매년 5% 상향 (조사값). 캡이 없거나 2027년 전이면 null.
+ * 자유 모드 캡 배율(capScale)은 하한에도 같이 곱한다. 미래 규칙 변경의 캡 상향률은 하한에 닿지 않는다
+ */
 export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
   if (year < CAP_FLOOR_FROM) return null;
-  const cap = salaryCap(year, league);
-  if (cap === null) return null;
-  return Math.round(CAP_FLOOR_2027 * (cap / CAP[CAP_FLOOR_FROM]));
+  if (salaryCap(year, league) === null) return null;
+  let v = CAP_FLOOR_2027;
+  for (let y = CAP_FLOOR_FROM + 1; y <= year; y++) v = Math.round(v * (1 + CAP_FLOOR_GROWTH));
+  const scale = ruleOf(league, 'capScale');
+  return scale === 1 ? v : Math.round(v * scale);
 }
 
 /**
