@@ -31,6 +31,8 @@ export interface ShellUi {
   density: Density;
   setDensity(d: Density): void;
   decisions: Decision[];
+  /** "확인"으로 알림을 내려 둔다 (그 상태 서명이 바뀔 때까지, Decision.ack) */
+  ack(key: string, sig: string): void;
 }
 
 const Ctx = createContext<ShellUi | null>(null);

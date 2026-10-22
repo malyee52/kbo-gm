@@ -54,7 +54,7 @@ import { rivalDue, rivalMove } from '../fantasy/rivals';
 import { About } from './screens/About';
 import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
 import { blockOf, entryOf, GROUPS, hidden, itemBlock, itemOf, itemsOf, MOBILE_GROUPS, tabLabel, type Group, type MenuItem } from './menu';
-import { countByGroup, decisions } from './decisions';
+import { countByGroup, decisions, loadAcked, saveAcked, type Acked } from './decisions';
 import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ShellUi } from './shell';
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
@@ -106,6 +106,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [searchKey, setSearchKey] = useState(0);
   const [density, setDensityState] = useState<Density>(loadDensity);
   const setDensity = (d: Density) => { setDensityState(d); saveDensity(d); };
+  // 결정함에서 "확인"한 알림 (게임마다 이 브라우저에 기억, decisions.ts)
+  const gameKey = `${session.league.startYear}:${session.league.seed}`;
+  const [acked, setAcked] = useState<Acked>(() => loadAcked(gameKey));
+  useEffect(() => setAcked(loadAcked(gameKey)), [gameKey]);
   // 막힌 화면을 누르면 사유를 잠시 보여 준다
   const go = useCallback((s: Screen, arg?: number) => {
     setScreen(s);
@@ -380,14 +384,19 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const pending = !!session.pendingEvent;
   const seasonRunning = !off && !session.done;
   const advanceDisabled = !!busy || pending || (!seasonRunning && !session.postseasonRunning);
-  const list = useMemo(() => decisions(session), [session, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const list = useMemo(() => decisions(session, acked), [session, version, acked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ack = (key: string, sig: string) => {
+    const next = { ...acked, [key]: sig };
+    setAcked(next);
+    saveAcked(gameKey, next);
+  };
   const badges = countByGroup(list);
 
   const advanceNext = () => {
     if (session.postseasonRunning) void advancePs('one', '경기 진행 중');
     else void advanceNextGame();
   };
-  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list };
+  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list, ack };
 
   const curItem = itemOf(screen);
   const curGroup = curItem?.group;

@@ -3,6 +3,7 @@
 // 출전 가능 상태·지금 수비 등급·최근 기록과 함께 열리고, 고른 변경은 묶음으로 모아 전후를 검토한 뒤 한 번에 적용한다.
 // 엔트리 이동(1군·2군)도 같은 묶음에 들어간다. 규칙 검사는 세션(checkBoard·applyBoard)이 하고 조작 기록은 기존 'entry'·'plan' 그대로다.
 // 추천은 화면에 보이는 능력 등급·상태만으로 고르고, 표시만 할 뿐 자동으로 적용하지 않는다.
+import { ConfirmButton } from '../ConfirmButton';
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
@@ -329,12 +330,16 @@ export function LineupBoard() {
         </div>
         <span className="inline">
           {editable && session.plan && (
-            <button type="button" className="ghost" onClick={() => mode(session.setPlan(null), '기용을 AI 감독에게 맡겼습니다.')}>AI에게 기용 맡기기</button>
+            // 확인 한 번 뒤 적용 (UI 2차 결정 2): 직접 정한 배치가 사라진다
+            <ConfirmButton className="ghost" label="AI에게 기용 맡기기" confirmLabel="직접 정한 배치가 사라집니다. 다시 눌러 맡기기"
+              onConfirm={() => mode(session.setPlan(null), '기용을 AI 감독에게 맡겼습니다.')} />
           )}
-          <button type="button" className="ghost" disabled={!editable} onClick={() => {
-            if (manual) mode(session.setEntry(null), '1군 엔트리를 AI에게 맡겼습니다. 선수를 옮기면 다시 직접 관리로 바뀝니다.');
-            else mode(session.setEntry(session.registered().map((p) => p.idx)), '지금 1군 명단으로 직접 관리를 시작합니다.');
-          }}>{manual ? 'AI에게 엔트리 맡기기' : '엔트리 직접 관리하기'}</button>
+          {manual ? (
+            <ConfirmButton className="ghost" disabled={!editable} label="AI에게 엔트리 맡기기" confirmLabel="AI 감독이 1군을 다시 짭니다. 다시 눌러 맡기기"
+              onConfirm={() => mode(session.setEntry(null), '1군 엔트리를 AI에게 맡겼습니다. 선수를 옮기면 다시 직접 관리로 바뀝니다.')} />
+          ) : (
+            <button type="button" className="ghost" disabled={!editable} onClick={() => mode(session.setEntry(session.registered().map((p) => p.idx)), '지금 1군 명단으로 직접 관리를 시작합니다.')}>엔트리 직접 관리하기</button>
+          )}
         </span>
       </section>
 
