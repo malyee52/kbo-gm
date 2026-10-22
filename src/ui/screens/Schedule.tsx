@@ -169,7 +169,7 @@ export function BoxView({ log, box }: { log: GameLog; box: BoxScore }) {
                 <tbody>
                   {box[k].batters.map((b, i) => (
                     <tr key={b.idx} className={b.sub ? 'sub-row' : undefined}><td className="l">
-                      {b.sub ? <span className="muted small">└ {b.sub === 'PH' ? '대타' : '대주자'}</span> : <span className="muted small">{b.order ?? i + 1}</span>} <PlayerLink p={session.world.players[b.idx]} /></td>
+                      {b.sub ? <span className="muted small">└ {b.sub === 'PH' ? '대타' : b.sub === 'DEF' ? '대수비' : '대주자'}</span> : <span className="muted small">{b.order ?? i + 1}</span>} <PlayerLink p={session.world.players[b.idx]} /></td>
                       <td>{b.ab}</td><td>{b.r}</td><td>{b.h}</td><td>{b.rbi}</td><td>{b.hr}</td><td>{b.bb}</td><td>{b.so}</td></tr>
                   ))}
                 </tbody>

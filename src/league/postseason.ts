@@ -190,7 +190,7 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
   return g;
 }
 
-function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], subs: { idx: number; order: number; kind: 'PH' | 'PR' }[] = []): BoxBatter[] {
+function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], subs: { idx: number; order: number; kind: 'PH' | 'PR' | 'DEF' }[] = []): BoxBatter[] {
   const line = (idx: number): BoxBatter => {
     const b = bat[idx];
     return { idx, ab: b.ab, r: b.r, h: b.h, rbi: b.rbi, hr: b.hr, bb: b.bb, so: b.so };

@@ -35,13 +35,15 @@ export interface RunTally {
   hnr: number; hnrMiss: number; hnrFoul: number; hnrInPlay: number;
   bunt: number; buntSac: number; buntHit: number; buntLeadOut: number; buntPop: number; buntDp: number;
   squeeze: number; squeezeRun: number; buntPitches: number;
+  /** 경기 중 교체 (엔진 2 9단계): 대타, 대주자, 대수비 */
+  ph: number; pr: number; def: number;
 }
 
 export function emptyRunTally(): RunTally {
   return {
     sb2: 0, cs2: 0, sb3: 0, cs3: 0, double: 0, pickoff: 0, pitchout: 0, pitchoutRun: 0, pitchoutCaught: 0,
     hnr: 0, hnrMiss: 0, hnrFoul: 0, hnrInPlay: 0, bunt: 0, buntSac: 0, buntHit: 0, buntLeadOut: 0, buntPop: 0, buntDp: 0,
-    squeeze: 0, squeezeRun: 0, buntPitches: 0,
+    squeeze: 0, squeezeRun: 0, buntPitches: 0, ph: 0, pr: 0, def: 0,
   };
 }
 

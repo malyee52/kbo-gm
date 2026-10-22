@@ -110,7 +110,8 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
       expect(sum(box.lineScore.away)).toBe(x.awayRuns);
       expect(box.home.batters.reduce((s, b) => s + b.r, 0)).toBe(x.homeRuns);
       expect(box.away.pitchers.reduce((s, p) => s + p.r, 0)).toBe(x.homeRuns);
-      expect(box.home.batters).toHaveLength(9);
+      // 선발 9명 + 경기 중 교체 타자 (엔진 2 9단계부터 AI 감독도 대타·대주자·대수비를 쓴다)
+      expect(box.home.batters.filter((b) => !b.sub)).toHaveLength(9);
     }
   });
 

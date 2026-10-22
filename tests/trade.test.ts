@@ -102,8 +102,9 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
     const g = newGame('deadline');
     const other = teamIdx(g, '두산');
     const myStar = prime(g, g.team.org)[0];
-    const theirs = byNow(g, g.world.teams[other].org)[10];
     g.advance(g.tradeDeadlineDay);
+    // 상대 선수는 마감일에 고른다 (개막 때 고르면 그 사이 소속이 바뀐 선수가 걸릴 수 있다)
+    const theirs = byNow(g, g.world.teams[other].org)[10];
     expect(g.tradeOpen).toBe(true);
     expect(g.evaluateTrade(other, [myStar], [theirs]).verdict).toBe('accept');
     g.advance(1);

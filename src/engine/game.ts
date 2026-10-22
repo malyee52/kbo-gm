@@ -10,6 +10,7 @@ import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
 import { applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
 import { fieldDefense, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
+import { aiDefense, pickPinchHitter, pickPinchRunner } from './subs';
 import { currentFatigue, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
@@ -88,6 +89,8 @@ export interface GameContext {
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */
   running?: RunTally;
+  /** 좌우 4칸 집계 (엔진 2 9단계 점검 도구만): 'LL'(좌타·좌투) 'LR' 'RL' 'RR' → 타석 결과 수. 양타는 투수 반대 손. 없으면 세지 않는다 */
+  splits?: Record<string, Partial<Record<PlayKind, number>>>;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
   resolver?: PaResolver;
 }
@@ -148,9 +151,9 @@ export interface CommandChoice {
 
 /**
  * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
- * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자
+ * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자, DEF 대수비
  */
-export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PO' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR';
+export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PO' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR' | 'DEF';
 
 export interface Play {
   inn: number;
@@ -237,6 +240,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     if (inning >= 9 && home.runs !== away.runs) break;
     if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
   }
+  if (ctx.running) for (const side of [home, away]) for (const s of side.subs) ctx.running[s.kind === 'PH' ? 'ph' : s.kind === 'PR' ? 'pr' : 'def']++;
   return finishGame(st, inning, lineScore);
 }
 
@@ -259,6 +263,8 @@ function ask(st: GameState, side: 'bat' | 'field', step: 'run' | 'bat' | 'field'
 function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean {
   st.startHalf(bat, fld, inning);
   const { ctx } = st;
+  // AI 감독 수비 교체 (엔진 2 9단계): 대타·대주자 뒤 수비 위치 다시 정하기, 후반 리드 때 대수비
+  aiDefense(st, fld, bat);
   const resolver = ctx.resolver ?? B0;
   const cmd = ctx.command;
   let first = true;
@@ -288,6 +294,16 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       ctx.bat[runnerIn.idx].g++;
       st.note('PR', runnerIn.idx, fld.pitcher.p.idx, bat.runs);
     };
+
+    // AI 감독 대주자·대타 (엔진 2 9단계, subs.ts): 투구 전에. 직접 지휘 팀도 같다 (모두 자동 = 지휘 안 한 경기)
+    const aiPr = pickPinchRunner(st);
+    if (aiPr) pinchRun({ pr: { base: aiPr[0], idx: aiPr[1].idx } });
+    const aiPh = pickPinchHitter(st);
+    if (aiPh) {
+      substitute(bat, bat.spot, aiPh, 'PH');
+      ctx.bat[aiPh.idx].g++;
+      st.note('PH', aiPh.idx, fld.pitcher.p.idx, bat.runs);
+    }
 
     // 주자 작전 (투구 전, 도루할 수 있을 때만): 대주자, 도루
     const rc = ours && st.bases[0] && !st.bases[1] ? ask(st, 'bat', 'run') : null;
@@ -337,6 +353,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       addPitches(ctx, pg, 1);
       const r0 = bat.runs;
       const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
+      if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
       st.note(kind, batter.idx, pg.p.idx, r0);
       if (st.walkOff()) return true;
       continue;
@@ -369,10 +386,19 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     }
     const r0 = bat.runs;
     const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk, rates);
+    if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
     st.note(kind, batter.idx, pg.p.idx, r0);
     if (st.walkOff()) return true;
   }
   return false;
+}
+
+/** 좌우 4칸 집계 한 타석 (점검 도구) */
+function tallySplit(splits: NonNullable<GameContext['splits']>, b: SimPlayer, p: SimPlayer, kind: PlayKind): void {
+  if (!b.bats || !p.throws) return;
+  const key = (b.bats === 'S' ? (p.throws === 'L' ? 'R' : 'L') : b.bats) + p.throws;
+  const t = (splits[key] ??= {});
+  t[kind] = (t[kind] ?? 0) + 1;
 }
 
 /**

@@ -72,7 +72,8 @@ export interface TeamSeason {
   /** 선발 등판 사이 최소 휴식일 (시대별, eras.ts). 없으면 params.starterRestDays */
   restDays?: number;
   /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
-  tactics?: { steal: number; bunt: number; hook: number };
+  /** 감독 성향 배율 (league/managers.ts Tactics). sub = 대타·대주자 빈도 (엔진 2 9단계, 없으면 1) */
+  tactics?: { steal: number; bunt: number; hook: number; sub?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
 }
@@ -109,7 +110,7 @@ export const LINEUP_SLOTS = ['C', 'SS', 'CF', '2B', '3B', 'RF', 'LF', '1B', 'DH'
 export type Slot = (typeof LINEUP_SLOTS)[number];
 
 /** 타석 가치 1 = 한 시즌(600타석) 약 500런. 수비 런을 가치와 더할 때 쓴다 */
-const RUNS_PER_VALUE = 500;
+export const RUNS_PER_VALUE = 500;
 
 
 /**
@@ -169,6 +170,18 @@ export function bestAssignment(score: number[][]): number[] {
   const out = new Array<number>(nRows).fill(-1);
   for (let j = 1; j <= n; j++) if (p[j] >= 1 && p[j] <= nRows && j <= nCols) out[p[j] - 1] = j - 1;
   return out;
+}
+
+/** 좌우 상성 (pa.ts platoonEdge와 같다): 같은 손이면 −1, 다른 손·양타면 +1, 모르면 0 */
+export function platoonSign(bats: string | null, throws: string | null): number {
+  if (!bats || !throws) return 0;
+  if (bats === 'S') return 1;
+  return bats === throws ? -1 : 1;
+}
+
+/** 상대 투수 손을 넣은 타자의 한 시즌 타격 런 (플래툰 라인업·대타 판단). 좌우 상성은 타석 보정(params.platoon)과 같은 비율 */
+export function batRunsVs(p: SimPlayer, throws: string | null, platoon: number): number {
+  return p.value * RUNS_PER_VALUE * (1 + platoonSign(p.bats, throws) * platoon);
 }
 
 /** 자리 점수 → 한 시즌 런 단위: 타석 가치 × 500 + 그 자리 수비 런 */
@@ -450,9 +463,14 @@ function planFixed(ts: TeamSeason, pool: SimPlayer[]): Map<Slot, SimPlayer> | un
   return fixed;
 }
 
-/** 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다 */
-export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng): SimPlayer[] {
+/**
+ * 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다.
+ * 플래툰 (엔진 2 9단계): 상대 선발의 손(oppThrows)을 알면 좌우 상성을 넣은 타격 런으로 자리를 배정한다 (주전 휴식 순위는 그대로)
+ */
+export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, oppThrows: string | null = null): SimPlayer[] {
   ts.lineupCache ??= new Map();
+  const hand = oppThrows === 'L' || oppThrows === 'R' ? oppThrows : '';
+  const runsOf = hand ? (p: SimPlayer, slot: Slot) => batRunsVs(p, hand, params.platoon) + defenseAt(p, slot) : slotRuns;
   let full = ts.lineupCache.get('');
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
   const regulars = full.map((x) => x.p);
@@ -467,13 +485,13 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
     if (rng.chance(Math.min(0.6, base * factor))) resting.add(p.idx);
   });
-  const key = [...resting].sort((a, b) => a - b).join(',');
+  const key = `${hand}:${[...resting].sort((a, b) => a - b).join(',')}`;
   ts.lineupCache ??= new Map();
   let placed = ts.lineupCache.get(key);
   if (!placed) {
     const avail = ts.hitters.filter((p) => !resting.has(p.idx));
     const pool = avail.length >= 9 ? avail : ts.hitters;
-    placed = assignSlots(pool, planFixed(ts, pool));
+    placed = assignSlots(pool, planFixed(ts, pool), runsOf);
     ts.lineupCache.set(key, placed);
   }
   ts.field = new Map(placed.map((x) => [x.p.idx, x.slot]));

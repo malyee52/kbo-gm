@@ -50,7 +50,8 @@ export interface GameSub {
   idx: number;
   /** 타순 자리 (0~8) */
   order: number;
-  kind: 'PH' | 'PR';
+  /** 대타, 대주자, 대수비 (엔진 2 9단계) */
+  kind: 'PH' | 'PR' | 'DEF';
 }
 
 export interface Side {
@@ -74,6 +75,8 @@ export interface Side {
   slots: Map<number, Slot>;
   /** 경기 중 들어온 타자 (박스스코어: 타순 자리, 대타·대주자) */
   subs: GameSub[];
+  /** 대타·대주자가 들어와 다음 수비 때 수비 위치를 다시 정해야 한다 (AI 감독, subs.ts aiDefense) */
+  realign?: boolean;
 }
 
 /** 선발 라인업의 수비 위치 (선수 색인 → 자리) */
@@ -115,7 +118,7 @@ export function fielderAt(side: Side, slot: Slot | 'P'): number {
  * 대타·대주자: 타순 order 자리의 선수를 바꾼다. 들어온 선수는 나간 선수의 수비 자리를 맡고(포수 자리에 포수가 아니면 수비력이 떨어진다),
  * 다음 수비부터 팀 수비력에 반영된다 (2026-10-12 직접 지휘 마무리)
  */
-export function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH' | 'PR'): void {
+export function substitute(side: Side, order: number, inP: SimPlayer, kind: GameSub['kind']): void {
   const outP = side.lineup[order];
   const slot = side.slots.get(outP.idx);
   side.lineup[order] = inP;
@@ -124,6 +127,7 @@ export function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH'
   if (slot) side.slots.set(inP.idx, slot);
   Object.assign(side, fieldDefense(side.lineup, side.slots));
   side.subs.push({ idx: inP.idx, order, kind });
+  if (kind !== 'DEF') side.realign = true;
 }
 
 /** 한 경기의 상태. 반 이닝 상태(inning·bat·fld·outs·bases)는 반 이닝을 시작할 때 startHalf로 바꾼다 */

@@ -111,8 +111,8 @@ export interface GameLog {
 
 export interface BoxBatter {
   idx: number;
-  /** 경기 중 교체로 들어온 타자 (2026-10-12부터. 예전 박스스코어에는 없다) */
-  sub?: 'PH' | 'PR';
+  /** 경기 중 교체로 들어온 타자 (2026-10-12부터. 예전 박스스코어에는 없다). DEF 대수비는 엔진 2 9단계부터 */
+  sub?: 'PH' | 'PR' | 'DEF';
   /** 타순 (1~9). 교체 타자는 바꾼 선수의 타순 */
   order?: number;
   ab: number;
@@ -238,6 +238,8 @@ export interface SeasonInit {
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계). 저장하지 않는다 */
   running?: RunTally;
+  /** 좌우 4칸 타석 결과 집계 (검증 도구용, 엔진 2 9단계). 저장하지 않는다 */
+  splits?: GameContext['splits'];
 }
 
 export class Season {
@@ -312,7 +314,7 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running,
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits,
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
     this.ctx.sbShift = sbShiftOf(world.players, world.env);
@@ -467,8 +469,11 @@ export class Season {
     for (const g of games) {
       const h = season[g.home];
       const a = season[g.away];
-      const homeLineup = todaysLineup(h, world.league, params, dayRng);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng);
+      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
+      const homeStarter = todaysStarter(h, states, day, params);
+      const awayStarter = todaysStarter(a, states, day, params);
+      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws);
+      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws);
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
@@ -476,7 +481,7 @@ export class Season {
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
-      const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
+      const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
@@ -579,9 +584,11 @@ export class Season {
     a.away = true;
     refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
-    const hl = todaysLineup(h, this.world.league, params, rng);
-    const al = todaysLineup(a, this.world.league, params, rng);
-    const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
+    const hs = todaysStarter(h, this.states, day, params);
+    const as = todaysStarter(a, this.states, day, params);
+    const hl = todaysLineup(h, this.world.league, params, rng, as.throws);
+    const al = todaysLineup(a, this.world.league, params, rng, hs.throws);
+    const result = simulateGame(h, a, hl, al, hs, as, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 
@@ -605,8 +612,8 @@ export class Season {
     });
     const h = side(home, -2);
     const a = side(away, -3);
-    const hl = todaysLineup(h, this.world.league, params, rng);
-    const al = todaysLineup(a, this.world.league, params, rng);
+    const hl = todaysLineup(h, this.world.league, params, rng, away.pitchers[0].throws);
+    const al = todaysLineup(a, this.world.league, params, rng, home.pitchers[0].throws);
     const result = simulateGame(h, a, hl, al, home.pitchers[0], away.pitchers[0], ctx);
     return { result, home: hl, away: al, bat, pit };
   }

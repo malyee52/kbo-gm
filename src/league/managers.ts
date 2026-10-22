@@ -13,6 +13,7 @@
 
 import type { DataStore, ManagerInfo } from '../data/types';
 import type { LeagueState } from './types';
+import { Rng } from '../engine/rng';
 
 export interface Manager {
   name: string;
@@ -44,9 +45,14 @@ export interface Tactics {
   bunt: number;
   /** 선발 한계 배율 (작을수록 일찍 바꾼다) */
   hook: number;
+  /**
+   * 대타·대주자 빈도 (엔진 2 9단계, 기획안 3.9.1): 대타 기준 이득·대주자 주력 차를 이 값으로 나눈다 (클수록 자주).
+   * 실존 감독은 자료가 없어 모두 1, 가상 감독만 이름으로 정한 0.7~1.3 (임시값)
+   */
+  sub: number;
 }
 
-export const NEUTRAL_TACTICS: Tactics = { steal: 1, bunt: 1, hook: 1 };
+export const NEUTRAL_TACTICS: Tactics = { steal: 1, bunt: 1, hook: 1, sub: 1 };
 
 /** 기록 배율을 경기 배율로 옮길 때의 비율: 팀 기록에는 선수 구성 몫도 섞여 있어 절반 남짓만 감독 몫으로 본다 (임시값) */
 export const TACTIC_SHARE = { steal: 0.6, bunt: 0.8, hook: 0.6 };
@@ -67,13 +73,19 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export const infoOf = (store: Pick<DataStore, 'managers'>, name: string): ManagerInfo | undefined => store.managers?.people[name];
 
 /** 기록 배율 → 경기 배율 */
-export function tacticsOf(info: ManagerInfo | undefined): Tactics {
-  if (!info) return NEUTRAL_TACTICS;
+export function tacticsOf(info: ManagerInfo | undefined, name?: string): Tactics {
+  if (!info) return name ? { ...NEUTRAL_TACTICS, sub: virtualSub(name) } : NEUTRAL_TACTICS;
   return {
+    sub: 1,
     steal: clamp(1 + (info.steal - 1) * TACTIC_SHARE.steal, 0.7, 1.4),
     bunt: clamp(1 + (info.bunt - 1) * TACTIC_SHARE.bunt, 0.7, 1.4),
     hook: clamp(1 - (info.relief - 1) * TACTIC_SHARE.hook, 0.9, 1.1),
   };
+}
+
+/** 가상 감독의 대타·대주자 빈도: 이름으로 정한 0.7~1.3 (같은 이름은 늘 같다, 임시값) */
+export function virtualSub(name: string): number {
+  return Math.round((0.7 + 0.6 * new Rng(`manager-sub/${name}`).next()) * 100) / 100;
 }
 
 /** 배율을 말로 (화면). 기록 비교일 뿐 좋고 나쁨이 아니다 */
