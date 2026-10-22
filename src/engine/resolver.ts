@@ -35,6 +35,16 @@ export function drawEvent(r: PaRates, rng: Rng): Ev {
   return Ev.OUT;
 }
 
+/** 인플레이로 끝난 타석의 결과 (홈런·단타·2루타·3루타·아웃 몫으로, 히트앤드런 첫 공 인플레이, 엔진 2 8단계) */
+export function drawInPlay(r: PaRates, rng: Rng): Ev {
+  let u = rng.next() * (1 / r.scale - r.so - r.bb - r.hbp);
+  if ((u -= r.hr) < 0) return Ev.HR;
+  if ((u -= r.s1) < 0) return Ev.S1;
+  if ((u -= r.d2) < 0) return Ev.D2;
+  if ((u -= r.t3) < 0) return Ev.T3;
+  return Ev.OUT;
+}
+
 /** B0: 엔진 1의 타석 뽑기 그대로. 투구 수는 세지 않는다 (시험용: 투구 수가 늘지 않아 투수가 지치지 않는다) */
 export const B0: PaResolver = {
   name: 'B0',

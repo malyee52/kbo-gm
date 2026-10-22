@@ -4,7 +4,7 @@
 
 import type { Rates } from '../data/types';
 import type { BallTally } from './battedball';
-import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play } from './game';
+import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
 import { eraPitching } from './eras';
@@ -235,6 +235,8 @@ export interface SeasonInit {
   resolver?: PaResolver;
   /** 인플레이 타구 집계 (검증 도구용). 저장하지 않는다 */
   balls?: BallTally;
+  /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계). 저장하지 않는다 */
+  running?: RunTally;
 }
 
 export class Season {
@@ -309,7 +311,7 @@ export class Season {
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls,
+      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running,
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
 
@@ -592,7 +594,7 @@ export class Season {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
     const ctx: GameContext = {
       ...this.ctx, params, rng, bat, pit, totals: emptyLeagueCounters(), states: newPlayerStates(n),
-      plays: null, command: null, form: undefined, errors: undefined, balls: undefined, postseason: false,
+      plays: null, command: null, form: undefined, errors: undefined, balls: undefined, running: undefined, postseason: false,
     };
     const side = (s: ExhibitionSide, idx: number): TeamSeason => ({
       team: { idx, name: s.name, franchise: s.name, org: [...s.hitters, ...s.pitchers] },

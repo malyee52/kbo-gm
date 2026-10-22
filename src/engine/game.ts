@@ -6,14 +6,14 @@ import type { BallTally } from './battedball';
 import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher } from './manager';
 import { Ev, NEUTRAL_PARK, paRates, type GamePark, type PaRates } from './pa';
 import type { EngineParams } from './params';
-import { B0, type PaResolver } from './resolver';
+import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
-import { applyPlateAppearance, autoSacBunt, beginPlateAppearance, orderedBunt, stealSecond, wildPitch } from './rules';
+import { applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
 import { fieldDefense, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
 import { currentFatigue, type PlayerStates, type TeamSeason } from './team';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
-export { BUNT_SUCCESS } from './rules';
+export { BUNT_SUCCESS, emptyRunTally, type RunTally } from './rules';
 export { bullpenOrder } from './manager';
 export { errorRateOf, type GameSub } from './state';
 
@@ -84,6 +84,8 @@ export interface GameContext {
   errors?: number[];
   /** 인플레이 타구 집계 (검증 도구용, battedball.ts). 없으면 세지 않는다. 난수를 쓰지 않아 결과는 같다 */
   balls?: BallTally;
+  /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */
+  running?: RunTally;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
   resolver?: PaResolver;
 }
@@ -146,7 +148,7 @@ export interface CommandChoice {
  * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
  * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자
  */
-export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR';
+export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PO' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR';
 
 export interface Play {
   inn: number;
@@ -289,7 +291,28 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const rc = ours && st.bases[0] && !st.bases[1] ? ask(st, 'bat', 'run') : null;
     pinchRun(rc);
     const steal = rc?.steal ?? (rc?.tactic === 'steal' ? 'go' : undefined);
-    if (stealSecond(st, steal)) break;
+    // 견제사, 피치아웃, 히트앤드런 → 도루 (엔진 2 8단계). 피치아웃·히트앤드런은 타석 첫 공에 거는 AI 감독 작전 (직접 지휘로는 아직 못 건다, 17단계).
+    // 직접 지휘 중에도 도루를 고르지 않으면(자동) AI 감독이 한다: 모두 자동인 경기가 지휘하지 않은 경기와 같다
+    if (pickoff(st)) break;
+    const po = wantPitchout(st);
+    if (po) addPitches(ctx, fld.pitcher, 1);
+    let going = false;
+    if (steal === undefined && hitAndRun(st)) {
+      // 타자는 첫 공에 반드시 휘두른다 (피치아웃이면 못 맞힌다): 헛스윙이면 주자는 도루, 파울이면 돌아가고, 인플레이면 그 공으로 타석이 끝난다
+      const sw = ctx.params.run.hnrSwing;
+      const u = ctx.rng.next() * (sw[0] + sw[1] + sw[2]);
+      if (po || u < sw[0]) {
+        if (ctx.running) ctx.running.hnrMiss++;
+        if (!po) addPitches(ctx, fld.pitcher, 1);
+        if (stealOne(st, 0, stealPct(st, st.bases[0]!, false, ctx.params.run.hnrMissPct + (po ? ctx.params.run.pitchoutPct : 0)))) break;
+      } else if (u < sw[0] + sw[1]) {
+        if (ctx.running) ctx.running.hnrFoul++;
+        addPitches(ctx, fld.pitcher, 1);
+      } else {
+        if (ctx.running) ctx.running.hnrInPlay++;
+        going = true;
+      }
+    } else if (steals(st, steal, po)) break;
     if (wildPitch(st)) return true;
 
     // 타격 작전 (도루가 끝난 뒤): 대타, 대주자, 강공·번트
@@ -304,15 +327,29 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const tactic = bc?.tactic === 'steal' ? undefined : bc?.tactic;
 
     const { batter, bl, pg } = beginPlateAppearance(st);
-    // 지휘한 희생번트: 2아웃 전, 주자가 있을 때
-    if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !fc?.walk) {
-      const end = orderedBunt(st, batter, bl, pg);
-      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
-      if (end) return true;
+    // 히트앤드런 첫 공 인플레이: 그 공으로 타석이 끝난다 (그 사이 지휘로 대타·번트·고의4구를 골랐으면 작전은 풀린다)
+    if (going && !tactic && !fc?.walk && !hitter) {
+      const rates = paRates(batter, pg, bat.isHome, ctx, {
+        runnersOn: true, scoring: false, late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
+      }, st.park);
+      addPitches(ctx, pg, 1);
+      const r0 = bat.runs;
+      const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
+      st.note(kind, batter.idx, pg.p.idx, r0);
+      if (st.walkOff()) return true;
       continue;
     }
-    if (!tactic && !fc?.walk && autoSacBunt(st, batter, bl, pg)) {
-      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
+    // 지휘한 번트: 2아웃 전, 주자가 있을 때 (3루 주자가 있으면 스퀴즈)
+    if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !fc?.walk) {
+      if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
+      if (orderedBunt(st, batter, bl, pg)) return true;
+      continue;
+    }
+    // 감독 판단 번트 (희생번트·스퀴즈). 번트 타석 투구 수는 HF 투구 자료 (투구 수를 세지 않는 해결기는 0)
+    const bunted = !tactic && !fc?.walk ? autoBunt(st, batter, bl, pg) : null;
+    if (bunted !== null) {
+      if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
+      if (bunted) return true;
       continue;
     }
 
@@ -334,6 +371,20 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     if (st.walkOff()) return true;
   }
   return false;
+}
+
+/**
+ * 히트앤드런 (AI 감독, 엔진 2 8단계): 1루 주자(2루 빔), 2아웃 전, 빠른 주자, 삼진이 적은 타자 (params.run, 임시값). 걸면 true
+ */
+function hitAndRun(st: GameState): boolean {
+  const { bases, bat, ctx } = st;
+  const run = ctx.params.run;
+  const r1 = bases[0];
+  const batter = bat.lineup[bat.spot];
+  if (!r1 || bases[1] || st.outs >= 2 || r1.p.bat!.speed < run.hnrSpeed || (batter.bat?.so ?? 1) > run.hnrContact) return false;
+  if (!ctx.rng.chance(run.hnr * (bat.ts.tactics?.steal ?? 1))) return false;
+  if (ctx.running) ctx.running.hnr++;
+  return true;
 }
 
 /** 마운드 투수의 투구 수를 센다 (기록·박스스코어, 경기 안 피로·교체·불펜 피로) */

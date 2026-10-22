@@ -70,6 +70,62 @@ export interface ErrorParams {
 
 export type ZoneFielders = Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF', number>>;
 
+/**
+ * 주루·작전 (rules.ts, 엔진 2 8단계). 자료가 없어 모두 임시값 (도루 시도·성공은 선수 기록, 리그 도루·폭투·희생번트 수로만 맞춘다)
+ */
+export interface RunParams {
+  /** 3루 도루: 2루 주자(3루 빔)의 시도 확률 = 그 주자의 도루 시도율 × stealScale × 이 값 */
+  thirdShare: number;
+  /** 3루 도루 성공률 보정 (2루 도루 성공률에 더한다) */
+  thirdPct: number;
+  /** 1·2루에서 3루 도루를 걸 때 1루 주자도 함께 뛰는 이중 도루 몫 */
+  double: number;
+  /** 좌투수: 1루 주자 도루 시도 배율, 성공률 보정 (주자를 보고 던진다, 견제·퀵모션의 몫). 우투수 성공률 보정은 리그 평균이 0 안팎이 되게 */
+  leftyAttempt: number;
+  leftyPct: number;
+  rightyPct: number;
+  /** 견제사: 도루할 수 있는 1루 주자가 있는 타석마다 = 이 값 × min(3, 주자 도루 시도율 ÷ 0.05) × (좌투수면 leftyPickoff) */
+  pickoff: number;
+  leftyPickoff: number;
+  /** 폭투·보크 확률에 곱하는 투수 제구 = (투수 볼넷 배율)^이 값 (0.4~2.5배로 자름) */
+  wildPitchControl: number;
+  /** 피치아웃 (AI 감독, 타석 첫 공): 도루 시도율이 이 값 넘는 1루 주자(2루 빔, 2아웃 전)에게 거는 확률 pitchout */
+  pitchoutThreat: number;
+  pitchout: number;
+  /** 피치아웃 공에 뛴 주자의 도루 성공률 보정 */
+  pitchoutPct: number;
+  /**
+   * 히트앤드런 (AI 감독, 타석 첫 공): 1루 주자(2루 빔), 2아웃 전, 주자 주력 ≥ hnrSpeed, 타자 삼진 배율 ≤ hnrContact일 때 확률 hnr × 감독 도루 성향.
+   * 타자는 첫 공에 반드시 휘두른다: 헛스윙·파울·인플레이 = hnrSwing (2025 투구 자료 0-0 카운트 스윙 결과 몫, count_pitch.csv).
+   * 헛스윙이면 주자는 도루 (성공률 + hnrMissPct), 인플레이면 병살 없음·단타에 1루 주자 3루 + hnrExtra·뜬 라이너에 귀루 실패 hnrDoubledOff
+   */
+  hnr: number;
+  hnrSpeed: number;
+  hnrContact: number;
+  hnrSwing: [miss: number, foul: number, inPlay: number];
+  hnrMissPct: number;
+  hnrExtra: number;
+  hnrDoubledOff: number;
+}
+
+/**
+ * 번트 (rules.ts, 엔진 2 8단계). 결과 몫은 임시값 (번트 결과 자료 없음), 투구 수는 HF 투구 자료
+ */
+export interface BuntParams {
+  /** 희생번트 시도 결과 몫 (나머지 = 성공: 타자 아웃, 주자 한 베이스): 내야안타(× 타자 주력 ÷ 0.5), 선행 주자 포스아웃(타자 1루), 타자만 아웃(뜬공·스리번트), 병살 */
+  hit: number;
+  leadOut: number;
+  popOut: number;
+  dp: number;
+  /** 스퀴즈 (AI 감독): 3루 주자, 2아웃 전, 7회 이후 1점 차 이내, 약한 타자일 때 확률 squeeze × 감독 번트 성향 */
+  squeeze: number;
+  /** 스퀴즈 결과 몫 (나머지 = 성공: 3루 주자 득점, 타자 아웃): 3루 주자 홈 아웃(타자 1루), 뜬공 병살(타자·3루 주자 아웃) */
+  squeezeOut: number;
+  squeezeDp: number;
+  /** 번트 타석 투구 수 분포 1~5구 (HF 투구 자료 2023~2025 희생번트 타석, data-src/pbp_derived/bunt.csv, 평균 1.74구) */
+  pitches: [number, number, number, number, number];
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -162,12 +218,16 @@ export interface EngineParams {
   unearnedInGame: number;
   /** 실책 (rules.ts, 엔진 2 7단계) */
   error: ErrorParams;
-  /** 폭투·보크 확률 = 이 값 × 그 해 리그의 타석당 폭투+보크 (주자가 있는 타석 기준. 포일 몫 포함) */
+  /** 폭투·보크 확률 = 이 값 × 그 해 리그의 타석당 폭투+보크 (주자가 있는 타석 기준. 포일 몫 포함). 2026-10-22 8단계에서 타석당 폭투를 처음 재 보니 +24~31%라 2.6 → 2 */
   wildPitchScale: number;
   /** 폭투·보크 기록이 없는 해(2000년 이전)에 쓰는 타석당 값 */
   wildPitchDefault: number;
-  /** 희생번트 확률 = 이 값 × 그 해 리그의 타석당 희생번트 (무사에 주자가 1·2루에 있을 때) */
+  /** 희생번트 시도 확률 = 이 값 × 그 해 리그의 타석당 희생번트 (무사에 주자가 1·2루에 있을 때). 실패가 생겨(8단계) 성공 몫으로 나눈 만큼 크다 */
   sacBuntScale: number;
+  /** 주루·작전 (엔진 2 8단계, 임시값) */
+  run: RunParams;
+  /** 번트 (엔진 2 8단계) */
+  bunt: BuntParams;
   /** 추가 진루를 시도한 주자가 아웃될 확률. 견제사 등 그 밖의 주루사 몫까지 여기에 담았다 */
   outOnAdvance: number;
   /**
@@ -331,9 +391,18 @@ export const DEFAULT_PARAMS: EngineParams = {
     onHit: 0.25,
     passedBall: 0.15,
   },
-  wildPitchScale: 2.6,
+  wildPitchScale: 2,
   wildPitchDefault: 0.012,
-  sacBuntScale: 11.6,
+  sacBuntScale: 16,
+  run: {
+    thirdShare: 0.15, thirdPct: 0, double: 0.5,
+    leftyAttempt: 0.85, leftyPct: -0.03, rightyPct: 0.01, pickoff: 0.002, leftyPickoff: 1.5,
+    wildPitchControl: 0.8,
+    pitchoutThreat: 0.12, pitchout: 0.06, pitchoutPct: -0.3,
+    hnr: 0.04, hnrSpeed: 0.45, hnrContact: 0.9, hnrSwing: [0.241, 0.359, 0.4], hnrMissPct: -0.05, hnrExtra: 0.3, hnrDoubledOff: 0.3,
+  },
+  bunt: { hit: 0.05, leadOut: 0.11, popOut: 0.07, dp: 0.02, squeeze: 0.05, squeezeOut: 0.2, squeezeDp: 0.05,
+    pitches: [0.509, 0.301, 0.142, 0.038, 0.01] },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
   groundBallShare: 0.52,
