@@ -359,6 +359,23 @@ table.roster td.l:first-child { min-width: 110px; }
 .linescore td.l, .linescore th.l { text-align: left; }
 .box .two { margin-top: 12px; }
 .box .scroll + .scroll { margin-top: 8px; }
+.box.two { margin-top: 10px; }
+/* 라인스코어 (BoxScore.tsx): 이닝 표는 가로로 밀고, 합계 R·H·E·B는 오른쪽에 고정. 두 표의 줄 높이를 맞춘다 */
+.ls-wrap { display: flex; align-items: stretch; gap: 0; max-width: 100%; margin: 8px 0; }
+.ls-wrap .ls-inn { flex: 0 1 auto; min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
+.ls-wrap .ls-tot { flex: 0 0 auto; background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: 0 var(--radius) var(--radius) 0; box-shadow: var(--shadow-sm); }
+.ls-wrap .linescore th, .ls-wrap .linescore td { height: 34px; padding-top: 0; padding-bottom: 0; white-space: nowrap; }
+.ls-tot td, .ls-tot th { min-width: 2.2em; font-variant-numeric: tabular-nums; }
+.linescore th.now { background: var(--accent-soft); color: var(--accent); }
+.linescore td.scored { font-weight: 800; color: var(--team); }
+.decisions { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0 0 6px; }
+.game-tabs { margin: 6px 0 10px; }
+.box-bat td, .box-pit td { font-variant-numeric: tabular-nums; }
+.box-bat .tag { margin-left: 0; }
+@media (max-width: 768px) {
+  .ls-b { display: none; }
+  .ls-wrap .linescore th, .ls-wrap .linescore td { padding-left: 6px; padding-right: 6px; }
+}
 
 /* ---- 기록 */
 .leader-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
@@ -500,8 +517,6 @@ dialog.player::backdrop { background: var(--scrim); backdrop-filter: blur(2px); 
 
 /* ---- 경기 중계 (GameCast.tsx) */
 dialog.cast { width: min(760px, calc(100vw / var(--z) - 32px)); }
-.cast-score th.now { background: var(--accent-soft); color: var(--accent); }
-.cast-score td.scored { font-weight: 800; color: var(--team); }
 .cast-field { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; margin: 12px 0; }
 .diamond { width: 150px; height: auto; }
 .diamond .infield { fill: color-mix(in srgb, var(--win) 14%, transparent); stroke: var(--line-strong); stroke-width: 1.5; }
@@ -949,6 +964,7 @@ td .inline { flex-wrap: nowrap; }
 .role-block h3 { font-size: 13px; margin: 0 0 8px; }
 .role-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
 .slot-card.pitch { min-height: 52px; }
+.slot-note { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-variant-numeric: tabular-nums; }
 .pen-group { margin-top: 8px; }
 .pen-label { display: block; font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
 ul.plain.bench { flex-direction: row; flex-wrap: wrap; gap: 6px; }
@@ -1051,3 +1067,11 @@ dialog.player.side .dialog-body { max-height: none; height: 100%; }
 .pd-group .grades, .dialog-body .defense .grades { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
 .pd-group .grades:has(.gbar-x) { grid-template-columns: minmax(0, 1fr); }
 .defense h4 .link { margin-left: 8px; }
+/* 선수 상세 투수 등판 탭: 최근 7등판 투구 수 막대 (2026-10-23 U2-3) */
+.np-bars { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: auto; gap: 6px; margin: 6px 0 12px; max-width: 420px; }
+.np-bars figcaption { grid-column: 1 / -1; }
+.np-bar { display: grid; grid-template-rows: auto 70px auto; justify-items: center; align-items: end; gap: 2px; }
+.np-bar i { display: block; width: 60%; min-height: 2px; background: color-mix(in srgb, var(--team) 45%, transparent); border-radius: 3px 3px 0 0; }
+.np-bar.sp i { background: var(--team); }
+.np-v { font-variant-numeric: tabular-nums; font-weight: 700; }
+.np-d { font-size: 10.5px; white-space: nowrap; }

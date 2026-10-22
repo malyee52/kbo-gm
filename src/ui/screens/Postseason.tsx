@@ -4,7 +4,8 @@ import { FlowNext } from '../FlowNext';
 import { formatDate } from '../../game/calendar';
 import { currentSeries, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
 import { PlayerLink, TeamName, useGame } from '../context';
-import { BoxView } from './Schedule';
+import { BoxView } from '../BoxScore';
+import { useShell } from '../shell';
 
 /** 진출 팀 수에 맞는 대진 설명 (1988년까지 2팀, 2014년까지 4팀, 2015년부터 5팀) */
 function bracketText(n: number): string {
@@ -20,6 +21,7 @@ function bracketText(n: number): string {
 
 export function Postseason() {
   const { session, go } = useGame();
+  const { density } = useShell();
   const st = session.postseason;
   const last = session.league.lastSeason?.postseason;
   const [sel, setSel] = useState<{ round: number; game: number } | null>(null);
@@ -104,6 +106,7 @@ export function Postseason() {
         <BoxView
           log={{ day: selGame.day, home: selGame.home, away: selGame.away, homeRuns: selGame.homeRuns, awayRuns: selGame.awayRuns, innings: selGame.innings, win: null, loss: null, save: null }}
           box={selGame.box}
+          full={density === 'full'}
         />
       )}
       {!st && last && <p className="muted small">결산 뒤에는 박스스코어 없이 결과만 남습니다.</p>}

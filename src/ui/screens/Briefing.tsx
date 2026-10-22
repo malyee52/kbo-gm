@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
 import { formatDate, gameTime, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, ipText, rate3, recentForm } from '../../game/stats';
+import { lastOutings, outingText } from '../../game/boxscore';
 import { isRivalry } from '../../league/rivals';
 import { stadiumName } from '../../league/naming';
 import { ROUND_LABEL, stillAlive, currentSeries } from '../../league/postseason';
@@ -112,9 +113,12 @@ function MatchCard() {
   const park = stadiumName(session.league, next.home, session.year);
   const gap = next.day - session.day;
   const last = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me).at(-1);
+  // 우리 선발의 지난 등판 (투구 수·휴식일, 2026-10-23 U2-3). 상대 구단은 박스스코어가 우리와 붙은 경기뿐이라 보이지 않는다
+  const outings = lastOutings(s, me, next.day);
   const side = (t: number) => {
     const r = s.teams[t];
     const sp = session.probableStarter(t);
+    const o = t === me && sp ? outings.get(sp.idx) : undefined;
     return (
       <div className={`match-side${t === me ? ' mine' : ''}`} style={chipVars(session.teamInfo(t).franchise, session.teamInfo(t).name)}>
         <strong className="match-team">{session.teamInfo(t).name}</strong>
@@ -123,6 +127,7 @@ function MatchCard() {
         <div className="match-sp">
           <span className="tag">SP</span> {sp ? <PlayerLink p={sp} /> : <span className="muted">선발 미정</span>}
           <span className="small num">{sp ? spLine(session, sp) : ''}</span>
+          {o && <span className="small muted num" title="지난 등판 · 그 뒤 쉰 날">지난 등판 {outingText(o, session.world.year)}</span>}
         </div>
         <div className="small"><span className="muted">최근 5경기 </span><FormChips list={lastResults(session, t)} /></div>
       </div>

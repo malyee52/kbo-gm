@@ -1,10 +1,11 @@
 // 일정·결과: 달력, 그날의 전체 경기, 박스스코어.
 import { useMemo, useState } from 'react';
-import type { BoxScore, BoxSide, GameLog } from '../../engine';
+import type { GameLog } from '../../engine';
 import { dateOf, formatDate, WEEKDAYS } from '../../game/calendar';
-import { ipText } from '../../game/stats';
 import { PlayerLink, TeamName, useGame } from '../context';
 import { GameCast } from '../GameCast';
+import { BoxView } from '../BoxScore';
+import { useShell } from '../shell';
 import type { CastGame } from '../../game/session';
 
 interface Cell {
@@ -16,6 +17,7 @@ interface Cell {
 
 export function Schedule({ focusGame }: { focusGame?: number }) {
   const { session } = useGame();
+  const { density } = useShell();
   const s = session.season;
   const year = session.world.year;
   const me = session.teamIdx;
@@ -119,7 +121,9 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
                     {g.innings !== 9 && <span className="muted small"> ({g.innings}회)</span>}
                     <span className="dg-links">
                       {s.boxes.has(i) && <button type="button" className="link small" onClick={() => setSelGame(i)}>박스</button>}
-                      {s.plays.has(i) && <button type="button" className="link small" onClick={() => setCast(session.ourGames().find((x) => x.key === `${year}-${i}`) ?? null)}>중계</button>}
+                      {(s.boxes.has(i) || s.plays.has(i)) && (g.home === me || g.away === me) && (
+                        <button type="button" className="link small" onClick={() => setCast(session.ourGames().find((x) => x.key === `${year}-${i}`) ?? null)}>경기 결과</button>
+                      )}
                     </span>
                   </div>
                   <div className="small muted">{w && <>승 {w}</>}{l && <> · 패 {l}</>}{sv && <> · 세 {sv}</>}</div>
@@ -131,7 +135,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
       </section>
       </div>
 
-      {box && selGame !== undefined && <BoxView log={s.log[selGame]} box={box} />}
+      {box && selGame !== undefined && <BoxView log={s.log[selGame]} box={box} full={density === 'full'} />}
       {cast && <GameCast key={cast.key} game={cast} onClose={() => setCast(null)} />}
     </div>
   );
@@ -140,58 +144,4 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
 function lastMyGame(log: GameLog[], me: number): number | undefined {
   for (let i = log.length - 1; i >= 0; i--) if (log[i].home === me || log[i].away === me) return i;
   return undefined;
-}
-
-export function BoxView({ log, box }: { log: GameLog; box: BoxScore }) {
-  const { session } = useGame();
-  const n = Math.max(box.lineScore.away.length, 9);
-  const cell = (v: number | undefined) => (v === undefined ? '' : v < 0 ? 'X' : String(v));
-  const hits = (side: BoxSide) => side.batters.reduce((a, b) => a + b.h, 0);
-  return (
-    <section className="box">
-      <h2>박스스코어 <span className="muted small">{formatDate(session.world.year, log.day)}</span></h2>
-      <div className="scroll fit">
-        <table className="linescore">
-          <thead><tr><th className="l">팀</th>{Array.from({ length: n }, (_, i) => <th key={i}>{i + 1}</th>)}<th>R</th><th>H</th></tr></thead>
-          <tbody>
-            <tr><td className="l"><TeamName idx={log.away} /></td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(box.lineScore.away[i])}</td>)}<td><strong>{log.awayRuns}</strong></td><td>{hits(box.away)}</td></tr>
-            <tr><td className="l"><TeamName idx={log.home} /></td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(box.lineScore.home[i])}</td>)}<td><strong>{log.homeRuns}</strong></td><td>{hits(box.home)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div className="two">
-        {([['away', log.away], ['home', log.home]] as const).map(([k, t]) => (
-          <div key={k}>
-            <h3><TeamName idx={t} /></h3>
-            <div className="scroll">
-              <table>
-                <thead><tr><th className="l">타자</th><th>타수</th><th>득점</th><th>안타</th><th>타점</th><th>홈런</th><th>볼넷</th><th>삼진</th></tr></thead>
-                <tbody>
-                  {box[k].batters.map((b, i) => (
-                    <tr key={b.idx} className={b.sub ? 'sub-row' : undefined}><td className="l">
-                      {b.sub ? <span className="muted small">└ {b.sub === 'PH' ? '대타' : '대주자'}</span> : <span className="muted small">{b.order ?? i + 1}</span>} <PlayerLink p={session.world.players[b.idx]} /></td>
-                      <td>{b.ab}</td><td>{b.r}</td><td>{b.h}</td><td>{b.rbi}</td><td>{b.hr}</td><td>{b.bb}</td><td>{b.so}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="scroll">
-              <table>
-                <thead><tr><th className="l">투수</th><th>이닝</th><th>타자</th><th>피안타</th><th>실점</th><th>자책</th><th>볼넷</th><th>삼진</th><th>피홈런</th></tr></thead>
-                <tbody>
-                  {box[k].pitchers.map((p) => {
-                    const dec = p.idx === log.win ? '승' : p.idx === log.loss ? '패' : p.idx === log.save ? '세' : '';
-                    return (
-                      <tr key={p.idx}><td className="l"><PlayerLink p={session.world.players[p.idx]} />{dec && <span className="tag">{dec}</span>}</td>
-                        <td>{ipText(p.outs)}</td><td>{p.bf}</td><td>{p.h}</td><td>{p.r}</td><td>{p.er}</td><td>{p.bb}</td><td>{p.so}</td><td>{p.hr}</td></tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }

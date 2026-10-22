@@ -113,6 +113,8 @@ export interface BoxBatter {
   sub?: 'PH' | 'PR';
   /** 타순 (1~9). 교체 타자는 바꾼 선수의 타순 */
   order?: number;
+  /** 선발 타자의 오늘 수비 자리 (C 1B … DH, 2026-10-23 U2-3. 교체 타자·예전 박스스코어에는 없다) */
+  pos?: string;
   ab: number;
   r: number;
   h: number;
@@ -120,6 +122,10 @@ export interface BoxBatter {
   hr: number;
   bb: number;
   so: number;
+  /** 2루타·3루타·도루 (2026-10-23 UI 2단계 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  d?: number;
+  t?: number;
+  sb?: number;
 }
 
 export interface BoxPitcher {
@@ -134,11 +140,16 @@ export interface BoxPitcher {
   hr: number;
   /** 투구 수 (엔진 2) */
   np: number;
+  /** 홀드·블론 세이브 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  hld?: number;
+  bsv?: number;
 }
 
 export interface BoxSide {
   batters: BoxBatter[];
   pitchers: BoxPitcher[];
+  /** 이 팀 수비 실책 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  e?: number;
 }
 
 /** 박스스코어. 타자는 타순, 투수는 등판 순 */
@@ -466,6 +477,8 @@ export class Season {
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
       const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
+      // 경기 전 실책 수 (박스스코어 E): 이 경기에 나올 수 있는 선수 전부
+      const errBefore = wantBox ? new Map([...batBefore!.keys(), ...pitBefore!.keys()].map((i) => [i, this.errors[i]])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
@@ -491,12 +504,13 @@ export class Season {
           const was = batBefore.get(idx)!;
           return {
             idx, ab: now.ab - was.ab, r: now.r - was.r, h: now.h - was.h, rbi: now.rbi - was.rbi, hr: now.hr - was.hr,
-            bb: now.bb - was.bb, so: now.so - was.so,
+            bb: now.bb - was.bb, so: now.so - was.so, d: now.d - was.d, t: now.t - was.t, sb: now.sb - was.sb,
           };
         };
         // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
-        const boxBat = (lineup: SimPlayer[], subs: GameSub[]): BoxBatter[] => lineup.flatMap((p, i) => [
-          { ...line(p.idx), order: i + 1 },
+        // 선발 타자의 수비 자리는 오늘 라인업 배정(ts.field)
+        const boxBat = (lineup: SimPlayer[], subs: GameSub[], field?: Map<number, string>): BoxBatter[] => lineup.flatMap((p, i) => [
+          { ...line(p.idx), order: i + 1, ...(field?.has(p.idx) ? { pos: field.get(p.idx) } : {}) },
           ...subs.filter((s) => s.order === i && batBefore.has(s.idx)).map((s) => ({ ...line(s.idx), order: i + 1, sub: s.kind })),
         ]);
         const boxPit = (staff: number[]): BoxPitcher[] => staff.map((idx) => {
@@ -504,17 +518,29 @@ export class Season {
           const was = pitBefore.get(idx)!;
           return {
             idx, outs: now.outs - was.outs, bf: now.bf - was.bf, h: now.h - was.h, r: now.r - was.r, er: now.er - was.er,
-            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np,
+            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np, hld: now.hld - was.hld, bsv: now.bsv - was.bsv,
           };
         });
+        /** 이 팀 선수(타자·투수)의 이 경기 실책 합 */
+        const sideErrors = (s: BoxSide): number => {
+          const ids = new Set([...s.batters.map((b) => b.idx), ...s.pitchers.map((q) => q.idx)]);
+          let e = 0;
+          for (const i of ids) e += this.errors[i] - (errBefore!.get(i) ?? this.errors[i]);
+          return e;
+        };
+        const side = (lineup: SimPlayer[], subs: GameSub[], staff: number[], field?: Map<number, string>): BoxSide => {
+          const s: BoxSide = { batters: boxBat(lineup, subs, field), pitchers: boxPit(staff) };
+          s.e = sideErrors(s);
+          return s;
+        };
         if (plays) {
           this.plays.set(this.log.length - 1, plays);
           for (const k of this.plays.keys()) if (this.plays.size > PLAYS_KEEP) this.plays.delete(k);
         }
         this.boxes.set(this.log.length - 1, {
           lineScore: res.lineScore,
-          home: { batters: boxBat(homeLineup, res.homeSubs), pitchers: boxPit(res.homeStaff) },
-          away: { batters: boxBat(awayLineup, res.awaySubs), pitchers: boxPit(res.awayStaff) },
+          home: side(homeLineup, res.homeSubs, res.homeStaff, h.field),
+          away: side(awayLineup, res.awaySubs, res.awayStaff, a.field),
         });
       }
     }

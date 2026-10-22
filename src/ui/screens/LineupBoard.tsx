@@ -10,6 +10,7 @@ import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type GameSession, type PitcherRole } from '../../game/session';
 import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
 import { recentLines } from '../recent';
+import { lastOutings, outingText, type Outing } from '../../game/boxscore';
 import { futuresText } from './Roster';
 
 type Tab = 'hit' | 'pit' | 'entry';
@@ -71,6 +72,9 @@ export function LineupBoard() {
   const rules = session.world.rules;
   const editable = session.canManage;
   const recent = useMemo(() => recentLines(session), [session, version]);
+  // 투수 지난 등판 (투구 수·휴식일·연투, 2026-10-23 U2-3). 우리 구단 박스스코어로
+  const outings = useMemo(() => lastOutings(session.season, session.teamIdx, session.season.day), [session, version]);
+  const outNote = (i: number | null) => { const o = i === null ? undefined : outings.get(i); return o ? outingText(o, session.world.year) : undefined; };
   const fut = useMemo(() => session.futures().lines, [session, version]);
   const curReg = useMemo(() => new Set(session.registered().map((p) => p.idx)), [session, version]);
   const curPlan = useMemo(() => session.effectivePlan(), [session, version]);
@@ -436,7 +440,7 @@ export function LineupBoard() {
                 <div className="role-row">
                   {[...d.plan.rotation, null].map((i, k) => (
                     <PitchButton key={i ?? 'add'} label={i === null ? '+ 선발 추가' : `${k + 1}`} p={i === null ? null : players[i]} on={sameTarget(target, { kind: 'sp', k })}
-                      changed={i !== null && diff.roles.some((r) => r.p.idx === i)} status={i === null ? null : statusOf(players[i])}
+                      changed={i !== null && diff.roles.some((r) => r.p.idx === i)} status={i === null ? null : statusOf(players[i])} note={outNote(i)}
                       disabled={!editable && i === null} onClick={() => open({ kind: 'sp', k })} />
                   ))}
                 </div>
@@ -445,7 +449,7 @@ export function LineupBoard() {
                 <h3>CP 마무리</h3>
                 <div className="role-row">
                   <PitchButton label="CP" p={d.plan.closer === null ? null : players[d.plan.closer]} on={sameTarget(target, { kind: 'cl' })}
-                    changed={d.plan.closer !== curPlan.closer} status={d.plan.closer === null ? null : statusOf(players[d.plan.closer])}
+                    changed={d.plan.closer !== curPlan.closer} status={d.plan.closer === null ? null : statusOf(players[d.plan.closer])} note={outNote(d.plan.closer)}
                     empty="마무리 없음 (AI 감독이 정함)" disabled={!editable && d.plan.closer === null} onClick={() => open({ kind: 'cl' })} />
                 </div>
               </div>
@@ -459,7 +463,7 @@ export function LineupBoard() {
                       <div className="role-row">
                         {list.map((p) => (
                           <PitchButton key={p.idx} p={p} on={sameTarget(target, { kind: 'pen', role, who: p.idx })} changed={diff.roles.some((r) => r.p.idx === p.idx) || diff.newRoles.some((r) => r.p.idx === p.idx)}
-                            status={statusOf(p)} onClick={() => open({ kind: 'pen', role, who: p.idx })} />
+                            status={statusOf(p)} note={outNote(p.idx)} onClick={() => open({ kind: 'pen', role, who: p.idx })} />
                         ))}
                         {editable && <PitchButton label="+ 추가" p={null} empty="" on={sameTarget(target, { kind: 'pen', role, who: null })} onClick={() => open({ kind: 'pen', role, who: null })} />}
                       </div>
@@ -477,7 +481,7 @@ export function LineupBoard() {
         <div className="stack tight board-side">
           {target && (
             <Candidates key={JSON.stringify(target)} target={target} label={targetLabel(target)} occupant={occupant(target)} d={d}
-              statusOf={statusOf} nowText={nowText} score={score} whyText={whyText} recent={recent} defAt={defAt} editable={editable}
+              statusOf={statusOf} nowText={nowText} score={score} whyText={whyText} recent={recent} outings={outings} defAt={defAt} editable={editable}
               onPick={(p) => { if (target.kind === 'slot') putHitter(p, target.slot); else putPitcher(p, target); setTarget(null); }}
               onClear={() => { if (target.kind === 'slot') clearSlot(target.slot); else clearPitcher(target); setTarget(null); }}
               onClose={() => setTarget(null)} />
@@ -520,23 +524,26 @@ export function LineupBoard() {
   );
 }
 
-function PitchButton({ p, label, on, changed, status, empty = '비어 있음', disabled, onClick }: {
-  p: SimPlayer | null; label?: string; on: boolean; changed?: boolean; status?: { text: string; out: boolean } | null; empty?: string; disabled?: boolean; onClick: () => void;
+function PitchButton({ p, label, on, changed, status, note, empty = '비어 있음', disabled, onClick }: {
+  p: SimPlayer | null; label?: string; on: boolean; changed?: boolean; status?: { text: string; out: boolean } | null;
+  /** 지난 등판 "6/08 104구 · 휴식 4일" */
+  note?: string; empty?: string; disabled?: boolean; onClick: () => void;
 }) {
   return (
     <button type="button" className={`slot-card pitch${on ? ' on' : ''}${changed ? ' changed' : ''}${p ? '' : ' add'}`} aria-pressed={on} disabled={disabled} onClick={onClick}>
       {label && <span className="slot-pos">{label}</span>}
       {p ? <strong>{p.name}</strong> : empty && <span className="muted small">{empty}</span>}
       {status?.out && <span className="status out">{status.text}</span>}
+      {p && note && <span className="slot-note" title="지난 등판 · 그 뒤 쉰 날">{note}</span>}
     </button>
   );
 }
 
 /** 후보 비교: 출전 가능 상태 · 지금 수비 등급(야수) · 능력 등급 · 최근 10경기. 2군 선수를 고르면 1군 등록도 묶음에 들어간다 */
-function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyText, recent, defAt, editable, onPick, onClear, onClose }: {
+function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyText, recent, outings, defAt, editable, onPick, onClear, onClose }: {
   target: Target; label: string; occupant: number | null; d: Draft;
   statusOf: (p: SimPlayer) => { text: string; out: boolean; block?: string }; nowText: (p: SimPlayer) => string;
-  score: (p: SimPlayer, t: Target) => number; whyText: (p: SimPlayer, t: Target) => string; recent: Map<number, string>;
+  score: (p: SimPlayer, t: Target) => number; whyText: (p: SimPlayer, t: Target) => string; recent: Map<number, string>; outings: Map<number, Outing>;
   defAt: (p: SimPlayer, s: Slot) => number | null; editable: boolean;
   onPick: (p: SimPlayer) => void; onClear: () => void; onClose: () => void;
 }) {
@@ -568,6 +575,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
         지금: <strong>{cur ? cur.name : '비어 있음'}</strong>
         {cur && target.kind === 'slot' && target.slot !== 'DH' && <> · 수비 <Grade v={defAt(cur, target.slot)} /></>}
         {cur && <> · {statusOf(cur).text}{recent.get(cur.idx) ? ` · ${recent.get(cur.idx)}` : ''}</>}
+        {cur && pit && outings.has(cur.idx) && <> · 지난 등판 {outingText(outings.get(cur.idx)!, session.world.year)}</>}
       </p>
       <p className="small muted">
         {best
@@ -605,6 +613,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
                       <ForeignMark p={p} />
                       {best?.p.idx === p.idx && <span className="tag rec-tag" title={whyText(p, target)}>추천</span>}
                       <span className="cand-recent muted">{d.entry.has(p.idx) ? (recent.get(p.idx) ?? '최근 10경기 출전 없음') : '2군'}</span>
+                      {pit && outings.has(p.idx) && <span className="cand-recent muted">지난 등판 {outingText(outings.get(p.idx)!, session.world.year)}</span>}
                     </td>
                     <td className="l small">{nowText(p)}{st.out && <><br /><span className="status out">{st.text}</span></>}</td>
                     {pit ? (

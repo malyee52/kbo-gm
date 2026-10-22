@@ -93,6 +93,8 @@ export interface CastGame {
   box?: BoxScore;
   /** 가을야구 시리즈 이름 */
   label?: string;
+  /** 정규시즌 경기 로그 색인 (차전·승패 투수를 찾는다). 가을야구는 없다 */
+  logIdx?: number;
 }
 
 /** 직접 지휘 미리보기 결과 (commandPreview) */
@@ -550,7 +552,7 @@ export class GameSession {
       if (g.day < fromDay || (g.home !== me && g.away !== me)) return;
       out.push({
         key: `${this.world.year}-${i}`, year: this.world.year, day: g.day, home: g.home, away: g.away, homeRuns: g.homeRuns, awayRuns: g.awayRuns,
-        innings: g.innings, plays: s.plays.get(i), box: s.boxes.get(i),
+        innings: g.innings, plays: s.plays.get(i), box: s.boxes.get(i), logIdx: i,
       });
     });
     for (const x of this.postseason?.series ?? []) {

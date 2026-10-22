@@ -395,7 +395,7 @@ function useGrowthDelta(p: SimPlayer): number | null {
 // ---- 탭 3: 기록
 
 type BatLike = { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; rbi: number; r: number; bb: number; hbp: number; so: number; sb: number; sf: number };
-type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number; qs?: number; bsv?: number; bf?: number; hbp?: number };
+type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number; qs?: number; bsv?: number; bf?: number; hbp?: number; np?: number };
 type RecRow<L> = { key: string; label: string; real: boolean; l: L; lg: LeagueBase | null };
 
 function batFromRow(r: BatRow): BatLike {
@@ -477,6 +477,11 @@ const PIT_COLS: Column<RecRow<PitLike>>[] = [
   { key: 'pk', label: 'K%', title: SABER_TIP.pk, value: (r) => (r.l.bf ? pitKPct(px(r.l)) : null), cell: (r) => (r.l.bf ? pct1(pitKPct(px(r.l))) : '-'), group: '세이버' },
   { key: 'pb', label: 'BB%', title: SABER_TIP.pb, value: (r) => (r.l.bf ? pitBbPct(px(r.l)) : null), cell: (r) => (r.l.bf ? pct1(pitBbPct(px(r.l))) : '-'), group: '세이버', lower: true },
   { key: 'pbabip', label: '피BABIP', title: SABER_TIP.pbabip, value: (r) => (r.l.bf ? pitBabip(px(r.l)) : null), cell: (r) => (r.l.bf ? rate3(pitBabip(px(r.l))) : '-'), group: '세이버', lower: true },
+  // 투구 수 묶음 (2026-10-23 U2-3): 게임 안 시즌만 (실제 기록·투구 수를 세기 전 저장은 —). 경기당은 선발·구원이 섞인 값
+  { key: 'np', label: '투구 수', value: (r) => r.l.np || null, cell: (r) => (r.l.np ? String(r.l.np) : '—'), group: '투구 수' },
+  { key: 'npg', label: '경기당', title: '경기당 투구 수 (선발·구원 등판을 함께 센다)', value: (r) => (r.l.np && r.l.g ? r.l.np / r.l.g : null), cell: (r) => (r.l.np && r.l.g ? (r.l.np / r.l.g).toFixed(1) : '—'), group: '투구 수', lower: true },
+  { key: 'npip', label: '이닝당', title: '이닝당 투구 수 (적을수록 공을 아낀다)', value: (r) => (r.l.np && r.l.outs ? (r.l.np * 3) / r.l.outs : null), cell: (r) => (r.l.np && r.l.outs ? ((r.l.np * 3) / r.l.outs).toFixed(1) : '—'), group: '투구 수', lower: true },
+  { key: 'npbf', label: '타자당', title: '상대 타자당 투구 수', value: (r) => (r.l.np && r.l.bf ? r.l.np / r.l.bf : null), cell: (r) => (r.l.np && r.l.bf ? (r.l.np / r.l.bf).toFixed(2) : '—'), group: '투구 수', lower: true },
 ];
 
 function RecordTab({ p, full, store }: { p: SimPlayer; full: boolean; store: ReturnType<typeof useGame>['store'] }) {
@@ -519,7 +524,8 @@ function RecordTab({ p, full, store }: { p: SimPlayer; full: boolean; store: Ret
   const lb = lg.total.bat;
   const lpit = lg.total.pit;
   const batFoot = live && lb.pa > 0 ? [{ label: `${year} 리그 평균`, cells: { avg: rate3(avg(lb)), obp: rate3(obp(lb)), slg: rate3(slg(lb)), ops: rate3(ops(lb)), woba: rate3(woba(lb)), iso: rate3(iso(lb)), babip: rate3(babip(lb)), bbp: pct1(bbPct(lb)), kp: pct1(kPct(lb)), wrc: '100' } }] : undefined;
-  const pitFoot = live && lpit.outs > 0 ? [{ label: `${year} 리그 평균`, cells: { era: fixed2(era(lpit)), whip: fixed2(whip(lpit)), fip: fixed2(era(lpit)), pk: pct1(pitKPct(lpit)), pb: pct1(pitBbPct(lpit)), pbabip: rate3(pitBabip(lpit)) } }] : undefined;
+  const pitFoot = live && lpit.outs > 0 ? [{ label: `${year} 리그 평균`, cells: { era: fixed2(era(lpit)), whip: fixed2(whip(lpit)), fip: fixed2(era(lpit)), pk: pct1(pitKPct(lpit)), pb: pct1(pitBbPct(lpit)), pbabip: rate3(pitBabip(lpit)),
+    ...(lpit.np > 0 ? { npg: (lpit.np / Math.max(1, lpit.g)).toFixed(1), npip: ((lpit.np * 3) / lpit.outs).toFixed(1), npbf: (lpit.np / Math.max(1, lpit.bf)).toFixed(2) } : {}) } }] : undefined;
   const batTable = bats.length > 0 && (
     <DataTable id="player-bat" label="타격 기록" cols={BAT_COLS} rows={bats} rowKey={(r) => r.key} full={full} thin={(r) => r.l.pa < THIN_PA} foot={batFoot} />
   );
@@ -625,9 +631,29 @@ function PitchingTab({ rows, full }: { rows: PitchRow[]; full: boolean }) {
   return (
     <section>
       <p className="small">마지막 등판 {last.date}{session.phase === 'season' && !session.done && rest >= 0 ? ` · 그 뒤 ${rest}일` : ''} · 이번 시즌 {rows.length}경기</p>
+      <RecentPitchBars rows={rows.slice(0, 7).reverse()} />
       <DataTable id="player-pitch-log" label="등판 기록" cols={PITCH_COLS} rows={rows} rowKey={(r) => r.key} full={full} />
       <p className="muted small">우리 구단 경기 박스스코어로 만든 표입니다. 투구 수를 세지 않은 경기는 —.</p>
     </section>
+  );
+}
+
+/** 최근 7등판 투구 수 막대 (오래된 것부터). 막대 높이는 그 중 최대 또는 110구 기준 (임시값) */
+function RecentPitchBars({ rows }: { rows: PitchRow[] }) {
+  const counted = rows.filter((r) => r.np > 0);
+  if (!counted.length) return null;
+  const top = Math.max(110, ...counted.map((r) => r.np));
+  return (
+    <figure className="np-bars" aria-label={`최근 ${rows.length}등판 투구 수: ${rows.map((r) => `${r.date} ${r.np || '—'}구`).join(', ')}`}>
+      {rows.map((r) => (
+        <div key={r.key} className={`np-bar${r.start ? ' sp' : ''}`} title={`${r.date} ${r.start ? '선발' : '구원'} ${r.np || '—'}구`}>
+          <span className="np-v small">{r.np || '—'}</span>
+          <i style={{ height: `${(r.np / top) * 100}%` }} aria-hidden />
+          <span className="np-d small muted">{r.date}</span>
+        </div>
+      ))}
+      <figcaption className="muted small">최근 {rows.length}등판 투구 수 (진한 막대 = 선발)</figcaption>
+    </figure>
   );
 }
 

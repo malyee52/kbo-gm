@@ -530,7 +530,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {summary && !session.pendingEvent && (
                   <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
                 )}
-                {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={closeCast} />}
+                {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={closeCast} live />}
                 {cmd && !session.pendingEvent && <CommandView start={cmd} onDone={() => void endCommand(true)} onCancel={() => void endCommand(false)} />}
                 {party.length > 0 && !cast && !cmd && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
                 {tabs && (
