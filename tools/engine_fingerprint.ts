@@ -32,8 +32,6 @@ for (const year of years) {
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
   const extra = s.playExtraGame(0, 1, s.schedule.length + 3, new Rng(`${seed}-${year}/extra`), 15, rec);
   const save = s.toSave();
-  const { rngGames: _g, ...rest } = save as typeof save & { rngGames?: number };
-  void _g;
   const ms = performance.now() - t0;
-  console.log(`${year}  save ${hash(rest)}  plays ${hash(plays)}  extra ${hash([extra.result, rec])}  (${(ms / 1000).toFixed(1)}초)`);
+  console.log(`${year}  save ${hash(save)}  plays ${hash(plays)}  extra ${hash([extra.result, rec])}  (${(ms / 1000).toFixed(1)}초)`);
 }
