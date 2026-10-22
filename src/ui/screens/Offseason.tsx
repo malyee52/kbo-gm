@@ -9,7 +9,7 @@ import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
   dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS,
-  FRANCHISE_TAG_SHARE, foreignCap, isPreGrade, minSalary, salaryCap, salaryFloor, teamCapPayroll,
+  FRANCHISE_TAG_SHARE, foreignCap, foreignContractTotal, isPreGrade, minSalary, salaryCap, salaryFloor, teamCapPayroll,
 } from '../../league/salary';
 import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
@@ -490,11 +490,11 @@ function ForeignPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>외국인 선수</h2>
         <p className="muted small">
-          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))}, 아시아쿼터 신규는 {dollarText(foreignCap(session.league, 'asiaNewCap', off.year + 1))}까지,{' '}
-          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(foreignCap(session.league, 'foreignTotalCap', off.year + 1))}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
+          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규(KBO 1년차) 계약은 연봉 + 계약금 {dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))}, 아시아쿼터 신규는 {dollarText(foreignCap(session.league, 'asiaNewCap', off.year + 1))}까지(재계약은 개인 제한 없음),{' '}
+          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(foreignCap(session.league, 'foreignTotalCap', off.year + 1))}에 재계약 외국인마다 같은 구단 재계약 연차 × 10만 달러를 더한 값까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
-          우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
+          우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)} / 상한 {dollarText(slots.cap)}{slots.resignRoom > 0 ? `, 재계약 몫 +${dollarText(slots.resignRoom)}` : ''}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}
         </p>
         {!myTurn && <p className="muted small">다음 단계로 넘기면 남은 구단이 고릅니다.</p>}
@@ -512,7 +512,7 @@ function ForeignPanel({ act }: { act: Act }) {
                   const keep = f.keep[p.id];
                   return (
                     <tr key={p.id}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(p.contract.salary)}</td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(foreignContractTotal(p.contract))}</td>
                       <td className="l">
                         <label className="inline small">
                           <input type="checkbox" checked={keep} onChange={(e) => act(session.setForeignKeep(p.id, e.target.checked))} /> 재계약
@@ -540,7 +540,7 @@ function ForeignPanel({ act }: { act: Act }) {
                 return (
                   <tr key={p.id}>
                     <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
-                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{dollarText(p.contract.salary)}</td>
+                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{dollarText(foreignContractTotal(p.contract))}</td>
                     <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
                     <td>
                       <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}

@@ -13,7 +13,8 @@
   drafts.json           입단 연도별 신인 지명 (1982~2027, 원년 멤버·육성선수 포함)
 
 함께 읽는 파일
-  data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
+  data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia).
+                                연봉(달러)·계약금(달러)·금액 출처 열이 있으면 시작 계약에 그대로 쓴다 (없으면 게임 생성식)
                                  자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
   data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
                                  상무·경찰 복무는 자료집 선수마스터의 '출신교·경력(2026 프로필)'에서 읽는다.
@@ -1079,7 +1080,13 @@ def main():
                 if r['구분'] == '제외':
                     continue
                 asia = r['구분'] == '아시아쿼터'
-                foreign_opening[str(r['연도'])][r['구단']].append({'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] == '확인'})
+                entry = {'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] == '확인'}
+                # 실제 계약 금액 (달러, 있는 선수만): 연봉·계약금·출처
+                if (r.get('연봉(달러)') or '').strip():
+                    entry['salary'] = int(r['연봉(달러)'])
+                    entry['bonus'] = int(r.get('계약금(달러)') or 0)
+                    entry['source'] = (r.get('금액 출처') or '').strip()
+                foreign_opening[str(r['연도'])][r['구단']].append(entry)
                 if asia:
                     asia_ids.add(str(r['선수ID']))
     for p in players:

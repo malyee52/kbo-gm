@@ -172,8 +172,9 @@ export interface Meta {
   /**
    * 시작 연도 개막 때 구단별 외국인 (연도 → 구단 이름 → 선수). data-src/외국인_개막명단.csv에서 만든다.
    * 그 해 기록에는 시즌 중 교체된 외국인까지 있어서, 새 게임은 이 명단에 있는 외국인만 넣는다. 없는 해는 기록 그대로.
+   * salary·bonus: 실제 계약 연봉·계약금 (달러, 있는 선수만, source = 출처). 시작 계약에 그대로 쓴다
    */
-  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean }[]>>;
+  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean; salary?: number; bonus?: number; source?: string }[]>>;
   /**
    * 연도별 특별 엔트리 선수 id (은퇴식 등으로 하루 1군에 등록된 선수. tools/build_data.py의 규칙으로 고른 값).
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.

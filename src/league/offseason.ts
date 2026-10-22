@@ -27,7 +27,7 @@ import {
 import { foreignName, josa, koreanName } from './names';
 import {
   capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
-  FA_RE_ELIGIBLE, foreignCap, foreignSalary, marketSalary, MIN_SALARY, minSalary, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
+  FA_RE_ELIGIBLE, foreignCap, foreignContractTotal, foreignSalary, foreignTeamCap, isNewForeign, marketSalary, MIN_SALARY, minSalary, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, salaryFloor, teamCapPayroll, type ForeignCapKey, WON_PER_RUN, wageIndex, rookieSalary, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
@@ -1549,7 +1549,8 @@ const isForeignOf = (p: LeaguePlayer, t: number) => p.team === t && p.foreign;
  */
 function toPool(league: LeagueState, view: LeagueView, p: LeaguePlayer): void {
   p.team = -1;
-  p.contract = { ...p.contract, salary: foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), true, p.asia, league, view.year) };
+  // 계약금은 지난 계약 것이라 지운다
+  p.contract = { kind: p.contract.kind, salary: foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), true, p.asia, league, view.year), until: p.contract.until };
 }
 /** 계약 기간이 이번 오프시즌에 끝나는 외국인 */
 const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.until <= year;
@@ -1564,11 +1565,17 @@ function resignForeignSalary(league: LeagueState, view: LeagueView, p: LeaguePla
   return p.asia ? want : Math.min(want, Math.max(0, room));
 }
 
-/** 이 선수를 뺀 같은 구단 외국인(아시아쿼터 제외)의 연봉 합. 아직 재계약 전인 선수는 빼고 센다 */
+/** 이 선수를 뺀 같은 구단 외국인(아시아쿼터 제외)의 연봉 + 계약금 합. 아직 재계약 전인 선수는 빼고 센다 */
 function otherRegularPay(league: LeagueState, p: LeaguePlayer, year: number): number {
   return league.players
     .filter((x) => x.team === p.team && x.foreign && !x.asia && x.id !== p.id && !(expiring(x, year) && x.contract.until <= year))
-    .reduce((s, x) => s + x.contract.salary, 0);
+    .reduce((s, x) => s + foreignContractTotal(x.contract), 0);
+}
+
+/** 다음 시즌(year + 1) 이 선수가 재계약할 때의 구단 총액 상한: 계약이 이어지는 일반 외국인과 이 선수의 재계약 몫 (salary.ts foreignTeamCap) */
+function resignTeamCap(league: LeagueState, p: LeaguePlayer, year: number): number {
+  const members = league.players.filter((x) => x.team === p.team && x.foreign && !x.asia && x.id !== p.id && x.contract.until > year);
+  return foreignTeamCap(league, p.team, year + 1, [...members, p]);
 }
 
 function enterForeign(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
@@ -1584,7 +1591,6 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
   const view = leagueView(league, store, params);
   const order = pickOrder(league).filter((t) => !isFuturesTeam(league, t, year + 1));
   const pool: string[] = [];
-  const totalCap = foreignCap(league, 'foreignTotalCap', year + 1);
 
   // 재계약 판단: AI 구단은 바로, 플레이어 구단은 권고만 하고 단계를 넘길 때 정한다.
   // 자료에는 시즌 중 교체된 외국인까지 들어 있어 한 구단에 5명 넘게 있을 수 있으므로, 보유 한도 안에서 좋은 선수부터 남긴다
@@ -1595,17 +1601,20 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     const staying = mine.filter((p) => !expiring(p, year));
     let regular = staying.filter((p) => !p.asia).length;
     let asia = staying.length - regular;
-    let pay = staying.filter((p) => !p.asia).reduce((sum, p) => sum + p.contract.salary, 0);
+    let pay = staying.filter((p) => !p.asia).reduce((sum, p) => sum + foreignContractTotal(p.contract), 0);
+    // 총액 상한은 재계약 외국인마다 늘어난다 (salary.ts foreignTeamCap)
+    const kept = staying.filter((p) => !p.asia);
     const cands = mine.filter((p) => expiring(p, year) && foreignKeepAdvice(view, p, year))
       .sort((a, b) => currentRuns(view.sim.get(b.id)!, view.ctx) - currentRuns(view.sim.get(a.id)!, view.ctx) || a.id.localeCompare(b.id));
     for (const p of cands) {
       if (p.asia ? asia >= rule.asia : regular >= rule.regular) continue;
-      if (!p.asia && totalCap - pay < FOREIGN_MIN_DEAL) continue;
+      if (!p.asia && foreignTeamCap(league, t, year + 1, [...kept, p]) - pay < FOREIGN_MIN_DEAL) continue;
       advised.add(p.id);
       if (p.asia) asia++;
       else {
         regular++;
-        pay += resignForeignSalary(league, view, p, totalCap - pay);
+        kept.push(p);
+        pay += resignForeignSalary(league, view, p, foreignTeamCap(league, t, year + 1, kept) - pay);
       }
     }
   }
@@ -1617,7 +1626,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
       continue;
     }
     if (advice) {
-      p.contract = { kind: 'foreign', salary: resignForeignSalary(league, view, p, totalCap - otherRegularPay(league, p, year)), until: year + 1 };
+      p.contract = { kind: 'foreign', salary: resignForeignSalary(league, view, p, resignTeamCap(league, p, year) - otherRegularPay(league, p, year)), until: year + 1 };
     } else {
       log(off, 'foreign', `${league.teams[p.team].name}, ${p.name}${josa(p.name, '와과')} 재계약하지 않음`, false);
       toPool(league, view, p);
@@ -1648,14 +1657,23 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
 export interface ForeignSlots {
   regular: number;
   asia: number;
-  /** 아시아쿼터를 뺀 외국인 연봉 합 (달러) */
+  /** 아시아쿼터를 뺀 외국인 연봉 + 계약금 합 (달러) */
   regularPay: number;
+  /** 다음 시즌(오프시즌이면 off.year + 1) 구단 총액 상한: 기본 상한 + 재계약 몫 (salary.ts foreignTeamCap) */
+  cap: number;
+  /** 그 가운데 재계약 몫 */
+  resignRoom: number;
 }
 
 export function foreignSlots(league: LeagueState, team: number, off?: OffseasonState): ForeignSlots {
   const list = league.players.filter((p) => isForeignOf(p, team) && !(off?.foreign && off.foreign.keep[p.id] === false));
   const regular = list.filter((p) => !p.asia);
-  return { regular: regular.length, asia: list.length - regular.length, regularPay: regular.reduce((s, p) => s + p.contract.salary, 0) };
+  const year = off ? off.year + 1 : league.year;
+  const cap = foreignTeamCap(league, team, year, regular);
+  return {
+    regular: regular.length, asia: list.length - regular.length, regularPay: regular.reduce((s, p) => s + foreignContractTotal(p.contract), 0),
+    cap, resignRoom: cap - foreignCap(league, 'foreignTotalCap', year),
+  };
 }
 
 /** 이번 오프시즌의 외국인 보유 한도 (M8 전 저장에는 없어 2026년 값) */
@@ -1671,12 +1689,19 @@ export function canSignForeign(league: LeagueState, off: OffseasonState, team: n
   const cap = (key: ForeignCapKey) => foreignCap(league, key, off.year + 1);
   if (p.asia) {
     if (s.asia >= lim.asia) return { ok: false, message: lim.asia ? '아시아쿼터 자리가 찼습니다.' : '아시아쿼터 제도가 없는 시대입니다.' };
-    if (p.contract.salary > cap('asiaNewCap')) return { ok: false, message: `아시아쿼터 신규 계약 상한(${dollarText(cap('asiaNewCap'))})을 넘습니다.` };
+    // 개인 상한은 신규(KBO 1년차)만, 연봉 + 계약금으로 (사용자 조사 2026-10-22)
+    if (isNewForeign(p) && foreignContractTotal(p.contract) > cap('asiaNewCap')) return { ok: false, message: `아시아쿼터 신규 계약 상한(${dollarText(cap('asiaNewCap'))})을 넘습니다.` };
     return feeCheck(league, team, p);
   }
   if (s.regular >= lim.regular) return { ok: false, message: `외국인 선수는 ${lim.asia ? '아시아쿼터를 빼고 ' : ''}${lim.regular}명까지입니다.` };
-  if (p.contract.salary > cap('foreignNewCap')) return { ok: false, message: `신규 외국인 계약 상한(${dollarText(cap('foreignNewCap'))})을 넘습니다.` };
-  if (s.regularPay + p.contract.salary > cap('foreignTotalCap')) return { ok: false, message: `외국인 총액 상한(${dollarText(cap('foreignTotalCap'))})을 넘습니다.` };
+  const total = foreignContractTotal(p.contract);
+  if (isNewForeign(p) && total > cap('foreignNewCap')) return { ok: false, message: `신규 외국인 계약 상한(${dollarText(cap('foreignNewCap'))}, 연봉 + 계약금)을 넘습니다.` };
+  // 재계약하기로 한 선수는 지난 연봉으로 센다 (아시아쿼터는 총액에 넣지 않는다). 숫자를 함께 보여 준다 (2026-10-22 사용자: 왜 막혔는지 몰랐다).
+  // 총액 상한은 재계약 외국인마다 늘어난다 (사용자 조사 2026-10-22)
+  if (s.regularPay + total > s.cap) {
+    const capText = s.resignRoom > 0 ? `${dollarText(s.cap)}: 기본 ${dollarText(cap('foreignTotalCap'))} + 재계약 몫 ${dollarText(s.resignRoom)}` : dollarText(s.cap);
+    return { ok: false, message: `외국인 총액 상한(${capText})을 넘습니다 (아시아쿼터를 뺀 우리 외국인 ${dollarText(s.regularPay)} + 요구액 ${dollarText(total)}).` };
+  }
   return feeCheck(league, team, p);
 }
 
@@ -1697,7 +1722,7 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
     league.ledger.push({ year: off.year + 1, from: team, to: -1, amount: Math.round(fee * WON_PER_USD), note: `${p.name} 외국인 이적료`, kind: 'transfer' });
     delete p.transferFee;
   }
-  log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(p.contract.salary / 10000)}만 달러${fee ? `, 이적료 ${Math.round(fee / 10000)}만 달러` : ''}${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
+  log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(foreignContractTotal(p.contract) / 10000)}만 달러${fee ? `, 이적료 ${Math.round(fee / 10000)}만 달러` : ''}${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
 }
 
 function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, view: LeagueView): void {
@@ -1759,7 +1784,7 @@ function finishForeign(league: LeagueState, off: OffseasonState, store: Store, p
   for (const [id, keep] of Object.entries(f.keep)) {
     const p = league.players.find((x) => x.id === id)!;
     if (keep) {
-      const room = foreignCap(league, 'foreignTotalCap', off.year + 1) - otherRegularPay(league, p, off.year);
+      const room = resignTeamCap(league, p, off.year) - otherRegularPay(league, p, off.year);
       if (!p.asia && room < FOREIGN_MIN_DEAL) {
         toPool(league, view0, p);
         f.pool.push(id);

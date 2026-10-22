@@ -41,6 +41,11 @@ export interface Contract {
   until: number;
   /** FA 계약금으로 미리 낸 한 해 몫 (만 원). 월말 연봉에서 빠진다 (finance.ts, 샐러리캡 계산은 salary 그대로) */
   prepaid?: number;
+  /**
+   * 외국인 계약금 (달러). 그 계약 시즌에 연봉과 함께 나가고, 외국인 금액 상한은 연봉 + 계약금으로 본다 (salary.ts foreignContractTotal,
+   * 사용자 조사 2026-10-22). 지금은 실제 계약 자료(외국인_개막명단.csv)가 있는 선수만 있다 (생성식 계약은 연봉에 다 넣는다)
+   */
+  bonus?: number;
 }
 
 export interface LeaguePlayer {

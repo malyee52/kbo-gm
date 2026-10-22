@@ -272,7 +272,7 @@ export const marketOf = (league: LeagueState, team: number) => parkOf(league, te
 
 /** 월말에 나가는 연봉 (만 원, 한 해). 외국인은 달러를 환산하고, FA 계약금으로 미리 낸 몫은 뺀다 */
 export function payOf(p: LeaguePlayer): number {
-  if (p.foreign) return Math.round(p.contract.salary * WON_PER_USD);
+  if (p.foreign) return Math.round((p.contract.salary + (p.contract.bonus ?? 0)) * WON_PER_USD);
   return Math.max(0, p.contract.salary - (p.contract.prepaid ?? 0));
 }
 

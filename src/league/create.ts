@@ -39,6 +39,15 @@ export interface CreatedLeague {
   world: World;
 }
 
+/** 시작 연도 개막 외국인의 실제 계약 (선수 id → 연봉·계약금, 달러). 외국인_개막명단.csv에 금액이 있는 선수만 */
+export function openingContracts(store: Pick<DataStore, 'meta'>, year: number): Map<string, { salary: number; bonus: number }> {
+  const m = new Map<string, { salary: number; bonus: number }>();
+  for (const list of Object.values(store.meta.foreignOpening?.[String(year)] ?? {})) {
+    for (const x of list) if (x.salary !== undefined) m.set(x.id, { salary: x.salary, bonus: x.bonus ?? 0 });
+  }
+  return m;
+}
+
 /** 시작 연도의 외국인 개막 명단 (선수 id → 아시아쿼터 여부). 명단이 없는 해는 null (기록에 있는 외국인을 모두 넣는다) */
 export function openingForeigners(store: Pick<DataStore, 'meta'>, year: number): Map<string, boolean> | null {
   const teams = store.meta.foreignOpening?.[String(year)];
@@ -76,8 +85,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     return years.size ? { franchise, seasons: years.size } : null;
   };
 
+  const realForeign = openingContracts(store, startYear);
   const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
+    const asia = p.foreign && (opening?.get(p.id) ?? m.asia ?? false);
     const ten = tenure0(p);
     const now = currentRuns(p, ctx);
     const peak = realPeakRuns(p, idx, store, ctx, params);
@@ -96,7 +107,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     for (let y = lastFaYear ?? m.entryYear; y < startYear; y++) if (servedSeason(idx, p.id, y)) service++;
 
     let contract: Contract;
-    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(now, false, false), until: startYear };
+    // 아시아쿼터도 아시아쿼터 연봉 식으로 (2026-10-22 사용자 보고: 웰스가 일반 외국인 재계약 식으로 100만 달러를 넘게 받았다)
+    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(now, false, asia), until: startYear };
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
@@ -107,10 +119,16 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     // FA를 다녀왔지만 계약 자료가 없는 선수: 보류 연봉 협상과 같은 하한 (offseason.ts POST_FA_RESERVE. 2026-10-22 시장 연봉의 0.8 → 0.5)
     else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(reserveTarget(now, service), Math.round(marketSalary(now) * POST_FA_RESERVE)), until: startYear };
     else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
+    // 실제 계약 금액이 있는 외국인은 그대로 (연봉 + 계약금, 사용자 조사 2026-10-22). 시작 연도 전 KBO 기록이 없으면 신규 계약 식 (개인 상한 100만 달러)
+    const realPay = p.foreign ? realForeign.get(p.id) : undefined;
+    if (realPay) contract = { kind: 'foreign', salary: realPay.salary, ...(realPay.bonus ? { bonus: realPay.bonus } : {}), until: startYear };
+    else if (p.foreign && ![...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].some((r) => r.year < startYear)) {
+      contract = { kind: 'foreign', salary: foreignSalary(now, true, asia), until: startYear };
+    }
 
     return {
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
-      foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
+      foreign: p.foreign, asia, birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), ...(p.underhand ? { underhand: true } : {}), history: [], ...(ten ? { tenure0: ten } : {}),

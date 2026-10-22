@@ -4,7 +4,7 @@
 // 연봉 단위는 만 원 (외국인 선수만 달러).
 
 import { faServiceNeeded } from './eras';
-import type { LeagueState, LeaguePlayer, School } from './types';
+import type { Contract, LeagueState, LeaguePlayer, School } from './types';
 import { RULE_DEFAULTS, ruleOf } from './rules';
 import { seasonsWith } from './stadium';
 import { futureValue } from './futureRules';
@@ -327,18 +327,55 @@ export const FOREIGN_REGULAR = 3;
 export const FOREIGN_ASIA = 1;
 
 /**
- * 외국인 연봉 (달러, 임시값): 기여에 따라. year = 계약이 시작되는 해 (없으면 2026 규정).
- * 금액 상한이 규정 인상(foreignCap)으로 오르면 시장 금액도 같은 배율로 오른다 (상한 아래 퍼짐을 그대로 두려고, 2026-10-22)
+ * 외국인 연봉 (달러, 연봉 + 계약금 총액, 임시값): 기여에 따라. year = 계약이 시작되는 해 (없으면 2026 규정).
+ * 금액 상한이 규정 인상(foreignCap)으로 오르면 시장 금액도 같은 배율로 오른다 (상한 아래 퍼짐을 그대로 두려고, 2026-10-22).
+ * 개인 상한은 신규(isNew, KBO 1년차)만: 일반 100만·아시아쿼터 20만 달러. 재계약은 개인 금액 제한이 없다 (사용자 조사 2026-10-22)
  */
 export function foreignSalary(runs: number, isNew: boolean, asia: boolean, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>, year?: number): number {
   const k = year === undefined ? 1 : ruleStepIndex(year, league);
   const cap = (key: ForeignCapKey) => (year === undefined ? ruleOf(league, key) : foreignCap(league, key, year));
-  if (asia) return Math.min(cap('asiaNewCap'), Math.round((k * (80_000 + 6_000 * Math.max(0, runs))) / 10_000) * 10_000);
-  // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
   const r = Math.max(0, runs);
+  if (asia) {
+    const a = Math.round((k * (80_000 + 6_000 * r)) / 10_000) * 10_000;
+    return isNew ? Math.min(cap('asiaNewCap'), a) : a;
+  }
+  // 신규는 상한(100만 달러) 아래에 퍼지게 낮은 기울기 (전에는 후보 대부분이 상한에 걸려 요구액이 모두 같았다, 2026-10-09 QA)
   // 신규: 20런 약 51만, 33런 약 74만, 46런 약 98만 달러 (외국인 능력을 올린 뒤 다시 맞춤, 2026-10-12)
-  const v = Math.round((k * (isNew ? 150_000 + 18_000 * r : 400_000 + 25_000 * r)) / 50_000) * 50_000;
-  return isNew ? Math.min(cap('foreignNewCap'), v) : Math.min(Math.round((2_000_000 * k) / 50_000) * 50_000, v);
+  // 재계약: 2026 LG 실제 연봉+계약금(사용자 조사 2026-10-22: 오스틴 69런 160만, 톨허스트 49런 120만 달러)에 맞춤. 전에는 40만 + 2.5만/런
+  // (200만 상한)이라 실제 연봉의 약 1.8~2배였다. 두 점으로 맞춘 값이라 임시값
+  const v = Math.round((k * (isNew ? 150_000 + 18_000 * r : FOREIGN_RESIGN_BASE + FOREIGN_RESIGN_PER_RUN * r)) / 50_000) * 50_000;
+  return isNew ? Math.min(cap('foreignNewCap'), v) : v;
+}
+/** 재계약 외국인 연봉 생성식 (달러, 연봉 + 계약금, 임시값): 기본 + 런당 */
+export const FOREIGN_RESIGN_BASE = 250_000;
+export const FOREIGN_RESIGN_PER_RUN = 20_000;
+
+/** 외국인 계약 총액 (연봉 + 계약금, 달러). 외국인 금액 상한은 이 값으로 본다 (사용자 조사 2026-10-22) */
+export function foreignContractTotal(c: Pick<Contract, 'salary' | 'bonus'>): number {
+  return c.salary + (c.bonus ?? 0);
+}
+
+/** 신규(KBO 1년차) 외국인인가: 리그에서 뛴 시즌이 없다. 개인 상한(일반 100만·아시아쿼터 20만 달러)은 신규만 (사용자 조사 2026-10-22) */
+export function isNewForeign(p: Pick<LeaguePlayer, 'history' | 'tenure0'>): boolean {
+  return p.history.length === 0 && !p.tenure0;
+}
+
+/**
+ * 재계약 외국인 1명마다 구단 총액 상한이 늘어나는 폭 (달러): 재계약 1년당 10만 달러 (사용자 조사 2026-10-22, 확인 필요).
+ * 해석: 같은 구단에서 마친 시즌 수를 재계약 연차로 본다 (2년차 = 1, 3년차 = 2…). 규정 인상(ruleStepIndex)도 같은 배율로 곱한다
+ */
+export const FOREIGN_RESIGN_CAP_STEP = 100_000;
+
+/** 이 외국인이 그 구단 총액 상한에 더하는 몫 (재계약 연차 × 10만 달러, 신규·아시아쿼터는 0) */
+export function foreignResignRoom(league: Pick<LeagueState, 'teams' | 'ruleShifts'>, p: LeaguePlayer, team: number, year: number): number {
+  if (p.asia || team < 0 || !league.teams[team]) return 0;
+  const n = seasonsWith(p, league, team);
+  return n > 0 ? Math.round((FOREIGN_RESIGN_CAP_STEP * n * ruleStepIndex(year, league)) / 10_000) * 10_000 : 0;
+}
+
+/** 그 구단의 외국인 총액 상한 (달러): 기본 상한 + 일반 외국인(members, 아시아쿼터 제외) 재계약 몫 */
+export function foreignTeamCap(league: Pick<LeagueState, 'teams' | 'rules' | 'ruleShifts'>, team: number, year: number, members: LeaguePlayer[]): number {
+  return foreignCap(league, 'foreignTotalCap', year) + members.reduce((s, p) => s + foreignResignRoom(league, p, team, year), 0);
 }
 
 /** 소속선수 정원 68명 (2026~, 출처 확인) */
