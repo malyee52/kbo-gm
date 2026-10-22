@@ -174,9 +174,12 @@ export function reserveTarget(runs: number, service: number, wage = 1): number {
 const SENIORITY_PAY = 900;
 const RUN_PAY = 220;
 
-/** 보류 선수 다음 해 연봉: 목표값을 향하되 한 해 변동 폭을 제한한다 (삭감 25%, 인상 150%까지. 임시값, 실제 삭감 한도 규정 미확인) */
-export function nextReserveSalary(prev: number, target: number): number {
-  return Math.max(MIN_SALARY, Math.round(Math.min(prev * 2.5, Math.max(prev * 0.75, target))));
+/**
+ * 보류 선수 다음 해 연봉: 목표값을 향하되 한 해 변동 폭을 제한한다 (삭감 25%, 인상 150%까지. 임시값, 실제 삭감 한도 규정 미확인).
+ * afterContract: FA·비FA 다년 계약이 끝난 뒤 첫 협상이면 삭감 한도 50% (임시값, 2026-10-22. 전에는 25%라 FA 연봉이 보류 연봉으로 거의 그대로 이어졌다)
+ */
+export function nextReserveSalary(prev: number, target: number, afterContract = false): number {
+  return Math.max(MIN_SALARY, Math.round(Math.min(prev * 2.5, Math.max(prev * (afterContract ? 0.5 : 0.75), target))));
 }
 
 /** FA 계약 기간 (임시값): 나이가 많을수록 짧다 */

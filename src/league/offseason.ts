@@ -581,6 +581,10 @@ export const EXT_MIN_YEARS = 2;
 export const EXT_MAX_YEARS = 6;
 /** 계약금: 총액의 이 비율 (FA 30%보다 낮게, 임시값) */
 export const EXT_BONUS_SHARE = 0.2;
+/** 비FA 다년 요구액의 시장 연봉 대비 비율: FA까지 1시즌 이하, 2~3시즌, 그보다 멀 때 (임시값) */
+export const EXT_DISCOUNT = [0.8, 0.7, 0.6];
+/** FA를 다녀온 보류 선수 연봉 목표의 하한: 시장 연봉 × 이 비율 (임시값. 2026-10-22 0.7 → 0.5) */
+export const POST_FA_RESERVE = 0.5;
 
 /** FA까지 남은 1군 시즌 (이미 FA 계약을 한 적이 있으면 재자격 기준) */
 export function seasonsToFa(p: LeaguePlayer, year: number): number {
@@ -596,17 +600,20 @@ export function extensionCandidates(league: LeagueState, off: OffseasonState): L
 }
 
 /**
- * 선수가 요구하는 연봉 (만 원): 계약 기간 동안의 예상 기여로 낸 시장 연봉 × 할인.
- * FA가 가까우면(1시즌 이하) 할인 없음, 2~3시즌 10%, 그보다 멀면 20% (안정을 사는 값). 길수록 해마다 2% 더 할인. 지금 연봉보다 낮게는 받지 않는다
+ * 선수가 요구하는 연봉 (만 원): 계약 기간 동안의 예상 기여로 낸 시장 연봉 × 할인 (EXT_DISCOUNT).
+ * 예상 기여의 성장 몫은 절반만 친다. FA까지 1시즌 이하 20%, 2~3시즌 30%, 그보다 멀면 40% (안정을 사는 값). 길수록 해마다 2% 더 할인. 지금 연봉보다 낮게는 받지 않는다.
+ * 2026-10-22 0%·10%·20% → 20%·30%·40% (임시값, 사용자: "FA 아닌 선수가 FA보다 많이 받는다"): FA는 시장가(요구액) 근처에서 계약하는데
+ * 비FA 다년은 계약금(20%)까지 얹어 같은 가치의 FA와 같거나 더 받았다
  */
 export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number, years: number): number {
   const sp = view.sim.get(p.id);
   if (!sp) return Math.max(MIN_SALARY, p.contract.salary);
   let sum = 0;
-  for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
+  // 성장 몫은 절반만 쳐준다 (FA 전이라 성장 위험을 구단이 진다, 임시값 2026-10-22). 하락은 그대로
+  for (let y = 0; y < years; y++) { const d = projectedShift(sp, y, view.ctx); sum += currentRuns(sp, view.ctx) + (d > 0 ? d * 0.5 : d); }
   const base = marketSalary(sum / years, view.wage);
   const toFa = seasonsToFa(p, year);
-  const factor = (toFa <= 1 ? 1 : toFa <= 3 ? 0.9 : 0.8) * (1 - 0.02 * (years - EXT_MIN_YEARS));
+  const factor = (toFa <= 1 ? EXT_DISCOUNT[0] : toFa <= 3 ? EXT_DISCOUNT[1] : EXT_DISCOUNT[2]) * (1 - 0.02 * (years - EXT_MIN_YEARS));
   return Math.max(MIN_SALARY, p.contract.salary, Math.round((base * factor) / 100) * 100);
 }
 
@@ -1937,8 +1944,9 @@ function enterSalary(league: LeagueState, off: OffseasonState, store: Store, par
   for (const p of league.players) {
     if (p.team < 0 || p.foreign || p.contract.until > off.year) continue;
     const runs = currentRuns(view.sim.get(p.id)!, view.ctx);
-    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service, view.wage), Math.round(marketSalary(runs, view.wage) * 0.7)) : reserveTarget(runs, p.service, view.wage);
-    demands[p.id] = nextReserveSalary(p.contract.salary, target);
+    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service, view.wage), Math.round(marketSalary(runs, view.wage) * POST_FA_RESERVE)) : reserveTarget(runs, p.service, view.wage);
+    // FA·비FA 다년 계약이 끝난 뒤 첫 협상은 삭감 한도가 넓다 (계약 연봉이 그대로 굳지 않게)
+    demands[p.id] = nextReserveSalary(p.contract.salary, target, p.contract.kind === 'fa' || p.contract.kind === 'nonFA');
   }
   const offers: Record<string, number> = {};
   for (const [id, v] of Object.entries(demands)) if (league.players.find((x) => x.id === id)!.team === off.userTeam) offers[id] = v;
@@ -2001,9 +2009,10 @@ function aiMeetFloor(league: LeagueState, off: OffseasonState): void {
       const tag = franchiseTag(league, t, year)?.id;
       const ps = league.players.filter((p) => p.team === t && !p.foreign && !isServing(p) && p.id !== tag
         && p.contract.kind === 'reserve' && p.contract.until === year);
-      const sum = ps.reduce((s, p) => s + p.contract.salary, 0);
-      if (sum <= 0) break;
-      for (const p of ps) p.contract = { ...p.contract, salary: Math.ceil(p.contract.salary * (1 + short / sum)) };
+      if (!ps.length) break;
+      // 모자란 몫을 같은 금액씩 나눠 올린다 (2026-10-22, 임시값. 전에는 연봉에 비례해 올려 FA를 다녀온 고액 보류 선수가 가장 많이 올랐다)
+      const each = Math.ceil(short / ps.length);
+      for (const p of ps) p.contract = { ...p.contract, salary: p.contract.salary + each };
     }
     const after = teamCapPayroll(league, t, year);
     if (after > before) log(off, 'salary', `${league.teams[t].name}: 샐러리캡 하한(${wonText(floor)})에 맞춰 보류 선수 연봉을 올렸습니다 (합계 +${wonText(after - before)})`, false);

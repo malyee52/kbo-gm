@@ -4,7 +4,7 @@ import type { DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
 import { initialMilitary } from './careers';
-import { makeDraftee, openMarket, takenNames } from './offseason';
+import { makeDraftee, openMarket, POST_FA_RESERVE, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
@@ -104,7 +104,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
         until: active.first + active.years - 1,
       };
     } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: MIN_SALARY, until: startYear };
-    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(MIN_SALARY, Math.round(marketSalary(now) * 0.8)), until: startYear };
+    // FA를 다녀왔지만 계약 자료가 없는 선수: 보류 연봉 협상과 같은 하한 (offseason.ts POST_FA_RESERVE. 2026-10-22 시장 연봉의 0.8 → 0.5)
+    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(reserveTarget(now, service), Math.round(marketSalary(now) * POST_FA_RESERVE)), until: startYear };
     else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
 
     return {
