@@ -109,16 +109,16 @@ def plain(md):
 
 
 def sections(md):
-    """[(제목, 본문 글)] — '## 1\\. 개요' 꼴 제목, 번호는 뗀다"""
+    """[(제목, 단계, 본문 글)] — '## 1\\. 개요' 꼴 제목, 번호는 뗀다. 단계는 '#' 수 (머리글은 0)"""
     body = md.split('\n분류\n', 1)[-1]
     body = re.sub(r'^\s*(?:-\s+\[.*\n\s*)+', '', body)  # 분류 목록
     out = []
-    pos, title = 0, ''
-    for m in re.finditer(r'^#{2,6}\s+(?:[\d.\\]+\s*)?(.*?)\s*$', body, flags=re.M):
-        out.append((title, plain(body[pos:m.start()])))
-        title = plain(m.group(1)).strip()
+    pos, title, level = 0, '', 0
+    for m in re.finditer(r'^(#{2,6})\s+(?:[\d.\\]+\s*)?(.*?)\s*$', body, flags=re.M):
+        out.append((title, level, plain(body[pos:m.start()])))
+        title, level = plain(m.group(2)).strip(), len(m.group(1))
         pos = m.end()
-    out.append((title, plain(body[pos:])))
+    out.append((title, level, plain(body[pos:])))
     return out
 
 

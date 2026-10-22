@@ -131,7 +131,7 @@ def summarize(plain):
     sents = [s.strip() for s in re.split(r'(?<=[다요음함됨]\.)\s+|(?<=\.)\s+(?=[가-힣A-Z])', plain) if s.strip()]
     good, cut = [], 0
     for s in sents:
-        if W.BANNED_RE.search(s):
+        if W.BANNED_RE.search(s) or W.AD_RE.search(s):
             cut += 1
         else:
             good.append(s)
@@ -148,13 +148,12 @@ def summarize(plain):
 def digest(text):
     """위키백과 서술 요점: (절 목록 [(제목, 요약)], 걸러 낸 절 수, 걸러 낸 문장 수)"""
     keep, cut_sec, cut_sent = [], 0, 0
-    for title, level, body in W.sections(text):
-        if title and W.SKIP_SECTION_RE.search(title):
-            continue
-        if title and W.BANNED_SECTION_RE.search(title):
+    for title, plain, state in W.keep_sections(W.sections(text), lambda b: W.clean(strip_blocks(b))):
+        if state == 'cut':
             cut_sec += 1
+        if state != 'keep':
             continue
-        summary, cut = summarize(W.clean(strip_blocks(body)))
+        summary, cut = summarize(plain)
         cut_sent += cut
         if summary:
             keep.append((title or '머리말', summary))

@@ -278,11 +278,10 @@ def extract(doc):
     keep, cut_sec, cut_sent = [], 0, 0
     texts = [(doc['title'], md)] + [(s['title'], s['md']) for s in doc.get('subdocs', []) if s.get('md')]
     for src_title, text in texts:
-        for title, body in N.sections(text):
-            if title and W.SKIP_SECTION_RE.search(title):
-                continue
-            if title and W.BANNED_SECTION_RE.search(title):
+        for title, body, state in W.keep_sections(N.sections(text)):
+            if state == 'cut':
                 cut_sec += 1
+            if state != 'keep':
                 continue
             summary, ct = X.summarize(body)
             cut_sent += ct

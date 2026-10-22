@@ -172,6 +172,9 @@ def main():
     our_rows = our_season_rows(seasons)
     wd = wikidata_body()
 
+    # 정리 노트는 다시 만든다 (거르기 목록이 바뀌면 지난 노트에 걸러야 할 글이 남아 있을 수 있다)
+    for f in (note_dir / '선수').glob('*.md'):
+        f.unlink()
     prof_rows, prof_diff, fill_rows, diff_rows, src_rows = [], [], [], [], []
     cut_sec = cut_sent = 0
     docs = {'wiki': 0, 'namu': 0}
