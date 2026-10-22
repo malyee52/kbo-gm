@@ -644,7 +644,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           </div>
         )}
 
-        {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}
+        {/* 판을 연 채 다른 선수를 누르면 내용만 바뀐다 (key 없음, U2-2) */}
+        {player !== null && <PlayerDetail idx={player} onClose={() => setPlayer(null)} />}
       </div>
       </ShellProvider>
     </GameProvider>
