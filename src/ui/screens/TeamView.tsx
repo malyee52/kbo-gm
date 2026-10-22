@@ -160,7 +160,7 @@ function Overview({ team }: { team: number }) {
           <p>캡 대상 <b>{won(money.cap)}</b> / 상한 {won(money.limit)} <span className="muted small">({money.cap <= money.limit ? `남는 몫 ${won(money.limit - money.cap)}` : `${won(money.cap - money.limit)} 넘음`})</span></p>
         )}
         <p className="small">국내 선수 연봉 합 {won(money.payroll)} · 외국인 {money.foreign}명</p>
-        <p className="small">{session.year}년에 계약이 끝나는 선수 {money.expiring}명</p>
+        <p className="small" title="계약이 끝나고 지금까지 쌓은 1군 연차로 FA 자격이 되는 선수 (이번 시즌 연차는 아직 안 셈)">{off ? session.year + 1 : session.year} 시즌 뒤 FA 후보 {money.faNext}명</p>
         <p className="muted small">{off ? '오프시즌 지금 계약 기준.' : '캡 판정은 개막 때 계약 기준이라 시즌 중 이적은 반영하지 않습니다.'}</p>
       </section>
 
@@ -211,7 +211,7 @@ function RosterTable({ team }: { team: number }) {
     const inDraft = desk.draft.team === team && desk.draft.get.includes(p.idx);
     return (
       <span className="cand-act">
-        <WatchStar id={r.id} name={r.name} small />
+        <WatchStar id={r.id} name={r.name} small bare />
         <button type="button" className="ghost small-btn" disabled={inCmp} aria-label={`${r.name} 비교에 넣기`}
           onClick={() => setNote(addToCompare(session, p.idx) ?? `${r.name}: 비교 칸 ${deskOf(session).compare.length}/${COMPARE_MAX}`)}>
           {inCmp ? '비교 중' : '+비교'}

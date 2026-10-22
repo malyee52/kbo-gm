@@ -15,14 +15,15 @@ import type { LeaguePlayer } from '../../league/types';
 import type { SimPlayer } from '../../engine';
 
 /** ☆ 관심: 누르면 담거나 뺀다 (저장 파일에 남는다) */
-export function WatchStar({ id, name, small = false }: { id: string; name: string; small?: boolean }) {
+/** small: 작은 단추, bare: 별만 (표 안) */
+export function WatchStar({ id, name, small = false, bare = false }: { id: string; name: string; small?: boolean; bare?: boolean }) {
   const { session, changed } = useGame();
   const on = session.isWatched(id);
   return (
     <button type="button" className={`ghost watch-star${small ? ' small-btn' : ''}${on ? ' on' : ''}`} aria-pressed={on}
       aria-label={on ? `${name} 관심 명단에서 빼기` : `${name} 관심 명단에 담기`} title={on ? '관심 명단에서 빼기' : '관심 명단에 담기 (이 게임 저장 파일에 남습니다)'}
       onClick={(e) => { e.stopPropagation(); session.toggleWatch(id, name); changed(); }}>
-      {on ? '★' : '☆'}{small ? '' : ' 관심'}
+      {on ? '★' : '☆'}{bare ? '' : on ? ' 관심 중' : ' 관심'}
     </button>
   );
 }

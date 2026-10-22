@@ -48,7 +48,7 @@ export function Find({ initialText = '' }: { initialText?: string }) {
                   ? <button type="button" className="link" onClick={() => open(h)} title={where[h.kind]}>{h.title}</button>
                   : <span>{h.title}</span>}
                 {h.sub && <span className="muted small"> {h.sub}</span>}
-                {(h.kind === 'player' || h.kind === 'retired') && h.id && <> <WatchStar id={h.id} name={h.title} small /></>}
+                {(h.kind === 'player' || h.kind === 'retired') && h.id && <> <WatchStar id={h.id} name={h.title} small bare /></>}
               </li>
             ))}
           </ul>

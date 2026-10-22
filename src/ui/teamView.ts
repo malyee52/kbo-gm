@@ -5,7 +5,7 @@
 import { activeOf, type GameSession } from '../game/session';
 import { assignSlots, isStarterSkill, LINEUP_SLOTS, type SimPlayer, type Slot } from '../engine';
 import type { LeaguePlayer } from '../league/types';
-import { capPayroll, salaryCap } from '../league/salary';
+import { capPayroll, faEligible, salaryCap } from '../league/salary';
 import { ruleOf } from '../league/rules';
 import { parsePick } from '../league/picks';
 import { runsGrade } from './grades';
@@ -80,6 +80,9 @@ export function teamDepth(s: GameSession, team: number): TeamDepth | null {
   const rotation = plan ? plan.rotation.map((i) => P[i]) : ts.rotation;
   const closer = plan ? (plan.closer !== null ? P[plan.closer] : ts.closer) : ts.closer;
   const pen = [...ts.rotation, ...ts.bullpen].filter((p) => !rotation.includes(p) && p !== closer);
+  // 화면 순서는 C 1B 2B 3B SS LF CF RF DH (LINEUP_SLOTS는 배정 우선순위 순)
+  const order: string[] = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
+  assigned.sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
   return { starters: assigned, rotation, closer, pen, bench: ts.hitters.filter((p) => !on.has(p.idx)) };
 }
 
@@ -89,8 +92,8 @@ export interface TeamMoney {
   limit: number | null;
   /** 연봉 총액 (외국인 제외, 만 원) */
   payroll: number;
-  /** 이번 시즌 뒤 계약이 끝나는 선수 */
-  expiring: number;
+  /** 그 시즌 뒤 FA 자격이 될 선수 (지금까지 쌓은 1군 연차 기준, 보류 선수 1년 계약은 세지 않는다) */
+  faNext: number;
   foreign: number;
 }
 
@@ -102,7 +105,7 @@ export function teamMoney(s: GameSession, team: number): TeamMoney {
     cap: capPayroll(L.players, team, ruleOf(L, 'capTopN')),
     limit: salaryCap(year, L),
     payroll: mine.filter((p) => !p.foreign).reduce((a, p) => a + p.contract.salary, 0),
-    expiring: mine.filter((p) => p.contract.until <= s.year).length,
+    faNext: mine.filter((p) => faEligible(p, year)).length,
     foreign: mine.filter((p) => p.foreign).length,
   };
 }
