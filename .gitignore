@@ -11,3 +11,6 @@ data-src/hardhit/
 
 # 네이버 문자중계 기반 투구 단위 원본 (Hugging Face slothman3878/kbo_playbyplay, 가공값만 커밋)
 data-src/naver_pbp/
+
+# 타구 유형·방향 리그 비율 엑셀 원본 (출처 미확인, 가공값만 data-src/batted_ball_derived/)
+data-src/batted_ball/
