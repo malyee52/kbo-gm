@@ -27,6 +27,18 @@ export function faServiceNeeded(offseasonYear: number, univ: boolean): number {
   return univ ? 7 : 8;
 }
 
+/**
+ * 등급제 전 FA 신청 기준: 리그 국내 선수 가치 순위가 "1군 구단 수 × 이 값" 안인 선수만 신청한다 (null이면 기준 없음).
+ * 임시값. 조사 표(1999~2019 시즌 뒤 신청 수)에 맞춘 값: 실제 1999~2008 시즌 뒤 신청 86명(자격 185명),
+ * 2011~2019 시즌 뒤 152명(자격 201명). 보상이 무거웠던 시기(300%+1명 또는 450%)에는 주전급 아래 선수가 신청하지 않고 남았다.
+ * 실제 2009·2010 시즌 뒤 신청이 적었던 것(12명/자격 45명)은 따로 맞추지 않았다.
+ */
+export function faFilingRankPerTeam(offseasonYear: number): number | null {
+  if (offseasonYear <= 2010) return 17;
+  if (offseasonYear <= 2019) return 21;
+  return null;
+}
+
 export interface ForeignRule {
   /** 보유 한도 전체 (0이면 제도 없음) */
   total: number;

@@ -1,10 +1,12 @@
 // M8 과거 시대 확장: 시대별 제도 스위치, 구단 변화(명칭 변경·승계·창단), 1982년 시작 → 2026년 자동 진행 (완료 기준).
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, eraPitching, type EngineParams } from '../src/engine';
+import { DEFAULT_PARAMS, eraPitching, Season, type EngineParams } from '../src/engine';
+import { currentRuns } from '../src/ai/value';
 import { createLeague, estimatedBirthYear } from '../src/league/create';
-import { changeText, faEnabled, faServiceNeeded, foreignRule, teamChangesFor } from '../src/league/eras';
-import { expansionSlots, EXPANSION_MIN, EXPANSION_SPECIAL } from '../src/league/offseason';
+import { changeText, faEnabled, faFilingRankPerTeam, faServiceNeeded, foreignRule, teamChangesFor } from '../src/league/eras';
+import { beginOffseason, expansionSlots, EXPANSION_MIN, EXPANSION_SPECIAL, leagueView } from '../src/league/offseason';
+import { worldFromLeague } from '../src/league/world';
 import { GameSession } from '../src/game/session';
 import { faEligible } from '../src/league/salary';
 import { runYear } from '../tools/longsim';
@@ -40,6 +42,29 @@ describe('시대별 제도', () => {
     expect(faEligible(p, 2010)).toBe(false);
     expect(faEligible({ ...p, contract: { ...p.contract, until: 2011 } }, 2011)).toBe(true);
     expect(faEligible({ ...p, school: 'HS' as const, contract: { ...p.contract, until: 2011 } }, 2011)).toBe(false);
+  });
+
+  it('등급제 전 FA 신청 기준: 1999~2010 시즌 뒤 구단 수 × 17위, 2011~2019 시즌 뒤 × 21위 안만 신청, 등급제(2020~)는 기준 없음', () => {
+    expect(faFilingRankPerTeam(1999)).toBe(17);
+    expect(faFilingRankPerTeam(2010)).toBe(17);
+    expect(faFilingRankPerTeam(2011)).toBe(21);
+    expect(faFilingRankPerTeam(2019)).toBe(21);
+    expect(faFilingRankPerTeam(2020)).toBeNull();
+    const { league } = createLeague(store, 2005, 'fa-file', FAST);
+    const world = worldFromLeague(structuredClone(league), store, FAST);
+    const season = Season.start(world, FAST, league.seed);
+    season.runToEnd();
+    const off = beginOffseason(league, world, season, store, -1, FAST);
+    const view = leagueView(league, store, FAST);
+    const runs = (id: string) => currentRuns(view.sim.get(id)!, view.ctx);
+    const all = league.players.filter((p) => p.team >= 0 && !p.foreign).map((p) => runs(p.id)).sort((a, b) => b - a);
+    const cutoff = all[17 * 8 - 1];
+    const filed = off.fa.entries.filter((e) => !e.returnee);
+    expect(filed.length).toBeGreaterThan(0);
+    for (const e of filed) expect(runs(e.id)).toBeGreaterThanOrEqual(cutoff);
+    // 기준 밖이라 신청하지 않은 자격 선수가 있다 (대체 선수 이상인데도)
+    const skipped = league.players.filter((p) => faEligible(p, off.year) && !filed.some((e) => e.id === p.id) && runs(p.id) >= 0 && runs(p.id) < cutoff);
+    expect(skipped.length).toBeGreaterThan(0);
   });
 
   it('외국인 한도는 연도별 규칙을 따른다: 1997년 0명, 1998년 2명, 2026년 3+아시아쿼터 1, 자료 밖 연도는 마지막 해 값', () => {

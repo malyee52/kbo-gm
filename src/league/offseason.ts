@@ -45,7 +45,7 @@ import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD,
 } from './finance';
-import { changeText, faEnabled, foreignRule, teamChangesFor, type TeamChange } from './eras';
+import { changeText, faEnabled, faFilingRankPerTeam, foreignRule, teamChangesFor, type TeamChange } from './eras';
 import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
 import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
@@ -790,6 +790,14 @@ export function answerPosting(league: LeagueState, off: OffseasonState, id: stri
 function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   const view = leagueView(league, store, params);
   const year = off.year;
+  // 등급제 전에는 리그 국내 선수 가치 순위가 기준 밖이면 신청하지 않는다 (eras.ts faFilingRankPerTeam)
+  const perTeam = faFilingRankPerTeam(year);
+  let cutoff = -Infinity;
+  if (perTeam !== null) {
+    const teams = league.teams.filter((_, t) => !isFuturesTeam(league, t, year)).length;
+    const all = league.players.filter((p) => p.team >= 0 && !p.foreign).map((p) => currentRuns(view.sim.get(p.id)!, view.ctx)).sort((a, b) => b - a);
+    cutoff = all[Math.min(all.length, perTeam * teams) - 1] ?? -Infinity;
+  }
   for (const p of league.players) {
     if (!faEligible(p, year)) continue;
     const sp = view.sim.get(p.id)!;
@@ -798,9 +806,10 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     let sum = 0;
     for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
     const ask = marketSalary(sum / years);
-    // 신청 여부 (임시 규칙): 대체 선수 이하면 신청하지 않고, 34세 이상은 지금 연봉보다 많이 받을 수 있을 때만
+    // 신청 여부 (임시 규칙): 대체 선수 이하면 신청하지 않고, 34세 이상은 지금 연봉보다 많이 받을 수 있을 때만, 등급제 전에는 순위 기준 안일 때만
     if (currentRuns(sp, view.ctx) < 0) continue;
     if (age >= 34 && ask < p.contract.salary * 0.9) continue;
+    if (currentRuns(sp, view.ctx) < cutoff) continue;
     off.fa.entries.push({ id: p.id, from: p.team, grade: faGrade(p, league.players, year), prevSalary: p.contract.salary, ask, years, status: 'open' });
   }
   // 해외에서 FA로 돌아온 선수 (보상 없음)
