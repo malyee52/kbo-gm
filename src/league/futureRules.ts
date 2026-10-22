@@ -11,6 +11,12 @@ import type { LeagueState } from './types';
 export const FUTURE_RULES_FROM = 2028;
 /** 같은 쪽으로 이만큼 시즌 이어서 벗어나면 후보 (임시값) */
 export const SHIFT_STREAK = 2;
+/**
+ * 국내 선수층 지표(외국인 한도 판정)의 기준: 첫 신호 해부터 이만큼 시즌의 평균 (임시값, 2026-10-22).
+ * 전에는 2027년 한 해가 기준이라, 시작 때 실존 유망주가 자라는 언덕(2030년대 초)이 "선수층이 두꺼워졌다"로 읽혀
+ * 2031년쯤 외국인 한도가 2명으로 줄었다. 기준이 다 모이기 전(2027~2031 시즌 결산)에는 외국인 한도 판정을 미룬다
+ */
+export const DEPTH_BASE_YEARS = 5;
 /** 바뀐 항목은 이만큼 시즌 동안 다시 후보가 되지 않는다 (임시값) */
 export const SHIFT_COOLDOWN = 3;
 
@@ -180,9 +186,16 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const ab = base.absence > 0 ? avg((s) => s.absence) / base.absence : 1;
   add('roster', streak(sig, (s) => (base.absence <= 0 ? 0 : s.absence / base.absence > 1 + L.absence ? 1 : s.absence / base.absence < 1 - L.absence ? -1 : 0)), ab,
     ab > 1 ? `부상·이탈 결장이 ${base.year}년보다 ${pct(ab)} 늘어 선수 보호를 위해 1군 엔트리를 1명 늘린다` : `결장이 ${base.year}년보다 ${pct(ab)} 줄어 1군 엔트리를 1명 줄인다`);
-  const dp = base.depth > 0 ? avg((s) => s.depth) / base.depth : 1;
-  add('foreign', streak(sig, (s) => (base.depth <= 0 ? 0 : s.depth / base.depth < 1 - L.depth ? 1 : s.depth / base.depth > 1 + L.depth ? -1 : 0)), dp,
-    dp < 1 ? `국내 선수층이 ${base.year}년보다 ${pct(dp)} 얇아져 외국인 보유 한도를 1명 늘린다` : `국내 선수층이 ${base.year}년보다 ${pct(dp)} 두꺼워져 외국인 보유 한도를 1명 줄인다`);
+  // 국내 선수층: 첫 DEPTH_BASE_YEARS시즌 평균이 기준. 기준이 다 모인 뒤 시즌부터 판정한다
+  if (sig.length > DEPTH_BASE_YEARS) {
+    const baseSig = sig.slice(0, DEPTH_BASE_YEARS);
+    const baseDepth = baseSig.reduce((a, s) => a + s.depth, 0) / DEPTH_BASE_YEARS;
+    const baseText = `${baseSig[0].year}~${baseSig.at(-1)!.year}년 평균`;
+    const after = sig.slice(DEPTH_BASE_YEARS);
+    const dp = baseDepth > 0 ? avg((s) => s.depth) / baseDepth : 1;
+    add('foreign', streak(after, (s) => (baseDepth <= 0 ? 0 : s.depth / baseDepth < 1 - L.depth ? 1 : s.depth / baseDepth > 1 + L.depth ? -1 : 0)), dp,
+      dp < 1 ? `국내 선수층이 ${baseText}보다 ${pct(dp)} 얇아져 외국인 보유 한도를 1명 늘린다` : `국내 선수층이 ${baseText}보다 ${pct(dp)} 두꺼워져 외국인 보유 한도를 1명 줄인다`);
+  }
   const over = avg((s) => s.capOver);
   const use = avg((s) => s.capUse);
   const capDir: 1 | -1 | 0 = recent.length < SHIFT_STREAK || recent.some((s) => s.capUse <= 0) ? 0

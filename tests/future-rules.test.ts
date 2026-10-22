@@ -66,6 +66,14 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     expect(new Set(a.map((s) => s.key)).size).toBeGreaterThan(2);
   });
 
+  it('선수층 기준이 다 모이기 전(2027~2031 시즌)에는 외국인 한도를 판정하지 않고, 기준은 여러 해 평균이다', () => {
+    const L = bare();
+    const got: RuleShift[] = [];
+    // 2027년만 낮고 그 뒤 두꺼워지는 흐름: 예전(2027년 기준)이면 2029년에 한도가 줄었다
+    for (let y = 2027; y < 2036; y++) { const s = judgeFutureRules(L, calm(y, { depth: y === 2027 ? 2600 : 3000 })); if (s) got.push(s); }
+    expect(got.filter((s) => s.key === 'foreign')).toEqual([]);
+  });
+
   it('판타지·자유 모드에서는 바뀌지 않는다', () => {
     const L = bare('fr', true);
     for (let y = 2027; y < 2035; y++) expect(judgeFutureRules(L, calm(y, { hr: 1.3 }))).toBeNull();
@@ -75,13 +83,14 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     const one = (o: (y: number) => Partial<RuleSignal>, key: FutureRuleKey) => {
       const L = bare();
       let s: RuleShift | null = null;
-      for (let y = 2027; y < 2032 && !s; y++) s = judgeFutureRules(L, calm(y, o(y)));
+      for (let y = 2027; y < 2040 && !s; y++) s = judgeFutureRules(L, calm(y, o(y)));
       expect(s?.key).toBe(key);
       return s!;
     };
     expect(one(() => ({ draw: 0.05 }), 'extra')).toMatchObject({ before: 11, after: 12 });
     expect(one((y) => ({ absence: y === 2027 ? 1000 : 1300 }), 'roster')).toMatchObject({ before: 29, after: 30 });
-    expect(one((y) => ({ depth: y === 2027 ? 3000 : 2600 }), 'foreign')).toMatchObject({ before: 3, after: 4 });
+    // 선수층 기준은 2027~2031 평균 (DEPTH_BASE_YEARS), 2032·2033 시즌 이어서 8% 넘게 얇으면 2034년 한도 +1
+    expect(one((y) => ({ depth: y <= 2031 ? 3000 : 2600 }), 'foreign')).toMatchObject({ year: 2034, before: 3, after: 4 });
     expect(one(() => ({ capOver: 4 }), 'capGrowth')).toMatchObject({ before: 0.05, after: 0.07 });
     expect(one(() => ({ so: 1.15 }), 'zone')).toMatchObject({ before: 1, after: 0.97 });
   });
