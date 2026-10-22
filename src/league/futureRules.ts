@@ -211,7 +211,7 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const capDir: 1 | -1 | 0 = recent.length < SHIFT_STREAK || recent.some((s) => s.capUse <= 0) ? 0
     : over >= L.capOverTeams ? 1 : recent.every((s) => s.capOver === 0) && use < L.capUseLow ? -1 : 0;
   add('capGrowth', capDir, capDir > 0 ? over : use,
-    capDir > 0 ? `샐러리캡 초과 구단이 2시즌 평균 ${over.toFixed(1)}곳이라 캡 상향률을 2%p 올린다` : `구단 평균 캡 사용률이 ${Math.round(use * 100)}%로 낮아 캡 상향률을 2%p 내린다`);
+    capDir > 0 ? `샐러리캡 초과 구단이 2시즌 평균 ${over.toFixed(1)}곳이라 캡 상향률을 2%p 올린다 (하한도 같은 비율)` : `구단 평균 캡 사용률이 ${Math.round(use * 100)}%로 낮아 캡 상향률을 2%p 내린다 (하한도 같은 비율)`);
   if (!cands.length) return null;
   const pick = cands.length === 1 ? cands[0] : cands[new Rng(`${league.seed}/rules/${next}`).int(cands.length)];
   const spec = FUTURE_RULE_SPEC[pick.key];

@@ -172,18 +172,19 @@ export function capShareOf(league: Pick<LeagueState, 'teams' | 'players' | 'rule
   return franchiseTag(league, team, year)?.id === p.id ? Math.round(p.contract.salary * FRANCHISE_TAG_SHARE) : p.contract.salary;
 }
 
-/** 샐러리캡 하한의 연간 상향률 (조사값: 2027년 도입 뒤 매년 5%) */
+/** 샐러리캡 하한의 2028년 상향률 (조사값: 2027년 도입 뒤 매년 5%. 2028년 캡 발표값의 상향률과 같다) */
 export const CAP_FLOOR_GROWTH = 0.05;
 
 /**
- * 샐러리캡 하한 (만 원). 2027년 발표값, 그 뒤 매년 5% 상향 (조사값). 캡이 없거나 2027년 전이면 null.
- * 자유 모드 캡 배율(capScale)은 하한에도 같이 곱한다. 미래 규칙 변경의 캡 상향률은 하한에 닿지 않는다
+ * 샐러리캡 하한 (만 원). 2027년 발표값, 2028년 5% 상향 (조사값), 2029년부터 그 해 캡 상향률(미래 규칙 변경 ② capGrowth)만큼 오른다.
+ * 캡 대비 하한 비율을 지켜 하한이 캡을 따라잡지 않게 한다 (규칙 알림 5차 결정 1, 2026-10-23 사용자 결정. 전에는 늘 5%라 상향률이 3%가 되면
+ * 하한이 캡을 따라잡았다). 캡이 없거나 2027년 전이면 null. 자유 모드 캡 배율(capScale)은 하한에도 같이 곱한다
  */
-export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
+export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>): number | null {
   if (year < CAP_FLOOR_FROM) return null;
   if (salaryCap(year, league) === null) return null;
   let v = CAP_FLOOR_2027;
-  for (let y = CAP_FLOOR_FROM + 1; y <= year; y++) v = Math.round(v * (1 + CAP_FLOOR_GROWTH));
+  for (let y = CAP_FLOOR_FROM + 1; y <= year; y++) v = Math.round(v * (1 + (y <= 2028 ? CAP_FLOOR_GROWTH : futureValue(league, 'capGrowth', y))));
   const scale = ruleOf(league, 'capScale');
   return scale === 1 ? v : Math.round(v * scale);
 }

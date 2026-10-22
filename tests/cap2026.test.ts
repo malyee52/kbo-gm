@@ -9,6 +9,7 @@ import {
   CAP_FLOOR_2027, capPayroll, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_SEASONS, salaryCap, salaryFloor, teamCapPayroll,
 } from '../src/league/salary';
 import { seasonsWith } from '../src/league/stadium';
+import type { RuleShift } from '../src/league/futureRules';
 import type { LeagueState } from '../src/league/types';
 
 let store: DataStore;
@@ -103,6 +104,26 @@ describe('샐러리캡 하한 (2027~)', () => {
     const { league } = createLeague(store, 2026, 'floor', FAST);
     expect(capFloorShorts(league, 2026)).toEqual([]);
     for (const x of capFloorShorts(league, 2027)) expect(x.pay).toBeLessThan(x.floor);
+  });
+
+  it('2029년부터 하한은 캡 상향률을 따라가 캡 대비 비율이 그대로이고 캡을 넘지 않는다 (규칙 알림 5차 결정 1)', () => {
+    const shift = (year: number, before: number, after: number): RuleShift => ({ year, key: 'capGrowth', before, after, reason: '시험 (게임 속 가상 결정)', signal: 0 });
+    // 상향률 5% → 3% (2032) → 9% (2050) → 3% (2070)
+    const L = { ruleShifts: [shift(2032, 0.05, 0.03), shift(2050, 0.03, 0.09), shift(2070, 0.09, 0.03)] };
+    const ratio = salaryFloor(2027)! / salaryCap(2027)!;
+    for (const lg of [L, { ...L, rules: { capScale: 1.5 } }, { ...L, rules: { capScale: 0.5 } }]) {
+      for (let y = 2027; y <= 2120; y++) {
+        const cap = salaryCap(y, lg)!;
+        const floor = salaryFloor(y, lg)!;
+        expect(floor).toBeLessThan(cap);
+        expect(Math.abs(floor / cap - ratio)).toBeLessThan(0.0005);
+      }
+    }
+    // 상향률 3%인 해는 하한도 3%
+    expect(salaryFloor(2033, L)! / salaryFloor(2032, L)!).toBeCloseTo(1.03, 4);
+    expect(salaryFloor(2051, L)! / salaryFloor(2050, L)!).toBeCloseTo(1.09, 4);
+    // 캡이 없으면 하한도 없다
+    expect(salaryFloor(2040, { ...L, rules: { capScale: 0 } })).toBeNull();
   });
 });
 
