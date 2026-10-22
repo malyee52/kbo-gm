@@ -308,7 +308,9 @@ def rules_for(year):
     return {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
-        'maxInnings': 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
+        # 2008 정규시즌은 무제한 연장(끝장승부)·무승부 없음 → 0 = 무제한 (사용자 확인 2026-10-22. 자료집 엑셀 '제도연표'는 openpyxl 저장 때
+        # 서식이 깨질 수 있어 고치지 않았다). 다른 해의 연장 연표(1982~2002 15회 등)는 경기 엔진 2 14단계에서 고친다
+        'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
 

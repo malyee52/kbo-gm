@@ -150,6 +150,7 @@ export interface SeasonData {
 export interface YearRules {
   rosterSize: number;
   foreignLimit: number;
+  /** 정규시즌 최대 이닝. 0 = 무제한 (2008 끝장승부, 무승부 없음) */
   maxInnings: number;
   postseasonTeams: number;
   [source: string]: number | string;
