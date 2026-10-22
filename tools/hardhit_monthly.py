@@ -38,6 +38,24 @@ GROUP = {3: '3·4월', 4: '3·4월', 5: '5월', 6: '6월', 7: '7월', 8: '8월',
 GROUPS = ['3·4월', '5월', '6월', '7월', '8월', '9·10월']
 
 
+HAND_MARK = re.compile(r'^(.*?)\s*\((L|R)\)$')
+
+
+def match_pitcher(M, year, name, team, stats):
+    """하드힛 월별 표의 투수 이름 → 게임 선수 ID. 같은 팀 동명이인을 하드힛이 "이승현 (L)"처럼 투구손으로 구분한 행은
+    투구손이 같은 후보 하나로 잇는다 (2026 삼성 이승현 좌·우, 2026-10-22 사용자 확인)"""
+    if year not in M.years:
+        return None, 'not-in-season'
+    m = HAND_MARK.match(name)
+    if not m:
+        return M.match(year, name, team, None, 'pit', stats)
+    base, hand = m.group(1), m.group(2)
+    fr = M.franchise(team, year)
+    cand = [i for i in M.by_name.get(base, []) if i in M.rows[(year, 'pit')] and M.players[i].get('throws') == hand
+            and (not fr or fr in M.teams_of(i, year))]
+    return (cand[0], 'by-hand') if len(cand) == 1 else (None, 'ambiguous-hand')
+
+
 def num(s):
     s = (s or '').strip().replace('%', '').replace('+', '')
     try:
@@ -152,7 +170,7 @@ def main():
         for (name, team), (pi, pa) in sorted(per_pitcher.items()):
             if pa > 0:
                 # 선수 연결: 이름·팀(계보), 겹치면 시즌 상대 타자 수로 가른다 (부분 시즌 2026은 게임 자료와 범위가 달라 기록으로 가르지 않는다)
-                pid, why = M.match(year, name, team, None, 'pit', None if part else {'tbf': int(pa)}) if year in M.years else (None, 'not-in-season')
+                pid, why = match_pitcher(M, year, name, team, None if part else {'tbf': int(pa)})
                 if pid:
                     players.append([year, part, pid, team, int(pi), int(pa), r(pi / pa if pi else None, 3)])
                 else:
