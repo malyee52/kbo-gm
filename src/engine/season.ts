@@ -9,6 +9,7 @@ import { injuryScale } from './traits';
 import { eraPitching } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
+import { managerNorms } from './manager';
 import { Rng } from './rng';
 import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
@@ -304,9 +305,10 @@ export class Season {
     this.gamesRoot = rng.fork('games');
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
-      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale, startPitchCap: eraPitching(world.year).pitchCap,
+      states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
       errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)),
     };
+    this.ctx.planNorms = managerNorms(world.players, this.ctx);
 
     // 개막부터 결장하는 선수 (지난 시즌에서 넘어온 부상, 병역 복귀 전). 난수를 쓰지 않는다
     for (const p of world.players) if (p.startAbsent && p.startAbsent > 0) this.states.absentUntil[p.idx] = p.startAbsent;

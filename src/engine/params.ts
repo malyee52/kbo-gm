@@ -72,8 +72,12 @@ export interface EngineParams {
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
   park: { hitExp: number; hrExp: number };
-  /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (임시값, 엔진 2 4단계) */
+  /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (엔진 2 4단계) */
   fatiguePerPitch: number;
+  /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
+  fatigueMax: number;
+  /** AI 감독의 투구 수 기준 = 그 시즌 리그 평균 선발·구원의 한계 투구 수 × 이 배율 (manager.ts managerNorms) */
+  planScale: { starter: number; relief: number; earlyRelief: number; spread: number };
   /** 볼카운트 사슬이 없는 해결기(B0)일 때 타석당 투구 수 (임시값, 2023~2025 리그 3.9구) */
   pitchesPerPaDefault: number;
 
@@ -208,9 +212,14 @@ export const DEFAULT_PARAMS: EngineParams = {
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
   park: { hitExp: 0.4, hrExp: 1.2 },
-  // 엔진 1의 타자 1명당 0.012를 2023~2025 리그 타석당 투구 수 3.9구로 나눈 값 (임시값)
-  fatiguePerPitch: 0.012 / 3.9,
+  // 한계 투구 수를 넘기면 능력이 확 꺾인다: 5구당 약 10% (사용자 결정 2026-10-22, 엔진 1은 타자 1명당 0.012 = 공 1개당 약 0.003)
+  fatiguePerPitch: 0.02,
+  // 임시값: 30구 넘김에서 멈춘다 (엔진 1은 0.3)
+  fatigueMax: 0.6,
   pitchesPerPaDefault: 3.9,
+  // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
+  // 기준 × 이 값까지 맡긴다 (임시값, 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다 (투수 능력과 무관, 경기 상황)
+  planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.12 },
 
   roePerUnearnedShare: 0.2,
   unearnedRunScale: 0.68,

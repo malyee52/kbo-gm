@@ -14,8 +14,10 @@ export interface PitcherInGame {
   bf: number;
   runs: number;
   outs: number;
-  /** 한계 투구 수 (엔진 2 4단계부터 공 수) */
+  /** 그날 몸의 한계 투구 수 (공 수). 넘기면 능력이 꺾인다 (pa.ts). AI 감독은 이 값을 모른다 */
   limit: number;
+  /** AI 감독이 보는 한계 투구 수: 보이는 체력 × 타석당 기대 투구 수 (그날의 몸 상태는 모른다), 감독 성향(hook)·시대 상한을 넣은 값. 교체 판단에 쓴다 */
+  plan: number;
   isStarter: boolean;
   /** 등판 시점의 점수 차 (자기 팀 기준) */
   enteredLead: number;

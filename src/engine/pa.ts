@@ -61,7 +61,7 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   // 투수 피로: 한계 투구 수를 넘긴 공 수에 비례. 타석 하나를 한 번에 뽑으므로 타석 중간(기대 투구 수의 절반) 시점의 투구 수로 본다
   // (docs/경기엔진2_기획안.md 3.6.3). 에이스 체력(특수능력)은 피로 누적 배율 그대로 (임시, 다시 정의는 공개 스킬 때)
   const over = pg.pitches + pg.ppa / 2 - pg.limit;
-  const fat = over > 0 ? Math.min(0.3, over * params.fatiguePerPitch * fatigueScale(pg.p, params.traits)) : 0;
+  const fat = over > 0 ? Math.min(params.fatigueMax, over * params.fatiguePerPitch * fatigueScale(pg.p, params.traits)) : 0;
   const up = 1 + edge;
   const down = 1 - edge;
   const worse = 1 + fat;

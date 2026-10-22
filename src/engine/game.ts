@@ -71,8 +71,8 @@ export interface GameContext {
   postseason?: boolean;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
-  /** 시대별 선발 한계 투구 수 상한 (eras.ts pitchCap). 없으면 상한 없음 */
-  startPitchCap?: number;
+  /** AI 감독의 투구 수 기준 (선발, 구원). 시즌마다 managerNorms로 정한다. 없으면 그 투수의 한계 투구 수(몸 상태 뺀 값) */
+  planNorms?: { starter: number; relief: number };
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
@@ -191,7 +191,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   const mkSide = (ts: TeamSeason, lineup: SimPlayer[], starter: SimPlayer, isHome: boolean): Side => {
     const pitcher = enterPitcher(starter, true, 0, ctx);
     // 감독 작전: 선발을 일찍(작으면)·늦게 바꾸는 정도 (league/managers.ts). 난수를 더 쓰지 않는다
-    if (ts.tactics) pitcher.limit *= ts.tactics.hook;
+    if (ts.tactics) pitcher.plan *= ts.tactics.hook;
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
