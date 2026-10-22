@@ -166,6 +166,45 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
   return skill;
 }
 
+/** 땅볼 몫 배율(리그 대비)을 아웃 타구 땅볼 승산 배율로. 몫은 0.15~0.85 안에서 */
+function gbOddsOf(shareRel: number, p: EngineParams): number {
+  const odds = (x: number) => x / (1 - x);
+  const s0 = p.groundBallShare;
+  return odds(Math.min(0.85, Math.max(0.15, s0 * shareRel))) / odds(s0);
+}
+
+/** 땅볼 성향 추정에 쓰는 병살 회귀 상수 (병살 기회가 될 수 있는 인플레이 타구 수, 임시값) */
+const GB_DP_REGRESS = 500;
+/** 타자 땅볼 몫 배율의 범위 (임시값) */
+const GB_BAT_RANGE: [number, number] = [0.7, 1.4];
+/** 투수 땅볼 몫 배율 = 피홈런 배율 ^ (−이 값) (임시값: 땅볼 투수가 홈런을 덜 맞는다는 관계만 쓴다. 타구 자료가 없다) */
+const GB_PIT_HR_EXP = 0.25;
+
+/**
+ * 타자 타구 성향 (엔진 2 6단계, 추정): 인플레이 타구(삼진·볼넷·사구·홈런·희생 뺌)당 병살을 리그 대비로 재고, 주력에 따른 병살 회피(play.dpSpeed)를 덜어
+ * 땅볼 몫 배율로 본다. 병살 기회(앞 타자 출루)의 차이도 섞여 있어 크게 평균 쪽으로 당긴다. 병살 기록이 없으면 undefined
+ */
+export function batGbOf(rows: { row: BatRow; w: number; league: SeasonData['league'] }[], speed: number, p: EngineParams): number | undefined {
+  let num = 0;
+  let den = 0;
+  for (const { row: r, w, league: L } of rows) {
+    if (r.gdp === null) continue;
+    const bip = r.pa - (r.so ?? 0) - (r.bb ?? 0) - (r.hbp ?? 0) - r.hr - (r.sac ?? 0) - (r.sf ?? 0);
+    const lgBip = L.pa - L.so - L.bb - L.hbp - L.hr - L.sac - L.sf;
+    if (bip <= 0 || lgBip <= 0 || L.gdp <= 0) continue;
+    num += (w * r.gdp) / (L.gdp / lgBip);
+    den += w * bip;
+  }
+  if (den <= 0) return undefined;
+  const rel = (num + GB_DP_REGRESS) / (den + GB_DP_REGRESS) / (1 - p.play.dpSpeed * (speed - 0.5) * 2);
+  return gbOddsOf(Math.min(GB_BAT_RANGE[1], Math.max(GB_BAT_RANGE[0], rel)), p);
+}
+
+/** 투수 땅볼 성향 (엔진 2 6단계, 추정): 피홈런 배율에서 */
+export function pitGbOf(hr: number, p: EngineParams): number {
+  return gbOddsOf(Math.max(0.01, hr) ** -GB_PIT_HR_EXP, p);
+}
+
 export function batValue(s: BatSkill, lg: Rates): number {
   const W = LINEAR_WEIGHTS;
   return (
@@ -350,6 +389,7 @@ export function buildWorld(input: BuildWorldInput): World {
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
       pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, rp);
+      if (rows.length) pit.gb = pitGbOf(pit.hr, params);
       const pitPpa = ppaRelOf(input.ppa?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (pitPpa !== undefined) pit.ppaRel = pitPpa;
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
@@ -368,6 +408,10 @@ export function buildWorld(input: BuildWorldInput): World {
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
+      const gbSeasons = debutEstimate ? [{ s: current, r: bRow, w: params.debutSeasonWeight }]
+        : rateSeasons.map((s, i) => ({ s, r: rateBat[i]?.get(id), w: rateW[i] ?? 0 }));
+      const gb = batGbOf(gbSeasons.flatMap(({ s, r, w }) => (s && r && r.pa > 0 ? [{ row: r, w, league: s.league }] : [])), bat.speed, params);
+      if (gb !== undefined) bat.gb = gb;
       const batPpa = ppaRelOf(input.ppa?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (batPpa !== undefined) bat.ppaRel = batPpa;
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
@@ -431,19 +475,22 @@ export function buildWorld(input: BuildWorldInput): World {
     gamesPerTeam: current.games,
     rules: meta.rules[String(year)],
     league: { ...lg },
-    env: leagueEnvFor(current.league, params),
+    env: leagueEnvFor(current.league, params, year),
     teams,
     players,
   };
 }
 
 /** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
-export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams): LeagueEnv {
+export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams, year?: number): LeagueEnv {
+  const odds = (x: number) => x / (1 - x);
+  const gb = year !== undefined ? params.groundBallShareByYear[year] : undefined;
   return {
     roe: params.roePerUnearnedShare * league.unearnedShare,
     sac: league.sacPerPa,
     unearnedRun: params.unearnedRunScale * league.unearnedShare,
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
+    gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
   };
 }
 

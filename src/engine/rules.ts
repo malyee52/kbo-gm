@@ -1,11 +1,15 @@
 // 공통 규칙 계층: 타석 전 주루(도루·폭투), 희생번트, 타석 결과에 따른 주자 진루·아웃·기록.
 // 해결기가 무엇이든 같은 코드를 쓴다 (docs/경기엔진2_기획안.md 3.2).
 
-import { Ball, battedBall } from './battedball';
+import { Ball, battedBall, type BattedBall } from './battedball';
 import type { PlayKind } from './game';
 import { Ev, type PaRates } from './pa';
 import type { GameState, PitcherInGame, Runner } from './state';
 import type { BatLine, SimPlayer } from './types';
+
+/** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
+const OF_SIDE = ['LF', 'CF', 'RF'] as const;
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 0.98 ? 0.98 : x);
 
 /** 지휘한 희생번트가 성공할 확률 (임시값) */
 export const BUNT_SUCCESS = 0.85;
@@ -115,21 +119,27 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   const { bases, fld, ctx } = st;
   const { params, rng, totals } = ctx;
   const me: Runner = { p: batter, resp: pg, earned: true };
-  // 인플레이 타구 (홈런 제외): 유형·방향·담당 수비수. 양타는 투수 손의 반대쪽 타석, 모르면 우타
-  let ground = false;
+  // 인플레이 타구 (홈런 제외): 유형·방향·담당 수비수. 양타는 투수 손의 반대쪽 타석, 모르면 우타.
+  // 땅볼 성향 = 그 해 리그 값 × 타자 × 투수 (엔진 2 6단계)
+  let ball: BattedBall | null = null;
   if (ev === Ev.S1 || ev === Ev.D2 || ev === Ev.T3 || ev === Ev.OUT) {
     const pullLeft = batter.bats === 'L' ? false : batter.bats === 'S' ? pg.p.throws === 'L' : true;
-    const ball = battedBall(ev, rates, ctx.league, pullLeft, (s) => fld.slotDef[s as keyof typeof fld.slotDef] ?? 0, params, rng);
+    const gb = (ctx.env.gbOdds ?? 1) * (batter.bat!.gb ?? 1) * (pg.skill.gb ?? 1);
+    ball = battedBall(ev, rates, ctx.league, pullLeft, (s) => fld.slotDef[s as keyof typeof fld.slotDef] ?? 0, params, rng, gb);
     ev = ball.ev;
-    ground = ball.type === Ball.GB;
     const t = ctx.balls;
     if (t) {
       t.type[ball.type]++;
+      if (ev === Ev.OUT) t.outType[ball.type]++;
       t.dir[ball.dir]++;
       t.slot[ball.slot] = (t.slot[ball.slot] ?? 0) + 1;
       if (ball.converted) { if (ev === Ev.OUT) t.toOut++; else t.toHit++; }
     }
   }
+  const pp = params.play;
+  /** 공이 간 구장 쪽 (0 좌익, 1 중견, 2 우익)과 그쪽 외야수의 어깨 보정 (수비 런으로 추정, + 면 주자가 덜 간다) */
+  const side = ball ? ball.zone % 3 : 1;
+  const arm = (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
   const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
   const twoOut = st.outs === 2 ? params.twoOutBonus : 0;
@@ -184,7 +194,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
       const f = bases[0];
       if (f) {
         bases[0] = null;
-        if (rng.chance(params.firstToHomeOnDouble + twoOut + speedAdj(f))) {
+        if (rng.chance(params.firstToHomeOnDouble + twoOut + speedAdj(f) - arm)) {
           if (tryAdvance()) st.score(f, bl);
         } else bases[2] = f;
       }
@@ -197,14 +207,14 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
       const s = bases[1];
       if (s) {
         bases[1] = null;
-        if (rng.chance(params.secondToHomeOnSingle + twoOut + speedAdj(s))) {
+        if (rng.chance(params.secondToHomeOnSingle + twoOut + speedAdj(s) - arm)) {
           if (tryAdvance()) st.score(s, bl);
         } else bases[2] = s;
       }
       const f = bases[0];
       if (f) {
         bases[0] = null;
-        if (!bases[2] && st.outs < 3 && rng.chance(params.firstToThirdOnSingle + twoOut * 0.5 + speedAdj(f))) {
+        if (!bases[2] && st.outs < 3 && rng.chance(params.firstToThirdOnSingle * pp.firstToThirdSide[side] + twoOut * 0.5 + speedAdj(f) - arm)) {
           if (tryAdvance()) bases[2] = f;
         } else bases[1] = f;
       }
@@ -229,10 +239,13 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
         bases[0] = me;
         break;
       }
-      if (ground) {
-        // 땅볼
+      const slot = ball?.slot ?? 'SS';
+      const depth = ball ? Math.floor(ball.zone / 3) : 2;
+      if (ball?.type === Ball.GB) {
+        // 땅볼: 병살은 받은 자리(유격·2루 쪽이 많다)와 타자 주력으로, 포스·야수선택(선행 주자 아웃, 타자 1루)도 받은 자리로
+        const fs = slot as keyof typeof pp.dpSlot;
         if (bases[0] && st.outs < 2) {
-          if (rng.chance(params.doublePlay)) {
+          if (rng.chance(params.doublePlay * (pp.dpSlot[fs] ?? 1) * (1 - pp.dpSpeed * (batter.bat!.speed - 0.5) * 2))) {
             bl.gdp++; totals.gdp++;
             kind = 'GDP';
             st.out(2);
@@ -243,32 +256,34 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
             }
           } else {
             st.out(1);
-            if (bases[2] && rng.chance(params.groundOutScores)) { st.score(bases[2], bl); bases[2] = null; }
+            if (bases[2] && rng.chance(params.groundOutScores + speedAdj(bases[2]))) { st.score(bases[2], bl); bases[2] = null; }
             if (bases[1] && !bases[2]) { bases[2] = bases[1]; bases[1] = null; }
-            // 절반은 선행 주자 포스아웃(타자 1루), 절반은 타자 아웃(주자 2루)
-            if (rng.chance(0.5)) bases[0] = me;
+            // 선행 주자 포스아웃(타자 1루) 또는 타자 아웃(주자 2루)
+            if (rng.chance(pp.forceLead[fs] ?? 0.5)) bases[0] = me;
             else if (!bases[1]) { bases[1] = bases[0]; bases[0] = null; }
           }
         } else {
           st.out(1);
           if (st.outs < 3) {
-            if (bases[2] && rng.chance(params.groundOutScores)) { st.score(bases[2], bl); bases[2] = null; }
-            if (bases[1] && !bases[2] && rng.chance(0.55)) { bases[2] = bases[1]; bases[1] = null; }
+            if (bases[2] && rng.chance(params.groundOutScores + speedAdj(bases[2]))) { st.score(bases[2], bl); bases[2] = null; }
+            // 2루 주자는 오른쪽 땅볼에 3루로 간다 (자기 앞·왼쪽 땅볼에는 묶인다)
+            if (bases[1] && !bases[2] && rng.chance(pp.groundAdvance[fs] ?? 0.5)) { bases[2] = bases[1]; bases[1] = null; }
           }
         }
       } else {
-        // 뜬공
+        // 뜬공·라인드라이브: 내야 공중(내야 뜬공·내야수 라이너)은 주자가 못 간다. 외야는 희생플라이·2루 주자 태그업을 구장 쪽·어깨·주력으로
         kind = 'FO';
         st.out(1);
-        if (st.outs < 3) {
+        if (st.outs < 3 && depth === 2) {
+          const line = ball?.type === Ball.LD ? pp.sfLineDrive : 1;
           const t = bases[2];
-          if (t && rng.chance(params.sacFly + speedAdj(t))) {
+          if (t && rng.chance(clamp01(params.sacFly * pp.sfSide[side] * line + speedAdj(t) - arm))) {
             st.score(t, bl);
             bases[2] = null;
             bl.ab--; totals.ab--; bl.sf++; totals.sf++;
             kind = 'SF';
           }
-          if (bases[1] && !bases[2] && rng.chance(0.2)) { bases[2] = bases[1]; bases[1] = null; }
+          if (bases[1] && !bases[2] && rng.chance(clamp01(pp.flyAdvance[side] * line - arm))) { bases[2] = bases[1]; bases[1] = null; }
         }
       }
     }

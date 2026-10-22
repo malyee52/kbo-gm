@@ -13,13 +13,41 @@ export interface BallParams {
   dir: [number, number, number];
   /** 안타 종류별 타구 유형 [땅볼, 라인드라이브, 뜬공, 내야 뜬공] */
   type: { S1: [number, number, number, number]; D2: [number, number, number, number]; T3: [number, number, number, number] };
-  /** 아웃 타구 중 땅볼이 아닌 것의 유형 [라인드라이브, 뜬공, 내야 뜬공] (땅볼 몫은 groundBallShare) */
-  airOut: [number, number, number];
+  /**
+   * 아웃 타구의 유형: ld = 아웃 중 라인드라이브 몫, pu = 아웃 중 (뜬공 + 내야 뜬공)에서 내야 뜬공 몫.
+   * 나머지(1 − ld)를 땅볼 : 뜬공 = groundBallShare : (1 − groundBallShare)로 나눈다 (엔진 2 6단계)
+   */
+  airOut: { ld: number; pu: number };
   /** 라인드라이브·뜬공이 내야 공중 구역(내야수가 맡음)으로 가는 몫 */
   infieldAir: { LD: number; FB: number };
   /** 깊이별·구장 쪽별 담당 자리 가중치 (ground 내야 땅볼, air 내야 공중, outfield 외야) */
   zones: Record<'ground' | 'air' | 'outfield', [ZoneFielders, ZoneFielders, ZoneFielders]>;
 }
+/**
+ * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
+ * "어깨" 능력이 없어 외야수의 수비 런을 어깨로도 쓴다 (armPerRun, 추정).
+ */
+export interface PlayParams {
+  /** 병살 확률 배율: 땅볼을 받은 자리 */
+  dpSlot: Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS', number>>;
+  /** 병살 확률 × (1 − dpSpeed × (타자 주력 − 0.5) × 2): 주력 1이면 1 − dpSpeed배, 0이면 1 + dpSpeed배 */
+  dpSpeed: number;
+  /** 병살이 아닌 땅볼(1루 주자, 2아웃 미만)에서 선행 주자를 잡고 타자가 1루에 사는(포스·야수선택) 확률. 나머지는 타자 아웃·주자 진루 */
+  forceLead: Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS', number>>;
+  /** 땅볼 아웃 때 2루 주자가 3루로 가는 확률 (3루가 비고 포스가 아닐 때) */
+  groundAdvance: Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS', number>>;
+  /** 외야 뜬공 희생플라이 배율: 구장 쪽 [좌익, 중견, 우익] */
+  sfSide: [number, number, number];
+  /** 외야 라인드라이브 아웃의 희생플라이 배율 (얕고 빨라 3루 주자가 덜 들어온다) */
+  sfLineDrive: number;
+  /** 외야 뜬공 아웃에 2루 주자가 3루로 가는 확률: 구장 쪽 [좌익, 중견, 우익] */
+  flyAdvance: [number, number, number];
+  /** 단타에 1루 주자가 3루까지 가는 확률 배율: 공이 간 구장 쪽 [좌익, 중견, 우익] */
+  firstToThirdSide: [number, number, number];
+  /** 외야수 수비 1런당 주자 추가 진루(희생플라이, 단타 1→3·2→홈, 2루타 1→홈) 확률 감소 (어깨, 추정) */
+  armPerRun: number;
+}
+
 export type ZoneFielders = Partial<Record<'P' | 'C' | '1B' | '2B' | '3B' | 'SS' | 'LF' | 'CF' | 'RF', number>>;
 
 export interface EngineParams {
@@ -111,8 +139,15 @@ export interface EngineParams {
   sacBuntScale: number;
   /** 추가 진루를 시도한 주자가 아웃될 확률. 견제사 등 그 밖의 주루사 몫까지 여기에 담았다 */
   outOnAdvance: number;
-  /** 인플레이 아웃 중 땅볼 비율 (임시값) */
+  /**
+   * 인플레이 아웃 중 땅볼 ÷ (땅볼 + 뜬공 + 내야 뜬공) (라인드라이브 뺌, 엔진 2 6단계). 그 해 값(groundBallShareByYear)이 없는 해에 쓴다.
+   * 선수별 성향(BatSkill.gb·PitSkill.gb)은 이 값의 승산에 곱한다
+   */
   groundBallShare: number;
+  /** 그 해 리그의 아웃 타구 땅볼 몫 (임시값, 출처 미확인: data-src/batted_ball_derived/batted_ball.csv gb_share_of_gb_fb) */
+  groundBallShareByYear: Record<number, number>;
+  /** 인플레이 아웃 처리 (rules.ts, 엔진 2 6단계): 병살·포스·진루·희생플라이를 타구 유형·자리·주력·어깨로 */
+  play: PlayParams;
   /** 타구 모형 (battedball.ts, 엔진 2 5단계) */
   ball: BallParams;
   /**
@@ -122,9 +157,9 @@ export interface EngineParams {
   chainShape: ChainShape;
   /** 그 해 투구 단위 자료가 있는 해의 사슬 모양 (없는 해는 chainShape) */
   chainShapeByYear: Record<number, ChainShape>;
-  /** 주자 1루, 2아웃 미만의 땅볼이 병살이 될 확률 */
+  /** 주자 1루, 2아웃 미만의 땅볼이 병살이 될 기본 확률 (자리·주력 배율을 곱한다, play) */
   doublePlay: number;
-  /** 2아웃 미만 뜬공에 3루 주자가 들어올 확률 */
+  /** 2아웃 미만 외야 뜬공에 3루 주자가 들어올 기본 확률 (라인드라이브·구장 쪽·어깨·주력 보정, play) */
   sacFly: number;
   /** 2아웃 미만 땅볼에 3루 주자가 들어올 확률 */
   groundOutScores: number;
@@ -252,14 +287,33 @@ export const DEFAULT_PARAMS: EngineParams = {
   wildPitchDefault: 0.012,
   sacBuntScale: 11.6,
   outOnAdvance: 0.11,
-  groundBallShare: 0.5,
+  // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
+  groundBallShare: 0.52,
+  groundBallShareByYear: {
+    2010: 0.5489, 2011: 0.5304, 2012: 0.5402, 2013: 0.5329, 2014: 0.5222, 2015: 0.5362, 2016: 0.5233, 2017: 0.5214,
+    2018: 0.5131, 2019: 0.5156, 2020: 0.5031, 2021: 0.5182, 2022: 0.5343, 2023: 0.5114, 2024: 0.4995, 2025: 0.5247, 2026: 0.5124,
+  },
+  // 모두 임시값 (자료 없음): 병살은 유격수·2루수 쪽 땅볼이 많고 1루수 쪽은 적다, 포스는 3루·유격 쪽 땅볼이면 선행 주자를 잡기 쉽다,
+  // 2루 주자는 오른쪽 땅볼에 3루로 간다, 1루 주자는 우익 쪽 단타에 3루까지 간다. 배율은 리그 평균이 1 안팎이 되게 정했다
+  play: {
+    dpSlot: { SS: 1.15, '2B': 1.15, '3B': 0.95, P: 1, '1B': 0.5, C: 0.3 },
+    dpSpeed: 0.3,
+    forceLead: { '3B': 0.65, SS: 0.6, P: 0.65, C: 0.6, '2B': 0.4, '1B': 0.25 },
+    groundAdvance: { '1B': 0.8, '2B': 0.75, P: 0.45, C: 0.3, SS: 0.4, '3B': 0.15 },
+    sfSide: [0.95, 1.1, 0.95],
+    sfLineDrive: 0.9,
+    flyAdvance: [0.08, 0.22, 0.35],
+    firstToThirdSide: [0.55, 1, 1.45],
+    armPerRun: 0.008,
+  },
   ball: {
     // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
     dir: [0.49, 0.2, 0.31],
     // 아래는 모두 임시값 (자료 없음. 라인드라이브·안타의 유형 분포는 자료에 없다, batted_ball_derived/README.md)
     type: { S1: [0.38, 0.44, 0.18, 0], D2: [0.06, 0.46, 0.48, 0], T3: [0, 0.3, 0.7, 0] },
-    airOut: [0.2, 0.62, 0.18],
-    infieldAir: { LD: 0.25, FB: 0.08 },
+    // pu·infieldAir.FB·play.sfLineDrive·sacFly는 2023~2025 희생플라이 리그 값에 맞췄다 (엔진 2 6단계, 내야 공중 아웃은 희생플라이가 안 된다)
+    airOut: { ld: 0.1, pu: 0.08 },
+    infieldAir: { LD: 0.25, FB: 0.05 },
     zones: {
       ground: [{ '3B': 0.5, SS: 0.5 }, { SS: 0.4, '2B': 0.4, P: 0.2 }, { '2B': 0.45, '1B': 0.55 }],
       air: [{ '3B': 0.45, SS: 0.35, C: 0.2 }, { SS: 0.35, '2B': 0.35, P: 0.1, C: 0.2 }, { '1B': 0.45, '2B': 0.35, C: 0.2 }],
@@ -330,8 +384,9 @@ export const DEFAULT_PARAMS: EngineParams = {
       [0.21864, 0.17276, 0.29984, 0.3044, 0.00436], // 3-2
     ],
   },
-  doublePlay: 0.43,
-  sacFly: 0.76,
+  // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.46·0.95)
+  doublePlay: 0.46,
+  sacFly: 0.95,
   groundOutScores: 0.58,
 
   firstToThirdOnSingle: 0.4,

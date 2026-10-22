@@ -18,6 +18,11 @@ export interface BatSkill {
   speed: number;
   /** 능력 산출에 쓴 가중 타석 수 */
   sample: number;
+  /**
+   * 타구 성향: 아웃 타구의 땅볼 승산에 곱하는 배율 (1 = 리그 평균, 클수록 땅볼형, 엔진 2 6단계). 타구 자료가 없어 병살 기록으로 추정한다
+   * (ratings.ts batGbOf). 없으면 1
+   */
+  gb?: number;
   /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
   ppaRel?: number;
   /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
@@ -40,6 +45,8 @@ export interface PitSkill {
   startShare: number;
   /** 능력 산출에 쓴 가중 상대 타자 수 */
   sample: number;
+  /** 땅볼 성향: 아웃 타구의 땅볼 승산 배율 (1 = 리그 평균, 엔진 2 6단계). 타구 자료가 없어 피홈런 능력으로 추정한다 (ratings.ts pitGbOf). 없으면 1 */
+  gb?: number;
   /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
   ppaRel?: number;
 }
@@ -136,6 +143,8 @@ export interface LeagueEnv {
   unearnedRun: number;
   /** 주자가 있는 타석에서 폭투·포일·보크로 주자가 한 베이스씩 가는 확률 */
   wildPitch: number;
+  /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */
+  gbOdds?: number;
 }
 
 export interface BatLine {

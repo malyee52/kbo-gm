@@ -5,7 +5,7 @@
 // 그다음 담당 수비수의 수비 런으로 안타 ↔ 아웃을 바꾼다 (수비 0이면 바꾸지 않아 결과가 타석 결과 함수 그대로).
 // 크기는 예전 팀 수비 합(T5)과 같게 맞춘다: 수비수 한 명의 +1런이 팀 인플레이 안타의 defenseHitPerRun만큼을 아웃으로 바꾼다
 // (그 수비수에게 가는 안타 몫으로 나눠 확률을 정한다). 그래서 외야수의 수비는 내야 땅볼에 영향이 없다.
-// 성향(땅볼·뜬공, 당겨치기)은 이 단계에서는 모든 선수가 리그 평균이다 (6단계에서 선수별로).
+// 땅볼 성향(엔진 2 6단계): 그 해 리그 값 × 타자 × 투수의 땅볼 승산 배율(gb)을 타구 유형 표의 땅볼 가중치에 곱한다. 당겨치기 성향은 아직 리그 평균.
 
 import type { Rates } from '../data/types';
 import { Ev, type PaRates } from './pa';
@@ -38,22 +38,24 @@ export interface BattedBall {
 /** 인플레이 타구 집계 (검증 도구용): 유형·방향·자리별 수, 수비로 바뀐 수 */
 export interface BallTally {
   type: number[];
+  /** 수비를 거친 뒤 아웃이 된 타구의 유형 (실책 출루 포함) */
+  outType: number[];
   dir: number[];
   slot: Partial<Record<BallSlot, number>>;
   toOut: number;
   toHit: number;
 }
-export const emptyBallTally = (): BallTally => ({ type: [0, 0, 0, 0], dir: [0, 0, 0], slot: {}, toOut: 0, toHit: 0 });
+export const emptyBallTally = (): BallTally => ({ type: [0, 0, 0, 0], outType: [0, 0, 0, 0], dir: [0, 0, 0], slot: {}, toOut: 0, toHit: 0 });
 
 const HIT_EVS = [Ev.S1, Ev.D2, Ev.T3] as const;
 const HIT_KEY = { [Ev.S1]: 'S1', [Ev.D2]: 'D2', [Ev.T3]: 'T3' } as const;
 
-/** 아웃 타구의 유형 분포: 땅볼 groundBallShare, 나머지는 airOut 비율 (LD·FB·PU) */
+/** 아웃 타구의 유형 분포: 라인드라이브 airOut.ld, 나머지를 땅볼 groundBallShare : 뜬공(내야 뜬공 airOut.pu 포함)으로 */
 function outTypes(p: EngineParams): number[] {
-  const a = p.ball.airOut;
-  const sum = a[0] + a[1] + a[2];
-  const air = 1 - p.groundBallShare;
-  return [p.groundBallShare, (air * a[0]) / sum, (air * a[1]) / sum, (air * a[2]) / sum];
+  const { ld, pu } = p.ball.airOut;
+  const g = p.groundBallShare * (1 - ld);
+  const air = (1 - p.groundBallShare) * (1 - ld);
+  return [g, ld, air * (1 - pu), air * pu];
 }
 
 const typesOf = (ev: Ev, p: EngineParams): readonly number[] => (ev === Ev.OUT ? outTypes(p) : p.ball.type[HIT_KEY[ev as Ev.S1 | Ev.D2 | Ev.T3]]);
@@ -135,11 +137,13 @@ function sharesFor(league: Rates, p: EngineParams): Shares {
 /**
  * 인플레이 타구 하나 (ev는 S1·D2·T3·OUT). 난수: 유형·방향·(깊이)·자리·수비 판정을 차례로 하나씩. 수비 판정 난수는 수비 런과 관계없이 늘 쓴다
  * (수비 능력을 바꿔도 다른 타구의 난수가 밀리지 않는다).
- * pullLeft: 당겨친 타구가 좌익선 쪽으로 가나 (우타, 또는 좌투를 상대한 양타). defAt: 그 자리 수비수의 수비 런 (투수는 0)
+ * pullLeft: 당겨친 타구가 좌익선 쪽으로 가나 (우타, 또는 좌투를 상대한 양타). defAt: 그 자리 수비수의 수비 런 (투수는 0).
+ * gb: 땅볼 승산 배율 (그 해 × 타자 × 투수, 1이면 리그 기본 표 그대로)
  */
-export function battedBall(ev: Ev, rates: PaRates | null, league: Rates, pullLeft: boolean, defAt: (slot: BallSlot) => number, p: EngineParams, rng: Rng): BattedBall {
+export function battedBall(ev: Ev, rates: PaRates | null, league: Rates, pullLeft: boolean, defAt: (slot: BallSlot) => number, p: EngineParams, rng: Rng, gb = 1): BattedBall {
   const b = p.ball;
-  const type = pick([Ball.GB, Ball.LD, Ball.FB, Ball.PU], typesOf(ev, p), rng.next());
+  const tw = typesOf(ev, p);
+  const type = pick([Ball.GB, Ball.LD, Ball.FB, Ball.PU], gb === 1 ? tw : [tw[0] * gb, tw[1], tw[2], tw[3]], rng.next());
   const dir = pick([0, 1, 2], b.dir, rng.next());
   const side = pullLeft ? dir : 2 - dir;
   const dep = depthsOf(type, b);

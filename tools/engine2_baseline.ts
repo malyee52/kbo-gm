@@ -48,6 +48,8 @@ interface Measure {
   cells: number[][];
   /** 인플레이 방향 [당겨, 가운데, 밀어] 몫, 수비로 아웃이 된 안타·안타가 된 아웃 (팀 경기당) */
   pull: number; center: number; oppo: number; toOut: number; toHit: number;
+  /** 인플레이 아웃의 땅볼 ÷ (땅볼 + 뜬공 + 내야 뜬공) (엔진 2 6단계), 타석당 병살·희생플라이·실책 출루, 비자책 실점 비율 */
+  gbOut: number; dpPa: number; sfPa: number; roePa: number; unearned: number;
 }
 
 function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<typeof calibrate>, seed: string): Measure {
@@ -132,6 +134,8 @@ function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<t
     pitP10: pct(pitPpa, 0.1), pitP90: pct(pitPpa, 0.9), cells,
     ...(() => { const n = balls.dir[0] + balls.dir[1] + balls.dir[2]; return { pull: balls.dir[0] / n, center: balls.dir[1] / n, oppo: balls.dir[2] / n }; })(),
     toOut: balls.toOut / teamGames, toHit: balls.toHit / teamGames,
+    gbOut: balls.outType[0] / (balls.outType[0] + balls.outType[2] + balls.outType[3]),
+    dpPa: s.totals.gdp / s.totals.pa, sfPa: s.totals.sf / s.totals.pa, roePa: s.totals.roe / s.totals.pa, unearned: 1 - s.totals.er / s.totals.r,
     pitById: new Map(s.pit.map((q, i): [string, [number, number]] => [world.players[i].id, [q.bf, q.np]]).filter(([, v]) => v[0] > 0)),
   };
 }
@@ -168,6 +172,13 @@ const ballDir = (() => {
   const h = ls[0].split(',');
   return new Map(ls.slice(1).map((l) => { const c = l.split(','); return [Number(c[h.indexOf('year')]), ['pull_pct', 'center_pct', 'oppo_pct'].map((k) => Number(c[h.indexOf(k)]) / 100)]; }));
 })();
+/** 판정된 아웃 타구의 땅볼 ÷ (땅볼 + 뜬공) (임시값, 출처 미확인) */
+const gbShare = (() => {
+  const ls = readFileSync('data-src/batted_ball_derived/batted_ball.csv', 'utf-8').trim().split(/\r?\n/);
+  const h = ls[0].split(',');
+  return new Map(ls.slice(1).map((l) => { const c = l.split(','); return [Number(c[h.indexOf('year')]), Number(c[h.indexOf('gb_share_of_gb_fb')])]; }));
+})();
+const gbReal = (year: number) => (gbShare.has(year) ? { gbOut: gbShare.get(year)! } : {});
 const countPitch = readCsv('count_pitch.csv');
 /** 하드힛 월별 표 리그 P/PA (2015~, 고의4구 포함 정의, data-src/hardhit_derived/league_ppa.csv) */
 const hardhitPpa = (() => {
@@ -211,6 +222,8 @@ function realFor(year: number): (Partial<Omit<Measure, 'cells'>> & { ibb?: numbe
     kPitches: pp('K'), bbPitches: pp('BB'), ipPitches: pp('in_play'), ...hhPart,
     sp100: Number(sp.share_100plus), sp110: Number(sp.share_110plus), qs: (qsByYear.get(year) ?? NaN) / Number(sp.starts),
     ibb: Number(ibb.find((r) => Number(r.year) === year)!.per_team),
+    dpPa: sm.dp_per_pa, sfPa: sm.sf_per_pa, roePa: sm.roe_per_pa, ...gbReal(year),
+    unearned: JSON.parse(readFileSync(`public/data/seasons/${year}.json`, 'utf-8')).league.unearnedShare,
   };
 }
 
@@ -292,6 +305,11 @@ for (const year of years) {
   const bd = ballDir.get(year);
   emit(`| 인플레이 방향 당겨·가운데·밀어 (실제는 임시값, 출처 미확인) | ${bd ? bd.map((x) => p(x)).join(' · ') : '—'} | ${p(avg('pull'))} · ${p(avg('center'))} · ${p(avg('oppo'))} | | ${bd ? `최대 ${(Math.max(Math.abs(avg('pull') - bd[0]), Math.abs(avg('center') - bd[1]), Math.abs(avg('oppo') - bd[2])) * 100).toFixed(1)}%p` : ''} |`);
   emit(`| 수비로 아웃이 된 안타 · 안타가 된 아웃 (팀 경기당) | | ${f(avg('toOut'), 3)} · ${f(avg('toHit'), 3)} | | |`);
+  row('인플레이 아웃 땅볼 ÷ (땅볼+뜬공) (실제는 임시값, 출처 미확인)', 'gbOut', 3);
+  row('타석당 병살', 'dpPa', 4);
+  row('타석당 희생플라이', 'sfPa', 4);
+  row('타석당 실책 출루', 'roePa', 4);
+  row('비자책 실점 비율 (실제는 시즌 자료)', 'unearned', 3, true);
   emit('');
   emit(`구원 등판 전 휴식일 분포 (앞 등판이 있는 구원 등판 중):`);
   emit('');
