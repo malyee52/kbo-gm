@@ -105,13 +105,16 @@ export function ScoutNote({ notes, full }: { notes: string[]; full: boolean }) {
  * 공통 표: 머리 눌러 정렬, 이름 거르기, (상세) 열 고르기·묶음 전환·리그 평균 줄, 표본 미만 줄 흐림·빼기.
  * 고른 열·정렬·거르기는 표(id)마다 이 브라우저에 기억한다 (결정 8)
  */
-export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, rowClass, foot, label, empty }: {
+export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, thinToggle = true, rowClass, foot, label, empty }: {
   id: string; cols: Column<R>[]; rows: R[]; rowKey: (r: R) => string; full: boolean;
   /** 거르기에 쓰는 글자 (없으면 거르기 칸 없음) */
   searchText?: (r: R) => string;
   /** 표본 미만 줄 (흐리게) */
   thin?: (r: R) => boolean;
-  rowClass?: (r: R) => string | undefined;
+  /** 상세에서 "표본 적은 줄 빼기" 칸을 보일까 (화면이 따로 거르기를 두면 false) */
+  thinToggle?: boolean;
+  /** sorted: 사용자가 머리를 눌러 다시 늘어놓았나 (순위 선처럼 원래 순서에만 뜻이 있는 표시를 끌 때) */
+  rowClass?: (r: R, sorted: boolean) => string | undefined;
   /** 맨 아래 줄 (리그 평균 등). 상세에서만 */
   foot?: { label: ReactNode; cells: Partial<Record<string, ReactNode>> }[];
   label?: string;
@@ -125,7 +128,7 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, r
   const groups = [...new Set(cols.filter((c) => c.group && !c.fixed).map((c) => c.group!))];
   const on = new Set(shown.map((c) => c.key));
   const fid = useId();
-  const tools = !!searchText || (full && cols.some((c) => !c.fixed)) || (!!thin && full);
+  const tools = !!searchText || (full && cols.some((c) => !c.fixed)) || (!!thin && thinToggle && full);
   return (
     <div className="dt">
       {tools && (
@@ -157,7 +160,7 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, r
               </div>
             </details>
           )}
-          {thin && full && (
+          {thin && thinToggle && full && (
             <label className="small"><input type="checkbox" checked={view.hideThin} onChange={(e) => setView({ ...view, hideThin: e.target.checked })} /> 표본 적은 줄 빼기</label>
           )}
         </div>
@@ -181,7 +184,7 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, r
           <tbody>
             {list.length === 0 && <tr><td colSpan={shown.length} className="l muted">{empty ?? '보일 줄이 없습니다.'}</td></tr>}
             {list.map((r) => {
-              const cls = [rowClass?.(r), thin?.(r) ? 'thin' : ''].filter(Boolean).join(' ');
+              const cls = [rowClass?.(r, view.sort !== null), thin?.(r) ? 'thin' : ''].filter(Boolean).join(' ');
               return (
                 <tr key={rowKey(r)} className={cls || undefined} title={thin?.(r) ? '표본이 기준보다 적습니다' : undefined}>
                   {shown.map((c) => <td key={c.key} className={c.text ? 'l' : undefined}>{c.cell ? c.cell(r) : cellText(c.value(r))}</td>)}
