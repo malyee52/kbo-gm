@@ -38,7 +38,7 @@ interface Measure {
   homeRuns: number; awayRuns: number; homeWin: number;
   winSd: number; babipSd: number; nQual: number;
   rest: Record<string, number>;
-  pPa: number; spPitches: number; rpPitches: number; kPitches: number; bbPitches: number; ipPitches: number;
+  pPa: number; spPitches: number; sp100: number; sp110: number; rpPitches: number; kPitches: number; bbPitches: number; ipPitches: number;
   pitP10: number; pitP90: number;
   /** 칸 × [볼, 스트라이크, 파울, 맞힘, 사구] 공 수 */
   cells: number[][];
@@ -120,7 +120,7 @@ function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<t
     reliefOutShare: reliefOuts / allOuts, backToBack: b2b / Math.max(1, withPrev), threeStraight: three / Math.max(1, withPrev),
     homeRuns: hr / s.log.length, awayRuns: ar / s.log.length, homeWin: hw / (hw + aw),
     winSd: sd(s.teams.map(winPct)), babipSd: sd(qual.map(babip)), nQual: qual.length, rest,
-    pPa: s.totals.pitches / s.totals.pa, spPitches: mean(st.np), rpPitches: rpNp / Math.max(1, reliefApps),
+    pPa: s.totals.pitches / s.totals.pa, spPitches: mean(st.np), sp100: mean(st.np.map((n) => (n >= 100 ? 1 : 0))), sp110: mean(st.np.map((n) => (n >= 110 ? 1 : 0))), rpPitches: rpNp / Math.max(1, reliefApps),
     kPitches: byEv.k[1] / byEv.k[0], bbPitches: byEv.bb[1] / byEv.bb[0], ipPitches: byEv.ip[1] / byEv.ip[0],
     pitP10: pct(pitPpa, 0.1), pitP90: pct(pitPpa, 0.9), cells,
   };
@@ -138,6 +138,19 @@ const reliefCsv = readCsv('relief.csv');
 const restCsv = readCsv('relief_rest.csv');
 const home = readCsv('home_away.csv');
 const ibb = readCsv('ibb.csv');
+/** 하드힛 투수 classic 가공값의 해마다 QS 합 (퀄스는 2002~) */
+const qsByYear = (() => {
+  const ls = readFileSync('data-src/hardhit_derived/pit_classic.csv', 'utf-8').trim().split(/\r?\n/);
+  const h = ls[0].split(',');
+  const m = new Map<number, number>();
+  for (const l of ls.slice(1)) {
+    const c = l.split(',');
+    const v = Number(c[h.indexOf('퀄스')] || 0);
+    const y = Number(c[h.indexOf('연도')]);
+    m.set(y, (m.get(y) ?? 0) + v);
+  }
+  return m;
+})();
 const paPitches = readCsv('pa_pitches.csv');
 const countPitch = readCsv('count_pitch.csv');
 /** 하드힛 월별 표 리그 P/PA (2015~, 고의4구 포함 정의, data-src/hardhit_derived/league_ppa.csv) */
@@ -180,6 +193,7 @@ function realFor(year: number): (Partial<Omit<Measure, 'cells'>> & { ibb?: numbe
     winSd: sm.team_win_pct_sd, babipSd: sm.qual_babip_sd, nQual: sm.qual_batters, rest,
     pPa: sm.pitches_per_pa, spPitches: Number(sp.mean), rpPitches: Number(rp.mean_pitches),
     kPitches: pp('K'), bbPitches: pp('BB'), ipPitches: pp('in_play'), ...hhPart,
+    sp100: Number(sp.share_100plus), sp110: Number(sp.share_110plus), qs: (qsByYear.get(year) ?? NaN) / Number(sp.starts),
     ibb: Number(ibb.find((r) => Number(r.year) === year)!.per_team),
   };
 }
@@ -214,7 +228,7 @@ for (const year of years) {
   row('선발 평균 이닝', 'starterIp', 2);
   row('선발 평균 상대 타자', 'starterBf', 1);
   row('선발 6이닝 이상 비율', 'share6ip', 3, true);
-  row('QS% (6이닝·3자책 이하)', 'qs', 3, true);
+  row('QS% (6이닝·3자책 이하, 실제는 하드힛 퀄스 ÷ 선발)', 'qs', 3, true);
   row('팀 경기당 구원 등판', 'reliefPerTeamGame', 2);
   row('구원 등판당 아웃', 'outsPerRelief', 2);
   row('구원 아웃 몫 (선발 아닌 등판)', 'reliefOutShare', 3, true);
@@ -231,8 +245,10 @@ for (const year of years) {
   row('삼진 타석 투구 수', 'kPitches', 2);
   row('볼넷 타석 투구 수', 'bbPitches', 2);
   row('인플레이 타석 투구 수', 'ipPitches', 2);
-  row('선발 평균 투구 수 (기록만, 교체는 아직 타자 수로)', 'spPitches', 1);
-  row('구원 등판당 투구 수 (기록만)', 'rpPitches', 1);
+  row('선발 평균 투구 수', 'spPitches', 1);
+  row('선발 100구 이상 비율', 'sp100', 3, true);
+  row('선발 110구 이상 비율', 'sp110', 3, true);
+  row('구원 등판당 투구 수', 'rpPitches', 1);
   row('투수별 P/PA 백분위 10 (상대 타자 100명 이상)', 'pitP10', 2);
   row('투수별 P/PA 백분위 90', 'pitP90', 2);
   if (real?.hhP10 !== undefined) emit(`| 투수별 P/PA 백분위 10·90 (하드힛, 규정 기준 미상) | ${f(real.hhP10, 2)} · ${f(real.hhP90, 2)} | ${f(avg('pitP10'), 2)} · ${f(avg('pitP90'), 2)} | | |`);

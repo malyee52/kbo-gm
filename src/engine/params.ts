@@ -72,8 +72,10 @@ export interface EngineParams {
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
   park: { hitExp: number; hrExp: number };
-  /** 투수가 체력 한계를 넘긴 뒤 타자 1명마다 나빠지는 정도 (임시값) */
-  fatiguePerBatter: number;
+  /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (임시값, 엔진 2 4단계) */
+  fatiguePerPitch: number;
+  /** 볼카운트 사슬이 없는 해결기(B0)일 때 타석당 투구 수 (임시값, 2023~2025 리그 3.9구) */
+  pitchesPerPaDefault: number;
 
   // ---- 인플레이 아웃 처리
   /** 실책 출루 확률 = 이 값 × 그 해 리그의 비자책 실점 비율. 실책 출루 기록이 없어 가정한 값 */
@@ -206,7 +208,9 @@ export const DEFAULT_PARAMS: EngineParams = {
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
   park: { hitExp: 0.4, hrExp: 1.2 },
-  fatiguePerBatter: 0.012,
+  // 엔진 1의 타자 1명당 0.012를 2023~2025 리그 타석당 투구 수 3.9구로 나눈 값 (임시값)
+  fatiguePerPitch: 0.012 / 3.9,
+  pitchesPerPaDefault: 3.9,
 
   roePerUnearnedShare: 0.2,
   unearnedRunScale: 0.68,
@@ -313,6 +317,17 @@ export const DEFAULT_PARAMS: EngineParams = {
 
   traits: DEFAULT_TRAIT_PARAMS,
 };
+
+/**
+ * 불펜 피로 (엔진 2 4단계, 단위는 공). 경기 뒤 던진 공 수만큼 쌓이고 하루에 BULLPEN_RECOVERY_PER_DAY씩 빠진다.
+ * 경기 전 피로가 BULLPEN_AVAILABLE_BELOW 미만이어야 등판할 수 있고(전날 15구 안팎까지는 연투 가능), 이틀 연속 던진 투수는 어제 경기 뒤
+ * 피로가 BULLPEN_THIRD_DAY_BELOW 미만일 때만 사흘째 나온다 (3연투). 쓸 투수가 없으면 덜 지친 투수부터 쓴다 (manager.ts pickReliever).
+ * 2025 투구 단위 자료의 구원 연투 22.0%·3연투 1.7%(data-src/pbp_derived/relief.csv)에 tools/engine2_baseline.ts 4시즌으로 맞춘 값
+ * (임시값: 실제 감독의 연투 기준은 모른다). 숨은 능력 '회복력'(엔진 2 16단계)이 회복량에 곱해질 자리이고 지금은 모두 1.00
+ */
+export const BULLPEN_RECOVERY_PER_DAY = 12;
+export const BULLPEN_AVAILABLE_BELOW = 3;
+export const BULLPEN_THIRD_DAY_BELOW = 10;
 
 /** 그 해의 볼카운트 사슬 모양 */
 export function chainShapeFor(params: EngineParams, year: number): ChainShape {

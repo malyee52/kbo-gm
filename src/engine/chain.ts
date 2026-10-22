@@ -132,6 +132,23 @@ export function solvedChain(shape: ChainShape, knobs: Knobs): SolvedChain {
   return { knobs, p, e: endFrom(p) };
 }
 
+/** 0-0에서 시작한 타석의 기대 투구 수 (뒤에서부터: 칸마다 1 + 다음 칸들의 기대값, 2스트라이크 파울은 제자리라 나머지로 나눈다) */
+export function expectedPitches(ch: SolvedChain): number {
+  const { p } = ch;
+  const n = new Float64Array(12);
+  for (let bl = 3; bl >= 0; bl--) {
+    for (let st = 2; st >= 0; st--) {
+      const c = cell(bl, st);
+      const o = c * 5;
+      const stay = st === 2 ? p[o + 2] : 0;
+      const afterBall = bl === 3 ? 0 : p[o] * n[cell(bl + 1, st)];
+      const afterStrike = st === 2 ? 0 : (p[o + 1] + p[o + 2]) * n[cell(bl, st + 1)];
+      n[c] = (1 + afterBall + afterStrike) / (1 - stay);
+    }
+  }
+  return n[0];
+}
+
 /** 지나간 칸과 공 결과를 받는 함수 (검증 도구용): 칸 색인, 결과 0 볼·1 스트라이크·2 파울·3 맞힘·4 사구 */
 export type PitchObserver = (c: number, kind: number) => void;
 

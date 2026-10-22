@@ -7,8 +7,14 @@ export interface EraPitching {
   rotation: number;
   /** 선발 등판 사이 최소 휴식일 */
   restDays: number;
-  /** 선발 한계 투구(상대 타자 수) 배율 */
+  /** 선발 한계 투구 수 배율 (엔진 1에서는 상대 타자 수 배율. 엔진 2 4단계부터 체력 × 타석당 기대 투구 수에 곱한다) */
   limitScale: number;
+  /**
+   * 선발 한계 투구 수 상한 (엔진 2 4단계). 2023년부터는 투구 단위 자료(선발 평균 86.1구·100구 이상 18.6%, 2025)에 맞춘 100구.
+   * 2022년 이전은 상한 없음: 실제 규정상 투구 수 제한이 없고 그 시대 선발 투구 수 자료도 없어, 체력 × 타석당 기대 투구 수만으로 정한다
+   * (limitScale을 맞춘 엔진 1 결과를 그대로 둔다. 사용자 결정 2026-10-22: 근거 없는 110구 상한을 두지 않는다)
+   */
+  pitchCap: number;
 }
 
 /**
@@ -28,8 +34,9 @@ export function leagueQuality(year: number): number {
 
 export function eraPitching(year: number): EraPitching {
   // 2026-10-12: 선발·구원을 겸한 에이스가 로테이션에 들어가며(engine/params.ts STARTER_SHARE) 이닝 상위 5명 비중이 실제보다 높아져 1.3 → 1.2, 1.1 → 1.0
-  if (year <= 1989) return { rotation: 4, restDays: 4, limitScale: 1.2 };
-  if (year <= 1994) return { rotation: 4, restDays: 4, limitScale: 1.0 };
-  if (year <= 1999) return { rotation: 5, restDays: 5, limitScale: 1.05 };
-  return { rotation: 5, restDays: 5, limitScale: 1 };
+  if (year <= 1989) return { rotation: 4, restDays: 4, limitScale: 1.2, pitchCap: Infinity };
+  if (year <= 1994) return { rotation: 4, restDays: 4, limitScale: 1.0, pitchCap: Infinity };
+  if (year <= 1999) return { rotation: 5, restDays: 5, limitScale: 1.05, pitchCap: Infinity };
+  if (year <= 2022) return { rotation: 5, restDays: 5, limitScale: 1, pitchCap: Infinity };
+  return { rotation: 5, restDays: 5, limitScale: 1, pitchCap: 100 };
 }

@@ -14,6 +14,7 @@ export interface PitcherInGame {
   bf: number;
   runs: number;
   outs: number;
+  /** 한계 투구 수 (엔진 2 4단계부터 공 수) */
   limit: number;
   isStarter: boolean;
   /** 등판 시점의 점수 차 (자기 팀 기준) */
@@ -22,8 +23,10 @@ export interface PitcherInGame {
   er: number;
   /** 이 등판에서 블론 세이브를 기록했나 */
   blown: boolean;
-  /** 이 등판에서 던진 공 수 (투구 수를 세는 해결기만 채운다, 엔진 2 3단계) */
+  /** 이 등판에서 던진 공 수 (엔진 2 3단계) */
   pitches: number;
+  /** 이 투수의 타석당 기대 투구 수 (리그 평균 타자 상대, 볼카운트 사슬에서). 타자 수로 정한 체력·교체 기준을 공 수로 바꿀 때 쓴다 */
+  ppa: number;
 }
 
 export interface Runner {

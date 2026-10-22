@@ -71,6 +71,8 @@ export interface GameContext {
   postseason?: boolean;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
+  /** 시대별 선발 한계 투구 수 상한 (eras.ts pitchCap). 없으면 상한 없음 */
+  startPitchCap?: number;
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
@@ -328,7 +330,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
   return false;
 }
 
-/** 마운드 투수의 투구 수를 센다 (기록·박스스코어용. 피로·교체에는 아직 쓰지 않는다, 엔진 2 4단계) */
+/** 마운드 투수의 투구 수를 센다 (기록·박스스코어, 경기 안 피로·교체·불펜 피로) */
 function addPitches(ctx: GameContext, pg: PitcherInGame, n: number): void {
   pg.pitches += n;
   pg.line.np += n;
@@ -348,7 +350,7 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
         ps.lastStartDay[i] = ctx.day;
         if (pg.outs >= 18 && pg.er <= 3) pg.line.qs++;
       }
-      ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.bf;
+      ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.pitches;
       ps.streak[i] = ps.fatigueDay[i] === ctx.day - 1 ? ps.streak[i] + 1 : ps.fatigueDay[i] === ctx.day ? Math.max(1, ps.streak[i]) : 1;
       ps.fatigueDay[i] = ctx.day;
     }

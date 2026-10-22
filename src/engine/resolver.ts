@@ -1,7 +1,7 @@
 // 타석을 끝내는 해결기. 경기 상태·규칙(주루·타구·교체·기록)은 공통이고, "타석 결과 함수가 낸 확률로 타석을 어떻게 끝내는가"만 해결기마다 다르다
 // (docs/경기엔진2_기획안.md 3.2). B는 타석 한 번에 결과를 뽑고, A(나중 단계)는 공 하나씩 진행한다.
 
-import { End, samplePitches, solveKnobs, solvedChain, type ChainShape, type PitchObserver, type SolvedChain } from './chain';
+import { End, expectedPitches, samplePitches, solveKnobs, solvedChain, type ChainShape, type PitchObserver, type SolvedChain } from './chain';
 import { Ev, type PaRates } from './pa';
 import type { Rng } from './rng';
 
@@ -16,6 +16,8 @@ export interface PaResolver {
   resolve(rates: PaRates, rng: Rng): PaOutcome;
   /** 해결기를 거치지 않는 번트 타석의 공 수. 없으면 0 (투구 수를 세지 않는 해결기) */
   inPlayPitches?(rng: Rng): number;
+  /** 삼진·볼넷·사구 확률이 K·W·H인 타석의 기대 투구 수 (난수 없음). 없으면 params.pitchesPerPaDefault */
+  pitchesPerPa?(K: number, W: number, H: number): number;
 }
 
 /** 확률표에서 결과 하나를 뽑는다 (난수 한 번). 예전 엔진의 타석 뽑기와 같은 순서·같은 산술 */
@@ -31,7 +33,7 @@ export function drawEvent(r: PaRates, rng: Rng): Ev {
   return Ev.OUT;
 }
 
-/** B0: 엔진 1의 타석 뽑기 그대로. 투구 수는 세지 않는다 */
+/** B0: 엔진 1의 타석 뽑기 그대로. 투구 수는 세지 않는다 (시험용: 투구 수가 늘지 않아 투수가 지치지 않는다) */
 export const B0: PaResolver = {
   name: 'B0',
   resolve: (r, rng) => ({ ev: drawEvent(r, rng), pitches: 0 }),
@@ -51,13 +53,10 @@ const CHAIN_CACHE = 50000;
  * 결과는 B0와 같은 확률표에서 뽑고(난수 한 번), 손잡이를 풀어 끝 확률이 그 확률표의 삼진·볼넷·사구와 같은 사슬에서
  * "그 결과로 끝나는 공 경로"를 뽑아 투구 수를 낸다 (칸마다 난수 한 번). 그래서 (결과, 투구 수)의 결합 분포가 사슬과 같다
  */
-export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}): PaResolver & { chainFor(r: PaRates): SolvedChain; inPlayPitches(rng: Rng): number } {
+export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}): PaResolver & { chainFor(r: PaRates): SolvedChain; inPlayPitches(rng: Rng): number; pitchesPerPa(K: number, W: number, H: number): number } {
   const cache = new Map<string, SolvedChain>();
   const league = solvedChain(shape, [1, 1, 1]);
-  const chainFor = (r: PaRates): SolvedChain => {
-    const K = r.so * r.scale;
-    const W = r.bb * r.scale;
-    const H = r.hbp * r.scale;
+  const solved = (K: number, W: number, H: number): SolvedChain => {
     const key = `${K},${W},${H}`;
     let ch = cache.get(key);
     if (!ch) {
@@ -67,10 +66,22 @@ export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}
     }
     return ch;
   };
+  const chainFor = (r: PaRates): SolvedChain => solved(r.so * r.scale, r.bb * r.scale, r.hbp * r.scale);
+  const ppa = new Map<string, number>();
+  const pitchesPerPa = (K: number, W: number, H: number): number => {
+    const key = `${K},${W},${H}`;
+    let v = ppa.get(key);
+    if (v === undefined) {
+      v = expectedPitches(solved(K, W, H));
+      ppa.set(key, v);
+    }
+    return v;
+  };
   const END_OF: Record<Ev, End> = { [Ev.SO]: End.K, [Ev.BB]: End.W, [Ev.HBP]: End.H, [Ev.HR]: End.X, [Ev.S1]: End.X, [Ev.D2]: End.X, [Ev.T3]: End.X, [Ev.OUT]: End.X };
   return {
     name: 'B1',
     chainFor,
+    pitchesPerPa,
     resolve(r, rng) {
       const ev = drawEvent(r, rng);
       return { ev, pitches: samplePitches(chainFor(r), END_OF[ev], rng, opts.observe) };
