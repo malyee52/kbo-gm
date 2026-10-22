@@ -202,6 +202,79 @@ def main():
         if int(y) >= 2015:
             warn(f'특별 엔트리로 보고 새 게임에서 뺌 {y}: ' + ', '.join(by_id[i]['name'] for i in ids if i in by_id))
 
+    # ---- 일정 규칙 (schedule.json, data-src/일정규칙.csv): 시즌 자료와 경기 수·구단 수가 맞는지, 날짜가 말이 되는지
+    schedule_path = DATA / 'schedule.json'
+    if schedule_path.exists():
+        import datetime as dt
+        sched = load(schedule_path)
+        status_ok = ('확인', '조사값', '출처 갈림', '미확인', '임시값')
+
+        def day(y, md):
+            try:
+                return dt.date(y, int(md[:2]), int(md[3:]))
+            except ValueError:
+                err(f'일정 규칙 {y}: 없는 날짜 {md}')
+                return None
+
+        for y in meta['years']:
+            r = sched['years'].get(str(y))
+            if not r:
+                err(f'일정 규칙: {y}년 줄 없음')
+                continue
+            teams = load(DATA / 'seasons' / f'{y}.json')['teams']
+            if r.get('teams') != len(teams):
+                err(f'일정 규칙 {y}: 구단 수 {r.get("teams")} ≠ 시즌 자료 {len(teams)}')
+            games = {t['g'] for t in teams}
+            # 진행 중인 시즌은 아직 다 치르지 않은 구단이 있다
+            if (max(games) if y in meta.get('inProgress', []) else games) != (r['games'] if y in meta.get('inProgress', []) else {r['games']}):
+                err(f'일정 규칙 {y}: 팀당 경기 {r["games"]} ≠ 시즌 자료 {sorted(games)}')
+            if 'vsOther' in r:
+                size = Counter(t.get('league') for t in teams)
+                for t in teams:
+                    same = size[t.get('league')] - 1
+                    if r['vs'] * same + r['vsOther'] * (len(teams) - 1 - same) != r['games']:
+                        err(f'일정 규칙 {y}: 같은 리그 {r["vs"]}×{same} + 다른 리그 {r["vsOther"]}×{len(teams) - 1 - same} ≠ {r["games"]} ({t["name"]})')
+            elif r['vs'] * (len(teams) - 1) != r['games']:
+                err(f'일정 규칙 {y}: 상대별 {r["vs"]} × {len(teams) - 1} ≠ 팀당 {r["games"]}')
+            if r['unscheduled'] and r['unscheduled'] % (len(teams) - 1):
+                warn(f'일정 규칙 {y}: 미편성 {r["unscheduled"]}이 상대 수 {len(teams) - 1}의 배수가 아님')
+            op = day(y, r['opening'])
+            if op and op.weekday() != 5 and y != 2020:
+                warn(f'일정 규칙 {y}: 개막 {r["opening"]}이 토요일이 아님 ({"월화수목금토일"[op.weekday()]}요일)')
+            for k in ('endRef', 'endRef2', 'postseasonStart', 'remainingFrom', 'allStar'):
+                d = r.get(k) and day(y, r[k])
+                if d and op and d <= op:
+                    err(f'일정 규칙 {y}: {k} {r[k]}이 개막보다 이름')
+            prev = None
+            for b in r['breaks'] + r['dhBan']:
+                a, z = day(y, b['from']), day(y, b['to'])
+                if a and z and a > z:
+                    err(f'일정 규칙 {y}: 기간 {b["from"]}~{b["to"]}이 거꾸로')
+            for b in r['breaks']:
+                a, z = day(y, b['from']), day(y, b['to'])
+                if a and op and a <= op:
+                    err(f'일정 규칙 {y}: 쉬는 기간 {b["from"]}이 개막 전')
+                if prev and a and a <= prev:
+                    err(f'일정 규칙 {y}: 쉬는 기간이 겹치거나 순서가 틀림 ({b["from"]})')
+                prev = z
+            if r.get('allStar'):
+                s = day(y, r['allStar'])
+                if s and not any(day(y, b['from']) <= s <= day(y, b['to']) for b in r['breaks']):
+                    err(f'일정 규칙 {y}: 올스타 날 {r["allStar"]}이 쉬는 기간 밖')
+            if r['status'] not in status_ok:
+                err(f'일정 규칙 {y}: 확인 값 {r["status"]}')
+        f = sched.get('future')
+        if not f or f.get('from') != meta['years'][-1] + 1:
+            err(f'일정 규칙: 자료 없는 해 줄이 {meta["years"][-1] + 1}년부터가 아님')
+        else:
+            for k in ('opening', 'allStar'):
+                if not isinstance(f.get(k), dict):
+                    err(f'일정 규칙 {f["from"]}~: {k}이 요일 규칙이 아님')
+            if 'allStarBreak' not in f:
+                err(f'일정 규칙 {f["from"]}~: 올스타 휴식 규칙 없음')
+        n = Counter(r['status'] for r in sched['years'].values())
+        warn('일정 규칙: 확인 상태 ' + ', '.join(f'{k} {v}' for k, v in sorted(n.items())) + ' (data-src/일정규칙.csv)')
+
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
     for w in warnings:

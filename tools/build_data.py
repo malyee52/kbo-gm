@@ -467,6 +467,101 @@ def build_homes():
     return rows
 
 
+SCHEDULE_CSV = ROOT / 'data-src' / '일정규칙.csv'
+SCHEDULE_FRAMES = ('W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-99', 'S33-9', 'S33L2', 'S33F')
+SCHEDULE_POSTPONE = ('R1', 'R2', 'R3', 'R3c', 'R4', 'R5')
+SCHEDULE_STATUS = ('확인', '조사값', '출처 갈림', '미확인', '임시값')
+WEEKDAYS = '일월화수목금토'  # JS Date.getDay() 순서
+
+
+def build_schedule():
+    """data-src/일정규칙.csv → public/data/schedule.json: 연도별 정규시즌 일정 규칙 (일정 개편 기획안 2장).
+    한 해 한 줄 + '2027~' 줄(자료 없는 해, 날짜를 규칙으로 계산). 날짜는 'MM-DD'.
+    '2027~' 줄은 개막·올스타를 {weekday, from, to}(그 구간의 그 요일)로, 올스타 휴식을 올스타 날 기준 [앞, 뒤] 날 수로 둔다.
+    선수 구성 지문과 무관하다 (저장 호환 그대로)."""
+    def date(s, where):
+        if not re.fullmatch(r'\d\d-\d\d', s):
+            raise SystemExit(f'일정규칙.csv {where}: 날짜 형식 "{s}" (MM-DD)')
+        return s
+
+    def day_rule(s, where):
+        m = re.fullmatch(r'(.) (\d\d-\d\d)~(\d\d-\d\d)', s)
+        if not m or m.group(1) not in WEEKDAYS:
+            raise SystemExit(f'일정규칙.csv {where}: 규칙 날짜 "{s}" (예: 토 03-22~03-28)')
+        return {'weekday': WEEKDAYS.index(m.group(1)), 'from': m.group(2), 'to': m.group(3)}
+
+    def ranges(s, where):
+        out = []
+        for part in filter(None, (x.strip() for x in (s or '').split(';'))):
+            m = re.fullmatch(r'(\d\d-\d\d)~(\d\d-\d\d)', part)
+            if not m:
+                raise SystemExit(f'일정규칙.csv {where}: 기간 형식 "{part}" (MM-DD~MM-DD)')
+            out.append({'from': m.group(1), 'to': m.group(2)})
+        return out
+
+    years, future = {}, None
+    with SCHEDULE_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            key = r['연도'].strip()
+            is_future = key.endswith('~')
+            where = key
+            vs = r['상대별'].split('·')
+            row = {}
+            if r['구단수']:
+                row['teams'] = int(r['구단수'])
+            row['games'] = int(r['팀당경기'])
+            row['vs'] = int(vs[0])
+            if len(vs) > 1:
+                row['vsOther'] = int(vs[1])  # 다른 리그 상대 (양대 리그 해)
+            if r['연전틀'] not in SCHEDULE_FRAMES:
+                raise SystemExit(f'일정규칙.csv {where}: 모르는 연전틀 {r["연전틀"]}')
+            row['frame'] = r['연전틀']
+            row['opening'] = day_rule(r['개막일'], where) if is_future else date(r['개막일'], where)
+            for col, k in (('종료참고', 'endRef'), ('종료참고2', 'endRef2'), ('가을시작', 'postseasonStart'), ('잔여발표', 'remainingFrom')):
+                if r[col]:
+                    row[k] = date(r[col], where)
+            breaks = []
+            for part in filter(None, (x.strip() for x in (r['쉬는기간'] or '').split(';'))):
+                span, _, reason = part.partition(':')
+                m = re.fullmatch(r'올스타([+-]\d+)~올스타([+-]\d+)', span)
+                if m:  # 올스타 날 기준 (자료 없는 해)
+                    row['allStarBreak'] = [int(m.group(1)), int(m.group(2))]
+                    continue
+                m = re.fullmatch(r'(\d\d-\d\d)~(\d\d-\d\d)', span)
+                if not m or not reason:
+                    raise SystemExit(f'일정규칙.csv {where}: 쉬는기간 형식 "{part}" (MM-DD~MM-DD:사유)')
+                breaks.append({'from': m.group(1), 'to': m.group(2), 'reason': reason})
+            row['breaks'] = breaks
+            if r['올스타일']:
+                row['allStar'] = day_rule(r['올스타일'], where) if is_future else date(r['올스타일'], where)
+            row['allStarGamesReal'] = int(r['실제올스타경기수'] or 0)
+            if r['순연'] not in SCHEDULE_POSTPONE:
+                raise SystemExit(f'일정규칙.csv {where}: 모르는 순연 코드 {r["순연"]}')
+            row['postpone'] = r['순연']
+            row['dhBan'] = ranges(r['더블헤더금지'], where)
+            row['unscheduled'] = int(r['미편성(팀당)'] or 0)
+            if r['2연전시작']:
+                if r['2연전시작'] != '올스타':
+                    raise SystemExit(f'일정규칙.csv {where}: 2연전시작은 "올스타"만 ({r["2연전시작"]})')
+                row['twoGameFrom'] = 'allStar'
+            row['rainMid'] = r['경기중비']
+            if r['확인'] not in SCHEDULE_STATUS:
+                raise SystemExit(f'일정규칙.csv {where}: 확인 값 "{r["확인"]}" (가능: {", ".join(SCHEDULE_STATUS)})')
+            row['status'] = r['확인']
+            if is_future:
+                row['from'] = int(key[:-1])
+                future = row
+            else:
+                years[key] = row
+    (OUT / 'schedule.json').write_text(json.dumps({
+        'version': 1,
+        'note': '연도별 정규시즌 일정 규칙 (일정 개편 기획안 2장). 출처·확인 상태·비고는 data-src/일정규칙.csv.',
+        'years': years,
+        'future': future,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return years, future
+
+
 def build_military(profiles, out_dir):
     """실제 병역 자료 → {선수 ID: {served?, exempt?}}.
     profiles: 선수 ID → 2026 프로필 경력 문자열. 시즌 기록과 선수 마스터는 out_dir의 JSON에서 읽는다 (같은 빌드에서 만든 것).
@@ -1015,6 +1110,10 @@ def main():
         # 연고지 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         print(f'연고지 {len(build_homes())}행')
         return
+    if '--schedule-only' in sys.argv:
+        # 일정 규칙 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        print(f'일정 규칙 {len(build_schedule()[0])}개 연도 + 자료 없는 해 규칙')
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1266,6 +1365,7 @@ def main():
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
     build_homes()
+    build_schedule()
     build_ppa()
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
