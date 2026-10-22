@@ -31,6 +31,7 @@ import { DataTable, Delta, GradeBar, Missing, PotCell, ScoutNote, usePotentialOf
 import type { Column } from '../table';
 import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
+import { addToCompare, addToDraft, COMPARE_MAX, deskOf, tradeBlockReason, updateDesk, useDesk } from '../tradeDesk';
 
 type Tab = 'sum' | 'abil' | 'rec' | 'deal' | 'pit';
 const TABS: { key: Tab; label: string }[] = [
@@ -175,8 +176,21 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
   const pot = usePotential(p);
   const potText = potentialText(pot);
   const c = lp?.contract;
-  const tradeBlock = lp?.foreign ? '외국인 선수는 트레이드할 수 없습니다' : session.phase !== 'season' ? '오프시즌 중에는 트레이드할 수 없습니다' : null;
+  const tradeBlock = tradeBlockReason(session, p);
   const move = () => { session.move(p, !registered); changed(); };
+  // 트레이드 작업대와 같은 비교 칸·제안판 (ui/tradeDesk.ts)
+  const desk = useDesk(session);
+  const [deskNote, setDeskNote] = useState<string | null>(null);
+  useEffect(() => setDeskNote(null), [p.idx]);
+  const inCompare = desk.compare.includes(p.idx);
+  const toCompare = () => setDeskNote(addToCompare(session, p.idx) ?? `비교 칸에 넣었습니다 (${deskOf(session).compare.length}/${COMPARE_MAX}).`);
+  const toDraft = () => {
+    const err = addToDraft(session, p);
+    if (err) { setDeskNote(err); return; }
+    updateDesk(session, () => ({ mode: 'deal', step: 'offer' }));
+    go('trade');
+    onClose();
+  };
   return (
     <>
       <p className="pd-line small">
@@ -189,10 +203,16 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
         {mine && session.canManage && <button type="button" className="ghost small-btn" onClick={move}>{registered ? '2군으로 내리기' : '1군에 등록하기'}</button>}
         {mine && session.phase === 'season' && !session.done && <ReleaseButton p={p} onDone={onClose} />}
         {!mine && p.teamIdx >= 0 && (
-          <button type="button" className="ghost small-btn" disabled={!!tradeBlock} title={tradeBlock ?? undefined} onClick={() => { go('trade'); onClose(); }}>트레이드 화면으로</button>
+          <button type="button" className="ghost small-btn" disabled={!!tradeBlock} title={tradeBlock ?? undefined} onClick={toDraft}>트레이드에 넣기</button>
+        )}
+        {p.teamIdx >= 0 && (
+          inCompare
+            ? <button type="button" className="ghost small-btn" onClick={() => { updateDesk(session, () => ({ mode: 'deal', step: 'compare' })); go('trade'); onClose(); }}>비교 보기 ({desk.compare.length}/{COMPARE_MAX})</button>
+            : <button type="button" className="ghost small-btn" onClick={toCompare}>비교에 넣기</button>
         )}
         {!mine && tradeBlock && p.teamIdx >= 0 && <span className="muted small">{tradeBlock}</span>}
       </div>
+      {deskNote && <p className="muted small" role="status">{deskNote}</p>}
     </>
   );
 }
@@ -206,7 +226,8 @@ function usePotential(p: SimPlayer): PotentialView {
 
 // ---- 리그 대비 (그 해 리그, 규정 이상 선수)
 
-function useLeague() {
+/** 그 해 리그 대비 (규정 이상 선수). 트레이드 비교 칸도 같은 기준을 쓴다 (screens/Trade.tsx) */
+export function useLeague() {
   const { session, version } = useGame();
   return useMemo(() => {
     const s = session.season;

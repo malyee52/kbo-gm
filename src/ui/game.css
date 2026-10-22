@@ -425,7 +425,43 @@ dialog.player::backdrop { background: var(--scrim); backdrop-filter: blur(2px); 
 .team-grid.compact { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
 .team-grid.compact .team-card { padding: 8px 10px 8px 14px; font-weight: 500; }
 .team-grid.compact .team-card::before { width: 4px; }
-.trade-bar { position: sticky; top: 68px; z-index: 2; }
+/* 트레이드 작업대 (U2-5): 단계 줄, 후보 거르기, 비교 칸, 바뀌는 것, 협상 답 */
+.trade-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.trade-steps button { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 14px 4px 8px; min-height: 30px; font-size: 13px; font-weight: 600;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line-strong); box-shadow: none; }
+.trade-steps button .n { font-size: 15px; }
+.trade-steps button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.trade-steps button:disabled { color: var(--faint); background: var(--panel-2); }
+.agree-tag { background: var(--accent-soft); color: var(--fg); border-color: var(--line-strong); }
+.cand-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.cand-filters select { margin-left: 4px; }
+.cand-act { display: inline-flex; gap: 4px; white-space: nowrap; }
+.cand-act .small-btn { padding: 2px 8px; min-height: 26px; font-size: 12px; }
+.dt tr.blocked td { color: var(--faint); }
+.dt tr.blocked td .link { color: var(--muted); }
+.dt tr.in-cmp td, .dt-scroll tr.in-cmp td:first-child { background: var(--panel-2); }
+.dt tr.in-cmp td:first-child { box-shadow: inset 3px 0 0 var(--fg); }
+.cmp-slots { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); }
+.cmp-slot { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--panel); font-size: 13px; }
+.cmp-slot.empty { color: var(--faint); border-style: dashed; background: transparent; }
+.cmp-slots > button:last-child { margin-left: auto; }
+table.cmp { table-layout: fixed; min-width: 100%; }
+table.cmp th, table.cmp td { vertical-align: top; white-space: normal; overflow-wrap: anywhere; }
+table.cmp tr > :first-child { width: 6.5em; }
+table.cmp tbody th { background: transparent; word-break: keep-all; overflow-wrap: normal; }
+table.cmp thead th + th { min-width: 150px; }
+table.cmp td.best { font-weight: 800; }
+table.cmp td.best .grade { outline: 1.5px solid var(--fg); outline-offset: 1px; }
+table.cmp td .small-btn + .small-btn { margin-left: 4px; }
+.cmp-starter { margin: 0; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--panel-2); }
+.deal-list li { padding: 2px 0; }
+.impact { border-top: 1px solid var(--line); padding-top: 6px; }
+.impact > summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+.impact-body p { margin: 4px 0; }
+.impact-body .chg { font-weight: 700; }
+.warn-line { color: var(--warn-fg); background: var(--warn-bg); padding: 2px 8px; border-radius: 6px; }
+.talk-reply { margin: 0; padding: 10px 14px; border-left: 3px solid var(--line-strong); background: var(--panel-2); border-radius: var(--radius-sm); }
+.sent-list li { padding: 2px 0; }
 .trade-sides { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: start; }
 .trade-sides h3 { margin-top: 0; }
 .trade-arrow { font-size: 22px; color: var(--faint); padding-top: 16px; }
@@ -471,7 +507,15 @@ dialog.player::backdrop { background: var(--scrim); backdrop-filter: blur(2px); 
   .start-hero { padding: 22px 20px; border-radius: 12px; }
   .start-hero h1 { font-size: 26px; }
   .start-grid { grid-template-columns: minmax(0, 1fr); }
-  .trade-bar { position: static; }
+  .sticky-actions { position: sticky; bottom: calc(118px + env(safe-area-inset-bottom)); z-index: 3; background: var(--panel); padding: 8px 0; border-top: 1px solid var(--line); }
+  table.cmp { table-layout: auto; width: max-content; }
+  table.cmp thead th + th { min-width: 0; width: 34vw; }
+  table.cmp td { width: 34vw; }
+  table.cmp tr > :first-child { width: 5.5em; }
+  .trade-steps { flex-wrap: nowrap; gap: 4px; }
+  .trade-steps button { padding: 4px 8px 4px 6px; gap: 3px; font-size: 12.5px; }
+  .trade-steps button .n { font-size: 13px; }
+  .cmp-slots > button:last-child { margin-left: 0; }
   .trade-sides { grid-template-columns: 1fr; }
   .trade-arrow { display: none; }
   .save-item { grid-template-columns: 1fr; }
