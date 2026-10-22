@@ -282,6 +282,11 @@ export interface EngineParams {
    */
   positionWeights: [number, number, number];
   /**
+   * 이력이 짧은 선수 (2026-10-22 사용자 "박석민은 3루 시작이 맞지"): 시작 앞 3시즌 하드힛 타석 합이 이보다 적으면 (0보다 크고)
+   * 2안 대신 예전 규칙 (자료집 주 포지션 → 그 시즌 포지션). 임시값
+   */
+  shortHistoryPa: number;
+  /**
    * 수비수 한 명의 수비 1런당 팀 인플레이 안타가 아웃으로 바뀌는 몫 (battedball.ts: 그 수비수에게 간 타구에서만 바꾼다).
    * 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값). 엔진 1의 팀 수비 합(T5)과 같은 크기
    */
@@ -527,6 +532,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   },
 
   positionWeights: [1, 0.7, 0.5],
+  shortHistoryPa: 100,
   defenseHitPerRun: 1 / 880,
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
