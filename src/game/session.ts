@@ -60,7 +60,7 @@ import {
 } from '../league/finance';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
-  ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
+  ACHIEVEMENTS, aiPotential, applyCapSanctions, capFloorShorts, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
@@ -214,6 +214,8 @@ export type GameAction =
   | { year: number; type: 'hire-coach'; id: string }
   | { year: number; type: 'posting'; id: string; accept: boolean }
   | { year: number; type: 'extend'; id: string; years: number }
+  /** 프랜차이즈 예외 선수 고르기 (2026~ 샐러리캡, league/salary.ts franchiseTag). null = 자동 지정 */
+  | { year: number; type: 'franchise-tag'; id: string | null }
   | { year?: number; day: number; type: 'convert'; id: string }
   /** 시즌 중 방출(웨이버 공시)·시장 선수 영입 (league/market.ts) */
   | { year: number; day: number; type: 'release-in'; id: string }
@@ -2492,6 +2494,11 @@ export class GameSession {
           if (!mine && !x.pickDrop) continue;
           this.addNews(0, 'owner', `${this.league.teams[x.team].name}: 샐러리캡 ${x.strike}회 연속 초과 (초과 ${(x.over / 10000).toFixed(1)}억 원). 제재금 ${(x.fine / 10000).toFixed(1)}억 원${x.pickDrop ? ', 이번 시즌 뒤 드래프트 1라운드 지명권 9단계 하락' : ''}.`);
         }
+        // 샐러리캡 하한 (2027~): 미달 제재는 확인하지 못해 알림만 (owner.ts capFloorShorts)
+        for (const x of capFloorShorts(L, L.year)) {
+          if (x.team !== this.teamIdx) continue;
+          this.addNews(0, 'owner', `샐러리캡 하한 미달: 캡 대상 연봉 ${(x.pay / 10000).toFixed(1)}억 원으로 하한 ${(x.floor / 10000).toFixed(1)}억 원보다 ${((x.floor - x.pay) / 10000).toFixed(1)}억 원 적습니다 (하한 미달 제재는 확인 전이라 게임에서는 알림만 합니다).`);
+        }
         this.setSeasonGoal();
         return res;
       }
@@ -2528,6 +2535,7 @@ export class GameSession {
       case 'hire-coach': res = this.applyHireCoach(a.id); break;
       case 'posting': res = Off.answerPosting(L, off!, a.id, a.accept); break;
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
+      case 'franchise-tag': res = Off.setFranchiseTagByUser(L, off!, a.id); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
@@ -3311,6 +3319,7 @@ export class GameSession {
 
   /** 우리 선수의 포스팅(해외 진출) 요청에 답한다 */
   answerPosting(id: string, accept: boolean) { return this.dispatchOff({ year: this.year, type: 'posting', id, accept }); }
+  setFranchiseTag(id: string | null) { return this.dispatchOff({ year: this.year, type: 'franchise-tag', id }); }
 
   /** 비FA 다년 계약 (오프시즌, 요구 연봉 그대로) */
   extend(id: string, years: number) { return this.dispatchOff({ year: this.year, type: 'extend', id, years }); }

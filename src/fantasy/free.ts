@@ -20,7 +20,7 @@ import { currentRuns } from '../ai/value';
 import { asSim } from '../league/growth';
 import { changedRules, clampRule, foreignPostingOn, ruleDate, ruleOf, RULE_DEFS, type RuleKey } from '../league/rules';
 import { ownedPicks, pickOwner, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../league/picks';
-import { capPayroll, salaryCap } from '../league/salary';
+import { salaryCap, teamCapPayroll } from '../league/salary';
 import { cashOf } from '../league/finance';
 import { pickTradeAllowed } from '../league/difficulty';
 import { STAGES, STAGE_LABEL } from '../league/offseason';
@@ -154,7 +154,7 @@ export function rulesContext(g: GameSession, store: Store): string {
   lines.push(`- 외국인: 보유 ${fr.regular}명${fr.asia ? ` + 아시아쿼터 ${fr.asia}명` : ''}, 신규 계약 상한 ${dollar(ruleOf(L, 'foreignNewCap'))}, 아시아쿼터 신규 상한 ${dollar(ruleOf(L, 'asiaNewCap'))}, 총액 상한 ${dollar(ruleOf(L, 'foreignTotalCap'))}, 시즌 중 교체 ${ruleOf(L, 'foreignSwaps')}번. 외국인 선수는 구단 간 트레이드 불가`);
   lines.push(`- 외국인 포스팅: ${foreignPostingOn(L) ? '켜짐 (KBO 외국인 선수도 해외 구단 요청으로 포스팅, 원소속 구단이 이적료를 받음)' : '꺼짐 (실제 KBO처럼 없음. 켜려면 rule foreignPosting 1)'}`);
   const cap = salaryCap(year, L);
-  lines.push(`- 샐러리캡: ${cap === null ? (ruleOf(L, 'capScale') <= 0 ? '폐지됨' : '아직 없음 (2023년 도입)') : `${won(cap)} (연봉 상위 ${ruleOf(L, 'capTopN')}명, 외국인·신인 제외). 우리 구단 지금 ${won(capPayroll(L.players, g.teamIdx, ruleOf(L, 'capTopN')))}. 초과 제재금 배율 ${ruleOf(L, 'capFineScale')}, 3회 초과 때 1라운드 지명 ${ruleOf(L, 'capPickDrop')}자리 강등`}`);
+  lines.push(`- 샐러리캡: ${cap === null ? (ruleOf(L, 'capScale') <= 0 ? '폐지됨' : '아직 없음 (2023년 도입)') : `${won(cap)} (연봉 상위 ${ruleOf(L, 'capTopN')}명, 외국인·신인 제외). 우리 구단 지금 ${won(teamCapPayroll(L, g.teamIdx, L.year))}. 초과 제재금 배율 ${ruleOf(L, 'capFineScale')}, 3회 초과 때 1라운드 지명 ${ruleOf(L, 'capPickDrop')}자리 강등`}`);
   lines.push(`- 트레이드: 한쪽 ${ruleOf(L, 'maxPerSide')}명까지, 지명권 ${pickTradeAllowed(L, g.year, 2020) ? `한 번에 ${ruleOf(L, 'maxPicksPerTrade')}장까지 거래 가능 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지)` : '거래 불가 (이 시대 규정)'}. 현금 트레이드 가능`);
   lines.push(`- FA: 오프시즌 외부 FA ${ruleOf(L, 'maxFaSignings')}명까지. 비FA 다년 계약 최대 ${ruleOf(L, 'extMaxYears')}년`);
   lines.push(`- 선수단: 소속 정원 ${ruleOf(L, 'orgLimit')}명, 육성선수 ${ruleOf(L, 'devLimit')}명 (${ruleOf(L, 'devMaxAge')}세 이하). 포스트시즌 연장 ${ruleOf(L, 'postseasonMaxInnings')}회까지`);

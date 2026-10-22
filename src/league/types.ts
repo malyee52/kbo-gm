@@ -251,6 +251,11 @@ export interface LeagueState {
   owner?: OwnerState;
   /** 구단별 샐러리캡 연속 초과 횟수 */
   capStrikes?: number[];
+  /**
+   * 플레이어가 고른 프랜차이즈 예외 선수 id (구단 색인, salary.ts franchiseTag). 없거나 자격이 없어지면 연봉 최고 자격 선수를 자동 지정한다.
+   * 2026-10-22부터, 예전 저장에는 없다 (모두 자동 지정)
+   */
+  franchiseTags?: (string | null)[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
   /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */

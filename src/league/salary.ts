@@ -6,6 +6,7 @@
 import { faServiceNeeded } from './eras';
 import type { LeagueState, LeaguePlayer, School } from './types';
 import { ruleOf } from './rules';
+import { seasonsWith } from './stadium';
 
 /** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
 export const MIN_SALARY = 3000;
@@ -52,13 +53,73 @@ export function priceIndex(year: number): number {
 /** 샐러리캡 대상: 외국인·신인을 뺀 구단별 연봉 상위 40명 합계 (출처 확인) */
 export const CAP_TOP_N = 40;
 
-export function capPayroll(players: LeaguePlayer[], team: number, topN = CAP_TOP_N): number {
+/** 샐러리캡에 들어가는 선수: 소속 구단의 국내 선수 중 신인 계약·복무 중이 아닌 선수 */
+function capCounted(p: LeaguePlayer, team: number): boolean {
+  return p.team === team && !p.foreign && p.contract.kind !== 'rookie' && p.military?.state !== 'serving';
+}
+
+/** 구단의 캡 대상 연봉 합계. tagged = 프랜차이즈 예외 선수 id (연봉의 FRANCHISE_TAG_SHARE만 넣는다) */
+export function capPayroll(players: LeaguePlayer[], team: number, topN = CAP_TOP_N, tagged?: string | null): number {
   return players
-    .filter((p) => p.team === team && !p.foreign && p.contract.kind !== 'rookie' && p.military?.state !== 'serving')
-    .map((p) => p.contract.salary)
+    .filter((p) => capCounted(p, team))
+    .map((p) => (p.id === tagged ? Math.round(p.contract.salary * FRANCHISE_TAG_SHARE) : p.contract.salary))
     .sort((a, b) => b - a)
     .slice(0, topN)
     .reduce((a, b) => a + b, 0);
+}
+
+// ---- 2026 샐러리캡 제도 개편 (기획안 리그 규칙 변경 1-7, D23·D24. 값은 웹 조사값이고 자료집 제도연표로는 아직 확인하지 않았다)
+
+/** 프랜차이즈 예외(구단당 1명)가 시작되는 해 (조사값) */
+export const FRANCHISE_TAG_FROM = 2026;
+/** 프랜차이즈 예외 자격: 같은 구단에서 뛴 시즌 수 (조사값) */
+export const FRANCHISE_TAG_SEASONS = 7;
+/** 프랜차이즈 예외 선수의 연봉 중 캡에 넣는 비율 (조사값) */
+export const FRANCHISE_TAG_SHARE = 0.5;
+/** 샐러리캡 하한이 시작되는 해와 그 해 값 (만 원, 조사값. 내부 연봉과 같은 2026년 물가 값) */
+export const CAP_FLOOR_FROM = 2027;
+export const CAP_FLOOR_2027 = 606538;
+
+/** 프랜차이즈 예외 자격: 그 구단 소속 캡 대상 선수이고 그 구단에서 FRANCHISE_TAG_SEASONS시즌 이상 뛰었다 */
+export function franchiseTagEligible(league: Pick<LeagueState, 'teams'>, p: LeaguePlayer, team: number): boolean {
+  return capCounted(p, team) && seasonsWith(p, league, team) >= FRANCHISE_TAG_SEASONS;
+}
+
+/**
+ * 그 해 캡 계산의 프랜차이즈 예외 선수 (없으면 null). 캡이 없거나 FRANCHISE_TAG_FROM 전이면 null.
+ * 플레이어가 고른 선수(league.franchiseTags)가 아직 자격이 있으면 그 선수, 아니면 자격 선수 중 연봉 최고를 자동 지정한다
+ * (AI 구단은 늘 자동 지정. 난수 없이 연봉 → id 순)
+ */
+export function franchiseTag(league: Pick<LeagueState, 'teams' | 'players' | 'rules' | 'franchiseTags'>, team: number, year: number): LeaguePlayer | null {
+  if (year < FRANCHISE_TAG_FROM || salaryCap(year, league) === null) return null;
+  const cands = league.players.filter((p) => franchiseTagEligible(league, p, team));
+  const chosen = league.franchiseTags?.[team];
+  if (chosen) {
+    const c = cands.find((p) => p.id === chosen);
+    if (c) return c;
+  }
+  let best: LeaguePlayer | null = null;
+  for (const p of cands) if (!best || p.contract.salary > best.contract.salary || (p.contract.salary === best.contract.salary && p.id < best.id)) best = p;
+  return best;
+}
+
+/** 그 해 규칙으로 센 구단의 캡 대상 연봉 합계 (계산 인원·프랜차이즈 예외 포함) */
+export function teamCapPayroll(league: Pick<LeagueState, 'teams' | 'players' | 'rules' | 'franchiseTags'>, team: number, year: number): number {
+  return capPayroll(league.players, team, ruleOf(league, 'capTopN'), franchiseTag(league, team, year)?.id);
+}
+
+/** 이 선수가 구단 캡 합계에 넣는 연봉 (예외 선수는 일부만, 캡 대상이 아니면 0). 재계약 검사에서 지금 몫을 뺄 때 쓴다 */
+export function capShareOf(league: Pick<LeagueState, 'teams' | 'players' | 'rules' | 'franchiseTags'>, team: number, year: number, p: LeaguePlayer): number {
+  if (p.team !== team) return 0;
+  return franchiseTag(league, team, year)?.id === p.id ? Math.round(p.contract.salary * FRANCHISE_TAG_SHARE) : p.contract.salary;
+}
+
+/** 샐러리캡 하한 (만 원). 2027년 발표값, 2028년부터는 캡과 같은 비율로 오른다 (임시값). 캡이 없거나 2027년 전이면 null */
+export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
+  if (year < CAP_FLOOR_FROM) return null;
+  const cap = salaryCap(year, league);
+  if (cap === null) return null;
+  return Math.round(CAP_FLOOR_2027 * (cap / CAP[CAP_FLOOR_FROM]));
 }
 
 /**

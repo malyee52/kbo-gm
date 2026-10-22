@@ -8,8 +8,10 @@ import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
-  capPayroll, dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, isPreGrade, MIN_SALARY, salaryCap,
+  dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS,
+  FRANCHISE_TAG_SHARE, isPreGrade, MIN_SALARY, salaryCap, salaryFloor, teamCapPayroll,
 } from '../../league/salary';
+import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
@@ -122,6 +124,7 @@ export function Offseason() {
           <div className="actions"><button type="button" onClick={() => void open()} disabled={busy}>{busy ? '준비 중' : `${off.year + 1} 시즌 개막`}</button></div>
         </section>
       )}
+      {off.stage === 'ready' && <CapRulesPanel act={act} />}
       {off.stage === 'ready' && <RulePreview year={off.year + 1} />}
       {off.stage !== 'ready' && <ExtensionPanel act={act} />}
       </div>
@@ -377,11 +380,12 @@ function CapLine() {
   const { session } = useGame();
   const won = useWon();
   const cap = salaryCap(session.year + 1, session.league);
-  const pay = capPayroll(session.league.players, session.teamIdx, ruleOf(session.league, 'capTopN'));
+  const floor = salaryFloor(session.year + 1, session.league);
+  const pay = teamCapPayroll(session.league, session.teamIdx, session.year + 1);
   const size = session.league.players.filter((p) => p.team === session.teamIdx).length;
   return (
     <p className="muted small">
-      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 40명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''} · 소속 선수 {size}/{ruleOf(session.league, 'orgLimit')}명
+      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 {ruleOf(session.league, 'capTopN')}명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''}{floor ? ` · 하한 ${won(floor)}` : ''} · 소속 선수 {size}/{ruleOf(session.league, 'orgLimit')}명
     </p>
   );
 }
@@ -1003,6 +1007,51 @@ function OffLog() {
             <li key={k} className={l.mine ? 'news-season' : ''}><span className="muted small">{LOG_LABEL[l.stage]}</span><span>{l.text}</span></li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/** 개막 준비: 2026년 샐러리캡 개편 (프랜차이즈 예외 고르기, 2027~ 하한). 캡이 없거나 2026년 전이면 숨긴다 */
+function CapRulesPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const won = useWon();
+  const L = session.league;
+  const me = session.teamIdx;
+  const year = session.year + 1;
+  const cap = salaryCap(year, L);
+  if (cap === null || year < FRANCHISE_TAG_FROM) return null;
+  const floor = salaryFloor(year, L);
+  const pay = teamCapPayroll(L, me, year);
+  const tag = franchiseTag(L, me, year);
+  const chosen = L.franchiseTags?.[me] ?? null;
+  const cands = L.players.filter((p) => franchiseTagEligible(L, p, me)).sort((a, b) => b.contract.salary - a.contract.salary || a.id.localeCompare(b.id));
+  return (
+    <section className="panel">
+      <h2>{year} 샐러리캡 <StatusBadge status="research" /></h2>
+      <p className="muted small">
+        캡 대상 연봉 {won(pay)} / 상한 {won(cap)}{floor ? ` · 하한 ${won(floor)}` : ''}.
+        초과 제재: 1회 30%, 2회 연속 50%, 3회 연속부터 100%와 1라운드 지명권 9단계 하락 (연속 횟수는 2023년부터 이어 셈, 임시값).
+      </p>
+      {floor !== null && pay < floor && (
+        <p className="error-text small">하한보다 {won(floor - pay)} 적습니다. 하한 미달 제재는 확인 전이라 게임에서는 개막 때 알림만 합니다.</p>
+      )}
+      <h3>프랜차이즈 예외</h3>
+      <p className="muted small">
+        우리 구단에서 {FRANCHISE_TAG_SEASONS}시즌 이상 뛴 국내 선수 1명의 연봉은 {FRANCHISE_TAG_SHARE * 100}%만 캡에 넣습니다.
+        고르지 않으면 자격 선수 중 연봉이 가장 높은 선수로 자동 지정합니다.
+      </p>
+      {cands.length === 0 ? <p className="muted small">자격 선수가 없습니다.</p> : (
+        <label className="inline">
+          <span>예외 선수</span>
+          <select value={chosen && cands.some((p) => p.id === chosen) ? chosen : ''}
+            onChange={(e) => act(session.setFranchiseTag(e.target.value || null))}>
+            <option value="">자동 지정{tag && !(chosen && cands.some((p) => p.id === chosen)) ? ` (${tag.name})` : ''}</option>
+            {cands.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} · {seasonsWith(p, L, me)}시즌 · {won(p.contract.salary)}</option>
+            ))}
+          </select>
+        </label>
       )}
     </section>
   );

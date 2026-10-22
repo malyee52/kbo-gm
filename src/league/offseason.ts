@@ -26,9 +26,9 @@ import {
 } from './careers';
 import { foreignName, josa, koreanName } from './names';
 import {
-  capPayroll, COMPENSATION, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
+  capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
   FA_RE_ELIGIBLE, foreignSalary, marketSalary, MIN_SALARY, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
-  SERVICE_SHARE, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
+  SERVICE_SHARE, salaryFloor, teamCapPayroll, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
@@ -611,7 +611,7 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);
-  if (limit !== null && capPayroll(league.players, off.userTeam, ruleOf(league, 'capTopN')) - p.contract.salary + salary > limit) return { ok: false, message: '이 계약을 하면 샐러리캡 상한을 넘습니다.' };
+  if (limit !== null && teamCapPayroll(league, off.userTeam, off.year + 1) - capShareOf(league, off.userTeam, off.year + 1, p) + salary > limit) return { ok: false, message: '이 계약을 하면 샐러리캡 상한을 넘습니다.' };
   signExtension(league, off, p, salary, years);
   log(off, 'salary', `${p.name}, 비FA 다년 계약 ${years}년 (연 ${(salary / 10000).toFixed(1)}억 원, 계약금 ${(bonus / 10000).toFixed(1)}억 원)`, true, true);
   return { ok: true, message: `${p.name}과(와) ${years}년 다년 계약을 맺었습니다.` };
@@ -845,7 +845,7 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
   if (limit !== null) {
     const p = league.players.find((x) => x.id === id)!;
     const others = Object.entries(off.fa.userOffers).filter(([k]) => k !== id).reduce((s, [, o]) => s + o.salary, 0);
-    const base = capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (p.team === t ? p.contract.salary : 0);
+    const base = teamCapPayroll(league, t, off.year + 1) - capShareOf(league, t, off.year + 1, p);
     if (base + others + salary > limit) {
       const cap = salaryCap(off.year + 1, league);
       const what = cap === null || limit < cap ? '구단 예산' : '샐러리캡';
@@ -885,7 +885,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       const home = t === e.from;
       if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
       const base = e.ask * FA_AI_OFFER[round - 1];
-      if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + base > limits[t]!) continue;
+      if (limits[t] !== null && teamCapPayroll(league, t, off.year + 1) - (home ? capShareOf(league, t, off.year + 1, p) : 0) + base > limits[t]!) continue;
       if (!canPayFaBonus(league, t, signingBonus(base * 1.15, e.years), off.year + 1)) continue; // 계약금: 자금 + 남은 모기업 지원 한도
       const gain = signingGain(view, t, sp, e.years, tendency[t], home);
       const comp = home || e.returnee ? 0 : COMPENSATION[e.grade] * e.prevSalary;
@@ -938,7 +938,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       const worth = marketSalary(gain / FA_WILLINGNESS) - (home ? 0 : COMPENSATION[e.grade] * e.prevSalary);
       if (!home && worth < MIN_SALARY) continue;
       const salary = Math.max(MIN_SALARY, Math.round(Math.min(e.ask * 0.8, worth)));
-      if (limits[t] !== null && capPayroll(league.players, t, ruleOf(league, 'capTopN')) - (home ? p.contract.salary : 0) + salary > limits[t]!) continue;
+      if (limits[t] !== null && teamCapPayroll(league, t, off.year + 1) - (home ? capShareOf(league, t, off.year + 1, p) : 0) + salary > limits[t]!) continue;
       if (!canPayFaBonus(league, t, signingBonus(salary, 1), off.year + 1)) continue;
       if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years: 1 };
     }
@@ -1925,6 +1925,48 @@ function finishSalary(league: LeagueState, off: OffseasonState): void {
   }
 }
 
+/** 플레이어 구단의 프랜차이즈 예외 선수 고르기 (2026~, salary.ts franchiseTag). id = null이면 자동 지정(연봉 최고 자격 선수)으로 되돌린다 */
+export function setFranchiseTagByUser(league: LeagueState, off: OffseasonState, id: string | null): OfferCheck {
+  const year = off.year + 1;
+  if (franchiseTag(league, off.userTeam, year) === null && id !== null) return { ok: false, message: `프랜차이즈 예외는 ${FRANCHISE_TAG_FROM}년 샐러리캡부터, 자격 선수가 있을 때만 고를 수 있습니다.` };
+  if (id !== null) {
+    const p = league.players.find((x) => x.id === id);
+    if (!p || !franchiseTagEligible(league, p, off.userTeam)) return { ok: false, message: `우리 구단에서 ${FRANCHISE_TAG_SEASONS}시즌 이상 뛴 국내 선수(신인 계약·복무 중 제외)만 고를 수 있습니다.` };
+  }
+  league.franchiseTags ??= new Array(league.teams.length).fill(null);
+  league.franchiseTags[off.userTeam] = id;
+  const now = franchiseTag(league, off.userTeam, year);
+  return { ok: true, message: now ? `${now.name}을(를) 프랜차이즈 예외로 정했습니다 (연봉의 ${FRANCHISE_TAG_SHARE * 100}%만 캡에 산정).` : '프랜차이즈 예외 지정을 비웠습니다.' };
+}
+
+/**
+ * AI 구단의 샐러리캡 하한(2027~) 맞추기: 오프시즌 끝에 다음 시즌 캡 대상 합계가 하한보다 적으면
+ * 이번에 재계약한 국내 보류 선수(프랜차이즈 예외 선수 제외)의 연봉을 같은 비율로 올려 모자란 만큼 채운다 (임시 규칙, 난수 없음).
+ * 플레이어 구단은 오프시즌 화면과 개막 소식에서 경고만 한다
+ */
+function aiMeetFloor(league: LeagueState, off: OffseasonState): void {
+  const year = off.year + 1;
+  const floor = salaryFloor(year, league);
+  if (floor === null) return;
+  for (let t = 0; t < league.teams.length; t++) {
+    if (t === off.userTeam || isFuturesTeam(league, t, year)) continue;
+    const before = teamCapPayroll(league, t, year);
+    // 올린 선수가 상위 계산 인원 안팎을 오가면 한 번에 다 채우지 못할 수 있어 몇 번 되풀이한다
+    for (let k = 0; k < 5; k++) {
+      const short = floor - teamCapPayroll(league, t, year);
+      if (short <= 0) break;
+      const tag = franchiseTag(league, t, year)?.id;
+      const ps = league.players.filter((p) => p.team === t && !p.foreign && !isServing(p) && p.id !== tag
+        && p.contract.kind === 'reserve' && p.contract.until === year);
+      const sum = ps.reduce((s, p) => s + p.contract.salary, 0);
+      if (sum <= 0) break;
+      for (const p of ps) p.contract = { ...p.contract, salary: Math.ceil(p.contract.salary * (1 + short / sum)) };
+    }
+    const after = teamCapPayroll(league, t, year);
+    if (after > before) log(off, 'salary', `${league.teams[t].name}: 샐러리캡 하한(${wonText(floor)})에 맞춰 보류 선수 연봉을 올렸습니다 (합계 +${wonText(after - before)})`, false);
+  }
+}
+
 // ---- 정원 정리
 
 /** 소속 인원 (정원 68명 대상). 복무 중인 선수(군 보류)는 세지 않는다 */
@@ -2303,6 +2345,7 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
       releaseMarket(league, off, store, params);
       aiDevMarket(league, off);
       aiSignUnsignedFa(league, off, store, params);
+      aiMeetFloor(league, off);
       off.stage = 'ready';
       return;
     case 'ready':
