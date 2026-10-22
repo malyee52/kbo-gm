@@ -1,13 +1,15 @@
 // 선수단: 1군·2군 명단과 엔트리 이동. 라인업·로테이션은 AI 감독이 1군 안에서 정한다.
 // 2026-10-12 개편: 1군/2군을 탭으로 나눠 한 번에 한 표만, 줄을 누르면 오른쪽에 선수 요약(좁은 화면은 바로 상세 창).
+// 2026-10-22 UI 대개편 2차: 기용(자리·보직·타순)과 엔트리 이동은 전력 > 기용 보드(LineupBoard.tsx)에서 묶음으로 검토해 적용한다.
+// 이 화면은 보기와 육성선수 정식 등록만 한다.
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar } from './PlayerDetail';
 import { seasonWar } from '../../league/awards';
 import { runsGrade } from '../grades';
-import { defenseAt, defenseGrade, fieldPosOf, LINEUP_SLOTS, type SimPlayer, type Slot } from '../../engine';
+import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
-import { PITCHER_ROLE_LABEL, type EntryCheck, type PitcherRole } from '../../game/session';
+import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
 import {
   babip, bbPct, bbPerK, fip, int0, iso, kPct, leagueBase, lobPct, pct1, per9, pitBabip, pitBbPct, pitKPct, sbPct, woba, wraa, wrcPlus,
   type LeagueBase,
@@ -44,15 +46,14 @@ interface Column {
 }
 
 
-/** board: 전력 > 기용 보드 (2026-10-22 UI 대개편 1차). 지금은 1군 능력·상태 표의 '역할' 칸과 타순으로 정한다 */
-export function Roster({ board = false }: { board?: boolean }) {
-  const { session, grades, changed, version, openPlayer } = useGame();
+export function Roster() {
+  const { session, grades, changed, version, openPlayer, go } = useGame();
   const [kind, setKind] = useState<Kind>('hit');
   const [inFirst, setInFirst] = useState(true);
   const [sel, setSel] = useState<number | null>(null);
   const [sort, setSort] = useState<SortKey>('value');
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
-  const [page, setPageState] = useState<Page>(board ? 'ability' : savedPage);
+  const [page, setPageState] = useState<Page>(savedPage);
   const setPage = (v: Page) => {
     setPageState(v);
     try { localStorage.setItem(PAGE_KEY, v); } catch { /* 기억하지 못해도 화면은 그대로 */ }
@@ -86,55 +87,6 @@ export function Roster({ board = false }: { board?: boolean }) {
   const foreign = first.filter((p) => p.foreign).length;
   const nPit = first.filter((p) => p.isPitcher).length;
 
-  const move = (p: SimPlayer, up: boolean) => {
-    const res = session.move(p, up);
-    setMsg({ ...res, who: res.errors.length ? undefined : `${p.name} ${up ? '1군 등록' : '2군으로 내림'}` });
-    changed();
-  };
-
-  const toggleAuto = () => {
-    if (view.manual) {
-      session.setEntry(null);
-      setMsg({ errors: [], warnings: [], who: '1군 엔트리를 AI에게 맡겼습니다. 선수를 옮기면 다시 직접 관리로 바뀝니다.' });
-    } else {
-      const res = session.setEntry(session.registered().map((p) => p.idx));
-      setMsg({ ...res, who: '지금 1군 명단으로 직접 관리를 시작합니다.' });
-    }
-    changed();
-  };
-
-  /** 기용 드롭다운 결과 */
-  const afterPlan = (res: EntryCheck, who: string) => {
-    setMsg({ ...res, who: res.errors.length ? undefined : who });
-    changed();
-  };
-  // 가을야구 중에도 탈락 전까지는 엔트리·기용표를 바꿀 수 있다
-  const canPlan = !!view.manual && session.canManage;
-  const roleCell = (p: SimPlayer, inFirst: boolean, roleText: string) => {
-    if (!inFirst || !canPlan) return roleText;
-    if (!p.isPitcher) {
-      const cur = session.slotOf(p);
-      return (
-        <select value={cur ?? ''} aria-label={`${p.name} 자리`} onChange={(e) => {
-          const v = (e.target.value || null) as Slot | null;
-          afterPlan(session.setHitterSlot(p, v), `${p.name}: ${v ? `주전 ${posName(v)}` : '서브'}`);
-        }}>
-          <option value="">서브</option>
-          {LINEUP_SLOTS.map((s) => (
-            <option key={s} value={s}>{posName(s)}{s === 'DH' ? '' : ` (수비 ${defenseGrade(defenseAt(p, s))})`}</option>
-          ))}
-        </select>
-      );
-    }
-    return (
-      <select value={session.pitcherRole(p)} aria-label={`${p.name} 보직`} onChange={(e) => {
-        const v = e.target.value as PitcherRole;
-        afterPlan(session.setPitcherRole(p, v), `${p.name}: ${PITCHER_ROLE_LABEL[v]}`);
-      }}>
-        {(Object.keys(PITCHER_ROLE_LABEL) as PitcherRole[]).map((r) => <option key={r} value={r}>{PITCHER_ROLE_LABEL[r]}</option>)}
-      </select>
-    );
-  };
   /** 지금 자리(주전이면 그 자리, 아니면 주 포지션)의 수비 등급 */
   const defGrade = (p: SimPlayer) => {
     const s = session.slotOf(p);
@@ -168,7 +120,8 @@ export function Roster({ board = false }: { board?: boolean }) {
     else setSel(p.idx);
   };
   const cols = columnsFor(kind, page);
-  const moveBtn = (p: SimPlayer, inF: boolean, big = false) => {
+  /** 육성선수 정식 등록 (1군·2군 이동은 기용 보드에서) */
+  const moveBtn = (p: SimPlayer, big = false) => {
     const cls = big ? 'ghost' : 'small-btn';
     if (p.dev) {
       const why = session.convertBlock(p);
@@ -179,13 +132,7 @@ export function Roster({ board = false }: { board?: boolean }) {
         </button>
       );
     }
-    const rd = !inF && view.manual ? session.reregisterDay(p) : null;
-    return (
-      <button type="button" className={cls} onClick={(e) => { e.stopPropagation(); move(p, !inF); }} disabled={!session.canManage || rd !== null}
-        title={rd !== null ? `말소 뒤 10일 규정: ${shortDate(session.world.year, rd)}부터 등록 가능` : inF ? '1군에서 말소하면 10일 동안 다시 등록할 수 없습니다' : undefined}>
-        {rd !== null ? `${shortDate(session.world.year, rd)}부터` : inF ? '2군으로' : '1군으로'}
-      </button>
-    );
+    return null;
   };
 
   return (
@@ -195,22 +142,9 @@ export function Roster({ board = false }: { board?: boolean }) {
           1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit} ·{' '}
           정식 {session.regularCount()}/{ruleOf(session.league, 'orgLimit')}{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}` : ''} ·{' '}
           {view.manual ? '엔트리 직접 관리' : '엔트리 AI 관리'}{view.manual ? (session.plan ? ' · 기용 직접' : ' · 기용 AI 감독') : ''}
-          <details className="help">
-            <summary>도움말</summary>
-            {view.manual
-              ? session.plan
-                ? '기용: 직접 정함. 1군의 "역할" 드롭다운으로 야수 자리(서브 포함)와 투수 보직(선발·중계·마무리)을 바꿉니다. 직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 서브로 채웁니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
-                : '기용: AI 감독. 1군의 "역할" 드롭다운을 바꾸면 지금 배치에서 시작해 직접 정하게 됩니다. 타순과 경기 중 교체는 AI 감독이 합니다.'
-              : '엔트리를 AI가 관리하는 동안에는 기용도 AI 감독이 정합니다. 역할은 다음 경기 기준 예상입니다.'}
-          </details>
         </div>
         <span className="inline">
-          {canPlan && session.plan && (
-            <button type="button" className="ghost" onClick={() => afterPlan(session.setPlan(null), '기용을 AI 감독에게 맡겼습니다.')}>AI에게 기용 맡기기</button>
-          )}
-          <button type="button" className="ghost" onClick={toggleAuto} disabled={!session.canManage}>
-            {view.manual ? 'AI에게 엔트리 맡기기' : '엔트리 직접 관리하기'}
-          </button>
+          <button type="button" className="ghost" onClick={() => go('lineup')} disabled={!session.canManage}>기용 보드에서 바꾸기</button>
         </span>
       </section>
 
@@ -222,7 +156,6 @@ export function Roster({ board = false }: { board?: boolean }) {
         </div>
       )}
 
-      {board && <p className="muted small">1군 표의 <strong>역할</strong> 칸에서 야수 자리(서브 포함)와 투수 보직을 정하고, 아래 타순 칸에서 타순을 정합니다. 엔트리를 직접 관리할 때만 바꿀 수 있습니다.</p>}
       <ServingList />
 
       <div className="roster-split">
@@ -283,10 +216,10 @@ export function Roster({ board = false }: { board?: boolean }) {
                         {p.foreign && <span className="tag">외</span>}
                         {p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}
                       </td>
-                      <td className="l small">{page === 'ability' ? roleCell(p, inFirst, roleText) : roleText}</td>
+                      <td className="l small">{roleText}</td>
                       {cols.map((c) => <td key={c.h} className={c.l ? 'l' : undefined}>{c.v(p)}</td>)}
                       {!inFirst && <td className="l small">{futuresText(fut.get(p.idx))}</td>}
-                      <td>{moveBtn(p, inFirst)}</td>
+                      <td>{moveBtn(p)}</td>
                     </tr>
                   );
                 })}
@@ -295,10 +228,9 @@ export function Roster({ board = false }: { board?: boolean }) {
           </div>
         </section>
 
-        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, inFirst, true)} war={war.get(picked.idx)} />}
+        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, true)} war={war.get(picked.idx)} />}
       </div>
 
-      {kind === 'hit' && inFirst && view.manual && <BattingOrderPanel onResult={(r, who) => { setMsg({ ...r, who }); changed(); }} />}
     </div>
   );
 
@@ -481,43 +413,4 @@ export function futuresText(l: FuturesLine | undefined): string {
     return `${l.pit.gs ? `${x.gs}선발 ` : `${x.g}경기 `}${ipText(x.outs)}이닝 평균자책 ${fixed2((x.er * 27) / Math.max(1, x.outs))} ${x.so}삼진`;
   }
   return '-';
-}
-
-/** 타순 (자리 순서로 정한다: 그 자리에 나온 선수가 그 타순. 결장 때는 서브가 그 타순에 선다) */
-function BattingOrderPanel({ onResult }: { onResult: (r: EntryCheck, who?: string) => void }) {
-  const { session } = useGame();
-  const { order, manual } = session.battingOrderSlots();
-  const plan = session.effectivePlan();
-  const name = (s: Slot) => {
-    const i = plan.starters[s];
-    return i === undefined ? '(AI가 채움)' : session.world.players[i].name;
-  };
-  /** k번 타순에 자리 s를 놓는다: 원래 s가 있던 타순과 맞바꾼다 (9번을 1번으로 한 번에) */
-  const put = (k: number, s: Slot) => {
-    const next = [...order];
-    const j = next.indexOf(s);
-    if (j < 0 || j === k) return;
-    [next[k], next[j]] = [next[j], next[k]];
-    const r = session.setBattingOrder(next);
-    onResult(r, r.errors.length ? undefined : `${k + 1}번 타자: ${posName(s)} ${name(s)}`);
-  };
-  return (
-    <section className="panel">
-      <div className="row-between">
-        <h2>타순 <span className="muted small">{manual ? '직접 정함' : 'AI 감독 (바꾸면 직접 정한 타순이 됩니다)'}</span></h2>
-        {manual && <button type="button" className="ghost small-btn" onClick={() => { const r = session.setBattingOrder(null); onResult(r, r.errors.length ? undefined : '타순을 AI 감독에게 맡겼습니다.'); }}>AI에게 타순 맡기기</button>}
-      </div>
-      <ol className="order-list">
-        {order.map((s, k) => (
-          <li key={s}>
-            <span className="muted small order-no">{k + 1}번</span>
-            <select value={s} aria-label={`${k + 1}번 타자`} disabled={!session.canManage} onChange={(e) => put(k, e.target.value as Slot)}>
-              {order.map((x) => <option key={x} value={x}>{posName(x)} · {name(x)}</option>)}
-            </select>
-          </li>
-        ))}
-      </ol>
-      <p className="muted small">타순 칸에서 선수를 고르면 원래 그 선수가 있던 타순과 서로 바뀝니다. 타순은 자리 기준이라, 그 자리 주전이 빠지면 대신 나온 선수가 같은 타순에 섭니다.</p>
-    </section>
-  );
 }

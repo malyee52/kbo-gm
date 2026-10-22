@@ -4,7 +4,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type { BrowserStore } from '../data/loadBrowser';
 import type { DisplayGrades, SimPlayer } from '../engine';
 import type { GameSession } from '../game/session';
-import { teamPalette } from './teams';
+import { darkBand, teamPalette } from './teams';
 import { priceIndex, wonText } from '../league/salary';
 
 export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
@@ -57,10 +57,10 @@ export function useWon(): (man: number) => string {
   return (man) => wonText(man, year);
 }
 
-/** 구단 색 표시 변수: 밝은 모드는 주색(--c), 다크 모드는 밝힌 구단색(--cd) */
+/** 구단 색 표시 변수: 밝은 모드는 주색(--c), 다크 모드는 밝힌 구단색(--cd), 다크 모드 띠(--cbd, teams.ts darkBand) */
 export function chipVars(franchise: string, name?: string): Record<string, string> {
   const p = teamPalette(franchise, name);
-  return { '--c': p.primary, '--cd': p.dark };
+  return { '--c': p.primary, '--cd': p.dark, '--cbd': darkBand(p) };
 }
 
 /** 구단 이름 + 색 표시 */
