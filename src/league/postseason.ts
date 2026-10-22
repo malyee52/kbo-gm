@@ -10,6 +10,7 @@
 import {
   emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type GameCommand, type Play, type Season, type SimPlayer,
 } from '../engine';
+import { daysBetween } from '../data/schedule';
 
 export type SeriesRound = 'wc' | 'semi' | 'po' | 'ks';
 
@@ -38,8 +39,15 @@ export const RULES: Record<SeriesRound, RoundRule> = {
 
 /** 포스트시즌 연장 한계 이닝 (임시값: 자료집에는 2024년까지 15회만 확인) */
 export const POSTSEASON_MAX_INNINGS = 15;
-/** 정규시즌이 끝나고 포스트시즌 첫 경기까지 쉬는 날 (임시값) */
+/** 정규시즌이 끝나고 포스트시즌 첫 경기까지 쉬는 날 (임시값). 규칙 표에 가을야구 시작일이 있는 해(1988 올림픽)는 그날 (그보다 이르면 이 규칙) */
 const REST_BEFORE = 3;
+
+/** 가을야구 첫 경기 날짜 색인: 정규시즌 끝 + REST_BEFORE, 규칙 표의 시작일(`가을시작`)이 더 늦으면 그날 (일정 개편 기획안 2.3) */
+export function postseasonStartDay(season: Pick<Season, 'schedule' | 'plan' | 'world'>): number {
+  const day = season.schedule.length + REST_BEFORE;
+  const fixed = season.world.schedule?.postseasonStart;
+  return fixed ? Math.max(day, daysBetween(season.plan.opening, fixed)) : day;
+}
 /** 시리즈 사이에 쉬는 날 (임시값) */
 const REST_BETWEEN = 2;
 
@@ -119,7 +127,7 @@ export function startPostseason(season: Season, standings: number[], n: number, 
   const rngSeed = `${seed}/postseason`;
   const st: PostseasonState = {
     format: 2, year: season.world.year, seed: rngSeed, seeds, rounds, series: [],
-    day: season.schedule.length + REST_BEFORE, done: false,
+    day: postseasonStartDay(season), done: false,
   };
   openSeries(st, seeds[seeds.length - 1]);
   return st;
