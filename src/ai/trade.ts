@@ -30,10 +30,10 @@ export const SALARY_WON_PER_RUN = 9000;
 const CASH_WON_PER_RUN = 6_000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
-/** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값) */
-const MIN_ORG_HITTERS = 18;
-const MIN_ORG_PITCHERS = 18;
-const MIN_ORG_CATCHERS = 2;
+/** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값). 화면은 보내기 전 경고에 쓴다 (ui/tradeDesk.ts) */
+export const MIN_ORG_HITTERS = 18;
+export const MIN_ORG_PITCHERS = 18;
+export const MIN_ORG_CATCHERS = 2;
 
 export interface TeamSituation {
   teamIdx: number;
