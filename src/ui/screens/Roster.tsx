@@ -4,7 +4,7 @@
 // 이 화면은 보기와 육성선수 정식 등록만 한다.
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
-import { GradeBar } from './PlayerDetail';
+import { GradeBar } from '../parts';
 import { seasonWar } from '../../league/awards';
 import { runsGrade } from '../grades';
 import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';

@@ -984,3 +984,60 @@ ul.plain.bench li { display: inline-flex; align-items: center; gap: 6px; padding
   .slot-card strong { font-size: 13.5px; }
   .role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---- 공통 부품 (2026-10-23 UI 2단계 U2-1, parts.tsx) */
+.vs { font-weight: 700; margin-left: 3px; font-variant-numeric: tabular-nums; }
+.vs-up { color: var(--g-hi); }
+.vs-dn { color: var(--g-lo); }
+.gbar-x { grid-template-columns: 72px minmax(60px, 1fr) auto minmax(0, 1.2fr); }
+.gbar-more { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.scout-note { margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px dashed var(--line-strong); }
+.scout-note p { margin: 2px 0 0; }
+.dt-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 6px; }
+.dt-tools .seg.small { margin: 0; }
+.dt-find input { width: 9em; margin-left: 4px; }
+.dt-cols { position: relative; }
+.dt-cols > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.dt-cols-list { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; display: grid; grid-template-columns: repeat(2, max-content); gap: 4px 14px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); }
+.dt-cols-list label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.th-sort { all: unset; cursor: pointer; font: inherit; color: inherit; white-space: nowrap; }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.dt tr.thin td { opacity: 0.55; }
+.dt tr.lg-row td { color: var(--muted); font-style: italic; border-top: 1px solid var(--line-strong); }
+.dt tr.sep td { color: var(--muted); font-size: 11.5px; font-weight: 700; background: var(--panel-2); }
+@media (max-width: 768px) {
+  /* 휴대폰: 첫 열을 붙이고 가로로 민다 */
+  .dt-scroll th:first-child, .dt-scroll td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+  .gbar-x { grid-template-columns: 64px minmax(40px, 1fr) auto; }
+  .gbar-x .gbar-more { grid-column: 1 / -1; padding-left: 74px; }
+}
+
+/* ---- 선수 상세 판 (2026-10-23 UI 2단계 U2-2, 결정 3): 데스크톱은 오른쪽 넓은 판(뒤 목록이 보이고 눌러짐), 휴대폰은 전체 화면 */
+dialog.player.side {
+  position: fixed; inset: 0 0 0 auto; margin: 0; width: min(760px, calc(100vw / var(--z))); height: calc(100vh / var(--z)); max-height: none;
+  border-radius: 0; border-width: 0 0 0 1px; z-index: 40;
+}
+dialog.player.side .dialog-body { max-height: none; height: 100%; }
+.pd-head { display: grid; gap: 2px; }
+.pd-head .row-between { align-items: flex-start; }
+.pd-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.pd-tabs { display: flex; gap: 2px; margin: 10px -22px -12px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+.pd-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-weight: 700; padding: 8px 12px; min-height: 40px; box-shadow: none; white-space: nowrap; }
+.pd-tabs button:hover:not(:disabled) { color: var(--fg); background: var(--hover); }
+.pd-tabs button[aria-selected='true'] { color: var(--fg); border-bottom-color: var(--team); }
+.pd-tabs button:disabled { color: var(--faint); }
+.pd-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 22px; }
+.pd-split h3 { font-size: 14px; }
+.pd-group + .pd-group { margin-top: 12px; }
+.pd-group h4 { margin: 0 0 6px; font-size: 12.5px; color: var(--muted); font-weight: 700; }
+.pd-recs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+.pd-recs b { font-weight: 600; color: var(--muted); font-size: 12px; margin-right: 4px; }
+@media (max-width: 768px) {
+  dialog.player, dialog.player.side { position: fixed; inset: 0; margin: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; border: 0; }
+  dialog.player .dialog-body { max-height: none; height: 100%; padding: 0 14px 22px; }
+  dialog.player .dialog-body > header { margin: 0 -14px 6px; padding: 10px 14px 10px; }
+  .pd-tabs { margin: 8px -14px -10px; padding: 0 8px; }
+  .pd-split { grid-template-columns: minmax(0, 1fr); }
+  .pd-head .pd-more { display: none; }
+}

@@ -11,8 +11,9 @@ import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIEL
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
-import { ForeignMark, Grade, gradeClass, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
+import { ForeignMark, Grade, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
+import { GradeBar } from '../parts';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
@@ -330,16 +331,6 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
         )}
       </dl>
     </section>
-  );
-}
-
-export function GradeBar({ label, v, title }: { label: string; v: number | null; title?: string }) {
-  return (
-    <div className="gbar" title={title}>
-      <span>{label}</span>
-      <span className="track" aria-hidden><i className={gradeClass(v)} style={{ width: `${v === null ? 0 : ((v - 20) / 60) * 100}%` }} /></span>
-      <Grade v={v} />
-    </div>
   );
 }
 
