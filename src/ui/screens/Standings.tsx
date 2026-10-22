@@ -14,8 +14,8 @@ const wlt = (w: number, t: number, l: number) => `${w}-${t}-${l}`;
 const diffText = (n: number) => (n > 0 ? `+${n}` : String(n));
 
 export const STAND_COLS: Column<StandRow>[] = [
-  { key: 'rank', label: '순위', value: (r) => r.rank, fixed: true, lower: true },
-  { key: 'team', label: '팀', value: (r) => r.team, fixed: true, text: true, cell: (r) => <TeamName idx={r.team} /> },
+  // 순위와 팀은 한 칸 (휴대폰에서 첫 열이 고정되므로 팀 이름이 늘 보이게)
+  { key: 'rank', label: '순위 · 팀', value: (r) => r.rank, fixed: true, text: true, lower: true, cell: (r) => <><span className="rank-no">{r.rank}</span> <TeamName idx={r.team} /></> },
   { key: 'g', label: '경기', value: (r) => r.t.g, brief: true, group: '기본' },
   { key: 'w', label: '승', value: (r) => r.t.w, brief: true, group: '기본' },
   { key: 'l', label: '패', value: (r) => r.t.l, brief: true, group: '기본', lower: true },

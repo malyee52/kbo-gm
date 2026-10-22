@@ -362,8 +362,8 @@ table.roster td.l:first-child { min-width: 110px; }
 .box.two { margin-top: 10px; }
 /* 라인스코어 (BoxScore.tsx): 이닝 표는 가로로 밀고, 합계 R·H·E·B는 오른쪽에 고정. 두 표의 줄 높이를 맞춘다 */
 .ls-wrap { display: flex; align-items: stretch; gap: 0; max-width: 100%; margin: 8px 0; }
-.ls-wrap .ls-inn { flex: 0 1 auto; min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
-.ls-wrap .ls-tot { flex: 0 0 auto; background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: 0 var(--radius) var(--radius) 0; box-shadow: var(--shadow-sm); }
+.ls-wrap .ls-inn { flex: 1 1 auto; min-width: 0; border-radius: var(--radius) 0 0 var(--radius); }
+.ls-wrap .ls-tot { flex: 0 0 auto; width: auto; background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--line-strong); border-radius: 0 var(--radius) var(--radius) 0; box-shadow: var(--shadow-sm); }
 .ls-wrap .linescore th, .ls-wrap .linescore td { height: 34px; padding-top: 0; padding-bottom: 0; white-space: nowrap; }
 .ls-tot td, .ls-tot th { min-width: 2.2em; font-variant-numeric: tabular-nums; }
 .linescore th.now { background: var(--accent-soft); color: var(--accent); }
@@ -1075,3 +1075,4 @@ dialog.player.side .dialog-body { max-height: none; height: 100%; }
 .np-bar.sp i { background: var(--team); }
 .np-v { font-variant-numeric: tabular-nums; font-weight: 700; }
 .np-d { font-size: 10.5px; white-space: nowrap; }
+.rank-no { display: inline-block; min-width: 1.6em; text-align: right; margin-right: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
