@@ -35,4 +35,15 @@ export function shortDate(year: number, day: number): string {
   return `${d.month}/${d.date}`;
 }
 
+/**
+ * 경기 시작 시각 (요일별, 0 = 일요일). 임시값: 2026-10-22 사용자 결정으로 평일 18:30, 토요일 17:00, 일요일 14:00.
+ * 일정 자료에 시각이 없어 화면 표시에만 쓴다. 일정 개편 때 연도별 표로 바꾼다
+ */
+export const GAME_TIME_BY_WEEKDAY = ['14:00', '18:30', '18:30', '18:30', '18:30', '18:30', '17:00'];
+
+/** 예: "18:30" */
+export function gameTime(year: number, day: number): string {
+  return GAME_TIME_BY_WEEKDAY[dateOf(year, day).weekday];
+}
+
 export { WEEKDAYS };

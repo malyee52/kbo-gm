@@ -25,7 +25,8 @@ export interface SearchFilter {
   ageMax: number | null;
   nowMin: number | null;
   potMin: number | null;
-  foreign: 'all' | 'domestic' | 'foreign';
+  /** foreign은 아시아쿼터 포함 외국인 전부, asia는 아시아쿼터만 */
+  foreign: 'all' | 'domestic' | 'foreign' | 'asia';
   /** 'fa' = 이번 시즌 뒤 계약이 끝남 */
   contract: 'all' | 'fa' | 'multi';
 }
@@ -54,6 +55,7 @@ export function filterPlayers(rows: SearchRow[], f: SearchFilter, userTeam: numb
     if (f.potMin !== null && (pot === null || pot < f.potMin)) return false;
     if (f.foreign === 'domestic' && p.foreign) return false;
     if (f.foreign === 'foreign' && !p.foreign) return false;
+    if (f.foreign === 'asia' && !(p.foreign && lp?.asia)) return false;
     if (f.contract === 'fa' && !(lp && lp.contract.until <= year)) return false;
     if (f.contract === 'multi' && !(lp && lp.contract.until > year)) return false;
     return true;
@@ -75,11 +77,12 @@ export function sortRows(rows: SearchRow[], key: SortKey): SearchRow[] {
 
 const numOrNull = (s: string): number | null => (s.trim() === '' || !Number.isFinite(Number(s)) ? null : Number(s));
 
-export function Search() {
+/** initialText: 상태 줄 검색 칸에서 넘어온 이름 (2026-10-22 UI 대개편 1차). 이름으로 찾을 때는 우리 구단도 포함한다 */
+export function Search({ initialText = '' }: { initialText?: string }) {
   const { session, version } = useGame();
   const won = useWon();
   const year = session.world.year;
-  const [f, setF] = useState<SearchFilter>(EMPTY_FILTER);
+  const [f, setF] = useState<SearchFilter>(initialText ? { ...EMPTY_FILTER, text: initialText, team: 'all' } : EMPTY_FILTER);
   const [sort, setSort] = useState<SortKey>('now');
   const [shown, setShown] = useState(PAGE);
   const set = (patch: Partial<SearchFilter>) => { setF((x) => ({ ...x, ...patch })); setShown(PAGE); };
@@ -141,7 +144,7 @@ export function Search() {
           <label>잠재력 이상<input type="number" min={20} max={80} step={5} value={f.potMin ?? ''} placeholder="20~80" style={{ width: '7em' }} onChange={(e) => set({ potMin: numOrNull(e.target.value) })} /></label>
           <label>국적
             <select value={f.foreign} onChange={(e) => set({ foreign: e.target.value as SearchFilter['foreign'] })}>
-              <option value="all">전체</option><option value="domestic">국내</option><option value="foreign">외국인</option>
+              <option value="all">전체</option><option value="domestic">국내</option><option value="foreign">외국인</option><option value="asia">아시아쿼터</option>
             </select>
           </label>
           <label>계약
