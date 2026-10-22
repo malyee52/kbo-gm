@@ -1,4 +1,4 @@
-# GitHub Pages 배포: main에 올리면 테스트 → 빌드 → 배포. Actions 탭에서 수동으로도 돌릴 수 있다.
+# GitHub Pages 배포: main에 올리면 빌드 → 배포 (테스트는 PR 검사 check.yml에서 이미 돌린다). Actions 탭에서 수동으로도 돌릴 수 있다.
 # 저장소 Settings → Pages → Build and deployment → Source를 "GitHub Actions"로 바꿔 둔다 (docs/deploy.md).
 name: deploy
 
@@ -26,7 +26,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
