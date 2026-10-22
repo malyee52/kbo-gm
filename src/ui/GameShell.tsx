@@ -33,6 +33,8 @@ import { teamVars } from './teams';
 import { gamesBehind, recentForm } from '../game/stats';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
+import { RuleNewsDialog, ruleDialogMuted } from './RuleNews';
+import { Rules } from './screens/Rules';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
 import { CommandView } from './CommandView';
@@ -71,6 +73,7 @@ const NAV: NavItem[] = [
   { id: 'postseason', label: '가을야구', hub: '리그' },
   { id: 'season-end', label: '시즌 결과', hub: '리그' },
   { id: 'awards', label: '시상식', hub: '리그' },
+  { id: 'rules', label: '규칙 연표', hub: '리그' },
   { id: 'club', label: '개요', hub: '구단' },
   { id: 'finance', label: '재정', hub: '구단' },
   { id: 'stadium', label: '구장·팬', hub: '구단' },
@@ -95,6 +98,16 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 개막일 "달라지는 규칙" 창: 시즌마다 한 번 (진행 중이면 띄우지 않고 소식만). 본 해는 메모리에만 (불러오면 다시 볼 수 있다)
+  const [ruleYear, setRuleYear] = useState<number | null>(null);
+  const ruleSeen = useRef<number | null>(null);
+  useEffect(() => {
+    if (session.phase !== 'season' || ruleSeen.current === session.year) return;
+    if (session.day !== 0 || session.done) { ruleSeen.current = session.year; return; }
+    if (busy) return;
+    ruleSeen.current = session.year;
+    if (!ruleDialogMuted()) setRuleYear(session.year);
+  }, [session, session.phase, session.year, session.day, session.done, busy, version]);
   // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다. 시즌 중에도 능력이 바뀌는 조작(자유 모드 선수 만들기·능력 변경,
   // 이도류 등)이 있어 조작마다 다시 계산한다 (2026-10-13 사용자 보고: 자유 모드로 만든 선동열이 오버롤 70인데 세부 능력은 빈 자리의 40대로 보였다)
   const world = session.world;
@@ -448,6 +461,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           <main className="content" aria-busy={!!busy}>
             <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>
               <EventDialog />
+              {ruleYear !== null && !session.pendingEvent && <RuleNewsDialog news={session.ruleNewsFor(ruleYear)} onClose={() => setRuleYear(null)} />}
               {summary && !session.pendingEvent && (
                 <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
               )}
@@ -484,6 +498,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {screen === 'rec-dynasty' && <Records tab="dynasty" />}
               {screen === 'rec-hof' && <Records tab="hof" />}
               {screen === 'articles' && <Articles />}
+              {screen === 'rules' && <Rules />}
               </div>
             </ErrorBoundary>
           </main>

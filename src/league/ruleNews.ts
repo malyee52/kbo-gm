@@ -279,7 +279,7 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
   const main = ordered(lines.filter(isMainLine));
   const other = ordered(lines.filter((l) => !isMainLine(l)));
   dated.sort((a, b) => a.day - b.day);
-  const summary = input.start ? startSummary(data, now) : [];
+  const summary = input.start ? ruleSummary(data, now) : [];
   const changes = [...main, ...other].filter((l) => !l.info);
   const total = changes.length;
   const headline = input.start
@@ -325,14 +325,14 @@ function ballLine(data: RuleChangeData | undefined, year: number, seasonDays: nu
     after: `${rangeText(cur.range)}${cur.single ? ' (단일 공인구)' : ''}`,
   };
   if (rangeChanged) line.before = rangeText(last.range);
-  if (!rangeChanged && !singleChanged && !start) line.info = true;
+  if (!rangeChanged && !singleChanged) line.info = true;
   const src = by?.source ?? data.ball.find((b) => b.range)?.source;
   if (src) line.source = src;
   return line;
 }
 
 /** 시작 연도 규칙 요약 (2.4): 게임 값 + 공인구. 게임이 실제와 다른 곳은 그 해 자료 항목의 단순화 문구로 밝힌다 */
-function startSummary(data: RuleChangeData | undefined, s: RuleSnapshot): string[] {
+export function ruleSummary(data: RuleChangeData | undefined, s: RuleSnapshot): string[] {
   const out: string[] = [];
   if (s.teams !== undefined && s.games !== undefined) out.push(`${s.teams}구단, 팀당 ${s.games}경기 (게임은 단일 시즌으로 진행)`);
   out.push(`1군 엔트리 ${keyValueText('rosterSize', s)}. 정규시즌 연장 ${keyValueText('maxInnings', s)}. 포스트시즌 ${keyValueText('postseasonTeams', s)}`);

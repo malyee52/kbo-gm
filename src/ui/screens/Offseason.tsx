@@ -14,6 +14,8 @@ import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { ruleOf } from '../../league/rules';
+import { previewOrder } from '../../league/ruleNews';
+import { RuleNewsBody } from '../RuleNews';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -120,6 +122,7 @@ export function Offseason() {
           <div className="actions"><button type="button" onClick={() => void open()} disabled={busy}>{busy ? '준비 중' : `${off.year + 1} 시즌 개막`}</button></div>
         </section>
       )}
+      {off.stage === 'ready' && <RulePreview year={off.year + 1} />}
       {off.stage !== 'ready' && <ExtensionPanel act={act} />}
       </div>
       <aside className="stack off-side">
@@ -993,6 +996,19 @@ function OffLog() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+/** 개막 준비: 다음 시즌 "달라지는 규칙" 미리 보기 (FA·외국인·캡·엔트리처럼 오프시즌 결정에 닿는 것을 앞에) */
+function RulePreview({ year }: { year: number }) {
+  const { session, go } = useGame();
+  const news = session.ruleNewsFor(year);
+  return (
+    <section className="panel">
+      <h2>{year} 시즌, 달라지는 규칙</h2>
+      <RuleNewsBody news={news} lines={previewOrder(news)} />
+      <div className="actions"><button type="button" className="ghost" onClick={() => go('rules')}>규칙 연표 전체 보기</button></div>
     </section>
   );
 }

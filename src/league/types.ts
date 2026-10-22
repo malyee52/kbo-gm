@@ -223,7 +223,8 @@ export interface LeagueState {
   teams: LeagueTeam[];
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
+  /** hr: 리그 전체 홈런 ("달라지는 규칙"의 지난 시즌 한 줄, 2026-10-22부터. 예전 저장에는 없다) */
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult; hr?: number } | null;
   /** 구장 (stadium.ts, 구단 색인) */
   stadiums?: import('./stadium').StadiumState[];
   /** 팬 만족도 (stadium.ts, 구단 색인) */

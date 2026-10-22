@@ -824,3 +824,24 @@ td .inline { flex-wrap: nowrap; }
 .defense-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; }
 .defense-edit label { display: flex; flex-direction: column; gap: 2px; }
 .defense-edit input { width: 4.2em; }
+/* "달라지는 규칙" 알림 (RuleNews.tsx, screens/Rules.tsx) */
+.rule-news .rule-cat h3, .rule-news .rule-cat > summary { margin: 14px 0 4px; font-size: 13px; color: var(--muted); font-weight: 700; }
+.rule-news details.rule-cat > summary, .rule-other > summary, .rule-year > summary { cursor: pointer; }
+.rule-lines { list-style: none; margin: 0; padding: 0; }
+.rule-line { padding: 8px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+.rule-line > div:not(.rule-meta) { grid-column: 1; }
+.rule-line .rule-meta { grid-column: 2; grid-row: 1 / span 4; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.rule-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.rule-change { font-variant-numeric: tabular-nums; }
+.rule-other { margin-top: 12px; }
+.rule-other > summary { font-weight: 700; }
+.rule-summary { margin: 6px 0 10px; padding-left: 18px; }
+.rule-status { margin-left: 0; cursor: help; }
+.rule-status.rule-confirmed { background: var(--accent-soft); color: var(--fg); border-color: var(--line-strong); }
+.rule-status.rule-research { background: var(--info-bg); color: var(--fg); border-color: var(--line); }
+.rule-status.rule-conflict, .rule-status.rule-unknown { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--line); }
+.rule-year > summary { font-size: 15px; }
+@media (max-width: 640px) {
+  .rule-line { grid-template-columns: 1fr; }
+  .rule-line .rule-meta { grid-column: 1; grid-row: auto; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 8px; }
+}

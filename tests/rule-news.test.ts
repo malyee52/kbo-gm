@@ -6,6 +6,7 @@ import { createLeague } from '../src/league/create';
 import { faServiceNeeded, foreignRule } from '../src/league/eras';
 import { isMainLine, keyValueText, ruleNews, ruleSnapshot, type RuleNews } from '../src/league/ruleNews';
 import { salaryCap } from '../src/league/salary';
+import { GameSession } from '../src/game/session';
 
 let store: DataStore;
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -130,5 +131,30 @@ describe('알림 계산 (1-2)', () => {
     const n = ruleNews({ year: 2026, now: snap(2026), prev: snap(2025) });
     expect(n.main.find((l) => l.key === 'foreignLimit')?.status).toBe('confirmed');
     expect(n.other).toEqual([]);
+  });
+});
+
+describe('게임 진행 속 규칙 소식 (1-3)', () => {
+  const roundTrip = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+  const ruleNewsOf = (g: GameSession) => g.news.filter((n) => n.text.startsWith('[공인구]') || n.text.startsWith('[규칙]') || n.text.includes('달라지는 규칙'));
+
+  it('2019 시작: 개막 소식 한 줄, 5월 24일 검사는 그날 소식으로. 저장 뒤 이어 돌려도 같다', () => {
+    const g = GameSession.create(store, { year: 2019, teamIdx: 0, seed: 'rule-news' }, FAST);
+    const day = g.ruleNewsFor().dated.find((d) => d.text.includes('0.4189'))!.day;
+    expect(g.news.some((n) => n.day === 0 && n.text.includes('2019 시즌 리그 규칙'))).toBe(true);
+    g.advance(day - 5);
+    expect(g.news.some((n) => n.text.includes('0.4189'))).toBe(false);
+    const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
+    g.advance(10);
+    h.advance(10);
+    const hit = g.news.find((n) => n.text.includes('0.4189'))!;
+    expect(hit.day).toBe(day);
+    expect(ruleNewsOf(h)).toEqual(ruleNewsOf(g));
+    // 화면 조회를 끼워도 같다
+    h.ruleNewsFor(2020);
+    h.ruleNewsFor();
+    g.advance(3);
+    h.advance(3);
+    expect(ruleNewsOf(h)).toEqual(ruleNewsOf(g));
   });
 });
