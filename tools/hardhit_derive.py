@@ -12,6 +12,7 @@
   data-src/hardhit_derived/clutch_pit.csv    투수 상황 기록 (1982~, 투수 situation): WPA, RE24, SD/MD, gmLI, pLI, 홀드, 세이브, 블론
   data-src/hardhit_derived/park.csv          구단(계보)·연도별 파크팩터 (2015~, 타자 saber 선수 행의 타석 가중 평균)
   data-src/hardhit_derived/position.csv      타자 그 시즌 주 포지션 (2003~, 2009 없음. 포지션 필터를 건 타자 classic, data-src/hardhit/positions/)
+  data-src/hardhit_derived/park_components.csv  구장별 구성 지수 (2022~2025 묶음, data-src/hardhit/park/의 구장 표): 득점·단타·2루타·3루타·홈런·볼넷·삼진
   data-src/hardhit_derived/war.csv           선수-시즌 WAR (타자 saber 2015~의 o-WAR, 투수 saber의 fWAR·rWAR. 투수 WAR은 2015~·약 30이닝 이상만 있다). tools/hardhit_war_check.ts가 쓴다
   reports/hardhit-unmatched.md               연결률과 못 맞춘 행
 
@@ -269,6 +270,28 @@ def war(M, log, names, fill):
     write_csv('war.csv', ['연도', '선수ID', '구분', '보직', '타석·아웃', 'WAR', 'rWAR'], out)
 
 
+def park_components():
+    """구장 표 (data-src/hardhit/park/hardhit_parkfactor_table_<끝 해>_<ALL|L|R>.csv, 메타 줄 없는 일반 CSV) → 구장·타자 손별 구성 지수
+
+    타자 열: ALL = 전체, L = 좌타, R = 우타. 방향별 홈런(hr_left/center/right)·파울은 엔진에 타구 방향이 없어 남기지 않는다.
+
+    값은 100 = 리그 평균인 구장 자체 지수다 (홈 경기 절반을 섞은 시즌 값이 아니다. reports/hardhit-fill.md 참조).
+    필요한 열만 남긴다. 팀이 둘인 구장(잠실 "LG, 두산")은 팀 칸에 '/'로 잇는다."""
+    out = []
+    cols = ('runs', 'hits_single', 'hits_double', 'hits_triple', 'hr_total', 'walks', 'strikeouts')
+    side = {'전체': 'ALL', '좌타': 'L', '우타': 'R'}
+    for p in sorted((RAW / 'park').glob('hardhit_parkfactor_table_*.csv')):
+        with p.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if r['batter_side'] not in side:
+                    continue
+                teams = '/'.join(t.strip() for t in r['team'].split(','))
+                out.append([r['season_range'], side[r['batter_side']], r['stadium'], teams, int(r['games']), int(r['pa'])]
+                           + [float(r[c]) for c in cols])
+    out.sort(key=lambda r: (r[0], ['ALL', 'L', 'R'].index(r[1]), -r[6]))
+    write_csv('park_components.csv', ['기간', '타자', '구장', '팀', '경기', '타석', '득점', '단타', '2루타', '3루타', '홈런', '볼넷', '삼진'], out)
+
+
 POS_FILE_RE = re.compile(r'^hardhit_batter_classic_(\d{4})_(C|1B|2B|3B|SS|LF|CF|RF)\.csv$')
 
 
@@ -336,6 +359,8 @@ def main():
     clutch_pit(M, log, names, fill)
     park(M, log)
     war(M, log, names, fill)
+    if (RAW / 'park').exists():
+        park_components()
     extra += position(M, log) if (RAW / 'positions').exists() else []
     extra += ['## 이름이 가려진 투수 표 (saber·situation)', '',
               '같은 연도·같은 손의 kbb(와 classic) 파일과 (나이, 보직, 경기, 이닝)으로 맞대 이름과 팀을 채웠다. 둘 이상 맞으면 kbb와 공통인 열(SD, MD, gmLI, pLI, BABIP, K%, BB%)이 모두 같은 한 명으로 가르고, 그래도 둘 이상이면 짐작하지 않고 비운다.', '',

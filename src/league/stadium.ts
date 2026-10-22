@@ -7,6 +7,7 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
+import type { ParkEvents } from '../data/types';
 import { Rng } from '../engine';
 import { realParkAt, realParkOpening } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -86,13 +87,23 @@ export const AI_NEW_AGE = 25;
  */
 export function parkRunFactor(parkFactors: Record<string, Record<string, number>> | undefined, franchise: string, year: number,
                               s: StadiumState | undefined): number {
-  if (!parkFactors || (s?.done ?? []).some((d) => d.kind === 'new')) return 1;
-  const known = parkFactors[String(year)];
-  if (known) return known[franchise] ?? 1;
-  const last = Math.max(...Object.keys(parkFactors).map(Number));
-  if (year < last) return 1;
+  return realParkValue(parkFactors, franchise, year, s) ?? 1;
+}
+
+/** 실제 홈 구장의 사건별 배율 (meta.parkEvents). 없으면 undefined (엔진이 득점 계수를 지수로 나눈다). 자료 뒤 해·신구장 규칙은 parkRunFactor와 같다 */
+export function parkEventFactor(parkEvents: Record<string, Record<string, ParkEvents>> | undefined, franchise: string, year: number,
+                                s: StadiumState | undefined): ParkEvents | undefined {
+  return realParkValue(parkEvents, franchise, year, s);
+}
+
+function realParkValue<T>(table: Record<string, Record<string, T>> | undefined, franchise: string, year: number, s: StadiumState | undefined): T | undefined {
+  if (!table || (s?.done ?? []).some((d) => d.kind === 'new')) return undefined;
+  const known = table[String(year)];
+  if (known) return known[franchise];
+  const last = Math.max(...Object.keys(table).map(Number));
+  if (year < last) return undefined;
   const moved = (realParkAt(franchise, year)?.from ?? 0) > last;
-  return moved ? 1 : (parkFactors[String(last)][franchise] ?? 1);
+  return moved ? undefined : table[String(last)][franchise];
 }
 
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {

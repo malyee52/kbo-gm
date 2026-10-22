@@ -1,4 +1,4 @@
-import type { Hand, Rates, YearRules } from '../data/types';
+import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense } from './defense';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
@@ -102,8 +102,11 @@ export interface SimTeam {
   /** 의료·트레이닝 투자: 부상 확률 배율, 결장 기간 배율 (없으면 1, league/finance.ts) */
   injuryRate?: number;
   injuryDays?: number;
-  /** 홈 구장 특성 (league/stadium.ts parkFactor): 홈런 배율. 없으면 1 */
-  park?: { hr: number; run?: number };
+  /**
+   * 홈 구장 특성: hr = 게임 안에서 지은 신구장의 홈런 배율 (league/stadium.ts parkFactor, 없으면 1),
+   * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
+   */
+  park?: { hr: number; run?: number; ev?: ParkEvents };
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */

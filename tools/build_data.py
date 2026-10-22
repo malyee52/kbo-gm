@@ -32,9 +32,11 @@
                                  자료집 값과 다르면 하드힛 값을 쓴다 (2026-10-22 사용자 결정, 모든 하드힛 가공값에 같은 규칙)
                                  pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
                                  park.csv: 구단·연도별 홈 구장 계수 (meta.json의 parkFactors, park_factors 참조)
+                                 park_components.csv: 구장별 구성 지수 → 사건별 구장 배율 (meta.json의 parkEvents, park_events 참조)
 """
 import csv
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -652,6 +654,103 @@ def park_factors(teams):
     return out, lines
 
 
+# 구장 표의 구장 → (계보들, 그 구장이 홈이 된 해). 개장 해는 src/league/ballparks.ts와 같다.
+# 포항(삼성)·울산(롯데)은 제2구장이라 엔진에 없어 쓰지 않는다 (몇 경기씩만 열린다)
+PARK_STADIUMS = {'대구': (['삼성'], 2016), '인천': (['SSG'], 2002), '부산': (['롯데'], 1986), '대전': (['한화'], 2025),
+                 '수원': (['KT'], 2014), '창원': (['NC'], 2019), '광주': (['KIA'], 2014), '잠실': (['LG', '두산'], 1985),
+                 '고척': (['히어로즈'], 2016)}
+# 구성 지수를 100 쪽으로 당기는 정도: 로그 지수 × 경기 / (경기 + PARK_SHRINK_GAMES). 288경기(4시즌) 구장 0.67, 대전 73경기 0.34 (임시값)
+PARK_SHRINK_GAMES = 144
+# 좌타·우타 표를 전체 표 쪽으로 당기는 정도: (좌우 log 지수 − 전체 log 지수) × 반 경기 / (반 경기 + PARK_SIDE_SHRINK_GAMES) (임시값.
+# 좌우 표는 표본이 전체의 절반쯤이다. 288경기 구장 0.5, 대전 0.2)
+PARK_SIDE_SHRINK_GAMES = 144
+# 사건별 득점 가치: 그 사건이 1개 더 날 때 엔진에서 느는 득점 (tools/park_run_value.ts, 2025년 6시드). 구성 배율이 내는 득점 계수를 셀 때만 쓴다.
+# 흔한 선형 가중치(단타 0.74, 2루타 1.05, 홈런 1.68)를 쓰면 엔진 득점 비가 f보다 1.25배 크게 움직였다 (reports/park-check.md).
+# 3루타는 잰 값(0.47)이 표본이 작아 2루타 값을 쓴다 (임시값)
+PARK_RUN_VALUE = {'s1': 0.61, 'd2': 0.69, 't3': 0.69, 'hr': 1.67}
+# 수준 맞춤에 쓰는 기본 나눔 (엔진 params.park의 hitExp·hrExp와 같다)
+PARK_DEFAULT_EXP = {'s1': 0.4, 'd2': 0.4, 't3': 0.4, 'hr': 1.2}
+
+
+def park_events(parks, league):
+    """구장 표의 구성 모양 + 연도별 홈 구장 계수 f(수준) → 연도 → 계보 → 사건별 구장 배율 {s1, d2, t3, hr}.
+
+    배율 = exp(w × log 구성 지수 + 기본 지수 × d). w는 경기 수로 당긴 정도, d는 그 해 리그 비율·득점 가치로 센 득점 계수가
+    그 해 f와 같아지게 정한다 (모양은 표에서, 수준은 해마다 f에서). 볼넷·삼진 지수는 쓰지 않는다:
+    표의 득점 지수와 견주면 안타·홈런 네 가지로 센 득점 계수가 더 잘 맞는다 (상관 0.96, 볼넷·삼진까지 넣으면 0.84).
+    그 구장이 홈이 된 해부터만 쓴다. 표가 없는 구장(예전 구장)은 엔진이 기본 지수(f^hitExp, f^hrExp)를 쓴다."""
+    rows = hardhit_csv('park_components.csv')
+    if not rows or not parks:
+        return {}, []
+    col = {'s1': '단타', 'd2': '2루타', 't3': '3루타', 'hr': '홈런'}
+    shape = {}  # 계보 → (개장 해, {사건: 당긴 log 지수}, 구장, 경기, {'L'|'R': {사건: 당긴 log 지수}})
+    side_rows = {}
+    for r in rows:
+        if r['구장'] not in PARK_STADIUMS:
+            continue
+        if r['타자'] != 'ALL':
+            side_rows[(r['구장'], r['타자'])] = r
+            continue
+        frs, since = PARK_STADIUMS[r['구장']]
+        g = int(r['경기'])
+        w = g / (g + PARK_SHRINK_GAMES)
+        for fr in frs:
+            shape[fr] = (since, {e: w * math.log(float(r[c]) / 100) for e, c in col.items()}, r['구장'], g, {})
+    for fr, (since, base, st, g, sides) in shape.items():
+        all_row = next(r for r in rows if r['구장'] == st and r['타자'] == 'ALL')
+        for sd in ('L', 'R'):
+            r = side_rows.get((st, sd))
+            if not r:
+                continue
+            half = int(r['경기']) / 2
+            ws = half / (half + PARK_SIDE_SHRINK_GAMES)
+            sides[sd] = {e: base[e] + ws * (math.log(float(r[c]) / 100) - math.log(float(all_row[c]) / 100)) for e, c in col.items()}
+    out = {}
+    for y, year in parks.items():
+        R = league[int(y)]['rates']
+        rpa = league[int(y)]['r'] / league[int(y)]['pa']
+        ev = {}
+        for fr, f in year.items():
+            if fr not in shape or int(y) < shape[fr][0]:
+                continue
+            base, sides = shape[fr][1], shape[fr][4]
+
+            def mult(d, b=base):
+                return {e: math.exp(b[e] + PARK_DEFAULT_EXP[e] * d) for e in b}
+
+            def run(d):
+                m = mult(d)
+                return 1 + sum(PARK_RUN_VALUE[e] * R[e] * (m[e] - 1) for e in m) / rpa
+
+            lo, hi = -1.0, 1.0
+            for _ in range(60):
+                mid = (lo + hi) / 2
+                lo, hi = (mid, hi) if run(mid) < f else (lo, mid)
+            d = (lo + hi) / 2
+            ev[fr] = {e: round(v, 3) for e, v in mult(d).items()}
+            # 좌타·우타: 모양만 좌우 표에서, 수준 맞춤 d는 전체와 같다
+            for sd, b in sides.items():
+                ev[fr][sd] = {e: round(v, 3) for e, v in mult(d, b).items()}
+        if ev:
+            out[y] = ev
+    lines = ['', '## 사건별 구장 배율 (park_components.csv → meta.json parkEvents)', '',
+             '구장 표(2022~2025 묶음)는 100 = 리그 평균인 **구장 자체 지수**다. 표의 득점 지수와 연도별 홈 구장 계수 f(2022~2025 평균)의 기울기 0.72·상관 0.96,',
+             '하드힛 선수 행 파크팩터(홈 경기 절반을 섞은 시즌 값)와는 기울기 0.35라 절반 값이 아니다.',
+             f'모양: 단타·2루타·3루타·홈런 지수를 log로, 경기 / (경기 + {PARK_SHRINK_GAMES})만큼 100 쪽으로 당김 (임시값). 수준: 그 해 f에 맞춤. 볼넷·삼진은 쓰지 않음.',
+             f'좌타(L)·우타(R): 좌우 표의 전체 대비 log 차이를 반 경기 / (반 경기 + {PARK_SIDE_SHRINK_GAMES})만큼만 더한다 (임시값). 수준 맞춤은 전체와 같다.',
+             '엔진: 좌타는 L, 우타는 R, 양타는 상대 투수 손의 반대쪽, 치는 손을 모르면 전체. 방향별 홈런(좌·중·우)은 엔진에 타구 방향이 없어 쓰지 않는다.',
+             '제2구장 포항(삼성 14경기)·울산(롯데 20경기)은 엔진에 없어 쓰지 않는다.', '',
+             '| 계보 | 구장 | 표 경기 | 쓰는 해 | 2025 f | 타자 | 2025 단타 | 2루타 | 3루타 | 홈런 |', '|---|---|---:|---|---:|---|---:|---:|---:|---:|']
+    for fr, (since, _, st, g, _s) in sorted(shape.items()):
+        yrs = [y for y in out if fr in out[y]]
+        e = out.get('2025', {}).get(fr) or {}
+        for label, x in (('전체', e), ('좌타', e.get('L') or {}), ('우타', e.get('R') or {})):
+            head = f'| {fr} | {st} | {g} | {yrs[0] if yrs else "-"}~{yrs[-1] if yrs else ""} | {parks.get("2025", {}).get(fr, 1):.3f} |' if label == '전체' else '| | | | | |'
+            lines.append(f'{head} {label} | ' + ' | '.join(f'{x.get(k, 1):.3f}' for k in ('s1', 'd2', 't3', 'hr')) + ' |')
+    print(f'사건별 구장 배율: {len(out)}개 연도, {sum(len(v) for v in out.values())}건')
+    return out, lines
+
+
 def profiles_of(wb):
     return {str(r['선수ID']): r['출신교·경력(2026 프로필)'] for r in rows(wb['선수마스터']) if r['출신교·경력(2026 프로필)']}
 
@@ -819,6 +918,8 @@ def main():
         L['unearnedShare'] = 1 - L['er'] / L['runsAllowed']
         L['wpbkPerPa'] = L['wpbk'] / tbf if L['wpbk'] else None  # 폭투+보크. 2001년부터 기록
         league[y] = L
+    park_ev, park_ev_report = park_events(parks, league)
+    hardhit_report += park_ev_report
 
     # ---- 능력 산출용 사전 평균: 출전이 적은 선수-시즌의 리그 대비 비율 (전 시즌 합산)
     ev_b = {'s1': None, 'd2': 'd', 't3': 't', 'hr': 'hr', 'bb': 'bb', 'hbp': 'hbp', 'so': 'so'}
@@ -908,6 +1009,7 @@ def main():
         **({'foreignOpening': foreign_opening} if foreign_opening else {}),
         'specialEntries': special,
         **({'parkFactors': parks} if parks else {}),
+        **({'parkEvents': park_ev} if park_ev else {}),
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)

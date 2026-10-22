@@ -1,6 +1,6 @@
 // 한 경기 시뮬레이션. 타석 단위로 결과를 뽑고 주자·아웃·득점을 진행한다.
 
-import type { Rates } from '../data/types';
+import type { ParkRates, Rates } from '../data/types';
 import type { EngineParams } from './params';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
@@ -448,7 +448,8 @@ type PaState = Pick<Situation, 'runnersOn' | 'scoring' | 'late'>;
 const NO_STATE: PaState = { runnersOn: false, scoring: false, late: false };
 
 /** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
-const NEUTRAL_PARK = { hit: 1, hr: 1 };
+type GamePark = ParkRates & { L?: ParkRates; R?: ParkRates };
+const NEUTRAL_PARK: GamePark = { s1: 1, d2: 1, t3: 1, hr: 1 };
 
 function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE, park = NEUTRAL_PARK): Ev {
   const { league: lg, cal, params } = ctx;
@@ -469,11 +470,14 @@ function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boole
   const pBb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
   const pHbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
   // 홈 구장 효과 (실제 구장 계수 meta.parkFactors + 게임 안에서 지은 신구장의 홈런 배율, league/stadium.ts): 양 팀 타자 모두에게
-  const pHr = combine(bs.hr * cal.hr * lg.hr * up * park.hr, ps.hr * lg.hr * worse, lg.hr);
+  // 치는 손별 구장 표: 좌타 L, 우타 R, 양타는 상대 투수 손의 반대쪽, 모르면 전체
+  const side = b.bats === 'S' ? (pg.p.throws === 'L' ? 'R' : pg.p.throws === 'R' ? 'L' : null) : b.bats === 'L' || b.bats === 'R' ? b.bats : null;
+  const pk: ParkRates = (side && park[side]) || park;
+  const pHr = combine(bs.hr * cal.hr * lg.hr * up * pk.hr, ps.hr * lg.hr * worse, lg.hr);
   const hitP = ps.hit * worse * Math.max(0.5, 1 - fieldDef * params.defenseHitPerRun);
-  const pS1 = combine(bs.s1 * cal.s1 * lg.s1 * up * park.hit, hitP * lg.s1, lg.s1);
-  const pD2 = combine(bs.d2 * cal.d2 * lg.d2 * up * park.hit, hitP * lg.d2, lg.d2);
-  const pT3 = combine(bs.t3 * cal.t3 * lg.t3 * up * park.hit, hitP * lg.t3, lg.t3);
+  const pS1 = combine(bs.s1 * cal.s1 * lg.s1 * up * pk.s1, hitP * lg.s1, lg.s1);
+  const pD2 = combine(bs.d2 * cal.d2 * lg.d2 * up * pk.d2, hitP * lg.d2, lg.d2);
+  const pT3 = combine(bs.t3 * cal.t3 * lg.t3 * up * pk.t3, hitP * lg.t3, lg.t3);
 
   const sum = pSo + pBb + pHbp + pHr + pS1 + pD2 + pT3;
   const scale = sum > 0.93 ? 0.93 / sum : 1;
@@ -506,9 +510,15 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [] };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
-  const run = homeTs.team.park?.run ?? 1;
-  const park = run === 1 && !homeTs.team.park ? NEUTRAL_PARK
-    : { hit: run ** ctx.params.park.hitExp, hr: (homeTs.team.park?.hr ?? 1) * run ** ctx.params.park.hrExp };
+  // 홈 구장 사건별 배율: 실제 구장 표가 있으면 그 배율(meta.parkEvents, 좌타·우타 포함), 없으면 득점 계수 f를 지수로 나눈다.
+  // 게임 안에서 지은 신구장의 홈런 배율(hr)은 곱한다
+  const tp = homeTs.team.park;
+  const run = tp?.run ?? 1;
+  const hit = run ** ctx.params.park.hitExp;
+  const withHr = (x: ParkRates | undefined): ParkRates | undefined => x && { s1: x.s1, d2: x.d2, t3: x.t3, hr: tp!.hr * x.hr };
+  const park: GamePark = !tp ? NEUTRAL_PARK
+    : tp.ev ? { ...withHr(tp.ev)!, L: withHr(tp.ev.L), R: withHr(tp.ev.R) }
+    : { s1: hit, d2: hit, t3: hit, hr: tp.hr * run ** ctx.params.park.hrExp };
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
 
   // 승리·패전 후보: 리드를 잡은 시점의 투수와 그 점수를 내준 투수. 동점이 되면 지운다
