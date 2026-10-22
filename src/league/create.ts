@@ -120,6 +120,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(reserveTarget(now, service), Math.round(marketSalary(now) * POST_FA_RESERVE)), until: startYear };
     else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
     // 실제 계약 금액이 있는 외국인은 그대로 (연봉 + 계약금, 사용자 조사 2026-10-22). 시작 연도 전 KBO 기록이 없으면 신규 계약 식 (개인 상한 100만 달러)
+    // 생성식 계약은 연봉·계약금을 나누지 않고 합친 금액 하나다 (규칙 알림 5차 결정 6, 2026-10-23). 계약금은 실제 자료가 있는 선수만
     const realPay = p.foreign ? realForeign.get(p.id) : undefined;
     if (realPay) contract = { kind: 'foreign', salary: realPay.salary, ...(realPay.bonus ? { bonus: realPay.bonus } : {}), until: startYear };
     else if (p.foreign && ![...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].some((r) => r.year < startYear)) {

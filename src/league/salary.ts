@@ -51,7 +51,8 @@ export function rookieSalary(year: number, league?: Pick<LeagueState, 'ruleShift
 
 /**
  * 최저 연봉·외국인 금액 상한의 규정 인상 주기 (임시값, 2026-10-22 사용자 결정 "계단식"): 2026년 뒤 이만큼마다(2030·2034…)
- * 그동안의 연봉 상승 지수만큼 규정을 올린다. 해마다 오르는 연봉(wageIndex)과 달리 규정은 몇 년에 한 번 바뀐다
+ * 그동안의 연봉 상승 지수만큼 규정을 올린다. 해마다 오르는 연봉(wageIndex)과 달리 규정은 몇 년에 한 번 바뀐다.
+ * 첫 인상은 2030년 그대로 (규칙 알림 5차 결정 2, 2026-10-23 사용자 결정)
  */
 export const MIN_SALARY_STEP_YEARS = 4;
 const RULE_STEP_BASE = 2026;
@@ -329,7 +330,7 @@ export const FOREIGN_ASIA = 1;
 
 /**
  * 외국인 연봉 (달러, 연봉 + 계약금 총액, 임시값): 기여에 따라. year = 계약이 시작되는 해 (없으면 2026 규정).
- * 금액 상한이 규정 인상(foreignCap)으로 오르면 시장 금액도 같은 배율로 오른다 (상한 아래 퍼짐을 그대로 두려고, 2026-10-22).
+ * 금액 상한이 규정 인상(foreignCap)으로 오르면 시장 금액도 같은 배율로 오른다 (상한 아래 퍼짐을 그대로 두려고, 2026-10-22. 규칙 알림 5차 결정 3에서 그대로 확정).
  * 개인 상한은 신규(isNew, KBO 1년차)만: 일반 100만·아시아쿼터 20만 달러. 재계약은 개인 금액 제한이 없다 (사용자 조사 2026-10-22)
  */
 export function foreignSalary(runs: number, isNew: boolean, asia: boolean, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>, year?: number): number {
@@ -363,7 +364,8 @@ export function isNewForeign(p: Pick<LeaguePlayer, 'history' | 'tenure0'>): bool
 
 /**
  * 재계약 외국인 1명마다 구단 총액 상한이 늘어나는 폭 (달러): 재계약 1년당 10만 달러 (사용자 조사 2026-10-22, 확인 필요).
- * 해석: 같은 구단에서 마친 시즌 수를 재계약 연차로 본다 (2년차 = 1, 3년차 = 2…). 규정 인상(ruleStepIndex)도 같은 배율로 곱한다
+ * 해석: 같은 구단에서 마친 시즌 수를 재계약 연차로 본다 (2년차 = 1, 3년차 = 2…). 규정 인상(ruleStepIndex)도 같은 배율로 곱한다.
+ * 중간에 끊긴 시즌도 모두 더하는 지금 방식 그대로 (규칙 알림 5차 결정 4, 2026-10-23. 실제 규정 확인 대기, 다르면 고친다)
  */
 export const FOREIGN_RESIGN_CAP_STEP = 100_000;
 
