@@ -64,7 +64,7 @@ export interface ErrorParams {
   outfieldExtra: number;
   /** 외야 안타(단타·2루타) 하나에 외야수 실책(공 빠뜨림·송구)으로 모든 주자가 한 베이스 더 갈 확률 ÷ 그 해 실책 출루 값 (env.roe) */
   onHit: number;
-  /** 폭투·포일·보크 진루 중 포일 몫. 포일로 간 주자는 비자책 */
+  /** 폭투·포일·보크 진루 중 포일 몫. 포일로 들어온 3루 주자의 득점은 비자책 */
   passedBall: number;
 }
 
@@ -307,8 +307,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.12 },
 
   roePerUnearnedShare: 0.2,
-  // 엔진 2 7단계: 경기 안 자책 판정을 넣고 0.68 → 0.38로 다시 맞춤 (2023~2025 engine2_baseline 비자책 비율)
-  unearnedRunScale: 0.38,
+  // 엔진 2 7단계: 경기 안 자책 판정을 넣고 0.68 → 0.45로 다시 맞춤 (2023~2025 engine2_baseline 비자책 비율)
+  unearnedRunScale: 0.45,
   // 모두 임시값 (자료 없음). share는 예전 수비진 실책 몫(SS 0.2·3B 0.17·2B 0.17·1B 0.12·외야 각 0.1·C 0.04)에 투수 0.04를 더했다
   error: {
     share: { SS: 0.2, '3B': 0.17, '2B': 0.17, '1B': 0.12, LF: 0.1, CF: 0.1, RF: 0.1, C: 0.04, P: 0.04 },

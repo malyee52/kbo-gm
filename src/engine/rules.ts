@@ -62,8 +62,9 @@ export function wildPitch(st: GameState): boolean {
   if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(ctx.env.wildPitch * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun))) {
     ctx.totals.wildPitches++;
     const r0 = bat.runs;
-    // 포일 몫 (엔진 2 7단계, 임시값): 포일로 간 주자는 비자책
-    if (ctx.rng.chance(ctx.params.error.passedBall)) for (const r of bases) if (r) r.earned = false;
+    // 포일 몫 (엔진 2 7단계, 임시값): 포일로 들어온 3루 주자의 득점은 비자책. 다른 주자는 그대로 둔다
+    // (누상 주자를 모두 비자책으로 굳히면 시대와 관계없이 비자책이 일정량 늘어 2012년이 +19%였다)
+    if (ctx.rng.chance(ctx.params.error.passedBall) && bases[2]) bases[2].earned = false;
     if (bases[2]) { st.score(bases[2], null); bases[2] = null; }
     if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
     if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
