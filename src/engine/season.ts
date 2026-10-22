@@ -171,7 +171,8 @@ interface FixedAbsence {
 export interface SeasonSave {
   /** 수비수별 실책 (예전 저장에는 없다) */
   errors?: number[];
-  format: 1;
+  /** 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1(엔진 1)은 불러오지 않는다 */
+  format: 2;
   seed: string;
   year: number;
   /** 월드의 선수 구성 지문. 데이터가 바뀌면 선수 색인이 어긋나므로 불러오기를 막는다 */
@@ -179,7 +180,6 @@ export interface SeasonSave {
   cal: Rates;
   day: number;
   rngDays: number;
-  rngGames: number;
   absentUntil: number[];
   fatigue: number[];
   fatigueDay: number[];
@@ -254,6 +254,8 @@ export class Season {
   commander: GameCommand | null = null;
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
+  /** 정규시즌 경기 난수의 뿌리. 경기마다 여기서 따로 줄기를 갈라 쓴다 (gameRng) */
+  private readonly gamesRoot: Rng;
   /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
   private eventRng: Rng;
   private ctx: GameContext;
@@ -294,8 +296,9 @@ export class Season {
     this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
     this.dayRng = rng.fork('days');
     this.eventRng = rng.fork('events');
+    this.gamesRoot = rng.fork('games');
     this.ctx = {
-      league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: rng.fork('games'),
+      league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
       errors: this.errors,
     };
@@ -458,6 +461,7 @@ export class Season {
       const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
+      ctx.rng = this.gameRng(day, g);
       const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
       const plays = ctx.plays;
       ctx.plays = null;
@@ -508,6 +512,14 @@ export class Season {
       }
     }
     this.day++;
+  }
+
+  /**
+   * 정규시즌 경기 하나의 난수 줄기 (docs/경기엔진2_기획안.md 3.7.1). 날짜와 대진으로만 정해지므로
+   * 한 경기의 난수 소비가 그날 다른 경기나 다음 날 경기에 영향을 주지 않고, 저장에 경기 난수 위치가 필요 없다
+   */
+  gameRng(day: number, g: ScheduledGame): Rng {
+    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}`);
   }
 
   /** 그 선수를 until 전날까지 쉬게 한다 (무작위 이벤트의 휴식 처방). 부상 기록에는 남기지 않는다 */
@@ -606,14 +618,13 @@ export class Season {
   toSave(): SeasonSave {
     const st = this.states;
     return {
-      format: 1,
+      format: 2,
       seed: this.seed,
       year: this.world.year,
       roster: this.baseRoster,
       cal: { ...this.cal },
       day: this.day,
       rngDays: this.dayRng.state(),
-      rngGames: this.ctx.rng.state(),
       absentUntil: Array.from(st.absentUntil),
       fatigue: Array.from(st.fatigue),
       fatigueDay: Array.from(st.fatigueDay),
@@ -641,7 +652,8 @@ export class Season {
 
   /** 저장한 위치에서 시즌을 다시 연다. world는 저장할 때와 같은 데이터·연도로 만든 것이어야 한다 */
   static restore(world: World, params: EngineParams, save: SeasonSave): Season {
-    if (save.format !== 1) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
+    if ((save.format as number) === 1) throw new Error('엔진 2 이전 저장이라 쓸 수 없습니다 (경기 엔진이 바뀌어 이어 할 수 없음)');
+    if (save.format !== 2) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
     if (save.year !== world.year) throw new Error(`저장한 연도(${save.year})와 월드 연도(${world.year})가 다릅니다`);
     if (save.roster !== rosterFingerprint(world)) {
       throw new Error('게임 데이터가 저장할 때와 달라 이 저장을 이어갈 수 없습니다 (선수 구성이 바뀜)');
@@ -656,7 +668,6 @@ export class Season {
     s.dayRng = Rng.fromState(root.fork('days').seed, save.rngDays);
     if (save.rngEvents !== undefined) s.eventRng = Rng.fromState(root.fork('events').seed, save.rngEvents);
     s.absences.push(...(save.absences ?? []).map((a) => ({ ...a })));
-    s.ctx.rng = Rng.fromState(root.fork('games').seed, save.rngGames);
     if (save.activeDays) s.activeDays.set(save.activeDays);
     if (save.demotedDay) s.demotedDay.set(save.demotedDay);
     s.states.absentUntil.set(save.absentUntil);

@@ -89,7 +89,8 @@ export interface PostseasonResult {
 
 /** 진행 중인 포스트시즌 (저장 가능) */
 export interface PostseasonState {
-  format: 1;
+  /** 2: 경기마다 따로 난수 줄기 (엔진 2, 2026-10-22). 1은 하나의 줄기를 이어 쓰던 예전 형식 */
+  format: 2;
   /** 연장 이닝 제한 (리그 규정이 바뀌었을 때만, league/rules.ts) */
   maxInnings?: number;
   year: number;
@@ -100,8 +101,6 @@ export interface PostseasonState {
   series: SeriesResult[];
   /** 다음 경기 날짜 (일정 색인) */
   day: number;
-  /** 난수 위치 */
-  rng: number;
   done: boolean;
 }
 
@@ -119,8 +118,8 @@ export function startPostseason(season: Season, standings: number[], n: number, 
   const rounds = roundsFor(seeds.length);
   const rngSeed = `${seed}/postseason`;
   const st: PostseasonState = {
-    format: 1, year: season.world.year, seed: rngSeed, seeds, rounds, series: [],
-    day: season.schedule.length + REST_BEFORE, rng: new Rng(rngSeed).state(), done: false,
+    format: 2, year: season.world.year, seed: rngSeed, seeds, rounds, series: [],
+    day: season.schedule.length + REST_BEFORE, done: false,
   };
   openSeries(st, seeds[seeds.length - 1]);
   return st;
@@ -155,11 +154,11 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
   const highHome = rule.homePattern[x.games.length] ?? true;
   const home = highHome ? x.high : x.low;
   const away = highHome ? x.low : x.high;
-  const rng = Rng.fromState(st.seed, st.rng);
+  // 경기마다 따로 난수 줄기: 라운드와 그 시리즈의 경기 번호 (docs/경기엔진2_기획안.md 3.7.1)
+  const rng = new Rng(st.seed).fork(`ps/${x.round}/${x.games.length}`);
   const n = season.world.players.length;
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
   const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, st.maxInnings ?? POSTSEASON_MAX_INNINGS, rec, command);
-  st.rng = rng.state();
   const g: SeriesGame = {
     day: st.day, home, away, homeRuns: r.homeRuns, awayRuns: r.awayRuns, innings: r.innings,
     box: {
