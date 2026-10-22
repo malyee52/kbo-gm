@@ -11,7 +11,7 @@ import { absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIEL
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
-import { Grade, gradeClass, HAND, posName, TeamName, useGame, useWon } from '../context';
+import { ForeignMark, Grade, gradeClass, HAND, POS_KO, posName, TeamName, useGame, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
@@ -76,7 +76,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
       <div className="dialog-body">
         <header className="row-between">
           <div>
-            <h2 id="player-name">{p.name}{p.foreign && <span className="tag">외국인</span>}</h2>
+            <h2 id="player-name">{p.name}<ForeignMark p={p} long /></h2>
             <p className="muted">
               <TeamName idx={p.teamIdx} />{p.teamIdx < 0 && p.formerTeam !== undefined && <span className="muted"> (전 {session.teamInfo(p.formerTeam).name}, 방출)</span>} · {p.isPitcher ? `투수 (${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' · 언더·사이드' : ''})` : `${posName(p.pos)} (${p.bats ? HAND[p.bats] : '-'}타)`}
               {' · '}{p.age !== null ? `${p.ageEstimated ? '약 ' : ''}${p.age}세` : '나이 미상'}
@@ -264,13 +264,13 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
   return (
     <div className="defense">
       <h4 className="small">
-        수비{session.phase === 'season' && (session.season.errors[p.idx] ?? 0) > 0 ? <span className="muted"> 이번 시즌 실책 {session.season.errors[p.idx]}개 ·</span> : null} <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (지명타자)'}</span>
+        수비{session.phase === 'season' && (session.season.errors[p.idx] ?? 0) > 0 ? <span className="muted"> 이번 시즌 실책 {session.season.errors[p.idx]}개 ·</span> : null} <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (DH)'}</span>
         {!edit && p.bat && <button type="button" className="link small" onClick={open}>고치기</button>}
       </h4>
       {edit ? (
         <div className="defense-edit">
           {FIELD_POS.map((q) => (
-            <label key={q} className="small">
+            <label key={q} className="small" title={POS_KO[q]}>
               {posName(q)}
               <input type="number" min={20} max={80} step={1} value={edit[q]} onChange={(e) => setEdit({ ...edit, [q]: Math.max(20, Math.min(80, Number(e.target.value) || 20)) })} />
             </label>
@@ -283,7 +283,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
         </div>
       ) : (
         <div className="grades">
-          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} v={defenseGrade(defenseAt(p, q))} />)}
+          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} title={POS_KO[q]} v={defenseGrade(defenseAt(p, q))} />)}
         </div>
       )}
       {msg && <p className="muted small">{msg}</p>}
@@ -333,9 +333,9 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
   );
 }
 
-export function GradeBar({ label, v }: { label: string; v: number | null }) {
+export function GradeBar({ label, v, title }: { label: string; v: number | null; title?: string }) {
   return (
-    <div className="gbar">
+    <div className="gbar" title={title}>
       <span>{label}</span>
       <span className="track" aria-hidden><i className={gradeClass(v)} style={{ width: `${v === null ? 0 : ((v - 20) / 60) * 100}%` }} /></span>
       <Grade v={v} />

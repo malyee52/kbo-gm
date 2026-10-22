@@ -11,11 +11,13 @@ import {
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
+import { OwnerMeeting } from './OwnerMeeting';
 import { ruleOf } from '../../league/rules';
 import { REP_FA, REP_TRADE, repLabel, repOf } from '../../league/reputation';
 
 // 2026-10-12 UI 개편: 탭(개요·재정·구장·팬·감독·코치·이력·업적)은 위쪽 '구단' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
-export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history';
+// 2026-10-22 UI 대개편 1차: 경영 > 구단주 (owner) 칸을 더했다. 구단주 평가 카드 + 판타지 모드의 정기 면담
+export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history' | 'owner';
 
 export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
   const { session, go } = useGame();
@@ -51,26 +53,14 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
       {tab === 'finance' && <FinancePanel />}
       {tab === 'stadium' && <StadiumPanel />}
       {tab === 'coach' && <><ManagerPanel /><CoachPanel /></>}
+      {tab === 'owner' && (<>
+        <section className="cards"><OwnerCard /></section>
+        {session.fantasy ? <OwnerMeeting /> : <p className="muted small">구단주와의 정기 면담(안건 듣고 답하기)은 판타지 모드 게임에서 열립니다.</p>}
+      </>)}
 
       {tab === 'overview' && (<>
       <section className="cards">
-        <div className="card">
-          <h2>구단주 평가</h2>
-          <p className="big">신뢰도 {o.trust}</p>
-          <div className="track trust" aria-label={`신뢰도 ${o.trust} / 100`}><i style={{ width: `${o.trust}%` }} /></div>
-          <p className="muted small">{FIRE_BELOW} 아래로 떨어지면 해고됩니다. 새 구단에 부임하면 {START_TRUST}에서 다시 시작합니다.</p>
-          {o.goal && (
-            <p>
-              {o.goal.year} 시즌 목표: <strong>{GOAL_LABEL[o.goal.kind]}</strong>
-              <span className="muted small"> (개막 때 전력 예상 {o.goal.projectedRank}위)</span>
-            </p>
-          )}
-          <p className="muted small">
-            목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.
-            달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
-          </p>
-          <p className="muted small">난이도: {settingsLabel(L)}</p>
-        </div>
+        <OwnerCard />
 
         <RepCard />
 
@@ -185,6 +175,32 @@ export function OfferPanel() {
         </tbody>
       </table>
     </section>
+  );
+}
+
+/** 구단주 평가: 신뢰도·목표·해고선 (구단 현황 개요와 경영 > 구단주) */
+function OwnerCard() {
+  const { session } = useGame();
+  const L = session.league;
+  const o = session.owner;
+  return (
+    <div className="card">
+      <h2>구단주 평가</h2>
+      <p className="big">신뢰도 {o.trust}</p>
+      <div className="track trust" aria-label={`신뢰도 ${o.trust} / 100`}><i style={{ width: `${o.trust}%` }} /></div>
+      <p className="muted small">{FIRE_BELOW} 아래로 떨어지면 해고됩니다. 새 구단에 부임하면 {START_TRUST}에서 다시 시작합니다.</p>
+      {o.goal && (
+        <p>
+          {o.goal.year} 시즌 목표: <strong>{GOAL_LABEL[o.goal.kind]}</strong>
+          <span className="muted small"> (개막 때 전력 예상 {o.goal.projectedRank}위)</span>
+        </p>
+      )}
+      <p className="muted small">
+        목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.
+        달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
+      </p>
+      <p className="muted small">난이도: {settingsLabel(L)}</p>
+    </div>
   );
 }
 
