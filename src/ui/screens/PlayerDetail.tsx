@@ -414,7 +414,7 @@ function PitSaberTable({ rows }: { rows: { label: string; l: PitLike; lg: League
       <thead><tr><th className="l">시즌 (세이버)</th><th title={SABER_TIP.fip}>FIP</th><th title={SABER_TIP.eraFip}>ERA-FIP</th><th title={SABER_TIP.pk}>K%</th><th title={SABER_TIP.pb}>BB%</th><th title={SABER_TIP.pbabip}>피BABIP</th></tr></thead>
       <tbody>
         {rows.map(({ label, l, lg }) => {
-          const p = { ...l, bf: l.bf ?? 0, hbp: l.hbp ?? 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0 };
+          const p = { ...l, bf: l.bf ?? 0, hbp: l.hbp ?? 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0, np: 0 };
           const f = lg ? fip(p, lg) : NaN;
           return (
             <tr key={label}>
@@ -434,7 +434,7 @@ function PitTable({ rows }: { rows: { label: string; l: PitLike }[] }) {
       <thead><tr><th className="l">시즌</th><th>경기</th><th>선발</th><th>승</th><th>패</th><th>세이브</th><th>홀드</th><th title="퀄리티 스타트: 선발로 6이닝 이상 던지고 3자책 이하">QS</th><th title="블론 세이브: 1~3점 리드에 나와 동점·역전을 허용">블론</th><th>이닝</th><th>평균자책</th><th>WHIP</th><th>피안타</th><th>피홈런</th><th>볼넷</th><th>탈삼진</th></tr></thead>
       <tbody>
         {rows.map(({ label, l }) => {
-          const p = { ...l, bf: 0, hbp: 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0 };
+          const p = { ...l, bf: 0, hbp: 0, r: 0, hld: l.hld ?? 0, qs: l.qs ?? 0, bsv: l.bsv ?? 0, np: 0 };
           return (
             <tr key={label}>
               <td className="l">{label}</td><td>{l.g}</td><td>{l.gs}</td><td>{l.w}</td><td>{l.l}</td><td>{l.sv}</td><td>{l.hld ?? '-'}</td><td>{l.qs ?? '-'}</td><td>{l.bsv ?? '-'}</td><td>{ipText(l.outs)}</td>

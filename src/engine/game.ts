@@ -42,12 +42,14 @@ export interface LeagueCounters {
   roe: number;
   outsOnBases: number;
   wildPitches: number;
+  /** 투구 수 (엔진 2 3단계) */
+  pitches: number;
 }
 
 export function emptyLeagueCounters(): LeagueCounters {
   return {
     games: 0, ties: 0, extraInningGames: 0, homeWins: 0, pa: 0, ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hbp: 0, so: 0,
-    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0,
+    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0, pitches: 0,
   };
 }
 
@@ -296,11 +298,17 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const { batter, bl, pg } = beginPlateAppearance(st);
     // 지휘한 희생번트: 2아웃 전, 주자가 있을 때
     if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !fc?.walk) {
-      if (orderedBunt(st, batter, bl, pg)) return true;
+      const end = orderedBunt(st, batter, bl, pg);
+      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
+      if (end) return true;
       continue;
     }
-    if (!tactic && !fc?.walk && autoSacBunt(st, batter, bl, pg)) continue;
+    if (!tactic && !fc?.walk && autoSacBunt(st, batter, bl, pg)) {
+      addPitches(ctx, pg, resolver.inPlayPitches?.(ctx.rng) ?? 0);
+      continue;
+    }
 
+    // 지휘한 고의4구는 공 없이 (자동 고의4구)
     let ev: Ev;
     if (fc?.walk) ev = Ev.BB;
     else {
@@ -309,7 +317,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
       }, st.park);
       const res = resolver.resolve(rates, ctx.rng);
       ev = res.ev;
-      pg.pitches += res.pitches;
+      addPitches(ctx, pg, res.pitches);
     }
     const r0 = bat.runs;
     const kind = applyPlateAppearance(st, ev, batter, bl, pg, !!fc?.walk);
@@ -317,6 +325,13 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     if (st.walkOff()) return true;
   }
   return false;
+}
+
+/** 마운드 투수의 투구 수를 센다 (기록·박스스코어용. 피로·교체에는 아직 쓰지 않는다, 엔진 2 4단계) */
+function addPitches(ctx: GameContext, pg: PitcherInGame, n: number): void {
+  pg.pitches += n;
+  pg.line.np += n;
+  ctx.totals.pitches += n;
 }
 
 /** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */
