@@ -451,7 +451,7 @@ describe('전 시대 연전 틀 (5단계)', () => {
     const { league } = createLeague(store, 2026, 'sched-11', FAST);
     const next = structuredClone(league);
     next.year = 2030;
-    next.lastSeason = undefined;
+    next.lastSeason = null;
     next.teams.push({ name: '가상', franchise: '가상' } as never);
     // 기존 구단마다 투수 2명·야수 2명을 새 구단으로
     for (let t = 0; t < 10; t++) {
