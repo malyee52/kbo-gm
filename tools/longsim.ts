@@ -54,6 +54,8 @@ export interface YearMetrics {
   serving: number;
   /** 구단별 주전(타자 9 + 선발 5 + 구원 7) 기여 합의 평균 (런) */
   core: number;
+  /** 그 해 시즌 뒤 FA: 신청(해외 복귀 제외), 다른 구단 이적, 보상선수로 옮긴 선수 */
+  fa: { filed: number; moved: number; compPlayers: number };
 }
 
 /** 리그 상태에서 한 시즌을 돌리고 오프시즌을 AI로 끝까지 진행한다 */
@@ -103,6 +105,12 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
   while (off.stage !== 'ready' && guard++ < 50) Off.advanceStage(league, off, store, params);
   if (off.stage !== 'ready') throw new Error(`${league.year} 오프시즌이 끝나지 않았습니다 (단계 ${off.stage})`);
   const retiredNow = (league.retired ?? []).filter((r) => r.year === off.year).length;
+  const faEntries = (off.fa?.entries ?? []).filter((e) => !e.returnee);
+  const fa = {
+    filed: faEntries.length,
+    moved: faEntries.filter((e) => e.status === 'signed' && e.team !== undefined && e.team !== e.from).length,
+    compPlayers: (off.comp ?? []).filter((c) => c.pick !== null && c.pick !== 'cash').length,
+  };
   Off.closeOffseason(league, off);
   const sizes = league.teams.map((_, i) => league.players.filter((p) => p.team === i && !isServing(p) && !p.dev).length);
 
@@ -125,15 +133,16 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
       retired: retiredNow,
       serving: league.players.filter(isServing).length,
       core: core.reduce((a, b) => a + b, 0) / core.length,
+      fa,
     },
   };
 }
 
 function table(rows: YearMetrics[]): string {
   const f = (x: number, d = 2) => x.toFixed(d);
-  const head = '| 연도 | 득점 | cal 단타·홈런·볼넷·삼진 | 승률SD | 최다·최소승 | 월드 인원 | 소속 최대 | 나이 타·투 | 최고령 | 실존 타석 | 부상(큰) | 이벤트(구체) | 은퇴 | 복무 | 주전 기여 |';
-  const sep = '|' + '---|'.repeat(15);
-  const body = rows.map((r) => `| ${r.year} | ${f(r.runs)} | ${f(r.cal.s1)} ${f(r.cal.hr)} ${f(r.cal.bb)} ${f(r.cal.so)} | ${f(r.sd, 3)} | ${r.maxW}·${r.minW} | ${r.orgMin}~${r.orgMax} | ${r.players} | ${f(r.ageBat, 1)}·${f(r.agePit, 1)} | ${r.maxAge} | ${f(r.realPa * 100, 0)}% | ${r.injuries}(${r.majors}) | ${r.events}(${r.specific}) | ${r.retired} | ${r.serving} | ${f(r.core, 0)} |`);
+  const head = '| 연도 | 득점 | cal 단타·홈런·볼넷·삼진 | 승률SD | 최다·최소승 | 월드 인원 | 소속 최대 | 나이 타·투 | 최고령 | 실존 타석 | 부상(큰) | 이벤트(구체) | 은퇴 | 복무 | 주전 기여 | FA 신청·이적·보상선수 |';
+  const sep = '|' + '---|'.repeat(16);
+  const body = rows.map((r) => `| ${r.year} | ${f(r.runs)} | ${f(r.cal.s1)} ${f(r.cal.hr)} ${f(r.cal.bb)} ${f(r.cal.so)} | ${f(r.sd, 3)} | ${r.maxW}·${r.minW} | ${r.orgMin}~${r.orgMax} | ${r.players} | ${f(r.ageBat, 1)}·${f(r.agePit, 1)} | ${r.maxAge} | ${f(r.realPa * 100, 0)}% | ${r.injuries}(${r.majors}) | ${r.events}(${r.specific}) | ${r.retired} | ${r.serving} | ${f(r.core, 0)} | ${r.fa.filed}·${r.fa.moved}·${r.fa.compPlayers} |`);
   return [head, sep, ...body].join('\n');
 }
 

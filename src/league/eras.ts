@@ -16,11 +16,12 @@ export function faEnabled(offseasonYear: number): boolean {
 }
 
 /**
- * FA 자격에 필요한 1군 연차 (임시값: 도입 당시 10년, 2001년부터 9년(대졸 8년), 2022년 시즌 뒤부터 8년(대졸 7년).
- * 마지막 값만 자료집에서 확인했다)
+ * FA 자격에 필요한 1군 연차: 도입 당시 10년, 2001~2010 시즌 뒤 9년 (대졸도 9년, 조사값), 2011 시즌 뒤부터 9년·대졸 8년
+ * (자료집 "2012년 FA부터 대졸 8·고졸 9"), 2022년 시즌 뒤부터 8년·대졸 7년 (자료집 확인). 도입 당시 10년은 자료집 확인.
  */
 export function faServiceNeeded(offseasonYear: number, univ: boolean): number {
   if (offseasonYear <= 2000) return 10;
+  if (offseasonYear <= 2010) return 9;
   if (offseasonYear <= 2021) return univ ? 8 : 9;
   return univ ? 7 : 8;
 }
