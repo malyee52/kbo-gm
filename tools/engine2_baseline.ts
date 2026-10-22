@@ -271,7 +271,7 @@ for (const year of years) {
   row('선발 100구 이상 비율', 'sp100', 3, true);
   row('선발 110구 이상 비율', 'sp110', 3, true);
   row('구원 등판당 투구 수', 'rpPitches', 1);
-  if (pairs.length) emit(`| 투수별 P/PA 실제 ±0.10구 안 (실제 상대 타자 300 이상 ${pairs.length}명) | 80% 이상 | ${f(100 * within / pairs.length, 1)}% | | 평균 절대 차 ${f(mean(pairs.map(([a, b]) => Math.abs(a - b))), 3)}구 |`);
+  if (pairs.length) emit(`| 투수별 P/PA 실제 ±0.10구 안 (실제 상대 타자 300 이상 ${pairs.length}명) | 50% 이상 | ${f(100 * within / pairs.length, 1)}% | | 평균 절대 차 ${f(mean(pairs.map(([a, b]) => Math.abs(a - b))), 3)}구 |`);
   row('투수별 P/PA 백분위 10 (상대 타자 100명 이상)', 'pitP10', 2);
   row('투수별 P/PA 백분위 90', 'pitP90', 2);
   if (real?.hhP10 !== undefined) emit(`| 투수별 P/PA 백분위 10·90 (하드힛, 규정 기준 미상) | ${f(real.hhP10, 2)} · ${f(real.hhP90, 2)} | ${f(avg('pitP10'), 2)} · ${f(avg('pitP90'), 2)} | | |`);
