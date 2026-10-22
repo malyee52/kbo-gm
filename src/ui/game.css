@@ -856,8 +856,7 @@ td .inline { flex-wrap: nowrap; }
 .why-결장 { background: var(--out-bg); color: var(--out-fg); }
 .why-상승 { background: var(--win-bg); color: var(--win); }
 .why-하락 { background: var(--loss-bg); color: var(--loss); }
-.stand-fold > summary { list-style: none; display: flex; }
-.stand-fold > summary::-webkit-details-marker { display: none; }
+.fold-btn { display: none !important; }
 .alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .alerts li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .panel .alerts li { grid-template-columns: 110px minmax(0, 1fr); }
@@ -881,7 +880,9 @@ td .inline { flex-wrap: nowrap; }
   .brief-grid { display: flex; flex-direction: column; align-items: stretch; }
   .brief-col { display: contents; }
   .brief-grid > *, .brief-col > * { min-width: 0; }
-  .stand-fold > summary { cursor: pointer; }
+  .fold-btn { display: inline-flex !important; min-height: 36px; }
+  .stand.folded .fold-body { display: none; }
+  .stand.folded .card-top { margin-bottom: 0; }
   .todo-cards { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 768px) {
