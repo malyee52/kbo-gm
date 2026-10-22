@@ -1,11 +1,12 @@
 // 연전 단위 일정 생성기 (src/engine/schedule.ts). 일정 개편 기획안 8장 3단계, 7장 검증 기준
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
-import { addDays, daysBetween, defaultOpening, openingOf, scheduleRule, weekdayOf, type YearScheduleRule } from '../src/data/schedule';
+import { addDays, daysBetween, defaultOpening, fitRuleToTeams, openingOf, scheduleRule, weekdayOf, type YearScheduleRule } from '../src/data/schedule';
 import { DEFAULT_PARAMS, Season, worldForYear } from '../src/engine';
 import { Rng } from '../src/engine/rng';
 import { framedRule, generatePlan, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
 import { createLeague } from '../src/league/create';
+import { postseasonStartDay } from '../src/league/postseason';
 import { worldFromLeague } from '../src/league/world';
 
 const store = loadDataStore();
@@ -243,7 +244,8 @@ describe('연전 단위 일정 생성기 (S33·S33F)', () => {
   });
 
   it('아직 만들지 않은 연전 틀과 구단 수가 다른 월드는 오류', () => {
-    expect(() => generatePlan(inputFor(1986, 'x'))).toThrow(/연전 틀/);
+    expect(() => generatePlan(inputFor(2019, 'x'))).toThrow(/연전 틀/);
+    expect(() => generatePlan(inputFor(1999, 'x'))).toThrow(/연전 틀/);
     expect(() => generatePlan(inputFor(2026, 'x', { teams: 8 }))).toThrow(/구단/);
   });
 });
@@ -312,5 +314,162 @@ describe('생성기 연결 (월드와 시즌)', () => {
     const p = planForWorld({ ...w2026, schedule: undefined, openingHosts: undefined }, new Rng('no-rule'));
     expect(p.opening).toBe(defaultOpening(2026));
     expect(p.days[0].length).toBe(5);
+  });
+});
+
+// 5단계: 전 시대 틀 (W82·W83·T3W2·S2·S33-9), 1988 가을야구 시작, 2027~ 규칙과 구단 수가 10이 아닌 월드
+describe('전 시대 연전 틀 (5단계)', () => {
+  const OLD_YEARS = [1982, 1983, 1984, 1985, 1986, 1987, 1988, 1989, 1990, 2013, 2014];
+  const ruleOf = (y: number) => scheduleRule(store.schedule!, y)!;
+  const wd = (y: number, i: number) => weekdayOf(dateOf(ruleOf(y), i));
+  /** 상대별 연전 길이 목록 (짧은 것부터) */
+  const pairLens = (p: SchedulePlan, a: number, b: number) =>
+    p.series.filter((x) => (x.home === a && x.away === b) || (x.home === b && x.away === a)).map((x) => x.len).sort((x, y) => x - y);
+
+  it('1982~2027 모든 해 × 50시드: 실패 없이 만들어지고 팀당 경기 수가 규칙 표와 같다 (하루씩 해 포함)', () => {
+    for (let y = 1982; y <= 2027; y++) {
+      const rule = ruleOf(y);
+      const franchises = store.season(y)?.teams.map((t) => t.franchise) ?? FRANCHISES_2026;
+      const world = { year: y, teams: franchises.map((franchise) => ({ franchise })), gamesPerTeam: rule.games, schedule: rule } as unknown as Parameters<typeof planForWorld>[0];
+      for (let s = 0; s < SEEDS; s++) {
+        const p = planForWorld(world, new Rng(`all-${y}-${s}`));
+        const games = new Array(franchises.length).fill(0);
+        for (const d of p.days) for (const g of d) { games[g.home]++; games[g.away]++; }
+        expect(games, `${y}/${s}`).toEqual(new Array(franchises.length).fill(rule.games));
+      }
+    }
+  });
+
+  it('새 틀 해 × 50시드: 검사 통과, 상대별 경기 수 정확, 팀당 홈 수가 시즌 자료와 ±2 안', () => {
+    for (const y of OLD_YEARS) {
+      const input = inputFor(y, 'x');
+      const n = input.teams;
+      const sd = store.season(y)!;
+      expect(framedRule({ teams: sd.teams as never, gamesPerTeam: input.rule.games, schedule: input.rule }), `${y}`).toBeDefined();
+      for (let s = 0; s < SEEDS; s++) {
+        const p = plan(y, s);
+        expect(planProblems(p, inputFor(y, `sched-${s}`)), `${y}/${s}`).toEqual([]);
+        const m = meetings(p, n);
+        for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) expect(m[a][b] + m[b][a], `${y}/${s} ${a}-${b}`).toBe(input.rule.vs);
+        sd.teams.forEach((t, i) => {
+          const real = t.home.split('-').map(Number).reduce((x, z) => x + z, 0);
+          expect(Math.abs(m[i].reduce((x, z) => x + z, 0) - real), `${y}/${s} ${t.name}`).toBeLessThanOrEqual(2);
+        });
+      }
+    }
+  });
+
+  it('연전 구성: T3W2 3×4 + 2×4(1985 2×5), S33-9 3×4 + 2×2, S2는 모두 2연전 (상대별 홈 10·8 또는 10·10)', () => {
+    for (const y of OLD_YEARS.filter((x) => x >= 1984)) {
+      const input = inputFor(y, 'x');
+      const n = input.teams;
+      const s2 = input.rule.frame === 'S2';
+      const want = s2 ? new Array(input.rule.vs / 2).fill(2) : [...new Array((input.rule.vs - 12) / 2).fill(2), 3, 3, 3, 3];
+      for (let s = 0; s < SEEDS; s += 5) {
+        const p = plan(y, s);
+        const m = meetings(p, n);
+        for (let a = 0; a < n; a++) {
+          for (let b = a + 1; b < n; b++) {
+            expect(pairLens(p, a, b), `${y}/${s} ${a}-${b}`).toEqual(want);
+            if (s2) expect([m[a][b], m[b][a]].sort((x, z) => x - z), `${y} ${a}-${b}`).toEqual(input.rule.vs === 18 ? [8, 10] : [10, 10]);
+          }
+        }
+        if (s2) expect(p.series.every((x) => x.len === 2)).toBe(true);
+      }
+    }
+  });
+
+  it('홀수 구단(S2 7구단, S33-9 9구단)은 연전 칸마다 한 팀이 쉰다', () => {
+    for (const y of [1986, 1990, 2013]) {
+      const p = plan(y, 0);
+      const n = inputFor(y, 'x').teams;
+      for (const day of new Set(p.series.map((x) => x.day))) expect(p.series.filter((x) => x.day === day).length, `${y} ${day}`).toBe((n - 1) / 2);
+    }
+  });
+
+  it('요일: W82는 수·(목)·토·일, W83·T3W2는 화·수·(목)·토·일 (금요일 쉼). W82·W83의 목요일은 앞에서부터 연다', () => {
+    const allowed: Record<number, number[]> = { 1982: [3, 4, 6, 0], 1983: [2, 3, 4, 6, 0], 1984: [2, 3, 4, 6, 0], 1985: [2, 3, 4, 6, 0] };
+    for (const y of [1982, 1983, 1984, 1985]) {
+      for (let s = 0; s < SEEDS; s += 5) plan(y, s).days.forEach((g, i) => { if (g.length) expect(allowed[y], `${y}/${s} ${dateOf(ruleOf(y), i)}`).toContain(wd(y, i)); });
+    }
+    for (const y of [1982, 1983]) {
+      const rule = ruleOf(y);
+      const p = plan(y, 0);
+      const thu = p.days.map((g, i) => (g.length && wd(y, i) === 4 ? i : -1)).filter((i) => i >= 0);
+      expect(thu.length, `${y}`).toBeGreaterThan(0);
+      // 마지막으로 연 목요일 앞의 경기 있는 수요일은, 다음 날이 쉬는 기간이 아니면 모두 목요일도 경기
+      for (let i = 0; i < thu[thu.length - 1]; i++) {
+        const next = dateOf(rule, i + 1);
+        if (wd(y, i) === 3 && p.days[i].length && !rule.breaks.some((b) => b.from <= next && next <= b.to)) expect(p.days[i + 1].length, `${y} ${next}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('S33-9: 2연전 주(화·수 / 목·금 / 토·일)는 올스타 휴식 뒤에 온다', () => {
+    for (const y of [2013, 2014]) {
+      const rule = ruleOf(y);
+      const b = rule.breaks.find((x) => x.reason === '올스타')!;
+      const thuTwo = plan(y, 0).series.filter((x) => x.len === 2 && wd(y, x.day) === 4).map((x) => dateOf(rule, x.day));
+      expect(thuTwo.length, `${y}`).toBeGreaterThan(0);
+      expect(thuTwo.every((d) => d > b.to), `${y}`).toBe(true);
+    }
+  });
+
+  it('마지막 경기: 1982~1990·2013~2014는 참고 종료일 전, 6주 안 (우천 없음)', () => {
+    for (const y of OLD_YEARS) {
+      const rule = ruleOf(y);
+      for (let s = 0; s < SEEDS; s += 5) {
+        const end = dateOf(rule, plan(y, s).days.length - 1);
+        expect(end <= rule.endRef!, `${y}/${s} ${end}`).toBe(true);
+        expect(end >= addDays(rule.endRef!, -42), `${y}/${s} ${end}`).toBe(true);
+      }
+    }
+  });
+
+  it('1988 가을야구는 규칙 표의 시작일(10월 8일), 다른 해는 정규시즌 끝 + 3일', () => {
+    for (const y of [1988, 1989]) {
+      const p = plan(y, 0);
+      const day = postseasonStartDay({ schedule: p.days, plan: p, world: { schedule: ruleOf(y) } } as never);
+      if (y === 1988) expect(addDays(p.opening, day)).toBe('1988-10-08');
+      else expect(day).toBe(p.days.length + 3);
+    }
+  });
+
+  it('2027~ 규칙: 10구단은 그대로, 구단 수가 다르면 상대별 경기를 144경기에 가장 가깝게 다시 나눈다', () => {
+    const r = ruleOf(2030);
+    expect(fitRuleToTeams(r, 10)).toBe(r);
+    expect(fitRuleToTeams(r, 11)).toMatchObject({ vs: 14, games: 140, unscheduled: 10 });
+    expect(fitRuleToTeams(r, 9)).toMatchObject({ vs: 18, games: 144, unscheduled: 8 });
+    expect(fitRuleToTeams(r, 12)).toMatchObject({ vs: 13, games: 143, unscheduled: 11 });
+    // 자료가 있는 해는 구단 수가 정해져 있어 그대로
+    const r2026 = ruleOf(2026);
+    expect(fitRuleToTeams(r2026, 11)).toBe(r2026);
+  });
+
+  it('11구단 가상 월드 (2030): 팀당 140경기, 연전 생성기로 상대별 14경기·검사 통과', () => {
+    const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
+    const { league } = createLeague(store, 2026, 'sched-11', FAST);
+    const next = structuredClone(league);
+    next.year = 2030;
+    next.lastSeason = undefined;
+    next.teams.push({ name: '가상', franchise: '가상' } as never);
+    // 기존 구단마다 투수 2명·야수 2명을 새 구단으로
+    for (let t = 0; t < 10; t++) {
+      for (const pit of [true, false]) next.players.filter((p) => p.team === t && p.isPitcher === pit).slice(0, 2).forEach((p) => { p.team = 10; });
+    }
+    const w = worldFromLeague(next, store, FAST);
+    expect(w.teams.length).toBe(11);
+    expect(w.gamesPerTeam).toBe(140);
+    expect(w.schedule).toMatchObject({ vs: 14, games: 140, frame: 'S33F' });
+    expect(framedRule(w)).toBeDefined();
+    for (let s = 0; s < 10; s++) {
+      const p = planForWorld(w, new Rng(`eleven-${s}`));
+      expect(planProblems(p, { rule: w.schedule!, teams: 11, franchises: w.teams.map((t) => t.franchise), rng: new Rng('x') }), `${s}`).toEqual([]);
+      const m = meetings(p, 11);
+      for (let a = 0; a < 11; a++) {
+        for (let b = a + 1; b < 11; b++) expect(m[a][b] + m[b][a]).toBe(14);
+        expect(m[a].reduce((x, z) => x + z, 0) + m.reduce((x, row) => x + row[a], 0)).toBe(140);
+      }
+    }
   });
 });

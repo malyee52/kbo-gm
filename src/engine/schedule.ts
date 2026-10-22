@@ -1,6 +1,7 @@
 // 연전 단위 정규시즌 일정 생성기 (일정 개편 기획안 3장). 순수 함수이고 난수는 Rng만 쓴다: 같은 시드 = 같은 일정.
 // Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천·순연(7단계)은 아직 없다.
-// 아직 만들지 않은 연전 틀(W82·W83·T3W2·S2·S33-99·S33-9·S33L2, 5·6단계)과 규칙 표에 맞지 않는 월드는
+// 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-9(2013~2014)·S33F(2023~) (3·5단계).
+// 아직 만들지 않은 틀(S33-99 1999 양대 리그 6단계, S33L2 2015~2022 2연전기 시작 결정 대기)과 규칙 표에 맞지 않는 월드는
 // 같은 달력(개막일·월요일·쉬는 기간) 위에 원형 대진을 하루 한 경기씩 편다 (spreadPlan, 연전 없음).
 //
 // 만드는 순서 (기획안 3.2):
@@ -75,7 +76,13 @@ const REMAINING_LEAD_DAYS = 21;
 const HOME_HEAVY_ODD = ['두산', '롯데', 'SSG', 'KT', '한화'];
 const HOME_HEAVY_EVEN = ['LG', 'KIA', '삼성', 'NC', '히어로즈'];
 
-const SUPPORTED_FRAMES = ['S33', 'S33F'];
+/** 연전 생성기가 만드는 틀. S33-99(1999 양대 리그, 6단계)·S33L2(2015~2022, 2연전기 시작 사용자 결정 대기)는 아직 하루씩 */
+const SUPPORTED_FRAMES = ['W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-9', 'S33F'];
+/**
+ * W82·W83의 목요일(주중 셋째 날)을 열 때 맞추는 날: 참고 종료일보다 이만큼 앞에 본 일정이 끝나게 (임시값).
+ * 남는 날은 우천 순연(7단계) 몫이다. 연전 해(S33)도 본 일정이 실제보다 2~4주 이르게 끝난다
+ */
+const EXTRA_DAY_MARGIN = 14;
 
 interface Slot {
   day: number;
@@ -147,6 +154,191 @@ export function buildSlots(rule: YearScheduleRule, horizon = 260): Slot[] {
   return out;
 }
 
+/** 화요일마다 새 주 (월요일은 지난 주 끝). 1970-01-06은 화요일 */
+const weekOf = (d: string) => Math.floor(daysBetween('1970-01-06', d) / 7);
+
+/**
+ * 경기 둘 수 있는 날을 요일 묶음(part)끼리 이어 붙인 칸. part가 null인 요일은 경기가 없다.
+ * 쉬는 기간에 잘린 조각은 그대로 짧은 칸이 된다 (S33처럼 이웃 칸과 합치지 않는다)
+ */
+function weekPieces(rule: YearScheduleRule, part: (d: string) => string | null, horizon = 260): Slot[] {
+  const out: Slot[] = [];
+  let cur: Slot | null = null;
+  let curSeg = '';
+  for (let i = 0; i < horizon; i++) {
+    const d = addDays(rule.opening, i);
+    const p = playable(rule, d) ? part(d) : null;
+    if (p === null) {
+      cur = null;
+      continue;
+    }
+    const seg = `${weekOf(d)}/${p}`;
+    if (cur && seg === curSeg && cur.day + cur.len === i) cur.len++;
+    else {
+      cur = { day: i, len: 1 };
+      curSeg = seg;
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+/**
+ * 틀의 달력 칸과 라운드 배정 방식 (기획안 2.1).
+ * counts가 있으면 라운드(= 상대별 연전 구성)마다 칸 길이별 개수를 맞춘다 (T3W2 3×4 + 2×4, S2 2×9, S33-9 3×4 + 2×2).
+ * 없으면 라운드마다 경기 수(상대별 경기)를 칸으로 채운다 (S33·S33F, 주중 길이가 섞이는 W82·W83).
+ * unit: 경기 수 방식에서 남은 자리가 이 배수로 남는 라운드를 고른다 (S33 3연전, W83 2연전). minLen: 이보다 짧게 남은 자리는 잔여 경기로
+ */
+interface FrameShape {
+  slots: Slot[];
+  counts?: Map<number, number>;
+  unit: number;
+  minLen: number;
+}
+
+/** 라운드마다 3연전 4개 + 나머지 2연전 (T3W2 20·22차전, S33-9 16차전) */
+function threeTwo(vs: number): Map<number, number> {
+  if (vs < 12 || vs % 2 !== 0) throw new Error(`일정 생성기: 상대별 ${vs}경기는 3연전 4개 + 2연전으로 나눌 수 없음`);
+  return new Map([[3, 4], [2, (vs - 12) / 2]]);
+}
+
+/** 칸 길이별 개수 방식: 칸을 날짜 순으로 쓸 때 본 일정이 끝나는 날 (다 채우지 못하면 Infinity). assignCounts의 합계판 */
+function countsEnd(slots: Slot[], total: Map<number, number>): number {
+  const left = new Map(total);
+  let end = -1;
+  for (const s of slots) {
+    if ([...left.values()].every((v) => v <= 0)) break;
+    const len = [...left.keys()].filter((l) => l <= s.len && left.get(l)! > 0).sort((a, b) => b - a)[0];
+    if (len === undefined) continue;
+    left.set(len, left.get(len)! - 1);
+    end = s.day + len - 1;
+  }
+  return [...left.values()].every((v) => v <= 0) ? end : Infinity;
+}
+
+/**
+ * W82·W83: 주중 셋째 날(목요일)은 기본으로 쉬고, 본 일정이 참고 종료일 − EXTRA_DAY_MARGIN 안에 끝나도록 모자란 만큼 앞에서부터 연다
+ * (임시 규칙, 기획안 2.1·3.3). 6구단이라 경기일마다 모든 팀이 뛰므로 팀당 경기 수 = 경기일 수다.
+ * even이면 연 목요일 수를 짝수로 (3연전이 라운드마다 짝으로 들어가 상대별 홈 반반이 되게)
+ */
+function openedThursdays(rule: YearScheduleRule, base: number[], horizon: number, even: boolean): Set<string> {
+  const extras: string[] = [];
+  let have = 0;
+  const target = rule.endRef ? addDays(rule.endRef, -EXTRA_DAY_MARGIN) : null;
+  for (let i = 0; i < horizon; i++) {
+    const d = addDays(rule.opening, i);
+    if (!playable(rule, d)) continue;
+    const w = weekdayOf(d);
+    if (base.includes(w) && (!target || d <= target)) have++;
+    if (w === 4 && playable(rule, addDays(d, -1)) && i > 0) extras.push(d);
+  }
+  let k = target ? Math.max(0, rule.games - have) : 0;
+  if (even && k % 2 === 1) k++;
+  return new Set(extras.slice(0, k));
+}
+
+function frameShape(rule: YearScheduleRule, horizon = 260): FrameShape {
+  const w = (d: string) => weekdayOf(d);
+  switch (rule.frame) {
+    case 'W82': {
+      // 수 단발(목이 열리면 수·목 2연전) + 토·일 2연전
+      const open = openedThursdays(rule, [3, 6, 0], horizon, false);
+      const slots = weekPieces(rule, (d) => (w(d) === 3 || (w(d) === 4 && open.has(d)) ? 'm' : w(d) === 6 || w(d) === 0 ? 'e' : null), horizon);
+      return { slots, unit: 1, minLen: 1 };
+    }
+    case 'W83': {
+      // 주중 화·수 2연전(목이 열리면 화~목 3연전) + 토·일 2연전. 금요일은 쉰다
+      const open = openedThursdays(rule, [2, 3, 6, 0], horizon, true);
+      const slots = weekPieces(rule, (d) => (w(d) === 2 || w(d) === 3 || (w(d) === 4 && open.has(d)) ? 'm' : w(d) === 6 || w(d) === 0 ? 'e' : null), horizon);
+      return { slots, unit: 2, minLen: 1 };
+    }
+    case 'T3W2':
+      // 화~목 3연전 + 토·일 2연전, 금요일 이동일
+      return { slots: weekPieces(rule, (d) => (w(d) >= 2 && w(d) <= 4 ? 'm' : w(d) === 6 || w(d) === 0 ? 'e' : null), horizon), counts: threeTwo(rule.vs), unit: 1, minLen: 1 };
+    case 'S2':
+      // 화·수 / 목·금 / 토·일 2연전 (7구단이라 칸마다 한 팀이 쉰다)
+      return { slots: weekPieces(rule, (d) => (w(d) === 2 || w(d) === 3 ? 'a' : w(d) === 4 || w(d) === 5 ? 'b' : 'c'), horizon), counts: new Map([[2, rule.vs / 2]]), unit: 1, minLen: 1 };
+    case 'S33-9':
+      return s339Shape(rule, horizon);
+    default:
+      return { slots: buildSlots(rule, horizon), unit: 3, minLen: 3 };
+  }
+}
+
+/**
+ * S33-9 (2013~2014, 9구단): 화~목 / 금~일 3연전에 2연전 주(화·수 / 목·금 / 토·일)를 섞는다. 상대별 3×4 + 2×2.
+ * 2연전 주는 올스타 휴식 뒤 첫 온전한 주(화~일 모두 경기 가능)부터 이어서, 본 일정이 가장 일찍 끝나는 만큼만 (임시 규칙.
+ * 조사값에 2연전 시기가 없다). 개막 토·일 2연전처럼 쉬는 기간에 잘린 2일 칸도 2연전으로 쓴다
+ */
+function s339Shape(rule: YearScheduleRule, horizon: number): FrameShape {
+  const counts = threeTwo(rule.vs);
+  const rounds = (rule.teams ?? 9) % 2 === 0 ? (rule.teams ?? 9) - 1 : rule.teams ?? 9;
+  const total = new Map([...counts].map(([l, c]) => [l, c * rounds]));
+  const allStar = rule.breaks.find((b) => b.reason === '올스타');
+  const fullWeeks: number[] = [];
+  for (let i = 0; i < horizon; i++) {
+    const d = addDays(rule.opening, i);
+    if (weekdayOf(d) !== 2 || (allStar && d <= allStar.to)) continue;
+    if (Array.from({ length: 6 }, (_, k) => addDays(d, k)).every((x) => playable(rule, x))) fullWeeks.push(weekOf(d));
+  }
+  const build = (two: Set<number>) => weekPieces(rule, (d) => {
+    const wd = weekdayOf(d);
+    if (two.has(weekOf(d))) return wd === 2 || wd === 3 ? 'a' : wd === 4 || wd === 5 ? 'b' : 'c';
+    return wd >= 2 && wd <= 4 ? 'a' : 'b';
+  }, horizon);
+  let best = { slots: build(new Set()), end: Infinity };
+  best.end = countsEnd(best.slots, total);
+  for (let c = 1; c <= fullWeeks.length; c++) {
+    const slots = build(new Set(fullWeeks.slice(0, c)));
+    const end = countsEnd(slots, total);
+    if (end < best.end) best = { slots, end };
+  }
+  return { slots: best.slots, counts, unit: 1, minLen: 1 };
+}
+
+/**
+ * 2. 칸 길이별 개수 방식: 칸을 날짜 순으로, 그 길이가 남은 라운드에 (덜 쓴 라운드부터, 바로 앞 칸과 다른 라운드로).
+ * 그 길이가 남은 라운드가 없으면 더 짧은 길이로 줄여 쓰고(앞쪽 날만), 그것도 없으면 칸을 비운다
+ */
+function assignCounts(slots: Slot[], rounds: number, counts: Map<number, number>, rng: Rng, openingRound: number | null) {
+  const need = Array.from({ length: rounds }, () => new Map(counts));
+  const used = new Array<number>(rounds).fill(0);
+  const prio: number[][] = [];
+  const prioOf = (c: number, r: number) => {
+    while (prio.length <= c) prio.push(rng.shuffle(Array.from({ length: rounds }, (_, i) => i)));
+    return prio[c].indexOf(r);
+  };
+  const lens = [...counts.keys()].sort((a, b) => b - a);
+  const out: { slot: Slot; round: number }[] = [];
+  let prev = -1;
+  for (const s0 of slots) {
+    if (need.every((m) => [...m.values()].every((v) => v <= 0))) break;
+    let pick = -1;
+    let len = 0;
+    for (const l of lens.filter((x) => x <= s0.len)) {
+      const cand = Array.from({ length: rounds }, (_, i) => i).filter((r) => need[r].get(l)! > 0);
+      if (!cand.length) continue;
+      const score = (r: number) => [out.length === 0 && openingRound !== null ? (r === openingRound ? 0 : 1) : 0, r === prev ? 1 : 0, used[r], prioOf(used[r], r)];
+      cand.sort((x, y) => {
+        const a = score(x);
+        const b = score(y);
+        for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return a[k] - b[k];
+        return 0;
+      });
+      pick = cand[0];
+      len = l;
+      break;
+    }
+    if (pick < 0) continue;
+    need[pick].set(len, need[pick].get(len)! - 1);
+    used[pick]++;
+    prev = pick;
+    out.push({ slot: { ...s0, len }, round: pick });
+  }
+  const cap = need.map((m) => [...m].reduce((a, [l, c]) => a + l * c, 0));
+  return { placed: out, cap };
+}
+
 /** 원형 대진의 라운드 (구단 수가 홀수면 쉬는 팀이 있다). ring은 자리 → 구단 */
 function roundRobin(ring: number[]): [number, number][][] {
   const r = [...ring];
@@ -188,7 +380,8 @@ export function homeHeavyTeams(rule: YearScheduleRule, n: number, franchises?: s
  */
 function homeTargets(rule: YearScheduleRule, n: number, heavy: number[]): number[][] {
   const vs = rule.vs;
-  const skew = rule.frame === 'S33F' ? 2 : vs % 2;
+  // S33F 짝수 차전은 9·7 (2 차이), 홀수 차전(구단 수가 바뀐 월드)은 1 차이. S2 2연전 홀수 개(18차전 = 2×9)는 2연전 하나 차이 = 10·8
+  const skew = rule.frame === 'S33F' ? 2 - (vs % 2) : rule.frame === 'S2' ? ((vs / 2) % 2) * 2 : vs % 2;
   const t = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   const light = Array.from({ length: n }, (_, i) => i).filter((i) => !heavy.includes(i));
   const ring = [...heavy, ...light];
@@ -214,7 +407,7 @@ function homeTargets(rule: YearScheduleRule, n: number, heavy: number[]): number
  * 3일이 아닌 칸(개막 2연전, 올스타 뒤 4연전)은 남은 자리가 3의 배수가 되는 라운드에: 개막 2연전 라운드가 4연전을 받아
  * 2 + 4 = 3연전 두 개 몫이 된다 (S33F). 어린이날 월요일이 붙은 4일 칸은 이 짝에서 빠진다 (올스타 뒤 4연전이 짝이 되게, 임시 규칙).
  */
-function assignRounds(slots: Slot[], rounds: number, cap0: number, rng: Rng, openingRound: number | null) {
+function assignRounds(slots: Slot[], rounds: number, cap0: number, rng: Rng, openingRound: number | null, unit = 3, minLen = 3) {
   const cap = new Array<number>(rounds).fill(cap0);
   const used = new Array<number>(rounds).fill(0);
   const prio: number[][] = [];
@@ -225,7 +418,7 @@ function assignRounds(slots: Slot[], rounds: number, cap0: number, rng: Rng, ope
   const out: { slot: Slot; round: number }[] = [];
   let prev = -1;
   for (const s0 of slots) {
-    if (cap.every((c) => c < 3)) break;
+    if (cap.every((c) => c < minLen)) break;
     const slot = { ...s0 };
     let pick = -1;
     for (;;) {
@@ -233,7 +426,7 @@ function assignRounds(slots: Slot[], rounds: number, cap0: number, rng: Rng, ope
       if (cand.length) {
         const score = (r: number) => [
           out.length === 0 && openingRound !== null ? (r === openingRound ? 0 : 1) : 0,
-          slot.len % 3 !== 0 && !slot.holiday && (cap[r] - slot.len) % 3 !== 0 ? 1 : 0,
+          slot.len % unit !== 0 && !slot.holiday && (cap[r] - slot.len) % unit !== 0 ? 1 : 0,
           r === prev ? 1 : 0,
           used[r],
           prioOf(used[r], r),
@@ -327,9 +520,11 @@ function tryBuild(input: ScheduleInput, rng: Rng, attempt: number): SchedulePlan
   const others = rng.shuffle(Array.from({ length: n }, (_, i) => i).filter((i) => !hosts.includes(i)));
   const ring = [...rng.shuffle([...hosts]), ...others];
   const rounds = roundRobin(ring);
-  const slots = buildSlots(rule);
-  const { placed, cap } = assignRounds(slots, rounds.length, perRound, rng, hosts.length ? 0 : null);
-  if (cap.some((c) => c >= 3)) return '달력 칸이 모자람';
+  const shape = frameShape(rule);
+  const { placed, cap } = shape.counts
+    ? assignCounts(shape.slots, rounds.length, shape.counts, rng, hosts.length ? 0 : null)
+    : assignRounds(shape.slots, rounds.length, perRound, rng, hosts.length ? 0 : null, shape.unit, shape.minLen);
+  if (cap.some((c) => c >= shape.minLen)) return '달력 칸이 모자람';
 
   // 상대별 연전 목록 (시간 순)
   const key = (a: number, b: number) => (a < b ? a * n + b : b * n + a);
