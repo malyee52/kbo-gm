@@ -59,6 +59,7 @@ export interface GameContext {
   /** 환경 맞춤 계수 (사건별). 타자 쪽 비율에 곱한다 */
   cal: Rates;
   params: EngineParams;
+  /** 최대 이닝. 0 = 무제한 (승부가 날 때까지) */
   maxInnings: number;
   day: number;
   rng: Rng;
@@ -225,7 +226,7 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     lineScore.home.push(home.runs - h0);
     if (walkOff) break;
     if (inning >= 9 && home.runs !== away.runs) break;
-    if (inning >= ctx.maxInnings) break;
+    if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
   }
   return finishGame(st, inning, lineScore);
 }
