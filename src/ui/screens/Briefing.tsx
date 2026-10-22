@@ -23,7 +23,7 @@ export function Briefing() {
   const { session } = useGame();
   const { density } = useShell();
   const off = session.phase === 'offseason';
-  const today = off ? `${session.year} 오프시즌` : formatDate(session.world.year, session.currentDay, true);
+  const today = off ? `${session.year} 오프시즌` : session.done && !session.postseasonRunning ? `${session.year} 시즌 종료` : formatDate(session.world.year, session.currentDay, true);
 
   return (
     <div className="briefing">
@@ -35,12 +35,16 @@ export function Briefing() {
       {session.fantasy?.free && <FantasyFree compact />}
       <TodoStrip />
       <div className={`brief-grid${density === 'full' ? ' full' : ''}`}>
-        <div className="b-match">
-          {off ? <OffseasonCard /> : session.postseasonRunning ? <PostseasonCard /> : session.done ? <WrapCard /> : <MatchCard />}
+        <div className="brief-col">
+          <div className="b-match">
+            {off ? <OffseasonCard /> : session.postseasonRunning ? <PostseasonCard /> : session.done ? <WrapCard /> : <MatchCard />}
+          </div>
+          {!off && !session.done && <div className="b-form"><FormCard /></div>}
         </div>
-        {!off && !session.done && <div className="b-form"><FormCard /></div>}
-        <div className="b-stand"><StandingsCard /></div>
-        <div className="b-news"><NewsCard /></div>
+        <div className="brief-col side">
+          <div className="b-stand"><StandingsCard /></div>
+          <div className="b-news"><NewsCard /></div>
+        </div>
         {!off && !session.done && <div className="b-week"><WeekCard /></div>}
       </div>
     </div>
@@ -178,10 +182,11 @@ function PostseasonCard() {
         <span className="small muted">{ROUND_LABEL[x.round]} {x.games.length + 1}차전 · {formatDate(session.world.year, st.day)}</span>
       </div>
       <div className="match-vs">
-        <div className="match-side"><strong className="match-team"><TeamName idx={x.high} /></strong><span className="num big">{x.winsHigh}</span></div>
+        <div className="match-side"><strong className="match-team"><TeamName idx={x.high} /></strong><span className="num big">{x.winsHigh}승</span></div>
         <span className="match-mid">VS<small>시리즈</small></span>
-        <div className="match-side"><strong className="match-team"><TeamName idx={x.low} /></strong><span className="num big">{x.winsLow}</span></div>
+        <div className="match-side"><strong className="match-team"><TeamName idx={x.low} /></strong><span className="num big">{x.winsLow}승</span></div>
       </div>
+      {x.round === 'wc' && <p className="small muted">와일드카드 결정전은 4위가 1승을 안고 시작합니다.</p>}
       <p className="small">{ours ? '우리 구단 시리즈입니다.' : alive ? '우리 구단은 다음 시리즈를 기다립니다.' : st.seeds.includes(me) ? '우리 구단은 탈락했습니다.' : '우리 구단은 가을야구에 나가지 못했습니다.'}</p>
       <div className="match-actions">
         <button type="button" className="go" onClick={advanceNext} disabled={advanceDisabled}>{busy ?? '다음 경기'}</button>
@@ -364,6 +369,8 @@ function StandingsCard() {
   const order = off ? last?.standings ?? [] : session.season.standings();
   const teams = off ? last?.teams ?? [] : session.season.teams;
   const moves = useRankMoves(order);
+  // 휴대폰에서는 접힌 채로 시작한다 (제목 줄을 누르면 펼침)
+  const [open] = useState(() => !window.matchMedia('(max-width: 768px)').matches);
   const me = session.teamIdx;
   const cut = session.world.rules.postseasonTeams;
   if (!order.length) return null;
@@ -373,7 +380,7 @@ function StandingsCard() {
   const leader = teams[order[0]];
   return (
     <section className="card stand" aria-label="순위">
-      <details open className="stand-fold">
+      <details open={open} className="stand-fold">
         <summary className="card-top">
           <h2>순위</h2>
           <span className="small muted">{off ? `${last?.year} 최종` : `상위 ${cut}팀 가을야구`}</span>

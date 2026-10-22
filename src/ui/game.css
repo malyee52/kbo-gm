@@ -641,12 +641,13 @@ table.roster tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--team); }
 .dg-links { margin-left: auto; display: inline-flex; gap: 8px; }
 
 /* 오프시즌 (Offseason.tsx): 지금 단계는 본문, 지명권·포스팅·소식은 곁 칸 */
-.off-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
+/* 왼쪽 메뉴(184px)가 생겨 본문이 좁아졌다: 곁 칸을 300px로 줄이고, 1400px 아래에서는 아래로 (2026-10-22 화면 점검: 1440 폭에서 FA 표 '제시' 단추가 잘림) */
+.off-split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
 .off-main, .off-side { min-width: 0; }
 .off-side .panel { padding: 12px 14px; }
 .off-side .panel h2 { font-size: 14px; }
 .off-side .scroll { max-height: 420px; overflow-y: auto; }
-@media (max-width: 1100px) { .off-split { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1400px) { .off-split { grid-template-columns: minmax(0, 1fr); } }
 .off-side .news { max-height: 460px; overflow-y: auto; }
 .off-side .news li { grid-template-columns: minmax(0, 1fr); gap: 0; }
 
@@ -827,12 +828,11 @@ td .inline { flex-wrap: nowrap; }
 .todo-card strong { font-size: 15px; }
 .todo-kind { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 800; color: var(--muted); }
 .todo-go { margin-top: auto; align-self: flex-end; font-size: 13px; font-weight: 700; color: var(--accent); }
-.brief-grid {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 16px; align-items: start;
-  grid-template-areas: 'match stand' 'form news' 'week week';
-}
-.b-match { grid-area: match; } .b-form { grid-area: form; } .b-stand { grid-area: stand; } .b-news { grid-area: news; } .b-week { grid-area: week; }
-.brief-grid > * { min-width: 0; }
+/* 왼쪽 열(경기·전력)과 오른쪽 열(순위·소식)은 높이를 따로 쓴다. 좁으면 열을 풀고(display: contents) order로 읽는 순서를 맞춘다 */
+.brief-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 16px; align-items: start; }
+.brief-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.b-week { grid-column: 1 / -1; min-width: 0; }
+.b-match { order: 1; } .b-form { order: 2; } .b-stand { order: 3; } .b-news { order: 4; } .b-week { order: 5; }
 .match-vs { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 14px; align-items: stretch; }
 .match-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--panel-2); }
 .match-side.mine { box-shadow: inset 0 0 0 1px var(--line-strong); }
@@ -878,7 +878,10 @@ td .inline { flex-wrap: nowrap; }
 .tag.urgent-tag { color: var(--loss); border-color: var(--loss); }
 .inbox-group h2 { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 1100px) {
-  .brief-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'match' 'form' 'stand' 'news' 'week'; }
+  .brief-grid { display: flex; flex-direction: column; align-items: stretch; }
+  .brief-col { display: contents; }
+  .brief-grid > *, .brief-col > * { min-width: 0; }
+  .stand-fold > summary { cursor: pointer; }
   .todo-cards { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 768px) {
@@ -894,4 +897,14 @@ td .inline { flex-wrap: nowrap; }
   .form-table { display: block; overflow-x: auto; }
   .week-days { grid-template-columns: repeat(7, minmax(72px, 1fr)); overflow-x: auto; }
   .inbox-list li { flex-direction: column; align-items: stretch; }
+}
+@media (max-width: 768px) {
+  .sb-score .small { display: none; }
+  /* 휴대폰은 아래 고정 진행 버튼이 있어 카드 안 '다음 경기'를 겹쳐 두지 않는다 */
+  .match-actions .go { display: none; }
+}
+/* 다크 모드: 구단 주색이 어두우면(두산 남색 등) 바탕에 묻히므로 띠는 밝힌 구단색으로 */
+@media (prefers-color-scheme: dark) {
+  .sb-band { background: var(--team); }
+  .match-band { background: var(--cd, var(--c, var(--team))); }
 }
