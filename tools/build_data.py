@@ -26,6 +26,10 @@
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
                                  이것만 다시 만들려면: build_data.py --managers-only
+  data-src/규칙변경.csv          연도별 리그 규칙 변경 (rule_changes.json, 개막 "올해 달라지는 규칙" 알림). 열: 연도, 날짜(MM-DD), 분류, 키,
+                                 제목, 전, 후, 단위, 반영, 확인, 출처, 비고("게임은 단순화: …"로 시작하면 단순화 문구). 키가 있으면 전·후는 게임 값에서 읽는다.
+  data-src/공인구.csv            공인구 반발계수 기준 범위·단일/복수·검사 평균 (rule_changes.json의 ball). 확인이 조사값이면 웹 조사 값.
+                                 둘만 다시 만들려면: build_data.py --rules-only
   data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
                                  원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
                                  bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다
@@ -51,6 +55,8 @@ FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
+RULES_CSV = ROOT / 'data-src' / '규칙변경.csv'
+BALL_CSV = ROOT / 'data-src' / '공인구.csv'
 HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
 HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
@@ -313,6 +319,88 @@ def rules_for(year):
         'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
+
+
+# ---- 규칙 변경 (rule_changes.json, 기획안 docs/리그규칙변경_기획안.md 2.3)
+
+RULE_CAT = {'공인구': 'ball', '경기': 'game', '엔트리': 'roster', '외국인': 'foreign', 'FA': 'fa', '드래프트': 'draft', '샐러리캡': 'cap', '리그': 'league'}
+RULE_EFFECT = {'표시만': 'show', '표시만(평균)': 'show-env', '리그 운영': 'league', '경기': 'engine'}
+RULE_STATUS = {'자료집 확인': 'confirmed', '조사값': 'research', '출처 갈림': 'conflict', '미확인': 'unknown'}
+# 키가 있는 항목은 전·후 값을 게임이 실제로 쓰는 값에서 읽는다 (src/league/ruleNews.ts의 RULE_KEYS와 같아야 한다)
+RULE_KEYS = {'rosterSize', 'foreignLimit', 'maxInnings', 'postseasonTeams', 'faEnabled', 'faService', 'salaryCap'}
+
+
+def build_rule_changes(out_dir):
+    """규칙변경.csv + 공인구.csv → rule_changes.json. 선수 월드 지문(선수 ID·소속)에 들어가지 않으므로 고쳐도 예전 저장을 쓴다."""
+    if not RULES_CSV.exists():
+        return
+    items = []
+    with RULES_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for n, r in enumerate(csv.DictReader(f), start=2):
+            where = f'규칙변경.csv {n}행'
+            def pick(table, col):
+                v = (r[col] or '').strip()
+                if v not in table:
+                    raise SystemExit(f'{where}: {col} 값 "{v}"는 {"/".join(table)} 중 하나여야 한다')
+                return table[v]
+            it = {'year': int(r['연도'])}
+            if (r['날짜'] or '').strip():
+                it['date'] = r['날짜'].strip()
+            it['cat'] = pick(RULE_CAT, '분류')
+            if (r['키'] or '').strip():
+                it['key'] = r['키'].strip()
+            it['title'] = r['제목'].strip()
+            for col, k in (('전', 'before'), ('후', 'after'), ('단위', 'unit')):
+                if (r[col] or '').strip():
+                    it[k] = r[col].strip()
+            it['effect'] = pick(RULE_EFFECT, '반영')
+            it['status'] = pick(RULE_STATUS, '확인')
+            if (r['출처'] or '').strip():
+                it['source'] = r['출처'].strip()
+            note = (r['비고'] or '').strip()
+            if note.startswith('게임은 단순화:'):
+                it['simplified'] = note[len('게임은 단순화:'):].strip()
+            elif note:
+                it['note'] = note
+            items.append(it)
+    balls = defaultdict(dict)
+    if BALL_CSV.exists():
+        with BALL_CSV.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                y = int(r['연도'])
+                b = balls[y]
+                b['year'] = y
+                kind, val, note = r['구분'].strip(), (r['값'] or '').strip(), (r['비고'] or '').strip()
+                status = RULE_STATUS[r['확인'].strip()]
+                if kind == '기준':
+                    lo, hi = val.split('~')
+                    b['range'] = [float(lo), float(hi)]
+                    if note:
+                        b['note'] = note
+                elif kind == '단일':
+                    b['single'] = val == '단일'
+                elif kind == '검사':
+                    t = {'round': int(r['차수'])}
+                    if (r['날짜'] or '').strip():
+                        t['date'] = r['날짜'].strip()
+                    if val:
+                        t['avg'] = float(val)
+                    if note:
+                        t['note'] = note
+                    b.setdefault('tests', []).append(t)
+                else:
+                    raise SystemExit(f'공인구.csv: 구분 "{kind}"는 기준/단일/검사 중 하나여야 한다')
+                b['status'] = status
+                if (r['출처'] or '').strip():
+                    b['source'] = r['출처'].strip()
+    (out_dir / 'rule_changes.json').write_text(json.dumps({
+        'version': 1,
+        'note': '연도별 리그 규칙 변경 (data-src/규칙변경.csv, 공인구.csv). status research = 웹 조사 값, 자료집 제도연표 확인 전. '
+                'key가 있는 항목의 전·후 값은 게임 규칙 값에서 계산한다.',
+        'items': items,
+        'ball': [balls[y] for y in sorted(balls)],
+    }, ensure_ascii=False, indent=1), encoding='utf-8')
+    print(f'규칙 변경: {len(items)}건, 공인구 {len(balls)}개 연도 → {out_dir / "rule_changes.json"}')
 
 
 # ---- 감독 (managers.json)
@@ -946,6 +1034,10 @@ def main():
         # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
         build_managers(OUT)
         return
+    if '--rules-only' in sys.argv:
+        # 규칙 변경 CSV만 다시 반영한다 (선수 월드 지문과 무관해 저장 호환은 그대로)
+        build_rule_changes(OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1196,6 +1288,7 @@ def main():
     }, OUT / 'meta.json')
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    build_rule_changes(OUT)
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')

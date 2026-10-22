@@ -1,0 +1,1469 @@
+{
+ "version": 1,
+ "note": "연도별 리그 규칙 변경 (data-src/규칙변경.csv, 공인구.csv). status research = 웹 조사 값, 자료집 제도연표 확인 전. key가 있는 항목의 전·후 값은 게임 규칙 값에서 계산한다.",
+ "items": [
+  {
+   "year": 1982,
+   "cat": "league",
+   "title": "전·후기 리그",
+   "after": "전기·후기 나눠 우승팀",
+   "effect": "show",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "단일 시즌"
+  },
+  {
+   "year": 1982,
+   "cat": "game",
+   "title": "지명타자 전 구단",
+   "after": "지명타자",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1982,
+   "cat": "game",
+   "title": "정식 경기 성립",
+   "after": "5회",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1982,
+   "cat": "game",
+   "title": "마운드 높이",
+   "after": "15인치",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1982,
+   "cat": "draft",
+   "title": "신인 지명",
+   "after": "연고 지명 위주",
+   "effect": "show",
+   "status": "confirmed",
+   "source": "자료집 드래프트제도 시트",
+   "simplified": "전 시대 전면 드래프트"
+  },
+  {
+   "year": 1982,
+   "cat": "league",
+   "key": "maxInnings",
+   "title": "정규시즌 연장 최대 이닝",
+   "after": "15회",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "2002년까지 실제 15회인데 게임은 12회 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 1983,
+   "cat": "league",
+   "title": "시범경기 시작",
+   "after": "시범경기",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "시범경기 없음"
+  },
+  {
+   "year": 1986,
+   "cat": "league",
+   "key": "postseasonTeams",
+   "title": "플레이오프 신설",
+   "after": "전·후기 1·2위 플레이오프 (5전 3선승)",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "1988년까지 한국시리즈만 (경기 엔진 2 14단계에서 4팀으로)"
+  },
+  {
+   "year": 1986,
+   "cat": "league",
+   "title": "올스타전 (단판)",
+   "after": "올스타전",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1987,
+   "cat": "league",
+   "title": "승률 계산 (1987~1997)",
+   "before": "승÷(승+패)",
+   "after": "(승+0.5×무)÷경기",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 1989,
+   "cat": "league",
+   "key": "postseasonTeams",
+   "title": "준플레이오프 도입",
+   "after": "4팀 (준플레이오프 3전 2선승)",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "준플레이오프도 5전 3선승 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 1990,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리",
+   "before": "구단별 15~25명",
+   "after": "25명",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "2013년까지 26명 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 1990,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1991,
+   "cat": "game",
+   "title": "마운드 높이",
+   "before": "15인치",
+   "after": "10인치",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1993,
+   "cat": "league",
+   "title": "준플레이오프 생략 조건",
+   "after": "3·4위 승차 3.5경기 이상이면 생략 (1993~2000)",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 4팀 사다리 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 1993,
+   "cat": "league",
+   "title": "플레이오프 시리즈 길이",
+   "before": "5전 3선승",
+   "after": "조건부 7전 4선승 (1993·1995)",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 5전 3선승"
+  },
+  {
+   "year": 1994,
+   "cat": "roster",
+   "title": "신고선수 제도",
+   "after": "신고선수 (6월 1일부터 등록)",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "모든 해 육성선수 규정 (5월 1일부터 등록)"
+  },
+  {
+   "year": 1996,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1997,
+   "cat": "draft",
+   "title": "신인 2차 지명 라운드",
+   "after": "12라운드",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "전 시대 11라운드"
+  },
+  {
+   "year": 1998,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "외국인 선수 도입",
+   "before": "없음",
+   "after": "2명",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 1998,
+   "cat": "foreign",
+   "title": "외국인 연봉 상한",
+   "after": "12만 달러",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "모든 해 신규 100만·총액 400만 달러"
+  },
+  {
+   "year": 1998,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 1999,
+   "cat": "fa",
+   "key": "faEnabled",
+   "title": "FA 제도 도입 (시즌 뒤)",
+   "before": "없음",
+   "after": "1군 10시즌",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 1999,
+   "cat": "fa",
+   "title": "FA 보상 (1999~2010 시즌 뒤)",
+   "after": "보호 18명 외 1명 + 직전 연봉 300% 또는 450%",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "2020 시즌 뒤 등급제를 모든 해에 씀"
+  },
+  {
+   "year": 1999,
+   "cat": "league",
+   "title": "드림·매직 양대 리그 (1999~2000)",
+   "after": "양대 리그",
+   "effect": "show",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "단일 리그"
+  },
+  {
+   "year": 2000,
+   "cat": "foreign",
+   "title": "외국인 연봉 상한",
+   "before": "12만 달러",
+   "after": "20만 달러",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "모든 해 신규 100만·총액 400만 달러"
+  },
+  {
+   "year": 2000,
+   "cat": "game",
+   "title": "마운드 높이",
+   "before": "10인치",
+   "after": "13인치",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2001,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "외국인 보유·출전 (2001~2002)",
+   "before": "2명",
+   "after": "3명 보유·2명 출전",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "3명 모두 출전 가능 (출전 한도는 다음 개발 단계)"
+  },
+  {
+   "year": 2001,
+   "cat": "fa",
+   "key": "faService",
+   "title": "FA 자격 연한",
+   "before": "1군 10시즌",
+   "after": "1군 9시즌",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2001,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리 등록·출장",
+   "after": "26명 등록·24명 출장",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "등록 인원 모두 출장 가능 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2001,
+   "cat": "roster",
+   "title": "9월 확대 엔트리",
+   "after": "+5명",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "확대 엔트리 없음 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2002,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2003,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "외국인 보유",
+   "before": "3명 보유·2명 출전",
+   "after": "2명",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2003,
+   "cat": "league",
+   "key": "maxInnings",
+   "title": "정규시즌 연장 최대 이닝",
+   "before": "15회",
+   "after": "12회",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2003,
+   "cat": "league",
+   "title": "순위 결정 다승제 (2003~2004)",
+   "before": "승률",
+   "after": "승수",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 2003,
+   "cat": "draft",
+   "title": "신인 2차 지명 라운드",
+   "before": "12라운드",
+   "after": "9라운드",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "전 시대 11라운드"
+  },
+  {
+   "year": 2004,
+   "cat": "league",
+   "title": "연장 시간 제한",
+   "after": "경기 개시 4시간 뒤 새 이닝 금지",
+   "effect": "show",
+   "status": "conflict",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "2005년 폐지 설과 2007년까지 유지 설이 갈린다"
+  },
+  {
+   "year": 2004,
+   "cat": "game",
+   "title": "마운드 방문 횟수·시간 제한",
+   "after": "제한",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2005,
+   "cat": "foreign",
+   "title": "외국인 연봉 상한 (2005~2014)",
+   "before": "20만 달러",
+   "after": "30만 달러",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "모든 해 신규 100만·총액 400만 달러"
+  },
+  {
+   "year": 2005,
+   "cat": "league",
+   "title": "준플레이오프 시리즈 길이 (2005년)",
+   "before": "3전 2선승",
+   "after": "5전 3선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2006,
+   "cat": "league",
+   "title": "준플레이오프 시리즈 길이",
+   "before": "5전 3선승",
+   "after": "3전 2선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 5전 3선승"
+  },
+  {
+   "year": 2006,
+   "cat": "fa",
+   "title": "FA 등록일수 (2006년 입단자부터)",
+   "after": "1군 등록 연 145일 이상",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "등록 경기일 60%"
+  },
+  {
+   "year": 2007,
+   "cat": "game",
+   "title": "마운드 높이",
+   "before": "13인치",
+   "after": "10인치",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2007,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2008,
+   "cat": "league",
+   "key": "maxInnings",
+   "title": "정규시즌 끝장승부",
+   "before": "12회",
+   "after": "무제한 연장·무승부 없음",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2008,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리 등록·출장",
+   "before": "26명 등록·24명 출장",
+   "after": "26명 등록·25명 출장",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "등록 인원 모두 출장 가능 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2008,
+   "cat": "league",
+   "title": "포스트시즌 시리즈 길이 (2008년)",
+   "before": "준플레이오프 3전·플레이오프 5전",
+   "after": "준플레이오프 5전 3선승·플레이오프 7전 4선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 5전 3선승"
+  },
+  {
+   "year": 2009,
+   "cat": "league",
+   "title": "승률 계산 (2009~2010)",
+   "before": "승÷(승+패)",
+   "after": "승÷(승+패+무)",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 2009,
+   "cat": "league",
+   "title": "올스타전 이스턴·웨스턴",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2009,
+   "cat": "game",
+   "title": "비디오 판독 도입 (홈런만)",
+   "after": "홈런 판정",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2010,
+   "cat": "game",
+   "title": "12초 룰",
+   "after": "주자 없을 때 12초 안에 투구",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2010,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2010,
+   "cat": "draft",
+   "title": "신인 2차 지명 라운드",
+   "before": "9라운드",
+   "after": "10라운드",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "전 시대 11라운드"
+  },
+  {
+   "year": 2011,
+   "cat": "fa",
+   "key": "faService",
+   "title": "FA 자격 연한 (2011 시즌 뒤부터)",
+   "before": "고졸·대졸 9시즌",
+   "after": "고졸 9·대졸 8시즌",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표 (2012년 FA부터 대졸 8·고졸 9)"
+  },
+  {
+   "year": 2011,
+   "cat": "fa",
+   "title": "FA 보상 (2011~2019 시즌 뒤)",
+   "before": "보호 18명 외 1명 + 300% 또는 450%",
+   "after": "보호 20명 외 1명 + 200% 또는 300%",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "2020 시즌 뒤 등급제를 모든 해에 씀"
+  },
+  {
+   "year": 2011,
+   "cat": "draft",
+   "title": "2차 드래프트 (격년)",
+   "after": "유출 구단당 5명까지",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "유출 한도 4명"
+  },
+  {
+   "year": 2013,
+   "cat": "foreign",
+   "title": "신생 구단 외국인 특례",
+   "after": "신생 구단 보유·출전 1명 더",
+   "effect": "show",
+   "status": "conflict",
+   "source": "자료집 제도연표",
+   "note": "기존 구단 3명 확대가 2013년인지 2014년인지 출처가 갈린다. 게임은 특례 없음"
+  },
+  {
+   "year": 2014,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "외국인 보유·출전 (2014~2019)",
+   "before": "2명",
+   "after": "3명 보유·2명 출전 (투수만·타자만 3명 불가)",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "3명 모두 출전 가능 (출전 한도는 다음 개발 단계)"
+  },
+  {
+   "year": 2014,
+   "cat": "game",
+   "title": "합의 판정 (후반기부터)",
+   "before": "홈런 판정",
+   "after": "합의 판정",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2015,
+   "cat": "league",
+   "key": "postseasonTeams",
+   "title": "와일드카드 결정전",
+   "before": "4팀",
+   "after": "5팀 (4위 1승 어드밴티지·최대 2경기)",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표 (5팀)",
+   "note": "와일드카드 방식은 조사값"
+  },
+  {
+   "year": 2015,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리 등록·출장",
+   "before": "26명 등록·25명 출장",
+   "after": "27명 등록·25명 출장",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "등록 인원 모두 출장 가능 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2015,
+   "cat": "roster",
+   "title": "신고선수 → 육성선수",
+   "before": "6월 1일부터 등록",
+   "after": "5월 1일부터 등록",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2015,
+   "cat": "foreign",
+   "title": "외국인 연봉 상한 폐지 (2015~2018)",
+   "before": "30만 달러",
+   "after": "상한 없음",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "모든 해 신규 100만·총액 400만 달러"
+  },
+  {
+   "year": 2015,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2015,
+   "cat": "league",
+   "title": "올스타전 드림·나눔",
+   "before": "이스턴·웨스턴",
+   "after": "드림·나눔",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2016,
+   "cat": "fa",
+   "title": "원 소속 구단 우선협상기간 폐지",
+   "before": "우선협상기간",
+   "after": "폐지",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "note": "게임은 처음부터 우선협상 단계가 없다"
+  },
+  {
+   "year": 2016,
+   "cat": "game",
+   "title": "홈 충돌 방지 규정",
+   "after": "도입",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2017,
+   "cat": "draft",
+   "title": "2차 드래프트 유출 한도",
+   "before": "5명",
+   "after": "4명 (1·2년차 자동 보호)",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "모든 해 4명·1~3년차 자동 보호"
+  },
+  {
+   "year": 2017,
+   "cat": "game",
+   "title": "비디오 판독센터",
+   "before": "합의 판정",
+   "after": "판독센터",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2017,
+   "cat": "game",
+   "title": "스트라이크존 개정",
+   "after": "규칙 개정·판정 지침",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2018,
+   "cat": "game",
+   "title": "자동 고의4구",
+   "before": "공 4개",
+   "after": "신청만으로 출루",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "경기 엔진 2 10단계에서 반영"
+  },
+  {
+   "year": 2019,
+   "cat": "foreign",
+   "title": "신규 외국인 계약 상한",
+   "before": "없음",
+   "after": "100만 달러",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2019,
+   "cat": "game",
+   "title": "2루 병살 슬라이딩 규정",
+   "after": "도입",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2019,
+   "cat": "game",
+   "title": "1루 3피트 라인 위반 비디오 판독",
+   "after": "판독 대상",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2020,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "외국인 출전",
+   "before": "3명 보유·2명 출전",
+   "after": "3명 보유·3명 출전",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2020,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리 등록·출장",
+   "before": "27명 등록·25명 출장",
+   "after": "28명 등록·26명 출장",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "등록 인원 모두 출장 가능 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2020,
+   "cat": "roster",
+   "title": "부상자 명단 (10·15·30일)",
+   "after": "도입",
+   "effect": "show",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "note": "게임은 결장 선수를 엔진이 따로 다룬다"
+  },
+  {
+   "year": 2020,
+   "cat": "roster",
+   "title": "더블헤더·서스펜디드 특별 엔트리",
+   "after": "+1명",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "게임은 더블헤더 없음"
+  },
+  {
+   "year": 2020,
+   "cat": "fa",
+   "title": "FA 등급제 (2020 시즌 뒤부터)",
+   "before": "보호선수 + 보상금 일률",
+   "after": "A·B·C 등급",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2020,
+   "cat": "draft",
+   "title": "신인 지명권 트레이드",
+   "after": "트레이드 한 번에 2장까지",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2020,
+   "cat": "league",
+   "title": "더블헤더·월요일 경기 연장 없음",
+   "after": "9회까지",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "더블헤더·월요일 경기 없음"
+  },
+  {
+   "year": 2020,
+   "cat": "league",
+   "title": "준플레이오프 시리즈 길이 (2020~2021)",
+   "before": "5전 3선승",
+   "after": "3전 2선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 5전 3선승"
+  },
+  {
+   "year": 2021,
+   "cat": "fa",
+   "title": "최저 연봉",
+   "after": "3000만 원",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2021,
+   "cat": "fa",
+   "title": "퓨처스 FA (2021~2022)",
+   "after": "도입",
+   "effect": "show",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "note": "게임에는 없음"
+  },
+  {
+   "year": 2021,
+   "cat": "roster",
+   "title": "은퇴 경기 특별 엔트리",
+   "after": "+1명",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2021,
+   "date": "08-10",
+   "cat": "league",
+   "title": "후반기 연장 없음",
+   "before": "연장 12회",
+   "after": "9회까지",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "12회 연장 그대로 (경기 엔진 2 14단계에서 고침)"
+  },
+  {
+   "year": 2021,
+   "cat": "foreign",
+   "title": "육성형 외국인",
+   "after": "도입",
+   "effect": "show",
+   "status": "conflict",
+   "source": "자료집 제도연표",
+   "note": "2021년인지 2023년인지 출처가 갈린다. 게임에는 없음"
+  },
+  {
+   "year": 2021,
+   "cat": "league",
+   "title": "플레이오프 시리즈 길이 (2021년)",
+   "before": "5전 3선승",
+   "after": "3전 2선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "늘 5전 3선승"
+  },
+  {
+   "year": 2022,
+   "cat": "fa",
+   "key": "faService",
+   "title": "FA 자격 연한 (2022 시즌 뒤부터)",
+   "before": "고졸 9·대졸 8시즌",
+   "after": "고졸 8·대졸 7시즌",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2022,
+   "cat": "game",
+   "title": "스트라이크존 정상화",
+   "after": "규칙대로 판정",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2022,
+   "cat": "league",
+   "title": "준플레이오프 시리즈 길이",
+   "before": "3전 2선승",
+   "after": "5전 3선승",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2023,
+   "cat": "cap",
+   "key": "salaryCap",
+   "title": "샐러리캡 도입 (연봉 상위 40명)",
+   "before": "없음",
+   "after": "114억 2638만 원",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2023,
+   "cat": "foreign",
+   "title": "외국인 연봉 총액 상한",
+   "after": "3명 400만 달러",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2023,
+   "cat": "draft",
+   "title": "2차 드래프트 재개 (격년)",
+   "after": "1라운드 50일·2라운드 30일 1군 의무 등록",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "의무 등록 없음"
+  },
+  {
+   "year": 2023,
+   "cat": "draft",
+   "title": "대학 2학년 얼리 드래프트",
+   "after": "도입",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "게임에는 없음"
+  },
+  {
+   "year": 2023,
+   "cat": "game",
+   "title": "마운드 방문 제한 강화",
+   "after": "횟수·시간 제한",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "game",
+   "title": "ABS (자동 볼 판정 시스템) 전면 도입",
+   "before": "심판 판정",
+   "after": "상단 키의 56.35%·하단 27.64%·좌우 47.18cm",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "game",
+   "title": "베이스 크기",
+   "before": "15인치",
+   "after": "18인치",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "game",
+   "title": "수비 시프트 제한",
+   "after": "내야수 4명 흙 안쪽·2루 좌우 2명씩",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "game",
+   "title": "피치클락 시범 운영",
+   "after": "18초·23초 (경고만)",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "game",
+   "title": "퓨처스 견제 제한·세 타자 상대",
+   "after": "견제 타석당 3회·투수 세 타자 의무 상대 (퓨처스만)",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "cat": "foreign",
+   "title": "부상 대체 외국인",
+   "after": "6주 이상 부상이면 대체 영입",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "게임은 시즌 중 대체 영입만 있고 6주 규정은 없음"
+  },
+  {
+   "year": 2025,
+   "cat": "league",
+   "title": "한국시리즈 홈 배정",
+   "before": "2-2-3",
+   "after": "2-3-2",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표 비고",
+   "simplified": "모든 해 2-3-2"
+  },
+  {
+   "year": 2025,
+   "cat": "league",
+   "title": "포스트시즌 노게임·강우콜드 폐지",
+   "after": "서스펜디드 의무",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "게임은 우천 없음"
+  },
+  {
+   "year": 2025,
+   "cat": "game",
+   "title": "ABS 존 하향",
+   "before": "상단 56.35%·하단 27.64%",
+   "after": "상단 55.75%·하단 27.04%",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2025,
+   "cat": "game",
+   "title": "피치클락 정식 도입",
+   "before": "시범 운영",
+   "after": "20초·25초·타석 간 33초",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2025,
+   "cat": "game",
+   "title": "1군 견제 횟수",
+   "after": "제한 없음",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2025,
+   "date": "08-19",
+   "cat": "game",
+   "title": "체크스윙 비디오 판독",
+   "after": "판독 대상",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2025,
+   "cat": "game",
+   "title": "1루 3피트 주로 확대",
+   "after": "확대",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "foreign",
+   "key": "foreignLimit",
+   "title": "아시아쿼터",
+   "before": "3명",
+   "after": "4명 (아시아쿼터 1명·신규 20만 달러)",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표"
+  },
+  {
+   "year": 2026,
+   "cat": "roster",
+   "key": "rosterSize",
+   "title": "1군 엔트리 등록·출장",
+   "before": "28명 등록·26명 출장",
+   "after": "29명 등록·27명 출장",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "등록 인원 모두 출장 가능 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2026,
+   "cat": "roster",
+   "title": "소속 선수 정원",
+   "before": "65명",
+   "after": "68명",
+   "effect": "league",
+   "status": "confirmed",
+   "source": "자료집 제도연표",
+   "simplified": "모든 해 68명"
+  },
+  {
+   "year": 2026,
+   "date": "08-25",
+   "cat": "roster",
+   "title": "확대 엔트리",
+   "after": "34명 등록·32명 출장",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "확대 엔트리 없음 (경기 엔진 2 13단계에서 고침)"
+  },
+  {
+   "year": 2026,
+   "cat": "roster",
+   "title": "아시안게임 기간 한시 엔트리 (후반기)",
+   "after": "30명 등록·28명 출장",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "simplified": "한시 엔트리 없음"
+  },
+  {
+   "year": 2026,
+   "cat": "cap",
+   "title": "샐러리캡 초과 제재 완화",
+   "before": "1회 50%·2회 100%·3회 150% + 지명 9단계 하락",
+   "after": "1회 30%·2회 50%·3회 100% + 지명 9단계 하락",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "cap",
+   "title": "프랜차이즈 예외 선수",
+   "after": "구단당 1명·같은 구단 7시즌 이상·연봉 50%만 캡에 산정",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "수비 시프트 제한 강화",
+   "after": "위반 수비수가 처음 만지면 출루·안전 진루 선택",
+   "effect": "show-env",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "피치클락 단축",
+   "before": "20초·25초",
+   "after": "18초·23초",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "견제 때 주루방해",
+   "after": "1베이스 진루",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "비디오 판독 확대",
+   "after": "신청하지 않은 오심도 정정",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "이물질 정기 검사",
+   "after": "도입",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "배트 규정",
+   "after": "시즌 중 공인·어뢰 배트 허용",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "cat": "game",
+   "title": "파울라인 폭",
+   "after": "4인치",
+   "effect": "show",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2027,
+   "cat": "cap",
+   "title": "샐러리캡 하한",
+   "before": "없음",
+   "after": "60억 6538만 원",
+   "effect": "league",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "note": "미달 때 제재는 조사 전 (게임은 표시·경고만)"
+  }
+ ],
+ "ball": [
+  {
+   "year": 1982,
+   "range": [
+    0.4134,
+    0.4374
+   ],
+   "note": "복수 공인구. 검사 결과 공표 없음",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "single": false
+  },
+  {
+   "year": 1999,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.433
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2006,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.415
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2007,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.425,
+     "note": "0.425 이상"
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2015,
+   "tests": [
+    {
+     "round": 1,
+     "note": "업체별 평균 0.4083~0.4414 (불합격 2건)"
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2016,
+   "single": true,
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2018,
+   "tests": [
+    {
+     "round": 1,
+     "date": "03-16",
+     "avg": 0.4198
+    },
+    {
+     "round": 2,
+     "date": "06-27",
+     "avg": 0.4176
+    },
+    {
+     "round": 3,
+     "avg": 0.4286,
+     "note": "9월 말 발표"
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2019,
+   "range": [
+    0.4034,
+    0.4234
+   ],
+   "note": "둘레 1mm 확대",
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22",
+   "tests": [
+    {
+     "round": 1,
+     "date": "03-18",
+     "avg": 0.4247,
+     "note": "새 기준 상한 초과로 불합격"
+    },
+    {
+     "round": 2,
+     "date": "05-24",
+     "avg": 0.4189
+    },
+    {
+     "round": 3,
+     "date": "10-29",
+     "avg": 0.4105
+    }
+   ]
+  },
+  {
+   "year": 2020,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.4141
+    },
+    {
+     "round": 2,
+     "avg": 0.4153
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2021,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.419
+    },
+    {
+     "round": 2,
+     "avg": 0.4108
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2022,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.4061
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2023,
+   "tests": [
+    {
+     "round": 1,
+     "avg": 0.4175
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2024,
+   "tests": [
+    {
+     "round": 1,
+     "date": "03-22",
+     "avg": 0.4208
+    },
+    {
+     "round": 2,
+     "date": "04-30",
+     "avg": 0.4149
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2025,
+   "tests": [
+    {
+     "round": 1,
+     "date": "03-25",
+     "avg": 0.4123
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  },
+  {
+   "year": 2026,
+   "tests": [
+    {
+     "round": 1,
+     "date": "03-30",
+     "avg": 0.4093
+    }
+   ],
+   "status": "research",
+   "source": "웹 조사(잼쨩) 2026-10-22"
+  }
+ ]
+}
