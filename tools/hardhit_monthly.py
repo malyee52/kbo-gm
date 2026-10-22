@@ -10,7 +10,8 @@
   data-src/hardhit_derived/league_monthly.csv   리그 연·월별 상대 타자·이닝·실점·자책·RA9·ERA·P/PA·타율·출루율(근사)·장타율·OPS
   data-src/hardhit_derived/monthly_trend.csv    월 묶음(3·4월 … 9·10월)별 그 해 시즌 값 대비 비율의 2015~2025 평균
   data-src/hardhit_derived/monthly_check.csv    월별 합계 대 게임 데이터 시즌 합계, 하드힛 P/PA 대 투구 단위 자료 P/PA
-  data-src/hardhit/derived_players/pitcher_ppa.csv  투수-시즌별 P/PA (선수별 값, 커밋하지 않는다)
+  data-src/hardhit_derived/pitcher_ppa.csv     투수-시즌-팀별 P/PA, 게임 선수 ID에 연결 (선수별 가공값, 사용자 결정 2026-10-22로 커밋한다)
+                                                못 맞춘 행은 같은 폴더 pitcher_ppa_unmatched.csv
 같은 입력이면 같은 결과가 나온다.
 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.
 """
@@ -21,10 +22,12 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hardhit_common import Matcher  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / 'data-src' / 'hardhit' / 'monthly'
 OUT = ROOT / 'data-src' / 'hardhit_derived'
-PLAYERS_OUT = ROOT / 'data-src' / 'hardhit' / 'derived_players'
 SEASONS = ROOT / 'public' / 'data' / 'seasons'
 PBP_SUMMARY = ROOT / 'data-src' / 'pbp_derived' / 'league_summary.csv'
 YEARS = range(2015, 2027)
@@ -86,7 +89,8 @@ def main():
             for row in csv.DictReader(f):
                 pbp[int(row['year'])][row['metric']] = float(row['value'])
 
-    monthly, ppa_rows, check, players, missing = [], [], [], [], []
+    M = Matcher()
+    monthly, ppa_rows, check, players, missing, unmatched = [], [], [], [], [], []
     season_vals = {}  # (연도) → 시즌 값, (연도, 묶음) → 묶음 값
     group_vals = {}
     for year in YEARS:
@@ -147,7 +151,12 @@ def main():
         qual = [pi / pa for pi, pa in per_pitcher.values() if pa >= QUAL_PA and pi > 0]
         for (name, team), (pi, pa) in sorted(per_pitcher.items()):
             if pa > 0:
-                players.append([year, name, team, int(pi), int(pa), r(pi / pa if pi else None, 3)])
+                # 선수 연결: 이름·팀(계보), 겹치면 시즌 상대 타자 수로 가른다 (부분 시즌 2026은 게임 자료와 범위가 달라 기록으로 가르지 않는다)
+                pid, why = M.match(year, name, team, None, 'pit', None if part else {'tbf': int(pa)}) if year in M.years else (None, 'not-in-season')
+                if pid:
+                    players.append([year, part, pid, team, int(pi), int(pa), r(pi / pa if pi else None, 3)])
+                else:
+                    unmatched.append([year, name, team, int(pa), why])
         lg = yp['pitches'] / yp['pa']
         ppa_rows.append([year, part, ' '.join(f'{m:02d}' for m in months), int(yp['pitches']), int(yp['pa']), r(lg),
                          len(qual)] + [r(pct(qual, q), 3) for q in (10, 25, 50, 75, 90)] + [r(min(qual), 3), r(max(qual), 3)])
@@ -193,9 +202,13 @@ def main():
                                        'ppa', 'avg', 'obp_approx', 'slg', 'ops_approx', 'k_rate', 'bb_rate'], monthly)
     write(OUT / 'monthly_trend.csv', ['group', 'years'] + [f'ratio_{k}' for k in keys] + [f'mean_{k}' for k in keys], trend)
     write(OUT / 'monthly_check.csv', ['year', 'against', 'metric', 'hardhit', 'other', 'diff'], check)
-    write(PLAYERS_OUT / 'pitcher_ppa.csv', ['year', 'name', 'team', 'pitches', 'pa', 'ppa'], players)
+    players.sort(key=lambda x: (x[0], x[2], x[3]))
+    write(OUT / 'pitcher_ppa.csv', ['year', 'partial', 'id', 'team', 'pitches', 'pa', 'ppa'], players)
+    write(OUT / 'pitcher_ppa_unmatched.csv', ['year', 'name', 'team', 'pa', 'why'], unmatched)
+    tot = sum(x[5] for x in players) + sum(x[3] for x in unmatched)
     print('없는 달:', ', '.join(missing) or '없음')
-    print(f'→ {OUT.relative_to(ROOT)} (선수별: {PLAYERS_OUT.relative_to(ROOT)})')
+    print(f'투수 연결: {len(players)}행, 못 맞춤 {len(unmatched)}행 (상대 타자 {sum(x[3] for x in unmatched)} / {tot})')
+    print(f'→ {OUT.relative_to(ROOT)}')
 
 
 def stats(b, p):
