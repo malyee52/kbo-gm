@@ -114,7 +114,8 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   beforeAll(() => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-14', difficulty: 'hard' }, FAST);
+    // 시드는 LG가 우승하지 못하는 판 (2026-10-22 구장 사건별 배율을 넣으며 m7-loop-14 → 15: 그 판은 LG가 우승해 해고되지 않았다)
+    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-15', difficulty: 'hard' }, FAST);
     firstTeam = g.teamIdx;
     // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
     g.owner.trust = 27; // 재정 흑자(+2)가 나도 해고선(25) 아래로 떨어지게 (2026-10-11 재정 상세형)
@@ -166,7 +167,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(b.owner.offers).toEqual(save.league.owner!.offers);
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     // 신뢰도·목표는 이 시험에서 직접 바꿔 조작 기록에 없다. 그래서 해고까지 재현하지는 않고 시즌 결과가 같은지만 본다
-    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-14', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
+    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-15', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
     c.advance(100000);
     expect(c.season.teams).toEqual(b.season.teams);
   });

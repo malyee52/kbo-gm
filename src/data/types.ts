@@ -181,6 +181,25 @@ export interface Meta {
    * 없는 해(2015년 이전)는 중립으로 본다.
    */
   parkFactors?: Record<string, Record<string, number>>;
+  /**
+   * 연도 → 구단 계보 → 사건별 홈 구장 배율 (구장 자체 값, 1 = 중립). 하드힛 구장 표(2022~2025 묶음)의 구성 모양에
+   * 그 해 parkFactors 수준을 맞춰 build_data.py(park_events)가 만든다. 표에 있는 구장을 쓰는 해만 있고, 없으면 엔진이 f^hitExp·f^hrExp로 나눈다.
+   */
+  parkEvents?: Record<string, Record<string, ParkEvents>>;
+}
+
+/** 사건별 구장 배율: 단타·2루타·3루타·홈런 (볼넷·삼진은 구장 효과를 넣지 않는다) */
+export interface ParkRates {
+  s1: number;
+  d2: number;
+  t3: number;
+  hr: number;
+}
+
+/** 전체 타자 배율 + 좌타(L)·우타(R) 배율 */
+export interface ParkEvents extends ParkRates {
+  L?: ParkRates;
+  R?: ParkRates;
 }
 
 /**

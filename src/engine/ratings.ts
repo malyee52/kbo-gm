@@ -5,7 +5,7 @@
 // "횟수 ÷ 리그 비율"은 그 횟수를 리그 평균 선수가 내려면 필요한 타석 수라서, 시대가 달라도 그대로 더할 수 있다.
 // K가 클수록 표본이 적은 선수가 사전 평균(출전이 적은 선수들의 평균) 쪽으로 강하게 당겨진다.
 
-import type { BatRow, Meta, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
 import type { DefenseAward } from '../data/types';
 import { estimatedStarts, type EngineParams } from './params';
@@ -28,24 +28,42 @@ export interface Weighted<T> {
   lg: Rates;
   /** 노화 보정: 사건별로 그 시즌 횟수에 곱하는 배율 (그 시즌 나이 → 목표 시즌 나이). 없으면 1 */
   aging?: Partial<Record<string, number>>;
-  /** 그 시즌 소속 구단의 시즌 단위 구장 계수 ((1 + 홈 구장 계수) / 2, seasonPark). 없으면 1 */
-  park?: number;
+  /** 그 시즌 소속 구단의 시즌 단위 구장 효과 (seasonPark). 없으면 중립 */
+  park?: SeasonPark;
+}
+
+/** 시즌 단위 구장 효과: run = (1 + 홈 구장 계수) / 2, ev = 사건별 홈 구장 배율 (있으면 사건마다 (1 + 배율) / 2로 쓴다) */
+export interface SeasonPark {
+  run: number;
+  ev?: ParkRates;
 }
 
 /** 그 시즌 그 구단 기록에 들어 있는 구장 효과: 홈 경기 절반은 홈 구장, 원정은 리그 평균 구장으로 본다 (meta.parkFactors) */
-export function seasonPark(meta: Pick<Meta, 'parkFactors'>, season: Pick<SeasonData, 'year' | 'teams'>, team: string): number {
+export function seasonPark(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, season: Pick<SeasonData, 'year' | 'teams'>, team: string,
+                           bats: Hand | null = null): SeasonPark | undefined {
   const year = meta.parkFactors?.[String(season.year)];
-  if (!year) return 1;
+  if (!year) return undefined;
   const fr = season.teams.find((t) => t.name === team)?.franchise;
   const f = fr ? year[fr] : undefined;
-  return f ? (1 + f) / 2 : 1;
+  if (!f) return undefined;
+  // 사건별 배율: 좌타·우타는 그 손의 표, 양타·투수·모름은 전체 (양타는 좌우 타석이 섞인다)
+  const all = fr ? meta.parkEvents?.[String(season.year)]?.[fr] : undefined;
+  const ev = all && (bats === 'L' || bats === 'R') ? all[bats] ?? all : all;
+  return { run: (1 + f) / 2, ...(ev ? { ev: { s1: ev.s1, d2: ev.d2, t3: ev.t3, hr: ev.hr } } : {}) };
 }
 
-/** 구장 효과를 걷어 내는 배율 (사건별 지수, params.park) */
-function parkDivisor(park: number | undefined, e: string, p: EngineParams): number {
-  if (!park || park === 1) return 1;
-  if (e === 'hr') return park ** p.park.hrExp;
-  if (e === 's1' || e === 'd2' || e === 't3' || e === 'hit') return park ** p.park.hitExp;
+/** 구장 효과를 걷어 내는 배율. 사건별 배율이 있으면 그것, 없으면 득점 계수의 지수 (params.park). 투수의 'hit'은 단타·2루타·3루타를 리그 비율로 섞는다 */
+function parkDivisor(park: SeasonPark | undefined, e: string, p: EngineParams, lg: Rates): number {
+  if (!park) return 1;
+  if (park.ev) {
+    const half = (k: keyof ParkRates) => (1 + park.ev![k]) / 2;
+    if (e === 's1' || e === 'd2' || e === 't3' || e === 'hr') return half(e);
+    if (e === 'hit') return (lg.s1 * half('s1') + lg.d2 * half('d2') + lg.t3 * half('t3')) / (lg.s1 + lg.d2 + lg.t3);
+    return 1;
+  }
+  if (park.run === 1) return 1;
+  if (e === 'hr') return park.run ** p.park.hrExp;
+  if (e === 's1' || e === 'd2' || e === 't3' || e === 'hit') return park.run ** p.park.hitExp;
   return 1;
 }
 
@@ -61,7 +79,7 @@ export function batSkillFrom(rows: Weighted<BatRow>[], priors: Rates, p: EngineP
     for (const { row, w, lg, aging, park } of rows) {
       const c = batCounts(row)[e];
       if (c === null || c === undefined || row.pa <= 0) continue; // 그 시즌에 이 항목 기록이 없으면 건너뜀
-      num += (w * c * (aging?.[e] ?? 1)) / lg[e] / parkDivisor(park, e, p);
+      num += (w * c * (aging?.[e] ?? 1)) / lg[e] / parkDivisor(park, e, p, lg);
       den += w * row.pa;
     }
     const k = p.batRegress[e];
@@ -103,7 +121,7 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
       if (row.tbf <= 0) continue;
       const c = e === 'hit' ? row.h - row.hr : row[e];
       const lgRate = e === 'hit' ? lg.s1 + lg.d2 + lg.t3 : lg[e];
-      num += (w * c * (aging?.[e] ?? 1)) / lgRate / parkDivisor(park, e, p);
+      num += (w * c * (aging?.[e] ?? 1)) / lgRate / parkDivisor(park, e, p, lg);
       den += w * row.tbf;
     }
     const k = p.pitRegress[e];
@@ -203,8 +221,10 @@ export function buildWorld(input: BuildWorldInput): World {
   const histPit = history.map((s) => (s ? new Map(s.pit.map((r) => [r.id, r])) : undefined));
 
   const parks = meta.parkFactors?.[String(year)];
+  const parkEv = meta.parkEvents?.[String(year)];
   const teams: SimTeam[] = current.teams.map((t, idx) => ({ idx, name: t.name, franchise: t.franchise, org: [],
-    ...(parks?.[t.franchise] && parks[t.franchise] !== 1 ? { park: { hr: 1, run: parks[t.franchise] } } : {}) }));
+    ...(parks?.[t.franchise] && parks[t.franchise] !== 1
+      ? { park: { hr: 1, run: parks[t.franchise], ...(parkEv?.[t.franchise] ? { ev: parkEv[t.franchise] } : {}) } } : {}) }));
   const teamIdx = new Map(teams.map((t) => [t.name, t.idx]));
   const players: SimPlayer[] = [];
   const curBat = new Map(current.bat.map((r) => [r.id, r]));
@@ -267,10 +287,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = rateBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team) });
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null) });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
-        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team) });
+        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null) });
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
