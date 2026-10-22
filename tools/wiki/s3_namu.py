@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import common as C  # noqa: E402
 import namumd as N  # noqa: E402
+import resolve as R  # noqa: E402
 
 ITEM = 'namuwiki-data-dump-20260829'
 FILE = 'namu-md.sqlite'
@@ -96,7 +97,8 @@ def titles_like(db, name):
     """'이름' 과 '이름(…)' 꼴 제목 (제목 색인 범위 검색)"""
     rows = db.execute('SELECT title FROM docs WHERE title = ? OR (title >= ? AND title < ?)',
                       (name, name + '(', name + ')')).fetchall()
-    return [r[0] for r in rows]
+    # '제목/선수 경력/2024년' 같은 하위 문서는 사람 문서가 아니다
+    return [r[0] for r in rows if '/' not in r[0]]
 
 
 def subdoc_titles(db, title):
@@ -161,11 +163,30 @@ def candidates(p, wiki_title):
     return names
 
 
-def find(db, players, stints, wiki_titles):
-    picks, amb = {}, []
+def resolve_one(db, p, info, stints, names, taken=()):
+    """근거가 모자라거나 같은 점수 후보가 여럿일 때: 넘겨주기로 겹친 후보를 묶고 더 많은 근거로 다시 본다 (resolve.py).
+    taken: 다른 선수의 짝으로 이미 쓰인 제목 (그 사람의 다른 제목까지 함께 뺀다)"""
+    cands = {}
+    for name in names:
+        for t in titles_like(db, name):
+            md = get_md(db, t)
+            cats = N.categories(md)
+            if any('동음이의' in c for c in cats) or not (profile(md) or any('야구' in c for c in cats)):
+                continue
+            cands[t] = R.namu_cand(md)
+    scored = [(*R.score(p, info, stints, cands[g[0]]), g[0]) for g in R.same_person_groups(cands)
+              if not any(t in taken for t in g)]
+    best, why = R.pick([(s, t, w) for s, w, t in scored])
+    return best, why, cands
+
+
+def find(db, players, stints, wiki_titles, master=None):
+    """1차: 생년·구단·연도 점수로 고른다. 2차: 1차에서 애매한 선수만 resolve.py 근거로, 1차 짝이 안 쓴 문서 중에서 다시 고른다"""
+    picks, amb, pending = {}, [], []
     for p in players:
         scored = {}
-        for name in candidates(p, wiki_titles.get(p['id'])):
+        names = candidates(p, wiki_titles.get(p['id']))
+        for name in names:
             for t in titles_like(db, name):
                 md = get_md(db, t)
                 s, why = evidence(p, stints.get(p['id'], set()), md)
@@ -174,14 +195,26 @@ def find(db, players, stints, wiki_titles):
         ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])
         if not ranked:
             continue
+        reason = ''
         if ranked[0][1][0] < 3:
-            amb.append((p['id'], p['name'], ' / '.join(t for t, _ in ranked), '근거 부족 (나무위키)'))
-            continue
-        if len(ranked) > 1 and ranked[1][1][0] == ranked[0][1][0]:
-            amb.append((p['id'], p['name'], ' / '.join(t for t, _ in ranked[:4]), '같은 점수 후보 여럿 (나무위키)'))
+            reason = '근거 부족 (나무위키)'
+        elif len(ranked) > 1 and ranked[1][1][0] == ranked[0][1][0]:
+            reason = '같은 점수 후보 여럿 (나무위키)'
+        if reason:
+            pending.append((p, names, ' / '.join(t for t, _ in ranked[:4]), reason))
             continue
         t, (s, why, md) = ranked[0]
         picks[p['id']] = (t, f'나무:{why}', md)
+    taken = {t for t, _, _ in picks.values()}
+    n_resolved = 0
+    for p, names, shown, reason in pending:
+        best, why2, _ = resolve_one(db, p, R.player_info(p, master), stints.get(p['id'], set()), names, taken)
+        if best:
+            n_resolved += 1
+            picks[p['id']] = (best[1], f'나무:다시 가림:{best[2]}', get_md(db, best[1]))
+        else:
+            amb.append((p['id'], p['name'], shown, f'{reason}, 다시 가림: {why2}'))
+    C.log(f'  애매 {len(pending)}명 중 다시 가려서 고름 {n_resolved}명')
     # 한 문서에 우리 선수 둘이면 버린다
     seen = {}
     for pid, (t, _, _) in list(picks.items()):
@@ -282,7 +315,7 @@ def main():
     stints = C.player_stints(C.load_seasons())
     db = open_db(db_path)
     C.log(f'[3단계] 나무위키 덤프에서 찾기: 선수 {len(players)}명, 덤프 {db_path}')
-    picks, amb = find(db, players, stints, wiki_titles)
+    picks, amb = find(db, players, stints, wiki_titles, C.load_master_extra())
     for pid, (t, why, md) in picks.items():
         save_doc(db, t, md)
     names = {p['id']: p['name'] for p in players}

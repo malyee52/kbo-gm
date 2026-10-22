@@ -217,6 +217,12 @@ def main():
     (dest / 'wiki').mkdir(parents=True, exist_ok=True)
     (dest / 'namu').mkdir(parents=True, exist_ok=True)
     import s3_namu  # 나무위키 문서 읽기 (덤프에서 뽑아 둔 것)
+    # 짝이 없어진 선수의 지난 추출 결과는 지운다 (5단계가 폴더의 파일을 그대로 읽으므로)
+    keep = {'wiki': {r['선수ID'] for r in pairs if r['위키 제목']}, 'namu': {r['선수ID'] for r in pairs if r.get('나무위키 제목')}}
+    for src, ids in keep.items():
+        for f in (dest / src).glob('*.json'):
+            if f.stem not in ids:
+                f.unlink()
     for r in pairs:
         if r['위키 제목']:
             page = C.cached_page(r['위키 제목'])
