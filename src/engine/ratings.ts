@@ -214,6 +214,56 @@ export interface BuildWorldInput {
  * 시즌 시작 시점의 월드를 만든다.
  * 소속 팀은 current 시즌 기록의 팀, 능력은 history 시즌 기록에서 뽑는다.
  */
+/** 규정타석 = 그 해 팀 경기 수 × 3.1 */
+const QUAL_PA_PER_GAME = 3.1;
+
+/**
+ * 하드힛 주 포지션 이력(시즌 행 posSrc 'H', 2003~)으로 정하는 수비 가능 포지션과 주 포지션 (2026-10-22 사용자 결정).
+ * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 한 번이라도 있는 자리.
+ * - 주 포지션: 규정타석 시즌이 가장 많은 자리 (같으면 더 최근에 채운 자리, 클사장 해석).
+ * - 규정타석 시즌이 없으면 가장 많이 나온 자리 하나만 (시즌 수 → 타석 합 → 최근 순), 주 포지션도 그 자리.
+ * 2009년·포지션 파일에 없는 타자의 추정값('E')은 쓰지 않는다. 하드힛 이력이 없는 선수는 맵에 없다 (기존 방식).
+ */
+export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[]): Map<string, { main: string; playable: string[] }> {
+  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number };
+  const per = new Map<string, Map<string, Acc>>();
+  for (const s of seasons) {
+    const games = new Map(s.teams.map((t) => [t.name, t.g]));
+    const seen = new Map<string, { pos: string; pa: number; g: number }>();
+    for (const r of s.bat) {
+      if (r.posSrc !== 'H' || !r.pos) continue;
+      const x = seen.get(r.id) ?? { pos: r.pos, pa: 0, g: 0 };
+      x.pa += r.pa;
+      x.g = Math.max(x.g, games.get(r.team) ?? 0);
+      seen.set(r.id, x);
+    }
+    for (const [id, x] of seen) {
+      let m = per.get(id);
+      if (!m) per.set(id, (m = new Map()));
+      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0 };
+      a.n++;
+      a.pa += x.pa;
+      a.last = Math.max(a.last, s.year);
+      if (x.g > 0 && x.pa >= QUAL_PA_PER_GAME * x.g) {
+        a.reg++;
+        a.regLast = Math.max(a.regLast, s.year);
+      }
+      m.set(x.pos, a);
+    }
+  }
+  const out = new Map<string, { main: string; playable: string[] }>();
+  for (const [id, m] of per) {
+    const all = [...m.entries()];
+    const reg = all.filter(([, a]) => a.reg > 0).sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast);
+    if (reg.length) out.set(id, { main: reg[0][0], playable: reg.map(([q]) => q) });
+    else {
+      const top = all.sort((p, q) => q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
+      out.set(id, { main: top, playable: [top] });
+    }
+  }
+  return out;
+}
+
 export function buildWorld(input: BuildWorldInput): World {
   const { year, current, history, players: master, meta, params } = input;
   const lg = current.league.rates;
@@ -249,6 +299,8 @@ export function buildWorld(input: BuildWorldInput): World {
       m.set(r.pos, (m.get(r.pos) ?? 0) + Math.max(1, r.pa) * w);
     }
   }
+  // 하드힛 이력이 있는 선수는 수비 가능 포지션·주 포지션을 규정타석 규칙으로 정하고 기존 추정의 다른 자리를 더하지 않는다 (2002년 이전·2009년만 있는 선수는 기존 방식)
+  const hhPos = hardhitPositions(careerSeasons);
 
   for (const id of ids) {
     const m = master.get(id);
@@ -305,17 +357,23 @@ export function buildWorld(input: BuildWorldInput): World {
       const totalPa = [...posPa.values()].reduce((a, b) => a + b, 0);
       const field = [...posPa.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
       const recent = (posPa.get('DH') ?? 0) > 0.7 * totalPa ? 'DH' : field?.[0] ?? (posPa.has('DH') ? 'DH' : undefined);
-      pos = recent ?? (m.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null) ?? bRow?.pos ?? null;
+      // 직전 시즌 포지션이 없는 신인·새 외국인은 그 해 하드힛 주 포지션을 마스터(내야수·외야수뿐인 경우가 많다)보다 먼저 쓴다 (2026-10-22)
+      const curHh = bRow?.posSrc === 'H' && bRow.pos ? bRow.pos : null;
+      pos = recent ?? curHh ?? (m.pos && !['SP', 'RP', 'CL', 'P'].includes(m.pos) ? m.pos : null) ?? bRow?.pos ?? null;
       // 세부 포지션이 어디에도 없으면 직전 시즌의 내야·외야 구분이라도, 그것도 없으면 내야로 본다 (1980~90년대 자료. 빈 자료는 추정치, 2026-10-09 QA)
       const posHist = seasonBasis ? rateBat : histBat;
       if (!pos) pos = posHist.map((h) => h?.get(id)?.pos).find((q) => q === 'IF' || q === 'OF') ?? 'IF';
+      // 하드힛 이력이 없고 그 해만 하드힛에 나온 선수는 그 자리 하나만 (규정타석 시즌이 없을 때의 규칙과 같다)
+      const hh = hhPos.get(id) ?? (curHh && !recent ? { main: curHh, playable: [curHh] } : undefined);
+      if (hh) pos = hh.main;
       // 수비: 커리어에 맡은 포지션(멀티 포지션 이력, 2026-10-13), 주력·나이, KBO 수비상으로 만든 추정값 (수비 기록 없음).
       // 커리어 세부 포지션이 없을 때만 직전 시즌들의 내야·외야 구분을 쓴다
       const career = careerPos.get(id);
-      const played = career && career.size ? [...career.keys()] : posHist.map((h) => h?.get(id)?.pos ?? null);
+      const played = hh ? hh.playable : career && career.size ? [...career.keys()] : posHist.map((h) => h?.get(id)?.pos ?? null);
       const careerField = career ? [...career.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] : undefined;
       bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
-        pos ? posPa.get(pos) ?? 0 : 0, { awards: input.defenseAwards?.[id], year, fieldPos: pos === 'DH' ? careerField ?? (m.pos && m.pos !== 'DH' ? m.pos : undefined) : undefined });
+        // 주전 출전 근거 타석: 하드힛 이력 선수는 수비 가능 자리 전체 (규정타석 시즌 수가 같아 최근 자리가 주 포지션이 된 선수가 오래 맡은 자리의 근거를 잃지 않게)
+        hh ? hh.playable.reduce((a, q) => a + (posPa.get(q) ?? 0), 0) : pos ? posPa.get(pos) ?? 0 : 0, { awards: input.defenseAwards?.[id], year, fieldPos: pos === 'DH' ? careerField ?? (m.pos && m.pos !== 'DH' ? m.pos : undefined) : undefined });
     }
 
     const p: SimPlayer = {
