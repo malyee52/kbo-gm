@@ -500,7 +500,8 @@ export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' 
   return {
     roe: params.roePerUnearnedShare * league.unearnedShare,
     sac: league.sacPerPa,
-    unearnedRun: params.unearnedRunScale * league.unearnedShare,
+    // 경기 안 판정 몫(해마다 거의 같다)을 뺀 모자란 몫만 확률로 채운다. 비율에 곱하면 비자책이 적은 해(2012 0.079)에 넘쳤다
+    unearnedRun: params.unearnedRunScale * Math.max(0, league.unearnedShare - params.unearnedInGame) / (1 - params.unearnedInGame),
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
     gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
   };
