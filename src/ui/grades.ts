@@ -28,6 +28,8 @@ export const POT_RANGE_AGE = 27;
 /** 범위 반폭 = 스카우트 오차 × 이 값 (임시값) */
 export const POT_RANGE_SCALE = 0.75;
 export const POT_HIDE_AGE = 31;
+/** 범위 최소 폭 (등급, 임시값). 스카우트 투자 최고 단계(오차 ±2런)에서도 숫자 하나로 줄지 않게 */
+export const POT_MIN_SPAN = 2;
 
 export type PotentialView = { kind: 'range'; lo: number; hi: number; guess: number } | { kind: 'one'; v: number } | null;
 
@@ -44,12 +46,23 @@ export function potentialView(
   if (age === null || age > POT_RANGE_AGE) return { kind: 'one', v: runsGrade(p.scoutPotential ?? p.potential, opts.year) };
   const guess = scoutGuessRuns(p, opts.seed, opts.noise);
   const w = opts.noise * POT_RANGE_SCALE;
-  return { kind: 'range', lo: runsGrade(guess - w, opts.year), hi: runsGrade(guess + w, opts.year), guess: runsGrade(guess, opts.year) };
+  // 27세 이하는 늘 범위 꼴 (2026-10-23 클사장 결정): 20·80 끝에 걸려 숫자 하나로 줄면 28~30세처럼 읽히므로,
+  // 끝을 넘은 만큼 범위를 눈금 안으로 밀어 폭(스카우트 오차, 최소 POT_MIN_SPAN)을 지킨다. 예: 23세 "80" → "75~80"
+  const raw = (r: number) => Math.round(40 + 5 * runsWar(r, opts.year));
+  let lo = raw(guess - w);
+  let hi = raw(guess + w);
+  const span = Math.min(60, Math.max(POT_MIN_SPAN, hi - lo));
+  if (hi - lo < span) { lo = Math.floor((lo + hi - span) / 2); hi = lo + span; }
+  if (hi > 80) { hi = 80; lo = Math.min(lo, 80 - span); }
+  if (lo < 20) { lo = 20; hi = Math.max(hi, 20 + span); }
+  lo = Math.max(20, lo);
+  hi = Math.min(80, hi);
+  return { kind: 'range', lo, hi, guess: Math.max(lo, Math.min(hi, runsGrade(guess, opts.year))) };
 }
 
 /** 잠재 표시 글자: "55~65" / "61" / null(숨김) */
 export function potentialText(v: PotentialView): string | null {
   if (!v) return null;
   if (v.kind === 'one') return String(v.v);
-  return v.lo === v.hi ? String(v.lo) : `${v.lo}~${v.hi}`;
+  return `${v.lo}~${v.hi}`;
 }

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { leagueRank, topPercent, vsMark } from '../src/ui/compare';
 import { EMPTY_VIEW, filterRows, loadView, nextSort, saveView, sortRows, toggleColumn, toggleGroup, visibleColumns, type Column } from '../src/ui/table';
-import { POT_RANGE_SCALE, potentialText, potentialView, runsGrade } from '../src/ui/grades';
+import { POT_MIN_SPAN, POT_RANGE_SCALE, potentialText, potentialView, runsGrade } from '../src/ui/grades';
 
 type Row = { name: string; avg: number | null; era: number; pa: number };
 const COLS: Column<Row>[] = [
@@ -109,6 +109,22 @@ describe('잠재 범위 (결정 5)', () => {
   it('스카우트 평가가 있는 선수(신인)는 그 값을 가운데로 쓴다', () => {
     const v = potentialView({ id: 'r', potential: 40, scoutPotential: 30 }, 19, { seed: 'g', noise });
     expect(v).toMatchObject({ kind: 'range', guess: runsGrade(30) });
+  });
+  it('27세 이하는 20·80 끝에 걸려도, 오차가 작아도 늘 범위 꼴 (숫자 하나로 줄지 않는다)', () => {
+    for (const n of [8, 2]) {
+      for (const [potential, edge] of [[200, 80], [-80, 20], [40, null]] as const) {
+        const v = potentialView({ id: 'e', potential }, 23, { seed: 'g', noise: n });
+        if (v?.kind !== 'range') throw new Error('범위가 아님');
+        expect(v.hi - v.lo).toBeGreaterThanOrEqual(POT_MIN_SPAN);
+        expect(v.lo).toBeGreaterThanOrEqual(20);
+        expect(v.hi).toBeLessThanOrEqual(80);
+        expect(v.guess).toBeGreaterThanOrEqual(v.lo);
+        expect(v.guess).toBeLessThanOrEqual(v.hi);
+        if (edge === 80) expect(v.hi).toBe(80);
+        if (edge === 20) expect(v.lo).toBe(20);
+        expect(potentialText(v)).toMatch(/^\d+~\d+$/);
+      }
+    }
   });
   it('화면은 잠재를 potentialView(범위 규칙)로만 보인다: 등급 함수에 잠재 런을 바로 넣지 않는다', () => {
     const dir = 'src/ui';
