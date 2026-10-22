@@ -369,8 +369,8 @@ function StandingsCard() {
   const order = off ? last?.standings ?? [] : session.season.standings();
   const teams = off ? last?.teams ?? [] : session.season.teams;
   const moves = useRankMoves(order);
-  // 휴대폰에서는 접힌 채로 시작한다 (제목 줄을 누르면 펼침)
-  const [open] = useState(() => !window.matchMedia('(max-width: 768px)').matches);
+  // 휴대폰에서는 접힌 채로 시작한다 (펼치기 단추). 넓은 화면은 접기와 상관없이 늘 보인다 (game.css .stand.folded)
+  const [folded, setFolded] = useState(true);
   const me = session.teamIdx;
   const cut = session.world.rules.postseasonTeams;
   if (!order.length) return null;
@@ -379,13 +379,14 @@ function StandingsCard() {
   const rows = density === 'full' ? order : order.slice(from, from + 5);
   const leader = teams[order[0]];
   return (
-    <section className="card stand" aria-label="순위">
-      <details open={open} className="stand-fold">
-        <summary className="card-top">
+    <section className={`card stand${folded ? ' folded' : ''}`} aria-label="순위">
+        <div className="card-top">
           <h2>순위</h2>
           <span className="small muted">{off ? `${last?.year} 최종` : `상위 ${cut}팀 가을야구`}</span>
-          <button type="button" className="link small card-more" onClick={(e) => { e.preventDefault(); go('standings'); }}>전체</button>
-        </summary>
+          <button type="button" className="link small card-more" onClick={() => go('standings')}>전체</button>
+          <button type="button" className="ghost small-btn fold-btn" aria-expanded={!folded} onClick={() => setFolded(!folded)}>{folded ? '펼치기' : '접기'}</button>
+        </div>
+        <div className="fold-body">
         <table className="mini">
           <thead><tr><th className="l">순위</th><th className="l">팀</th><th>승</th><th>패</th><th>차</th></tr></thead>
           <tbody>
@@ -409,7 +410,7 @@ function StandingsCard() {
           const r = session.season.teams[me];
           return r.g ? <p className="small muted">최근 10경기 {f.w}-{f.l}{f.t ? `-${f.t}` : ''}{f.streak ? ` · ${f.streak}` : ''} · 득점 {r.rs} / 실점 {r.ra}</p> : null;
         })()}
-      </details>
+        </div>
     </section>
   );
 }
