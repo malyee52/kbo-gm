@@ -2,6 +2,7 @@
 // 새 사건을 만들지 않는다. 이미 게임에 있는 처리 대상(이벤트, 오프시즌 단계, 시즌 마무리, 판타지 선택 등)만 모아 보여 준다.
 // 기한은 게임에 실제로 있는 단계 조건만 쓰고 날짜를 지어내지 않는다 (when).
 import type { GameSession } from '../game/session';
+import { LINEUP_SLOTS, MIN_PLAN_ROTATION } from '../engine';
 import * as Off from '../league/offseason';
 import { ruleOf } from '../league/rules';
 import { pendingChoices } from '../fantasy/types';
@@ -12,7 +13,7 @@ import type { Screen } from './context';
 import type { Group } from './menu';
 
 /** 결정 종류: 홈 카드의 묶음 이름 */
-export type DecisionKind = '사건' | '계약' | '지명' | '선수단' | '시즌' | '구단주' | '면담' | '대화';
+export type DecisionKind = '사건' | '계약' | '지명' | '선수단' | '엔트리' | '시즌' | '구단주' | '면담' | '대화';
 
 export interface Decision {
   key: string;
@@ -51,6 +52,9 @@ export function decisions(s: GameSession): Decision[] {
       why: '해고된 뒤 다른 구단의 제의가 와 있습니다. 하나를 골라야 다음 시즌을 맡습니다.', go: 'club', blocking: true,
     });
   }
+
+  // 엔트리: 직접 관리하는 1군·기용표에 이미 생긴 빈 곳만 (기한 없음)
+  if (s.phase === 'season' && s.canManage && s.manualEntry) out.push(...entryDecisions(s));
 
   if (s.phase === 'season' && s.done) {
     if (s.postseasonRunning) {
@@ -130,6 +134,52 @@ export function decisions(s: GameSession): Decision[] {
   }
 
   return out.sort((a, b) => Number(!!b.blocking) - Number(!!a.blocking));
+}
+
+/**
+ * 결정함 '엔트리' 기준 (2026-10-22 UI 대개편 2차): 지금 이미 있는 상태만 센다.
+ * 1군 정원 초과·미달, 1군 결장 선수, (기용표를 직접 정했을 때) 결장·말소로 빈 주전 자리, 마무리·선발 역할 칸 빈 곳.
+ * AI 감독 기용이면 자리·역할은 AI가 채우므로 세지 않는다
+ */
+export function entryDecisions(s: GameSession): Decision[] {
+  const out: Decision[] = [];
+  const reg = s.registered();
+  const regIdx = new Set(reg.map((p) => p.idx));
+  const size = s.world.rules.rosterSize;
+  const base = { kind: '엔트리' as const, group: '전력' as const, go: 'lineup' as const };
+  if (reg.length > size) {
+    out.push({ ...base, key: 'entry-size', title: `1군 정원 초과 ${reg.length - size}명`, why: `1군은 ${size}명까지입니다 (지금 ${reg.length}명).` });
+  } else if (reg.length < size) {
+    out.push({ ...base, key: 'entry-size', title: `1군 빈자리 ${size - reg.length}명`, why: `1군 ${size}명 중 ${reg.length}명만 등록돼 있습니다.` });
+  }
+  const absent = reg.filter((p) => s.isAbsent(p));
+  if (absent.length) {
+    out.push({
+      ...base, key: 'entry-absent', title: `1군 결장 ${absent.length}명`,
+      why: `${absent.map((p) => p.name).join(', ')}이(가) 결장 중인데 1군 자리를 차지하고 있습니다. 모자라면 경기 때 2군에서 임시로 올립니다.`,
+    });
+  }
+  const plan = s.plan;
+  if (plan) {
+    const P = s.world.players;
+    const out1 = (i: number) => !regIdx.has(i) || s.isAbsent(P[i]);
+    const empty = LINEUP_SLOTS.filter((sl) => plan.starters[sl] !== undefined && out1(plan.starters[sl]!));
+    if (empty.length) {
+      out.push({
+        ...base, key: 'entry-starter', title: `빈 주전 자리 ${empty.join('·')}`,
+        why: `${empty.map((sl) => `${sl} ${P[plan.starters[sl]!].name}(${regIdx.has(plan.starters[sl]!) ? '결장' : '1군에 없음'})`).join(', ')}. 그동안은 AI 감독이 대기 선수로 채웁니다.`,
+      });
+    }
+    const roles: string[] = [];
+    if (plan.closer === null) roles.push('마무리 없음');
+    else if (out1(plan.closer)) roles.push(`마무리 ${P[plan.closer].name} ${regIdx.has(plan.closer) ? '결장' : '1군에 없음'}`);
+    const rot = plan.rotation.filter((i) => !out1(i)).length;
+    if (rot < MIN_PLAN_ROTATION) roles.push(`선발 ${rot}명`);
+    if (roles.length) {
+      out.push({ ...base, key: 'entry-role', title: `투수 역할 빈 칸: ${roles.join(', ')}`, why: '빈 역할은 AI 감독이 대신 정합니다. 직접 정하려면 기용 보드에서 고릅니다.' });
+    }
+  }
+  return out;
 }
 
 /** 종류별 묶음 (홈 카드) */

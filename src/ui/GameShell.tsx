@@ -14,6 +14,7 @@ import { ClubNews } from './screens/ClubNews';
 import { Leaders } from './screens/Leaders';
 import { PlayerDetail } from './screens/PlayerDetail';
 import { Roster } from './screens/Roster';
+import { LineupBoard } from './screens/LineupBoard';
 import { SaveScreen } from './screens/SaveScreen';
 import { Schedule } from './screens/Schedule';
 import { SeasonEnd } from './screens/SeasonEnd';
@@ -115,6 +116,17 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (group && group !== '공통') lastInGroup.current[group] = s;
     window.scrollTo({ top: 0 });
   }, []);
+
+  // 휴대폰 '전체' 판이 열려 있는 동안 뒤 본문은 스크롤하지 않는다 (닫으면 보던 자리 그대로). Esc로 닫는다
+  useEffect(() => {
+    if (!allOpen) return;
+    const root = document.documentElement;
+    const prev = root.style.overflow;
+    root.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAllOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => { root.style.overflow = prev; window.removeEventListener('keydown', onKey); };
+  }, [allOpen]);
 
   const autosave = useCallback(async () => {
     dirty.current = 0;
@@ -536,7 +548,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'inbox' && <Inbox />}
                 {screen === 'news' && <ClubNews />}
                 {screen === 'roster' && <Roster />}
-                {screen === 'lineup' && <Roster board />}
+                {screen === 'lineup' && <LineupBoard />}
                 {screen === 'enlist' && <EnlistPanel />}
                 {screen === 'schedule' && <Schedule focusGame={screenArg} />}
                 {screen === 'standings' && <Standings />}
@@ -591,8 +603,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           {progressOpen && <div className="dock-pop">{progressMenu}</div>}
         </div>
 
+        {allOpen && <div className="all-scrim" aria-hidden onClick={() => setAllOpen(false)} />}
         {allOpen && (
-          <div className="all-sheet" role="dialog" aria-label="전체 메뉴">
+          <div className="all-sheet" role="dialog" aria-modal="true" aria-label="전체 메뉴">
+            <div className="sheet-head">
+              <i className="sheet-grip" aria-hidden />
+              <button type="button" className="ghost small-btn" onClick={() => setAllOpen(false)}>닫기</button>
+            </div>
             <div className="all-grid">
               {GROUPS.map((g) => (
                 <section key={g}>

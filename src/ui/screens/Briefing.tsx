@@ -4,7 +4,7 @@
 // '요약 / 상세'(shell.tsx)에 따라 같은 카드에서 보여 주는 양만 바뀐다.
 import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
-import { formatDate, shortDate } from '../../game/calendar';
+import { formatDate, gameTime, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, ipText, rate3, recentForm } from '../../game/stats';
 import { isRivalry } from '../../league/rivals';
 import { stadiumName } from '../../league/naming';
@@ -16,7 +16,7 @@ import { ScenarioBanner } from '../ScenarioBanner';
 import { FantasyFree } from './FantasyFree';
 import { chipVars, PlayerLink, Pos, TeamName, useGame } from '../context';
 import { byKind, type Decision } from '../decisions';
-import { DensityToggle, useShell } from '../shell';
+import { DensityToggle, useCurrentStep, useShell } from '../shell';
 import { useRankMoves } from '../Motion';
 
 export function Briefing() {
@@ -132,7 +132,7 @@ function MatchCard() {
     <section className="card match" aria-label="다음 경기">
       <div className="card-top">
         <h2>다음 경기</h2>
-        <span className="small muted">정규시즌 · {formatDate(session.world.year, next.day)}{gap > 0 ? ` (${gap}일 뒤)` : ' (오늘)'} · {park ?? `${session.teamInfo(next.home).name} 홈`}{isRivalry(session.league, me, opp) && <span className="tag rival">라이벌전</span>}</span>
+        <span className="small muted">정규시즌 · {formatDate(session.world.year, next.day)} {gameTime(session.world.year, next.day)}{gap > 0 ? ` (${gap}일 뒤)` : ' (오늘)'} · {park ?? `${session.teamInfo(next.home).name} 홈`}{isRivalry(session.league, me, opp) && <span className="tag rival">라이벌전</span>}</span>
       </div>
       <div className="match-vs">
         {side(home ? opp : me)}
@@ -230,10 +230,11 @@ function OffseasonCard() {
   const off = session.offseason!;
   const at = STAGES.indexOf(off.stage);
   const tasks = decisions.filter((d) => d.go === 'offseason' && !d.key.startsWith('stage:'));
+  const steps = useCurrentStep<HTMLOListElement>(off.stage);
   return (
     <section className="card match" aria-label="오프시즌">
       <div className="card-top"><h2>오프시즌</h2><span className="small muted">{off.year} 시즌 뒤 · {off.year + 1} 시즌 준비</span></div>
-      <ol className="steps" aria-label="오프시즌 단계">
+      <ol className="steps" aria-label="오프시즌 단계" ref={steps}>
         {STAGES.map((s, i) => <li key={s} className={i < at ? 'done' : i === at ? 'now' : ''} aria-current={i === at ? 'step' : undefined}>{STAGE_LABEL[s]}</li>)}
       </ol>
       {tasks.length ? (
@@ -252,6 +253,10 @@ function OffseasonCard() {
 }
 
 // ---- 3. 전력 변화
+
+/** 전력 변화 상승·하락 기준 (최근 10경기 대 시즌). 임시값: 2026-10-22 사용자 결정으로 출루 ±0.050, 평균자책 ±1.00 */
+const FORM_OBP = 0.05;
+const FORM_ERA = 1.0;
 
 interface FormRow { p: SimPlayer; why: '결장' | '상승' | '하락' | '주목'; spark: number[]; base: number; line: string; note?: string; score: number }
 
@@ -277,7 +282,7 @@ function formRows(session: ReturnType<typeof useGame>['session']): FormRow[] {
       if (apps < 2 || outs < 15) continue;
       const now = (er * 27) / outs;
       const d = base - now; // 양수면 좋아짐
-      rows.push({ p, why: d >= 1.5 ? '상승' : d <= -1.5 ? '하락' : '주목', spark, base, line: `${apps}경기 ${ipText(outs)}이닝 · 평균자책 ${fixed2(now)}`, note: `시즌 ${fixed2(base)}`, score: Math.abs(d) >= 1.5 ? 10 + Math.abs(d) : outs / 30 });
+      rows.push({ p, why: d >= FORM_ERA ? '상승' : d <= -FORM_ERA ? '하락' : '주목', spark, base, line: `${apps}경기 ${ipText(outs)}이닝 · 평균자책 ${fixed2(now)}`, note: `시즌 ${fixed2(base)}`, score: Math.abs(d) >= FORM_ERA ? 10 + Math.abs(d) : outs / 30 });
     } else {
       let ab = 0, h = 0, bb = 0, hr = 0, rbi = 0, gp = 0;
       const spark: number[] = [];
@@ -292,7 +297,7 @@ function formRows(session: ReturnType<typeof useGame>['session']): FormRow[] {
       if (ab + bb < 15) continue;
       const now = (h + bb) / (ab + bb);
       const d = now - base;
-      rows.push({ p, why: d >= 0.08 ? '상승' : d <= -0.08 ? '하락' : '주목', spark, base, line: `타율 ${rate3(ab ? h / ab : 0)} · 홈런 ${hr} · 타점 ${rbi}`, note: `시즌 출루 ${rate3(base)}`, score: Math.abs(d) >= 0.08 ? 10 + Math.abs(d) * 20 : now });
+      rows.push({ p, why: d >= FORM_OBP ? '상승' : d <= -FORM_OBP ? '하락' : '주목', spark, base, line: `타율 ${rate3(ab ? h / ab : 0)} · 홈런 ${hr} · 타점 ${rbi}`, note: `시즌 출루 ${rate3(base)}`, score: Math.abs(d) >= FORM_OBP ? 10 + Math.abs(d) * 20 : now });
     }
   }
   return rows.sort((a, b) => b.score - a.score || a.p.idx - b.p.idx).slice(0, 3);
@@ -461,7 +466,7 @@ function WeekCard() {
           const t = opp >= 0 ? session.teamInfo(opp) : null;
           return (
             <li key={d} className={g ? '' : 'rest'}>
-              <span className="small muted num">{shortDate(session.year, d)}</span>
+              <span className="small muted num">{shortDate(session.year, d)}{g ? ` ${gameTime(session.year, d)}` : ''}</span>
               {t ? <span className="week-opp"><i className="chip" style={chipVars(t.franchise, t.name)} aria-hidden />{g!.home === me ? 'vs' : '@'} {t.name}</span> : <span className="muted small">휴식</span>}
             </li>
           );

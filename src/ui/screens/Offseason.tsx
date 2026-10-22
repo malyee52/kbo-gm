@@ -3,6 +3,7 @@ import { isStarterSkill } from '../../engine';
 import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
+import { useCurrentStep } from '../shell';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
@@ -36,6 +37,7 @@ export function Offseason() {
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const steps = useCurrentStep<HTMLOListElement>(off?.stage);
 
   if (!off) {
     return (
@@ -93,7 +95,7 @@ export function Offseason() {
         )}
       </section>
 
-      <ol className="steps" aria-label="오프시즌 단계">
+      <ol className="steps" aria-label="오프시즌 단계" ref={steps}>
         {STAGES.map((s, i) => (
           <li key={s} className={i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''} aria-current={i === stageIdx ? 'step' : undefined}>
             {STAGE_LABEL[s]}

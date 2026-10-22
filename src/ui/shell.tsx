@@ -1,6 +1,6 @@
 // 화면 틀이 본문 화면에 내려 주는 것 (2026-10-22 UI 대개편 1차): 진행 버튼 동작, 정보 깊이(요약/상세), 결정함.
 // context.tsx(GameUi)는 게임 상태, 여기는 틀의 조작이다.
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { Decision } from './decisions';
 
 /** 정보 깊이: 난이도와 별개인 표시 옵션. 이 브라우저에 기억한다 */
@@ -54,4 +54,21 @@ export function DensityToggle() {
       <button type="button" aria-pressed={density === 'full'} className={density === 'full' ? 'on' : ''} onClick={() => setDensity('full')}>상세</button>
     </div>
   );
+}
+
+/**
+ * 가로로 넘치는 단계 표시(.steps, 휴대폰)를 지금 단계(aria-current="step")가 가운데 오게 옆으로 민다 (2026-10-22 UI 대개편 2차).
+ * 쪽 전체를 세로로 움직이지 않게 scrollIntoView 대신 목록의 scrollLeft만 바꾼다
+ */
+export function useCurrentStep<T extends HTMLElement>(key: unknown) {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => {
+    const ol = ref.current;
+    const li = ol?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!ol || !li || ol.scrollWidth <= ol.clientWidth) return;
+    const a = ol.getBoundingClientRect();
+    const b = li.getBoundingClientRect();
+    ol.scrollLeft += b.left - a.left - (a.width - b.width) / 2;
+  }, [key]);
+  return ref;
 }

@@ -232,7 +232,7 @@ button.go { min-height: 40px; padding: 8px 18px; border-radius: 10px; font-size:
 .screen-tabs { margin-bottom: 14px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .main { min-width: 0; display: flex; flex-direction: column; flex: 1; }
-.dock, .all-sheet { display: none; }
+.dock, .all-sheet, .all-scrim { display: none; }
 .blocked-panel { border-left: 4px solid var(--line-strong); }
 .cast-cover { padding: 48px 16px; text-align: center; }
 /* 휴대폰 아래 탭 아이콘 (그림 파일 없이 선으로) */
@@ -798,7 +798,16 @@ td .inline { flex-wrap: nowrap; }
   .dock-tabs .nav-group.on, .dock-tabs .nav-group.on:hover:not(:disabled) { color: var(--team); box-shadow: inset 0 3px 0 var(--team); background: transparent; }
   .dock-tabs .badge { position: absolute; top: 4px; left: calc(50% + 6px); margin: 0; min-width: 18px; height: 18px; font-size: 10.5px; }
   .dock-pop .progress-pop { position: fixed; left: 12px; right: 12px; top: auto; bottom: calc(126px + env(safe-area-inset-bottom)); width: auto; max-height: calc(70vh / var(--z)); overflow-y: auto; }
-  .all-sheet { display: block; position: fixed; inset: 0 0 calc(116px + env(safe-area-inset-bottom)) 0; z-index: 4; overflow-y: auto; padding: 16px; background: var(--bg); }
+  /* '전체' 메뉴판: 아래 고정 영역 위로 반쯤 올라오는 판 (2026-10-22 사용자 결정). 뒤는 막으로 덮고, 막을 누르면 닫힌다 */
+  .all-scrim { display: block; position: fixed; inset: 0; z-index: 4; background: var(--scrim); }
+  .all-sheet {
+    display: block; position: fixed; left: 0; right: 0; bottom: calc(116px + env(safe-area-inset-bottom)); z-index: 4;
+    max-height: min(62vh, calc(100vh - 180px)); overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 16px;
+    background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: var(--shadow-lg); animation: sheet-up 0.18s ease-out;
+  }
+  .sheet-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: center; min-height: 48px; margin-bottom: 4px; background: var(--panel); }
+  .sheet-head .small-btn { position: absolute; right: 0; min-height: 36px; }
+  .sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line-strong); }
   .all-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
   .all-grid section { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .all-grid h2 { margin: 0 0 2px; font-size: 15px; }
@@ -904,8 +913,74 @@ td .inline { flex-wrap: nowrap; }
   /* 휴대폰은 아래 고정 진행 버튼이 있어 카드 안 '다음 경기'를 겹쳐 두지 않는다 */
   .match-actions .go { display: none; }
 }
-/* 다크 모드: 구단 주색이 어두우면(두산 남색 등) 바탕에 묻히므로 띠는 밝힌 구단색으로 */
+/* 다크 모드: 구단 주색이 어두우면(두산 남색 등) 바탕에 묻히므로 띠는 밝힌 구단색으로. 밝힌 색이 거의 흰색인 구단(두산·KT)은
+   주색·보조색 반반 + 옅은 테두리 (teams.ts darkBand) */
 @media (prefers-color-scheme: dark) {
-  .sb-band { background: var(--team); }
-  .match-band { background: var(--cd, var(--c, var(--team))); }
+  .sb-band { background: var(--team-band-dark, var(--team)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 28%, transparent); }
+  .match-band { background: var(--cbd, var(--cd, var(--c, var(--team-band-dark, var(--team))))); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 28%, transparent); }
+}
+
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .all-sheet { animation: none; } }
+
+/* ---- 기용 보드 (2026-10-22 UI 대개편 2차, LineupBoard.tsx) */
+.board-split { display: grid; grid-template-columns: minmax(0, 1fr) 490px; gap: 16px; align-items: start; }
+.board-side { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; }
+.board-jump { margin-left: 12px; align-self: center; font-size: 13px; font-weight: 700; color: var(--accent); }
+.field-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.slot-LF { grid-area: 1 / 1 / 2 / 3; } .slot-CF { grid-area: 1 / 3 / 2 / 5; } .slot-RF { grid-area: 1 / 5 / 2 / 7; }
+.slot-SS { grid-area: 2 / 2 / 3 / 4; } .slot-2B { grid-area: 2 / 4 / 3 / 6; }
+.slot-3B { grid-area: 3 / 1 / 4 / 3; } .slot-1B { grid-area: 3 / 5 / 4 / 7; }
+.slot-C { grid-area: 4 / 3 / 5 / 5; } .slot-DH { grid-area: 4 / 5 / 5 / 7; }
+.slot-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 64px; padding: 8px 10px; text-align: left;
+  background: var(--panel-2); color: var(--fg); border: 1px solid var(--line-strong); border-radius: 10px; font-weight: 400; box-shadow: none; min-width: 0;
+}
+.slot-card strong { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.slot-card:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.slot-card.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.slot-card.changed { border-style: dashed; border-color: var(--accent); }
+.slot-card.changed::after { content: '변경'; font-size: 10.5px; font-weight: 700; color: var(--accent); }
+.slot-card.add { border-style: dashed; color: var(--muted); align-items: center; justify-content: center; }
+.slot-pos { font-family: var(--font-num); font-size: 12px; font-weight: 700; color: var(--team); letter-spacing: 0.04em; }
+.slot-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 12px; color: var(--muted); }
+.role-block + .role-block { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.role-block h3 { font-size: 13px; margin: 0 0 8px; }
+.role-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.slot-card.pitch { min-height: 52px; }
+.pen-group { margin-top: 8px; }
+.pen-label { display: block; font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
+ul.plain.bench { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+ul.plain.bench li { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; min-height: 44px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); cursor: grab; }
+.bat-order { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2px 16px; }
+.bat-order li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.bat-order .order-no { width: 1.6em; font-family: var(--font-num); font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.bat-order .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bat-order button.small-btn { min-width: 36px; min-height: 36px; }
+.candidates { display: flex; flex-direction: column; gap: 6px; scroll-margin-top: 72px; }
+.candidates .card-top { margin-bottom: 0; }
+.cand-table { font-size: 12.5px; }
+.cand-table td, .cand-table th { padding: 5px 4px; font-variant-numeric: tabular-nums; }
+.cand-table .group-row th { background: var(--panel-2); color: var(--muted); font-size: 11.5px; }
+.cand-table tr.rec td { background: var(--accent-soft); }
+.tag.rec-tag { color: var(--accent); border-color: var(--accent); }
+.cand-table button.pick-btn { min-height: 32px; }
+.cand-recent { display: block; font-size: 11px; }
+.review-list li { font-size: 13px; }
+.review-list .tag { margin: 0 6px 0 0; }
+.entry-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.entry-cols h3 { font-size: 13px; margin: 0 0 6px; }
+.entry-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.entry-list li.changed { background: var(--accent-soft); border-radius: 6px; }
+.entry-list .entry-name { min-width: 0; }
+.entry-list button.small-btn { flex: none; min-height: 36px; }
+@media (max-width: 1100px) {
+  .board-split { grid-template-columns: minmax(0, 1fr); }
+  .board-side { position: static; max-height: none; overflow: visible; }
+}
+@media (max-width: 768px) {
+  .entry-cols { grid-template-columns: minmax(0, 1fr); }
+  .slot-card { min-height: 60px; padding: 6px 8px; }
+  .slot-card strong { font-size: 13.5px; }
+  .role-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
