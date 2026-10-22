@@ -10,16 +10,14 @@ import { asSim, shiftForRuns, type CareerIndex } from './growth';
 import type { MilitaryRecord } from '../data/types';
 import type { LeaguePlayer, LeagueState, Military } from './types';
 
-/** 복무 기간: 시즌이 끝나고 입대해 다음 시즌 전체를 빠지고, 그다음 시즌 이만큼(일정 일수) 뒤에 돌아온다 (상무 18개월 가정, 임시값) */
+/** 복귀 시즌의 개막 뒤 복귀 일수를 모르는 복무(시작 자료의 복무, 2026-10-21 전 저장): 상무 18개월로 본다 (임시값). 새 입대는 serviceEnd로 정한다 */
 export const MILITARY_RETURN_DAY = 75;
-/** 복귀 후 감각 저하 (런, 임시값). 잠재력은 그대로라 성장 판정에서 다시 회복한다 */
+/** 현역·보충역 전역 후 감각 저하 (런, 임시값). 잠재력은 그대로라 성장 판정에서 다시 회복한다 */
 export const MILITARY_RUST = 3;
 /** 이 나이(다음 시즌 기준)가 되면 반드시 입대한다 (임시값) */
 export const MILITARY_LAST_AGE = 28;
 /** 입대 대상이 되는 최소 나이 (다음 시즌 기준, 임시값) */
 export const MILITARY_MIN_AGE = 21;
-/** 한 구단이 한 해에 보내는 입대 인원 상한 (임시값). 강제 입대 나이가 된 선수는 상한과 상관없이 간다 */
-export const MILITARY_TEAM_CAP = 4;
 /** 주전급(다음 시즌 기여 이 런 이상)은 이 나이 전에는 AI 구단이 스스로 보내지 않는다 (임시값, 상무 지원 시기와 비슷하게) */
 const MILITARY_STARTER_RUNS = 10;
 const MILITARY_STARTER_AGE = 27;
@@ -231,6 +229,106 @@ export function retirements(c: CareerContext): CareerNews[] {
   return out;
 }
 
+// ---- 입대: 군 야구단(상무·경찰) 정원 + 나머지는 현역·보충역 (2026-10-21 사용자: "현실과 똑같이, 그 시대에 실제로 했던 방식")
+// 근거: 조사 결과(상무·경찰 선발 인원, 육군 현역·보충역 복무 기간, 방위병 홈경기 출전). 연도는 모두 입대한 해(시즌이 끝난 다음 해) 기준이다.
+// 확인값이 아닌 것은 "임시값"으로 적었다. 목록은 docs/milestones.md M6 "입대".
+
+/** 복무 형태. unit = 군 야구단(상무·경찰, 퓨처스리그에서 뛴다), active = 현역, reserve = 보충역(방위병·공익·사회복무) */
+export type ServiceKind = 'unit' | 'active' | 'reserve';
+
+/** 그해 입대(entry = 시즌이 끝난 다음 해) 군 야구단 정원: 상무 + 경찰. 상무는 1998년 말(1999 입대)부터 프로 선수를 받았고 경찰은 2006~2018 입대 */
+export function unitQuota(entry: number): { sangmu: number; police: number } {
+  if (entry <= 1998) return { sangmu: 0, police: 0 };
+  if (entry === 1999) return { sangmu: 5, police: 0 };
+  // 2000 입대: 2001년 2군 정식 참가 전 과도기 (실제 인원 미확인, 임시값)
+  if (entry === 2000) return { sangmu: 8, police: 0 };
+  if (entry <= 2005) return { sangmu: 18, police: 0 };
+  // 상무 16~18 + 경찰 18 (경찰 2005~2007은 격년 25명이라 해마다로 고르게 폈다)
+  if (entry <= 2018) return { sangmu: 16, police: 18 };
+  return { sangmu: 14, police: 0 };
+}
+
+/** 육군 현역 복무 기간 (개월, 입대한 해). 2019년은 21 → 18개월 단축기의 가운데 값 */
+export function activeMonths(entry: number): number {
+  if (entry <= 1983) return 33;
+  if (entry <= 1992) return 30;
+  if (entry <= 2002) return 26;
+  if (entry <= 2010) return 24;
+  if (entry <= 2018) return 21;
+  if (entry === 2019) return 20;
+  return 18;
+}
+
+/** 보충역 복무 기간 (개월): 방위병 18(1994 입대까지), 공익근무 28·26·24, 사회복무 21 */
+export function reserveMonths(entry: number): number {
+  if (entry <= 1994) return 18;
+  if (entry <= 2002) return 28;
+  if (entry <= 2005) return 26;
+  if (entry <= 2018) return 24;
+  return 21;
+}
+
+/** 방위병(1994 입대까지): 리그에 남아 출퇴근 복무를 하며 홈경기에만 나왔다. 1995년 4월 국방부가 출전을 금지했다 */
+export const HOME_ONLY_LAST_ENTRY = 1994;
+export const HOME_ONLY_BANNED_FROM = 1995;
+/** 보충역 판정 비율 (임시값, 실제 통계 없음): 방위병 시대에는 많았고 공익·사회복무는 신체등급 4급 등 일부 */
+export function reserveShare(entry: number): number {
+  return entry <= HOME_ONLY_LAST_ENTRY ? 0.3 : 0.1;
+}
+/** 상무·경찰 지원 나이 상한 (다음 시즌 나이, 접수 마감 만 27세 이하) */
+export const UNIT_MAX_AGE = 27;
+/** 한 구단의 군 야구단 합격 상한: 정원을 구단 수로 나눈 값의 1.5배 (임시값. 명문 규정은 없고 구단 안배로 1~3명, 많으면 4~5명) */
+export const UNIT_TEAM_SHARE = 1.5;
+/** 군 야구단 선발 점수의 체력·면접 몫 (런, ±, 임시값) */
+const UNIT_SCORE_NOISE = 2;
+/** 복무 중 해마다의 감각 저하 (런, 임시값): 현역은 경기도 훈련도 못 하고, 공익·사회복무는 퇴근 뒤 개인 훈련만 한다 */
+export const SERVICE_DECAY: Record<ServiceKind, number> = { unit: 0, active: 1.5, reserve: 0.5 };
+/** 전역 때 감각 저하 (런, 임시값). 군 야구단은 퓨처스에서 뛰어 없다. 잠재력은 그대로라 성장 판정에서 다시 회복한다 */
+export const SERVICE_RUST: Record<ServiceKind, number> = { unit: 0, active: MILITARY_RUST, reserve: MILITARY_RUST };
+/** 입대는 시즌이 끝난 뒤 12월 1일로 본다. 개막은 3월 하순(1월 1일부터 2.75달), 한 달 30.5일, 9월부터는 시즌이 끝난 것으로 본다 (임시값) */
+const OPEN_MONTH = 2.75;
+const SEASON_OVER_MONTH = 9;
+
+/** 시즌(enlisted)이 끝나고 입대해 months개월 복무하면 돌아오는 시즌과 그 시즌 개막 뒤 일수 (개막 전 전역이면 0) */
+export function serviceEnd(enlisted: number, months: number): { year: number; day: number } {
+  const m = months - 1;
+  const year = enlisted + 1 + Math.floor(m / 12);
+  const mo = m % 12;
+  if (mo >= SEASON_OVER_MONTH) return { year: year + 1, day: 0 };
+  return { year, day: Math.max(0, Math.round((mo - OPEN_MONTH) * 30.5)) };
+}
+
+/** 그해 입대의 복무 형태별 기간·전역 시점 (화면 설명용) */
+export function serviceTerms(enlisted: number): Record<ServiceKind, { months: number; end: { year: number; day: number } }> & { homeOnly: boolean; quota: { sangmu: number; police: number } } {
+  const entry = enlisted + 1;
+  const a = activeMonths(entry);
+  const r = reserveMonths(entry);
+  return {
+    unit: { months: a, end: serviceEnd(enlisted, a) },
+    active: { months: a, end: serviceEnd(enlisted, a) },
+    reserve: { months: r, end: serviceEnd(enlisted, r) },
+    homeOnly: entry <= HOME_ONLY_LAST_ENTRY,
+    quota: unitQuota(entry),
+  };
+}
+
+/** 선수 한 명의 보충역 판정 (신체검사): 선수마다 정해진 값과 그해 비율로. 난수는 선수 ID에서만 갈라 쓴다 */
+export function isReserveGrade(seed: string, id: string, entry: number): boolean {
+  return new Rng(`${seed}/military-grade/${id}`).next() < reserveShare(entry);
+}
+
+/** 복무 형태 이름 (알림·화면). 실존 선수에게도 형태와 기간만 쓴다 */
+export function serviceName(m: Military | undefined): string {
+  if (!m) return '';
+  if (m.state === 'homeOnly') return '방위병';
+  if (m.kind === 'active') return '현역';
+  if (m.kind === 'reserve') {
+    const entry = (m.enlisted ?? 9999) + 1;
+    return entry <= HOME_ONLY_LAST_ENTRY ? '방위병' : entry <= 2013 ? '공익근무' : '사회복무';
+  }
+  return m.note === '경찰' ? '경찰 야구단' : '상무';
+}
+
 /** 입대 후보 한 명 (다음 시즌 기준) */
 export interface EnlistCandidate {
   id: string;
@@ -244,14 +342,21 @@ export interface EnlistCandidate {
   forced: boolean;
   /** AI 규칙으로 올해 입대할 확률 */
   chance: number;
+  /** 보충역 판정 (군 야구단에 지원할 수 없다. 방위병 시대에는 홈경기만 뛴다) */
+  reserve: boolean;
+  /** 올해 군 야구단(상무·경찰)에 지원할 수 있다: 정원이 있고 UNIT_MAX_AGE 이하, 보충역이 아님 */
+  canApply: boolean;
 }
 
 /**
  * 한 구단의 입대 후보: 미필 국내 선수 중 다음 시즌 나이가 MILITARY_MIN_AGE 이상. 강제 입대 나이가 먼저, 그다음 나이 많은 순.
- * AI 확률 (임시값): 0.06 + 기여 3런 미만이면 0.15 + 24세부터 한 살에 0.05, 27세(강제 한 해 전)는 1. 다년 계약 중이거나 주전급(27세 전)이면 0.
+ * AI 확률 (임시값): 0.06 + 기여 3런 미만이면 0.15 + 24세부터 한 살에 0.05, 27세(강제 한 해 전, 군 야구단 지원 마지막 해)는 1.
+ * 다년 계약 중이거나 주전급(27세 전)이면 0.
  */
 export function enlistCandidates(league: LeagueState, team: number, year: number, runsOf: (p: LeaguePlayer) => number): EnlistCandidate[] {
   const out: EnlistCandidate[] = [];
+  const quota = unitQuota(year + 1);
+  const open = quota.sangmu + quota.police > 0;
   for (const p of league.players) {
     if (p.team !== team || p.foreign || p.military?.state !== 'pending') continue;
     // 리그 밖에서 데려온 선수(자유 모드)는 입대하지 않는다 (2026-10-13 사용자 보고: 38세 선동열·외국인 멜빈 번치 입대)
@@ -262,64 +367,142 @@ export function enlistCandidates(league: LeagueState, team: number, year: number
     if (age > MILITARY_LAST_AGE + 3) continue;
     const runs = runsOf(p);
     const forced = age >= MILITARY_LAST_AGE;
-    // 강제 입대 한 해 전(27세)이면 상한 안에서 먼저 보낸다: 한 해에 강제 입대가 몰려 상한을 넘지 않게
     let chance = forced || age === MILITARY_LAST_AGE - 1 ? 1 : 0.06 + (runs < 3 ? 0.15 : 0) + 0.05 * Math.max(0, age - 23);
     if (!forced && (p.contract.until > year + 1 || (runs >= MILITARY_STARTER_RUNS && age < MILITARY_STARTER_AGE))) chance = 0;
-    out.push({ id: p.id, name: p.name, team, age, runs, forced, chance });
+    const reserve = isReserveGrade(league.seed, p.id, year + 1);
+    out.push({ id: p.id, name: p.name, team, age, runs, forced, chance, reserve, canApply: open && !reserve && age <= UNIT_MAX_AGE });
   }
   return out.sort((a, b) => Number(b.forced) - Number(a.forced) || b.age - a.age || a.id.localeCompare(b.id));
 }
 
-/** AI 규칙의 입대 명단: 강제 입대 전원 + 확률로 뽑힌 선수 중 나이 많은 순(같으면 기여가 낮은 순)으로 구단 상한까지 */
+/**
+ * AI 구단이 한 해에 보내려는 입대 인원 (강제 입대 포함, 강제 입대만으로 넘으면 강제 입대만, 임시값). 규칙 상한이 아니라 AI 판단이다:
+ * 플레이어는 몇 명이든 보낼 수 있다. 근거: 경찰 해체 뒤 해마다 상무 14~15명 + 현역·사회복무 약 30~40명(언론 추산, 구단당 3~4명)이라 구단당 약 5명.
+ * 없으면 시작 자료로 미필이라 짐작한 선수가 많은 옛 시대 시작의 첫 오프시즌에 한 해 100명(1996, 8구단)까지 입대했다 (2026-10-21 측정)
+ */
+export const AI_ENLIST_TEAM = 5;
+
+/** AI 규칙의 입대 명단: 강제 입대 전원 + 확률로 뽑힌 선수 중 나이 많은 순(같으면 기여가 낮은 순)으로 AI_ENLIST_TEAM명까지 */
 export function aiEnlistPicks(league: LeagueState, year: number, cands: EnlistCandidate[]): string[] {
   const forced = cands.filter((c) => c.forced);
   const rolled = cands
     .filter((c) => !c.forced && c.chance > 0 && new Rng(`${league.seed}/military/${year}/${c.id}`).chance(c.chance))
     .sort((a, b) => b.age - a.age || a.runs - b.runs || a.id.localeCompare(b.id));
-  return [...forced, ...rolled.slice(0, Math.max(0, MILITARY_TEAM_CAP - forced.length))].map((c) => c.id);
+  return [...forced, ...rolled.slice(0, Math.max(0, AI_ENLIST_TEAM - forced.length))].map((c) => c.id);
 }
 
-/** 플레이어가 고른 입대 명단을 규칙에 맞춘다: 후보만, 강제 입대는 모두 포함, 그 밖에는 상한까지 (고른 순서대로) */
+/** 플레이어가 고른 입대 명단을 규칙에 맞춘다: 후보만, 강제 입대는 모두 포함 (고른 순서대로) */
 export function normalizeEnlist(cands: EnlistCandidate[], ids: string[]): string[] {
   const byId = new Map(cands.map((c) => [c.id, c]));
   const forced = cands.filter((c) => c.forced).map((c) => c.id);
-  const room = Math.max(0, MILITARY_TEAM_CAP - forced.length);
-  const chosen = [...new Set(ids)].filter((id) => byId.has(id) && !byId.get(id)!.forced).slice(0, room);
+  const chosen = [...new Set(ids)].filter((id) => byId.has(id) && !byId.get(id)!.forced);
   return [...forced, ...chosen];
 }
 
+/** 군 야구단 지원 명단을 규칙에 맞춘다: 입대 명단 안에서 지원할 수 있는 선수만. apply가 없으면(AI·예전 기록) 지원할 수 있는 선수 모두 */
+export function normalizeApply(cands: EnlistCandidate[], enlist: string[], apply?: string[] | null): string[] {
+  const byId = new Map(cands.map((c) => [c.id, c]));
+  const want = apply ? new Set(apply) : null;
+  return enlist.filter((id) => byId.get(id)?.canApply && (!want || want.has(id)));
+}
+
+/**
+ * 군 야구단 선발 (리그 전체): 지원자를 선발 점수 순으로 정원까지, 한 구단은 상한까지. 앞에서부터 상무, 그다음 경찰.
+ * 점수 (임시값) = 0.6 × 다음 시즌 기여 + 0.4 × 잠재력 + 체력·면접 ±UNIT_SCORE_NOISE
+ */
+export function selectUnit(league: LeagueState, year: number, applicants: LeaguePlayer[], runsOf: (p: LeaguePlayer) => number): Map<string, '상무' | '경찰'> {
+  const q = unitQuota(year + 1);
+  const teamCap = Math.max(1, Math.ceil((UNIT_TEAM_SHARE * (q.sangmu + q.police)) / Math.max(1, league.teams.length)));
+  const score = new Map(applicants.map((p) => [p.id,
+    0.6 * runsOf(p) + 0.4 * p.potential + (new Rng(`${league.seed}/unit/${year}/${p.id}`).next() * 2 - 1) * UNIT_SCORE_NOISE]));
+  const order = [...applicants].sort((a, b) => score.get(b.id)! - score.get(a.id)! || a.id.localeCompare(b.id));
+  const out = new Map<string, '상무' | '경찰'>();
+  const perTeam = new Map<number, number>();
+  for (const p of order) {
+    if (out.size >= q.sangmu + q.police) break;
+    const n = perTeam.get(p.team) ?? 0;
+    if (n >= teamCap) continue;
+    perTeam.set(p.team, n + 1);
+    out.set(p.id, out.size < q.sangmu ? '상무' : '경찰');
+  }
+  return out;
+}
+
+const returnText = (end: { year: number; day: number }) => (end.day > 0 ? `${end.year} 시즌 중 복귀 예정` : `${end.year} 시즌 개막 전 복귀 예정`);
+
 /**
  * 병역: 복무를 마치는 선수의 복귀 준비, 새 입대. 구단마다 enlistCandidates → AI 규칙(aiEnlistPicks).
- * user가 있으면 그 구단은 플레이어가 고른 명단(normalizeEnlist)을 쓴다.
+ * user가 있으면 그 구단은 플레이어가 고른 명단(normalizeEnlist)과 군 야구단 지원 명단(normalizeApply)을 쓴다.
+ * 입대하는 선수는 보충역이면 보충역(방위병 시대에는 리그에 남아 홈경기만), 군 야구단 지원자는 선발되면 상무·경찰, 나머지는 현역.
+ * rust(p, d): 전역하는 선수의 감각 저하 d런
  */
-export function militaryStep(c: CareerContext, rust: (p: LeaguePlayer) => void, user?: { team: number; ids: string[] }): CareerNews[] {
+export function militaryStep(c: CareerContext, rust: (p: LeaguePlayer, d: number) => void,
+                             user?: { team: number; ids: string[]; apply?: string[] }): CareerNews[] {
   const { league, year } = c;
   const out: CareerNews[] = [];
   for (const p of league.players) {
-    if (p.foreign || p.team < 0 || !isServing(p)) continue;
-    if ((p.military!.returnYear ?? 0) <= year + 1) {
+    if (p.foreign || p.team < 0) continue;
+    let m = p.military;
+    // 1995년부터 방위병은 경기에 못 나간다 (국방부 출전 금지): 남은 복무는 리그 밖에서
+    if (m?.state === 'homeOnly' && year + 1 >= HOME_ONLY_BANNED_FROM && (m.returnYear ?? 0) > year) {
+      m = p.military = { ...m, state: 'serving' };
+      p.contract = { ...p.contract, until: Math.max(p.contract.until, year + 1) };
+      out.push({ team: p.team, text: `${p.name}: 방위병 경기 출전 금지 (${year + 1}년부터): 전역까지 경기에 나오지 못합니다`, major: false });
+    }
+    // 방위병은 리그에 남아 있다가 전역하는 시즌이 끝나면 마친다
+    if (m?.state === 'homeOnly') {
+      if ((m.returnYear ?? 0) <= year) p.military = { state: 'done' };
+      continue;
+    }
+    if (!isServing(p)) continue;
+    if ((m!.returnYear ?? 0) <= year + 1) {
+      const day = m!.returnDay ?? MILITARY_RETURN_DAY;
       p.military = { state: 'done' };
-      p.startAbsent = Math.max(p.startAbsent ?? 0, MILITARY_RETURN_DAY);
-      p.startAbsentReason = 'military';
-      rust(p);
-      out.push({ team: p.team, text: `${p.name}: ${year + 1} 시즌 중 전역 예정 (개막 뒤 약 ${MILITARY_RETURN_DAY}일)`, major: false });
+      if (day > 0) {
+        p.startAbsent = Math.max(p.startAbsent ?? 0, day);
+        p.startAbsentReason = 'military';
+      }
+      rust(p, SERVICE_RUST[m!.kind ?? 'unit']);
+      out.push({ team: p.team, text: day > 0 ? `${p.name}: ${year + 1} 시즌 중 전역 예정 (개막 뒤 약 ${day}일)` : `${p.name}: 전역 (${year + 1} 시즌 개막부터 합류)`, major: false });
     }
   }
   const byId = new Map(league.players.map((p) => [p.id, p]));
+  const going: { p: LeaguePlayer; cand: EnlistCandidate; apply: boolean }[] = [];
   for (let t = 0; t < league.teams.length; t++) {
     const cands = enlistCandidates(league, t, year, c.nextRuns);
     if (!cands.length) continue;
-    const ids = user && user.team === t ? normalizeEnlist(cands, user.ids) : aiEnlistPicks(league, year, cands);
-    for (const id of ids) {
-      const p = byId.get(id)!;
-      const age = ageAt(p, year + 1)!;
-      p.military = { state: 'serving', enlisted: year, returnYear: year + 2 };
-      // 복무 중에는 계약이 끝나지 않게 (복귀 직전 오프시즌에 연봉 협상)
-      p.contract = { ...p.contract, until: Math.max(p.contract.until, year + 1) };
-      out.push({ team: t, text: `${p.name} 입대 (${age - 1}세, ${year + 2} 시즌 중 복귀 예정)`, major: false });
+    const mine = user && user.team === t;
+    const ids = mine ? normalizeEnlist(cands, user.ids) : aiEnlistPicks(league, year, cands);
+    const apply = new Set(normalizeApply(cands, ids, mine ? user.apply : null));
+    const byCand = new Map(cands.map((x) => [x.id, x]));
+    for (const id of ids) going.push({ p: byId.get(id)!, cand: byCand.get(id)!, apply: apply.has(id) });
+  }
+  const unit = selectUnit(league, year, going.filter((g) => g.apply).map((g) => g.p), c.nextRuns);
+  const terms = serviceTerms(year);
+  for (const { p, cand } of going) {
+    const age = cand.age;
+    const name = unit.get(p.id);
+    if (cand.reserve && terms.homeOnly) {
+      const end = terms.reserve.end;
+      p.military = { state: 'homeOnly', kind: 'reserve', enlisted: year, returnYear: end.year, returnDay: end.day };
+      out.push({ team: p.team, text: `${p.name} 입대 (방위병 ${terms.reserve.months}개월, ${age - 1}세 · 홈경기만 출전, ${end.year} 시즌 개막 뒤 약 ${end.day}일 전역)`, major: false });
+      continue;
     }
+    const kind: ServiceKind = cand.reserve ? 'reserve' : name ? 'unit' : 'active';
+    const t = terms[kind];
+    p.military = { state: 'serving', kind, enlisted: year, returnYear: t.end.year, returnDay: t.end.day, ...(name ? { note: name } : {}) };
+    // 복무 중에는 계약이 끝나지 않게 (복귀 직전 오프시즌에 연봉 협상)
+    p.contract = { ...p.contract, until: Math.max(p.contract.until, year + 1) };
+    out.push({ team: p.team, text: `${p.name} 입대 (${serviceName(p.military)} ${t.months}개월, ${age - 1}세 · ${returnText(t.end)})`, major: false });
   }
   return out;
+}
+
+/** 이번 시즌에 방위병이 홈경기에만 나올 수 있는 마지막 날 (개막 뒤 일수, 그날부터 원정도 나간다). 방위병이 아니면 null */
+export function homeOnlyUntil(p: LeaguePlayer, year: number): number | null {
+  const m = p.military;
+  if (m?.state !== 'homeOnly' || (m.returnYear ?? 0) < year) return null;
+  return m.returnYear! > year ? Number.MAX_SAFE_INTEGER : (m.returnDay ?? 0);
 }
 
 /** 복무 중인 선수의 SimPlayer (월드에 없으므로 가치 계산용으로 만든다) */

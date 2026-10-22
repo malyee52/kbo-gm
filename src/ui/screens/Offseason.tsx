@@ -398,7 +398,7 @@ function FaPanel({ act }: { act: Act }) {
         <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {ruleOf(session.league, 'maxFaSignings')}명</p>
         <p className="small">
           지금 자금 <strong>{won(session.cashNow())}</strong> · 계약금은 계약 총액(연봉 × 기간)의 30%를 계약할 때 한 번에 내고, 나머지는 시즌 중 월말에 나갑니다.
-          계약금을 낼 자금이 없으면 제시할 수 없습니다 (이번 라운드의 다른 제시 계약금까지 합쳐서).
+          계약금을 낼 자금이 모자라면 계약할 때 모기업이 모자란 몫을 지원합니다 (장부에 '모기업 지원 (FA 계약금)').
         </p>
         <CapLine />
         {mineLeaving.length > 0 && (
@@ -430,7 +430,7 @@ function FaPanel({ act }: { act: Act }) {
                     {e.status === 'signed' ? (
                       <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
                     ) : e.status === 'left' ? (
-                      <span className="muted">미계약 (리그 이탈)</span>
+                      <span className="muted">미계약 (무적: 2차 드래프트·육성선수 후보)</span>
                     ) : mine ? (
                       <span className="inline">제시함: {mine.years}년 연 {won(mine.salary)}
                         <button type="button" className="small-btn" onClick={() => act(session.withdrawFa(e.id), '제시를 거뒀습니다.')}>거두기</button>
@@ -882,7 +882,7 @@ function ReleasePanel({ act }: { act: Act }) {
       </div>
       {devPool.length > 0 && (
         <div className="panel">
-          <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수 {devPool.length}명</span></h3>
+          <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수·무적 FA {devPool.length}명</span></h3>
           <div className="scroll pick">
             <table>
               <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재(평가)</th><th /></tr></thead>

@@ -1,5 +1,6 @@
 // 선수단: 1군·2군 명단과 엔트리 이동. 라인업·로테이션은 AI 감독이 1군 안에서 정한다.
 // 2026-10-12 개편: 1군/2군을 탭으로 나눠 한 번에 한 표만, 줄을 누르면 오른쪽에 선수 요약(좁은 화면은 바로 상세 창).
+import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar } from './PlayerDetail';
 import { seasonWar } from '../../league/awards';
@@ -337,7 +338,7 @@ export function Roster() {
     }
     if (pg === 'ability') {
       return [
-        { h: '나이', v: (p) => p.age ?? '-' }, { h: '투', v: (p) => (p.throws ? HAND[p.throws] : '-') },
+        { h: '나이', v: (p) => p.age ?? '-' }, { h: '투', title: '투구손. 언 = 언더·사이드', v: (p) => (p.throws ? `${HAND[p.throws]}${p.underhand ? '언' : ''}` : '-') },
         { h: '구위', v: (p) => <Grade v={grades.pitchers.get(p.id)?.stuff} /> },
         { h: '제구', v: (p) => <Grade v={grades.pitchers.get(p.id)?.control} /> },
         { h: '장타 억제', v: (p) => <Grade v={grades.pitchers.get(p.id)?.hrSuppression} /> },
@@ -349,6 +350,7 @@ export function Roster() {
     if (pg === 'classic') {
       return [
         pit('경기', (x) => x.g), pit('선발', (x) => x.gs), pit('승', (x) => x.w), pit('패', (x) => x.l), pit('세이브', (x) => x.sv), pit('홀드', (x) => x.hld ?? 0),
+        pit('QS', (x) => x.qs ?? 0, '퀄리티 스타트: 선발로 6이닝 이상 던지고 3자책 이하'), pit('블론', (x) => x.bsv ?? 0, '블론 세이브: 1~3점 리드에 나와 동점·역전을 허용'),
         pit('이닝', (x) => ipText(x.outs)), pit('피안타', (x) => x.h), pit('피홈런', (x) => x.hr), pit('볼넷', (x) => x.bb),
         pit('탈삼진', (x) => x.so), pit('실점', (x) => x.r), pit('자책', (x) => x.er), pit('평균자책', (x) => fixed2(era(x))),
         pit('WHIP', (x) => fixed2(whip(x)), '이닝당 출루 허용: (피안타 + 볼넷) ÷ 이닝'), warCol,
@@ -418,7 +420,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
   return (
     <aside className="card roster-side" aria-label={`${p.name} 요약`}>
       <header className="side-head">
-        <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
+        <span className="small">{p.isPitcher ? `투수 · ${p.throws ? HAND[p.throws] : '-'}투${p.underhand ? ' (언더·사이드)' : ''}` : `${posName(p.pos)} · ${p.bats ? HAND[p.bats] : '-'}타`} · {p.age !== null ? `${p.age}세` : '나이 미상'} · {inFirst ? '1군' : '2군'}</span>
         <strong>{p.name}{p.foreign && <span className="tag">외국인</span>}</strong>
       </header>
       <div className="side-body">
@@ -458,7 +460,7 @@ function ServingList() {
   if (!list.length) return null;
   return (
     <p className="note small">
-      군 복무 중 {list.length}명 (정원 제외): {list.map((p) => `${p.name}(${p.isPitcher ? '투수' : posName(p.pos)}, ${p.military?.returnYear}년 시즌 중 복귀)`).join(', ')}
+      군 복무 중 {list.length}명 (정원 제외): {list.map((p) => `${p.name}(${p.isPitcher ? '투수' : posName(p.pos)}, ${serviceName(p.military)}, ${p.military?.returnYear}년 ${p.military?.returnDay === 0 ? '개막 전' : '시즌 중'} 복귀)`).join(', ')}
     </p>
   );
 }

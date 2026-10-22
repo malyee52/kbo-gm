@@ -7,7 +7,7 @@ import type { World } from './types';
 
 export { DECLINE_START_AGE, DEFAULT_PARAMS, isStarterSkill, STARTER_SHARE, type EngineParams } from './params';
 export { Rng } from './rng';
-export { buildWorld, batValue, pitValue, batSkillFrom, pitSkillFrom, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress } from './ratings';
+export { buildWorld, hardhitPositions, batValue, pitValue, batSkillFrom, pitSkillFrom, seasonPark, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress, penTrustOf } from './ratings';
 export {
   simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
   type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
@@ -16,7 +16,7 @@ export {
   MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
-export { BUNT_SUCCESS, emptyLeagueCounters, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
+export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
   FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
 } from './defense';

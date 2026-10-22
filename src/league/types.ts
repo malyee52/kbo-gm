@@ -58,6 +58,11 @@ export interface LeaguePlayer {
   twoWayTalent?: boolean;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
+  /**
+   * 계약하지 못한 FA (team = -1, 2026-10-21 사용자: "그걸 이제 육성선수나 2차드랩으로 만들어야지"). since = 미계약이 된 오프시즌, from = 원 소속.
+   * 그 오프시즌 2차 드래프트 지명·육성선수 계약 후보가 되고, 남으면 다음 시즌 중 자유계약 선수(market)로 남는다. 그 시즌도 계약하지 못하면 은퇴 (offseason.ts)
+   */
+  freeAgent?: { since: number; from: number };
   /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */
   market?: number;
   /** 자유 모드의 빈 자리 (그 해, src/fantasy/free.ts): 시즌 중 AI가 새 선수를 만들 때 채워 쓴다. 쓰기 전에는 어디에도 보이지 않는다 */
@@ -100,6 +105,10 @@ export interface LeaguePlayer {
   lastFaYear: number | null;
   /** 직전 시즌 세이브 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (실존은 자료, 가상 투수는 생성 때 실제 비율로). 없으면 정통파 (2026-10-22) */
+  underhand?: boolean;
+  /** 불펜 신뢰도 (engine/ratings.ts penTrustOf). 없으면 0 = 능력 순 (2026-10-22 추가, 예전 저장에는 없다) */
+  penTrust?: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
   /** 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다 */
@@ -126,6 +135,8 @@ export type MilitaryState =
   | 'pending'
   /** 복무 중 (월드에서 빠진다) */
   | 'serving'
+  /** 방위병 복무 중 (1994년 입대까지, careers.ts): 리그에 남아 홈경기에만 나온다 */
+  | 'homeOnly'
   /** 마침 (또는 시작 때 마친 것으로 본 선수) */
   | 'done'
   /** 면제 (아시안게임 금메달 등) */
@@ -137,9 +148,13 @@ export interface Military {
   enlisted?: number;
   /** 복무 중일 때: 복귀하는 시즌 */
   returnYear?: number;
+  /** 복귀하는 시즌의 개막 뒤 복귀 일수 (0 = 개막 전). 없으면 MILITARY_RETURN_DAY (시작 자료의 복무, 2026-10-21 전 저장) */
+  returnDay?: number;
+  /** 복무 형태 (careers.ts ServiceKind): unit = 군 야구단(상무·경찰), active = 현역, reserve = 보충역. 없으면 unit (예전 저장·시작 자료) */
+  kind?: 'unit' | 'active' | 'reserve';
   /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), estimate = 나이·1군 기록 공백으로 짐작 */
   basis?: 'record' | 'estimate';
-  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달') */
+  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달'). 군 야구단 복무 중이면 '상무'·'경찰' */
   note?: string;
 }
 
@@ -245,6 +260,8 @@ export interface LeagueState {
   archive?: ArchivedPlayer[];
   /** 게임 안 시즌의 리그 환경 (war.ts, 결산 때). 시즌 가치(WAR)를 다시 계산할 때 쓴다. 예전 저장에는 없다 (그 해 실제 자료로 대신) */
   seasonEnv?: Record<string, import('./war').WarEnv>;
+  /** 게임 안 시즌의 세이버 리그 기준값 (game/saber.ts leagueBase, 결산 때). 선수 상세의 지난 시즌 wRC+·FIP. 예전 저장에는 없다 (2026-10-22) */
+  seasonSaber?: Record<string, { woba: number; runsPerPa: number; fipConst: number }>;
   /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
   yearbook?: YearRecord[];
   /** 게임 안 시즌의 단일 시즌 기록 부문별 상위 (history.ts) */

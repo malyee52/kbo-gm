@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, battingOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -25,13 +25,13 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, MIN_SALARY, wonText } from '../league/salary';
+import { dollarText, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
 import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
 import { lineTeam } from '../engine/types';
-import { addFantasyEntry, applyArc, discountFor, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
+import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
@@ -57,7 +57,7 @@ import {
   cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
   type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
-import { aiEnlistPicks, enlistCandidates, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
+import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
@@ -71,7 +71,7 @@ import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
-import { offersByRep, repDemand, repGoodwill, repOf, updateReputation } from '../league/reputation';
+import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
@@ -181,8 +181,9 @@ export type GameAction =
   | { year: number; day: number; type: 'event'; choice: number }
   /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인 */
   | { year: number; day: number; type: 'command'; choices: CommandChoice[] }
-  /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장) */
-  | { year: number; type: 'begin-off'; enlist?: string[] }
+  /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장).
+   *  apply: 그중 군 야구단(상무·경찰) 지원 명단. 없으면 지원할 수 있는 선수 모두 (2026-10-21 전 기록) */
+  | { year: number; type: 'begin-off'; enlist?: string[]; apply?: string[] }
   | { year: number; type: 'fa-offer'; id: string; salary: number; years: number }
   | { year: number; type: 'fa-withdraw'; id: string }
   | { year: number; type: 'foreign-keep'; id: string; keep: boolean }
@@ -257,6 +258,8 @@ export const ATTENTION_DAYS = DEFAULT_STOPS.injuryDays;
 
 /** 육성선수 정식 등록이 되는 첫날 (KBO 규정 5월 1일) */
 export const DEV_REGISTER_FROM = { month: 5, date: 1 };
+/** AI 구단은 5월 1일에 지금 기여가 이 런 이상인 육성선수를 정원 안에서 정식 등록한다 (2026-10-21 사용자 결정, 기준값은 임시값: 대체 선수 수준) */
+export const AI_DEV_REGISTER_RUNS = 0;
 
 /** 1군 말소 뒤 다시 등록할 수 있을 때까지 (KBO 규정 10일) */
 export const REREGISTER_DAYS = 10;
@@ -297,6 +300,8 @@ export interface GameSaveV2 {
   offseason?: Off.OffseasonState;
   /** 시즌이 끝난 뒤 고른 우리 구단 입대 명단 (결산 전까지만. 없으면 추천대로) */
   enlistChoice?: string[];
+  /** 그중 군 야구단 지원 명단 (결산 전까지만. 없으면 지원할 수 있는 선수 모두) */
+  applyChoice?: string[];
   news: NewsItem[];
   actions: GameAction[];
 }
@@ -377,6 +382,8 @@ export class GameSession {
   trades: TradeRecord[] = [];
   /** 시즌이 끝난 뒤 플레이어가 고른 입대 명단 (결산 때 쓴다). null이면 추천대로 */
   enlistChoice: string[] | null = null;
+  /** 그중 군 야구단(상무·경찰) 지원 명단. null이면 지원할 수 있는 선수 모두 */
+  applyChoice: string[] | null = null;
   private lastCallUps = new Set<number>();
   /** 기사 판정용 기준값 (메모리에만, 불러오기·재현 때 같은 규칙으로 다시 만든다) */
   private articleState: ArticleState | null = null;
@@ -667,6 +674,7 @@ export class GameSession {
     g.news.push(...save.news);
     g.actions.push(...save.actions);
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
+    g.applyChoice = save.phase === 'season' && save.applyChoice ? [...save.applyChoice] : null;
     g.ensureOwner();
     ensureFinance(g.league);
     ensureCoaches(g.league);
@@ -1238,14 +1246,40 @@ export class GameSession {
     return { ok: true, message: `${p.name} 정식 등록` };
   }
 
-  private applyConvert(id: string): void {
+  private applyConvert(id: string, quiet = false): void {
     const p = this.world.players.find((x) => x.id === id);
     if (!p) return;
     p.dev = false;
     const lp = this.leaguePlayer(id);
     if (lp) lp.dev = false;
     this.season.teamSeasons[p.teamIdx].dirty = true;
-    this.addNews(this.day, 'entry', `${p.name}, 육성선수에서 정식 선수로 등록`);
+    if (!quiet) this.addNews(this.day, 'entry', `${p.name}, 육성선수에서 정식 선수로 등록`);
+  }
+
+  /**
+   * AI 구단의 육성선수 정식 등록 (5월 1일 경기 전, 하루 진행 뒤 훅): 플레이어와 같은 조건(정식 등록 첫날, 정식 선수 정원 안)으로,
+   * 지금 기여가 AI_DEV_REGISTER_RUNS 이상인 선수를 기여 순으로. 난수를 쓰지 않아 재현·불러오기와 같다
+   */
+  private aiDevRegister(): void {
+    if (this.season.day !== this.devRegisterDay || this.season.day > this.tradeDeadlineDay) return;
+    const limit = ruleOf(this.league, 'orgLimit');
+    const names: string[] = [];
+    for (const t of this.world.teams) {
+      if (t.idx === this.teamIdx) continue;
+      let room = limit - t.org.filter((p) => !p.dev).length;
+      const devs = t.org.filter((p) => p.dev).map((p) => ({ p, r: currentRuns(p, this.values) }))
+        .filter((x) => x.r >= AI_DEV_REGISTER_RUNS)
+        .sort((a, b) => b.r - a.r || a.p.id.localeCompare(b.p.id));
+      for (const { p } of devs) {
+        if (room <= 0) break;
+        this.applyConvert(p.id, true);
+        names.push(`${p.name}(${t.name})`);
+        room--;
+      }
+    }
+    if (!names.length) return;
+    this.valueCtx = null;
+    this.addNews(this.season.day, 'trade', `[육성선수 정식 등록] 다른 구단: ${names.join(', ')}`);
   }
 
   /**
@@ -1341,10 +1375,11 @@ export class GameSession {
     if (pl.rotation.includes(p.idx)) return 'SP';
     const r = pl.pen?.[p.idx];
     if (r) return r;
-    // 역할을 아무것도 정하지 않았으면 AI 감독처럼 마무리를 뺀 불펜 서열 1·2번째를 필승조로 보인다 (game.ts pickReliever)
+    // 역할을 아무것도 정하지 않았으면 AI 감독처럼 마무리를 뺀 불펜 서열 1·2번째를 필승조로 보인다 (game.ts pickReliever·bullpenOrder:
+    // 개막에는 지난 시즌 실제 쓰임 순, 시즌이 지나며 능력 순)
     if (!pl.pen || !Object.keys(pl.pen).length) {
       const ts = this.activeTeam();
-      const order = ts.bullpen.filter((x) => x.idx !== pl.closer && !pl.rotation.includes(x.idx)).sort((a, b) => a.value - b.value);
+      const order = bullpenOrder(ts.bullpen.filter((x) => x.idx !== pl.closer && !pl.rotation.includes(x.idx)), this.season.day, this.params.penBlendDays);
       const k = order.findIndex((x) => x.idx === p.idx);
       if (k >= 0 && k < 2) return 'SU';
     }
@@ -1665,6 +1700,7 @@ export class GameSession {
       this.dailyArticles();
       this.aiTradeDay();
       this.aiMarket();
+      this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
@@ -2201,7 +2237,8 @@ export class GameSession {
   /** 시즌이 끝났으면 결산하고 오프시즌을 연다 */
   beginOffseason(): void {
     if (this.phase !== 'season' || !this.done) throw new Error('정규시즌이 끝나야 오프시즌을 열 수 있습니다');
-    this.dispatchOff({ year: this.year, type: 'begin-off', enlist: this.enlistOptions().chosen });
+    const { chosen, apply } = this.enlistOptions();
+    this.dispatchOff({ year: this.year, type: 'begin-off', enlist: chosen, apply });
   }
 
   // ---- 입대 선택 (시즌이 끝난 뒤, 결산 때 입대)
@@ -2210,21 +2247,33 @@ export class GameSession {
    * 우리 구단 입대 후보와 추천·지금 고른 명단. 기여는 지금 능력 기준 (결산의 성장 판정 전).
    * 시즌 중 트레이드로 바뀐 소속은 월드에서 읽는다 (리그 상태는 결산 때 반영된다).
    */
-  enlistOptions(): { cands: EnlistCandidate[]; recommended: string[]; chosen: string[] } {
+  enlistOptions(): { cands: EnlistCandidate[]; recommended: string[]; chosen: string[]; apply: string[] } {
     const L = this.league;
     const teamOf = new Map(this.world.players.map((p) => [p.id, p.teamIdx]));
     const now = { ...L, players: L.players.map((p) => (teamOf.has(p.id) ? { ...p, team: teamOf.get(p.id)! } : p)) };
     const ctx = this.values;
     const cands = enlistCandidates(now, this.teamIdx, this.year, (p) => runsNow(p, ctx, this.year));
     const recommended = aiEnlistPicks(L, this.year, cands);
-    return { cands, recommended, chosen: this.enlistChoice ? normalizeEnlist(cands, this.enlistChoice) : recommended };
+    const chosen = this.enlistChoice ? normalizeEnlist(cands, this.enlistChoice) : recommended;
+    return { cands, recommended, chosen, apply: normalizeApply(cands, chosen, this.applyChoice) };
   }
 
-  /** 입대 명단을 고른다 (null = 추천대로). 강제 입대는 늘 포함되고, 그 밖에는 상한까지만 남는다 */
+  /** 입대 명단을 고른다 (null = 추천대로). 강제 입대는 늘 포함된다 */
   setEnlist(ids: string[] | null): string[] {
     if (this.phase !== 'season' || !this.done) throw new Error('입대 선택은 정규시즌이 끝난 뒤 결산 전에 합니다');
     this.enlistChoice = ids === null ? null : normalizeEnlist(this.enlistOptions().cands, ids);
     return this.enlistOptions().chosen;
+  }
+
+  /**
+   * 입대 명단 중 군 야구단(상무·경찰)에 지원할 선수를 고른다 (null = 지원할 수 있는 선수 모두). 떨어지면 현역으로 입대한다.
+   * 입대 명단에서 빠진 선수는 지원 명단에서도 빠진다
+   */
+  setApply(ids: string[] | null): string[] {
+    if (this.phase !== 'season' || !this.done) throw new Error('입대 선택은 정규시즌이 끝난 뒤 결산 전에 합니다');
+    const { cands, chosen } = this.enlistOptions();
+    this.applyChoice = ids === null ? null : normalizeApply(cands, chosen, ids);
+    return this.enlistOptions().apply;
   }
 
   /** 오프시즌 조작을 적용하고 기록한다. 결과 메시지가 있으면 돌려준다 */
@@ -2251,8 +2300,9 @@ export class GameSession {
         this.finishedLeague = clone(L);
         const prevStandings = L.lastSeason?.standings ?? null;
         settleMarketContracts(L, this.year);
-        this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist);
+        this.offseason = Off.beginOffseason(L, this.world, this.season, this.store, this.teamIdx, this.params, a.enlist, a.apply);
         this.enlistChoice = null;
+        this.applyChoice = null;
         L.lastSeason!.postseason = ps;
         // 가을야구 개인 기록: 선수의 이번 시즌 줄에 붙인다 (postseason.ts, 2026-10-12)
         {
@@ -2365,7 +2415,7 @@ export class GameSession {
             p.contract = { ...p.contract, kind: 'foreign', salary: Math.max(300_000, Math.round(p.contract.salary / WON_PER_USD)) };
             delete p.military;
           }
-          if (p.military?.state === 'serving' || (p.foreign && p.startAbsentReason === 'military')) {
+          if (p.military?.state === 'serving' || p.military?.state === 'homeOnly' || (p.foreign && p.startAbsentReason === 'military')) {
             if (p.military) p.military = { state: 'done', basis: 'estimate', note: '자유 모드 영입 (병역 해당 없음)' };
             if (p.startAbsentReason === 'military') { delete p.startAbsent; delete p.startAbsentReason; }
             twoWayNews.push(`${p.name} 병역 정정 (리그 밖에서 데려온 선수라 해당 없음)`);
@@ -3238,7 +3288,7 @@ export class GameSession {
     const view = Off.leagueView(this.league, this.store, this.params);
     const ys = Array.from({ length: ruleOf(this.league, 'extMaxYears') - Off.EXT_MIN_YEARS + 1 }, (_, i) => Off.EXT_MIN_YEARS + i);
     return Off.extensionCandidates(this.league, off).map((p) => ({
-      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Math.max(MIN_SALARY, Math.round(Off.applyDiscount(Off.extensionDemand(view, p, off.year, years), discountFor(this.league.fantasy, p.id, off.year)) * repDemand(this.league))) })),
+      p, toFa: Off.seasonsToFa(p, off.year), demands: ys.map((years) => ({ years, salary: Off.extensionAsk(this.league, view, p, off.year, years) })),
     }));
   }
 
@@ -3305,7 +3355,8 @@ export class GameSession {
     if (this.phase === 'offseason') {
       return { ...base, phase: 'offseason', league: clone(this.league), finishedLeague: clone(this.finishedLeague!), offseason: clone(this.offseason!) };
     }
-    return { ...base, phase: 'season', league: clone(this.league), ...(this.enlistChoice ? { enlistChoice: [...this.enlistChoice] } : {}) };
+    return { ...base, phase: 'season', league: clone(this.league), ...(this.enlistChoice ? { enlistChoice: [...this.enlistChoice] } : {}),
+      ...(this.applyChoice ? { applyChoice: [...this.applyChoice] } : {}) };
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Hand, Rates, YearRules } from '../data/types';
+import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense } from './defense';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
@@ -57,6 +57,10 @@ export interface SimPlayer {
   pit: PitSkill | null;
   /** 직전 시즌 세이브 수 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (자료집·하드힛 투구손 우언·좌언, 가상 투수는 생성 때). 표시용, 엔진 효과는 없다 (2026-10-22) */
+  underhand?: boolean;
+  /** 불펜 신뢰도 (ratings.ts penTrustOf): 지난 시즌 실제 쓰임으로 정한 시작 불펜 서열. 없으면 능력 순 (2026-10-22) */
+  penTrust?: number;
   /** 타자: 기대 타석 가치(클수록 좋음). 투수: 기대 실점 가치(작을수록 좋음) */
   value: number;
   /** 직전 기록이 없어 해당 시즌 기록으로 능력을 추정한 선수 */
@@ -79,6 +83,8 @@ export interface SimPlayer {
   reserve?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
+  /** 방위병 (league/careers.ts, 1982~1994): 이 날(개막 뒤 일수) 전까지는 홈경기에만 나온다 */
+  homeOnlyUntil?: number;
   /** 이도류로 쓰는 선수의 반대쪽 능력 (투수의 타격 bat, 타자의 투구 pit). 있으면 refreshActive가 반대쪽 자리 후보에도 넣는다 */
   alt?: { bat?: BatSkill; pit?: PitSkill };
   /** 나이가 추정값 (생년 자료 없음, M8) */
@@ -96,8 +102,11 @@ export interface SimTeam {
   /** 의료·트레이닝 투자: 부상 확률 배율, 결장 기간 배율 (없으면 1, league/finance.ts) */
   injuryRate?: number;
   injuryDays?: number;
-  /** 홈 구장 특성 (league/stadium.ts parkFactor): 홈런 배율. 없으면 1 */
-  park?: { hr: number };
+  /**
+   * 홈 구장 특성: hr = 게임 안에서 지은 신구장의 홈런 배율 (league/stadium.ts parkFactor, 없으면 1),
+   * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
+   */
+  park?: { hr: number; run?: number; ev?: ParkEvents };
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */
@@ -162,6 +171,12 @@ export interface PitLine {
   er: number;
   /** 홀드 (2026-10-12 추가, 맨 뒤라 예전 저장의 배열에는 없다 → 0) */
   hld: number;
+  /** 퀄리티 스타트: 선발 6이닝 이상·3자책 이하 (2026-10-22 추가, 맨 뒤라 예전 저장에는 없다 → 0) */
+  qs: number;
+  /** 블론 세이브: 세이브 상황(1~3점 리드)에 나와 동점·역전을 허용 (2026-10-22 추가) */
+  bsv: number;
+  /** 투구 수 (엔진 2 3단계, 2026-10-22 추가. 기록·박스스코어에만 쓰고 피로·교체에는 아직 쓰지 않는다) */
+  np: number;
 }
 
 export interface TeamRecord {
@@ -186,7 +201,7 @@ export function lineTeam(p: Pick<SimPlayer, 'teamIdx' | 'formerTeam'>): number {
 }
 
 export function emptyPitLine(): PitLine {
-  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0 };
+  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0, qs: 0, bsv: 0, np: 0 };
 }
 
 export function emptyTeamRecord(): TeamRecord {

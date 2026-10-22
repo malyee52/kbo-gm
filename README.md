@@ -55,4 +55,5 @@ python3 tools/fit_regression.py                      # 능력 산출의 회귀 �
 
 - 기록은 KBO 공식 사이트를 수집한 공개 저장소와 보조 자료에서 가져왔다. 출처와 한계는 자료집 엑셀의 "안내", "출처", "데이터공백" 시트에 있다.
 - 두 저장소 모두 라이선스 표시가 없다. 공개 범위를 넓히기 전에 권리 문제를 다시 검토한다 (M9).
+- 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용. 사용자가 유료 회원으로 직접 받은 CSV 원본(`data-src/hardhit/`)은 저장소에 올리지 않고, 게임 선수에 연결한 가공값(`data-src/hardhit_derived/`, `tools/hardhit_derive.py`)만 둔다.
 - KBO 및 각 구단과 관련이 없는 팬 프로젝트다.
