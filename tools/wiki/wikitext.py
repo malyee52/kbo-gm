@@ -209,6 +209,6 @@ BANNED = [
 ]
 BANNED_RE = re.compile('|'.join(re.escape(w) for w in BANNED))
 # 절 제목만 보고 통째로 빼는 것
-BANNED_SECTION_RE = re.compile(r'논란|사건|사고|구설|비판|비난|사생활|가족|개인사|징계|물의|스캔들|의혹|법적|재판|범죄')
+BANNED_SECTION_RE = re.compile(r'논란|사건|사고|구설|비판|비난|사생활|가족|개인사|배우자|결혼|자녀|연애|열애|징계|물의|스캔들|의혹|법적|재판|범죄')
 # 서술 정리에서 볼 필요 없는 절
 SKIP_SECTION_RE = re.compile(r'각주|외부 링크|같이 보기|참고|출신 학교|통산 기록|주요 기록|연도별|기록$|수상|출처|둘러보기|관련 항목|^경력$|등번호')
