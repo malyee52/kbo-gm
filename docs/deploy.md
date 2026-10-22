@@ -1,6 +1,6 @@
 # 배포 (GitHub Pages)
 
-`main`에 올리면 `.github/workflows/deploy.yml`이 테스트 → 빌드 → GitHub Pages 배포를 한다. 주소는 `https://<계정>.github.io/<저장소 이름>/`.
+`main`에 올리면 `.github/workflows/deploy.yml`이 빌드 → GitHub Pages 배포를 한다 (테스트는 PR 검사 `.github/workflows/check.yml`에서 이미 돌린다). 주소는 `https://<계정>.github.io/<저장소 이름>/`.
 
 ## 처음 한 번
 
