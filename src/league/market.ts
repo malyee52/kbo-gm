@@ -19,7 +19,7 @@ import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { foreignRule } from './eras';
 import { payOf, paydays } from './finance';
-import { MIN_SALARY, WON_PER_RUN } from './salary';
+import { MIN_SALARY, wageIndex, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { ruleDate, ruleOf } from './rules';
 
@@ -186,7 +186,7 @@ export function releasePlayer(ctx: MarketCtx, p: SimPlayer, team: number): numbe
   let claimer = -1;
   if (!p.foreign && !p.dev) {
     const runs = currentRuns(p, ctx.values);
-    const worth = runs >= CLAIM_MIN_RUNS && runs * WON_PER_RUN >= CLAIM_PAY_SHARE * lp.contract.salary;
+    const worth = runs >= CLAIM_MIN_RUNS && runs * WON_PER_RUN * wageIndex(year, league) >= CLAIM_PAY_SHARE * lp.contract.salary;
     if (worth) {
       for (const t of [...season.standings()].reverse()) {
         if (t === team || t === ctx.userTeam || regularCount(world, t) >= ruleOf(ctx.league, 'orgLimit')) continue;

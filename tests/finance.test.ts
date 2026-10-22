@@ -5,6 +5,7 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -159,7 +160,7 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     // 자금으로 계약금을 낼 수 있는 FA (시즌 결과에 따라 첫 FA가 너무 비쌀 수 있다)
     const cash = cashOf(h.league, lg);
     // 모기업 지원 한도(2026-10-21) 안의 계약금
-    const cap = faSupportCap(h.league, lg);
+    const cap = faSupportCap(h.league, lg, 2027);
     const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < Math.min(cash * 0.8, cap))!;
     expect(e).toBeDefined();
     // 자금을 바닥내도 제시할 수 있고, 계약하면 모자란 계약금을 모기업이 대 준다 (2026-10-21 사용자 결정. 그 전에는 제시가 막혔다)
@@ -250,11 +251,13 @@ describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 
     let paid = 0;
     for (let t = 0; t < L.teams.length; t++) {
       for (const y of L.finance![t].history) {
-        expect(y.cash, `${L.teams[t].name} ${y.year}`).toBeLessThan(2_000_000);
+        // 기준 금액은 2026년 뒤 연봉 상승 지수만큼 오른다 (2026-10-22)
+        const w = wageIndex(y.year, L);
+        expect(y.cash, `${L.teams[t].name} ${y.year}`).toBeLessThan(2_000_000 * w);
         if (y.dividend) {
           paid++;
-          expect(y.cash).toBeGreaterThanOrEqual(1_000_000);
-          expect(y.cash + y.dividend - 1_000_000).toBeCloseTo(y.dividend * 2, -1);
+          expect(y.cash).toBeGreaterThanOrEqual(1_000_000 * w - 1);
+          expect(y.cash + y.dividend - 1_000_000 * w).toBeCloseTo(y.dividend * 2, -1);
         }
       }
     }

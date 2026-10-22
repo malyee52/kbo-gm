@@ -26,7 +26,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, wonText } from '../league/salary';
+import { dollarText, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -2012,7 +2012,9 @@ export class GameSession {
       const ctx = valueContext(this.world);
       // AI 구단이 보는 잠재력 (난이도 오차, owner.ts). 트레이드 판단은 AI 쪽 판단이다
       ctx.potential = new Map(this.league.players.map((p) => [p.id, aiPotential(this.league, p)]));
-      ctx.salary = new Map(this.league.players.filter((p) => !p.foreign).map((p) => [p.id, p.contract.salary]));
+      // 연봉은 그 해 연봉 상승 지수로 나눠 2026년 돈으로 (AI의 연봉 부담 단가가 2026년 값이다)
+      const wage = wageIndex(this.year, this.league);
+      ctx.salary = new Map(this.league.players.filter((p) => !p.foreign).map((p) => [p.id, p.contract.salary / wage]));
       this.valueCtx = ctx;
     }
     return this.valueCtx;
@@ -2122,7 +2124,7 @@ export class GameSession {
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
     // 판타지 설득의 호의 + 단장 평판 (league/reputation.ts)
     const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
-    return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash, picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
+    return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
       this.world.teams[aiTeam].org, sit, this.values);
   }
 

@@ -28,7 +28,7 @@ import { foreignName, josa, koreanName } from './names';
 import {
   capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
   FA_RE_ELIGIBLE, foreignSalary, marketSalary, MIN_SALARY, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
-  SERVICE_SHARE, salaryFloor, teamCapPayroll, WON_PER_RUN, FA_COMP, wonText, dollarText, type FaGrade,
+  SERVICE_SHARE, salaryFloor, teamCapPayroll, WON_PER_RUN, wageIndex, rookieSalary, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
 import { FUTURE_RULE_LABEL, futureValueText, judgeFutureRules, type RuleSignal } from './futureRules';
@@ -250,6 +250,8 @@ export interface LeagueView {
   ctx: ValueContext;
   sim: Map<string, SimPlayer>;
   orgs: SimPlayer[][];
+  /** 다음 시즌(계약이 시작되는 해)의 연봉 상승 지수 (salary.ts wageIndex) */
+  wage: number;
 }
 
 /** 다음 시즌(league.year + 1) 기준으로 선수 가치를 잴 수 있게 SimPlayer를 만든다. 무소속 선수도 포함 */
@@ -265,7 +267,7 @@ export function leagueView(league: LeagueState, store: Store, params: EnginePara
     if (sim.has(lp.id)) continue;
     sim.set(lp.id, { ...asSim(lp, world.league, next.year), idx: 1_000_000 + k++, name: lp.name, foreign: lp.foreign, teamIdx: lp.team });
   }
-  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]) };
+  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league) };
 }
 
 const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p]));
@@ -283,8 +285,8 @@ function tendencyFor(league: LeagueState, view: LeagueView, team: number): Tende
  * 계약 비용을 런으로: 연봉은 시장 연봉식의 역함수로(그 연봉이면 몇 런짜리 선수를 살 수 있는지), 보상금은 시장 단가로 바꾼다.
  * 시장 연봉이 기여보다 가파르게 오르므로 단순 단가로 나누면 스타는 늘 비싸 보인다.
  */
-function costRuns(salary: number, years: number, compensation: number): number {
-  return runsForSalary(salary) * years + compensation / WON_PER_RUN;
+function costRuns(salary: number, years: number, compensation: number, wage: number): number {
+  return runsForSalary(salary, wage) * years + compensation / (WON_PER_RUN * wage);
 }
 
 /** 선수를 구단 전력에 넣었을 때의 시즌별 이득 합 (years 시즌, 성향 배율 적용) */
@@ -602,7 +604,7 @@ export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number,
   if (!sp) return Math.max(MIN_SALARY, p.contract.salary);
   let sum = 0;
   for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
-  const base = marketSalary(sum / years);
+  const base = marketSalary(sum / years, view.wage);
   const toFa = seasonsToFa(p, year);
   const factor = (toFa <= 1 ? 1 : toFa <= 3 ? 0.9 : 0.8) * (1 - 0.02 * (years - EXT_MIN_YEARS));
   return Math.max(MIN_SALARY, p.contract.salary, Math.round((base * factor) / 100) * 100);
@@ -703,7 +705,7 @@ function overseasOffseason(league: LeagueState, off: OffseasonState, store: Stor
       const age = ageIn(p, year + 1);
       const yrs = age <= 32 ? 4 : 2;
       p.team = origin;
-      p.contract = { kind: 'nonFA', salary: Math.max(MIN_SALARY, marketSalary(runs)), until: year + yrs };
+      p.contract = { kind: 'nonFA', salary: Math.max(MIN_SALARY, marketSalary(runs, view.wage)), until: year + yrs };
       delete p.abroad;
       p.returnedFromAbroad = year + 1;
       log(off, 'settle', `${p.name}, ${away}년 만에 해외에서 돌아와 ${league.teams[origin].name} 복귀 (${yrs}년, 연 ${(p.contract.salary / 10000).toFixed(1)}억 원)`, origin === off.userTeam, true);
@@ -805,7 +807,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     const years = faYears(age);
     let sum = 0;
     for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
-    const ask = marketSalary(sum / years);
+    const ask = marketSalary(sum / years, view.wage);
     // 신청 여부 (임시 규칙): 대체 선수 이하면 신청하지 않고, 34세 이상은 지금 연봉보다 많이 받을 수 있을 때만, 등급제 전에는 순위 기준 안일 때만
     if (currentRuns(sp, view.ctx) < 0) continue;
     if (age >= 34 && ask < p.contract.salary * 0.9) continue;
@@ -820,7 +822,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     const years = faYears(ageIn(p, year + 1));
     let sum = 0;
     for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
-    const ask = marketSalary(sum / years);
+    const ask = marketSalary(sum / years, view.wage);
     off.fa.entries.push({ id, from: p.abroad?.origin ?? -1, grade: 'C', prevSalary: ask, ask, years, status: 'open', returnee: true });
   }
   off.fa.entries.sort((a, b) => b.ask - a.ask || a.id.localeCompare(b.id));
@@ -933,7 +935,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       // 단장 성향 (gm.ts): 윈나우형은 적극적, 짠돌이형은 소극적, 육성형은 28세 이하만 적극적
       const style = gmStyle(league, t);
       const young = style === 'develop' && p.birthYear !== null && off.year + 1 - p.birthYear <= 28;
-      const cost = costRuns(base, e.years, comp) * FA_WILLINGNESS * GM_FA_COST[style] * (young ? GM_FA_YOUNG : 1);
+      const cost = costRuns(base, e.years, comp, view.wage) * FA_WILLINGNESS * GM_FA_COST[style] * (young ? GM_FA_YOUNG : 1);
       if (gain < cost) continue;
       const eager = Math.min(2, Math.max(0, gain / cost - 1));
       offers.push({ team: t, salary: Math.round(Math.min(e.ask * 1.15, base * (1 + 0.05 * eager))), years: e.years });
@@ -976,7 +978,7 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
       if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
       const gain = signingGain(view, t, sp, 1, tendency[t], home);
       if (gain <= 0) continue;
-      const worth = marketSalary(gain / FA_WILLINGNESS) - (home ? 0 : COMPENSATION[e.grade] * e.prevSalary);
+      const worth = marketSalary(gain / FA_WILLINGNESS, view.wage) - (home ? 0 : COMPENSATION[e.grade] * e.prevSalary);
       if (!home && worth < MIN_SALARY) continue;
       const salary = Math.max(MIN_SALARY, Math.round(Math.min(e.ask * 0.8, worth)));
       if (limits[t] !== null && teamCapPayroll(league, t, off.year + 1) - (home ? capShareOf(league, t, off.year + 1, p) : 0) + salary > limits[t]!) continue;
@@ -1288,7 +1290,7 @@ function finishProtectDrafts(league: LeagueState, off: OffseasonState, store: St
           // 원 소속이 다시 데려가면 내지 않는다. 구단당 잃는 인원 상한에는 세지 않는다
           const origin = pick.freeAgent?.from ?? -1;
           pick.team = t;
-          pick.contract = { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
+          pick.contract = { kind: 'reserve', salary: rookieSalary(off.year + 1, league), until: off.year + 1 };
           delete pick.freeAgent;
           moveInView(view, view.sim.get(pick.id)!, t);
           const paid = origin >= 0 && origin !== t;
@@ -1516,7 +1518,7 @@ function expandTeam(league: LeagueState, off: OffseasonState, store: Store, para
     const runs = -8 + rng.range(-4, 6);
     const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential: runs + rng.range(0, 10), isPitcher: pitchers * 2 <= mine.length }, off.year);
     p.team = t;
-    p.contract = { kind: 'reserve', salary: MIN_SALARY, until: off.year + 1 };
+    p.contract = { kind: 'reserve', salary: rookieSalary(off.year + 1, league), until: off.year + 1 };
     moveInView(view, view.sim.get(p.id)!, t);
   }
   if (made) log(off, 'settle', `${name}: 창단 선수 ${made}명 영입 (해외·독립 리그·퓨처스 출신, 가상 선수)`, false, false);
@@ -1794,7 +1796,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     p.school = univ ? 'UNIV' : 'HS';
     p.scoutPotential = scoutView(league, potential, devRng);
     view.ctx.potential?.set(p.id, aiPotential(league, p));
-    p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year + 1 };
+    p.contract = { kind: 'reserve', salary: rookieSalary(year + 1, league), until: year + 1 };
     off.devExtra.push(p.id);
   }
   for (let i = 0; i < (real?.length ? 0 : DRAFT_POOL); i++) {
@@ -1812,7 +1814,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 스카우트 평가: 실제 잠재력에 오차 (모든 구단이 같은 평가를 본다. 난이도별 오차는 M7)
     p.scoutPotential = scoutView(league, potential, rng);
     view.ctx.potential?.set(p.id, aiPotential(league, p));
-    p.contract = { kind: 'rookie', salary: MIN_SALARY, until: year + 1 };
+    p.contract = { kind: 'rookie', salary: rookieSalary(year + 1, league), until: year + 1 };
     pool.push(p.id);
   }
   const order = pickOrder(league);
@@ -1935,7 +1937,7 @@ function enterSalary(league: LeagueState, off: OffseasonState, store: Store, par
   for (const p of league.players) {
     if (p.team < 0 || p.foreign || p.contract.until > off.year) continue;
     const runs = currentRuns(view.sim.get(p.id)!, view.ctx);
-    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service), Math.round(marketSalary(runs) * 0.7)) : reserveTarget(runs, p.service);
+    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service, view.wage), Math.round(marketSalary(runs, view.wage) * 0.7)) : reserveTarget(runs, p.service, view.wage);
     demands[p.id] = nextReserveSalary(p.contract.salary, target);
   }
   const offers: Record<string, number> = {};
@@ -2620,7 +2622,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   if (m && !m.birthYear) p.birthYearEstimated = true;
   p.scoutPotential = scoutView(league, potential, rng);
   view.ctx.potential?.set(p.id, aiPotential(league, p));
-  p.contract = { kind: 'rookie', salary: MIN_SALARY, until: entryYear };
+  p.contract = { kind: 'rookie', salary: rookieSalary(entryYear, league), until: entryYear };
   // 해외 프로에서 뛰다 들어온 선수 (해외파 특별지명, 해외 진출 뒤 늦게 입단): 신인상 자격이 없고 다시 포스팅을 요청하지 않는다
   if (d.kind === '해외' || (d.drafted !== undefined && entryYear - d.drafted >= 3 && !d.univ)) p.returnedFromAbroad = entryYear;
   return p;
@@ -2699,7 +2701,7 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
       startShare: starter ? 0.85 : 0.05, sample: 0,
     },
     potential: 0, estimated: false, team: -1,
-    contract: { kind: 'rookie', salary: MIN_SALARY, until: nextYear },
+    contract: { kind: 'rookie', salary: rookieSalary(nextYear, league), until: nextYear },
     service: 0, faCount: 0, lastFaYear: null, lastSaves: 0, history: [],
     ...(spec.foreign ? {} : { military: { state: 'pending' as const } }),
   };

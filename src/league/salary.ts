@@ -19,13 +19,34 @@ export function salaryCap(year: number, league?: Pick<LeagueState, 'rules' | 'ru
   // 규정 변경 (league/rules.ts capScale, 0이면 폐지)
   const scale = ruleOf(league, 'capScale');
   if (scale <= 0) return null;
-  let v: number;
-  if (CAP[year]) v = CAP[year];
-  else {
-    v = CAP[2028];
-    for (let y = 2029; y <= year; y++) v = Math.round(v * (1 + futureValue(league, 'capGrowth', y)));
-  }
+  const v = baseCap(year, league);
   return scale === 1 ? v : Math.round(v * scale);
+}
+
+/** 캡 배율·폐지와 상관없는 기본 캡 경로 (발표값, 2029년부터 미래 규칙의 상향률로 복리) */
+function baseCap(year: number, league?: Pick<LeagueState, 'ruleShifts'>): number {
+  if (CAP[year]) return CAP[year];
+  if (year < 2023) return CAP[2023];
+  let v = CAP[2028];
+  for (let y = 2029; y <= year; y++) v = Math.round(v * (1 + futureValue(league, 'capGrowth', y)));
+  return v;
+}
+
+/**
+ * 연봉 상승 지수 (2026년 = 1, 2026년 이전도 1): 그 해 기본 캡 경로 ÷ 2026년 캡 (2027 +5%, 2028 +10.25%, 그 뒤 미래 규칙의 상향률).
+ * 2026년 뒤 연봉은 이 지수만큼 오른다: 연봉 생성식(FA 요구·평가, 비FA 다년, 보류 연봉 협상, 신인)에 곱하고, 돈 → 런 쪽은 나눈다.
+ * 재정(finance.ts 수입·운영비·투자비·기준 자금)도 같은 지수를 쓴다 (연봉만 오르면 수입이 못 따라가 시장이 얼어붙는다, 2026-10-22).
+ * 캡이 없는 모드(자유 모드 capScale 0)도 같은 경로(5% 복리)다. 지수를 쓰는 곳은 "계약이 시작되는 해" 값을 넣는다.
+ * 2026년 이전 시대는 내부 연봉이 2026년 물가로 고정(priceIndex는 화면용)이라 1로 둔다
+ */
+export function wageIndex(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  if (year <= 2026) return 1;
+  return baseCap(year, league ?? undefined) / CAP[2026];
+}
+
+/** 신인 계약 연봉: 최저 연봉 × 연봉 상승 지수 (100만 원 단위 아래는 반올림) */
+export function rookieSalary(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  return Math.round((MIN_SALARY * wageIndex(year, league)) / 100) * 100;
 }
 /** 샐러리캡 도입 전(2022년까지)의 구단 예산 기준: 2023년 캡 값을 그대로 쓴다 (임시값. 내부 연봉은 2026년 물가라 캡 값과 같은 단위다) */
 export const PRE_CAP_BUDGET = 1142638;
@@ -133,21 +154,21 @@ export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules'>): 
 
 /**
  * FA 시장 연봉 (연평균, 만 원): 계약 기간 평균 기여(런)에 따라 오른다 (임시값).
- * 기준점: 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억.
+ * 기준점 (2026년): 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억. wage = 계약 시작 해의 연봉 상승 지수(wageIndex)
  */
-export function marketSalary(runs: number): number {
-  return Math.max(MIN_SALARY, Math.round(1200 * Math.max(0, runs) ** 1.31));
+export function marketSalary(runs: number, wage = 1): number {
+  return Math.max(MIN_SALARY, Math.round(1200 * wage * Math.max(0, runs) ** 1.31));
 }
 
 /** 시장 연봉식의 역함수: 이 연봉이면 시장에서 몇 런짜리 선수 값인가 */
-export function runsForSalary(salary: number): number {
-  return (Math.max(0, salary) / 1200) ** (1 / 1.31);
+export function runsForSalary(salary: number, wage = 1): number {
+  return (Math.max(0, salary) / (1200 * wage)) ** (1 / 1.31);
 }
 
-/** 보류 선수(FA 전) 연봉 목표: 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음) */
-export function reserveTarget(runs: number, service: number): number {
+/** 보류 선수(FA 전) 연봉 목표: 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음). wage = 연봉 상승 지수 */
+export function reserveTarget(runs: number, service: number, wage = 1): number {
   const seniority = Math.min(1.2, 0.4 + 0.12 * service);
-  return Math.round(MIN_SALARY + SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority);
+  return Math.round((MIN_SALARY + SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority) * wage);
 }
 
 const SENIORITY_PAY = 900;

@@ -8,7 +8,7 @@ import { makeDraftee, openMarket, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
-import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget } from './salary';
+import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
@@ -176,7 +176,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
   const have = new Set(league.players.map((p) => `${p.team}/${p.name}`));
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][] };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear) };
   const rng = new Rng(`${seed}/rookies/${startYear}`);
   const taken = takenNames(league, store);
   const all = store.drafts![String(startYear)];
@@ -318,7 +318,7 @@ function addAbsentVeterans(league: LeagueState, store: Store, startYear: number,
 function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex): number {
   const list = lateDebutDraftees(store, league, startYear);
   if (!list.length) return 0;
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][] };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear) };
   const taken = takenNames(league, store);
   let n = 0;
   for (const x of list) {
