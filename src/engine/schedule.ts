@@ -1,7 +1,7 @@
 // 연전 단위 정규시즌 일정 생성기 (일정 개편 기획안 3장). 순수 함수이고 난수는 Rng만 쓴다: 같은 시드 = 같은 일정.
 // Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천·순연(7단계)은 아직 없다.
-// 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-9(2013~2014)·S33F(2023~) (3·5단계).
-// 아직 만들지 않은 틀(S33-99 1999 양대 리그 6단계, S33L2 2015~2022 2연전기 시작 결정 대기)과 규칙 표에 맞지 않는 월드는
+// 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-99(1999 양대 리그)·S33-9(2013~2014)·S33F(2023~)
+// (3·5·6단계). 아직 만들지 않은 틀(S33L2 2015~2022, 2연전기 시작 결정 대기)과 규칙 표에 맞지 않는 월드(리그 나눔이 없는 1999 월드 포함)는
 // 같은 달력(개막일·월요일·쉬는 기간) 위에 원형 대진을 하루 한 경기씩 편다 (spreadPlan, 연전 없음).
 //
 // 만드는 순서 (기획안 3.2):
@@ -61,6 +61,8 @@ export interface ScheduleInput {
   franchises?: string[];
   /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 팀, 기획안 2.2). 없으면 시드로 */
   openingHosts?: number[];
+  /** 양대 리그 나눔 (World.divisions의 teams, 1999·2000). S33-99는 이것으로 대진을 짜고, 19차전 해(2000)는 남는 홈을 리그마다 나눈다 */
+  divisions?: [number[], number[]];
   /** 시즌 뿌리 난수. 여기서 'schedule', 'schedule/2', …를 갈라 쓴다 */
   rng: Rng;
 }
@@ -76,8 +78,8 @@ const REMAINING_LEAD_DAYS = 21;
 const HOME_HEAVY_ODD = ['두산', '롯데', 'SSG', 'KT', '한화'];
 const HOME_HEAVY_EVEN = ['LG', 'KIA', '삼성', 'NC', '히어로즈'];
 
-/** 연전 생성기가 만드는 틀. S33-99(1999 양대 리그, 6단계)·S33L2(2015~2022, 2연전기 시작 사용자 결정 대기)는 아직 하루씩 */
-const SUPPORTED_FRAMES = ['W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-9', 'S33F'];
+/** 연전 생성기가 만드는 틀. S33L2(2015~2022, 2연전기 시작 사용자 결정 대기)는 아직 하루씩 */
+const SUPPORTED_FRAMES = ['W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-99', 'S33-9', 'S33F'];
 /**
  * W82·W83의 목요일(주중 셋째 날)을 열 때 맞추는 날: 참고 종료일보다 이만큼 앞에 본 일정이 끝나게 (임시값).
  * 남는 날은 우천 순연(7단계) 몫이다. 연전 해(S33)도 본 일정이 실제보다 2~4주 이르게 끝난다
@@ -237,7 +239,7 @@ function openedThursdays(rule: YearScheduleRule, base: number[], horizon: number
   return new Set(extras.slice(0, k));
 }
 
-function frameShape(rule: YearScheduleRule, horizon = 260): FrameShape {
+function frameShape(rule: YearScheduleRule, horizon = 260, rng?: Rng, total?: Map<number, number>): FrameShape {
   const w = (d: string) => weekdayOf(d);
   switch (rule.frame) {
     case 'W82': {
@@ -260,6 +262,8 @@ function frameShape(rule: YearScheduleRule, horizon = 260): FrameShape {
       return { slots: weekPieces(rule, (d) => (w(d) === 2 || w(d) === 3 ? 'a' : w(d) === 4 || w(d) === 5 ? 'b' : 'c'), horizon), counts: new Map([[2, rule.vs / 2]]), unit: 1, minLen: 1 };
     case 'S33-9':
       return s339Shape(rule, horizon);
+    case 'S33-99':
+      return s3399Shape(rule, horizon, total!, rng!);
     default:
       return { slots: buildSlots(rule, horizon), unit: 3, minLen: 3 };
   }
@@ -274,18 +278,8 @@ function s339Shape(rule: YearScheduleRule, horizon: number): FrameShape {
   const counts = threeTwo(rule.vs);
   const rounds = (rule.teams ?? 9) % 2 === 0 ? (rule.teams ?? 9) - 1 : rule.teams ?? 9;
   const total = new Map([...counts].map(([l, c]) => [l, c * rounds]));
-  const allStar = rule.breaks.find((b) => b.reason === '올스타');
-  const fullWeeks: number[] = [];
-  for (let i = 0; i < horizon; i++) {
-    const d = addDays(rule.opening, i);
-    if (weekdayOf(d) !== 2 || (allStar && d <= allStar.to)) continue;
-    if (Array.from({ length: 6 }, (_, k) => addDays(d, k)).every((x) => playable(rule, x))) fullWeeks.push(weekOf(d));
-  }
-  const build = (two: Set<number>) => weekPieces(rule, (d) => {
-    const wd = weekdayOf(d);
-    if (two.has(weekOf(d))) return wd === 2 || wd === 3 ? 'a' : wd === 4 || wd === 5 ? 'b' : 'c';
-    return wd >= 2 && wd <= 4 ? 'a' : 'b';
-  }, horizon);
+  const fullWeeks = fullWeeksAfterAllStar(rule, horizon);
+  const build = (two: Set<number>) => twoWeekPieces(rule, two, horizon);
   let best = { slots: build(new Set()), end: Infinity };
   best.end = countsEnd(best.slots, total);
   for (let c = 1; c <= fullWeeks.length; c++) {
@@ -296,19 +290,71 @@ function s339Shape(rule: YearScheduleRule, horizon: number): FrameShape {
   return { slots: best.slots, counts, unit: 1, minLen: 1 };
 }
 
+/** 3연전 주(화~목 / 금~일)에서 two의 주만 2연전 주(화·수 / 목·금 / 토·일)로 바꾼 달력 칸 (S33-9·S33-99) */
+function twoWeekPieces(rule: YearScheduleRule, two: Set<number>, horizon: number): Slot[] {
+  return weekPieces(rule, (d) => {
+    const wd = weekdayOf(d);
+    if (two.has(weekOf(d))) return wd === 2 || wd === 3 ? 'a' : wd === 4 || wd === 5 ? 'b' : 'c';
+    return wd >= 2 && wd <= 4 ? 'a' : 'b';
+  }, horizon);
+}
+
+/** 올스타 휴식 뒤의 온전한 주(화~일 모두 경기 가능): 2연전 주 후보 */
+function fullWeeksAfterAllStar(rule: YearScheduleRule, horizon: number): number[] {
+  const allStar = rule.breaks.find((b) => b.reason === '올스타');
+  const out: number[] = [];
+  for (let i = 0; i < horizon; i++) {
+    const d = addDays(rule.opening, i);
+    if (weekdayOf(d) !== 2 || (allStar && d <= allStar.to)) continue;
+    if (Array.from({ length: 6 }, (_, k) => addDays(d, k)).every((x) => playable(rule, x))) out.push(weekOf(d));
+  }
+  return out;
+}
+
+/** S33-99 2연전 주 수 (같은 리그 라운드 3개 × 2연전 4번 = 2연전 칸 12 = 4주, 기획안 10.3) */
+const S3399_TWO_WEEKS = 4;
+
+/**
+ * S33-99 (1999 드림·매직 양대 리그, 기획안 10.3): 전반기(올스타 전)는 3연전 주(화~목 / 금~일)만, 개막 토·일은 같은 리그 2연전 라운드 하나.
+ * 후반기에 2연전 주(화·수 / 목·금 / 토·일) 4주: 본 일정 마지막 14일에 걸치는 주는 모두 2연전 주로 이어 두고(조사값, 다른 리그 경기가
+ * 약 2주 먼저 끝난다), 나머지는 그 앞 후반기 주 가운데 시드로 고른다 (임시 규칙). 3연전 칸이 모두 차는 가장 이른 주까지 쓴다.
+ * 1999는 후반기 경기일(3연전 7칸 + 2연전 11칸 = 43일)이 6일짜리 주로 나뉘지 않아, 마지막 3연전 주의 금~일 칸이 2연전(금·토)으로 줄고
+ * 본 일정이 마지막 주 화·수 2연전으로 끝난다 (개막 토·일 2연전을 같은 리그 라운드로 세므로 2연전 칸이 남는다)
+ */
+function s3399Shape(rule: YearScheduleRule, horizon: number, total: Map<number, number>, rng: Rng): FrameShape {
+  const weeks = fullWeeksAfterAllStar(rule, horizon);
+  // 라운드별 구성은 tryBuild가 assignCounts에 따로 준다 (divisionCounts). 여기 counts는 "칸 길이별 개수 방식"이라는 표시
+  const counts = new Map(total);
+  // 3연전 칸이 모자라지 않는 가장 적은 후반기 3연전 주 수 (2연전 주를 어디에 두든 칸 수와 끝나는 날은 같다)
+  for (let c3 = 0; c3 + S3399_TWO_WEEKS <= weeks.length; c3++) {
+    const used = weeks.slice(0, c3 + S3399_TWO_WEEKS);
+    const lastSunday = daysBetween(rule.opening, addDays('1970-01-06', used[used.length - 1] * 7 + 5));
+    const end = countsEnd(twoWeekPieces(rule, new Set(used.slice(-S3399_TWO_WEEKS)), horizon), total);
+    if (end > lastSunday) continue;
+    // 본 일정 끝에서 14일(마지막 2주)에 걸치는 주
+    const from = weekOf(addDays(rule.opening, end - 13));
+    const tail = used.filter((w) => w >= from).slice(-S3399_TWO_WEEKS);
+    const head = used.filter((w) => !tail.includes(w));
+    const mid = rng.shuffle([...head]).slice(0, Math.max(0, S3399_TWO_WEEKS - tail.length));
+    return { slots: twoWeekPieces(rule, new Set([...mid, ...tail]), horizon), counts, unit: 1, minLen: 1 };
+  }
+  return { slots: twoWeekPieces(rule, new Set(), horizon), counts, unit: 1, minLen: 1 }; // 칸이 모자람 → tryBuild가 걸러 낸다
+}
+
 /**
  * 2. 칸 길이별 개수 방식: 칸을 날짜 순으로, 그 길이가 남은 라운드에 (덜 쓴 라운드부터, 바로 앞 칸과 다른 라운드로).
  * 그 길이가 남은 라운드가 없으면 더 짧은 길이로 줄여 쓰고(앞쪽 날만), 그것도 없으면 칸을 비운다
  */
-function assignCounts(slots: Slot[], rounds: number, counts: Map<number, number>, rng: Rng, openingRound: number | null) {
-  const need = Array.from({ length: rounds }, () => new Map(counts));
+function assignCounts(slots: Slot[], rounds: number, counts: Map<number, number> | Map<number, number>[], rng: Rng, openingRound: number | null) {
+  // 라운드마다 같은 구성, 또는 라운드별 구성 (S33-99: 같은 리그 3×4 + 2×4, 다른 리그 3×6)
+  const need = Array.from({ length: rounds }, (_, r) => new Map(Array.isArray(counts) ? counts[r] : counts));
   const used = new Array<number>(rounds).fill(0);
   const prio: number[][] = [];
   const prioOf = (c: number, r: number) => {
     while (prio.length <= c) prio.push(rng.shuffle(Array.from({ length: rounds }, (_, i) => i)));
     return prio[c].indexOf(r);
   };
-  const lens = [...counts.keys()].sort((a, b) => b - a);
+  const lens = [...new Set(need.flatMap((m) => [...m.keys()]))].sort((a, b) => b - a);
   const out: { slot: Slot; round: number }[] = [];
   let prev = -1;
   for (const s0 of slots) {
@@ -316,7 +362,7 @@ function assignCounts(slots: Slot[], rounds: number, counts: Map<number, number>
     let pick = -1;
     let len = 0;
     for (const l of lens.filter((x) => x <= s0.len)) {
-      const cand = Array.from({ length: rounds }, (_, i) => i).filter((r) => need[r].get(l)! > 0);
+      const cand = Array.from({ length: rounds }, (_, i) => i).filter((r) => (need[r].get(l) ?? 0) > 0);
       if (!cand.length) continue;
       const score = (r: number) => [out.length === 0 && openingRound !== null ? (r === openingRound ? 0 : 1) : 0, r === prev ? 1 : 0, used[r], prioOf(used[r], r)];
       cand.sort((x, y) => {
@@ -358,8 +404,34 @@ function roundRobin(ring: number[]): [number, number][][] {
   return rounds;
 }
 
+/**
+ * S33-99 라운드 (기획안 10.3): 같은 리그 라운드(두 리그가 같은 날 리그 안 원형 대진, 4팀이면 3라운드)와
+ * 다른 리그 라운드(드림 × 매직 교차, 4라운드). 같은 리그 라운드가 앞, 다른 리그 라운드가 뒤
+ */
+function divisionRounds(divs: [number[], number[]], rng: Rng): { rounds: [number, number][][]; same: number } {
+  const a = rng.shuffle([...divs[0]]);
+  const b = rng.shuffle([...divs[1]]);
+  const ra = roundRobin(a);
+  const rb = roundRobin(b);
+  const same = ra.map((r, k) => [...r, ...rb[k]]);
+  const cross = b.map((_, k) => a.map((t, i) => [t, b[(i + k) % b.length]] as [number, number]));
+  return { rounds: [...same, ...cross], same: same.length };
+}
+
+/** 두 리그의 구단 수가 같고 모든 구단을 한 번씩 담은 양대 리그 나눔인가 (S33-99가 쓸 수 있는 나눔) */
+function evenDivisions(divs: [number[], number[]] | undefined, n: number): divs is [number[], number[]] {
+  return !!divs && divs[0].length === divs[1].length && divs[0].length * 2 === n && new Set([...divs[0], ...divs[1]]).size === n;
+}
+
+/** S33-99 라운드 구성: 같은 리그 라운드는 3연전 4개 + 2연전 (20차전), 다른 리그 라운드는 3연전만 (18차전 = 3×6) */
+function divisionCounts(rule: YearScheduleRule, same: number, rounds: number): Map<number, number>[] {
+  const other = rule.vsOther ?? rule.vs;
+  if (other % 3 !== 0) throw new Error(`일정 생성기: 다른 리그 상대별 ${other}경기는 3연전으로 나눌 수 없음`);
+  return Array.from({ length: rounds }, (_, r) => (r < same ? threeTwo(rule.vs) : new Map([[3, other / 3]])));
+}
+
 /** 상대별 남는 홈 경기를 더 받는 구단 (19차전 해 홈 67, 2023~ 홈 73). 기획안 2.2 */
-export function homeHeavyTeams(rule: YearScheduleRule, n: number, franchises?: string[]): number[] {
+export function homeHeavyTeams(rule: YearScheduleRule, n: number, franchises?: string[], divisions?: [number[], number[]]): number[] {
   const need = Math.floor(n / 2);
   const all = Array.from({ length: n }, (_, i) => i);
   let picked: number[] = [];
@@ -368,8 +440,14 @@ export function homeHeavyTeams(rule: YearScheduleRule, n: number, franchises?: s
     picked = all.filter((i) => names.includes(franchises[i])).slice(0, need);
   }
   // 그 밖(19차전 해, 모르는 계보만 남은 자리)은 연도 홀짝과 색인으로 (임시 규칙)
-  const rest = all.filter((i) => !picked.includes(i)).sort((a, b) => ((a + rule.year) % 2) - ((b + rule.year) % 2) || a - b);
+  const parity = (a: number, b: number) => ((a + rule.year) % 2) - ((b + rule.year) % 2) || a - b;
+  const rest = all.filter((i) => !picked.includes(i)).sort(parity);
   for (const t of rest) if (picked.length < need) picked.push(t);
+  // 양대 리그 해(2000)는 리그마다 절반이 더 받게: 홀짝 규칙이 리그마다 절반이 아니면 리그 안에서 같은 규칙으로 다시 고른다
+  // (임시 규칙, 기획안 10.3. 실제 2000은 리그마다 두 팀이 홈 67)
+  if (rule.frame !== 'S33F' && evenDivisions(divisions, n) && divisions.some((d) => d.filter((t) => picked.includes(t)).length !== d.length / 2)) {
+    picked = divisions.flatMap((d) => [...d].sort(parity).slice(0, d.length / 2));
+  }
   return picked.sort((a, b) => a - b);
 }
 
@@ -378,8 +456,14 @@ export function homeHeavyTeams(rule: YearScheduleRule, n: number, franchises?: s
  * 짝수 차전은 반반, 홀수 차전(19)은 10·9, S33F(16 = 15 + 잔여 1)는 9·7. 더 받는 쪽은 많은 쪽 구단(heavy)이
  * 상대 절반 남짓에게서 받도록 원형으로 정한다 → heavy 구단 팀당 홈이 하나씩(S33F는 둘씩) 많다.
  */
-function homeTargets(rule: YearScheduleRule, n: number, heavy: number[]): number[][] {
+function homeTargets(rule: YearScheduleRule, n: number, heavy: number[], divisions?: [number[], number[]]): number[][] {
   const vs = rule.vs;
+  if (rule.frame === 'S33-99' && evenDivisions(divisions, n)) {
+    // 1999: 같은 리그 20차전 홈 10·10, 다른 리그 18차전 홈 9·9 (팀당 66·66, 시즌 자료와 같다)
+    const lg = new Array<number>(n);
+    divisions.forEach((d, k) => d.forEach((t) => { lg[t] = k; }));
+    return Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => (a === b ? 0 : (lg[a] === lg[b] ? vs : rule.vsOther ?? vs) / 2)));
+  }
   // S33F 짝수 차전은 9·7 (2 차이), 홀수 차전(구단 수가 바뀐 월드)은 1 차이. S2 2연전 홀수 개(18차전 = 2×9)는 2연전 하나 차이 = 10·8
   const skew = rule.frame === 'S33F' ? 2 - (vs % 2) : rule.frame === 'S2' ? ((vs / 2) % 2) * 2 : vs % 2;
   const t = Array.from({ length: n }, () => new Array<number>(n).fill(0));
@@ -519,10 +603,15 @@ function tryBuild(input: ScheduleInput, rng: Rng, attempt: number): SchedulePlan
   const hosts = input.openingHosts ?? [];
   const others = rng.shuffle(Array.from({ length: n }, (_, i) => i).filter((i) => !hosts.includes(i)));
   const ring = [...rng.shuffle([...hosts]), ...others];
-  const rounds = roundRobin(ring);
-  const shape = frameShape(rule);
+  // S33-99는 같은 리그·다른 리그 라운드 (라운드마다 연전 구성이 다르다)
+  const div = rule.frame === 'S33-99' ? divisionRounds(input.divisions!, rng) : null;
+  const rounds = div ? div.rounds : roundRobin(ring);
+  const divCounts = div ? divisionCounts(rule, div.same, rounds.length) : null;
+  const total = new Map<number, number>();
+  for (const c of divCounts ?? []) for (const [l, k] of c) total.set(l, (total.get(l) ?? 0) + k);
+  const shape = div ? frameShape(rule, 260, rng.fork('two-weeks'), total) : frameShape(rule);
   const { placed, cap } = shape.counts
-    ? assignCounts(shape.slots, rounds.length, shape.counts, rng, hosts.length ? 0 : null)
+    ? assignCounts(shape.slots, rounds.length, divCounts ?? shape.counts, rng, hosts.length ? 0 : null)
     : assignRounds(shape.slots, rounds.length, perRound, rng, hosts.length ? 0 : null, shape.unit, shape.minLen);
   if (cap.some((c) => c >= shape.minLen)) return '달력 칸이 모자람';
 
@@ -540,8 +629,8 @@ function tryBuild(input: ScheduleInput, rng: Rng, attempt: number): SchedulePlan
   });
 
   // 4. 홈·원정: 시간 순으로 연전마다 홈을 정한다. 상대별 홈 목표를 넘지 않고 남은 연전으로 목표를 채울 수 있어야 한다
-  const heavy = homeHeavyTeams(rule, n, input.franchises);
-  const target = homeTargets(rule, n, heavy);
+  const heavy = homeHeavyTeams(rule, n, input.franchises, input.divisions);
+  const target = homeTargets(rule, n, heavy, input.divisions);
   const homeSoFar = Array.from({ length: n }, () => new Array<number>(n).fill(0));
   const pos = new Map<number, number>(); // 상대별 몇 번째 연전까지 정했는지
   const lastHome = new Map<number, number>();
@@ -667,8 +756,8 @@ export function planProblems(plan: SchedulePlan, input: ScheduleInput): string[]
       meet[g.home][g.away]++;
     }
   });
-  const heavy = homeHeavyTeams(rule, n, input.franchises);
-  const target = homeTargets(rule, n, heavy);
+  const heavy = homeHeavyTeams(rule, n, input.franchises, input.divisions);
+  const target = homeTargets(rule, n, heavy, input.divisions);
   for (let a = 0; a < n; a++) {
     for (let b = 0; b < n; b++) {
       if (a !== b && meet[a][b] !== target[a][b]) out.push(`${a} 대 ${b}: 홈 ${meet[a][b]}경기 (목표 ${target[a][b]})`);
@@ -693,6 +782,9 @@ export function generatePlan(input: ScheduleInput): SchedulePlan {
   if (!SUPPORTED_FRAMES.includes(input.rule.frame)) throw new Error(`일정 생성기: 아직 만들지 않은 연전 틀 ${input.rule.frame} (${input.rule.year})`);
   if (input.rule.teams !== undefined && input.rule.teams !== input.teams) {
     throw new Error(`일정 생성기: ${input.rule.year}년 규칙은 ${input.rule.teams}구단, 월드는 ${input.teams}구단`);
+  }
+  if (input.rule.frame === 'S33-99' && !evenDivisions(input.divisions, input.teams)) {
+    throw new Error(`일정 생성기: ${input.rule.year}년 양대 리그 틀(S33-99)에 구단 수가 같은 두 리그 나눔이 없음`);
   }
   let why = '';
   for (let k = 1; k <= MAX_ATTEMPTS; k++) {
@@ -768,20 +860,32 @@ export function spreadPlan(rule: Pick<YearScheduleRule, 'opening' | 'breaks'>, n
   };
 }
 
-/** 이 월드에 연전 생성기(generatePlan)를 쓸 수 있는가: 만든 연전 틀이고 구단 수·팀당 경기 수가 규칙 표와 같다 */
-export function framedRule(world: Pick<World, 'teams' | 'gamesPerTeam' | 'schedule'>): YearScheduleRule | undefined {
+/**
+ * 이 월드에 연전 생성기(generatePlan)를 쓸 수 있는가: 만든 연전 틀이고 구단 수·팀당 경기 수가 규칙 표와 같다.
+ * S33-99(1999)는 구단 수가 같은 두 리그 나눔(World.divisions)이 있어야 한다 (팀당 = 같은 리그 상대 × 20 + 다른 리그 상대 × 18)
+ */
+export function framedRule(world: Pick<World, 'teams' | 'gamesPerTeam' | 'schedule' | 'divisions'>): YearScheduleRule | undefined {
   const rule = world.schedule;
   const n = world.teams.length;
   if (!rule || !SUPPORTED_FRAMES.includes(rule.frame)) return undefined;
-  if ((rule.teams ?? n) !== n || rule.games !== world.gamesPerTeam || rule.vs * (n - 1) !== rule.games) return undefined;
-  return rule;
+  if ((rule.teams ?? n) !== n || rule.games !== world.gamesPerTeam) return undefined;
+  if (rule.frame === 'S33-99') {
+    const divs = world.divisions?.teams;
+    if (!evenDivisions(divs, n)) return undefined;
+    const k = divs[0].length;
+    return rule.vs * (k - 1) + (rule.vsOther ?? rule.vs) * k === rule.games ? rule : undefined;
+  }
+  return rule.vs * (n - 1) === rule.games ? rule : undefined;
 }
 
 /** 시즌 일정 (Season이 쓴다). rng는 시즌 뿌리 난수 ('schedule' 줄기를 갈라 쓴다) */
-export function planForWorld(world: Pick<World, 'year' | 'teams' | 'gamesPerTeam' | 'schedule' | 'openingHosts'>, rng: Rng): SchedulePlan {
+export function planForWorld(world: Pick<World, 'year' | 'teams' | 'gamesPerTeam' | 'schedule' | 'openingHosts' | 'divisions'>, rng: Rng): SchedulePlan {
   const rule = framedRule(world);
   if (rule) {
-    return generatePlan({ rule, teams: world.teams.length, franchises: world.teams.map((t) => t.franchise), openingHosts: world.openingHosts, rng });
+    return generatePlan({
+      rule, teams: world.teams.length, franchises: world.teams.map((t) => t.franchise), openingHosts: world.openingHosts,
+      ...(world.divisions ? { divisions: world.divisions.teams } : {}), rng,
+    });
   }
   const cal = world.schedule ?? { opening: defaultOpening(world.year), breaks: [] };
   return spreadPlan(cal, world.teams.length, world.gamesPerTeam, rng.fork('schedule'));

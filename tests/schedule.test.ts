@@ -4,7 +4,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { addDays, daysBetween, defaultOpening, divisionsOf, fitRuleToTeams, openingOf, scheduleRule, weekdayOf, type Divisions, type YearScheduleRule } from '../src/data/schedule';
 import { DEFAULT_PARAMS, Season, worldForYear } from '../src/engine';
 import { Rng } from '../src/engine/rng';
-import { framedRule, generatePlan, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
+import { framedRule, generatePlan, homeHeavyTeams, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
 import { createLeague } from '../src/league/create';
 import { divisionsFor } from '../src/league/eras';
 import { postseasonStartDay } from '../src/league/postseason';
@@ -20,10 +20,11 @@ const FRANCHISES_2026 = store.season(2026)!.teams.map((t) => t.franchise);
 function inputFor(year: number, seed: string, extra: Partial<ScheduleInput> = {}): ScheduleInput {
   const rule = scheduleRule(store.schedule!, year)!;
   const sd = store.season(year);
+  const franchises = sd ? sd.teams.map((t) => t.franchise) : FRANCHISES_2026;
+  const divs = divisionsOf(sd, franchises);
   return {
-    rule, teams: rule.teams ?? FRANCHISES_2026.length,
-    franchises: sd ? sd.teams.map((t) => t.franchise) : FRANCHISES_2026,
-    rng: new Rng(seed), ...extra,
+    rule, teams: rule.teams ?? FRANCHISES_2026.length, franchises,
+    ...(divs ? { divisions: divs.teams } : {}), rng: new Rng(seed), ...extra,
   };
 }
 
@@ -244,9 +245,9 @@ describe('연전 단위 일정 생성기 (S33·S33F)', () => {
     expect(JSON.stringify(a.days)).not.toBe(JSON.stringify(c.days));
   });
 
-  it('아직 만들지 않은 연전 틀과 구단 수가 다른 월드는 오류', () => {
+  it('아직 만들지 않은 연전 틀, 리그 나눔이 없는 1999, 구단 수가 다른 월드는 오류', () => {
     expect(() => generatePlan(inputFor(2019, 'x'))).toThrow(/연전 틀/);
-    expect(() => generatePlan(inputFor(1999, 'x'))).toThrow(/연전 틀/);
+    expect(() => generatePlan(inputFor(1999, 'x', { divisions: undefined }))).toThrow(/리그 나눔/);
     expect(() => generatePlan(inputFor(2026, 'x', { teams: 8 }))).toThrow(/구단/);
   });
 });
@@ -331,7 +332,8 @@ describe('전 시대 연전 틀 (5단계)', () => {
     for (let y = 1982; y <= 2027; y++) {
       const rule = ruleOf(y);
       const franchises = store.season(y)?.teams.map((t) => t.franchise) ?? FRANCHISES_2026;
-      const world = { year: y, teams: franchises.map((franchise) => ({ franchise })), gamesPerTeam: rule.games, schedule: rule } as unknown as Parameters<typeof planForWorld>[0];
+      const divisions = divisionsOf(store.season(y), franchises) ?? undefined;
+      const world = { year: y, teams: franchises.map((franchise) => ({ franchise })), gamesPerTeam: rule.games, schedule: rule, divisions } as unknown as Parameters<typeof planForWorld>[0];
       for (let s = 0; s < SEEDS; s++) {
         const p = planForWorld(world, new Rng(`all-${y}-${s}`));
         const games = new Array(franchises.length).fill(0);
@@ -514,5 +516,129 @@ describe('양대 리그 나눔 (A1)', () => {
     expect(divisionsOf(store.season(1999), [...f.slice(0, 7), '가상'])).toBeNull();
     expect(divisionsOf(store.season(1999), [...f, '가상'])).toBeNull();
     expect(divisionsOf(store.season(2026), FRANCHISES_2026)).toBeNull();
+  });
+});
+
+describe('1999·2000 일정 (A2)', () => {
+  const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
+  const rule1999 = scheduleRule(store.schedule!, 1999)!;
+  const divs1999 = divisionsOf(store.season(1999), store.season(1999)!.teams.map((t) => t.franchise))!.teams;
+  const leagueOf = (divs: [number[], number[]]) => {
+    const lg = new Array<number>(8);
+    divs.forEach((d, k) => d.forEach((t) => { lg[t] = k; }));
+    return lg;
+  };
+  const lg1999 = leagueOf(divs1999);
+
+  it('1999 × 50시드: 검사 통과, 같은 리그 상대별 20(홈 10)·다른 리그 18(홈 9), 팀당 132·홈 66 (시즌 자료와 같다)', () => {
+    const sd = store.season(1999)!;
+    for (let s = 0; s < SEEDS; s++) {
+      const p = plan(1999, s);
+      expect(planProblems(p, inputFor(1999, `sched-${s}`)), `${s}`).toEqual([]);
+      const m = meetings(p, 8);
+      for (let a = 0; a < 8; a++) {
+        for (let b = 0; b < 8; b++) if (a !== b) expect(m[a][b], `${s} ${a}-${b}`).toBe(lg1999[a] === lg1999[b] ? 10 : 9);
+        expect(m[a].reduce((x, z) => x + z, 0) + m.reduce((x, row) => x + row[a], 0), `${s} ${a}`).toBe(132);
+        const real = sd.teams[a].home.split('-').map(Number).reduce((x, z) => x + z, 0);
+        expect(m[a].reduce((x, z) => x + z, 0), `${s} ${a}`).toBe(real);
+      }
+    }
+  });
+
+  it('1999 연전 구성: 같은 리그 3연전 4번 + 2연전 4번, 다른 리그 3연전 6번', () => {
+    for (let s = 0; s < SEEDS; s += 5) {
+      const p = plan(1999, s);
+      for (let a = 0; a < 8; a++) {
+        for (let b = a + 1; b < 8; b++) {
+          const lens = p.series.filter((x) => (x.home === a && x.away === b) || (x.home === b && x.away === a)).map((x) => x.len).sort();
+          expect(lens, `${s} ${a}-${b}`).toEqual(lg1999[a] === lg1999[b] ? [2, 2, 2, 2, 3, 3, 3, 3] : [3, 3, 3, 3, 3, 3]);
+        }
+      }
+    }
+  });
+
+  it('1999: 마지막 2주(본 일정 끝 14일)에 다른 리그 경기 0, 전반기 2연전은 개막 주말뿐, 2연전 주는 올스타 뒤', () => {
+    const allStar = rule1999.breaks.find((b) => b.reason === '올스타')!;
+    for (let s = 0; s < SEEDS; s++) {
+      const p = plan(1999, s);
+      for (let i = p.mainEnd - 13; i <= p.mainEnd; i++) {
+        for (const g of p.days[i]) expect(lg1999[g.home], `${s} ${dateOf(rule1999, i)}`).toBe(lg1999[g.away]);
+      }
+      const firstHalfTwo = p.series.filter((x) => x.len === 2 && dateOf(rule1999, x.day) < allStar.from);
+      expect(firstHalfTwo.every((x) => x.day === 0), `${s}`).toBe(true);
+      expect(firstHalfTwo.length, `${s}`).toBe(4); // 개막 토·일: 두 리그 같은 리그 2연전
+      for (const x of firstHalfTwo) expect(lg1999[x.home], `${s}`).toBe(lg1999[x.away]);
+      // 2연전 주(목·금 2연전)는 올스타 휴식 뒤
+      const thuTwo = p.series.filter((x) => x.len === 2 && weekdayOf(dateOf(rule1999, x.day)) === 4);
+      expect(thuTwo.length, `${s}`).toBeGreaterThan(0);
+      expect(thuTwo.every((x) => dateOf(rule1999, x.day) > allStar.to), `${s}`).toBe(true);
+    }
+  });
+
+  it('1999: 마지막 경기가 참고 종료일(9월 19일) 전, 6주 안 (우천 없음)', () => {
+    for (let s = 0; s < SEEDS; s += 5) {
+      const end = dateOf(rule1999, plan(1999, s).days.length - 1);
+      expect(end <= rule1999.endRef!, `${s} ${end}`).toBe(true);
+      expect(end >= addDays(rule1999.endRef!, -42), `${s} ${end}`).toBe(true);
+    }
+  });
+
+  it('2000 × 50시드: 상대별 19, 홈 67이 리그마다 두 팀 (남는 1경기는 잔여 경기)', () => {
+    const sd = store.season(2000)!;
+    const lg = leagueOf(divisionsOf(sd, sd.teams.map((t) => t.franchise))!.teams);
+    for (let s = 0; s < SEEDS; s++) {
+      const p = plan(2000, s);
+      expect(planProblems(p, inputFor(2000, `sched-${s}`)), `${s}`).toEqual([]);
+      const m = meetings(p, 8);
+      for (let a = 0; a < 8; a++) for (let b = a + 1; b < 8; b++) expect(m[a][b] + m[b][a], `${s} ${a}-${b}`).toBe(19);
+      const heavy = m.map((row, i) => (row.reduce((x, z) => x + z, 0) === 67 ? i : -1)).filter((i) => i >= 0);
+      expect(heavy.length, `${s}`).toBe(4);
+      expect(heavy.filter((i) => lg[i] === 0).length, `${s}`).toBe(2);
+    }
+  });
+
+  it('2000 홈 배분: 홀짝 규칙이 한 리그로 몰리는 구단 순서(1982 시작 리그 등)면 리그 안에서 다시 골라 리그마다 두 팀', () => {
+    const r2000 = scheduleRule(store.schedule!, 2000)!;
+    // 자료 순서(리그가 0~3·4~7)는 홀짝 규칙 그대로
+    expect(homeHeavyTeams(r2000, 8, undefined, [[0, 1, 2, 3], [4, 5, 6, 7]])).toEqual(homeHeavyTeams(r2000, 8));
+    // 짝수 색인이 모두 한 리그면 리그마다 둘
+    const divs: [number[], number[]] = [[0, 2, 4, 6], [1, 3, 5, 7]];
+    expect(homeHeavyTeams(r2000, 8)).toEqual([0, 2, 4, 6]);
+    const heavy = homeHeavyTeams(r2000, 8, undefined, divs);
+    expect(heavy.filter((t) => divs[0].includes(t)).length).toBe(2);
+    expect(heavy.filter((t) => divs[1].includes(t)).length).toBe(2);
+    for (let s = 0; s < 10; s++) {
+      const input = { ...inputFor(2000, `mix-${s}`), divisions: divs };
+      const p = generatePlan(input);
+      expect(planProblems(p, input), `${s}`).toEqual([]);
+      const m = meetings(p, 8);
+      const h67 = m.map((row, i) => (row.reduce((x, z) => x + z, 0) === 67 ? i : -1)).filter((i) => i >= 0);
+      expect(h67.filter((t) => divs[0].includes(t)).length, `${s}`).toBe(2);
+    }
+  });
+
+  it('월드와 시즌: 1999 월드는 연전 생성기(S33-99), 리그 나눔이 없는 1999 월드는 하루 한 경기씩', () => {
+    const w = worldForYear(store, 1999, FAST);
+    expect(framedRule(w)?.frame).toBe('S33-99');
+    // 시즌 일정: 개막 토·일은 두 리그 같은 리그 2연전 (하루씩 일정이면 둘째 날 대진이 다르다)
+    const season = Season.start(w, FAST, 'div-1999', { cal: { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 } });
+    const lg = leagueOf(w.divisions!.teams);
+    expect(season.schedule[0].length).toBe(4);
+    expect(season.schedule[1]).toEqual(season.schedule[0]);
+    for (const g of season.schedule[0]) expect(lg[g.home]).toBe(lg[g.away]);
+    const { divisions: _, ...single } = w;
+    expect(framedRule(single)).toBeUndefined();
+    const p = planForWorld(single, new Rng('single'));
+    expect(p.series).toEqual([]);
+    const games = new Array(8).fill(0);
+    for (const d of p.days) for (const g of d) { games[g.home]++; games[g.away]++; }
+    expect(games).toEqual(new Array(8).fill(132));
+  });
+
+  it('같은 시드 = 같은 1999 일정', () => {
+    const a = generatePlan(inputFor(1999, 'same'));
+    const b = generatePlan(inputFor(1999, 'same'));
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect(JSON.stringify(a.days)).not.toBe(JSON.stringify(generatePlan(inputFor(1999, 'other')).days));
   });
 });
