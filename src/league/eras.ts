@@ -6,6 +6,7 @@
 //   자료가 없는 해(2027년 이후)는 변화가 없다.
 
 import type { DataStore, Meta } from '../data/types';
+import { divisionsOf, type Divisions } from '../data/schedule';
 import type { LeagueTeam } from './types';
 import { ruleOf } from './rules';
 import type { LeagueState } from './types';
@@ -80,4 +81,13 @@ export function changeText(c: TeamChange): string {
   if (c.kind === 'rename') return `${c.from} → ${c.to} 구단 명칭 변경`;
   if (c.kind === 'succeed') return `${c.from}의 선수단을 ${c.to}가 승계`;
   return `${c.name} 창단`;
+}
+
+/**
+ * 그 해(year)의 양대 리그 나눔 (일정 개편 기획안 10.2): 시즌 자료의 `league` 칸이 두 가지인 해(1999·2000 드림·매직)만,
+ * 게임 구단을 계보로 자료 구단과 맞춘다. 다른 해·계보가 하나라도 안 맞는 리그는 null (단일 리그).
+ * 저장하지 않는다: 연도 + 구단 계보 + 자료로 언제든 같은 값이 나온다
+ */
+export function divisionsFor(store: Pick<DataStore, 'season'>, year: number, teams: Pick<LeagueTeam, 'franchise'>[]): Divisions | null {
+  return divisionsOf(store.season(year), teams.map((t) => t.franchise));
 }

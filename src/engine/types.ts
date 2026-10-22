@@ -1,6 +1,6 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense } from './defense';
-import type { YearScheduleRule } from '../data/schedule';
+import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -136,6 +136,8 @@ export interface World {
   schedule?: YearScheduleRule;
   /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 5팀, 기획안 2.2). 없으면 시드로 */
   openingHosts?: number[];
+  /** 양대 리그 나눔 (1999·2000 드림·매직, 일정 개편 기획안 10.2). 없으면 단일 리그. 엔진은 받은 묶음만 쓰고 저장하지 않는다 */
+  divisions?: Divisions;
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */

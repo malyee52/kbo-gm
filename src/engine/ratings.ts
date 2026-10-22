@@ -8,7 +8,7 @@
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
 import type { DefenseAward, PpaData, ScheduleData } from '../data/types';
-import { scheduleRule } from '../data/schedule';
+import { divisionsOf, scheduleRule } from '../data/schedule';
 import { pickOpeningHosts, rankedFromSeason } from './schedule';
 import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
@@ -490,6 +490,8 @@ export function buildWorld(input: BuildWorldInput): World {
   const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
   const franchises = teams.map((t) => t.franchise);
   const hosts = pickOpeningHosts(year, rankedFromSeason(history[0], franchises), franchises);
+  // 양대 리그 나눔 (1999·2000, 그 해 시즌 자료의 league 칸)
+  const divisions = divisionsOf(current, franchises);
   return {
     year,
     gamesPerTeam: current.games,
@@ -500,6 +502,7 @@ export function buildWorld(input: BuildWorldInput): World {
     players,
     ...(rule ? { schedule: rule } : {}),
     ...(hosts ? { openingHosts: hosts } : {}),
+    ...(divisions ? { divisions } : {}),
   };
 }
 

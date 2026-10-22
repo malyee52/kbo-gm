@@ -129,6 +129,34 @@ export function fitRuleToTeams(rule: YearScheduleRule, n: number): YearScheduleR
   return { ...rule, vs, games: vs * (n - 1), unscheduled: perOpp * (n - 1) };
 }
 
+/** 양대 리그 나눔 (1999·2000 드림·매직, 일정 개편 기획안 10.2). teams[k]는 names[k] 리그의 구단 색인 (오름차순) */
+export interface Divisions {
+  names: [string, string];
+  teams: [number[], number[]];
+}
+
+/**
+ * 그 해 시즌 자료의 구단별 `league` 칸으로 양대 리그 나눔을 만든다. `league` 값이 꼭 두 가지인 해만, 연도를 코드에 박지 않는다.
+ * franchises는 게임 구단의 계보 (구단 색인 순). 자료 구단과 계보로 하나씩 맞지 않으면(가상 창단·자유 모드 구단 변화) null = 단일 리그 (임시 규칙).
+ * 리그 이름은 가나다순 (드림, 매직)
+ */
+export function divisionsOf(season: { teams: { franchise: string; league: string | null }[] } | undefined, franchises: string[]): Divisions | null {
+  if (!season) return null;
+  const names = [...new Set(season.teams.map((t) => t.league))];
+  if (names.length !== 2 || names.some((x) => !x)) return null;
+  const sorted = (names as string[]).sort((a, b) => (a < b ? -1 : 1)) as [string, string];
+  if (season.teams.length !== franchises.length || new Set(franchises).size !== franchises.length) return null;
+  const leagueOf = new Map(season.teams.map((t) => [t.franchise, t.league]));
+  const teams: [number[], number[]] = [[], []];
+  for (let i = 0; i < franchises.length; i++) {
+    const lg = leagueOf.get(franchises[i]);
+    if (lg === undefined) return null;
+    teams[sorted.indexOf(lg!)].push(i);
+  }
+  if (!teams[0].length || !teams[1].length) return null;
+  return { names: sorted, teams };
+}
+
 /** 규칙 표가 없을 때의 개막일: 3월 넷째 토요일 (3/22~3/28, 2027~ 규칙과 같다) */
 export function defaultOpening(year: number): IsoDate {
   return ruleDay(year, { weekday: 6, from: '03-22', to: '03-28' });

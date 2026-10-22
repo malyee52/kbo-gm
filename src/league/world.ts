@@ -15,6 +15,7 @@ import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
+import { divisionsFor } from './eras';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
@@ -153,5 +154,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const last = league.lastSeason;
   const ranked = last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : rankedFromSeason(store.season(year - 1), franchises);
   const hosts = pickOpeningHosts(year, ranked, franchises);
-  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players, ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}) };
+  // 양대 리그 나눔 (1999·2000): 결산의 구단 변화(쌍방울 → SK 승계) 뒤 새 해 자료로 다시 계산한다
+  const divisions = divisionsFor(store, year, teams);
+  return {
+    year, gamesPerTeam: games, rules, league: lg, env, teams, players,
+    ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}), ...(divisions ? { divisions } : {}),
+  };
 }

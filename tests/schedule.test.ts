@@ -1,11 +1,12 @@
 // 연전 단위 일정 생성기 (src/engine/schedule.ts). 일정 개편 기획안 8장 3단계, 7장 검증 기준
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
-import { addDays, daysBetween, defaultOpening, fitRuleToTeams, openingOf, scheduleRule, weekdayOf, type YearScheduleRule } from '../src/data/schedule';
+import { addDays, daysBetween, defaultOpening, divisionsOf, fitRuleToTeams, openingOf, scheduleRule, weekdayOf, type Divisions, type YearScheduleRule } from '../src/data/schedule';
 import { DEFAULT_PARAMS, Season, worldForYear } from '../src/engine';
 import { Rng } from '../src/engine/rng';
 import { framedRule, generatePlan, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
 import { createLeague } from '../src/league/create';
+import { divisionsFor } from '../src/league/eras';
 import { postseasonStartDay } from '../src/league/postseason';
 import { worldFromLeague } from '../src/league/world';
 
@@ -471,5 +472,47 @@ describe('전 시대 연전 틀 (5단계)', () => {
         expect(m[a].reduce((x, z) => x + z, 0) + m.reduce((x, row) => x + row[a], 0)).toBe(140);
       }
     }
+  });
+});
+
+// 6단계: 1999·2000 드림·매직 양대 리그 (기획안 10장 A1·A2)
+describe('양대 리그 나눔 (A1)', () => {
+  const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
+  /** 리그별 계보 이름 (리그 이름 순) */
+  const byName = (w: { teams: { franchise: string }[]; divisions?: Divisions }) =>
+    w.divisions ? w.divisions.teams.map((ts) => ts.map((i) => w.teams[i].franchise).sort()) : null;
+
+  it('1999·2000은 기획안 10.2 표대로, 1998·2001은 단일 리그', () => {
+    const w1999 = worldForYear(store, 1999, FAST);
+    expect(w1999.divisions?.names).toEqual(['드림', '매직']);
+    expect(byName(w1999)).toEqual([['KIA', '두산', '롯데', '현대계'].sort(), ['LG', '삼성', '쌍방울', '한화'].sort()]);
+    expect(byName(worldForYear(store, 2000, FAST))).toEqual([['KIA', '두산', '삼성', '현대계'].sort(), ['LG', 'SSG', '롯데', '한화'].sort()]);
+    expect(worldForYear(store, 1998, FAST).divisions).toBeUndefined();
+    expect(worldForYear(store, 2001, FAST).divisions).toBeUndefined();
+  });
+
+  it('리그 상태 월드: 1999 바로 시작과 1998 시작 → 1999가 같은 나눔, 2000은 쌍방울 → SK 승계 뒤 새 해 자료로', () => {
+    const direct = worldFromLeague(createLeague(store, 1999, 'div', FAST).league, store, FAST);
+    expect(byName(direct)).toEqual(byName(worldForYear(store, 1999, FAST)));
+    const from1998 = structuredClone(createLeague(store, 1998, 'div', FAST).league);
+    from1998.year = 1999;
+    from1998.lastSeason = null;
+    expect(byName(worldFromLeague(from1998, store, FAST))).toEqual(byName(direct));
+    // 1999 리그를 2000으로: 승계 전(쌍방울 계보)은 자료와 맞지 않아 단일 리그, 승계 뒤에는 2000 나눔
+    const to2000 = structuredClone(createLeague(store, 1999, 'div', FAST).league);
+    to2000.year = 2000;
+    to2000.lastSeason = null;
+    const ssang = to2000.teams.findIndex((t) => t.franchise === '쌍방울');
+    expect(divisionsFor(store, 2000, to2000.teams)).toBeNull();
+    to2000.teams[ssang] = { ...to2000.teams[ssang], name: 'SK', franchise: 'SSG' };
+    expect(byName(worldFromLeague(to2000, store, FAST))).toEqual(byName(worldForYear(store, 2000, FAST)));
+  });
+
+  it('계보가 하나라도 안 맞거나 구단 수가 다르면 단일 리그 (null)', () => {
+    const f = store.season(1999)!.teams.map((t) => t.franchise);
+    expect(divisionsOf(store.season(1999), f)).not.toBeNull();
+    expect(divisionsOf(store.season(1999), [...f.slice(0, 7), '가상'])).toBeNull();
+    expect(divisionsOf(store.season(1999), [...f, '가상'])).toBeNull();
+    expect(divisionsOf(store.season(2026), FRANCHISES_2026)).toBeNull();
   });
 });
