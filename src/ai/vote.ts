@@ -110,13 +110,17 @@ export const INTEREST_WEIGHTS: Record<FutureRuleKey, Partial<Record<FactKey, num
   zone: { kPitch: 0.5, eye: -0.5 },
 };
 
-/** 점수 조정값 (임시값, V5 longsim 50시즌 × 시드 a·b로 맞춤. reports/longsim-vote-50.md) */
+/**
+ * 점수 조정값 (임시값). V5 longsim 50시즌 × 시드 a·b 안건 25건으로 맞췄다 (reports/longsim-vote-50.md).
+ * 처음 값(meritBase 0.3·span 0.5·interest 1)은 가결률 40%·결정표 36%로 목표(가결률 50~80%, 결정표 25% 이하) 밖이었다.
+ * 신호가 문턱을 많이 넘은 안건에 명분을 더 주고(span ↑) 이해 배율을 낮춰(구단 사이 갈림은 남김) 맞췄다
+ */
 export const VOTE_PARAMS = {
   /** 명분 = base + span × (신호가 문턱을 넘은 정도, 0~1) */
-  meritBase: 0.3,
-  meritSpan: 0.5,
+  meritBase: 0.2,
+  meritSpan: 1.5,
   /** 이해 항 배율 (표준화한 지표의 가중합에 곱한다) */
-  interest: 1,
+  interest: 0.6,
   /** 성향 가산: 전력을 키우는 안에 우승 도전, 비용을 줄이는 안에 리빌딩 */
   lean: 0.2,
   /** 현상 유지 (보통 안건, 큰 안건) */
