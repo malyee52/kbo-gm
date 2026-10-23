@@ -91,7 +91,9 @@ export function makeLateDraftee(league: LeagueState, view: LeagueView, x: LateDr
  * (복무 기간 약 2년, 입대 해는 자료에 없다). 복무 중이면 전역 다음 해에 복귀하는 상태를, 아니면 null.
  */
 export function servingAt(store: Pick<DataStore, 'military'>, id: string, year: number): Military | null {
-  const s = store.military?.[id]?.served;
+  const rec = store.military?.[id];
+  const s = rec?.served;
   if (!s?.end || s.end < year || s.end > year + 1) return null;
-  return { state: 'serving', enlisted: year - 1, returnYear: s.end + 1, basis: 'record', note: s.unit };
+  return { state: 'serving', enlisted: year - 1, returnYear: s.end + 1, basis: rec?.src === 'wiki' ? 'wiki' : 'record', note: s.unit,
+           ...(s.kind ? { kind: s.kind } : {}) };
 }

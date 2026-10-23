@@ -10,6 +10,7 @@ function basisText(p: LeaguePlayer): string {
   const m = p.military;
   if (!p.real) return '게임이 만든 신인';
   if (m?.basis === 'record') return `실제 자료: ${m.note ?? ''}`;
+  if (m?.basis === 'wiki') return `위키 자료: ${m.note ?? ''}`;
   if (m?.basis === 'estimate') return `짐작: ${m.note ?? '나이'}`;
   return '실제 자료에 복무·면제 기록 없음';
 }

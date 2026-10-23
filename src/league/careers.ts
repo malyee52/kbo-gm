@@ -44,11 +44,12 @@ export function initialMilitary(p: Pick<LeaguePlayer, 'id' | 'foreign' | 'real' 
                                 rec?: MilitaryRecord): Military | undefined {
   if (p.foreign) return undefined;
   if (!p.real) return { state: 'pending' };
-  if (rec?.exempt && rec.exempt.year <= startYear) return { state: 'exempt', basis: 'record', note: rec.exempt.event };
+  const basis = rec?.src === 'wiki' ? 'wiki' : 'record';
+  if (rec?.exempt && rec.exempt.year <= startYear) return { state: 'exempt', basis, note: rec.exempt.event };
   if (rec?.served) {
     const end = rec.served.end;
-    if (end !== undefined ? end < startYear : startYear >= PROFILE_YEAR) return { state: 'done', basis: 'record', note: rec.served.unit };
-    if (end !== undefined) return { state: 'pending', basis: 'record', note: `${rec.served.unit} (${end}년까지 복무, 시작 뒤)` };
+    if (end !== undefined ? end < startYear : startYear >= PROFILE_YEAR) return { state: 'done', basis, note: rec.served.unit };
+    if (end !== undefined) return { state: 'pending', basis, note: `${rec.served.unit} (${end}년까지 복무, 시작 뒤)` };
   }
   const age = p.birthYear ? startYear - p.birthYear : null;
   if (age === null || age >= MILITARY_ASSUME_DONE_AGE) return { state: 'done', basis: 'estimate' };

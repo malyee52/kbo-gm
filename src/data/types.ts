@@ -297,10 +297,13 @@ export interface ManagerInfo {
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
 export interface MilitaryRecord {
-  /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름) */
-  served?: { unit: string; end?: number };
-  /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도 */
+  /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름).
+   *  src가 wiki면 위키 병역 칸: unit '현역'·'보충역'도 있고 kind로 복무 형태를 알린다 (없으면 군 야구단), end는 글에 적힌 마지막 해 */
+  served?: { unit: string; end?: number; kind?: 'active' | 'reserve' };
+  /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도. src가 wiki면 예술체육요원·병역 면제 (해를 모르면 첫 1군 시즌) */
   exempt?: { year: number; event: string };
+  /** 'wiki' = 위 실제 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (2026-10-23) */
+  src?: 'wiki';
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */
