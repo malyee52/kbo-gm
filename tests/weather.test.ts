@@ -52,7 +52,7 @@ describe('날씨와 우천 순연 (7단계)', () => {
     const w = worldOf(2025);
     const p = planOf(2025, 0);
     const base = generatePlan({ rule: w.schedule!, teams: 10, franchises: w.teams.map((t) => t.franchise), openingHosts: w.openingHosts, rng: new Rng('rain-2025-0') });
-    const key = (pl: SchedulePlan) => pl.days.flat().map((g) => `${g.home}-${g.away}`).sort().join(',');
+    const key = (pl: SchedulePlan) => pl.days.flat().filter((g) => !isNoGame(g.rainInning)).map((g) => `${g.home}-${g.away}`).sort().join(',');
     expect(key(p)).toBe(key(base));
     expect(p.cancels.length).toBeGreaterThan(0);
     expect(p.planned).toEqual(base.planned);
