@@ -675,8 +675,16 @@ export const DEFAULT_PARAMS: EngineParams = {
     { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
     { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
   ],
-  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts로 그 해 실제 무승부 비율에 맞춘 값
-  timeLimit: {},
+  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts --seasons 40으로 그 해 실제 무승부 비율에 맞춘 값 (2026-10-23).
+  // 시작 회는 12회, 12회 끝 동점 비율이 실제 무승부보다 적으면 한 회씩 앞당겼다 (사용자 결정 전 임시). 1982는 실제 무승부 0이라 넣지 않는다
+  timeLimit: {
+    1983: { from: 12, end: 0.98 }, 1984: { from: 11, end: 0.35 }, 1985: { from: 12, end: 0.512 }, 1986: { from: 10, end: 0.392 },
+    1987: { from: 10, end: 0.386 }, 1988: { from: 11, end: 0.459 }, 1989: { from: 10, end: 0.399 }, 1990: { from: 11, end: 0.845 },
+    1991: { from: 11, end: 0.755 }, 1992: { from: 11, end: 0.572 }, 1993: { from: 10, end: 0.405 }, 1994: { from: 11, end: 0.369 },
+    1995: { from: 10, end: 0.376 }, 1996: { from: 10, end: 0.377 }, 1997: { from: 11, end: 0.869 }, 1998: { from: 11, end: 0.434 },
+    1999: { from: 10, end: 0.544 }, 2000: { from: 10, end: 0.366 }, 2001: { from: 10, end: 0.54 }, 2002: { from: 10, end: 0.396 },
+    2004: { from: 10, end: 0.911 },
+  },
 
   restChance: 0.6,
   catcherRestChance: 0.6,
