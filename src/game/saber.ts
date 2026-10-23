@@ -1,5 +1,5 @@
 // 세이버메트릭스 기록: 그 시즌 리그 전체 기록을 기준으로 계산한다 (시뮬레이션 기록 기준).
-// 구장 효과가 없는 엔진이라 wRC+는 구장 보정을 하지 않는다. 고의4구 기록이 없어 볼넷 전체를 쓴다.
+// wRC+는 아직 구장 보정을 하지 않는다 (엔진에는 2015년 뒤 실측 구장 효과가 있다. 보정은 구장효과 기획안 P2). 고의4구 기록이 없어 볼넷 전체를 쓴다.
 
 import { LINEAR_WEIGHTS, type BatLine, type PitLine } from '../engine';
 import { WOBA_SCALE } from '../ai/value';
