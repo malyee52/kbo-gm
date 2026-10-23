@@ -8,6 +8,9 @@ __pycache__
 
 # 하드힛 유료 CSV 원본 (사용자가 직접 받음, 공개 저장소에 올리지 않는다)
 data-src/hardhit/
+# 하드힛 가공값도 공개하지 않는다 (유료 구독자 자료, 2026-10-24 사용자 지시로 git 기록에서 지움)
+data-src/hardhit_derived/
+reports/hardhit-*
 
 # 네이버 문자중계 기반 투구 단위 원본 (Hugging Face slothman3878/kbo_playbyplay, 가공값만 커밋)
 data-src/naver_pbp/
