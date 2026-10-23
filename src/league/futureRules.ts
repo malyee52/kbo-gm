@@ -15,24 +15,35 @@ export const SHIFT_STREAK = 2;
  * 외국인 보유 한도 판정 (2026-10-22 사용자 결정 "국내 선수 비율 이런 거 말고"): 리그 흥행·재정 신호로 정한다 (모두 임시값).
  * 전에는 국내 선수층 두께(상위 270명 기여 합)로 정했는데, 시작 때 실존 유망주가 자라는 언덕(2030년대 초)을 "선수층이 두꺼워졌다"로 읽어
  * 외국인 한도가 줄었다. 국제대회 성적 신호는 국가대표 기획 뒤 (intlForeignSignal)
+ *
+ * 문턱은 규칙 알림 5차 결정 5(2026-10-23, "15~20년에 한 번쯤 켜지게")와 구단 투표 기획 결정 9(C2)로 낮췄다.
+ * 전 값(관중 3년·3%, 부담 15%)은 longsim 50시즌 × 시드 a·b에서 외국인 한도 변경이 0.5번(100년에 한 번)이었고,
+ * 관중이 해마다 ±1% 안팎으로 흔들려 4개 값이 내리 줄어드는 일이 드물었다. C2(관중 2년·2%, 부담 12%)는
+ * 같은 실측에서 2.5번(약 20년에 한 번, 구단투표 기획안 6장). 표결이 없어도(② 신호가 곧 변경) 이 값을 쓴다
  */
 export const FOREIGN_JUDGE = {
-  /** 리그 경기당 관중이 이만큼 시즌 이어서 줄면 (해마다 전해보다 적으면) 볼거리를 늘리려 한도 +1 */
-  attendanceYears: 3,
-  /** 그동안 줄어든 폭이 이 비율 이상일 때만 (작은 흔들림은 넘긴다) */
-  attendanceDrop: 0.03,
+  /** 리그 경기당 관중이 이만큼 시즌 이어서 줄면 (해마다 전해보다 적으면) 볼거리를 늘리려 한도 +1 (전 3, 결정 9 C2) */
+  attendanceYears: 2,
+  /** 그동안 줄어든 폭이 이 비율 이상일 때만 (작은 흔들림은 넘긴다, 전 0.03, 결정 9 C2) */
+  attendanceDrop: 0.02,
   /** 외국인 연봉 부담과 적자가 이만큼 시즌 이어서 크면 한도 −1 */
   burdenYears: 3,
   /**
    * 외국인 연봉 부담: 1군 구단 외국인 연봉 합 ÷ 수입 합이 이 이상. longsim 2026 시작 15시즌(시드 a)의 평소 값이 9.5~13.7%라
-   * 그보다 무거울 때만 (한도가 4명으로 늘면 부담이 커져 다시 줄이는 쪽으로 돌아온다)
+   * 그보다 무거울 때만 (한도가 4명으로 늘면 부담이 커져 다시 줄이는 쪽으로 돌아온다).
+   * 전 0.15, 결정 9 C2로 0.12: 50시즌 실측에서 한도 3명일 때 8~12%, 4명으로 늘어난 뒤 12.9~13.0%라 늘린 뒤에야 걸린다
    */
-  foreignShare: 0.15,
+  foreignShare: 0.12,
   /** 적자 구단(그 해 수지 < 0) 수가 이 이상. 같은 실행의 평소 값 2~6곳 */
   deficitTeams: 5,
 };
 /** 바뀐 항목은 이만큼 시즌 동안 다시 후보가 되지 않는다 (임시값) */
 export const SHIFT_COOLDOWN = 3;
+/**
+ * 단장 회의에서 부결된 항목·방향은 이만큼 시즌 동안 다시 안건이 되지 않는다 (구단 투표 결정 5).
+ * SHIFT_COOLDOWN과 같은 셈법: 부결된 안건의 적용 해가 Y이면 Y·Y+1 해 결산을 건너뛰고 Y+2 해 결산(Y+3 시즌 안건)부터. 반대 방향은 쉬지 않는다
+ */
+export const REJECT_COOLDOWN = 2;
 
 export type FutureRuleKey = 'ball' | 'zone' | 'extra' | 'roster' | 'foreign' | 'capGrowth';
 
@@ -123,6 +134,8 @@ export interface RuleShift {
   reason: string;
   /** 판단에 쓴 신호 값 */
   signal: number;
+  /** 단장 회의 표결 결과 (구단 투표, 2026-10-23부터. 표결 없이 바뀐 예전 기록에는 없다). user: 플레이어 구단이 낸 표 */
+  vote?: { yes: number; no: number; need: number; user?: 'yes' | 'no' };
 }
 
 /** 미래 규칙 변경을 쓰는 리그인가: 기본 모드만 (판타지·자유 모드는 끈다) */
@@ -160,11 +173,21 @@ function streak(signals: RuleSignal[], side: (s: RuleSignal) => number): 1 | -1 
 }
 
 /**
- * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정한다 (한 해 최대 1개).
- * 난수는 후보가 여럿일 때만 `${seed}/rules/${다음 해}` 갈래에서 하나 쓴다 (다른 진행의 난수를 건드리지 않는다).
- * 돌려주는 값은 새로 생긴 변경 (없으면 null)
+ * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정해 곧바로 넣는다 (한 해 최대 1개, 표결 없이).
+ * 돌려주는 값은 새로 생긴 변경 (없으면 null). 구단 투표가 켜진 리그는 proposeFutureRule로 안건만 받아 단장 회의에서 표결한다 (league/ruleVote.ts)
  */
 export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleShift | null {
+  const shift = proposeFutureRule(league, signal);
+  if (shift) (league.ruleShifts ??= []).push(shift);
+  return shift;
+}
+
+/**
+ * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경 후보를 하나 고른다 (넣지는 않는다).
+ * 난수는 후보가 여럿일 때만 `${seed}/rules/${다음 해}` 갈래에서 하나 쓴다 (다른 진행의 난수를 건드리지 않는다).
+ * 가결 뒤 3시즌(SHIFT_COOLDOWN), 부결된 같은 방향은 2시즌(REJECT_COOLDOWN) 후보가 되지 않는다
+ */
+export function proposeFutureRule(league: LeagueState, signal: RuleSignal): RuleShift | null {
   if (!futureRulesOn(league)) return null;
   const next = signal.year + 1;
   // 신호는 자료 없는 해의 환경(2022~2026 평균 목표)으로 돈 2027 시즌부터 남긴다. 기준 해 = 처음 남긴 신호
@@ -185,6 +208,8 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
     if (after < spec.min - 1e-9 || after > spec.max + 1e-9) return;
     const last = (league.ruleShifts ?? []).filter((s) => s.key === key).at(-1);
     if (last && next - last.year < SHIFT_COOLDOWN + 1) return;
+    const rejected = (league.ruleVotes ?? []).filter((v) => v.key === key && !v.passed && Math.sign(v.after - v.before) === dir).at(-1);
+    if (rejected && next - rejected.year < REJECT_COOLDOWN + 1) return;
     cands.push({ key, dir, signal: round(signalValue), why });
   };
   const avg = (f: (s: RuleSignal) => number) => recent.reduce((a, s) => a + f(s), 0) / recent.length;
@@ -216,10 +241,7 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const pick = cands.length === 1 ? cands[0] : cands[new Rng(`${league.seed}/rules/${next}`).int(cands.length)];
   const spec = FUTURE_RULE_SPEC[pick.key];
   const before = futureValue(league, pick.key, signal.year);
-  const shift: RuleShift = { year: next, key: pick.key, before, after: round(before + pick.dir * spec.step), reason: `${pick.why} (게임 속 가상 결정)`, signal: pick.signal };
-  league.ruleShifts ??= [];
-  league.ruleShifts.push(shift);
-  return shift;
+  return { year: next, key: pick.key, before, after: round(before + pick.dir * spec.step), reason: `${pick.why} (게임 속 가상 결정)`, signal: pick.signal };
 }
 
 /** 외국인 한도 판정 하나 (방향 +1 확대·−1 축소, 판단에 쓴 신호 값, 까닭 문구) */

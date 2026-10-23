@@ -154,6 +154,8 @@ export function stageHeadline(s: GameSession): string[] {
   const pay = teamCapPayroll(L, me, next);
   const capText = cap ? `캡 여유 ${wonText(cap - pay, next)}` : `연봉 총액 ${wonText(pay, next)}`;
   switch (off.stage) {
+    case 'vote':
+      return [];
     case 'fa': {
       const offers = Object.keys(off.fa.userOffers).length;
       return [`${off.fa.round}/${Off.FA_ROUNDS}라운드`, `우리 제시 ${offers}건`, capText];

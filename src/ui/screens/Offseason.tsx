@@ -143,7 +143,8 @@ export function Offseason() {
         <li className={`done${record === 'settle' ? ' viewing' : ''}`}>
           <button type="button" className="step-btn" aria-pressed={record === 'settle'} onClick={() => setRecord(record === 'settle' ? null : 'settle')} title="결산 기록 보기">결산</button>
         </li>
-        {STAGES.map((s, i) => (
+        {/* 단장 회의는 안건이 있는 해만 */}
+        {STAGES.map((s, i) => (s === 'vote' && !off.vote ? null : (
           <li key={s} className={`${i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''}${record === s && i < stageIdx ? ' viewing' : ''}`} aria-current={i === stageIdx ? 'step' : undefined}>
             {i < stageIdx && s === 'second' && !off.second && !off.expansion
               ? <span title="이번 오프시즌은 2차 드래프트·특별 지명이 없어 건너뛰었습니다">{STAGE_LABEL[s]} <span className="muted">(없음)</span></span>
@@ -153,7 +154,7 @@ export function Offseason() {
                 ? <button type="button" className="step-btn" onClick={() => setRecord(null)} title="지금 단계로 돌아가기">{STAGE_LABEL[s]}</button>
                 : STAGE_LABEL[s]}
           </li>
-        ))}
+        )))}
       </ol>
 
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
