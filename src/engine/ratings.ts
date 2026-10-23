@@ -7,8 +7,9 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward, PpaData } from '../data/types';
-import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
+import type { DefenseAward, PlateData, PpaData } from '../data/types';
+import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
+import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -252,6 +253,15 @@ export function ppaRelOf(rows: Record<string, [number, number]> | undefined, sea
   return den > 0 ? (num + regress) / (den + regress) : undefined;
 }
 
+/** 선수의 사슬 실측 시즌 (plate.json)을 능력과 같은 시즌·가중치로 */
+function plateRows(rows: Record<string, number[]> | undefined, seasons: (SeasonData | undefined)[], w: readonly number[]): PlateSeason[] {
+  if (!rows) return [];
+  return seasons.flatMap((s, i) => {
+    const c = s && rows[String(s.year)];
+    return c ? [{ w: w[i] ?? 0, c }] : [];
+  });
+}
+
 export interface BuildWorldInput {
   year: number;
   /** 로스터와 소속 팀을 정하는 시즌 (보통 year와 같다) */
@@ -269,6 +279,8 @@ export interface BuildWorldInput {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 선수별 볼카운트 사슬 실측 (plate.json, 능력치 v2 16-1). 없으면 결과 기록으로 짐작한다 */
+  plate?: PlateData;
 }
 
 /**
@@ -359,6 +371,9 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
 export function buildWorld(input: BuildWorldInput): World {
   const { year, current, history, players: master, meta, params } = input;
   const lg = current.league.rates;
+  // 볼카운트 사슬 실측 몫 (능력치 v2 16-1): 그 해 리그 칸 상수. 시즌(Season)이 같은 식으로 다시 만들므로 시작 때 사슬 능력 = 실측
+  let lpCache: LeaguePlate | undefined;
+  const lpOf = () => (lpCache ??= leaguePlateFor(chainShapeFor(params, year), lg, params.plate));
   const histBat = history.map((s) => (s ? new Map(s.bat.map((r) => [r.id, r])) : undefined));
   const histPit = history.map((s) => (s ? new Map(s.pit.map((r) => [r.id, r])) : undefined));
 
@@ -429,6 +444,11 @@ export function buildWorld(input: BuildWorldInput): World {
       if (rows.length) pit.gb = pitGbOf(pit.hr, params);
       const pitPpa = ppaRelOf(input.ppa?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (pitPpa !== undefined) pit.ppaRel = pitPpa;
+      const pitPlate = plateRows(input.plate?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
+      if (pitPlate.length) {
+        const solved = solvedPitPlate(pit, lg, lpOf());
+        pit.plateRes = addPit(measuredPitPlate(pitPlate, solved, params.plate), solved, -1);
+      }
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
       // 시작 불펜 서열: 세이브와 같은 기준 시즌(예측은 직전, 역사 재현은 그 해)의 실제 쓰임
@@ -451,6 +471,11 @@ export function buildWorld(input: BuildWorldInput): World {
       if (gb !== undefined) bat.gb = gb;
       const batPpa = ppaRelOf(input.ppa?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (batPpa !== undefined) bat.ppaRel = batPpa;
+      const batPlate = plateRows(input.plate?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
+      if (batPlate.length) {
+        const solved = solvedBatPlate(bat, lg, lpOf(), params.plate);
+        bat.plateRes = addBat(measuredBatPlate(batPlate, solved, params.plate), solved, -1);
+      }
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다

@@ -1,5 +1,6 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense } from './defense';
+import type { BatPlate, PitPlate } from './plate';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -25,6 +26,11 @@ export interface BatSkill {
   gb?: number;
   /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
   ppaRel?: number;
+  /**
+   * 볼카운트 사슬 실측 몫 (능력치 v2 16-1, plate.ts): 실측 능력 − 결과 기록으로 푼 능력. 시즌마다 사슬 능력 = 그때 결과 비율로 푼 값 + 이 몫이라
+   * 시작 때는 실측 그대로이고, 성장으로 비율이 바뀌면 그만큼 따라간다. 실측이 없으면 undefined (푼 값 그대로)
+   */
+  plateRes?: BatPlate;
   /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
 }
@@ -49,6 +55,8 @@ export interface PitSkill {
   gb?: number;
   /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
   ppaRel?: number;
+  /** 볼카운트 사슬 실측 몫 (BatSkill.plateRes와 같은 뜻) */
+  plateRes?: PitPlate;
 }
 
 export interface SimPlayer {

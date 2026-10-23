@@ -1,14 +1,16 @@
 // 타석 결과 함수 (공통 규칙 계층): 타자·투수 능력과 그 순간의 보정으로 한 타석의 사건별 목표 확률을 낸다.
 // 어떤 해결기(resolver.ts)든 이 확률을 받아 타석을 끝낸다. 난수를 쓰지 않는다.
 
-import type { ParkRates } from '../data/types';
+import type { ParkRates, Rates } from '../data/types';
 import type { GameContext } from './game';
 import type { PitcherInGame } from './state';
 import { fatigueScale, traitEdge, type Situation } from './traits';
-import type { SimPlayer } from './types';
-import type { BodyParams } from './params';
+import type { BatSkill, PitSkill, SimPlayer } from './types';
+import { chainShapeFor, type BodyParams, type EngineParams } from './params';
 import { currentBody } from './team';
 import { conditionOf } from './condition';
+import { expectedPitches, type SolvedChain } from './chain';
+import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
 
 /** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
 export function tiredPenalty(body: number, bp: BodyParams): number {
@@ -31,8 +33,57 @@ export interface PaRates {
   d2: number;
   t3: number;
   scale: number;
-  /** 볼카운트 사슬의 길이 손잡이 (타자 × 투수, 선수별 P/PA). 없으면 1. B0은 쓰지 않는다 */
+  /** 볼카운트 사슬의 길이 손잡이 (타자 × 투수, 선수별 P/PA). 없으면 1. B0은 쓰지 않는다 (예전 길) */
   len?: number;
+  /** 칸 함수로 만든 이 타석의 사슬 (능력치 v2 16-1). 있으면 해결기가 손잡이를 풀지 않고 이것으로 공 수를 뽑는다 */
+  chain?: SolvedChain;
+}
+
+/**
+ * 시즌 하나의 사슬 능력 (Season이 만든다, 선수 색인). 결과 비율로 푼 값 + 실측 몫(plateRes).
+ * 시즌 중 능력이 바뀌면(자유 모드 능력 바꾸기, 새 선수) 선수의 BatSkill·PitSkill 객체가 바뀌므로, 쓸 때 만든 객체와 다르면 다시 푼다
+ */
+export interface PlateContext {
+  lp: LeaguePlate;
+  league: Rates;
+  params: EngineParams;
+  bat: BatPlate[];
+  pit: PitPlate[];
+  /** bat·pit을 만든 능력 객체 */
+  batSrc: (BatSkill | null)[];
+  pitSrc: (PitSkill | null)[];
+  /** 투수가 리그 평균 타자를 상대할 때 타석당 기대 투구 수 */
+  pitPpa: number[];
+}
+
+/** 월드의 모든 선수 사슬 능력 (난수 없음). 시작 때는 실측 그대로, 성장으로 결과 비율이 바뀌면 푼 값이 따라간다 */
+export function plateContext(players: readonly SimPlayer[], league: Rates, params: EngineParams, year: number): PlateContext {
+  const lp = leaguePlateFor(chainShapeFor(params, year), league, params.plate);
+  const pl: PlateContext = { lp, league, params, bat: [], pit: [], batSrc: [], pitSrc: [], pitPpa: [] };
+  for (const p of players) {
+    batPlateOf(pl, p);
+    pitPlateOf(pl, p);
+  }
+  return pl;
+}
+
+/** 선수의 타자 사슬 능력 (능력 객체가 바뀌었으면 다시 푼다) */
+export function batPlateOf(pl: PlateContext, p: SimPlayer): BatPlate {
+  if (pl.batSrc[p.idx] !== p.bat || pl.bat[p.idx] === undefined) {
+    pl.batSrc[p.idx] = p.bat;
+    pl.bat[p.idx] = p.bat ? addBat(solvedBatPlate(p.bat, pl.league, pl.lp, pl.params.plate), p.bat.plateRes) : ZERO_BAT;
+  }
+  return pl.bat[p.idx];
+}
+
+/** 선수의 투수 사슬 능력 (능력 객체가 바뀌었으면 다시 풀고 기대 투구 수도 다시 낸다) */
+export function pitPlateOf(pl: PlateContext, p: SimPlayer): PitPlate {
+  if (pl.pitSrc[p.idx] !== p.pit || pl.pit[p.idx] === undefined) {
+    pl.pitSrc[p.idx] = p.pit;
+    pl.pit[p.idx] = p.pit ? addPit(solvedPitPlate(p.pit, pl.league, pl.lp), p.pit.plateRes) : ZERO_PIT;
+    pl.pitPpa[p.idx] = p.pit ? expectedPitches(plateChain(pl.lp, ZERO_BAT, pl.pit[p.idx])) : pl.lp.ppa;
+  }
+  return pl.pit[p.idx];
 }
 
 /** 주자·이닝·점수 상황 (숨겨진 특수능력 판정용) */
@@ -97,9 +148,6 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const so = combine(bs.so * cal.so * lg.so * down, ps.so * lg.so * (1 - fat), lg.so);
   const bb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
   const hbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
-  // 사슬 길이 손잡이: 타자(끈질김)와 투수(투구 효율)의 선수별 P/PA를 리그 평균 상대에서 맞춘 값을 곱한다 (D단계 가공값, 없으면 1)
-  const len = lengthOf(ctx, bs.ppaRel, bs.so * cal.so * lg.so, bs.bb * cal.bb * lg.bb, bs.hbp * cal.hbp * lg.hbp)
-    * lengthOf(ctx, ps.ppaRel, ps.so * lg.so, ps.bb * lg.bb, ps.hbp * lg.hbp);
   // 홈 구장 효과 (실제 구장 계수 meta.parkFactors + 게임 안에서 지은 신구장의 홈런 배율, league/stadium.ts): 양 팀 타자 모두에게
   // 치는 손별 구장 표: 좌타 L, 우타 R, 양타는 상대 투수 손의 반대쪽, 모르면 전체
   const side = b.bats === 'S' ? (pg.p.throws === 'L' ? 'R' : pg.p.throws === 'R' ? 'L' : null) : b.bats === 'L' || b.bats === 'R' ? b.bats : null;
@@ -111,5 +159,21 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const t3 = combine(bs.t3 * cal.t3 * lg.t3 * up * pk.t3, hitP * lg.t3, lg.t3);
 
   const sum = so + bb + hbp + hr + s1 + d2 + t3;
-  return { so, bb, hbp, hr, s1, d2, t3, scale: sum > 0.93 ? 0.93 / sum : 1, len };
+  const scale = sum > 0.93 ? 0.93 / sum : 1;
+  const pl = ctx.plate;
+  if (!pl) {
+    // 사슬 길이 손잡이: 타자(끈질김)와 투수(투구 효율)의 선수별 P/PA를 리그 평균 상대에서 맞춘 값을 곱한다 (D단계 가공값, 없으면 1)
+    const len = lengthOf(ctx, bs.ppaRel, bs.so * cal.so * lg.so, bs.bb * cal.bb * lg.bb, bs.hbp * cal.hbp * lg.hbp)
+      * lengthOf(ctx, ps.ppaRel, ps.so * lg.so, ps.bb * lg.bb, ps.hbp * lg.hbp);
+    return { so, bb, hbp, hr, s1, d2, t3, scale, len };
+  }
+  // 능력치 v2 16-1: 삼진·볼넷·사구와 공 수는 칸 함수 사슬에서. 환경 맞춤·좌우·홈·특수능력·컨디션·피로는 삼진·볼넷 배율을 맞히기·선구 로짓으로 옮겨 더하고
+  // (리그 평균 매치업에서 같은 배율이 되는 크기, 기획안 1.9 4·5), 사구는 배율로. 인플레이(맞힘) 뒤 결과 몫은 위 비율 그대로 (16-2에서 타구 갈래로)
+  const mK = cal.so * down * (1 - fat);
+  const mW = cal.bb * up * worse;
+  const ch = plateChain(pl.lp, batPlateOf(pl, b), pitPlateOf(pl, pg.p), shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]));
+  const X = ch.e[3];
+  const inPlay = (1 - scale * (so + bb + hbp)) / scale;
+  const k = inPlay > 0 ? X / inPlay : 0;
+  return { so: ch.e[0], bb: ch.e[1], hbp: ch.e[2], hr: hr * k, s1: s1 * k, d2: d2 * k, t3: t3 * k, scale: 1, chain: ch };
 }

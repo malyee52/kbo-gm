@@ -84,7 +84,9 @@ describe('월드 구성 (2025년)', () => {
 
   it('능력치에 비정상 값이 없다', () => {
     for (const p of world.players) {
-      const { def, ...rest } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number> };
+      const { def, plateRes, ...rest } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number>; plateRes?: Record<string, number> };
+      // 사슬 실측 몫(능력치 v2 16-1)은 로짓 차라 음수일 수 있다
+      for (const [k, v] of Object.entries(plateRes ?? {})) expect(Number.isFinite(v), `${p.name} plateRes.${k}`).toBe(true);
       for (const [k, v] of Object.entries(rest)) {
         expect(Number.isFinite(v), `${p.name} ${k}`).toBe(true);
         expect(v, `${p.name} ${k}`).toBeGreaterThanOrEqual(0);

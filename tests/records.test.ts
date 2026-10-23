@@ -122,7 +122,8 @@ describe('시즌에서 (연표가 경기에 걸린다)', () => {
 
   it('1985: 15회까지 (12회를 넘긴 경기가 있다)', () => {
     const world = worldForYear(store, 1985, FAST);
-    const s = Season.start(world, FAST, 'records-1985');
+    // 12회를 넘는 경기는 한 시즌에 몇 번뿐이라 시드에 걸린다 (능력치 v2 16-1 사슬 능력 뒤 'records-1985'는 0번 → 3번 나오는 시드로)
+    const s = Season.start(world, FAST, 'records-1985-3');
     s.runToEnd();
     expect(s.log.every((g) => g.innings <= 15)).toBe(true);
     expect(s.log.some((g) => g.innings > 12)).toBe(true);

@@ -5,7 +5,7 @@ import { isSaveSituation, tyingRunNear, type GameState, type PitcherInGame, type
 import { isStarterSkill } from './params';
 import { availableBelow, currentFatigue, currentOveruse, needsRest } from './team';
 import type { SimPlayer } from './types';
-import { lengthOf } from './pa';
+import { lengthOf, pitPlateOf } from './pa';
 
 /** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계, tools/pen_check.ts). 저장하지 않는다. 세지 않아도 결과는 같다 (난수를 쓰지 않는다) */
 export interface PenTally {
@@ -77,9 +77,7 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
   // 선발 몸 한계는 체력보다 조금 길게 (STARTER_LIMIT_SCALE 1.15, 임시값: 체력 추정이 평균 쪽으로 당겨져 있고, 감독 기준과 함께 2025 선발 투구 수·QS에 맞춤).
   // 몸의 한계(limit)는 그날 몸 상태(0.82~1.18배)를 곱한 값이다. AI 감독은 투수의 한계를 보지 않고 자기 투구 수 기준(plan)으로만
   // 바꾼다 (사용자 결정 2026-10-22: 감독이 보는 한계는 감독 성향으로만. 성향 hook은 game.ts에서 곱한다)
-  const lg = ctx.league;
-  const ppa = ctx.resolver?.pitchesPerPa?.(skill.so * lg.so, skill.bb * lg.bb, skill.hbp * lg.hbp,
-    lengthOf(ctx, skill.ppaRel, skill.so * lg.so, skill.bb * lg.bb, skill.hbp * lg.hbp)) ?? ctx.params.pitchesPerPaDefault;
+  const ppa = pitcherPpa(ctx, p);
   const base = (isStarter ? skill.stamina * STARTER_LIMIT_SCALE * (ctx.startLimitScale ?? 1) : skill.reliefStint) * ppa;
   const limit = base * ctx.rng.range(0.82, 1.18);
   const sp = ctx.params.planScale.spread;
@@ -98,13 +96,28 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
  * AI 감독의 투구 수 기준 (선발, 구원): 그 시즌 리그 평균 투수(기록 표본 가중)의 한계 투구 수(몸 상태 뺀 값) × planScale.
  * 시대마다 숫자를 따로 정하지 않고 그 시대 투수들의 체력에서 나온다 (옛 시대는 eras.ts limitScale로 길다). 난수를 쓰지 않는다
  */
-export function managerNorms(players: readonly SimPlayer[], ctx: GameContext): { starter: number; relief: number } {
+/**
+ * 투수가 리그 평균 타자를 상대할 때 타석당 기대 투구 수. 사슬 능력(능력치 v2 16-1)이 있으면 칸 함수 사슬, 없으면 결과 비율로 손잡이를 푼 사슬
+ * (withLength: 선수별 P/PA 길이 손잡이까지, 감독 기준은 예전처럼 넣지 않았다). 투구 수를 세지 않는 해결기는 기본값
+ */
+function pitcherPpa(ctx: GameContext, p: SimPlayer, withLength = true): number {
+  const r = ctx.resolver;
+  if (!r?.pitchesPerPa) return ctx.params.pitchesPerPaDefault;
+  if (ctx.plate) {
+    pitPlateOf(ctx.plate, p);
+    return ctx.plate.pitPpa[p.idx];
+  }
+  const k = p.pit!;
   const lg = ctx.league;
+  return r.pitchesPerPa(k.so * lg.so, k.bb * lg.bb, k.hbp * lg.hbp, withLength ? lengthOf(ctx, k.ppaRel, k.so * lg.so, k.bb * lg.bb, k.hbp * lg.hbp) : 1);
+}
+
+export function managerNorms(players: readonly SimPlayer[], ctx: GameContext): { starter: number; relief: number } {
   let ws = 0, ss = 0, wr = 0, sr = 0;
   for (const p of players) {
     const k = p.pit;
     if (!p.isPitcher || !k || !(k.sample > 0)) continue;
-    const ppa = ctx.resolver?.pitchesPerPa?.(k.so * lg.so, k.bb * lg.bb, k.hbp * lg.hbp) ?? ctx.params.pitchesPerPaDefault;
+    const ppa = pitcherPpa(ctx, p, false);
     if (isStarterSkill(k)) { ws += k.sample; ss += k.sample * k.stamina * ppa; } else { wr += k.sample; sr += k.sample * k.reliefStint * ppa; }
   }
   const sc = ctx.params.planScale;
