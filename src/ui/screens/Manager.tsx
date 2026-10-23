@@ -12,9 +12,14 @@ const ratio = (v: number) => {
   return n === 0 ? '±0%' : `${n > 0 ? '+' : '−'}${Math.abs(n)}%`;
 };
 
-/** 컨디션 반영: 라인업·선발 순서에 선수 컨디션을 얼마나 보는지. 낱말만 (실존 감독은 선발 라인업 변동 기록 대리값, 자료 없으면 보통) */
+/**
+ * 컨디션 반영: 라인업·선발 순서에 선수 컨디션을 얼마나 보는지. 낱말만.
+ * 실존 감독은 도루·번트처럼 기록 값(선발 라인업 변동 대리값 info.cond)으로 낱말을 정한다 (경기 배율은 그 일부만 반영해 거의 다 '보통'이 된다).
+ * 자료 없는 실존 감독은 보통, 가상 감독은 이름으로 정한 성향
+ */
 function CondTendency({ info, name }: { info: ManagerInfo | undefined; name?: string }) {
-  return <span title="AI 감독이 선수 컨디션을 라인업과 선발 순서에 얼마나 반영하는지 (기록이 아닌 성향)">컨디션 반영 {tendencyLabel(tacticsOf(info, name).cond)}</span>;
+  const v = info ? info.cond ?? 1 : tacticsOf(undefined, name).cond;
+  return <span title="AI 감독이 선수 컨디션을 라인업과 선발 순서에 얼마나 반영하는지 (실존 감독은 선발 라인업을 바꾼 정도로 짐작)">컨디션 반영 {tendencyLabel(v)}</span>;
 }
 
 function Tendency({ info, name }: { info: ManagerInfo | undefined; name?: string }) {
