@@ -42,6 +42,11 @@ export interface TeamSituation {
   nTeams: number;
   /** 포스트시즌 진출권 순위 */
   cut: number;
+  /**
+   * 양대 리그 해(1999·2000)만: 지금 순위로 실제 진출 규칙(리그 2위 이내, 또는 준플레이오프 조건을 채우는 3위)에 드는가.
+   * 있으면 진출권 판정(rank <= cut)을 이것으로 바꾼다 (일정 개편 기획안 10.6). rank는 그대로 통합 순위
+   */
+  inPlace?: boolean;
   /** 주전급 평균 나이 */
   coreAge: number;
   /** 남은 정규시즌 비율 (0~1) */
@@ -58,7 +63,7 @@ export function tendencyOf(s: TeamSituation): Tendency {
   // 단장 성향 (league/gm.ts): 윈나우형은 진출권 3계단 밖까지 우승 도전, 육성형은 2위 안이 아니면 리빌딩
   if (s.style === 'winnow') return s.rank <= s.cut + 3 ? 'contend' : 'rebuild';
   if (s.style === 'develop') return s.rank <= 2 ? 'contend' : 'rebuild';
-  if (s.rank <= s.cut) return 'contend';
+  if (s.inPlace ?? s.rank <= s.cut) return 'contend';
   if (s.rank <= s.cut + 2 && s.coreAge >= 30) return 'contend';
   return 'rebuild';
 }

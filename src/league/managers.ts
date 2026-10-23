@@ -259,9 +259,11 @@ export function changeManagerInSeason(league: LeagueState, store: Pick<DataStore
  * 개막 때 감독 정리 (session 'open', closeOffseason 뒤 league.year = 새 시즌). 바뀐 일을 문장으로 돌려준다.
  * - 우리 구단: 계약이 끝났으면 같은 조건으로 재계약, 비어 있으면 첫 후보로 채운다.
  * - AI 구단: 자료가 있는 해는 실제 개막 감독. 아니면 계약 만료·성적으로 재계약하거나 바꾼다.
- * standings: 지난 시즌 순위 (구단 색인, 1위부터). postseasonTeams: 지난 시즌 가을야구 팀 수
+ * standings: 지난 시즌 순위 (구단 색인, 1위부터). postseasonTeams: 지난 시즌 가을야구 팀 수.
+ * postseason: 양대 리그 해(1999·2000)만, 지난 시즌 실제 가을야구 진출 구단. 주면 "가을야구"는 이것으로, 꼴찌·상위 절반은 통합 순위 그대로 (일정 개편 기획안 10.6)
  */
-export function openManagers(league: LeagueState, store: Pick<DataStore, 'managers' | 'meta'>, userTeam: number, standings: number[], postseasonTeams: number): string[] {
+export function openManagers(league: LeagueState, store: Pick<DataStore, 'managers' | 'meta'>, userTeam: number, standings: number[], postseasonTeams: number,
+                             postseason?: readonly number[]): string[] {
   if (!store.managers) return [];
   const year = league.year;
   league.managers ??= [];
@@ -300,7 +302,7 @@ export function openManagers(league: LeagueState, store: Pick<DataStore, 'manage
     if (!cur) continue;
     const r = rank(t);
     const last = r >= 0 && r === standings.length - 1;
-    const good = r >= 0 && r < postseasonTeams;
+    const good = postseason ? postseason.includes(t) : r >= 0 && r < postseasonTeams;
     // 실제 감독이 우리 구단에 있어 데려올 수 없으면 지금 감독을 그대로 둔다
     if (real !== null) continue;
     let why = '';

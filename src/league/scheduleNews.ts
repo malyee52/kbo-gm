@@ -3,15 +3,16 @@
 // 표시 기능이다: 연도별 일정 규칙 표(data/schedule.ts)만 읽고 난수를 쓰지 않으며, 저장 형식·조작 기록에 닿지 않는다.
 // 지난해 규칙과 견줘 바뀐 것만 줄로 만든다: 경기 수·상대별, 연전 틀, 올스타 휴식, 우천 순연·더블헤더, 국제대회 등으로 쉬는 기간.
 // 실제 올스타전이 여러 경기였던 해(1982~1985, 2000)는 "게임은 1경기로 단순화" 줄을 늘 붙인다 (결정 10).
+// 양대 리그(1999·2000 드림·매직)의 시작·재편·끝도 여기서 한 줄로 만든다 (leagueNews, 기획안 10.6).
 // 이 브랜치에는 개막 알림 창(규칙 알림, league/ruleNews.ts)이 아직 없어 개막 소식 한 줄로 보인다. 그 창과 합치면 이 줄들을 창의 일정 분류로 넘긴다.
-import { daysBetween, type IsoDate, type YearScheduleRule } from '../data/schedule';
+import { daysBetween, type Divisions, type IsoDate, type YearScheduleRule } from '../data/schedule';
 import type { ScheduleFrame } from '../data/types';
 
 export type ScheduleRule = Pick<YearScheduleRule, 'year' | 'games' | 'vs' | 'vsOther' | 'frame' | 'breaks' | 'allStar' | 'allStarGamesReal' | 'postpone' | 'dhBan' | 'status' | 'projected'>;
 
 /** 일정 알림 한 줄 */
 export interface ScheduleNewsLine {
-  key: 'games' | 'frame' | 'allStarBreak' | 'allStarGames' | 'postpone' | 'stop';
+  key: 'games' | 'frame' | 'allStarBreak' | 'allStarGames' | 'postpone' | 'stop' | 'league';
   title: string;
   /** 전 → 후 (전이 없으면 후만) */
   before?: string;
@@ -105,6 +106,38 @@ export function scheduleNews(rule: ScheduleRule, prev?: ScheduleRule): ScheduleN
   const stop = stopText(rule);
   if (stop) out.push({ key: 'stop', title: '정규시즌 중단', after: stop, status });
   return out;
+}
+
+/** 시즌 자료의 구단별 리그 칸 (`league`). 두 가지 값이면 양대 리그 해 */
+type LeagueData = { teams: { franchise: string; league: string | null }[] } | undefined;
+const isSplit = (d: LeagueData) => !!d && d.teams.every((t) => t.league) && new Set(d.teams.map((t) => t.league)).size === 2;
+
+/**
+ * 양대 리그 알림 (일정 개편 기획안 10.6 개막 알림): 1999 "드림·매직 양대 리그 (…)", 2000 "리그 재편: 삼성 드림, 롯데 매직",
+ * 2001 "양대 리그 → 단일 리그". 자료는 양대 리그인데 게임 구단이 자료와 맞지 않아 나누지 않은 해(divisions null)는 "단일 리그로 진행".
+ * cur = 올해 월드의 나눔, teams = 올해 구단 (색인 순), data·prevData = 올해·지난해 시즌 자료. 지난해 소속은 자료의 계보로 견준다
+ * (게임 안 승계로 계보가 바뀐 구단은 견주지 않는다: 2000 SK). 난수·저장과 무관한 표시 기능
+ */
+export function leagueNews(cur: Divisions | null | undefined, teams: readonly { name: string; franchise: string }[], data: LeagueData, prevData: LeagueData): ScheduleNewsLine[] {
+  const status = '자료집';
+  const prevSplit = isSplit(prevData);
+  if (cur) {
+    const d = cur;
+    const lineup = d.names.map((n, k) => `${n} ${d.teams[k].map((t) => teams[t].name).join('·')}`).join(' / ');
+    if (!prevSplit) {
+      return [{ key: 'league', title: '리그', ...(prevData ? { before: '단일 리그' } : {}),
+        after: `${d.names.join('·')} 양대 리그 (${lineup}). 각 리그 1·2위가 가을야구에 나가고, 한 리그 3위 승률이 다른 리그 2위보다 높으면 둘이 준플레이오프`, status }];
+    }
+    const prevOf = new Map(prevData!.teams.map((t) => [t.franchise, t.league]));
+    const moved = d.teams.flatMap((ts, k) => ts.filter((t) => {
+      const p = prevOf.get(teams[t].franchise);
+      return p !== undefined && p !== d.names[k];
+    }).map((t) => `${teams[t].name} ${d.names[k]}`));
+    return moved.length ? [{ key: 'league', title: '리그 재편', after: `${moved.join(', ')} (${lineup})`, status }] : [];
+  }
+  if (isSplit(data)) return [{ key: 'league', title: '리그', after: '단일 리그로 진행 (구단 구성이 그 해 실제와 달라 양대 리그로 나누지 않음)', status }];
+  if (prevSplit) return [{ key: 'league', title: '리그', before: '양대 리그', after: '단일 리그', status }];
+  return [];
 }
 
 /** 소식 한 줄: "1983 시즌 일정 (조사값): 정규시즌 경기 수 팀당 80경기 … → 팀당 100경기 … / …". 줄이 없으면 null */

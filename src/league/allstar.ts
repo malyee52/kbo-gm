@@ -1,4 +1,5 @@
 // 올스타전 (2026-10-14): 시즌 중반 휴식일에 드림·나눔 올스타가 시범 경기와 홈런 더비를 치른다.
+// - 양대 리그 해(1999·2000, World.divisions)는 드림 올스타 대 매직 올스타, 그 해 리그 소속으로 (일정 개편 기획안 10.6, 결정 3).
 // - 날짜: 연도별 일정 규칙 표의 올스타 날 (일정 개편 11단계). 올스타가 없던 해(2020·2021)는 열지 않는다.
 //   실제 올스타전이 여러 경기였던 해(1982~1985, 2000)도 게임은 1경기다 (일정 개편 결정 10, 개막 알림에 적는다).
 //   휴식기는 일정 규칙 표의 쉬는 기간으로 일정에 비어 있고, 그날 모든 투수의 피로도 없앤다 (예전 동작 그대로).
@@ -18,6 +19,15 @@ import type { LeagueState } from './types';
 const DREAM = ['두산', '롯데', '삼성', 'SSG', 'KT', '현대계'];
 const NANUM = ['LG', 'KIA', '한화', '히어로즈', 'NC', '쌍방울'];
 export const SIDE_NAMES: [string, string] = ['드림 올스타', '나눔 올스타'];
+
+/** 그 해 두 편 이름: 양대 리그 해는 리그 이름으로 ("드림 올스타", "매직 올스타"), 다른 해는 SIDE_NAMES */
+export function allStarSideNames(world: Pick<World, 'divisions'>): [string, string] {
+  const d = world.divisions;
+  return d ? [`${d.names[0]} 올스타`, `${d.names[1]} 올스타`] : SIDE_NAMES;
+}
+
+/** 기록의 두 편 이름 (names가 없는 기록은 SIDE_NAMES) */
+export const recordSideNames = (rec: Pick<AllStarRecord, 'names'>): [string, string] => rec.names ?? SIDE_NAMES;
 const FIELD_POS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'] as const;
 const BENCH = 5;
 const SP_N = 4;
@@ -31,8 +41,10 @@ export interface AllStarPick { id: string; name: string; side: 0 | 1; team: numb
 export interface AllStarRecord {
   year: number;
   day: number;
-  /** 구단 색인 (드림, 나눔) */
+  /** 구단 색인 (드림, 나눔). 양대 리그 해는 (드림리그, 매직리그) */
   teams: [number[], number[]];
+  /** 두 편 이름. 양대 리그 해에만 남긴다 (없으면 SIDE_NAMES) */
+  names?: [string, string];
   /** 홈 쪽 (0 드림, 1 나눔) */
   home: 0 | 1;
   roster: AllStarPick[];
@@ -73,8 +85,9 @@ export function allStarDay(schedule: readonly (readonly unknown[])[], year: numb
   return best;
 }
 
-/** 구단을 드림(0)·나눔(1)으로. 계보를 모르는 구단(창단 등)은 적은 쪽으로 */
-export function allStarSides(world: Pick<World, 'teams'>): [number[], number[]] {
+/** 구단을 드림(0)·나눔(1)으로. 계보를 모르는 구단(창단 등)은 적은 쪽으로. 양대 리그 해는 리그 소속 그대로 */
+export function allStarSides(world: Pick<World, 'teams' | 'divisions'>): [number[], number[]] {
+  if (world.divisions) return [[...world.divisions.teams[0]], [...world.divisions.teams[1]]];
   const out: [number[], number[]] = [[], []];
   const unknown: number[] = [];
   for (const t of world.teams) {
@@ -154,6 +167,7 @@ export function homeRunDerby(season: Season, picks: SimPlayer[], rng: Rng): AllS
 export function playAllStar(league: LeagueState, world: World, season: Season, ctx: ValueContext, day: number): AllStarRecord | null {
   const year = world.year;
   const sides = allStarSides(world);
+  const names = allStarSideNames(world);
   if (!sides[0].length || !sides[1].length) return null;
   const reserve = new Set(league.players.filter((p) => p.reserve !== undefined).map((p) => p.id));
   const roster = pickAllStars(world, season, ctx, sides, (p) => reserve.has(p.id));
@@ -165,7 +179,7 @@ export function playAllStar(league: LeagueState, world: World, season: Season, c
     const rp = mine.filter((r) => r.pos === 'RP').map((r) => byId.get(r.id)!);
     if (starters.length < 9 || sp.length + rp.length < 2) return null;
     const pitchers = [...sp, ...rp];
-    return { name: SIDE_NAMES[s], hitters: starters, pitchers, closer: rp[0] ?? null };
+    return { name: names[s], hitters: starters, pitchers, closer: rp[0] ?? null };
   };
   const dream = sideOf(0);
   const nanum = sideOf(1);
@@ -191,7 +205,7 @@ export function playAllStar(league: LeagueState, world: World, season: Season, c
     if (mvp === null || v > val.get(mvp)! || (v === val.get(mvp)! && byId.get(id)!.idx < byId.get(mvp)!.idx)) mvp = id;
   }
   const derby = homeRunDerby(season, roster.map((x) => byId.get(x.id)!), rng);
-  const rec: AllStarRecord = { year, day, teams: sides, home, roster, game: { score, innings: r.innings, line: r.lineScore, mvp, bat, pit }, derby };
+  const rec: AllStarRecord = { year, day, teams: sides, ...(world.divisions ? { names } : {}), home, roster, game: { score, innings: r.innings, line: r.lineScore, mvp, bat, pit }, derby };
   league.allStars = [...(league.allStars ?? []).filter((x) => x.year !== year), rec];
   // 휴식기: 모든 투수의 피로를 없앤다
   for (const p of world.players) if (p.isPitcher) season.clearFatigue(p.idx);

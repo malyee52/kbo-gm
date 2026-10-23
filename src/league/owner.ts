@@ -161,10 +161,25 @@ export function goalFor(projectedRank: number, postseasonTeams: number): GoalKin
   return 'notLast';
 }
 
+/**
+ * 양대 리그 해(1999·2000)의 목표: 개막 때 리그 안 전력 예상 순위로 (임시값: 리그 1위 우승, 리그 진출권(2위) + 1위까지 가을야구, 그 아래 탈꼴찌).
+ * 단일 리그의 "진출 팀 수 + 1위"를 리그 진출권 2팀에 맞췄다 (일정 개편 기획안 10.6, 10.8 결정 2)
+ */
+export function goalForLeague(projectedLeagueRank: number): GoalKind {
+  if (projectedLeagueRank <= 1) return 'champion';
+  if (projectedLeagueRank <= 3) return 'postseason';
+  return 'notLast';
+}
+
 export interface SeasonOutcome {
+  /** 통합 순위 (꼴찌 판정) */
   rank: number;
   nTeams: number;
   postseasonTeams: number;
+  /** 양대 리그 해만: 리그 안 순위 (결과 문장 "드림 2위") */
+  league?: { name: string; rank: number };
+  /** 양대 리그 해만: 실제 가을야구 진출 (대진의 seeds). 없으면 통합 순위 ≤ 진출 팀 수 */
+  postseason?: boolean;
   champion: boolean;
   /** 한국시리즈에 오름 */
   finalist: boolean;
@@ -175,7 +190,7 @@ export interface SeasonOutcome {
 export function outcomeTier(o: SeasonOutcome): number {
   if (o.champion) return 3;
   if (o.finalist) return 2.5;
-  if (o.rank <= o.postseasonTeams) return 2;
+  if (o.postseason ?? o.rank <= o.postseasonTeams) return 2;
   if (o.rank < o.nTeams) return 1;
   return 0;
 }
@@ -183,8 +198,11 @@ export function outcomeTier(o: SeasonOutcome): number {
 export function outcomeLabel(o: SeasonOutcome): string {
   if (o.champion) return '한국시리즈 우승';
   if (o.finalist) return '한국시리즈 준우승';
-  if (o.rank <= o.postseasonTeams) return `가을야구 (${o.rank}위)`;
-  return o.rank === o.nTeams ? `꼴찌 (${o.rank}위)` : `${o.rank}위`;
+  // 양대 리그 해: 문장은 리그 순위, 꼴찌는 통합 순위로 판정해 둘 다 적는다 ("꼴찌 (매직 4위, 통합 8위)")
+  const place = o.league ? `${o.league.name} ${o.league.rank}위` : `${o.rank}위`;
+  if (o.postseason ?? o.rank <= o.postseasonTeams) return `가을야구 (${place})`;
+  if (o.rank === o.nTeams) return o.league ? `꼴찌 (${place}, 통합 ${o.rank}위)` : `꼴찌 (${place})`;
+  return place;
 }
 
 /** 신뢰도 변화 (임시값): 달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25) / 캡 초과 -10 */
@@ -216,6 +234,8 @@ export interface OwnerRecord {
   capOver: boolean;
   /** 그 시즌의 구단 이름 (명칭 변경·승계 뒤에도 그대로). 없으면 지금 이름 */
   teamName?: string;
+  /** 양대 리그 해만: 리그 안 순위 (rank는 통합 순위). 업적 "정규시즌 1위"는 리그 1위 */
+  league?: { name: string; rank: number };
 }
 
 export interface OwnerState {
@@ -223,7 +243,7 @@ export interface OwnerState {
   team: number;
   trust: number;
   /** 이번 시즌 목표 */
-  goal: { year: number; kind: GoalKind; projectedRank: number } | null;
+  goal: { year: number; kind: GoalKind; projectedRank: number; /** 양대 리그 해만: projectedRank가 이 리그 안 순위 */ projectedLeague?: string } | null;
   history: OwnerRecord[];
   achievements: { id: AchievementId; year: number; team: number }[];
   /** 해고된 뒤 받은 영입 제의 (구단 색인). 고르기 전에는 오프시즌을 진행할 수 없다 */
@@ -272,7 +292,7 @@ export function newAchievements(owner: OwnerState, prevLastPlace: boolean): Achi
   const titles = h.filter((r) => r.champion);
   const sameTeamStreak = (k: number) => h.length >= k && h.slice(-k).every((r) => r.champion && r.team === cur.team);
   add('firstPostseason', post(cur));
-  add('regularFirst', cur.rank === 1);
+  add('regularFirst', (cur.league?.rank ?? cur.rank) === 1);
   add('champion', cur.champion);
   add('backToBack', sameTeamStreak(2));
   add('dynasty', sameTeamStreak(3));
@@ -285,12 +305,17 @@ export function newAchievements(owner: OwnerState, prevLastPlace: boolean): Achi
 }
 
 /** 포스트시즌 결과에서 구단의 결과 */
+/**
+ * 포스트시즌 결과에서 구단의 결과. league = 양대 리그 해의 리그 안 자리 (주면 가을야구는 실제 진출 ps.seeds로 판정, 기획안 10.8 결정 2).
+ * 단일 리그 해는 league 없이 예전처럼 통합 순위 ≤ 진출 팀 수
+ */
 export function outcomeOf(team: number, standings: number[], ps: PostseasonResult | null | undefined, postseasonTeams: number,
-                          capOver: boolean): SeasonOutcome {
+                          capOver: boolean, league?: { name: string; rank: number }): SeasonOutcome {
   return {
     rank: standings.indexOf(team) + 1,
     nTeams: standings.length,
     postseasonTeams,
+    ...(league ? { league, postseason: !!ps?.seeds.includes(team) } : {}),
     champion: ps?.champion === team,
     finalist: ps?.champion === team || ps?.runnerUp === team,
     capOver,

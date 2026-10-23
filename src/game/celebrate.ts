@@ -1,5 +1,6 @@
 // 축하 연출의 계기 (2026-10-12 사용자 요청 "애니메이션": 우승·기록 축하 연출).
 // 지금 게임 상태에서 이룬 일을 모은다. 화면은 처음 본 것만 축하한다 (GameShell이 이미 본 key를 기억한다).
+import { seasonPlace } from './rank';
 import type { GameSession } from './session';
 
 export interface Achievement {
@@ -15,11 +16,13 @@ export function achievements(s: GameSession): Achievement[] {
   const me = s.teamIdx;
   const year = s.world.year;
   const name = s.team.name;
-  if (s.phase === 'season' && s.season.done && s.season.standings()[0] === me) {
-    out.push({ key: `${year}-first`, title: '정규시즌 1위!', sub: `${year} ${name}`, big: true });
+  // 양대 리그 해(1999·2000)는 리그 1위 ("드림리그 1위!"), 진출 자리는 대진의 자리 이름 ("드림 2위로 진출")
+  if (s.phase === 'season' && s.season.done) {
+    const p = seasonPlace(s.season, me);
+    if (p.rank === 1) out.push({ key: `${year}-first`, title: p.league ? `${p.league}리그 1위!` : '정규시즌 1위!', sub: `${year} ${name}`, big: true });
   }
   const ps = s.postseason;
-  if (ps?.seeds.includes(me)) out.push({ key: `${year}-ps`, title: '가을야구 진출!', sub: `${year} ${name} · ${ps.seeds.indexOf(me) + 1}위로 진출`, big: true });
+  if (ps?.seeds.includes(me)) out.push({ key: `${year}-ps`, title: '가을야구 진출!', sub: `${year} ${name} · ${ps.seedLabels?.[ps.seeds.indexOf(me)] ?? `${ps.seeds.indexOf(me) + 1}위`}로 진출`, big: true });
   if (ps) {
     const last = ps.series[ps.series.length - 1];
     const final = ps.series.length === ps.rounds.length ? last : undefined;

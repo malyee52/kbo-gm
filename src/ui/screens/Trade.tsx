@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { TENDENCY_LABEL, type TradeEvaluation } from '../../ai/trade';
 import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
+import { rankText } from '../../game/rank';
 import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
@@ -42,7 +43,8 @@ export function Trade() {
     () => new Map(others.map((t) => {
       const sit = session.situation(t.idx);
       const early = session.season.teams[t.idx].g < 20;
-      return [t.idx, { tendency: session.tendency(t.idx), rank: `${early ? '전력 ' : ''}${sit.rank}위` }];
+      // 양대 리그 해(1999·2000)는 리그 순위 ("드림 2위", game/rank.ts). 전력 순위는 통합
+      return [t.idx, { tendency: session.tendency(t.idx), rank: early ? `전력 ${sit.rank}위` : rankText(session, t.idx) }];
     })),
     [session, version], // version: 경기를 치르거나 트레이드하면 성향이 바뀔 수 있다
   );

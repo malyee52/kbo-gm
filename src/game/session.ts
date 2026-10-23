@@ -60,7 +60,7 @@ import {
 } from '../league/finance';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
-  ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
+  ACHIEVEMENTS, aiPotential, applyCapSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, goalForLeague, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
@@ -69,8 +69,8 @@ import {
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
-import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
-import { scheduleNews, scheduleNewsText } from '../league/scheduleNews';
+import { ALLSTAR_FAN, allStarDay, playAllStar, recordSideNames, type AllStarRecord } from '../league/allstar';
+import { leagueNews, scheduleNews, scheduleNewsText } from '../league/scheduleNews';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
@@ -2141,12 +2141,19 @@ export class GameSession {
     return this.valueCtx;
   }
 
-  /** 개막 소식: 올해 달라지는 일정 (경기 수·연전·올스타 휴식·순연·중단, league/scheduleNews.ts). 지난해 규칙과 견준다 */
+  /**
+   * 개막 소식: 올해 달라지는 일정 (경기 수·연전·올스타 휴식·순연·중단, league/scheduleNews.ts). 지난해 규칙과 견준다.
+   * 양대 리그(1999·2000)의 시작·재편·끝도 같은 줄에 (leagueNews)
+   */
   private scheduleNotice(): void {
     const rule = this.world.schedule;
     if (!rule) return;
     const raw = this.store.schedule ? scheduleRule(this.store.schedule, rule.year - 1) : undefined;
-    const text = scheduleNewsText(rule.year, scheduleNews(rule, raw && fitRuleToTeams(raw, this.world.teams.length)));
+    const lines = [
+      ...scheduleNews(rule, raw && fitRuleToTeams(raw, this.world.teams.length)),
+      ...leagueNews(this.world.divisions, this.world.teams, this.store.season(rule.year), this.store.season(rule.year - 1)),
+    ];
+    const text = scheduleNewsText(rule.year, lines);
     if (text) this.addNews(0, 'season', text);
   }
 
@@ -2168,7 +2175,8 @@ export class GameSession {
     const nameOf = (id: string | null) => (id ? rec.roster.find((x) => x.id === id)?.name ?? this.world.players.find((p) => p.id === id)?.name ?? id : '-');
     const ours = rec.roster.filter((x) => x.team === this.teamIdx);
     const [d, n] = rec.game.score;
-    const result = d === n ? `${d}-${n} 무승부` : `${SIDE_NAMES[d > n ? 0 : 1]} ${Math.max(d, n)}-${Math.min(d, n)} 승리`;
+    const sides = recordSideNames(rec);
+    const result = d === n ? `${d}-${n} 무승부` : `${sides[d > n ? 0 : 1]} ${Math.max(d, n)}-${Math.min(d, n)} 승리`;
     const mvpOurs = rec.game.mvp !== null && ours.some((x) => x.id === rec.game.mvp);
     const derbyOurs = rec.derby.winner !== null && ours.some((x) => x.id === rec.derby.winner);
     this.addNews(day, 'season', `올스타전: ${result}, MVP ${nameOf(rec.game.mvp)}. 홈런 더비 우승 ${nameOf(rec.derby.winner)}.`
@@ -2178,7 +2186,7 @@ export class GameSession {
     const mvpTeam = rec.roster.find((x) => x.id === rec.game.mvp)?.team;
     addArticle(this.league, {
       year, day, kind: 'allstar', title: `올스타전 ${result}, MVP ${nameOf(rec.game.mvp)}`,
-      body: `${josa(SIDE_NAMES[0], '과', '와')} ${josa(SIDE_NAMES[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
+      body: `${josa(sides[0], '과', '와')} ${josa(sides[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
         + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다.`,
       ...(mvpTeam !== undefined ? { franchise: this.world.teams[mvpTeam].franchise } : {}),
     });
@@ -2208,16 +2216,19 @@ export class GameSession {
     const s = this.season;
     const n = this.world.teams.length;
     let rank: number;
+    let inPlace: boolean | undefined;
     if (s.teams[teamIdx].g < 20) {
       // 시즌 초반은 전력 순위로
       const str = this.world.teams.map((t) => teamStrength(t.org, this.values, 0));
       rank = 1 + str.filter((v, i) => v > str[teamIdx] || (v === str[teamIdx] && i < teamIdx)).length;
     } else {
       rank = s.standings().indexOf(teamIdx) + 1;
+      // 양대 리그 해: 진출권은 실제 진출 규칙으로 (리그 2위 이내, 준플레이오프 조건을 채운 3위. game/rank.ts)
+      if (this.world.divisions) inPlace = seasonPostseasonPlaces(s, this.world.rules.postseasonTeams).includes(teamIdx);
     }
     const played = s.teams[teamIdx].g;
     return {
-      teamIdx, rank, nTeams: n, cut: this.world.rules.postseasonTeams,
+      teamIdx, rank, nTeams: n, cut: this.world.rules.postseasonTeams, ...(inPlace !== undefined ? { inPlace } : {}),
       coreAge: coreAge(this.world.teams[teamIdx].org, this.values),
       remaining: 1 - played / this.world.gamesPerTeam,
       ...(teamIdx !== this.teamIdx ? { style: gmStyle(this.league, teamIdx) } : {}),
@@ -2552,8 +2563,9 @@ export class GameSession {
         const changes = off.changes ?? [];
         Off.closeOffseason(L, off);
         // 감독: 재계약·실제 개막 감독·교체 (managers.ts). 지난 시즌 순위로 판단한다
+        // 양대 리그 해(1999·2000)의 가을야구는 실제 진출 (lastSeason.divisions가 있는 해만, 기획안 10.8 결정 2)
         const mgrNews = openManagers(L, this.store, this.teamIdx, L.lastSeason?.standings ?? [],
-          this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5);
+          this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5, L.lastSeason?.divisions ? L.lastSeason.postseason?.seeds : undefined);
         this.postseason = null;
         this.hallOfFameAndFarewells(L.year - 1);
         const sanctions = applyCapSanctions(L, L.year);
@@ -2715,14 +2727,17 @@ export class GameSession {
     if (this.phase === 'season' && !this.done) this.setSeasonGoal();
   }
 
-  /** 개막 때 전력 예상 순위로 이번 시즌 목표를 정한다 */
+  /** 개막 때 전력 예상 순위로 이번 시즌 목표를 정한다. 양대 리그 해(1999·2000)는 리그 안 전력 예상 순위로 (goalForLeague) */
   private setSeasonGoal(): void {
     const o = this.league.owner!;
     const str = this.world.teams.map((t) => teamStrength(t.org, this.values, 0));
-    const rank = 1 + str.filter((v, i) => v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx)).length;
-    const kind = goalFor(rank, this.world.rules.postseasonTeams);
-    o.goal = { year: this.year, kind, projectedRank: rank };
-    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${rank}위). 신뢰도 ${o.trust}.` });
+    const div = this.world.divisions;
+    const k = div ? div.teams.findIndex((ts) => ts.includes(this.teamIdx)) : -1;
+    const pool = k >= 0 ? div!.teams[k] : null;
+    const rank = 1 + str.filter((v, i) => (!pool || pool.includes(i)) && (v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx))).length;
+    const kind = pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams);
+    o.goal = { year: this.year, kind, projectedRank: rank, ...(pool ? { projectedLeague: div!.names[k] } : {}) };
+    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${pool ? `${div!.names[k]} ` : ''}${rank}위). 신뢰도 ${o.trust}.` });
   }
 
   /** 시즌 평가: 목표 달성, 신뢰도, 업적. 신뢰도가 바닥나면 해고되고 하위권 구단의 영입 제의를 받는다 */
@@ -2732,7 +2747,10 @@ export class GameSession {
     const team = this.teamIdx;
     const goal = o.goal?.year === this.year ? o.goal : { year: this.year, kind: goalFor(5, this.world.rules.postseasonTeams), projectedRank: 5 };
     const capOver = (L.capStrikes?.[team] ?? 0) > 0;
-    const outcome = outcomeOf(team, standings, ps, this.world.rules.postseasonTeams, capOver);
+    // 양대 리그 해: 결과 문장은 리그 순위, 가을야구는 실제 진출, 꼴찌는 통합 순위 (기획안 10.8 결정 2)
+    const place = seasonPlace(this.season, team);
+    const outcome = outcomeOf(team, standings, ps, this.world.rules.postseasonTeams, capOver,
+      place.league && place.rank ? { name: place.league, rank: place.rank } : undefined);
     const td = trustDelta(goal.kind, outcome);
     const achieved = td.achieved;
     const delta = td.delta < 0 ? Math.round(td.delta * settingsOf(this.league).ownerPressure) : td.delta;
@@ -2742,6 +2760,7 @@ export class GameSession {
       year: this.year, team, goal: goal.kind, projectedRank: goal.projectedRank, rank: outcome.rank, result: outcomeLabel(outcome),
       // 구단 이름은 막 끝난 시즌의 월드에서 (결산 때 승계·명칭 변경이 먼저 적용돼 리그 상태는 이미 새 이름이다)
       achieved, trustBefore: before, trustAfter: o.trust, champion: outcome.champion, capOver, teamName: this.world.teams[team].name,
+      ...(outcome.league ? { league: outcome.league } : {}),
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
     say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}). 신뢰도 ${before} → ${o.trust}.`);

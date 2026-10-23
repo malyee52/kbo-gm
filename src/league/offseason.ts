@@ -271,10 +271,14 @@ const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p
 const ageIn = (p: LeaguePlayer, year: number) => (p.birthYear ? year - p.birthYear : 28);
 
 function tendencyFor(league: LeagueState, view: LeagueView, team: number): Tendency {
-  const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
+  const last = league.lastSeason;
+  const st = last?.standings ?? league.teams.map((_, i) => i);
+  // 지난 시즌이 양대 리그 해(1999·2000)면 진출권은 실제 가을야구 진출로 (일정 개편 기획안 10.6)
+  const ps = last?.divisions ? last.postseason?.seeds : undefined;
   return tendencyOf({
     teamIdx: team, rank: (st.indexOf(team) < 0 ? st.length : st.indexOf(team)) + 1, nTeams: league.teams.length, cut: 5,
     coreAge: coreAge(view.orgs[team], view.ctx), remaining: 1, style: gmStyle(league, team),
+    ...(ps ? { inPlace: ps.includes(team) } : {}),
   });
 }
 

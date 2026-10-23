@@ -1,7 +1,8 @@
 // 올스타전 (league/allstar.ts): 올해 일정·예상 선발, 지난 올스타전 결과(라인스코어·MVP·명단·홈런 더비).
 import { useMemo, useState } from 'react';
 import { formatDate } from '../../game/calendar';
-import { allStarSides, pickAllStars, SIDE_NAMES, type AllStarPick, type AllStarRecord } from '../../league/allstar';
+import { josa } from '../../league/articles';
+import { allStarSideNames, allStarSides, pickAllStars, recordSideNames, type AllStarPick, type AllStarRecord } from '../../league/allstar';
 import { posName, TeamName, useGame } from '../context';
 
 const POS_LABEL = (pos: string) => (pos === 'SP' ? '선발' : pos === 'RP' ? '구원' : posName(pos));
@@ -17,6 +18,8 @@ export function AllStar() {
   const rec = records.find((r) => r.year === shown) ?? null;
   const upcoming = inSeason && shown === year && !rec;
   const day = inSeason ? session.allStarDay : -1;
+  // 양대 리그 해(1999·2000)는 드림 올스타 대 매직 올스타
+  const upcomingNames = allStarSideNames(session.world);
 
   // 아직 열리지 않았으면 지금 기준 예상 선발
   const preview = useMemo<AllStarPick[]>(() => {
@@ -40,7 +43,7 @@ export function AllStar() {
         {upcoming ? (
           day < 0 ? <p className="muted small">{year} 시즌에는 올스타전이 열리지 않습니다 (실제로도 열리지 않은 해).</p> : (
             <p className="small">
-              {year} 올스타전은 <strong>{formatDate(year, day)}</strong>에 열립니다. {SIDE_NAMES[0]}와 {SIDE_NAMES[1]}가 맞붙고, 홈런 더비도 함께 열립니다.
+              {year} 올스타전은 <strong>{formatDate(year, day)}</strong>에 열립니다. {josa(upcomingNames[0], '과', '와')} {josa(upcomingNames[1], '이', '가')} 맞붙고, 홈런 더비도 함께 열립니다.
               <span className="muted"> 선발은 그날까지의 시즌 WAR와 지금 능력으로 정해지고(팬 투표 대신), 그날 모든 투수가 쉬어 피로가 풀립니다. 우리 선수가 뽑히면 팬 만족도가 조금 오릅니다.</span>
             </p>
           )
@@ -49,12 +52,12 @@ export function AllStar() {
       {upcoming && preview.length > 0 && (
         <section className="panel">
           <h2>지금 기준 예상 선발</h2>
-          <Rosters roster={preview} />
+          <Rosters roster={preview} names={upcomingNames} />
         </section>
       )}
       {rec && (
         <>
-          <section className="panel"><h2>명단</h2><p className="muted small">경기는 선발 출전 9명이 끝까지 뛰고, 투수는 여럿이 짧게 이어 던집니다.</p><Rosters roster={rec.roster} rec={rec} /></section>
+          <section className="panel"><h2>명단</h2><p className="muted small">경기는 선발 출전 9명이 끝까지 뛰고, 투수는 여럿이 짧게 이어 던집니다.</p><Rosters roster={rec.roster} rec={rec} names={recordSideNames(rec)} /></section>
           <Derby rec={rec} />
         </>
       )}
@@ -72,10 +75,11 @@ function Result({ rec }: { rec: AllStarRecord }) {
   const hits = (s: 0 | 1) => rec.game.bat.reduce((a, b) => a + (sideOf.get(b[0]) === s ? b[2] : 0), 0);
   const mvp = rec.roster.find((x) => x.id === rec.game.mvp);
   const [d, nn] = rec.game.score;
+  const sides = recordSideNames(rec);
   return (
     <>
       <p>
-        {formatDate(rec.year, rec.day, true)} · {d === nn ? <strong>{d}-{nn} 무승부</strong> : <strong>{SIDE_NAMES[d > nn ? 0 : 1]} {Math.max(d, nn)}-{Math.min(d, nn)} 승리</strong>}
+        {formatDate(rec.year, rec.day, true)} · {d === nn ? <strong>{d}-{nn} 무승부</strong> : <strong>{sides[d > nn ? 0 : 1]} {Math.max(d, nn)}-{Math.min(d, nn)} 승리</strong>}
         {' · MVP '}<strong>{name(rec.game.mvp)}</strong>{mvp && <span className="muted"> (<TeamName idx={mvp.team} />)</span>}
         {mvp?.team === session.teamIdx && <span className="tag">우리 선수</span>}
       </p>
@@ -83,8 +87,8 @@ function Result({ rec }: { rec: AllStarRecord }) {
         <table className="linescore">
           <thead><tr><th className="l">팀</th>{Array.from({ length: n }, (_, i) => <th key={i}>{i + 1}</th>)}<th>R</th><th>H</th></tr></thead>
           <tbody>
-            <tr><td className="l">{SIDE_NAMES[away]}</td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(rec.game.line.away[i])}</td>)}<td><strong>{rec.game.score[away]}</strong></td><td>{hits(away)}</td></tr>
-            <tr><td className="l">{SIDE_NAMES[rec.home]}</td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(rec.game.line.home[i])}</td>)}<td><strong>{rec.game.score[rec.home]}</strong></td><td>{hits(rec.home)}</td></tr>
+            <tr><td className="l">{sides[away]}</td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(rec.game.line.away[i])}</td>)}<td><strong>{rec.game.score[away]}</strong></td><td>{hits(away)}</td></tr>
+            <tr><td className="l">{sides[rec.home]}</td>{Array.from({ length: n }, (_, i) => <td key={i}>{cell(rec.game.line.home[i])}</td>)}<td><strong>{rec.game.score[rec.home]}</strong></td><td>{hits(rec.home)}</td></tr>
           </tbody>
         </table>
       </div>
@@ -92,7 +96,7 @@ function Result({ rec }: { rec: AllStarRecord }) {
   );
 }
 
-function Rosters({ roster, rec }: { roster: AllStarPick[]; rec?: AllStarRecord }) {
+function Rosters({ roster, rec, names }: { roster: AllStarPick[]; rec?: AllStarRecord; names: [string, string] }) {
   const { session } = useGame();
   const bat = new Map(rec?.game.bat.map((b) => [b[0], b]) ?? []);
   const pit = new Map(rec?.game.pit.map((b) => [b[0], b]) ?? []);
@@ -124,7 +128,7 @@ function Rosters({ roster, rec }: { roster: AllStarPick[]; rec?: AllStarRecord }
         );
         return (
           <div key={s}>
-            <h3>{SIDE_NAMES[s]}</h3>
+            <h3>{names[s]}</h3>
             <div className="scroll flat">
               <table>
                 <tbody>
