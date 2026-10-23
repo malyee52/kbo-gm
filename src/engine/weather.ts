@@ -5,6 +5,7 @@
 // 날씨 (4.2, 임시값): 날마다 전국 비(월별 확률) + 구장별 비 두 단계. 구장 하루 날씨는 맑음 / 경기 전 취소 / 경기 중 비(멈추는 회).
 // 난수 줄기는 시즌 뿌리의 'weather'에서 날짜·구장마다 따로 갈라 쓴다 (weather/<날짜 색인>/<구장 계보>, 더블헤더 2차전은 /2).
 // 순연이 생겨 그 날 경기가 늘어도 그 날 그 구장 날씨는 같다. 돔 구장은 비가 오지 않는다.
+// 더블헤더 1차전이 경기 전 취소면 같은 구장 비라 2차전도 함께 취소하고 (2차전 날씨는 뽑지 않는다), 1차전을 치르면 2차전 날씨를 따로 뽑는다.
 //
 // 경기 중 비는 rainInning(1~8)을 달아 두고 엔진(game.ts)이 그 회를 마치고 멈춘다 (기획안 4.7, 8장 10단계).
 // 정식 경기 성립(5회) 전에 멈추는 노게임은 그 경기를 일정에 남긴 채(피로·부상만 남는다) 같은 순연 규칙으로 한 경기를 더 편성한다.
@@ -253,28 +254,40 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
     if (d >= days.length) continue;
     const today = days[d];
     const date = dateAt(d);
-    // 1차전 먼저 (같은 대진의 2차전은 1차전 뒤에). 2차전 날씨는 1차전이 취소돼도 2차전 줄기에서 뽑는다
+    // 1차전 먼저 (같은 대진의 2차전은 1차전 뒤에). 1차전을 치르면 2차전 날씨는 2차전 줄기에서 따로 뽑는다 (오후 비)
     const order = [...today].sort((x, y) => (x.dh ?? 0) - (y.dh ?? 0) || x.home - y.home).map((g) => [g, g.dh === 2] as const);
+    /** 1차전 경기 전 취소로 함께 취소된 2차전 (날씨를 뽑지 않는다) */
+    const gone = new Set<PlanGame>();
+    const cancel = (g: PlanGame, nogame: boolean) => {
+      const idx = cancels.length;
+      cancels.push(nogame ? [d, g.home, g.away, -1, 1] : [d, g.home, g.away, -1]);
+      const to = reschedule({ home: g.home, away: g.away }, d, idx);
+      cancels[idx][3] = to;
+      if (to < 0 || (announce < 0 && d < reveal && to > mainEnd)) late.push(idx);
+    };
     for (const [g, second] of order) {
-      if (domes[g.home]) continue;
+      if (domes[g.home] || gone.has(g)) continue;
       const w = parkWeather(root, d, date, input.parks[g.home] ?? String(g.home), second);
       if (w === 0) continue;
       if (w > 0) {
         g.rainInning = w;
         // 강우 콜드(5~8회)는 그 회까지로 끝난 경기. 노게임은 경기를 남긴 채 다시 치를 한 경기를 순연 규칙으로 더 놓는다
         if (!isNoGame(w)) continue;
-      } else {
-        today.splice(today.indexOf(g), 1);
-        if (g.dh) {
-          const partner = today.find((x) => x.home === g.home && x.away === g.away && x.dh);
-          if (partner) delete partner.dh;
-        }
+        cancel(g, true);
+        continue;
       }
-      const idx = cancels.length;
-      cancels.push(w > 0 ? [d, g.home, g.away, -1, 1] : [d, g.home, g.away, -1]);
-      const to = reschedule({ home: g.home, away: g.away }, d, idx);
-      cancels[idx][3] = to;
-      if (to < 0 || (announce < 0 && d < reveal && to > mainEnd)) late.push(idx);
+      today.splice(today.indexOf(g), 1);
+      const partner = g.dh ? today.find((x) => x.home === g.home && x.away === g.away && x.dh) : undefined;
+      if (partner && g.dh === 1) {
+        // 1차전이 경기 전 취소면 같은 구장 비라 2차전도 함께 취소한다 (1차전, 2차전 순으로 다시 놓는다)
+        today.splice(today.indexOf(partner), 1);
+        gone.add(partner);
+        cancel(g, false);
+        cancel(partner, false);
+        continue;
+      }
+      if (partner) delete partner.dh;
+      cancel(g, false);
     }
   }
   while (days.length && !days[days.length - 1].length) days.pop();

@@ -343,7 +343,7 @@ table.roster td.l:first-child { min-width: 110px; }
 .cal-opp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-weight: 600; }
 /* 일정 개편 15단계: 더블헤더는 한 칸에 두 줄, 우천 취소·콜드·노게임 표시 */
 .cal-line { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; max-width: 100%; }
-.cal-opp.cancel { text-decoration: line-through; color: var(--muted); font-weight: 400; }
+.cal-opp.cancel, .cal-opp .cancel { text-decoration: line-through; color: var(--muted); font-weight: 400; }
 .tag.rain { margin-left: 0; background: var(--info-bg); border-color: transparent; color: var(--fg); }
 .linescore th, .linescore td { padding: 5px 9px; text-align: center; }
 .linescore td.l, .linescore th.l { text-align: left; }

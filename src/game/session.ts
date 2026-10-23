@@ -1970,10 +1970,20 @@ export class GameSession {
     }
     if (!today.length) return;
     const others: string[] = [];
+    // 같은 대진 취소가 둘이면 더블헤더 두 경기 함께 취소 (applyWeather가 1차전, 2차전 순으로 적는다)
+    const groups: PlanCancel[][] = [];
     for (const c of today) {
-      const w = this.replayWhen(c, day, known);
-      if (mine({ home: c[1], away: c[2] })) this.addNews(day, 'season', `${name(c[2])} 대 ${name(c[1])} 경기는 우천으로 취소됐습니다. ${w.text}.`);
-      else others.push(`${name(c[2])} 대 ${name(c[1])} (${w.short})`);
+      const g = groups.find((x) => x[0][1] === c[1] && x[0][2] === c[2]);
+      if (g) g.push(c);
+      else groups.push([c]);
+    }
+    for (const g of groups) {
+      const [, h, a] = g[0];
+      const ws = g.map((c) => this.replayWhen(c, day, known));
+      if (mine({ home: h, away: a })) {
+        if (ws.length === 1) this.addNews(day, 'season', `${name(a)} 대 ${name(h)} 경기는 우천으로 취소됐습니다. ${ws[0].text}.`);
+        else this.addNews(day, 'season', `${name(a)} 대 ${name(h)} 더블헤더 두 경기가 모두 우천으로 취소됐습니다. ${ws.map((w, i) => `${i + 1}차전은 ${w.text}`).join('. ')}.`);
+      } else others.push(`${name(a)} 대 ${name(h)}${ws.length > 1 ? ' 더블헤더' : ''} (${ws.map((w) => w.short).join(' · ')})`);
     }
     if (others.length) this.addNews(day, 'season', `우천 취소: ${others.join(', ')}.`);
   }

@@ -212,6 +212,35 @@ describe('날씨와 우천 순연 (7단계)', () => {
     expect(parkWeather(root, 100, '2025-07-01', 'LG')).toBe(parkWeather(root, 100, '2025-07-01', 'LG'));
   });
 
+  it('더블헤더 1차전이 경기 전 취소면 2차전도 함께 취소 (같은 구장 비), 1차전을 치른 뒤 2차전만 취소는 그대로', () => {
+    let both = 0;
+    let secondOnly = 0;
+    each((y, s, p) => {
+      const root = new Rng(`rain-${y}-${s}`).fork('weather');
+      const parks = worldOf(y).teams.map((t) => t.franchise);
+      const seen = new Map<string, number>();
+      for (const [d, h, a, , nogame] of p.cancels) {
+        if (nogame) continue;
+        const k = `${d}/${h}/${a}`;
+        seen.set(k, (seen.get(k) ?? 0) + 1);
+      }
+      for (const [k, n] of seen) {
+        const [d, h, a] = k.split('/').map(Number);
+        const left = (p.days[d] ?? []).filter((g) => g.home === h && g.away === a);
+        expect(n + left.length, `${y}/${s} ${k}`).toBeLessThanOrEqual(2);
+        if (n === 2) both++;
+        if (n === 1 && left.length) {
+          // 남은 경기는 1차전이고 1차전은 경기 전 취소가 아니었다 (2차전 줄기에서만 취소)
+          secondOnly++;
+          expect(left[0].dh, `${y}/${s} ${k}`).toBeUndefined();
+          expect(parkWeather(root, d, addDays(p.opening, d), parks[h], false), `${y}/${s} ${k}`).not.toBe(-1);
+        }
+      }
+    });
+    expect(both).toBeGreaterThan(0);
+    expect(secondOnly).toBeGreaterThan(0);
+  });
+
   it('일정 규칙이 없는 월드는 비가 없다', () => {
     const w = { ...worldOf(2025), schedule: undefined } as W;
     expect(planForWorld(w, new Rng('no-rule')).cancels).toEqual([]);

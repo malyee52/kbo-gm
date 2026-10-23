@@ -51,6 +51,11 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
     const dh = days[c[3]]?.find((g) => g.home === c[1] && g.away === c[2] && g.dh === 1);
     return `${shortDate(year, c[3])}${dh ? ' 더블헤더 1차전' : ''}`;
   };
+  /** 같은 날 같은 대진 취소가 둘이면 더블헤더 두 경기 함께 취소 (1차전이 먼저 적힌다): 몇 차전인지, 아니면 0 */
+  const dhOf = (list: PlanCancel[], c: PlanCancel) => {
+    const same = list.filter((x) => x[1] === c[1] && x[2] === c[2]);
+    return same.length > 1 ? same.indexOf(c) + 1 : 0;
+  };
   const nogameCancel = (d: number, g: PlanGame) => cancels.find((c) => c[4] && c[0] === d && c[1] === g.home && c[2] === g.away);
 
   const initialDay = focusGame !== undefined ? s.log[focusGame]?.day : Math.min(s.day, days.length - 1);
@@ -136,7 +141,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
               {lines}
               {c.cancels.map((x, i) => (
                 <span key={`c${i}`} className="cal-line">
-                  <span className="cal-opp cancel">{opp({ home: x[1], away: x[2] })}</span>
+                  <span className="cal-opp"><span className="cancel">{opp({ home: x[1], away: x[2] })}</span>{dhOf(c.cancels, x) ? <span className="muted"> {dhOf(c.cancels, x)}차</span> : null}</span>
                   <span className="tag rain">우천 취소</span>
                 </span>
               ))}
@@ -162,7 +167,7 @@ export function Schedule({ focusGame }: { focusGame?: number }) {
           <ul className="plain">
             {dayCancels.map((c, k) => (
               <li key={k}>
-                <TeamName idx={c[2]} /> @ <TeamName idx={c[1]} /> <span className="tag rain">우천 취소</span> <span className="muted small">→ {replayText(c)}</span>
+                <TeamName idx={c[2]} /> @ <TeamName idx={c[1]} /> {dhOf(dayCancels, c) ? <span className="muted small">더블헤더 {dhOf(dayCancels, c)}차전 </span> : null}<span className="tag rain">우천 취소</span> <span className="muted small">→ {replayText(c)}</span>
               </li>
             ))}
           </ul>
