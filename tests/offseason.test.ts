@@ -514,11 +514,13 @@ describe('등급제 전 FA 보상 (1-5, 조사값)', () => {
     const { league } = createLeague(store, 2026, 's', FAST);
     const top = [...league.players].filter((p) => !p.foreign).sort((a, b) => b.contract.salary - a.contract.salary)[0];
     const p = { ...top, faCount: 0, birthYear: 2026 + 1 - 30 } as LeaguePlayer;
+    expect(faGrade(p, league.players, 1999)).toBe('P1');
     expect(faGrade(p, league.players, 2005)).toBe('P1');
     expect(faGrade(p, league.players, 2010)).toBe('P1');
     expect(faGrade(p, league.players, 2011)).toBe('P2');
     expect(faGrade(p, league.players, 2019)).toBe('P2');
     expect(faGrade(p, league.players, 2020)).toBe('A');
+    expect(faGrade(p, league.players, 2021)).toBe('A');
     expect(FA_COMP.P1).toEqual({ cashOnly: 4.5, withPlayer: 3, protect: 18 });
     expect(FA_COMP.P2).toEqual({ cashOnly: 3, withPlayer: 2, protect: 20 });
   });
