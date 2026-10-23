@@ -25,6 +25,7 @@ import { RulePreviewBody, StatusBadge } from '../RuleNews';
 import { FIX_LABEL, stageHeadline, stageLeftovers, stageRecord, type Leftover, type LeftoverFix } from '../offStage';
 import { teamVars } from '../teams';
 import { useNarrow } from '../BoxScore';
+import { openingEdits, openWithPreview } from '../openingBoard';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -81,7 +82,8 @@ export function Offseason() {
     setBusy(true);
     setMsg({ text: `${session.year + 1} 시즌을 준비하는 중입니다 (리그 환경 맞춤)` });
     await new Promise((r) => setTimeout(r, 30));
-    const r = session.openNextSeason();
+    // 개막 준비에서 기용 보드를 미리 고쳤으면 개막 직후 그대로 옮긴다 (openingBoard.ts)
+    const r = openWithPreview(session);
     setBusy(false);
     if (!r.ok) {
       setMsg({ text: r.message, error: true });
@@ -284,12 +286,13 @@ function ReadyCard({ busy, onOpen }: { busy: boolean; onOpen: () => void }) {
   const under = floor !== null && pay < floor;
   const news = session.ruleNewsFor(year);
   const showCapRules = cap !== null && year >= FRANCHISE_TAG_FROM;
+  const edits = openingEdits(session);
   return (
     <section className="panel ready-card">
       <h2>{year} 시즌 개막 준비 완료</h2>
       <ul className="plain ready-checks">
         <li className={size > limit ? 'warn' : 'ok'}>{size > limit ? '⚠' : '✓'} 선수단 {size}/{limit}명</li>
-        <li className="ok">✓ 1군 엔트리: 개막하면 AI가 짠 명단으로 시작 (개막 뒤 전력 &gt; 기용 보드에서 바꿈)</li>
+        <li className="ok">✓ 1군 엔트리: {edits ? `기용 보드에서 고친 ${edits}건을 개막 때 옮김` : 'AI가 짠 명단으로 시작 (기용 보드에서 미리 보고 바꿀 수 있음)'}</li>
         <li className={capOver || under ? 'warn' : 'ok'}>
           {capOver || under ? '⚠' : '✓'} {cap ? '캡 대상 연봉' : '연봉 총액'} {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ' (샐러리캡 없는 시대)'}{floor ? ` · 하한 ${won(floor)}` : ''}
           {showCapRules && <> <button type="button" className="link small" onClick={() => document.getElementById('cap-rules')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>프랜차이즈 예외 고르기 ▾</button></>}
@@ -299,6 +302,7 @@ function ReadyCard({ busy, onOpen }: { busy: boolean; onOpen: () => void }) {
       <RulePreviewBody news={news} lines={previewOrder(news)} top={narrow ? 2 : 4} />
       <div className="actions">
         <button type="button" className="ghost" onClick={() => go('rules')}>규칙 연표 전체 보기</button>
+        <button type="button" className="ghost" onClick={() => go('lineup')} disabled={busy}>기용 보드 확인</button>
         <button type="button" onClick={onOpen} disabled={busy}>{busy ? '준비 중' : `${year} 시즌 개막 ▶`}</button>
       </div>
     </section>

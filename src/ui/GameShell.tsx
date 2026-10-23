@@ -58,6 +58,7 @@ import { duePromises } from '../fantasy/promises';
 import { rivalDue, rivalMove } from '../fantasy/rivals';
 import { About } from './screens/About';
 import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
+import { OpeningBoard } from './screens/OpeningBoard';
 import { blockOf, entryOf, GROUPS, hidden, itemBlock, itemOf, itemsOf, MOBILE_GROUPS, tabLabel, type Group, type MenuItem } from './menu';
 import { countByGroup, decisions, loadAcked, saveAcked, type Acked } from './decisions';
 import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ScreenPrimary, type ShellUi } from './shell';
@@ -576,7 +577,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'inbox' && <Inbox />}
                 {screen === 'news' && <ClubNews />}
                 {screen === 'roster' && <Roster />}
-                {screen === 'lineup' && <LineupBoard />}
+                {screen === 'lineup' && (session.phase === 'offseason' ? <OpeningBoard /> : <LineupBoard />)}
                 {screen === 'enlist' && <EnlistPanel />}
                 {screen === 'schedule' && <Schedule focusGame={screenArg} />}
                 {screen === 'standings' && <Standings />}

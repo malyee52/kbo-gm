@@ -95,8 +95,10 @@ export function blockOf(s: GameSession, screen: Screen): string | null {
   const off = s.phase === 'offseason';
   switch (screen) {
     case 'roster':
-    case 'lineup':
       return off ? '오프시즌에는 쉼 · 다음 시즌 개막 뒤 열림 (계약은 영입 > 계약·지명)' : null;
+    case 'lineup':
+      // 개막 준비 단계에서는 개막 날 기용 보드를 미리 연다 (2026-10-23 사용자 결정, OpeningBoard.tsx)
+      return off && s.offseason?.stage !== 'ready' ? '오프시즌에는 쉼 · 개막 준비 단계에서 열림 (개막 미리 보기)' : null;
     case 'search':
     case 'market':
     case 'trade':

@@ -3527,6 +3527,38 @@ export class GameSession {
   /** 오프시즌을 끝내고 다음 시즌을 연다 (환경 맞춤 때문에 1초 안팎 걸린다) */
   openNextSeason() { return this.dispatchOff({ year: this.year, type: 'open' }); }
 
+  /**
+   * 개막 준비 단계의 기용 보드 (2026-10-23 사용자 결정): 지금 오프시즌을 저장·불러오기로 복사해 개막까지 한 세션.
+   * 개막은 결정적이라 실제로 개막하면 같은 월드가 된다. 화면은 이 세션에서 1군·기용표를 고치고,
+   * 개막 때 그 조작(openingBoardActions)을 실제 세션에 applyOpeningBoard로 옮긴다. 이 세션 자체는 버린다.
+   */
+  previewOpening(): GameSession | null {
+    if (this.phase !== 'offseason' || this.offseason?.stage !== 'ready') return null;
+    const g = GameSession.load(this.store, clone(this.toSave()), this.params);
+    g.watch = [];
+    return g.openNextSeason().ok ? g : null;
+  }
+
+  /** 개막 날(첫 경기 전)에 한 1군·기용표 조작. previewOpening 세션에서 꺼낸다 */
+  openingBoardActions(): GameAction[] {
+    return this.actions.filter((a) => (a.type === 'entry' || a.type === 'plan') && 'day' in a && a.day === 0 && a.year === this.year).map((a) => clone(a));
+  }
+
+  /**
+   * 미리 보기에서 한 개막 날 조작을 그대로 한다 (조작 기록에 남아 재현된다). 개막 직후(0일, 첫 경기 전)에만.
+   * 선수는 id로 적혀 있어 월드 색인과 상관없다. 돌려주는 값: 옮긴 조작 수
+   */
+  applyOpeningBoard(actions: readonly GameAction[]): number {
+    if (this.phase !== 'season' || this.day !== 0) return 0;
+    let n = 0;
+    for (const a of actions) {
+      if ((a.type !== 'entry' && a.type !== 'plan') || a.day !== 0 || (a.year ?? this.league.startYear) !== this.year) continue;
+      this.dispatchSeason(clone(a));
+      n++;
+    }
+    return n;
+  }
+
   toSave(): GameSaveV2 {
     const base = {
       app: 'kbo-gm' as const,
