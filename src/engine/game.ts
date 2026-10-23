@@ -65,6 +65,8 @@ export interface GameContext {
   params: EngineParams;
   /** 최대 이닝. 0 = 무제한 (승부가 날 때까지) */
   maxInnings: number;
+  /** 시간 제한 흉내 (params.timeLimit의 그 해 값). 없으면 시간 제한 없음 */
+  timeLimit?: { from: number; end: number };
   day: number;
   rng: Rng;
   states: PlayerStates;
@@ -250,6 +252,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
 
   let inning = 0;
   const lineScore = { away: [] as number[], home: [] as number[] };
+  const tl = ctx.timeLimit;
+  let timeRng: Rng | null = null;
   for (;;) {
     inning++;
     const a0 = away.runs;
@@ -267,6 +271,8 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     if (walkOff) break;
     if (inning >= 9 && home.runs !== away.runs) break;
     if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
+    // 시간 제한 흉내: 여기까지 오면 동점이다. 따로 둔 줄기에서만 뽑아 경기 난수 흐름은 그대로다
+    if (tl && inning >= tl.from && (timeRng ??= ctx.rng.fork('time')).chance(tl.end)) break;
   }
   if (ctx.running) for (const side of [home, away]) for (const s of side.subs) ctx.running[s.kind === 'PH' ? 'ph' : s.kind === 'PR' ? 'pr' : 'def']++;
   return finishGame(st, inning, lineScore);

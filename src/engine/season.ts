@@ -337,7 +337,7 @@ export class Season {
     this.gamesRoot = rng.fork('games');
     this.condRoot = rng.fork('cond');
     this.ctx = {
-      league: world.league, env: eraEnv(world, baseParams), cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
+      league: world.league, env: eraEnv(world, baseParams), cal, params, maxInnings: world.rules.maxInnings, timeLimit: params.timeLimit?.[world.year], day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
       errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
       autoIbb: world.year >= AUTO_IBB_YEAR,
@@ -694,7 +694,7 @@ export class Season {
     // 직접 지휘 (2026-10-12 가을야구까지): 우리 경기에만
     const cmd = command && (command.team === home || command.team === away) ? command : null;
     this.advanceCondition(day);
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd, injuries: undefined };
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit: undefined, plays, command: cmd, injuries: undefined };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     h.away = false;

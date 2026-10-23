@@ -23,4 +23,14 @@ describe('연장 규정', () => {
     expect(s.totals.ties).toBeGreaterThan(0);
     expect(s.log.every((g) => g.innings <= 11)).toBe(true);
   }, 120_000);
+
+  it('시간 제한 흉내: 끝 확률 1이면 from회 끝 동점에서 무승부로 끝난다 (1995, from 12)', () => {
+    const params = { ...FAST, timeLimit: { 1995: { from: 12, end: 1 } } };
+    const world = worldForYear(loadDataStore(), 1995, params);
+    expect(world.rules.maxInnings).toBe(15);
+    const s = Season.start(world, params, 'time-1995');
+    s.runToEnd();
+    expect(s.log.every((g) => g.innings <= 12)).toBe(true);
+    expect(s.log.some((g) => g.innings === 12 && g.homeRuns === g.awayRuns)).toBe(true);
+  }, 120_000);
 });

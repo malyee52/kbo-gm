@@ -342,6 +342,12 @@ export interface EngineParams {
    * 선으로 잇고 처음보다 앞·끝보다 뒤는 그 끝 값을 쓴다. 비어 있으면 모두 1. 시즌을 열 때 doublePlay·sacFly·stealScale과 주자 추가 진루 확률(firstToThirdOnSingle·secondToHomeOnSingle·firstToHomeOnDouble)에 곱한다
    */
   eraRunning: EraRunning[];
+  /**
+   * 시간 제한 흉내 (엔진 2 14단계 물음 1, 2026-10-23 사용자 결정): 경기 시각이 없어 시간 제한(1982~2002 야간 경기 개시 4시간, 2004 4시간)을
+   * 그대로 넣을 수 없어서, 그 해 정규시즌 경기는 from회 끝에 동점이면 이닝마다 확률 end로 끝나 무승부가 된다 (game.ts, 경기 난수의 'time' 줄기).
+   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌에는 쓰지 않는다
+   */
+  timeLimit?: Record<number, { from: number; end: number }>;
 
   // ---- 선수 기용
   /**
@@ -669,6 +675,8 @@ export const DEFAULT_PARAMS: EngineParams = {
     { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
     { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
   ],
+  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts로 그 해 실제 무승부 비율에 맞춘 값
+  timeLimit: {},
 
   restChance: 0.6,
   catcherRestChance: 0.6,
