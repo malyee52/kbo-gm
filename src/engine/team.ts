@@ -28,6 +28,8 @@ export interface PlayerStates {
   /** 야수 피로 (경기 단위, 엔진 2 11단계)와 그 값을 기록한 날짜. 하루에 params.body.recover씩 빠진다 */
   body: Float32Array;
   bodyDay: Int32Array;
+  /** 컨디션의 흐름 (엔진 2 12단계, condition.ts). 시즌이 날마다 한 걸음씩 옮긴다 (Season.condDay). 사건 몫은 GameContext.condEvent */
+  cond: Float32Array;
 }
 
 export function newPlayerStates(n: number): PlayerStates {
@@ -41,6 +43,7 @@ export function newPlayerStates(n: number): PlayerStates {
     recoverMul: new Float32Array(n).fill(1),
     body: new Float32Array(n),
     bodyDay: new Int32Array(n).fill(-99),
+    cond: new Float32Array(n),
   };
 }
 

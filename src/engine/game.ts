@@ -81,6 +81,8 @@ export interface GameContext {
   sbShift?: number;
   /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
+  /** 선수별 컨디션 사건 값 (선수 색인, 감기·몸살 같은 몸 상태 이벤트, league/events.ts condToday). 흐름(states.cond)에 더한다. 없으면 0 */
+  condEvent?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
   plays?: Play[] | null;
   /** 직접 지휘 (경기 개입): 이 구단의 타석마다 지휘자에게 묻는다. 고른 것이 '자동'이면 AI 감독과 똑같이 진행한다 */

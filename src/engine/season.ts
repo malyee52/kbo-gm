@@ -12,6 +12,8 @@ import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
 import { sbShiftOf } from './rules';
+import { openCondition, stepCondition } from './condition';
+import { condToday } from './pa';
 import { Rng } from './rng';
 import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
@@ -220,6 +222,9 @@ export interface SeasonSave {
   overuse?: number[];
   body?: number[];
   bodyDay?: number[];
+  /** 컨디션 흐름과 그 날짜 (엔진 2 12단계, 없으면 개막부터 다시 계산) */
+  cond?: number[];
+  condDay?: number;
   /** 숨은 능력 시드 (리그 시드, 엔진 2 11단계). 없으면 시즌 시드 */
   hiddenSeed?: string;
 }
@@ -301,6 +306,10 @@ export class Season {
   private slumpCycle = -1;
   /** 숨은 능력 시드 (SeasonInit.hiddenSeed) */
   readonly hiddenSeed: string;
+  /** 컨디션 흐름 난수의 뿌리 (condition.ts). 날마다 `${날}`, 개막은 'open'으로 갈라 쓴다: 경기·결장·이벤트 난수와 따로다 */
+  private readonly condRoot: Rng;
+  /** states.cond가 어느 날의 흐름인가 (−1 = 아직 개막 전) */
+  private condDay = -1;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
   constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
@@ -326,6 +335,7 @@ export class Season {
     this.dayRng = rng.fork('days');
     this.eventRng = rng.fork('events');
     this.gamesRoot = rng.fork('games');
+    this.condRoot = rng.fork('cond');
     this.ctx = {
       league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
@@ -457,6 +467,7 @@ export class Season {
     const games = this.schedule[day];
     const season = this.teamSeasons;
     ctx.day = day;
+    this.advanceCondition(day);
 
     for (const a of this.fixedAbsence.get(day) ?? []) {
       states.absentUntil[a.p] = a.until;
@@ -612,6 +623,33 @@ export class Season {
     this.ctx.form = form ?? undefined;
   }
 
+  /** 그날 컨디션 사건 값 (선수 색인, league/events.ts condToday). 없으면 null */
+  setCondEvents(cond: Float64Array | null): void {
+    this.ctx.condEvent = cond ?? undefined;
+  }
+
+  /**
+   * 컨디션 흐름을 그날(day)까지 옮긴다 (경기가 없는 날도 한 걸음씩). 개막 날은 오래 둔 분포에서 뽑는다.
+   * 날마다 따로 가른 줄기에서 선수 색인 순서대로 뽑으므로, 언제 부르든 그날 값은 같다
+   */
+  private advanceCondition(day: number): void {
+    const c = this.params.cond;
+    if (this.condDay < 0) {
+      openCondition(this.states.cond, this.condRoot.fork('open'), c);
+      this.condDay = 0;
+    }
+    while (this.condDay < day) {
+      this.condDay++;
+      stepCondition(this.states.cond, this.condRoot.fork(String(this.condDay)), c);
+    }
+  }
+
+  /** 그날 선수 컨디션 (흐름 + 사건, 화면·AI 감독용). 날짜를 넘기면 흐름을 그날까지 옮긴다 (지난 날은 볼 수 없다) */
+  condition(idx: number, day = this.day): number {
+    if (day > this.condDay) this.advanceCondition(day);
+    return condToday(this.ctx, idx);
+  }
+
   private addAbsence(a: Absence, ts: TeamSeason): void {
     this.states.absentUntil[a.idx] = a.until;
     this.absences.push(a);
@@ -629,6 +667,7 @@ export class Season {
     const plays = this.boxTeams.has(home) || this.boxTeams.has(away) ? [] as Play[] : null;
     // 직접 지휘 (2026-10-12 가을야구까지): 우리 경기에만
     const cmd = command && (command.team === home || command.team === away) ? command : null;
+    this.advanceCondition(day);
     const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, plays, command: cmd, injuries: undefined };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
@@ -722,6 +761,7 @@ export class Season {
       overuse: Array.from(st.overuse),
       body: Array.from(st.body),
       bodyDay: Array.from(st.bodyDay),
+      ...(this.condDay >= 0 ? { cond: Array.from(st.cond), condDay: this.condDay } : {}),
       hiddenSeed: this.hiddenSeed,
       ...(this.slump ? { slump: [this.slumpCycle, [...this.slump.keys()].filter((i) => this.slump![i])] as [number, number[]] } : {}),
     };
@@ -757,6 +797,11 @@ export class Season {
     }
     if (save.body) s.states.body.set(save.body);
     if (save.bodyDay) s.states.bodyDay.set(save.bodyDay);
+    // 컨디션 흐름: 없으면(예전 저장) 개막부터 다시 돌려 같은 값을 만든다 (날마다 따로 가른 줄기라 가능)
+    if (save.cond && save.condDay !== undefined) {
+      s.states.cond.set(save.cond);
+      s.condDay = save.condDay;
+    }
     s.states.lastStartDay.set(save.lastStartDay);
     save.bat.forEach((row, i) => BAT_KEYS.forEach((k, j) => { s.bat[i][k] = row[j]; }));
     save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j] ?? 0; })); // 예전 저장에는 뒤에 붙인 항목(홀드)이 없다

@@ -318,6 +318,8 @@ export interface EngineParams {
   catcherRestChance: number;
   /** 야수 체력 (엔진 2 11단계, team.ts hitterFatigue). 모두 임시값 */
   body: BodyParams;
+  /** 선수 컨디션 (엔진 2 12단계, condition.ts, docs/컨디션_기획안.md). 모두 임시값 */
+  cond: CondParams;
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -396,6 +398,21 @@ export function isStarterSkill(pit: { startShare: number } | null | undefined): 
 }
 
 /** 야수 체력 (엔진 2 11단계, 단위는 '경기'). 모두 임시값 */
+/** 선수 컨디션: 며칠 이어지는 흐름 (AR(1)) + 몸 상태 사건. 값은 [−1, +1], 0 = 평소 (docs/컨디션_기획안.md 1장) */
+export interface CondParams {
+  /** 흐름이 하루에 남는 비율 (1 − 0쪽으로 돌아가는 비율) */
+  rho: number;
+  /** 하루 흔들림의 표준편차. 오래 둔 흐름의 퍼짐 = sd ÷ √(1 − rho²) */
+  sd: number;
+  /** 타석 edge에 주는 크기: edge += edge × (타자 컨디션 − 투수 컨디션). 0이면 컨디션이 경기에 영향이 없다 */
+  edge: number;
+  /** 낱말 경계: 좋음 ≥ good, 나쁨 ≤ bad */
+  good: number;
+  bad: number;
+  /** 흐름 사유 '컨디션 난조'로 바꾸는 값 (≤) */
+  awful: number;
+}
+
 export interface BodyParams {
   /** 선발 출전 한 경기에 쌓이는 피로. 연장이면 이닝 ÷ 9배 */
   load: number;
@@ -601,6 +618,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   body: {
     load: 1, catcher: 1.3, dh: 0.6, sub: 0.3, agePer: 0.02, recover: 0.6, cap: 4, restFrom: 1, penaltyFrom: 2, penaltyPer: 0.01, penaltyMax: 0.02,
   },
+  // 선수 컨디션 (엔진 2 12단계, docs/컨디션_기획안.md v1). rho·sd·경계·난조는 임시값, edge 0.04는 사용자 결정 크기 (2026-10-22, 근거 자료 없음이라 임시값)
+  cond: { rho: 0.9, sd: 0.153, edge: 0, good: 0.4, bad: -0.4, awful: -0.7 },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md
