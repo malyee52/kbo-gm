@@ -35,8 +35,9 @@ export const MENU: MenuItem[] = [
   { key: 'news', group: '브리핑', label: '소식', tabs: [{ screen: 'news', label: '구단 소식' }, { screen: 'articles', label: '기사' }] },
   one('fantasy', '브리핑', '대화', 'fantasy'),
 
-  one('roster', '전력', '선수 명단', 'roster'),
+  // 전력에 들어가면 기용 보드가 먼저 (2026-10-23 사용자 결정), 1·2군 명단은 그다음
   one('lineup', '전력', '기용 보드', 'lineup'),
+  one('roster', '전력', '선수 명단', 'roster'),
   one('growth', '전력', '성장', 'growth'),
   one('enlist', '전력', '입대', 'enlist'),
 
