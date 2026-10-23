@@ -174,8 +174,9 @@ export interface Meta {
   /**
    * 시작 연도 개막 때 구단별 외국인 (연도 → 구단 이름 → 선수). data-src/외국인_개막명단.csv에서 만든다.
    * 그 해 기록에는 시즌 중 교체된 외국인까지 있어서, 새 게임은 이 명단에 있는 외국인만 넣는다. 없는 해는 기록 그대로.
+   * recordTeam: 시즌 중 이적해 그 해 기록 소속이 개막 구단과 다른 선수의 기록 소속 (예: 2026 데이비슨, 개막 NC → 기록 키움).
    */
-  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean }[]>>;
+  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean; recordTeam?: string }[]>>;
   /**
    * 연도별 특별 엔트리 선수 id (은퇴식 등으로 하루 1군에 등록된 선수. tools/build_data.py의 규칙으로 고른 값).
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.

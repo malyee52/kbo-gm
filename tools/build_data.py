@@ -14,7 +14,9 @@
 
 함께 읽는 파일
   data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
-                                 자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
+                                 자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다 ('확인'·'출처 확인'은 확인값).
+                                 구분: 개막 명단(일반·아시아쿼터) 또는 제외(시즌 중 교체 선수). 계약구분: 아시아쿼터면 시장에서도 아시아쿼터.
+                                 기록소속: 개막 구단과 그 해 기록 소속이 다를 때(시즌 중 이적) 기록 소속. 월드는 개막 구단에서 시작한다.
   data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
                                  상무·경찰 복무는 자료집 선수마스터의 '출신교·경력(2026 프로필)'에서 읽는다.
                                  엑셀의 다른 내용을 바꾸지 않고 이것만 다시 만들려면: build_data.py --military-only
@@ -1199,12 +1201,16 @@ def main():
     if FOREIGN_OPENING.exists():
         with FOREIGN_OPENING.open(encoding='utf-8-sig', newline='') as f:
             for r in csv.DictReader(f):
-                if r['구분'] == '제외':
-                    continue
-                asia = r['구분'] == '아시아쿼터'
-                foreign_opening[str(r['연도'])][r['구단']].append({'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] == '확인'})
+                # 계약구분 열이 없던 예전 파일은 구분만 본다
+                asia = r['구분'] == '아시아쿼터' or r.get('계약구분') == '아시아쿼터'
                 if asia:
                     asia_ids.add(str(r['선수ID']))
+                if r['구분'] == '제외':
+                    continue
+                entry = {'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] in ('확인', '출처 확인')}
+                if r.get('기록소속'):
+                    entry['recordTeam'] = r['기록소속']
+                foreign_opening[str(r['연도'])][r['구단']].append(entry)
     for p in players:
         if p['id'] in asia_ids:
             p['asia'] = True

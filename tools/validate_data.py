@@ -151,11 +151,25 @@ def main():
                     continue
                 if not pl.get('foreign'):
                     err(f'외국인 개막 명단 {y} {t}: {pl["name"]}은(는) 외국인이 아님')
-                if team_of.get(x['id']) != t:
+                # 시즌 중 이적한 개막 선수는 기록소속 열에 그 해 기록 소속을 적는다 (월드는 개막 구단에서 시작)
+                if team_of.get(x['id']) != x.get('recordTeam', t):
                     err(f'외국인 개막 명단 {y} {t}: {pl["name"]}의 {y}년 기록 소속이 {team_of.get(x["id"])}')
+                elif x.get('recordTeam'):
+                    warn(f'외국인 개막 명단 {y} {t}: {pl["name"]}은(는) 개막 구단과 기록 소속({x["recordTeam"]})이 다름 (시즌 중 이적, 개막 구단에서 시작)')
                 unconfirmed += not x.get('confirmed')
         if unconfirmed:
-            warn(f'외국인 개막 명단 {y}: 미확인 {unconfirmed}명 (출전량·이름으로 추정한 값)')
+            warn(f'외국인 개막 명단 {y}: 미확인 {unconfirmed}명 (출전량·이름으로 추정했거나 개막 선수 대신 넣은 값)')
+
+    # 아시아쿼터 국적: 아시아축구연맹(AFC) 회원국 국적만 (KBO 아시아쿼터 규정). 국적을 적은 행만 본다
+    foreign_csv = ROOT / 'data-src' / '외국인_개막명단.csv'
+    if foreign_csv.exists():
+        import csv
+        AFC = {'JPN', 'TPE', 'AUS', 'CHN', 'HKG', 'PHI', 'INA', 'THA', 'VIE', 'MAS', 'SGP', 'IND', 'PAK', 'SRI', 'MGL', 'UZB', 'KAZ', 'IRN', 'GUM'}
+        with foreign_csv.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                codes = (r.get('국적코드') or '').split()
+                if r['구분'] == '아시아쿼터' and codes and not any(c in AFC for c in codes):
+                    err(f'외국인 개막 명단 {r["연도"]} {r["구단"]}: 아시아쿼터 {r["선수명"]}의 국적 {r.get("국적")}이 아시아 국가가 아님')
 
     # ---- 신인 지명 (drafts.json, baseballchart.kr 원본)
     drafts_path = DATA / 'drafts.json'
