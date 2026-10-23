@@ -322,15 +322,22 @@ export function investCost(f: TeamFinance | undefined, planned = false): number 
   return INVEST_KINDS.reduce((s, k) => s + INVEST_COST[k][lv[k] ?? 0], 0);
 }
 
-/** 개막 때 스타 보정 (리그 상위 30명 안의 선수 수 × 0.015, 최대 0.06). 시즌마다 한 번 계산해 둔다 */
-const starCache = new WeakMap<World, number[]>();
-function starBonus(world: World): number[] {
+/**
+ * 개막 때 스타 보정 (리그 상위 30명 안의 선수 수 × 0.015, 최대 0.06). 소속은 리그 상태(시즌 중에는 개막 때 모습)를 따른다.
+ * 예전에는 월드마다 처음 부른 때(시즌 첫 이벤트 등)의 월드 소속을 끝까지 써서, 불러온 게임(처음 부른 때가 다름)과
+ * 결산 관중 수입이 달라졌다 (2026-10-23). 캐시는 쓴 소속이 같을 때만 다시 쓴다
+ */
+const starCache = new WeakMap<World, { key: string; out: number[] }>();
+function starBonus(world: World, league: Pick<LeagueState, 'players'>): number[] {
+  const opening = new Map(league.players.map((p) => [p.id, p.team]));
+  const teams = world.players.map((p) => opening.get(p.id) ?? p.teamIdx);
+  const key = teams.join(',');
   const hit = starCache.get(world);
-  if (hit) return hit;
+  if (hit?.key === key) return hit.out;
   const ctx = valueContext(world);
-  const top = [...world.players].map((p) => ({ t: p.teamIdx, r: currentRuns(p, ctx) })).sort((a, b) => b.r - a.r).slice(0, 30);
+  const top = world.players.map((p, i) => ({ t: teams[i], r: currentRuns(p, ctx) })).sort((a, b) => b.r - a.r).slice(0, 30);
   const out = world.teams.map((_, t) => Math.min(0.06, 0.015 * top.filter((x) => x.t === t).length));
-  starCache.set(world, out);
+  starCache.set(world, { key, out });
   return out;
 }
 
@@ -390,7 +397,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
 
   // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로
   if (team < world.teams.length) {
-    const star = starBonus(world)[team] ?? 0;
+    const star = starBonus(world, league)[team] ?? 0;
     const park = league.stadiums?.[team];
     const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
     // 관중이 적은 시대는 객단가를 그만큼 올려 관중 수입 합을 시대와 상관없이 같게 (eraFillScale)
@@ -452,7 +459,7 @@ export function seasonIncome(league: LeagueState, world: World, team: number): {
   const futures = isFuturesTeam(league, team, year);
   const trust = league.owner?.team === team ? league.owner.trust : 50;
   const lastCash = league.finance?.[team]?.history.at(-1)?.cash ?? START_CASH;
-  const star = team < world.teams.length ? starBonus(world)[team] ?? 0 : 0;
+  const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
   return {
     broadcast: futures ? 0 : BROADCAST,
     parent: parentSupport(league, team, trust, lastCash),
@@ -507,7 +514,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   ensureFinance(league);
   const end = Number.MAX_SAFE_INTEGER;
   const out: FinanceYear[] = [];
-  const stars = starBonus(world);
+  const stars = starBonus(world, league);
   for (let t = 0; t < league.teams.length; t++) {
     const flows = seasonFlows(input, t, end);
     const items = { ...flows.items };

@@ -302,6 +302,8 @@ export interface GameSaveV2 {
   enlistChoice?: string[];
   /** 그중 군 야구단 지원 명단 (결산 전까지만. 없으면 지원할 수 있는 선수 모두) */
   applyChoice?: string[];
+  /** 우리 구단 1군에 임시로 올라와 있는 선수 색인 (같은 승격 소식을 다시 내지 않게. 없으면 불러올 때 다시 짜 본다) */
+  callUps?: number[];
   news: NewsItem[];
   actions: GameAction[];
 }
@@ -680,7 +682,8 @@ export class GameSession {
     ensureCoaches(g.league);
     ensureGm(g.league);
     g.rebuildTrades();
-    g.lastCallUps = new Set(season.teamSeasons[save.teamIdx].callUps?.map((p) => p.idx) ?? []);
+    // 예전 저장에는 없다: 불러온 직후 엔진 명단은 비어 있으므로 지금 날짜로 짜 본 임시 승격으로 대신한다
+    g.lastCallUps = new Set(save.callUps ?? season.activeAt(save.teamIdx).callUps?.map((p) => p.idx) ?? []);
     return g;
   }
 
@@ -3414,6 +3417,7 @@ export class GameSession {
       seed: this.league.seed,
       season: this.season.toSave(),
       ...(this.postseason ? { postseason: clone(this.postseason) } : {}),
+      ...(this.lastCallUps.size ? { callUps: [...this.lastCallUps] } : {}),
       news: this.news.map((n) => ({ ...n })),
       actions: this.actions.map((a) => clone(a)),
     };
