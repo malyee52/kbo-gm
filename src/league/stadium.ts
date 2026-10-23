@@ -7,8 +7,8 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
-import type { Meta, ParkEvents } from '../data/types';
-import { Rng, type SimTeam } from '../engine';
+import type { ParkEvents } from '../data/types';
+import { DEFAULT_PARAMS, realParkYear, Rng, type EngineParams, type ParkLeagueRates, type ParkSource, type RealParkBasis, type SimTeam } from '../engine';
 import { realParkAt, realParkOpening, realParkRename } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
 
@@ -110,15 +110,35 @@ export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boo
   return { hr: s?.hr ?? 1, dome: !!s?.dome };
 }
 
+/** 구장 화면에 보이는 근거: 실제 구장 값의 근거(park.ts) + 게임 안 신구장, 중립 */
+export type TeamParkBasis = RealParkBasis | 'built' | 'none';
+
 /**
  * 그 해 그 구단 홈 구장의 경기 배율 (world.ts SimTeam.park, 구장 화면·세이버 보정이 같은 값을 읽는다).
- * 실제 구장 계수(parkRunFactor·parkEventFactor) + 게임 안 신구장 홈런 배율. 중립이면 undefined
+ * 실제 구장 값(engine/park.ts realParkYear: 2015~ 실측, 그 전은 차이 방식·짐작, 구장효과 기획안 P5) + 게임 안 신구장 홈런 배율.
+ * 마지막 실측 해 뒤는 같은 실제 구장이면 마지막 실측 값을 이어 쓴다 (parkRunFactor, P7에서 바뀜).
+ * franchises·lg = 그 해 리그 구단 계보와 리그 비율 (옛 해 평균 1 맞춤과 득점 계수에 쓴다). 중립이면 park가 undefined
  */
-export function teamParkAt(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, franchise: string, year: number, s: StadiumState | undefined): SimTeam['park'] {
+export function teamParkInfo(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
+                             lg: ParkLeagueRates, pp: EngineParams['park'] = DEFAULT_PARAMS.park): { park: SimTeam['park']; basis: TeamParkBasis } {
   const hr = parkFactor(s).hr;
-  const run = parkRunFactor(meta.parkFactors, franchise, year, s);
-  const ev = run !== 1 ? parkEventFactor(meta.parkEvents, franchise, year, s) : undefined;
-  return hr !== 1 || run !== 1 ? { hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } : undefined;
+  if ((s?.done ?? []).some((d) => d.kind === 'new')) return { park: hr !== 1 ? { hr } : undefined, basis: 'built' };
+  const last = Math.max(...Object.keys(src.parkFactors ?? {}).map(Number));
+  let v: { run: number; ev?: ParkEvents; basis: RealParkBasis } | undefined;
+  if (year > last) {
+    const run = parkRunFactor(src.parkFactors, franchise, year, s);
+    const ev = run !== 1 ? parkEventFactor(src.parkEvents, franchise, year, s) : undefined;
+    if (run !== 1) v = { run, ...(ev ? { ev } : {}), basis: 'measured' };
+  } else {
+    v = realParkYear(src, year, franchises, lg, pp).get(franchise);
+  }
+  const run = v?.run ?? 1;
+  return { park: hr !== 1 || run !== 1 ? { hr, ...(run !== 1 ? { run } : {}), ...(v?.ev ? { ev: v.ev } : {}) } : undefined, basis: v ? v.basis : 'none' };
+}
+
+export function teamParkAt(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
+                           lg: ParkLeagueRates, pp: EngineParams['park'] = DEFAULT_PARAMS.park): SimTeam['park'] {
+  return teamParkInfo(src, franchise, year, s, franchises, lg, pp).park;
 }
 
 /** 리모델링: 구단 부담 250억, 한 시즌 공사(그 시즌 관중석 20% 못 씀), 시설 +30, 좌석 +1,000 (임시값) */

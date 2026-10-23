@@ -5,7 +5,8 @@
 // "횟수 ÷ 리그 비율"은 그 횟수를 리그 평균 선수가 내려면 필요한 타석 수라서, 시대가 달라도 그대로 더할 수 있다.
 // K가 클수록 표본이 적은 선수가 사전 평균(출전이 적은 선수들의 평균) 쪽으로 강하게 당겨진다.
 
-import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import type { BatRow, Hand, Meta, ParkData, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import { realParkYear } from './park';
 import { makeDefense } from './defense';
 import type { DefenseAward, PpaData } from '../data/types';
 import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
@@ -40,18 +41,25 @@ export interface SeasonPark {
   ev?: ParkRates;
 }
 
-/** 그 시즌 그 구단 기록에 들어 있는 구장 효과: 홈 경기 절반은 홈 구장, 원정은 리그 평균 구장으로 본다 (meta.parkFactors) */
-export function seasonPark(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, season: Pick<SeasonData, 'year' | 'teams'>, team: string,
-                           bats: Hand | null = null): SeasonPark | undefined {
-  const year = meta.parkFactors?.[String(season.year)];
-  if (!year) return undefined;
+/**
+ * 그 시즌 그 구단 기록에 들어 있는 구장 효과: 홈 경기 절반은 홈 구장, 원정은 리그 평균 구장으로 본다.
+ * 경기와 같은 실제 구장 값 (park.ts realParkYear): 2015~ 실측, 그 전은 구장 제원(parks)이 있으면 차이 방식·짐작 (구장효과 기획안 4.3, P5)
+ */
+export function seasonPark(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, season: Pick<SeasonData, 'year' | 'teams' | 'league'>, team: string,
+                           bats: Hand | null = null, parks?: ParkData, pp: EngineParams['park'] = DEFAULT_PARAMS.park): SeasonPark | undefined {
   const fr = season.teams.find((t) => t.name === team)?.franchise;
-  const f = fr ? year[fr] : undefined;
-  if (!f) return undefined;
+  if (!fr) return undefined;
+  const v = realParkYear({ parkFactors: meta.parkFactors, parkEvents: meta.parkEvents, parks }, season.year, season.teams.map((t) => t.franchise),
+    leagueRpa(season.league), pp).get(fr);
+  if (!v) return undefined;
   // 사건별 배율: 좌타·우타는 그 손의 표, 양타·투수·모름은 전체 (양타는 좌우 타석이 섞인다)
-  const all = fr ? meta.parkEvents?.[String(season.year)]?.[fr] : undefined;
-  const ev = all && (bats === 'L' || bats === 'R') ? all[bats] ?? all : all;
-  return { run: (1 + f) / 2, ...(ev ? { ev: { s1: ev.s1, d2: ev.d2, t3: ev.t3, hr: ev.hr } } : {}) };
+  const ev = v.ev && (bats === 'L' || bats === 'R') ? v.ev[bats] ?? v.ev : v.ev;
+  return { run: (1 + v.run) / 2, ...(ev ? { ev: { s1: ev.s1, d2: ev.d2, t3: ev.t3, hr: ev.hr } } : {}) };
+}
+
+/** 리그 합계 → 구장 계산에 쓰는 리그 비율·타석당 득점 */
+export function leagueRpa(L: SeasonData['league']): { rates: Rates; rpa: number } {
+  return { rates: L.rates, rpa: L.pa > 0 ? L.r / L.pa : 0 };
 }
 
 /** 구장 효과를 걷어 내는 배율. 사건별 배율이 있으면 그것, 없으면 득점 계수의 지수 (params.park). 투수의 'hit'은 단타·2루타·3루타를 리그 비율로 섞는다 */
@@ -269,6 +277,8 @@ export interface BuildWorldInput {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 실제 구장 제원 (parks.json). 있으면 2015년 이전 구장 효과를 차이 방식·짐작으로 넣는다 (park.ts). 없으면 그 해들은 중립 */
+  parks?: ParkData;
 }
 
 /**
@@ -362,11 +372,13 @@ export function buildWorld(input: BuildWorldInput): World {
   const histBat = history.map((s) => (s ? new Map(s.bat.map((r) => [r.id, r])) : undefined));
   const histPit = history.map((s) => (s ? new Map(s.pit.map((r) => [r.id, r])) : undefined));
 
-  const parks = meta.parkFactors?.[String(year)];
-  const parkEv = meta.parkEvents?.[String(year)];
-  const teams: SimTeam[] = current.teams.map((t, idx) => ({ idx, name: t.name, franchise: t.franchise, org: [],
-    ...(parks?.[t.franchise] && parks[t.franchise] !== 1
-      ? { park: { hr: 1, run: parks[t.franchise], ...(parkEv?.[t.franchise] ? { ev: parkEv[t.franchise] } : {}) } } : {}) }));
+  // 홈 구장 배율 (park.ts realParkYear): 2015~ 실측, 그 전은 구장 제원이 있으면 차이 방식·짐작
+  const parks = realParkYear({ parkFactors: meta.parkFactors, parkEvents: meta.parkEvents, parks: input.parks }, year,
+    current.teams.map((t) => t.franchise), leagueRpa(current.league), params.park);
+  const teams: SimTeam[] = current.teams.map((t, idx) => {
+    const v = parks.get(t.franchise);
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(v && v.run !== 1 ? { park: { hr: 1, run: v.run, ...(v.ev ? { ev: v.ev } : {}) } } : {}) };
+  });
   const teamIdx = new Map(teams.map((t) => [t.name, t.idx]));
   const players: SimPlayer[] = [];
   const curBat = new Map(current.bat.map((r) => [r.id, r]));
@@ -418,10 +430,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<PitRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = ratePit[i]?.get(id);
-        if (s && r && r.tbf > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team) });
+        if (s && r && r.tbf > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, null, input.parks, params.park) });
       });
       if (rows.length === 0 && pRow && pRow.tbf > 0) {
-        rows.push({ row: pRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, pRow.team) });
+        rows.push({ row: pRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, pRow.team, null, input.parks, params.park) });
         debutEstimate = true;
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
@@ -438,10 +450,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = rateBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null), sbPct: params.sbPctByYear[s.year] });
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null, input.parks, params.park), sbPct: params.sbPctByYear[s.year] });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
-        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null), sbPct: params.sbPctByYear[current.year] });
+        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null, input.parks, params.park), sbPct: params.sbPctByYear[current.year] });
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);

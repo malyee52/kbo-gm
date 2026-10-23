@@ -189,8 +189,8 @@ export interface EraRunning {
 }
 
 /**
- * 구장 제원 회귀 (구장효과 기획안 4.2·6.1, P4 reports/park-specs-fit.md). log 지수 = a + b × 평균 거리(좌·중·우 평균, m).
- * 2026-10-24 자리값: 아직 어디에도 쓰지 않는다 (옛 구장 대리값 P5, 신구장 펜스 P6에서 쓴다)
+ * 구장 제원 회귀 (구장효과 기획안 4.2·6.1·6.2, P4 reports/park-specs-fit.md). log 지수 = a + b × 평균 거리(좌·중·우 평균, m) + 높이 규칙.
+ * P5부터 옛 해 대리값(engine/park.ts: 차이 방식·짐작)이 쓴다. 신구장 펜스(P6)도 같은 값을 쓸 자리
  */
 export interface ParkSpecFit {
   /** 홈런 log 지수 [a, b] */
@@ -199,8 +199,12 @@ export interface ParkSpecFit {
   xb: [number, number];
   /** 실제 구장 짐작의 당김: 짐작 log 지수 × w (0 = 중립) */
   w: number;
-  /** 상·하한: 홈런·(2루타 + 3루타) 지수(100 = 리그), 득점 계수 f */
-  clamp: { hr: [number, number]; xb: [number, number]; f: [number, number] };
+  /** 상·하한: 홈런·(2루타 + 3루타) 지수(100 = 리그), 득점 계수 f, 좌타·우타 홈런 지수 */
+  clamp: { hr: [number, number]; xb: [number, number]; f: [number, number]; side: [number, number] };
+  /** 펜스 높이 규칙: 기준 높이(m)보다 1m 높을 때마다 홈런 지수 × (1 + hr), (2루타 + 3루타) × (1 + xb). 낮으면 반대 (log로 대칭) */
+  height: { base: number; hr: number; xb: number };
+  /** 좌우 비대칭: 좌·우 펜스 거리 차 1m당 짧은 쪽으로 당겨 치는 타자(좌타는 우측) 홈런 + perM, 상한 ±max. 반대 손은 같은 폭만큼 내린다 */
+  asym: { perM: number; max: number };
   /** 신구장 고르기 범위 (m): 좌·우 펜스, 중앙 펜스, 높이 */
   range: { side: [number, number]; center: [number, number]; height: [number, number] };
 }
@@ -536,7 +540,12 @@ export const DEFAULT_PARAMS: EngineParams = {
       hr: [3.2501, -0.0308],
       xb: [-0.5575, 0.0055],
       w: 0.5,
-      clamp: { hr: [70, 147], xb: [86, 122], f: [0.886, 1.126] },
+      // 좌우타 홈런 55~149: 하드힛 좌우 표 최소(잠실 좌타)~최대(라팍 우타) (기획안 4.2-5, P5)
+      clamp: { hr: [70, 147], xb: [86, 122], f: [0.886, 1.126], side: [55, 149] },
+      // 임시값 (기획안 6.2): 1m당 홈런 −4%·(2루타 + 3루타) +3%, 기준 3.4m = P4 높이가 있는 7곳 평균. P4 잰 값(−0.090/m·+0.062/m)은 사직 한 곳이 끌어 쓰지 않음
+      height: { base: 3.4, hr: -0.04, xb: 0.03 },
+      // 임시값 (기획안 6.2-3): 좌우 거리가 다른 구장이 하나뿐이라 잴 수 없었다. 좌타·우타 타석 비 대신 같은 폭으로 올리고 내린다
+      asym: { perM: 0.02, max: 0.08 },
       range: { side: [95, 101], center: [120, 125], height: [2.5, 6] },
     },
   },

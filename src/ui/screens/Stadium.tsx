@@ -8,7 +8,7 @@ import { TeamName, useGame, useWon } from '../context';
 import { ConfirmButton } from '../ConfirmButton';
 import { namingAt, namingOffers, stadiumName } from '../../league/naming';
 import { realParkSpec } from '../../league/ballparks';
-import { PARK_BASIS_LABEL, teamParkView, type ParkLeague, type TeamParkView } from '../../game/parkView';
+import { isGuessBasis, PARK_BASIS_LABEL, teamParkView, type ParkLeague, type TeamParkView } from '../../game/parkView';
 import { leagueBase } from '../../game/saber';
 import type { ParkSpec } from '../../data/types';
 
@@ -86,7 +86,7 @@ export function StadiumPanel() {
             {underConstruction(s, year) && p?.kind === 'remodel' && <span className="small down">{year} 시즌 공사 중 {seatsAt(s, year).toLocaleString()}석만</span>}</div>
           <div className="stat"><span className="stat-label">관중률 보정 (시설{honey ? '·새 구장' : ''})</span><strong className="stat-value">{pctp(stadiumFill(s, year))}</strong></div>
           <div className="stat"><span className="stat-label">객단가</span><strong className="stat-value">×{ticketScale(s).toFixed(2)}</strong></div>
-          <div className="stat"><span className="stat-label">구장 지수 ({year} 시즌, {PARK_BASIS_LABEL[mine.basis]})</span>
+          <div className="stat" title={isGuessBasis(mine.basis) ? '제원으로 짐작한 값' : undefined}><span className="stat-label">구장 지수 ({year} 시즌, {PARK_BASIS_LABEL[mine.basis]})</span>
             <strong className="stat-value">득점 {ix(mine.index.run)} · 홈런 {ix(mine.index.hr)}</strong>
             {ix(parkPrev[me].index.hr) !== ix(mine.index.hr) && <span className="small">홈런 {ixChange(parkPrev[me].index.hr, mine.index.hr)} (지난 시즌 → {year})</span>}
             {s.dome && <span className="small">돔</span>}</div>
@@ -142,7 +142,7 @@ export function StadiumPanel() {
                 </tbody>
               </table>
             </div>
-            <p className="muted small">신구장 크기는 홈·원정 두 팀 타자 모두의 홈런에 그대로 곱해집니다 (신구장을 지으면 원래 구장의 실측 구장 효과 대신 이 배율만 씁니다. 원래 구장은 2015년 뒤 실측 구장 효과를 쓰고, 2014년 이전은 중립입니다). 신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
+            <p className="muted small">신구장 크기는 홈·원정 두 팀 타자 모두의 홈런에 그대로 곱해집니다 (신구장을 지으면 원래 구장의 구장 효과 대신 이 배율만 씁니다. 원래 구장의 구장 효과는 아래 리그 구장 지수 표에 있습니다). 신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
           </>
         )}
         {!off && !building && <p className="muted small">공사는 오프시즌에 주문합니다.</p>}
@@ -206,7 +206,8 @@ function ParkIndexTable({ year, now, prev }: { year: number; now: TeamParkView[]
   const cell = (t: number, k: 'run' | 'hr' | 'd2' | 't3' | 'hrL' | 'hrR') => {
     const v = now[t].index[k];
     const was = prev[t].index[k];
-    return <td className={now[t].basis === 'none' ? 'muted' : undefined}>{ixChange(was, v)}</td>;
+    const b = now[t].basis;
+    return <td className={b === 'none' || isGuessBasis(b) ? 'muted' : undefined} title={isGuessBasis(b) ? '제원으로 짐작한 값' : undefined}>{ixChange(was, v)}</td>;
   };
   return (
     <section className="panel">
@@ -227,7 +228,9 @@ function ParkIndexTable({ year, now, prev }: { year: number; now: TeamParkView[]
       </div>
       <p className="muted small">
         홈 구장 경기에서 두 팀 타자 모두의 단타·2루타·3루타·홈런에 곱해지는 배율입니다 (삼진·볼넷에는 구장 효과가 없습니다). 실측은 2015년 뒤 하드힛 파크팩터와
-        2022~2025 구장 구성 지수로 만든 값이고, 2014년 이전은 자료가 없어 중립(100)입니다. 지난 시즌과 달라진 칸은 "지난 시즌 → {year}"로 보여 줍니다.
+        2022~2025 구장 구성 지수로 만든 값입니다. 2014년 이전은 같은 구장이 2015년 뒤까지 이어지면 실측을 옛 해에 그대로 쓰고(펜스가 달랐던 해는 펜스 차이만큼 짐작해 고침),
+        사라진 구장과 큰 리모델링 전 구장은 펜스 거리·높이로 짐작해 중립 쪽으로 반쯤 당긴 값입니다 (짐작은 흐린 글씨, 실제를 잘 맞히는 식은 아닙니다). 펜스 제원이 없는 구장은 중립(100)입니다.
+        옛 해는 해마다 리그 평균이 100이 되게 맞춥니다. 지난 시즌과 달라진 칸은 "지난 시즌 → {year}"로 보여 줍니다.
         wRC+는 이 득점 지수의 절반(원정 경기는 리그 평균 구장)으로 구장을 보정합니다.
       </p>
     </section>

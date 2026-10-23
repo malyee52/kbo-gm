@@ -5,7 +5,7 @@
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, leagueRpa, makeDefense, pitValue, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
@@ -88,6 +88,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const futures = opts.includeFutures ? [] : league.teams.map((_, i) => i).filter((i) => isFuturesTeam(league, i, year));
   const kept = league.teams.length - futures.length;
   if (futures.some((i) => i < kept)) throw new Error('퓨처스 구단이 구단 목록 끝에 있지 않습니다');
+  // 구장 효과의 자료·그 해 리그 구단·리그 비율 (옛 해 평균 1 맞춤, park.ts)
+  const parkSrc = { parkFactors: store.meta.parkFactors, parkEvents: store.meta.parkEvents, parks: store.parks };
+  const parkFrs = league.teams.slice(0, kept).map((t) => t.franchise);
+  const parkLg = data ? leagueRpa(data.league) : { rates: lg, rpa: 0 };
   const teams: SimTeam[] = league.teams.slice(0, kept).map((t, idx) => {
     const med = activeLevel(league, idx, 'medical');
     // 세부 난이도의 부상 빈도는 플레이어 구단에만 (difficulty.ts)
@@ -95,8 +99,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     // 스프링캠프 (camp.ts): 체력 훈련·국내 캠프의 시즌 부상 배율
     const camp = campInjury(league, idx, year);
     const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
-    // 홈 구장 배율 (stadium.ts teamParkAt): 실제 구장 계수 + 게임 안에서 지은 신구장
-    const park = teamParkAt(store.meta, t.franchise, year, league.stadiums?.[idx]);
+    // 홈 구장 배율 (stadium.ts teamParkAt): 실제 구장 값 + 게임 안에서 지은 신구장
+    const park = teamParkAt(parkSrc, t.franchise, year, league.stadiums?.[idx], parkFrs, parkLg, params.park);
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
       ...(park ? { park } : {}) };
   });

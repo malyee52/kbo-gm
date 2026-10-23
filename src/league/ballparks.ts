@@ -4,12 +4,12 @@
 //  - 진행 중: 시작 연도 뒤에 실제로 새 구장이 열린 해가 오면 그 구단은 새 구장으로 옮긴다 (지자체가 지은 것으로 보고 비용 없음,
 //    시설 100·새 구장 효과). 게임 안에서 신구장을 주문했거나 지은 구단은 실제 구장으로 옮기지 않는다.
 //
-// 자료는 두 갈래다 (구장효과 기획안 P1, 2026-10-23):
-//  - 이름·좌석·확인 표시: parks.json (data-src/구장.csv · 구장_사용.csv, 나무위키 덤프 가공값). useParkData로 넣는다.
-//  - 옮기는 해·관중 모델 좌석·돔: 아래 코드 안 표 CODE_PARKS. 경기·관중 결과를 바꾸지 않으려고 P1에서는 그대로 두고,
-//    결과가 바뀌는 구장 효과 P5 배포 때 자료로 옮긴다. 자료와 옮기는 해가 다른 곳: LG(자료 1982 동대문 → 1983 잠실, 표는 1982 잠실),
-//    NC(자료 2013, 표 2012), KT(자료 2015, 표 2014). 자료에서 구장이 바뀌었는데 표에 옮김이 없는 해는 이름만 바꾼다 (realParkRename).
-//  parks.json이 없으면 이름도 코드 안 표를 쓴다.
+// 자료 (구장효과 기획안 P1·P5): parks.json (data-src/구장.csv · 구장_사용.csv, 나무위키 덤프 가공값). useParkData로 넣는다.
+//  - 옮기는 해 = 구장_사용.csv의 사용 행 시작 해 (계획 행 포함), 이름·좌석·돔 = 그 해 구장.csv 제원 행 (P5, 2026-10-24부터).
+//    관중 모델 좌석은 제원 행 좌석, 비어 있으면 아래 코드 안 표 CODE_PARKS에서 같은 계보의 그 해 값.
+//    P1까지는 옮기는 해·관중 좌석이 코드 안 표였다: 자료와 옮기는 해가 다른 곳은 LG(자료 1982 동대문 → 1983 잠실, 표는 1982 잠실),
+//    NC(자료 2013, 표 2012), KT(자료 2015, 표 2014). 같은 구장 안에서 이름만 바뀐 해는 이름만 바꾼다 (realParkRename).
+//  parks.json이 없으면 모두 코드 안 표를 쓴다.
 // 코드 안 표의 확인: checked가 true인 것은 2026-10-14 검색으로 확인한 값 (잠실 1982년 7월 개장·지금 23,750석, 고척 16,744석·2015년 개장,
 //  대전 새 구장 2025년 개장, 잠실 돔 2032년 3월 개장 예정·30,000석). 나머지 연도·수용 인원은 기억에 기댄 추정이라 확인이 필요하다.
 //  구단이 이 구장을 홈으로 쓰기 시작한 해(from)를 적는다 (구장 개장 연도와 다를 수 있다).
@@ -109,21 +109,46 @@ function withShown(p: RealPark, year: number): RealPark {
   return shown ? { ...p, ...shown } : p;
 }
 
+/** 코드 안 표의 그 계보·그 해 관중 좌석 (자료의 제원 행에 좌석이 비었을 때) */
+function codeCapacity(franchise: string, year: number): number | undefined {
+  let out: RealPark | undefined;
+  for (const p of CODE_PARKS) if (p.franchise === franchise && p.from <= year && (!out || p.from > out.from)) out = p;
+  return (out ?? CODE_PARKS.find((p) => p.franchise === franchise))?.capacity;
+}
+
+/** 자료(parks.json) 사용 행 → 실제 구장 표 (옮기는 해 = 사용 행 시작 해). 자료마다 한 번만 만든다 */
+let dataRows: { data: ParkData; rows: RealPark[] } | undefined;
+function moveRows(): RealPark[] {
+  if (!parkData) return CODE_PARKS;
+  if (dataRows?.data === parkData) return dataRows.rows;
+  const rows = parkData.use.map((u): RealPark => {
+    const spec = specAt(parkData!, u.park, u.from);
+    return {
+      franchise: u.franchise, from: u.from, name: spec?.name ?? u.park,
+      capacity: spec?.seats ?? codeCapacity(u.franchise, u.from) ?? 12_000,
+      ...(spec?.dome ? { dome: true } : {}), checked: u.confirmed === '출처 확인', ...(u.kind === '계획' ? { planned: true } : {}),
+      parkId: u.park, ...(spec?.seats != null ? { seats: spec.seats } : {}),
+    };
+  });
+  dataRows = { data: parkData, rows };
+  return rows;
+}
+
 /** 지금 쓰는 실제 구장 표 (옮기는 해 기준, 이름은 그 해 자료) */
 export function realParks(): RealPark[] {
-  return CODE_PARKS.map((p) => withShown(p, p.from));
+  return moveRows().map((p) => withShown(p, p.from));
 }
 
 /** 그 해 그 구단 계보의 실제 홈 구장 (없으면 undefined) */
 export function realParkAt(franchise: string, year: number): RealPark | undefined {
   let out: RealPark | undefined;
-  for (const p of CODE_PARKS) if (p.franchise === franchise && p.from <= year && (!out || p.from > out.from)) out = p;
+  for (const p of moveRows()) if (p.franchise === franchise && p.from <= year && (!out || p.from > out.from)) out = p;
   return out && withShown(out, year);
 }
 
 /** 그 해에 새로 옮기는 실제 구장 (from === year) */
 export function realParkOpening(franchise: string, year: number): RealPark | undefined {
-  const p = CODE_PARKS.find((q) => q.franchise === franchise && q.from === year);
+  const p = moveRows().find((q) => q.franchise === franchise && q.from === year);
   return p && withShown(p, year);
 }
 

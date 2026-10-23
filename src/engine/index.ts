@@ -7,7 +7,7 @@ import type { World } from './types';
 
 export { DECLINE_START_AGE, DEFAULT_PARAMS, isStarterSkill, STARTER_SHARE, type EngineParams } from './params';
 export { Rng } from './rng';
-export { buildWorld, hardhitPositions, batValue, pitValue, batSkillFrom, pitSkillFrom, seasonPark, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress, penTrustOf } from './ratings';
+export { buildWorld, hardhitPositions, batValue, pitValue, batSkillFrom, pitSkillFrom, seasonPark, leagueRpa, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress, penTrustOf } from './ratings';
 export {
   simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
   type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
@@ -32,12 +32,15 @@ export {
   type Trait, type TraitParams, type Situation,
 } from './traits';
 export { eraPitching, leagueQuality, type EraPitching } from './eras';
-export { gameParkOf, parkIndexOf, runFactorOf, type ParkIndex } from './park';
+export {
+  applyDiff, gameParkOf, guessLogs, mainParkId, parkIndexOf, realParkYear, runFactorOf, PARK_COMPONENT_YEARS,
+  type GuessLogs, type ParkIndex, type ParkLeagueRates, type ParkSource, type RealParkBasis, type RealParkValue,
+} from './park';
 export { dateOfDay, postseasonMaxInnings, regularMaxInnings, winPctBy, winPctRuleOf, POSTSEASON_INNINGS_DEFAULT, type GameDayInfo, type WinPctRule } from './records';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa'> & Partial<Pick<DataStore, 'parks'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -52,5 +55,6 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     career: store.meta.years.filter((y) => y < year).map((y) => store.season(y)).filter((s): s is SeasonData => !!s),
     defenseAwards: store.defenseAwards,
     ppa: store.ppa,
+    parks: store.parks,
   });
 }

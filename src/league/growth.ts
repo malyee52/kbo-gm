@@ -100,7 +100,7 @@ export function careerIndex(store: Pick<DataStore, 'meta' | 'season'>): CareerIn
  * 실제 커리어의 전성기 기여: 출전이 충분했던 시즌마다 그 시즌까지 세 시즌 기록으로(게임 능력 산출과 같은 가중치) 능력을 뽑아
  * 런으로 바꾸고 가장 높은 값을 쓴다. 기록이 없으면 null.
  */
-export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataStore, 'meta' | 'season'>, ctx: ValueContext,
+export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'parks'>>, ctx: ValueContext,
                              params: EngineParams = DEFAULT_PARAMS): number | null {
   // 2026-10-12 사용자 "실제로 높았던 선수들의 잠재력이 실제보다 낮다": 예전에는 한 시즌씩 따로 능력을 뽑아(한 시즌 표본이라
   // 평균 쪽으로 크게 당겨진다) 좋은 두 시즌을 평균했다. 이제는 게임이 능력을 매기는 방식 그대로(그 시즌과 앞 두 시즌을
@@ -123,7 +123,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team) }] : [];
+        return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, null, store.parks, params.park) }] : [];
       });
       const skill = pitSkillFrom(rows, meta.priors.pitcher, seasonRegress(params));
       take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0) * qRatio(year));
@@ -136,7 +136,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats), sbPct: params.sbPctByYear[s.year] }] : [];
+        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats, store.parks, params.park), sbPct: params.sbPctByYear[s.year] }] : [];
       });
       const skill = batSkillFrom(rows, meta.priors.batter, seasonRegress(params));
       take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year));
