@@ -73,6 +73,8 @@ export interface GameContext {
   totals: LeagueCounters;
   /** 포스트시즌 경기인가 (숨겨진 특수능력 '가을 사나이'용). 없으면 정규시즌 */
   postseason?: boolean;
+  /** 정규시즌 더블헤더 몇 차전 (일정 개편 기획안 4.6). 없으면 더블헤더가 아닌 경기. 더블헤더 이닝 규정은 엔진 2 14단계가 본다 */
+  dh?: 1 | 2;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
   /** AI 감독의 투구 수 기준 (선발, 구원). 시즌마다 managerNorms로 정한다. 없으면 그 투수의 한계 투구 수(몸 상태 뺀 값) */
@@ -150,6 +152,8 @@ export interface CommandRequest {
   bullpen: number[];
   /** 지금까지의 중계 기록 */
   plays: Play[];
+  /** 더블헤더 2차전이면 2 (지휘자가 같은 날 두 경기를 가린다, GameContext.dh). 그 밖에는 없다 */
+  dh?: 2;
 }
 
 /**
@@ -282,6 +286,7 @@ function ask(st: GameState, side: 'bat' | 'field', step: 'run' | 'bat' | 'field'
     bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
     bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
     plays: plays ? plays.slice() : [],
+    ...(ctx.dh === 2 ? { dh: 2 as const } : {}),
   });
 }
 

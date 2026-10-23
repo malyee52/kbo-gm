@@ -96,6 +96,8 @@ export interface GameLog {
   win: number | null;
   loss: number | null;
   save: number | null;
+  /** 더블헤더 몇 차전 (일정 개편 9단계). 더블헤더가 아니면 없다 */
+  dh?: 1 | 2;
 }
 
 export interface BoxBatter {
@@ -515,7 +517,15 @@ export class Season {
       for (const p of ts.bullpen) this.activeDays[p.idx]++;
     }
 
-    for (const g of games) {
+    // 더블헤더 날은 1차전 묶음을 모두 치른 뒤 2차전 묶음 (일정 개편 기획안 4.6). 2차전 전에 두 팀 엔트리를 다시 짠다:
+    // 1차전 부상(경기 중 부상은 다음 날부터가 아니라 그날 2차전부터 빠진다)·피로를 본다. 1차전 선발은 lastStartDay가 오늘이라 2차전에 못 나오고,
+    // 같은 날 두 번 던진 투수·뛴 야수의 피로는 회복 없이 쌓인다 (fatigueDay·bodyDay가 같은 날)
+    const second = games.filter((g) => g.dh === 2);
+    const order = second.length ? [...games.filter((g) => g.dh !== 2), ...second] : games;
+    for (const g of order) {
+      if (g === second[0]) {
+        for (const x of second) for (const t of [x.home, x.away]) refreshActive(season[t], world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
+      }
       const h = season[g.home];
       const a = season[g.away];
       // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
@@ -533,10 +543,12 @@ export class Season {
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
+      ctx.dh = g.dh;
       const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
+      ctx.dh = undefined;
       // 경기 중 부상 (엔진 2 11단계): 다음 날부터 결장. 구단 의료 투자의 기간 배율은 경기 전 부상과 같다
       for (const inj of ctx.injuries) {
         const ts = season[world.players[inj.idx].teamIdx];
@@ -556,7 +568,7 @@ export class Season {
       else { ht.t++; at.t++; ht.homeT++; }
       this.log.push({
         day, home: g.home, away: g.away, homeRuns: res.homeRuns, awayRuns: res.awayRuns, innings: res.innings,
-        win: res.win, loss: res.loss, save: res.save,
+        win: res.win, loss: res.loss, save: res.save, ...(g.dh ? { dh: g.dh } : {}),
       });
       if (pitBefore && batBefore) {
         const line = (idx: number): BoxBatter => {

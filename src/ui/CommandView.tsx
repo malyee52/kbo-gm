@@ -78,10 +78,10 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     return c;
   };
   // 미리보기는 하루 경기만 돌려 10ms 안팎이라 바로 계산한다
-  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode));
+  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode, pv.dh));
   const commit = () => {
     setBusy(true);
-    session.commitCommand(pv.choices);
+    session.commitCommand(pv.choices, pv.dh);
     onDone();
   };
   const cancel = () => { ref.current?.close(); onCancel(); };
@@ -91,6 +91,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const canBunt = !!req && req.outs < 2 && req.bases.some((b) => b >= 0);
   const recent = plays.slice(-8).reverse();
   const date = formatDate(W.year, s.day);
+  // 더블헤더 날은 몇 차전인지 (지휘하지 않은 차전은 감독이 맡는다)
+  const dhLabel = pv.dh ? ' · 더블헤더 2차전' : session.ourGamesToday().length > 1 ? ' · 더블헤더 1차전' : '';
 
   return (
     <dialog ref={ref} className="player cast command tv" onClose={onCancel} style={teamVars(session.team.franchise, session.team.name)}>
@@ -98,11 +100,11 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
         <header className="row-between">
           <div>
             <h2>직접 지휘 · {teamName(pv.away)} <span className="muted">@</span> {teamName(pv.home)}</h2>
-            <p className="muted small">{date} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
+            <p className="muted small">{date}{dhLabel} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
           </div>
           <span className="inline">
             {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 바로 확정합니다"
-              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto').choices); onDone(); }}>나머지 자동으로 확정</button>}
+              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto', pv.dh).choices, pv.dh); onDone(); }}>나머지 자동으로 확정</button>}
             <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>
           </span>
         </header>
