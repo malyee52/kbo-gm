@@ -345,9 +345,14 @@ export interface EngineParams {
   /**
    * 시간 제한 흉내 (엔진 2 14단계 물음 1, 2026-10-23 사용자 결정): 경기 시각이 없어 시간 제한(1982~2002 야간 경기 개시 4시간, 2004 4시간)을
    * 그대로 넣을 수 없어서, 그 해 정규시즌 경기는 from회 끝에 동점이면 이닝마다 확률 end로 끝나 무승부가 된다 (game.ts, 경기 난수의 'time' 줄기).
-   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌에는 쓰지 않는다
+   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌은 timeLimitPostseason에 있는 해만 같은 값을 쓴다
    */
   timeLimit?: Record<number, { from: number; end: number }>;
+  /**
+   * 포스트시즌에도 시간 제한 흉내를 쓰는 해 (2026-10-24 사용자 결정: 원문으로 확인된 해만). 그 해 timeLimit 값(정규시즌과 같은 시작 회·확률)을 쓴다.
+   * 없는 해의 포스트시즌은 시간 제한 없음
+   */
+  timeLimitPostseason?: number[];
 
   // ---- 선수 기용
   /**
@@ -685,6 +690,8 @@ export const DEFAULT_PARAMS: EngineParams = {
     1999: { from: 10, end: 0.544 }, 2000: { from: 10, end: 0.366 }, 2001: { from: 10, end: 0.54 }, 2002: { from: 10, end: 0.396 },
     2004: { from: 10, end: 0.911 },
   },
+  // 출처: 나무위키, 2004 포스트시즌 4시간 제한. 다른 해는 원문이 확인되면 더한다
+  timeLimitPostseason: [2004],
 
   restChance: 0.6,
   catcherRestChance: 0.6,

@@ -694,7 +694,10 @@ export class Season {
     // 직접 지휘 (2026-10-12 가을야구까지): 우리 경기에만
     const cmd = command && (command.team === home || command.team === away) ? command : null;
     this.advanceCondition(day);
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit: undefined, plays, command: cmd, injuries: undefined };
+    // 시간 제한 흉내는 timeLimitPostseason에 있는 해만 (정규시즌과 같은 값, 경기 난수의 'time' 줄기)
+    const year = this.world.year;
+    const timeLimit = params.timeLimitPostseason?.includes(year) ? params.timeLimit?.[year] : undefined;
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit, plays, command: cmd, injuries: undefined };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     h.away = false;
