@@ -42,6 +42,13 @@ vi.mock('../src/league/futureRules', async (orig) => {
   };
 });
 
+/** 켜면 결산 때 신뢰도와 상관없이 해고된다 (해고 중 단장 회의 시험) */
+const fire = vi.hoisted(() => ({ on: false }));
+vi.mock('../src/league/owner', async (orig) => {
+  const m = await orig<typeof import('../src/league/owner')>();
+  return { ...m, get FIRE_BELOW() { return fire.on ? 101 : m.FIRE_BELOW; } };
+});
+
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
 const roundTrip = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -62,6 +69,15 @@ function toVote(): GameSession {
   const g = GameSession.load(store, roundTrip(seasonEnd), FAST);
   force.on = true;
   try { g.beginOffseason(); } finally { force.on = false; }
+  return g;
+}
+
+/** 결산에서 해고된 채 단장 회의 단계로 */
+function toVoteFired(save: GameSave = seasonEnd): GameSession {
+  const g = GameSession.load(store, roundTrip(save), FAST);
+  force.on = true;
+  fire.on = true;
+  try { g.beginOffseason(); } finally { force.on = false; fire.on = false; }
   return g;
 }
 
@@ -352,6 +368,89 @@ describe('세션: 우리 표·저장·재현', () => {
     expect(g.offseason!.log.some((l) => l.stage === 'vote' && l.text.includes('단장 회의 안건'))).toBe(true);
     expect(FUTURE_RULE_SPEC.foreign.base).toBe(3);
   });
+});
+
+describe('해고 중 단장 회의 (2026-10-23 클사장 결정: 우리 표를 막고 모든 구단 AI 표)', () => {
+  /** 모든 구단 AI 개표: 우리 구단 칸도 실무진 추천(AI 표) 그대로 */
+  const allAi = (ai: number[]) => ai.map((v) => (v < 0 ? -1 : v));
+
+  it('해고되면 표를 낼 수 없고, 새 구단에 부임해도 이번 회의는 막힌 채 모든 구단 AI 표로 개표한다', () => {
+    const g = toVoteFired();
+    const offers = g.league.owner!.offers!;
+    expect(offers.length).toBeGreaterThan(0);
+    expect(g.offseason!.stage).toBe('vote');
+    expect(g.voteLocked).toBe(true);
+    const r1 = g.voteRule('yes');
+    expect(r1).toEqual({ ok: false, message: '해고 중이라 표를 낼 수 없습니다.' });
+    expect(g.offseason!.vote!.user).toEqual({});
+    expect(g.actions.some((a) => a.type === 'rule-vote')).toBe(false);
+    expect(stageLeftovers(g).filter((l) => l.key.startsWith('vote:'))).toEqual([]);
+    expect(stageHeadline(g)).toContain('해고 중 · 모든 구단 AI 표');
+    expect(g.acceptOffer(offers[0]).ok).toBe(true);
+    expect(g.voteLocked).toBe(true);
+    expect(g.voteRule('no').ok).toBe(false);
+    const ai = roundTrip(g.offseason!.vote!.ai[0]);
+    expect(g.nextStage().ok).toBe(true);
+    const r = g.league.ruleVotes!.at(-1)!;
+    expect(r.userTeam).toBeUndefined();
+    expect(r.user).toBeUndefined();
+    expect(r.votes).toEqual(allAi(ai));
+    expect(g.offseason!.log.some((l) => l.text.includes('해고 중이라 우리 표 없이'))).toBe(true);
+    expect(g.offseason!.stage).toBe('fa');
+    expect(g.voteLocked).toBe(false);
+  });
+
+  it('해고되지 않은 회의는 그대로 (막히지 않음)', () => {
+    const g = toVote();
+    expect(g.voteLocked).toBe(false);
+    expect(g.voteRule('yes').ok).toBe(true);
+  });
+
+  it('예전 저장: 해고 중 낸 표가 오프시즌 상태에 남아 있어도 버리고 AI 표로 개표한다', () => {
+    const g = toVoteFired();
+    const a = g.offseason!.vote!.agendas[0];
+    const ai = roundTrip(g.offseason!.vote!.ai[0]);
+    const me = g.teamIdx;
+    // 예전 코드가 받아 준 표: AI 추천과 반대로 넣어 차이가 드러나게 한다
+    g.offseason!.vote!.user[a.id] = ai[me] === 1 ? 'no' : 'yes';
+    const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
+    expect(h.voteLocked).toBe(true);
+    h.acceptOffer(h.league.owner!.offers![0]);
+    h.nextStage();
+    const r = h.league.ruleVotes!.at(-1)!;
+    expect(r.userTeam).toBeUndefined();
+    expect(r.votes).toEqual(allAi(ai));
+  });
+
+  it('재현: 예전에 해고 중 낸 표가 조작 기록에 있으면 그 표를 버리고, 표 없이 한 것과 같은 상태', () => {
+    const opts = { year: 2026, teamIdx: TEAM, seed: SEED };
+    const g = GameSession.create(store, opts, FAST);
+    g.advance(1000);
+    force.on = true;
+    fire.on = true;
+    try { g.beginOffseason(); } finally { force.on = false; fire.on = false; }
+    expect(g.voteLocked).toBe(true);
+    g.acceptOffer(g.league.owner!.offers![0]);
+    g.nextStage();
+    expect(g.league.ruleVotes!.at(-1)!.userTeam).toBeUndefined();
+    // 예전 코드가 기록한 표: 해고 중(부임 전)과 부임 뒤에 하나씩 끼워 넣는다
+    const begin = g.actions.findIndex((a) => a.type === 'begin-off');
+    const accept = g.actions.findIndex((a) => a.type === 'accept-offer');
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(accept).toBeGreaterThan(begin);
+    const vote = (choice: 'yes' | 'no') => ({ year: 2026, type: 'rule-vote' as const, choice });
+    const old = [...g.actions.slice(0, accept), vote('yes'), g.actions[accept], vote('no'), ...g.actions.slice(accept + 1)];
+    force.on = true;
+    fire.on = true;
+    let r: GameSession;
+    try {
+      r = GameSession.replay(store, opts, old, undefined, FAST);
+    } finally { force.on = false; fire.on = false; }
+    expect(r.actions).toEqual(g.actions);
+    expect(r.league.ruleVotes).toEqual(g.league.ruleVotes);
+    expect(r.toSave().league).toEqual(g.toSave().league);
+    expect(r.offseason).toEqual(g.offseason);
+  }, 120_000);
 });
 
 describe('V4 화면 계산 (단장 회의 탭·개표·알림)', () => {

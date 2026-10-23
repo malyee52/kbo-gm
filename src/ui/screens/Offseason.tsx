@@ -347,20 +347,26 @@ function VotePanel({ act }: { act: (r: { ok: boolean; message: string }, okText?
   const v = session.offseason?.vote;
   if (!v) return null;
   const many = v.agendas.length > 1;
+  const locked = session.voteLocked;
   return (
     <>
       <p className="muted small">
         결산 때 리그 흐름 신호가 켜져 규칙 안건이 올라왔습니다. 문턱 이상 구단이 찬성하면 다음 시즌부터 바뀝니다.
         다른 구단 표는 결산 때 정해져 이 단계에서 무엇을 해도 바뀌지 않습니다. 우리 표는 넘기기 전까지 몇 번이고 바꿀 수 있습니다.
       </p>
+      {locked && (
+        <p className="warn-line small" role="status">
+          {Off.VOTE_LOCKED_TEXT} 이번 회의는 모든 구단 표를 AI가 냅니다 (영입 제의를 받아 새 구단에 부임해도 그대로).
+        </p>
+      )}
       {v.agendas.map((a, i) => (
-        <AgendaCard key={a.id} a={a} ai={v.ai[i]} facts={v.facts} pick={v.user[a.id]} onPick={(c) => act(session.voteRule(c, many ? a.id : undefined))} />
+        <AgendaCard key={a.id} a={a} ai={v.ai[i]} facts={v.facts} pick={v.user[a.id]} locked={locked} onPick={(c) => act(session.voteRule(c, many ? a.id : undefined))} />
       ))}
     </>
   );
 }
 
-function AgendaCard({ a, ai, facts, pick, onPick }: { a: RuleAgenda; ai: number[]; facts?: VoteFacts[]; pick?: VoteChoice; onPick: (c: VoteChoice) => void }) {
+function AgendaCard({ a, ai, facts, pick, locked, onPick }: { a: RuleAgenda; ai: number[]; facts?: VoteFacts[]; pick?: VoteChoice; locked?: boolean; onPick: (c: VoteChoice) => void }) {
   const { session } = useGame();
   const won = useWon();
   const impact = useRuleImpact(a);
@@ -412,9 +418,9 @@ function AgendaCard({ a, ai, facts, pick, onPick }: { a: RuleAgenda; ai: number[
       )}
       <div className="agenda-vote" role="group" aria-label="우리 표">
         <b className="small">우리 표</b>
-        <button type="button" className={pick === 'yes' ? '' : 'ghost'} aria-pressed={pick === 'yes'} onClick={() => onPick('yes')}>찬성</button>
-        <button type="button" className={pick === 'no' ? '' : 'ghost'} aria-pressed={pick === 'no'} onClick={() => onPick('no')}>반대</button>
-        <span className="muted small">{pick ? `지금 우리 표: ${pick === 'yes' ? '찬성' : '반대'}` : '아직 내지 않음 · 고르지 않으면 반대로 셉니다'}</span>
+        <button type="button" className={pick === 'yes' && !locked ? '' : 'ghost'} aria-pressed={pick === 'yes' && !locked} disabled={locked} onClick={() => onPick('yes')}>찬성</button>
+        <button type="button" className={pick === 'no' && !locked ? '' : 'ghost'} aria-pressed={pick === 'no' && !locked} disabled={locked} onClick={() => onPick('no')}>반대</button>
+        <span className="muted small">{locked ? Off.VOTE_LOCKED_TEXT : pick ? `지금 우리 표: ${pick === 'yes' ? '찬성' : '반대'}` : '아직 내지 않음 · 고르지 않으면 반대로 셉니다'}</span>
       </div>
     </section>
   );

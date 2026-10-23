@@ -621,12 +621,24 @@ export function castVote(off: OffseasonState, choice: VoteChoice, agenda?: strin
   return { ok: true, message: `${a.year} 시즌 안건에 ${choice === 'yes' ? '찬성' : '반대'}표를 냈습니다.` };
 }
 
-/** 개표: 우리 표가 없으면 반대 (결정 4). 가결은 ruleShifts에, 가결·부결 모두 ruleVotes에 */
+/**
+ * 이번 단장 회의에 우리 표를 낼 수 없는가: 이 결산에서 해고되었으면 (2026-10-23 클사장 결정).
+ * 영입 제의를 받아 새 구단에 부임해도 이번 회의는 모든 구단 AI 표로 개표한다. 상태(firedYears)에서 읽으므로 저장·재현에 따로 남기지 않는다
+ */
+export const VOTE_LOCKED_TEXT = '해고 중이라 표를 낼 수 없습니다.';
+
+export function voteLockedByFiring(league: LeagueState, off: OffseasonState): boolean {
+  return off.stage === 'vote' && !!off.vote && !!league.owner?.firedYears.includes(off.year);
+}
+
+/** 개표: 우리 표가 없으면 반대 (결정 4). 해고로 막힌 회의는 모든 구단 AI 표. 가결은 ruleShifts에, 가결·부결 모두 ruleVotes에 */
 function finishVote(league: LeagueState, off: OffseasonState): void {
   const v = off.vote;
   if (!v) return;
+  const locked = voteLockedByFiring(league, off);
+  if (locked) log(off, 'vote', '해고 중이라 우리 표 없이 모든 구단 표를 AI가 냈습니다.', true, false);
   v.agendas.forEach((a, i) => {
-    const { record, shift } = tallyAgenda(a, v.ai[i], off.userTeam, v.user[a.id]);
+    const { record, shift } = locked ? tallyAgenda(a, v.ai[i], -1) : tallyAgenda(a, v.ai[i], off.userTeam, v.user[a.id]);
     (league.ruleVotes ??= []).push(record);
     log(off, 'vote', tallyText(record, (t) => league.teams[t]?.name ?? ''), true, true);
     if (shift) {

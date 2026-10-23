@@ -40,7 +40,8 @@ export function stageLeftovers(s: GameSession): Leftover[] {
 
   switch (off.stage) {
     case 'vote': {
-      // 표를 안 내도 넘길 수 있다. 안 낸 안건은 반대로 센다 (구단투표 결정 4)
+      // 표를 안 내도 넘길 수 있다. 안 낸 안건은 반대로 센다 (구단투표 결정 4). 해고로 막힌 회의는 낼 표가 없다
+      if (s.voteLocked) break;
       for (const a of off.vote?.agendas ?? []) {
         if (off.vote!.user[a.id]) continue;
         out.push({ key: `vote:${a.id}`, title: `안건 표 안 냄 (${voteAgendaText(a)})`, then: '우리 표를 반대로 세어 개표합니다. 실무진 추천은 자동으로 내지 않습니다.' });
@@ -167,6 +168,7 @@ export function stageHeadline(s: GameSession): string[] {
     case 'vote': {
       const v = off.vote;
       if (!v) return [];
+      if (s.voteLocked) return [`안건 ${v.agendas.length}건`, '해고 중 · 모든 구단 AI 표'];
       const swing = v.agendas.map((_, i) => voteOutlook(v.ai[i], me).swing);
       return [`안건 ${v.agendas.length}건`, `우리 표 ${v.agendas.filter((a) => v.user[a.id]).length}/${v.agendas.length}`,
         ...(swing.includes('decisive') ? [`우리 표에 달린 안건 ${swing.filter((x) => x === 'decisive').length}건`] : [])];
