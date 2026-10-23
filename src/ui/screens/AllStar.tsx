@@ -38,7 +38,7 @@ export function AllStar() {
           )}
         </div>
         {upcoming ? (
-          day < 0 ? <p className="muted small">{year} 시즌에는 올스타전 날이 없습니다 (시즌 중반 휴식일이 없음).</p> : (
+          day < 0 ? <p className="muted small">{year} 시즌에는 올스타전이 열리지 않습니다 (실제로도 열리지 않은 해).</p> : (
             <p className="small">
               {year} 올스타전은 <strong>{formatDate(year, day)}</strong>에 열립니다. {SIDE_NAMES[0]}와 {SIDE_NAMES[1]}가 맞붙고, 홈런 더비도 함께 열립니다.
               <span className="muted"> 선발은 그날까지의 시즌 WAR와 지금 능력으로 정해지고(팬 투표 대신), 그날 모든 투수가 쉬어 피로가 풀립니다. 우리 선수가 뽑히면 팬 만족도가 조금 오릅니다.</span>

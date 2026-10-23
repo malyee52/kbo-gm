@@ -487,12 +487,13 @@ export class Season {
     if (games.length) {
       const ip = params.injury;
       const ou = ip.overuse;
-      const len = this.schedule.length;
+      const perTeam = world.gamesPerTeam;
       for (const ts of season) {
+        const played = this.teams[ts.team.idx].g;
         for (const p of ts.team.org) {
           const active = p.isPitcher ? states.streak[p.idx] > 0 && day - states.fatigueDay[p.idx] <= 7 : day - states.bodyDay[p.idx] <= 3;
           if (p.availability !== undefined || states.absentUntil[p.idx] > day) continue;
-          const base = injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1)
+          const base = injuryChance(p, this.pit[p.idx], played, perTeam, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1)
             * injuryProneness(p) * (active ? ip.inGame.preShare : 1);
           const extra = ou.on && p.isPitcher ? base * ou.injury * currentOveruse(states, p.idx, day, ou) : 0;
           const u = dayRng.next();

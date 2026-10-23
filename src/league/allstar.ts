@@ -1,12 +1,15 @@
 // 올스타전 (2026-10-14): 시즌 중반 휴식일에 드림·나눔 올스타가 시범 경기와 홈런 더비를 치른다.
-// - 날짜: 7월 14일에 가장 가까운 휴식일 (시즌의 35~75% 사이). 엔진 일정은 그대로라 저장·날짜 계산이 바뀌지 않는다.
-//   실제 휴식기(4~6일)는 따로 두지 않고, 그날 모든 투수의 피로를 없애는 것으로 대신한다.
+// - 날짜: 연도별 일정 규칙 표의 올스타 날 (일정 개편 11단계). 올스타가 없던 해(2020·2021)는 열지 않는다.
+//   실제 올스타전이 여러 경기였던 해(1982~1985, 2000)도 게임은 1경기다 (일정 개편 결정 10, 개막 알림에 적는다).
+//   휴식기는 일정 규칙 표의 쉬는 기간으로 일정에 비어 있고, 그날 모든 투수의 피로도 없앤다 (예전 동작 그대로).
+//   규칙 표가 없는 월드(시험용)는 예전처럼 7월 14일에 가장 가까운 휴식일 (시즌의 35~75% 사이).
 // - 선발: 팬 투표·감독 추천 대신 그날까지의 시즌 WAR + 지금 능력으로 자리별 1명, 후보 야수 5명, 선발 4명·구원 6명.
 // - 경기: 엔진 시범 경기(Season.playExhibition, 시즌 기록·난수와 따로). MVP는 이긴 쪽에서 가장 잘한 선수.
 // - 홈런 더비: 그날까지 홈런 상위 8명, 아웃 7개씩, 상위 2명 결승.
 // 난수는 리그 시드·연도로 만든 따로 된 Rng만 쓴다 (시즌 결과를 바꾸지 않는다).
 import { isStarterSkill, Rng, type ExhibitionSide, type Season, type SimPlayer, type World } from '../engine';
 import { currentRuns, type ValueContext } from '../ai/value';
+import { daysBetween, type YearScheduleRule } from '../data/schedule';
 import { dateOf } from '../game/calendar';
 import { seasonWar } from './awards';
 import type { LeagueState } from './types';
@@ -47,10 +50,18 @@ export interface AllStarRecord {
   derby: { round1: [string, number][]; final: [string, number][]; winner: string | null };
 }
 
-/** 올스타전 날 (일정 색인): 7월 14일에 가장 가까운 휴식일, 시즌의 35~75% 사이. 없으면 -1 */
-export function allStarDay(schedule: readonly (readonly unknown[])[], year: number): number {
+/**
+ * 올스타전 날 (일정 색인). 일정 규칙(rule)이 있으면 그 표의 올스타 날 (없는 해는 -1). 그날 경기가 있으면(구단 수가 표와 달라
+ * 일정을 따로 펼친 월드) 그 날짜에 가장 가까운 휴식일. 규칙이 없으면 7월 14일에 가장 가까운 휴식일, 시즌의 35~75% 사이. 없으면 -1
+ */
+export function allStarDay(schedule: readonly (readonly unknown[])[], year: number, rule?: Pick<YearScheduleRule, 'opening' | 'allStar'>): number {
   const n = schedule.length;
-  const target = Date.UTC(year, 6, 14);
+  if (rule) {
+    if (!rule.allStar) return -1;
+    const d = daysBetween(rule.opening, rule.allStar);
+    if (d >= 0 && d < n && !schedule[d].length) return d;
+  }
+  const target = rule?.allStar ? Date.UTC(year, Number(rule.allStar.slice(5, 7)) - 1, Number(rule.allStar.slice(8, 10))) : Date.UTC(year, 6, 14);
   let best = -1;
   let bestGap = Infinity;
   for (let d = Math.ceil(n * 0.35); d <= Math.floor(n * 0.75) && d < n; d++) {

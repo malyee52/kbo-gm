@@ -69,6 +69,8 @@ import {
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
+import { scheduleNews, scheduleNewsText } from '../league/scheduleNews';
+import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
 import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
@@ -358,6 +360,8 @@ interface ArticleState {
 }
 /** 단장 인터뷰 간격 (일, 임시값) */
 const GM_INTERVIEW_EVERY = 21;
+/** 월간 MVP를 따로 내는 달의 최소 경기일. 모자라면 기사 없이 다음 달과 합친다 (일정 개편 11단계, 임시값) */
+const MONTHLY_MIN_DAYS = 10;
 /** 다른 구단 화제 경기 기사를 내는 하루 확률 (임시값) */
 const LEAGUE_GAME_CHANCE = 0.3;
 const SEASON_KEYS = ['hr', 'h', 'rbi', 'sb', 'w', 'sv', 'so'];
@@ -370,7 +374,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'schedule'>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -680,6 +684,7 @@ export class GameSession {
     g.refreshRivals();
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
+    g.scheduleNotice();
     const ch = opts.challenge ? challengeById(opts.challenge) : undefined;
     if (ch) {
       // 기획안 도전: 시작 때 만 23세 이하 우리 선수가 자체 육성 후보 (campaigns.ts HOMEGROWN)
@@ -2116,9 +2121,18 @@ export class GameSession {
     return this.valueCtx;
   }
 
-  /** 올스타전 날 (일정 색인, 휴식일). 없으면 -1 (league/allstar.ts) */
+  /** 개막 소식: 올해 달라지는 일정 (경기 수·연전·올스타 휴식·순연·중단, league/scheduleNews.ts). 지난해 규칙과 견준다 */
+  private scheduleNotice(): void {
+    const rule = this.world.schedule;
+    if (!rule) return;
+    const raw = this.store.schedule ? scheduleRule(this.store.schedule, rule.year - 1) : undefined;
+    const text = scheduleNewsText(rule.year, scheduleNews(rule, raw && fitRuleToTeams(raw, this.world.teams.length)));
+    if (text) this.addNews(0, 'season', text);
+  }
+
+  /** 올스타전 날 (일정 색인, 휴식일). 일정 규칙 표의 날, 없는 해(2020·2021)는 -1 (league/allstar.ts) */
   get allStarDay(): number {
-    return allStarDay(this.season.schedule, this.world.year);
+    return allStarDay(this.season.schedule, this.world.year, this.world.schedule);
   }
 
   /** 올해 올스타전 기록 (아직이면 null) */
@@ -2581,6 +2595,7 @@ export class GameSession {
         }
         this.actions.push(clone(a));
         this.addNews(0, 'season', `${this.year} 시즌을 시작합니다. 개막일은 ${formatDate(this.year, 0)}입니다.`);
+        this.scheduleNotice();
         for (const p of this.team.org) {
           const until = this.season.states.absentUntil[p.idx];
           if (until > 0) this.addNews(0, 'absence', `${p.name}: ${this.absenceReason(p)}. 복귀 예정 ${formatDate(this.year, until)}.`);
@@ -3023,10 +3038,17 @@ export class GameSession {
       put('injury', p.teamIdx, `${tname(p.teamIdx)} ${p.name}, 부상으로 이탈`, `${tname(p.teamIdx)} ${josa(p.name, '이', '가')} 부상으로 1군에서 빠졌다. ${out}.${mine ? quoteLine('injury', rng) : ''}`);
     }
 
-    // 월간 MVP: 그 달 마지막 경기일 다음 날 (달이 바뀌면)
+    // 월간 MVP: 그 달 마지막 경기일 다음 날 (달이 바뀌면). 경기일이 MONTHLY_MIN_DAYS보다 적은 달(3월 개막 주, 올림픽·코로나 중단,
+    // 2020 5월 개막처럼 일정 개편으로 생기는 짧은 달)은 기사 없이 다음 달과 합친다 ("3·4월 MVP"). 기준점의 month가 합친 첫 달이다
     const nextMonth = dateOf(year, Math.min(day + 1, s.schedule.length - 1)).month;
     const done = day + 1 >= s.schedule.length;
-    if (nextMonth !== st.month || done) {
+    const fromMonth = L.storyMonth?.month ?? st.month;
+    let fromDay = 0;
+    while (fromDay < day && dateOf(year, fromDay).month < fromMonth) fromDay++;
+    const gameDays = new Set(s.log.filter((g) => g.day >= fromDay && g.day <= day).map((g) => g.day)).size;
+    if (nextMonth !== st.month && !done && gameDays < MONTHLY_MIN_DAYS) {
+      st.month = nextMonth;
+    } else if (nextMonth !== st.month || done) {
       const snap = L.storyMonth?.lines ?? {};
       const d = (idx: number) => {
         const z = snap[P[idx].id] ?? [];
@@ -3042,7 +3064,7 @@ export class GameSession {
       const bh = hitters.sort((a, b) => ops(b.bat) - ops(a.bat) || a.p.idx - b.p.idx)[0];
       const bp = pitchers.sort((a, b) => era(a.pit) - era(b.pit) || b.pit.outs - a.pit.outs || a.p.idx - b.p.idx)[0];
       if (bh || bp) {
-        const m = st.month;
+        const m = fromMonth < st.month ? `${fromMonth}·${st.month}` : `${st.month}`;
         const parts: string[] = [];
         if (bh) parts.push(`타자 부문 ${tname(bh.p.teamIdx)} ${bh.p.name} (${bh.bat.pa}타석 타율 ${rate3(avg(bh.bat))}, ${bh.bat.hr}홈런, OPS ${rate3(ops(bh.bat))})`);
         if (bp) parts.push(`투수 부문 ${tname(bp.p.teamIdx)} ${bp.p.name} (${ipText(bp.pit.outs)}이닝 평균자책 ${fixed2(era(bp.pit))}, ${bp.pit.w}승 ${bp.pit.so}탈삼진)`);
