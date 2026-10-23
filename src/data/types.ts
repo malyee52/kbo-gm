@@ -285,6 +285,32 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 판정 함수 src/engine/fielding.ts만 읽는다 (엔진·리그 생성에는 16-3에서 잇는다). 없으면 판정하지 않는다 */
+  defense?: DefenseData;
+}
+
+/**
+ * defense.json (tools/build_data.py build_defense ← data-src/수비이닝.csv · 수비평판.csv).
+ * players: 선수 ID → 연도 → 그 해 수비. rep: 선수 ID → 평판 [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산)
+ */
+export interface DefenseData {
+  version: number;
+  /** p 값의 순서: g, gs, outs(이닝 × 3), e, po, a, dp, sb, cs, pb */
+  fields: string[];
+  /** 수비 기록이 있는 해 범위 (2001~2026) */
+  from: number;
+  to: number;
+  players: Record<string, Record<string, DefenseYear>>;
+  rep: Record<string, [string, number, number | null, number | null][]>;
+}
+
+/** 한 선수의 한 해 수비 (여러 구단을 거쳤으면 합친 값) */
+export interface DefenseYear {
+  /** 자리(C·1B·2B·3B·SS·LF·CF·RF) → fields 순 값. 수비 출장이 없으면 없다 */
+  p?: Record<string, number[]>;
+  /** 타석, 수비 없는 타석 (시즌 타석 × 수비 없는 경기 ÷ 시즌 경기의 근사) */
+  pa: number;
+  nd: number;
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */

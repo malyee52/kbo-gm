@@ -233,6 +233,49 @@ def main():
                 if not any(a <= int(y) <= b for a, b in spans.get(t['franchise'], ())):
                     warn(f'구장 사용 {y} {t["name"]}: 주 구장 없음')
 
+    # ---- 수비 이닝·평판 (defense.json, 능력치 v2 16-3a: tools/build_defense.py → build_data.py --defense-only)
+    if (DATA / 'defense.json').exists():
+        dj = load(DATA / 'defense.json')
+        f = dj['fields']
+        ig, igs, io = f.index('g'), f.index('gs'), f.index('outs')
+        n_pos = 0
+        for pid, ys in dj['players'].items():
+            if pid not in by_id:
+                err(f'수비: 없는 선수 ID {pid}')
+            for y, v in ys.items():
+                if not dj['from'] <= int(y) <= dj['to']:
+                    err(f'수비 {pid} {y}: 연도가 {dj["from"]}~{dj["to"]} 밖')
+                if not 0 <= v['nd'] <= v['pa']:
+                    err(f'수비 {pid} {y}: 수비 없는 타석 {v["nd"]}가 0~타석 {v["pa"]} 밖')
+                for pos, a in v.get('p', {}).items():
+                    n_pos += 1
+                    if pos not in ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'):
+                        err(f'수비 {pid} {y}: 모르는 자리 {pos}')
+                    if not 0 <= a[igs] <= a[ig]:
+                        err(f'수비 {pid} {y} {pos}: 선발 {a[igs]}이 0~출장 {a[ig]} 밖')
+                    # 한 경기 18이닝까지 (2008년 무제한 연장 포함 여유). 출장이 없는데 이닝이 있으면 오류
+                    if a[io] > a[ig] * 18 * 3:
+                        err(f'수비 {pid} {y} {pos}: 이닝 {a[io] / 3:.1f}이 출장 {a[ig]}경기 × 18 넘음')
+        rows_2004 = 0
+        src_csv = ROOT / 'data-src' / '수비이닝.csv'
+        if src_csv.exists():
+            import csv
+            with src_csv.open(encoding='utf-8-sig', newline='') as fh:
+                rows_2004 = sum(1 for r in csv.DictReader(fh) if r['연도'] == '2004')
+            # 2004년 보완 원본 540행 중 야수 행 (투수 164행 제외). 원본 540행은 build_defense.py가 확인한다
+            if rows_2004 != 376:
+                err(f'수비 이닝 2004년 야수 {rows_2004}행 (보완 원본 540행의 야수 376행이어야 함)')
+        for pid, reps in dj['rep'].items():
+            if pid not in by_id:
+                err(f'수비 평판: 없는 선수 ID {pid}')
+            for pos, lvl, a, b in reps:
+                if pos not in ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'IF', 'OF', '전반') or lvl not in (-2, -1, 0, 1, 2):
+                    err(f'수비 평판 {pid}: 자리·수준 {pos} {lvl}')
+                if (a is None) != (b is None) or (a is not None and a > b):
+                    err(f'수비 평판 {pid} {pos}: 시기 {a}~{b}')
+        warn(f'수비: 선수 {len(dj["players"]):,}명 · 자리-해 {n_pos:,}칸 ({dj["from"]}~{dj["to"]}, 2004년 야수 {rows_2004}행), '
+             f'평판 {sum(len(v) for v in dj["rep"].values()):,}줄 ({len(dj["rep"]):,}명)')
+
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
     for w in warnings:

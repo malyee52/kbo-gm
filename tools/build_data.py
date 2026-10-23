@@ -47,6 +47,9 @@
                                  나무위키 덤프에서 tools/wiki/s6_awards.py가 만든다. 짝 결과는 reports/wiki-awards.md
   data-src/구장.csv · 구장_사용.csv  구장 × 제원 기간(펜스·좌석·잔디·돔)과 구단 계보별 주 구장 (parks.json). 나무위키 구장 문서에서 읽어 적은 값.
                                  열은 docs/구장효과_기획안.md 7.1·7.2 (plan/park-effects). 이것만 다시 만들려면: build_data.py --history-only
+  data-src/수비이닝.csv · 수비평판.csv  KBO 공식 사이트 수비 기록 2001~2026 (사용자 수집, 선수·연도·구단·자리별 G·GS·이닝·E·PO·A·DP·PB·SB·CS)과
+                                 나무위키·위키백과 서술의 수비 평판 (등급·시기·문서 제목만) → defense.json. 저장소 밖 원본에서 tools/build_defense.py가 만든다.
+                                 이것만 다시 만들려면: build_data.py --defense-only (능력치 v2 16-3a, 판정 함수는 src/engine/fielding.ts)
 """
 import csv
 import json
@@ -424,6 +427,71 @@ def build_history(out_dir):
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'수상 {len(awards)}줄 (짝 {sum(1 for a in awards if a["id"])}), 구장 제원 {len(specs)}줄 · 사용 {len(use)}줄, '
           f'올스타전 {len(years)}개 해 → {out_dir}')
+
+
+# ---- 수비 이닝·평판 (defense.json, 능력치 v2 16-3a)
+# 가공 CSV: data-src/수비이닝.csv · 수비평판.csv (tools/build_defense.py가 저장소 밖 원본에서 만든다).
+# 게임 코드는 아직 읽지 않는다 (판정 함수 src/engine/fielding.ts만, 16-3에서 엔진에 잇는다). 선수 구성에 닿지 않아 저장 호환은 그대로.
+
+DEF_POS = ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF')
+DEF_FIELDS = ('G', 'GS', '이닝x3', 'E', 'PO', 'A', 'DP', 'SB', 'CS', 'PB')
+
+
+def build_defense(out_dir):
+    """선수 ID → 연도 → {p: 자리 → [G, GS, 이닝×3, E, PO, A, DP, SB, CS, PB], pa: 타석, nd: 수비 없는 타석 (근사)},
+    평판: 선수 ID → [[자리, 수준 −2~2, 시기 시작, 시기 끝]] (시기가 없으면 null = 통산).
+    수비 없는 타석 = 시즌 타석 × 수비 없는 경기 ÷ 시즌 경기, 수비 없는 경기 = 시즌 경기 − 수비 출장 경기 합 (구단 계보별, 0 아래는 0).
+    조사 직원 정리본(선수시즌_수비요약.csv)의 '수비없는_타석_근사'와 같은 식이다. 수비 기록이 시작된 해(2001)부터
+    그 해 수비 행이 없는 타자는 타석 전부를 수비 없는 타석으로 센다 (지명타자·대타만 나온 시즌)."""
+    src = ROOT / 'data-src'
+    rows = read_src_csv(src / '수비이닝.csv')
+    if not rows:
+        print('수비 이닝 CSV 없음, defense.json을 만들지 않음 (tools/build_defense.py)')
+        return
+    meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
+    fr_of = {(s['name'], y): fr for fr, spans in meta['franchises'].items() for s in spans for y in range(s['from'], s['to'] + 1)}
+    players = defaultdict(dict)
+    def_g = defaultdict(int)  # (선수, 연도, 계보) → 수비 출장 경기 합
+    for r in rows:
+        pid, y = r['선수ID'], int(r['연도'])
+        yr = players[pid].setdefault(str(y), {'p': {}, 'pa': 0, 'nd': 0})
+        cur = yr['p'].setdefault(r['자리'], [0] * len(DEF_FIELDS))
+        for i, k in enumerate(DEF_FIELDS):
+            cur[i] += int(r[k])
+        def_g[(pid, y, fr_of.get((r['구단'], y), r['구단']))] += int(r['G'])
+    first = min(int(r['연도']) for r in rows)
+    last = max(int(r['연도']) for r in rows)
+    for y in meta['years']:
+        if not first <= y <= last:
+            continue
+        s = json.loads((out_dir / 'seasons' / f'{y}.json').read_text(encoding='utf-8'))
+        f = s['batFields']
+        ii, it, ig, ip = f.index('id'), f.index('team'), f.index('g'), f.index('pa')
+        for b in s['bat']:
+            pid, g, pa = b[ii], b[ig] or 0, b[ip] or 0
+            if pa <= 0:
+                continue
+            yr = players[pid].setdefault(str(y), {'p': {}, 'pa': 0, 'nd': 0})
+            dg = def_g.get((pid, y, fr_of.get((b[it], y), b[it])), 0)
+            nd_g = max(0, g - dg)
+            yr['pa'] += pa
+            yr['nd'] += round(pa * nd_g / g) if g > 0 else 0
+    for pid in players:
+        for yr in players[pid].values():
+            if not yr['p']:
+                del yr['p']
+    rep = defaultdict(list)
+    for r in read_src_csv(src / '수비평판.csv'):
+        rep[r['선수ID']].append([r['자리'], int(r['수준']), num(r['시기_시작']), num(r['시기_끝'])])
+    (out_dir / 'defense.json').write_text(json.dumps({
+        'version': 1,
+        'source': 'data-src/수비이닝.csv (KBO 공식 사이트 수비 기록, 사용자 수집, 가공) · 수비평판.csv (나무위키·위키백과 서술 요약, 등급·시기만)',
+        'fields': ['g', 'gs', 'outs', 'e', 'po', 'a', 'dp', 'sb', 'cs', 'pb'], 'from': first, 'to': last,
+        'note': 'players: 선수 ID → 연도 → {p: 자리 → fields 순 값 (outs = 이닝 × 3), pa: 타석, nd: 수비 없는 타석 근사}. '
+                'rep: 선수 ID → [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산)',
+        'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)},
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'수비 이닝 {len(rows):,}행 → 선수 {len(players):,}명 ({first}~{last}), 평판 {sum(len(v) for v in rep.values()):,}행 ({len(rep):,}명) → {out_dir / "defense.json"}')
 
 
 # ---- 감독 (managers.json)
@@ -1412,6 +1480,10 @@ def main():
         # 수상·구장·올스타전 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         build_history(OUT)
         return
+    if '--defense-only' in sys.argv:
+        # 수비 이닝·평판 CSV만 다시 반영한다 (시즌 JSON에서 타석을 읽는다. 다른 JSON과 저장 호환은 그대로)
+        build_defense(OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1668,6 +1740,7 @@ def main():
     build_homes()
     build_ppa()
     build_history(OUT)
+    build_defense(OUT)
     if not NO_WIKI:
         write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special, wiki_fixes)
     if hardhit_report:
