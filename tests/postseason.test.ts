@@ -31,7 +31,7 @@ describe('가을야구 직접 진행', () => {
     expect(currentSeries(g.postseason!)!.round).toBe('wc');
     expect(g.advancePostseason(1)).toBe(1);
     expect(g.postseason!.series[0].games).toHaveLength(1);
-    expect(g.postseason!.series[0].games[0].box!.home.batters).toHaveLength(9);
+    expect(g.postseason!.series[0].games[0].box!.home.batters.filter((b) => !b.sub)).toHaveLength(9);
     expect(g.currentDay).toBeGreaterThan(g.season.schedule.length);
   });
 

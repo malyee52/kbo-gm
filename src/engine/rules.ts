@@ -6,7 +6,7 @@ import type { PlayKind } from './game';
 import { Ev, type PaRates } from './pa';
 import { DEFAULT_PARAMS } from './params';
 import { errorRateOf, fielderAt, type GameState, type PitcherInGame, type Runner } from './state';
-import type { BatLine, SimPlayer } from './types';
+import type { BatLine, LeagueEnv, SimPlayer } from './types';
 
 /** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
 const OF_SIDE = ['LF', 'CF', 'RF'] as const;
@@ -35,13 +35,15 @@ export interface RunTally {
   hnr: number; hnrMiss: number; hnrFoul: number; hnrInPlay: number;
   bunt: number; buntSac: number; buntHit: number; buntLeadOut: number; buntPop: number; buntDp: number;
   squeeze: number; squeezeRun: number; buntPitches: number;
+  /** 경기 중 교체 (엔진 2 9단계): 대타, 대주자, 대수비 */
+  ph: number; pr: number; def: number;
 }
 
 export function emptyRunTally(): RunTally {
   return {
     sb2: 0, cs2: 0, sb3: 0, cs3: 0, double: 0, pickoff: 0, pitchout: 0, pitchoutRun: 0, pitchoutCaught: 0,
     hnr: 0, hnrMiss: 0, hnrFoul: 0, hnrInPlay: 0, bunt: 0, buntSac: 0, buntHit: 0, buntLeadOut: 0, buntPop: 0, buntDp: 0,
-    squeeze: 0, squeezeRun: 0, buntPitches: 0,
+    squeeze: 0, squeezeRun: 0, buntPitches: 0, ph: 0, pr: 0, def: 0,
   };
 }
 
@@ -72,8 +74,26 @@ export function stealOne(st: GameState, from: 0 | 1, pct: number): boolean {
 export function stealPct(st: GameState, r: Runner, third: boolean, extra = 0): number {
   const { params } = st.ctx;
   const run = params.run;
-  return r.p.bat!.sbPct - st.fld.catcherDef * params.catcherStealPerRun
+  return r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherDef * params.catcherStealPerRun
     + (third ? run.thirdPct : st.fld.pitcher.p.throws === 'L' ? run.leftyPct : run.rightyPct) + extra;
+}
+
+/**
+ * 리그 도루 환경 (2026-10-23): 선수 성공률은 직전 시즌들 기록이라 리그 성공률이 해마다 오르내리는 몫(2022 0.709 → 2025 0.749, 2009 0.726 → 2012 0.690)을 못 따라간다.
+ * 그 해 리그 성공률(env.sbPct)과 선수 성공률 평균(도루 시도율 × 표본 타석 가중, 표본 600타석까지)의 차. 리그 성공률을 모르면 0.
+ * 다른 환경 값(희생번트·폭투)처럼 그 해 리그 값에 맞춘다
+ */
+export function sbShiftOf(players: readonly SimPlayer[], env: LeagueEnv): number {
+  if (!env.sbPct) return 0;
+  let w = 0;
+  let s = 0;
+  for (const p of players) {
+    if (p.isPitcher || !p.bat) continue;
+    const x = p.bat.sbAtt * Math.min(600, Math.max(50, p.bat.sample));
+    w += x;
+    s += x * p.bat.sbPct;
+  }
+  return w > 0 ? env.sbPct - s / w : 0;
 }
 
 /**
@@ -141,22 +161,69 @@ export function steals(st: GameState, steal: 'go' | 'hold' | undefined, pitchout
   return stealOne(st, 1, stealPct(st, r2, true));
 }
 
-/** 폭투·포일·보크: 주자 전원 한 베이스씩. 투수 제구(볼넷 배율)가 나쁠수록 잦다 (엔진 2 8단계). 끝내기면 true */
-export function wildPitch(st: GameState): boolean {
-  const { bases, bat, fld, ctx } = st;
+/** 타석당 폭투·포일·보크 확률 (주자가 있을 때): 그 해 리그 값 × 투수 제구(볼넷 배율, 나쁠수록 잦다, 엔진 2 8단계) × 포수 수비 */
+function wildPitchChance(st: GameState): number {
+  const { fld, ctx } = st;
   const control = Math.min(2.5, Math.max(0.4, (fld.pitcher.p.pit?.bb ?? 1) ** ctx.params.run.wildPitchControl));
-  if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(ctx.env.wildPitch * control * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun))) {
-    ctx.totals.wildPitches++;
-    const r0 = bat.runs;
-    // 포일 몫 (엔진 2 7단계, 임시값): 포일로 들어온 3루 주자의 득점은 비자책. 다른 주자는 그대로 둔다
-    // (누상 주자를 모두 비자책으로 굳히면 시대와 관계없이 비자책이 일정량 늘어 2012년이 +19%였다)
-    if (ctx.rng.chance(ctx.params.error.passedBall) && bases[2]) bases[2].earned = false;
-    if (bases[2]) { st.score(bases[2], null); bases[2] = null; }
-    if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-    if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
-    st.note('WP', -1, fld.pitcher.p.idx, r0);
-    if (st.walkOff()) return true;
+  return ctx.env.wildPitch * control * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun);
+}
+
+/** 폭투·포일 한 번 일어난 뒤: 주자 전원 한 베이스. 끝내기면 true */
+function wildPitchAdvance(st: GameState): boolean {
+  const { bases, bat, fld, ctx } = st;
+  ctx.totals.wildPitches++;
+  const r0 = bat.runs;
+  // 포일 몫 (엔진 2 7단계, 임시값): 포일로 들어온 3루 주자의 득점은 비자책. 다른 주자는 그대로 둔다
+  // (누상 주자를 모두 비자책으로 굳히면 시대와 관계없이 비자책이 일정량 늘어 2012년이 +19%였다)
+  if (ctx.rng.chance(ctx.params.error.passedBall) && bases[2]) bases[2].earned = false;
+  if (bases[2]) { st.score(bases[2], null); bases[2] = null; }
+  if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
+  if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
+  st.note('WP', -1, fld.pitcher.p.idx, r0);
+  return st.walkOff();
+}
+
+/** 폭투·포일·보크 (타석 전, 주자가 있을 때 타석당 한 번 판정): 주자 전원 한 베이스씩. 끝내기면 true */
+export function wildPitch(st: GameState): boolean {
+  const { bases, ctx } = st;
+  if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(wildPitchChance(st))) return wildPitchAdvance(st);
+  return false;
+}
+
+/** 마운드 투수의 투구 수를 센다 (기록·박스스코어, 경기 안 피로·교체·불펜 피로) */
+export function addPitches(ctx: GameState['ctx'], pg: PitcherInGame, n: number): void {
+  pg.pitches += n;
+  pg.line.np += n;
+  ctx.totals.pitches += n;
+}
+
+/**
+ * 수동 고의4구 공 하나의 폭투·포일 확률 (엔진 2 10단계): 보통 공 하나의 확률(타석당 확률 ÷ 리그 타석당 기대 투구 수) × params.mgr.ibb.wildShare (임시값).
+ * A(투구 단위)·B(타석 단위) 해결기가 같은 식을 쓴다
+ */
+export function ibbWildPitchChance(st: GameState): number {
+  return (wildPitchChance(st) / st.ctx.params.pitchesPerPaDefault) * st.ctx.params.mgr.ibb.wildShare;
+}
+
+/**
+ * 수동 고의4구 (자동 고의4구 도입 전, eras.ts AUTO_IBB_YEAR): 공 4개를 실제로 던지고 공마다 주자가 있으면 폭투·포일을 판정한다
+ * (폭투면 주자가 한 베이스씩 가고 남은 공은 그대로 던진다). 볼넷 기록은 부른 쪽이 남긴다. 끝내기면 true
+ */
+export function manualIntentionalWalk(st: GameState, pg: PitcherInGame): boolean {
+  const { bases, ctx } = st;
+  const t = ctx.pen;
+  if (t) t.ibbManual++;
+  for (let i = 0; i < 4; i++) {
+    addPitches(ctx, pg, 1);
+    if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(ibbWildPitchChance(st))) {
+      if (t) t.ibbWp++;
+      if (wildPitchAdvance(st)) {
+        if (t) t.ibbCut++;
+        return true;
+      }
+    }
   }
+  if (t) t.ibbPitches += 4;
   return false;
 }
 
@@ -313,11 +380,21 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   // 인플레이 타구 (홈런 제외): 유형·방향·담당 수비수. 양타는 투수 손의 반대쪽 타석, 모르면 우타.
   // 땅볼 성향 = 그 해 리그 값 × 타자 × 투수 (엔진 2 6단계)
   let ball: BattedBall | null = null;
+  st.ballSlot = null;
   if (ev === Ev.S1 || ev === Ev.D2 || ev === Ev.T3 || ev === Ev.OUT) {
     const pullLeft = batter.bats === 'L' ? false : batter.bats === 'S' ? pg.p.throws === 'L' : true;
     const gb = (ctx.env.gbOdds ?? 1) * (batter.bat!.gb ?? 1) * (pg.skill.gb ?? 1);
     ball = battedBall(ev, rates, ctx.league, pullLeft, (s) => fld.slotDef[s as keyof typeof fld.slotDef] ?? 0, params, rng, gb);
     ev = ball.ev;
+    st.ballSlot = ball.slot;
+    // 전진 수비 (엔진 2 10단계): 앞으로 나온 내야를 빠지는 땅볼 안타가 는다 (임시값)
+    if (st.infieldIn && ball.type === Ball.GB) {
+      if (ctx.pen) ctx.pen.ifInGb++;
+      if (ev === Ev.OUT && rng.chance(params.mgr.infieldIn.hit)) {
+        ev = Ev.S1;
+        if (ctx.pen) ctx.pen.ifInHit++;
+      }
+    }
     const t = ctx.balls;
     if (t) {
       t.type[ball.type]++;
@@ -333,6 +410,13 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   const arm = (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
   const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
+  /** 땅볼 아웃 때 3루 주자가 들어오나 (전진 수비면 덜 들어온다, 엔진 2 10단계) */
+  const gbScores = (r: Runner): boolean => {
+    if (!st.infieldIn) return rng.chance(params.groundOutScores + speedAdj(r));
+    const ok = rng.chance((params.groundOutScores + speedAdj(r)) * params.mgr.infieldIn.score);
+    if (ctx.pen) { if (ok) ctx.pen.ifInScored++; else ctx.pen.ifInHeld++; }
+    return ok;
+  };
   const twoOut = st.outs === 2 ? params.twoOutBonus : 0;
   const hnrExtra = going ? params.run.hnrExtra : 0;
   /** 추가 진루 시도: 성공이면 true, 주루사면 아웃을 올리고 false */
@@ -443,7 +527,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
           // 히트앤드런: 1루 주자가 이미 뛰어 병살·포스아웃이 없다. 타자 아웃, 주자 2루
           st.out(1);
           if (st.outs < 3) {
-            if (bases[2] && rng.chance(params.groundOutScores + speedAdj(bases[2]))) { st.score(bases[2], bl); bases[2] = null; }
+            if (bases[2] && gbScores(bases[2])) { st.score(bases[2], bl); bases[2] = null; }
             if (!bases[1]) { bases[1] = bases[0]; bases[0] = null; }
           }
         } else if (bases[0] && st.outs < 2) {
@@ -458,7 +542,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
             }
           } else {
             st.out(1);
-            if (bases[2] && rng.chance(params.groundOutScores + speedAdj(bases[2]))) { st.score(bases[2], bl); bases[2] = null; }
+            if (bases[2] && gbScores(bases[2])) { st.score(bases[2], bl); bases[2] = null; }
             if (bases[1] && !bases[2]) { bases[2] = bases[1]; bases[1] = null; }
             // 선행 주자 포스아웃(타자 1루) 또는 타자 아웃(주자 2루)
             if (rng.chance(pp.forceLead[fs] ?? 0.5)) bases[0] = me;
@@ -467,7 +551,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
         } else {
           st.out(1);
           if (st.outs < 3) {
-            if (bases[2] && rng.chance(params.groundOutScores + speedAdj(bases[2]))) { st.score(bases[2], bl); bases[2] = null; }
+            if (bases[2] && gbScores(bases[2])) { st.score(bases[2], bl); bases[2] = null; }
             // 2루 주자는 오른쪽 땅볼에 3루로 간다 (자기 앞·왼쪽 땅볼에는 묶인다)
             if (bases[1] && !bases[2] && rng.chance(pp.groundAdvance[fs] ?? 0.5)) { bases[2] = bases[1]; bases[1] = null; }
           }

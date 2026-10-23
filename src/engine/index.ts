@@ -13,16 +13,16 @@ export {
   type SeasonPlan, type SavedSchedule, type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
-  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
+  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
-export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyRunTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
+export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
   FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
 } from './defense';
 export {
   ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
-  type Absence, type AbsenceKind, type EventCode, type InjuryParams,
+  INJURY_PARTS, SEVERITY_LABEL, overuseDecay, type Absence, type AbsenceKind, type EventCode, type InjuryCause, type InjuryParams, type InjuryPart, type OveruseParams,
 } from './injury';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
 // 숨겨진 특수능력: 화면(src/ui)은 이것을 가져다 쓰면 안 된다 (tests/traits.test.ts가 검사). 도구·테스트·리그 계층용

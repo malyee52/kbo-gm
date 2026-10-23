@@ -85,6 +85,8 @@ export interface LeagueTotals {
   unearnedShare: number;
   /** 타석당 폭투+보크. 2000년 이전은 기록이 없어 null */
   wpbkPerPa: number | null;
+  /** 도루 성공률: 도루 실패가 기록된 타자 행의 도루 ÷ (도루 + 도루 실패). 불러올 때 계산 (decodeSeason), 기록이 없으면 null */
+  sbPct?: number | null;
 }
 
 export interface BatRow {
@@ -377,6 +379,13 @@ export interface ManagerInfo {
   steal: number;
   bunt: number;
   relief: number;
+  /**
+   * 투구 단위 자료(2023~)의 팀 선발 평균 투구 수 ÷ 리그, 팀 구원 연투 비율 ÷ 리그 (시즌 내내 맡은 해 평균, 시즌이 적으면 1 쪽으로 당김).
+   * byYear: 개막 감독으로 맡은 해의 팀 값 그대로 (엔진 2 10단계). 자료가 없으면 없다
+   */
+  push?: number;
+  pen?: number;
+  byYear?: Record<string, { push: number; pen: number }>;
 }
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
@@ -405,7 +414,11 @@ function unpack<T>(fields: string[], rows: unknown[][]): T[] {
 
 export function decodeSeason(raw: RawSeason): SeasonData {
   const { batFields, bat, pitFields, pit, ...rest } = raw;
-  return { ...rest, bat: unpack<BatRow>(batFields, bat), pit: unpack<PitRow>(pitFields, pit) };
+  const batRows = unpack<BatRow>(batFields, bat);
+  let sb = 0;
+  let cs = 0;
+  for (const r of batRows) if (r.sb !== null && r.cs !== null && r.cs !== undefined) { sb += r.sb; cs += r.cs; }
+  return { ...rest, league: { ...rest.league, sbPct: sb + cs > 0 ? sb / (sb + cs) : null }, bat: batRows, pit: unpack<PitRow>(pitFields, pit) };
 }
 
 /** KBO 수비상 한 건 (감독·코치·단장 투표 75% + 수비 기록 25%, 언론 보도) */

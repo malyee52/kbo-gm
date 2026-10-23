@@ -3,6 +3,7 @@
 
 import type { GameContext, Play, PlayKind } from './game';
 import { defenseAt } from './defense';
+import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
 import { assignSlots, type Slot, type TeamSeason } from './team';
 import type { BatLine, PitLine, PitSkill, SimPlayer } from './types';
@@ -16,6 +17,14 @@ export interface PitcherInGame {
   outs: number;
   /** 그날 몸의 한계 투구 수 (공 수). 넘기면 능력이 꺾인다 (pa.ts). AI 감독은 이 값을 모른다 */
   limit: number;
+  /** 실제 한계 투구 수 (숨은 능력, 기획안 4.6): 넘긴 공은 부상 확률을 올리고 혹사지수를 쌓는다. AI 감독은 모른다 */
+  realLimit: number;
+  /** 등판 때 혹사지수 (경기 중 부상 확률 배율, 엔진 2 11단계) */
+  overuse: number;
+  /** 경기 중 부상을 마지막으로 따진 때의 투구 수 (그 뒤 던진 공만 다음에 따진다) */
+  injChecked: number;
+  /** 경기 중 다쳤다: 다음 타석 전에 바꾼다 */
+  injured?: boolean;
   /** AI 감독이 보는 한계 투구 수: 보이는 체력 × 타석당 기대 투구 수 (그날의 몸 상태는 모른다), 감독 성향(hook)·시대 상한을 넣은 값. 교체 판단에 쓴다 */
   plan: number;
   isStarter: boolean;
@@ -31,6 +40,14 @@ export interface PitcherInGame {
   pitches: number;
   /** 이 투수의 타석당 기대 투구 수 (리그 평균 타자 상대, 볼카운트 사슬에서). 타자 수로 정한 체력·교체 기준을 공 수로 바꿀 때 쓴다 */
   ppa: number;
+  /** 구원 등판한 회 (블론 기록 BLOWN_FROM_INNING, 엔진 2 10단계) */
+  entryInning?: number;
+  /** 좌우 원포인트로 올라왔다 (엔진 2 10단계): 맡은 좌타자 뒤 다음 타자가 좌타가 아니면 바꾼다 */
+  onePoint?: boolean;
+  /** 세이브 상황 등판 집계 칸 (검증 도구 ctx.pen이 있을 때만, manager.ts tallySaveEntry) */
+  entryKey?: string;
+  entryTired?: boolean;
+  entryRunners?: number;
 }
 
 /**
@@ -38,6 +55,13 @@ export interface PitcherInGame {
  * (리드 ≤ 누상 주자 + 2). 기록에만 쓰고 경기 진행에는 쓰지 않는다
  */
 export const isSaveSituation = (lead: number, runners: number): boolean => lead >= 1 && (lead <= 3 || lead <= runners + 2);
+
+/**
+ * 블론 세이브를 기록하는 등판 회 (엔진 2 10단계): 이 회 이후 세이브 상황에 나온 투수만 리드를 잃으면 블론으로 센다.
+ * 근거: 투구 단위 자료(2023~2025)에서 세이브 상황 구원 등판이 리드를 잃은 수 가운데 7회 이후 등판분이 하드힛 블론 합과 세 해 모두 정확히 같다
+ * (2023 183 · 2024 199 · 2025 185, tools/pbp_saves.py). KBO 규정 문구로는 확인하지 못했다 (조사값). 6회 이전 등판이 리드를 잃어도 홀드는 받지 못한다
+ */
+export const BLOWN_FROM_INNING = 7;
 
 export interface Runner {
   p: SimPlayer;
@@ -50,7 +74,8 @@ export interface GameSub {
   idx: number;
   /** 타순 자리 (0~8) */
   order: number;
-  kind: 'PH' | 'PR';
+  /** 대타, 대주자, 대수비 (엔진 2 9단계) */
+  kind: 'PH' | 'PR' | 'DEF';
 }
 
 export interface Side {
@@ -74,6 +99,10 @@ export interface Side {
   slots: Map<number, Slot>;
   /** 경기 중 들어온 타자 (박스스코어: 타순 자리, 대타·대주자) */
   subs: GameSub[];
+  /** 대타·대주자가 들어와 다음 수비 때 수비 위치를 다시 정해야 한다 (AI 감독, subs.ts aiDefense) */
+  realign?: boolean;
+  /** 선발 출전 선수와 시작 수비 위치 (경기 뒤 야수 피로, 엔진 2 11단계) */
+  starters: { p: SimPlayer; slot: Slot | undefined }[];
 }
 
 /** 선발 라인업의 수비 위치 (선수 색인 → 자리) */
@@ -115,7 +144,7 @@ export function fielderAt(side: Side, slot: Slot | 'P'): number {
  * 대타·대주자: 타순 order 자리의 선수를 바꾼다. 들어온 선수는 나간 선수의 수비 자리를 맡고(포수 자리에 포수가 아니면 수비력이 떨어진다),
  * 다음 수비부터 팀 수비력에 반영된다 (2026-10-12 직접 지휘 마무리)
  */
-export function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH' | 'PR'): void {
+export function substitute(side: Side, order: number, inP: SimPlayer, kind: GameSub['kind']): void {
   const outP = side.lineup[order];
   const slot = side.slots.get(outP.idx);
   side.lineup[order] = inP;
@@ -124,6 +153,7 @@ export function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH'
   if (slot) side.slots.set(inP.idx, slot);
   Object.assign(side, fieldDefense(side.lineup, side.slots));
   side.subs.push({ idx: inP.idx, order, kind });
+  if (kind !== 'DEF') side.realign = true;
 }
 
 /** 한 경기의 상태. 반 이닝 상태(inning·bat·fld·outs·bases)는 반 이닝을 시작할 때 startHalf로 바꾼다 */
@@ -139,8 +169,12 @@ export class GameState {
    * 예전 "2아웃 실책 뒤 그 이닝 실점은 비자책"을 1·0아웃 실책까지 넓혔다
    */
   errOuts = 0;
+  /** 이번 타석에 수비 팀이 전진 수비를 했나 (AI 감독, 엔진 2 10단계). 타석마다 game.ts가 정한다 */
+  infieldIn = false;
   /** 직접 지휘 물음 번호 */
   cmdN = 0;
+  /** 이번 타석 인플레이 타구를 맡은 수비 자리 (없으면 null). 경기 중 수비 부상에 쓴다 (엔진 2 11단계) */
+  ballSlot: Slot | 'P' | null = null;
 
   inning = 0;
   bat!: Side;
@@ -212,7 +246,8 @@ export class GameState {
     const cur = fld.pitcher;
     if (before === -1 && !cur.isStarter && !cur.blown && cur.saveSit) {
       cur.blown = true;
-      cur.line.bsv++;
+      if ((cur.entryInning ?? BLOWN_FROM_INNING) >= BLOWN_FROM_INNING) cur.line.bsv++;
+      if (ctx.pen) tallyBlown(cur, runner.resp !== cur, ctx);
     }
     if (before <= 0 && after > 0) {
       rec.win = bat.pitcher;

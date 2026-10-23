@@ -326,11 +326,19 @@ def rules_for(year):
 # (src/league/history.ts TWO_LEAGUE_FINAL과 같은 값)
 TWO_LEAGUE_CHAMPION = {1999: '한화', 2000: '현대'}
 
+# 문자중계 팀 코드 → 계보 (data-src/pbp_derived/team_pitching.csv)
+PBP_TEAM = {'HH': '한화', 'HT': 'KIA', 'KT': 'KT', 'LG': 'LG', 'LT': '롯데', 'NC': 'NC', 'OB': '두산', 'SK': 'SSG', 'SS': '삼성', 'WO': '히어로즈'}
+
+
 def build_managers(out_dir):
     """감독.csv → {seasons: {연도: {계보: [{name, kind, mid}]}}, people: {이름: 경력·운영 경향}}.
     운영 경향은 그 감독이 개막부터 끝까지 맡은 시즌(중도 교체가 없는 해)의 팀 기록을 그 해 리그 평균과 견준 배율이다.
       steal: (도루 + 도루자) / (단타 + 볼넷 + 사구), bunt: 희생번트 / 타석, relief: (등판 − 선발) / 경기
-    시즌이 적으면 1 쪽으로 당긴다 (n / (n + 2)). 성격·인물평은 넣지 않는다 (기록 사실만)."""
+    시즌이 적으면 1 쪽으로 당긴다 (n / (n + 2)). 성격·인물평은 넣지 않는다 (기록 사실만).
+    투구 단위 자료가 있는 해(2023~, data-src/pbp_derived/team_pitching.csv, 엔진 2 10단계)는 더 본다:
+      push: 팀 선발 평균 투구 수 / 리그, pen: 팀 구원 연투(전날 등판) 비율 / 리그 (감독 성향 '투수 밀어붙이기'·'불펜 연투 허용').
+      개막 감독에게는 그 해 팀 값을 byYear에 그대로 남기고 (시즌 중 교체가 있던 해도), 시즌 내내 맡은 해의 평균은 위처럼 당겨 push·pen에.
+      자료가 없는 감독은 push·pen이 없다 (엔진은 push 대신 relief, pen은 보통)."""
     if not MANAGERS_CSV.exists():
         return
     meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
@@ -385,6 +393,38 @@ def build_managers(out_dir):
                          ('relief', ratio(t['relief'], t['games'], lg['relief'], lg['games']))):
                 if v is not None:
                     acc[name][k].append(v)
+    # 투구 단위 자료 (2023~): 구단-시즌 → push·pen 배율
+    pitch = defaultdict(dict)
+    tp = PBP_DERIVED / 'team_pitching.csv'
+    if tp.exists():
+        with tp.open(encoding='utf-8', newline='') as f:
+            trows = list(csv.DictReader(f))
+        for y in sorted({r['year'] for r in trows}):
+            ys = [r for r in trows if r['year'] == y]
+            starts = sum(int(r['starts']) for r in ys)
+            lg_mean = sum(int(r['starts']) * float(r['starter_mean']) for r in ys) / starts
+            apps = sum(int(r['relief_apps']) for r in ys)
+            lg_b2b = sum(int(r['relief_apps']) * float(r['back_to_back_rate']) for r in ys) / apps
+            for r in ys:
+                pitch[y][PBP_TEAM[r['team']]] = {'push': round(float(r['starter_mean']) / lg_mean, 3),
+                                                 'pen': round(float(r['back_to_back_rate']) / lg_b2b, 3)}
+    pacc = defaultdict(lambda: {'push': [], 'pen': []})
+    for y, teams in pitch.items():
+        for fr, v in teams.items():
+            ms = seasons.get(y, {}).get(fr, [])
+            opening = [m for m in ms if not m.get('mid')]
+            if not opening or opening[0]['name'] not in people:
+                continue
+            name = opening[0]['name']
+            people[name].setdefault('byYear', {})[y] = v
+            if len(ms) == 1 and y not in [str(x) for x in meta.get('inProgress', [])]:
+                for k in ('push', 'pen'):
+                    pacc[name][k].append(v[k])
+    for name, a in pacc.items():
+        for k in ('push', 'pen'):
+            vs = a[k]
+            if vs:
+                people[name][k] = round(1 + (sum(vs) / len(vs) - 1) * len(vs) / (len(vs) + 2), 3)
     for name, pe in people.items():
         a = acc.get(name)
         n = len(a['steal']) if a else 0

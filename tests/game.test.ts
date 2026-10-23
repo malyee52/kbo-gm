@@ -121,13 +121,16 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
       expect(sum(box.lineScore.away)).toBe(x.awayRuns);
       expect(box.home.batters.reduce((s, b) => s + b.r, 0)).toBe(x.homeRuns);
       expect(box.away.pitchers.reduce((s, p) => s + p.r, 0)).toBe(x.homeRuns);
-      expect(box.home.batters).toHaveLength(9);
+      // 선발 9명 + 경기 중 교체 타자 (엔진 2 9단계부터 AI 감독도 대타·대주자·대수비를 쓴다)
+      expect(box.home.batters.filter((b) => !b.sub)).toHaveLength(9);
     }
   });
 
-  it('알림에 실존 선수의 결장 사유를 적지 않는다', () => {
+  // 엔진 2 11단계 (2026-10-22 사용자 결정): 부상은 실존 선수도 부위·정도를 쓴다. 부상이 아닌 사유(징계·사건)는 여전히 적지 않는다
+  it('알림에 실존 선수의 부상 아닌 결장 사유를 적지 않는다 (부상은 부위·정도를 쓴다)', () => {
     const absences = g.news.filter((n) => n.kind === 'absence');
-    for (const n of absences) expect(n.text).not.toMatch(/부상|골절|징계|음주|도박|폭행|사생활/);
+    for (const n of absences) expect(n.text).not.toMatch(/골절|징계|음주|도박|폭행|사생활|갈등/);
+    expect(absences.some((n) => /부상, (경미|중간 정도|심각)/.test(n.text))).toBe(true);
   });
 
   it('시즌 일정이 규칙 표의 개막일(3월 28일 토요일)에 시작하고 발표 일정의 월요일에는 경기가 없다 (월요일 경기는 우천 순연·잔여 경기)', () => {

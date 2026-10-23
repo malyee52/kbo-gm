@@ -103,6 +103,10 @@ export interface SimPlayer {
   ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */
   traits?: readonly import('./traits').Trait[];
+  /** 숨은 능력 '부상 경향' (부상 확률 배율, 엔진 2 16단계에서 붙는다). 없으면 1.00 */
+  injuryProne?: number;
+  /** 개막 때 혹사지수 (지난 시즌에서 넘어온 값, league/offseason.ts). 없으면 0 */
+  overuseStart?: number;
 }
 
 export interface SimTeam {
@@ -154,6 +158,8 @@ export interface LeagueEnv {
   wildPitch: number;
   /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */
   gbOdds?: number;
+  /** 그 해 리그 도루 성공률 (엔진 2 9단계 앞, 도루 실패 2025 +11.5% 고침). 시즌 시작 때 선수 성공률 평균과의 차를 모든 도루에 더한다 (GameCtx.sbShift). 없으면 0 */
+  sbPct?: number;
 }
 
 export interface BatLine {

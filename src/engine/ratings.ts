@@ -278,6 +278,7 @@ export interface BuildWorldInput {
  * 소속 팀은 current 시즌 기록의 팀, 능력은 history 시즌 기록에서 뽑는다.
  */
 /** 규정타석 = 그 해 팀 경기 수 × 3.1 */
+const FIELD_POS = new Set(['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF']);
 const QUAL_PA_PER_GAME = 3.1;
 
 /**
@@ -287,12 +288,18 @@ const QUAL_PA_PER_GAME = 3.1;
  *   그 3시즌에 하드힛 기록이 없으면(입대·부상 공백) 예전 규칙: 규정타석 시즌이 가장 많은 자리 → 시즌 수 → 타석 합 → 최근 순.
  * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 있는 자리
  *   + 2시즌 이상 맡은 자리 + 주 포지션.
+ * - 포수 예외 (2026-10-22 사용자 결정): 포수를 주 포지션으로 삼으려면 포수로 규정타석을 채운 시즌이 있어야 한다.
+ *   하드힛 시즌 행의 타석은 지명타자 타석까지 합친 값이라, 포수 규정타석 시즌이 다른 자리 규정타석 시즌 합보다 적으면
+ *   (강백호: 포수 1 · 1루 2 · 좌익 1 · 우익 1) 포수로 채운 시즌으로 보지 않는다 (해석, 보고에 적음).
+ *   아니면 규정타석 시즌이 다음으로 많은 자리 (같으면 최근 가중 타석 → 최근) 가 주 포지션이고, 포수는 수비 가능으로 남는다. 다른 자리가 없으면 포수 그대로.
+ * - 이력이 짧은 선수 (2026-10-22 사용자 결정): 그 3시즌 타석 합이 0보다 크고 shortPa보다 적으면 fallback(자료집 주 포지션 → 그 시즌 포지션)을 쓴다 (박석민 2005 → 3B).
  * 2009년·포지션 파일에 없는 타자의 추정값('E')은 쓰지 않는다. 하드힛 이력이 없는 선수는 맵에 없다 (기존 방식).
  * year를 주지 않으면 seasons의 가장 늦은 해 다음 해로 본다.
  */
 export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[], year?: number,
-  weights: readonly number[] = DEFAULT_PARAMS.positionWeights): Map<string, { main: string; playable: string[] }> {
-  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number; recent: number };
+  weights: readonly number[] = DEFAULT_PARAMS.positionWeights,
+  opts: { shortPa?: number; fallback?: (id: string) => string | null | undefined } = {}): Map<string, { main: string; playable: string[] }> {
+  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number; recent: number; win: number };
   const start = year ?? Math.max(...seasons.map((s) => s.year)) + 1;
   const per = new Map<string, Map<string, Acc>>();
   for (const s of seasons) {
@@ -309,11 +316,12 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
     for (const [id, x] of seen) {
       let m = per.get(id);
       if (!m) per.set(id, (m = new Map()));
-      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0, recent: 0 };
+      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0, recent: 0, win: 0 };
       a.n++;
       a.pa += x.pa;
       a.last = Math.max(a.last, s.year);
       a.recent += Math.max(1, x.pa) * w;
+      if (w > 0) a.win += x.pa;
       if (x.g > 0 && x.pa >= QUAL_PA_PER_GAME * x.g) {
         a.reg++;
         a.regLast = Math.max(a.regLast, s.year);
@@ -332,8 +340,19 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
     } else {
       main = [...all].sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast || q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
     }
+    if (main === 'C') {
+      const cReg = m.get('C')!.reg;
+      const otherReg = all.reduce((t, [q, a]) => t + (q === 'C' ? 0 : a.reg), 0);
+      const next = all.filter(([q]) => q !== 'C' && q !== 'DH')
+        .sort((p, q) => q[1].reg - p[1].reg || q[1].recent - p[1].recent || q[1].last - p[1].last)[0];
+      if ((cReg === 0 || cReg < otherReg) && next) main = next[0];
+    }
+    const win = all.reduce((t, [, a]) => t + a.win, 0);
+    const old = win > 0 && win < (opts.shortPa ?? DEFAULT_PARAMS.shortHistoryPa) ? opts.fallback?.(id) : undefined;
+    if (old) main = old;
     const playable = all.filter(([q, a]) => q === main || a.reg > 0 || a.n >= 2)
       .sort((p, q) => Number(q[0] === main) - Number(p[0] === main) || q[1].reg - p[1].reg || q[1].n - p[1].n || q[1].last - p[1].last).map(([q]) => q);
+    if (!m.has(main)) playable.unshift(main);
     out.set(id, { main, playable });
   }
   return out;
@@ -375,7 +394,11 @@ export function buildWorld(input: BuildWorldInput): World {
     }
   }
   // 하드힛 이력이 있는 선수는 수비 가능 포지션·주 포지션을 규정타석 규칙으로 정하고 기존 추정의 다른 자리를 더하지 않는다 (2002년 이전·2009년만 있는 선수는 기존 방식)
-  const hhPos = hardhitPositions(careerSeasons, seasonBasis ? year + 1 : year, params.positionWeights);
+  // 이력이 짧은 선수의 예전 규칙: 자료집 주 포지션 → 그 시즌 포지션. 투수·내야/외야 구분은 쓰지 않고,
+  // 지명타자는 2안의 70% 규칙이 정하게 둔다 (몇십 타석 선수가 자료집 지명타자로 수비 자리를 잃지 않게)
+  const fieldPos = (q: string | null | undefined) => (q && FIELD_POS.has(q) ? q : undefined);
+  const hhPos = hardhitPositions(careerSeasons, seasonBasis ? year + 1 : year, params.positionWeights,
+    { shortPa: params.shortHistoryPa, fallback: (id) => fieldPos(master.get(id)?.pos) ?? fieldPos(curBat.get(id)?.pos) });
 
   for (const id of ids) {
     const m = master.get(id);
@@ -507,7 +530,7 @@ export function buildWorld(input: BuildWorldInput): World {
 }
 
 /** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
-export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams, year?: number): LeagueEnv {
+export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa' | 'sbPct'>, params: EngineParams, year?: number): LeagueEnv {
   const odds = (x: number) => x / (1 - x);
   const gb = year !== undefined ? params.groundBallShareByYear[year] : undefined;
   return {
@@ -517,6 +540,7 @@ export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' 
     unearnedRun: params.unearnedRunScale * Math.max(0, league.unearnedShare - params.unearnedInGame) / (1 - params.unearnedInGame),
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
     gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
+    ...(league.sbPct ? { sbPct: league.sbPct } : {}),
   };
 }
 

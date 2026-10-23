@@ -126,6 +126,44 @@ export interface BuntParams {
   pitches: [number, number, number, number, number];
 }
 
+/** AI 감독 경기 중 교체 (엔진 2 9단계, subs.ts). 감독 성향 '대타·대주자 빈도'(tactics.sub)로 phGain·prGap을 나눈다. 모두 임시값 */
+export interface SubParams {
+  /** 대타: 이 회부터, 점수 차가 이만큼 이내 */
+  phInning: number;
+  phMaxDiff: number;
+  /** 대타 기준: 남은 타석의 기대 득점 이득 − 남은 이닝 수비 손해가 이 값(런) 이상 */
+  phGain: number;
+  /** 대주자: 이 회부터, 점수 차가 이만큼 이내, 주력이 prSlow 이하인 주자를 prGap 이상 빠른 벤치 선수로 */
+  prInning: number;
+  prMaxDiff: number;
+  prSlow: number;
+  prGap: number;
+  /** 대수비: 이 회부터 리드 중일 때, 그 자리 수비 런(한 시즌)이 이만큼 이상 나은 벤치 선수로 (반 이닝에 한 명) */
+  defInning: number;
+  defGain: number;
+}
+
+/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv에 맞춤) */
+export interface Manager2Params {
+  /**
+   * 고의4구: 1루가 비고 득점권 주자, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 gap 이상 높을 때 확률 rate × 아웃별 배율(outs) × (후반 접전이 아니면 early).
+   * minInning 전에는 후반 접전이 아니면 하지 않는다. wildShare: 수동 고의4구 공 하나의 폭투·포일 확률 = 보통 공 하나의 확률 × 이 값
+   */
+  ibb: { rate: number; gap: number; outs: [number, number, number]; early: number; minInning: number; wildShare: number };
+  /**
+   * 전진 수비: 3루 주자, 2아웃 전, inning회 이후 수비 팀 리드가 0~maxLead점일 때 확률 rate. 그 타석 동안 땅볼 아웃의 hit만큼이 내야를 빠진 단타,
+   * 땅볼 아웃 때 3루 주자 득점 확률 × score
+   */
+  infieldIn: { inning: number; maxLead: number; rate: number; hit: number; score: number };
+  /**
+   * 좌우 원포인트: inning회 이후 점수 차 maxDiff 이내, 우투수가 마운드에 있고 좌타자(양타 제외)가 팀 중간 이상일 때, 필승조·마무리가 아닌 좌완 구원으로 확률 rate.
+   * 그 타자를 상대한 뒤 다음 타자가 좌타가 아니면 바꾼다
+   */
+  onePoint: { inning: number; maxDiff: number; rate: number };
+  /** 기용표로 역할을 정하지 않은 불펜에서 필승조로 보는 서열 수 (마무리 빼고) */
+  setup: number;
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -178,7 +216,7 @@ export interface EngineParams {
   };
 
   // ---- 타석 보정 (game.ts)
-  /** 좌우 상성 크기. 반대 손 대결에서 타자의 안타·홈런·볼넷이 이만큼 늘고 삼진이 준다 (임시값) */
+  /** 좌우 상성 크기. 반대 손 대결에서 타자의 안타·홈런·볼넷이 이만큼 늘고 삼진이 준다 (D단계 4칸 OPS로 맞춤, tools/manager_check.ts) */
   platoon: number;
   /** 홈 이점. 홈 타자의 안타·홈런·볼넷이 이만큼 늘고 원정은 그만큼 준다 */
   homeEdge: number;
@@ -228,6 +266,9 @@ export interface EngineParams {
   run: RunParams;
   /** 번트 (엔진 2 8단계) */
   bunt: BuntParams;
+  /** AI 감독 경기 중 교체 (엔진 2 9단계, subs.ts, 모두 임시값) */
+  sub: SubParams;
+  mgr: Manager2Params;
   /** 추가 진루를 시도한 주자가 아웃될 확률. 견제사 등 그 밖의 주루사 몫까지 여기에 담았다 */
   outOnAdvance: number;
   /**
@@ -268,10 +309,15 @@ export interface EngineParams {
   stealScale: number;
 
   // ---- 선수 기용
-  /** 주전 야수가 하루 쉴 확률 */
+  /**
+   * 야수 휴식 (엔진 2 11단계): 경기 전 피로(body)가 body.restFrom을 넘은 만큼에 곱하는 휴식 확률 (피로 1당).
+   * 0이면 쉬지 않는다 (가을야구·올스타전)
+   */
   restChance: number;
-  /** 주전 포수가 하루 쉴 확률 */
+  /** 포수의 휴식 확률 배율 (피로 1당, restChance와 같은 쓰임) */
   catcherRestChance: number;
+  /** 야수 체력 (엔진 2 11단계, team.ts hitterFatigue). 모두 임시값 */
+  body: BodyParams;
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -281,6 +327,11 @@ export interface EngineParams {
    * 최근일수록 무겁게 (임시값)
    */
   positionWeights: [number, number, number];
+  /**
+   * 이력이 짧은 선수 (2026-10-22 사용자 "박석민은 3루 시작이 맞지"): 시작 앞 3시즌 하드힛 타석 합이 이보다 적으면 (0보다 크고)
+   * 2안 대신 예전 규칙 (자료집 주 포지션 → 그 시즌 포지션). 임시값
+   */
+  shortHistoryPa: number;
   /**
    * 수비수 한 명의 수비 1런당 팀 인플레이 안타가 아웃으로 바뀌는 몫 (battedball.ts: 그 수비수에게 간 타구에서만 바꾼다).
    * 1런 ≈ 안타→아웃 0.75런, 팀 한 시즌 인플레이 안타 약 1,170개에서 1/880 (임시값). 엔진 1의 팀 수비 합(T5)과 같은 크기
@@ -344,6 +395,30 @@ export function isStarterSkill(pit: { startShare: number } | null | undefined): 
   return !!pit && pit.startShare >= STARTER_SHARE;
 }
 
+/** 야수 체력 (엔진 2 11단계, 단위는 '경기'). 모두 임시값 */
+export interface BodyParams {
+  /** 선발 출전 한 경기에 쌓이는 피로. 연장이면 이닝 ÷ 9배 */
+  load: number;
+  /** 포수 자리로 선발 출전한 경기의 배율 */
+  catcher: number;
+  /** 지명타자로 선발 출전한 경기의 배율 */
+  dh: number;
+  /** 교체로 나온 경기 (대타·대주자·대수비) */
+  sub: number;
+  /** 30세부터 한 살마다 쌓이는 피로에 더하는 몫 */
+  agePer: number;
+  /** 하루(경기 없는 날 포함)에 빠지는 피로 */
+  recover: number;
+  /** 피로 상한 */
+  cap: number;
+  /** 휴식을 생각하기 시작하는 피로 (restChance) */
+  restFrom: number;
+  /** 이 피로부터 타석이 조금 나빠진다: 넘은 1당 penaltyPer, 최대 penaltyMax (타자 유리도에서 뺀다, pa.ts) */
+  penaltyFrom: number;
+  penaltyPer: number;
+  penaltyMax: number;
+}
+
 export const DEFAULT_PARAMS: EngineParams = {
   seasonWeights: [1.0, 0.8, 0.6],
   debutSeasonWeight: 0.4,
@@ -361,7 +436,8 @@ export const DEFAULT_PARAMS: EngineParams = {
     pitcher: { hit: 0.99, hr: 0.885, bb: 0.87, hbp: 0.942, so: 1.075 },
   },
 
-  platoon: 0.035,
+  // 2026-10-23 엔진 2 9단계: D단계 좌우 4칸 OPS(2023~2025 platoon4.csv)의 같은 손·반대 손 차(좌타 .035·우타 .024, 2025)에 맞춤 (0.035에서는 시뮬 차 약 .038)
+  platoon: 0.028,
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
   park: { hitExp: 0.4, hrExp: 1.2 },
@@ -403,6 +479,13 @@ export const DEFAULT_PARAMS: EngineParams = {
   },
   bunt: { hit: 0.05, leadOut: 0.11, popOut: 0.07, dp: 0.02, squeeze: 0.05, squeezeOut: 0.2, squeezeDp: 0.05,
     pitches: [0.509, 0.301, 0.142, 0.038, 0.01] },
+  sub: { phInning: 7, phMaxDiff: 3, phGain: 0.02, prInning: 8, prMaxDiff: 2, prSlow: 0.4, prGap: 0.25, defInning: 7, defGain: 8 },
+  mgr: {
+    ibb: { rate: 0.3, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
+    infieldIn: { inning: 7, maxLead: 1, rate: 0.8, hit: 0.1, score: 0.4 },
+    onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
+    setup: 2,
+  },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
   groundBallShare: 0.52,
@@ -512,8 +595,12 @@ export const DEFAULT_PARAMS: EngineParams = {
   twoOutBonus: 0.15,
   stealScale: 1.2,
 
-  restChance: 0.2,
-  catcherRestChance: 0.25,
+  restChance: 0.6,
+  catcherRestChance: 0.6,
+  // 야수 체력 (엔진 2 11단계, 임시값): 2025 상위 9명 타석 비중 실제 0.708에 tools/injury_check.ts 6시즌으로 맞춤 (0.788 → 0.706)
+  body: {
+    load: 1, catcher: 1.3, dh: 0.6, sub: 0.3, agePer: 0.02, recover: 0.6, cap: 4, restFrom: 1, penaltyFrom: 2, penaltyPer: 0.01, penaltyMax: 0.02,
+  },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md
@@ -524,9 +611,18 @@ export const DEFAULT_PARAMS: EngineParams = {
     eventChance: 0.00005,
     specificShare: 0.5,
     offseasonDays: 150,
+    // 경기 중 부상 (엔진 2 11단계, 임시값): 1군 선수의 경기 전 부상을 preShare로 줄이고 나머지를 경기 중 사건이 맡는다.
+    // 경기 전 + 경기 중 합한 리그 결장 비율·주축 부상 횟수가 바꾸기 전과 같도록 tools/injury_check.ts로 맞춘 값
+    inGame: { preShare: 0.55, perPitch: 0.0002, perRun: 0.00045, perField: 0.00028 },
+    // 혹사지수 (기획안 4.6, 임시값). 혹사 부상은 결장 비율 기준과 따로 정한다 (사용자 결정 2026-10-22)
+    overuse: {
+      on: true, realSpread: 0.15, overPitch: 0.05, b2b: 0.5, b3b: 1.5, shortRest: 1, decay1: 0.02, decay2: 0.002, offseason: 0.25,
+      recovery: 0.1, injury: 0.3, overInjury: 0.0002,
+    },
   },
 
   positionWeights: [1, 0.7, 0.5],
+  shortHistoryPa: 100,
   defenseHitPerRun: 1 / 880,
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
