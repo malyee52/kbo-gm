@@ -1,6 +1,6 @@
 // 리그 > 규칙 연표: 지금 연도 규칙 전체와 지난 해들의 변화 (다시 보기). 표시만 한다 (league/ruleNews.ts).
 import { useMemo } from 'react';
-import { ruleSnapshot, ruleSummary } from '../../league/ruleNews';
+import { perkTeamsFor, ruleSnapshot, ruleSummary } from '../../league/ruleNews';
 import { useGame } from '../context';
 import { RuleNewsBody } from '../RuleNews';
 
@@ -10,7 +10,7 @@ export function Rules() {
   const first = store.meta.years[0];
   const now = useMemo(() => {
     const sd = store.season(year);
-    return ruleSummary(store.ruleChanges, ruleSnapshot(store.meta, year, session.league, sd ? { teams: sd.teams.length, games: sd.games } : undefined));
+    return ruleSummary(store.ruleChanges, ruleSnapshot(store.meta, year, session.league, sd ? { teams: sd.teams.length, games: sd.games } : undefined), perkTeamsFor(session.league, year));
   }, [store, session.league, year]);
   const years = useMemo(() => {
     const out: number[] = [];

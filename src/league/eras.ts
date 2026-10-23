@@ -62,6 +62,28 @@ export function foreignRule(meta: Meta, year: number, league?: Pick<LeagueState,
   return { total: regular + asia, asia, regular };
 }
 
+/** 창단 특례가 있는 창단 구단: 1군 첫해가 이 해 이후 (NC 2013부터. 빙그레·쌍방울은 지명 특례만 있었다, 자료집 제도연표 42) */
+export const EXPANSION_PERK_FROM = 2013;
+/** 창단 특례 기간: 1군 첫해부터 몇 시즌 */
+export const EXPANSION_PERK_SEASONS = 2;
+
+/**
+ * 창단 특례 (신생팀 지원, 2026-10-23 사용자 결정 "빈 자료 물음 4"): 1군 첫 두 시즌 동안 외국인 보유·1군 +1명, 1군 엔트리 +1명,
+ * 그 두 시즌 앞 오프시즌의 외부 FA 영입은 보상선수 없이 보상금만 (offseason.ts faCompRule).
+ * 출처: kt 2015~2016 (자료집 제도연표 41, 출처 확인), NC 2013~2014 (나무위키 NC 다이노스/창단 과정·2014년, 원문 확인 2026-10-23).
+ * 게임 안 창단 구단도 같은 규칙. year: 시즌 (오프시즌 판정은 다음 시즌 = off.year + 1)
+ */
+export function expansionPerk(league: Pick<LeagueState, 'expansions'>, team: number, year: number): boolean {
+  return (league.expansions ?? []).some((e) => e.team === team && e.firstYear >= EXPANSION_PERK_FROM
+    && year >= e.firstYear && year < e.firstYear + EXPANSION_PERK_SEASONS);
+}
+
+/** 구단별 외국인 보유 한도: 리그 한도 + 창단 특례 1명 (아시아쿼터 아닌 자리, 외국인 제도가 있는 해만) */
+export function teamForeignRule(rule: ForeignRule, league: Pick<LeagueState, 'expansions'>, team: number, year: number): ForeignRule {
+  if (rule.total === 0 || !expansionPerk(league, team, year)) return rule;
+  return { total: rule.total + 1, asia: rule.asia, regular: rule.regular + 1 };
+}
+
 export type TeamChange =
   | { kind: 'rename'; team: number; from: string; to: string }
   | { kind: 'succeed'; team: number; from: string; to: string; franchise: string }

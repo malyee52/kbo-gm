@@ -17,6 +17,7 @@ import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { ruleOf } from '../../league/rules';
 import { previewOrder } from '../../league/ruleNews';
+import { expansionPerk } from '../../league/eras';
 import { RuleNewsBody, StatusBadge } from '../RuleNews';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
@@ -164,6 +165,7 @@ function CompPanel({ act }: { act: Act }) {
   const mineIn = cases.filter((c) => c.to === me);
   const mineOut = cases.filter((c) => c.from === me);
   const others = cases.filter((c) => c.to !== me && c.from !== me);
+  const perkTeams = session.league.teams.map((_, t) => t).filter((t) => expansionPerk(session.league, t, off.year + 1));
 
   return (
     <section className="stack">
@@ -181,6 +183,9 @@ function CompPanel({ act }: { act: Act }) {
             원 소속 구단은 명단 밖 선수 1명과 직전 연봉 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].withPlayer! * 100}% 또는 보상금만 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].cashOnly * 100}%를 고릅니다.
             외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다. <StatusBadge status="research" />
           </p>
+        )}
+        {perkTeams.length > 0 && (
+          <p className="small">창단 특례: {perkTeams.map((t) => session.league.teams[t].name).join(', ')}가 데려간 FA는 보상선수 없이 보상금만이라 이 단계에 없습니다.</p>
         )}
       </div>
 
@@ -402,6 +407,8 @@ function FaPanel({ act }: { act: Act }) {
   const entries = off.fa.entries;
   const mineLeaving = entries.filter((e) => e.from === session.teamIdx && e.status === 'open');
   const externalOffers = Object.keys(off.fa.userOffers).filter((id) => entries.find((e) => e.id === id)?.from !== session.teamIdx).length;
+  const preGrade = off.year <= 2010 ? 'P1' : 'P2';
+  const perkTeams = session.league.teams.map((_, t) => t).filter((t) => expansionPerk(session.league, t, off.year + 1));
 
   return (
     <section className="stack">
@@ -409,8 +416,16 @@ function FaPanel({ act }: { act: Act }) {
         <h2>FA 시장 <span className="muted small">{off.fa.round}/{FA_ROUNDS}라운드</span></h2>
         <p className="muted small">
           라운드를 마감하면 AI 구단도 제시하고, 선수는 가장 좋은 조건을 고릅니다 (원 소속 구단은 조금 더 쳐줍니다). 라운드가 지날수록 선수가 눈높이를 낮춥니다.
-          외부 FA는 한 오프시즌에 {ruleOf(session.league, 'maxFaSignings')}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 보상금(A 300%, B 200%, C 150%)을 냅니다.
+          외부 FA는 한 오프시즌에 {ruleOf(session.league, 'maxFaSignings')}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 {off.year >= FA_GRADE_FROM
+            ? '보상금(A 300%, B 200%, C 150%)을 냅니다'
+            : `보상(보호 ${FA_COMP[preGrade].protect}명 밖 1명 + 직전 연봉 ${FA_COMP[preGrade].withPlayer! * 100}%, 또는 ${FA_COMP[preGrade].cashOnly * 100}%만)을 합니다`}.
         </p>
+        {perkTeams.length > 0 && (
+          <p className="small">
+            창단 특례: {perkTeams.map((t) => session.league.teams[t].name).join(', ')}{perkTeams.includes(session.teamIdx) ? ' (우리 구단)' : ''}는 외부 FA를 데려와도 보상선수를 내주지 않고 보상금만 냅니다
+            ({off.year >= FA_GRADE_FROM ? '그 등급의 보상금만 비율' : `직전 연봉 ${FA_COMP[preGrade].cashOnly * 100}%`}).
+          </p>
+        )}
         <p className="small">외부 FA: 계약 {off.fa.signings[session.teamIdx]}명 · 이번 라운드 제시 {externalOffers}명 / 한도 {ruleOf(session.league, 'maxFaSignings')}명</p>
         <p className="small">
           지금 자금 <strong>{won(session.cashNow())}</strong> · 계약금은 계약 총액(연봉 × 기간)의 30%를 계약할 때 한 번에 내고, 나머지는 시즌 중 월말에 나갑니다.
@@ -480,7 +495,8 @@ function ForeignPanel({ act }: { act: Act }) {
   const info = useInfo();
   const players = new Map(session.league.players.map((p) => [p.id, p]));
   const slots = foreignSlots(session.league, session.teamIdx, off);
-  const lim = foreignLimits(off);
+  const lim = foreignLimits(off, session.league, session.teamIdx);
+  const perk = expansionPerk(session.league, session.teamIdx, off.year + 1);
   const myTurn = f.order[f.pointer] === session.teamIdx;
   const pool = f.pool.map((id) => players.get(id)!).sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id));
   const expiringMine = Object.keys(f.keep).map((id) => players.get(id)!);
@@ -494,6 +510,7 @@ function ForeignPanel({ act }: { act: Act }) {
           보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규(KBO 1년차) 계약은 연봉 + 계약금 {dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))}, 아시아쿼터 신규는 {dollarText(foreignCap(session.league, 'asiaNewCap', off.year + 1))}까지(재계약은 개인 제한 없음),{' '}
           {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(foreignCap(session.league, 'foreignTotalCap', off.year + 1))}에 재계약 외국인마다 같은 구단 재계약 연차 × 10만 달러를 더한 값까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
+        {perk && <p className="small">창단 특례: {off.year + 1} 시즌은 1군 첫 두 시즌 안이라 외국인을 1명 더 보유하고 1군에 올릴 수 있습니다{slots.cap > foreignCap(session.league, 'foreignTotalCap', off.year + 1) + slots.resignRoom ? ` (총액 상한도 ${dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))} 더)` : ''}.</p>}
         <p className="small">
           우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)} / 상한 {dollarText(slots.cap)}{slots.resignRoom > 0 ? `, 재계약 몫 +${dollarText(slots.resignRoom)}` : ''}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}

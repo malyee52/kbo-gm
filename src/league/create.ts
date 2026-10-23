@@ -11,7 +11,7 @@ import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './grow
 import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
-import { teamChangesFor } from './eras';
+import { expansionPerk, teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
 
@@ -179,9 +179,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   for (const p of league.players) if (twoWayIds.has(p.id)) p.twoWayTalent = true;
   ensureFinance(league);
   for (const e of league.expansions ?? []) addExpansionCapital(league, e.team, startYear);
+  const perks = addPerkTeams(league, store, startYear);
   const market = openMarket(league, store, params);
   ensureAlts(league, startYear); // 시장 선수까지 모두
-  const world = opening || added || special.size || futures || market ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  const world = opening || added || special.size || futures || market || perks ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
 
@@ -365,6 +366,23 @@ function trimToOrgLimit(league: LeagueState, recordedIds: Set<string>): void {
       .slice(0, over).map((p) => p.id));
     league.players = league.players.filter((p) => !drop.has(p.id));
   }
+}
+
+/**
+ * 시작 연도에 창단 특례 기간(1군 첫 두 시즌, eras.ts expansionPerk)인 구단을 창단 구단 목록에 넣는다 (예: 2015 시작의 kt).
+ * 창단 자본금·특별 지명은 이미 지난 일이라 주지 않는다. 넣은 수를 돌려준다
+ */
+function addPerkTeams(league: LeagueState, store: Store, startYear: number): number {
+  const successors = new Set(Object.values(store.meta.successors));
+  let n = 0;
+  league.teams.forEach((t, team) => {
+    if (successors.has(t.franchise) || league.expansions?.some((e) => e.team === team)) return;
+    const firstYear = Math.min(...(store.meta.franchises[t.franchise] ?? []).map((x) => x.from));
+    if (!expansionPerk({ expansions: [{ team, firstYear }] }, team, startYear)) return;
+    (league.expansions ??= []).push({ team, firstYear });
+    n++;
+  });
+  return n;
 }
 
 /** 시작 다음 해에 1군에 들어오는 창단 구단을 퓨처스 구단으로 넣는다. 넣은 수를 돌려준다 */
