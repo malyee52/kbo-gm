@@ -49,7 +49,7 @@ def size_bucket(d):
 
 def classify(rows):
     """기록_차이.csv 행마다 누가 다른가·차이·크기·짐작한 까닭을 붙인다 (diff_209.py도 쓴다)"""
-    seasons = C.load_seasons()
+    seasons = C.load_seasons(C.BASE_DATA if C.BASE_DATA.exists() else None)  # s5_merge와 같은 기반 자료 (위키 값 넣기 전)
     ours = M.our_season_rows(seasons)
     by_year = defaultdict(list)  # (선수, 연도, 종류) → [행 값]
     for (pid, y, fr, kind), v in ours.items():
@@ -65,8 +65,9 @@ def classify(rows):
         src = 'same' if wd and nd and w == n else 'split' if wd and nd else 'w' if wd else 'n'
         theirs = [v for v, d in ((w, wd), (n, nd)) if d]
         diff = max((v - o for v in theirs), key=abs)
-        fr = C.franchise_of(r['구단']) or r['구단']
-        mine = ours.get((r['선수ID'], y, fr, kind), {})
+        frs = r['계보'].split('+') if r.get('계보') else [C.franchise_of(r['구단']) or r['구단']]
+        fr = frs[0]
+        mine = M.add_fields([ours.get((r['선수ID'], y, f, kind), {}) for f in frs])  # 합산 줄은 우리 구단별 행의 합
         allrows = by_year.get((r['선수ID'], y, kind), [])
         why = '그 밖'
         if k == 'bb' and mine.get('hbp') is not None and any(v == o + mine['hbp'] for v in theirs) and mine['hbp'] > 0:

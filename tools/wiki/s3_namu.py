@@ -19,6 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import zlib
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -274,7 +275,8 @@ def extract(doc):
     if m:
         prof['입단 연도'] = int(m.group(1))
     grids = N.tables(md) + [t for s in doc.get('subdocs', []) if s.get('md') for t in N.tables(s['md'])]
-    seasons = X.season_rows_grid(grids)
+    dropped = Counter()
+    seasons = X.season_rows_grid(grids, dropped)
     keep, cut_sec, cut_sent = [], 0, 0
     texts = [(doc['title'], md)] + [(s['title'], s['md']) for s in doc.get('subdocs', []) if s.get('md')]
     for src_title, text in texts:
@@ -289,7 +291,7 @@ def extract(doc):
                 keep.append(((title or '머리말') + ('' if src_title == doc['title'] else f' ({src_title})'), summary))
     return {
         'source': 'namu', 'title': doc['title'], 'revid': N.front(md).get('last_modified'), 'fetched': doc.get('fetched'),
-        'profile': prof, 'seasons': seasons, 'narrative': keep, 'cut_sections': cut_sec, 'cut_sentences': cut_sent,
+        'profile': prof, 'seasons': seasons, 'dropped_rows': dict(dropped), 'narrative': keep, 'cut_sections': cut_sec, 'cut_sentences': cut_sent,
     }
 
 

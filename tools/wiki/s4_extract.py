@@ -10,6 +10,7 @@
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,14 +53,21 @@ def num(s):
     return int(s) if re.fullmatch(r'\d+', s) else None
 
 
-def season_rows(text):
+def season_rows(text, dropped=None):
     """위키백과 원문의 KBO 시즌 기록 표 행"""
-    return season_rows_grid([[c[1] for c in row] for row in tb] for tb in W.tables(text))
+    return season_rows_grid(([[c[1] for c in row] for row in tb] for tb in W.tables(text)), dropped)
 
 
-def season_rows_grid(grids):
-    """표(행 = 칸 글 목록)들에서 KBO 시즌 기록 행: [{year, team, franchise, kind, fields}]
-    머리 행은 첫 칸이 '연도'인 행. 표 중간에 머리 행이 다시 나오면 건너뛴다. KBO 밖 구단(MLB·NPB 등)과 통산 행은 뺀다."""
+KBO_FIRST, KBO_LAST = 1982, 2026
+# 통산 줄 첫 칸이 이것으로 시작하면 해외 리그 표 (나무위키는 NPB 표에 지바 롯데를 '롯데'로만 적는다: 파레디스 2017·이대은 2015)
+FOREIGN_TOTAL = re.compile(r'\s*(NPB|MLB|MiLB|CPBL|ABL|LMB|LIDOM|LVBP|일본|미국|대만|마이너)')
+
+
+def season_rows_grid(grids, dropped=None):
+    """표(행 = 칸 글 목록)들에서 KBO 시즌 기록 행: [{year, team, franchises, kind, fields}]
+    머리 행은 첫 칸이 '연도'인 행. 표 중간에 머리 행이 다시 나오면 건너뛴다. 통산 행은 뺀다.
+    KBO 밖 구단(NPB·MLB·2군 등, common.franchises_of가 None)과 KBO 출범 전(1970~1981) 행은 빼고 dropped(Counter)에 센다.
+    시즌 중 이적 합산 줄('롯데/kt')은 franchises가 둘 이상 (s5_merge가 우리 구단별 행의 합과 견준다)."""
     out = []
     for tb in grids:
         hi = next((i for i, r in enumerate(tb) if r and re.sub(r'\s', '', r[0]) in ('연도', '년도', '시즌')), None)
@@ -76,14 +84,28 @@ def season_rows_grid(grids):
         team_col = next((i for i, h in enumerate(head) if h in ('소속', '팀명', '팀', '구단', '소속팀')), None)
         if team_col is None:
             continue
-        for cells in tb[hi + 1:]:
+        # 해외 리그 통산 줄('NPB 통산', 'MLB 통산' …)만 있고 KBO 통산 줄이 없는 표는 해외 리그 표라 통째로 뺀다.
+        # (나무위키 NPB 표는 지바 롯데를 '롯데'로만 적는다: 파레디스 2017·이대은 2015·보스 2025)
+        # KBO 통산 줄도 있는 표(경력 전체 표)는 줄마다 구단 이름으로 가른다 (요미우리·지바 롯데는 franchises_of가 None).
+        firsts = [c[0] for c in tb[hi + 1:] if c]
+        if any(FOREIGN_TOTAL.match(f) for f in firsts) and not any('KBO' in f and '통산' in f for f in firsts):
+            if dropped is not None:
+                dropped['해외 리그 표'] += sum(1 for f in firsts if re.match(r'\d{4}', f.strip()))
+            continue
+        body = tb[hi + 1:]
+        for cells in body:
             if len(cells) < len(head):
                 continue
             m = re.match(r'(\d{4})', cells[0].strip())
             if not m:
                 continue
-            fr = C.franchise_of(cells[team_col])
-            if not fr:
+            year = int(m.group(1))
+            frs = C.franchises_of(cells[team_col])
+            why = ('해외·기타 구단' if frs is None else '구단 없음' if not frs
+                   else '출범 전' if year < KBO_FIRST else '2027 이후' if year > KBO_LAST else None)
+            if why:
+                if dropped is not None:
+                    dropped[why] += 1
                 continue
             fields = {}
             for i, h in enumerate(head):
@@ -93,8 +115,13 @@ def season_rows_grid(grids):
                 v = outs_of(cells[i]) if key == 'outs' else num(cells[i])
                 if v is not None:
                     fields[key] = v
+            if fields and not any(fields.values()):
+                if dropped is not None:
+                    dropped['출장 0 줄'] += 1  # 등록만 하고 1군에 나오지 않은 해
+                continue
             if fields:
-                out.append({'year': int(m.group(1)), 'team': cells[team_col].strip(), 'franchise': fr, 'kind': kind, 'fields': fields})
+                out.append({'year': year, 'team': re.sub(r'\s+', ' ', cells[team_col]).strip(), 'franchises': frs, 'kind': kind,
+                            'fields': fields})
     return out
 
 
@@ -199,9 +226,11 @@ def extract_wiki(page):
             if schools:
                 prof['출신 학교'] = ' / '.join(s for s in schools if s)
     secs, cut_sec, cut_sent = digest(text)
+    dropped = Counter()
+    rows = season_rows(text, dropped)
     return {
         'source': 'wiki', 'title': page['title'], 'revid': page.get('revid'), 'fetched': page.get('fetched'),
-        'profile': prof, 'seasons': season_rows(text),
+        'profile': prof, 'seasons': rows, 'dropped_rows': dict(dropped),
         'narrative': secs, 'cut_sections': cut_sec, 'cut_sentences': cut_sent,
     }
 

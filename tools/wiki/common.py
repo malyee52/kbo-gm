@@ -33,6 +33,8 @@ RAW = Path.home() / 'kbo-gm-raw'
 RAW_WIKI = RAW / 'wiki'
 RAW_NAMU = RAW / 'namuwiki'
 RAW_NOTE = RAW / '정리'
+# 위키 값을 넣지 않은 기반 자료 (build_data.py --no-wiki). 5단계가 '우리 값'으로 견준다
+BASE_DATA = RAW_NOTE / '기반'
 
 # ---- Wikimedia 규칙 (고치지 말 것)
 UA = f'kbo-gm-data/1.0 (https://github.com/malyee52/kbo-gm) python-urllib/{urllib.request.__version__}'
@@ -220,17 +222,32 @@ def _query_pages(http, chunk):
 
 # ---- 우리 자료
 
-def load_players():
-    return json.loads((DATA / 'players.json').read_text(encoding='utf-8'))['players']
+def load_players(data=None):
+    return json.loads(((data or DATA) / 'players.json').read_text(encoding='utf-8'))['players']
 
 
-def load_meta_years():
-    return sorted(int(p.stem) for p in (DATA / 'seasons').glob('*.json'))
+def load_meta_years(data=None):
+    return sorted(int(p.stem) for p in ((data or DATA) / 'seasons').glob('*.json'))
 
 
-def load_seasons():
+def load_seasons(data=None):
     """연도 → 시즌 JSON"""
-    return {y: json.loads((DATA / 'seasons' / f'{y}.json').read_text(encoding='utf-8')) for y in load_meta_years()}
+    data = data or DATA
+    return {y: json.loads((data / 'seasons' / f'{y}.json').read_text(encoding='utf-8')) for y in load_meta_years(data)}
+
+
+def build_base_data():
+    """위키 값을 넣지 않은 기반 자료를 BASE_DATA에 만든다 (build_data.py --no-wiki, 1분 안팎). 경로를 돌려준다"""
+    import shutil
+    import subprocess
+    BASE_DATA.mkdir(parents=True, exist_ok=True)
+    if not (BASE_DATA / 'meta.json').exists():
+        # build_data.py의 지명 단계가 출력 폴더의 앞 빌드(meta·seasons)에서 통산 경기를 읽으므로 처음에는 게임 자료를 옮겨 둔다
+        shutil.copy(DATA / 'meta.json', BASE_DATA / 'meta.json')
+        shutil.copytree(DATA / 'seasons', BASE_DATA / 'seasons', dirs_exist_ok=True)
+    subprocess.run([sys.executable, str(ROOT / 'tools' / 'build_data.py'), str(XLSX), str(BASE_DATA), '--no-wiki'],
+                   check=True, stdout=subprocess.DEVNULL)
+    return BASE_DATA
 
 
 def player_stints(seasons):
@@ -285,6 +302,48 @@ def franchise_of(text):
         if re.search(r'(?<![A-Za-z])' + re.escape(k) + r'(?![A-Za-z])', text):
             return v
     return None
+
+
+# 시즌 기록 표의 구단 칸 읽기 (2026-10-23 고침). franchise_of는 글자 조각으로 찾아서
+# '요미우리'의 '우리'(→ 히어로즈), '지바 롯데'(→ 롯데)처럼 해외 구단을 KBO 구단으로 읽었다.
+# 여기서는 칸을 낱말로 나눠 낱말이 모두 KBO 구단 이름·별칭이어야 KBO 구단으로 본다.
+KBO_TEAM_WORDS = {
+    'MBC': 'LG', 'LG': 'LG', '삼성': '삼성', '롯데': '롯데', '해태': 'KIA', 'KIA': 'KIA', '기아': 'KIA',
+    'OB': '두산', '두산': '두산', '삼미': '현대계', '청보': '현대계', '태평양': '현대계', '현대': '현대계',
+    '빙그레': '한화', '한화': '한화', '쌍방울': '쌍방울', 'SK': 'SSG', 'SSG': 'SSG', '우리': '히어로즈',
+    '히어로즈': '히어로즈', '넥센': '히어로즈', '키움': '히어로즈', 'NC': 'NC', 'KT': 'KT',
+}
+# 별칭 꼬리·지역명: 낱말로 나와도 되지만 계보를 정하지 않는다
+TEAM_NICKS = {
+    '청룡', '트윈스', '라이온즈', '자이언츠', '타이거즈', '베어스', '슈퍼스타즈', '핀토스', '돌핀스', '유니콘스', '이글스',
+    '레이더스', '와이번스', '랜더스', '다이노스', '위즈', 'WIZ', '서울', '서을',  # '서을': 나무위키 '우리 서을 넥센' 오타
+}
+# 군 야구단(퓨처스): 칸에 같이 적혀 있으면 그 조각만 버린다 ('kt(~6.3) 상무(7.19~)')
+FARM_WORDS = {'상무', '경찰', '경찰청', '국군체육부대', '상무피닉스'}
+
+
+def franchises_of(text):
+    """시즌 기록 표의 구단 칸 → KBO 계보 목록 (시즌 중 이적 'LG/롯데'는 둘, 칸에 적힌 순서).
+    KBO 구단이 아닌 낱말(요미우리·지바·컵스·2군 …)이 하나라도 있으면 None, 군 야구단뿐이면 []."""
+    t = re.sub(r'\[[^\]]*\]', ' ', text or '')     # 각주 [^8]
+    t = re.sub(r'\([^)]*\)', ' ', t)               # (~6.3) 같은 날짜
+    out = []
+    for w in re.split(r'[\s/,·→\-–~～]+', t):
+        if not w:
+            continue
+        u = w.upper()
+        if u in KBO_TEAM_WORDS:
+            fr = KBO_TEAM_WORDS[u]
+            if fr not in out:
+                out.append(fr)
+        elif w in KBO_TEAM_WORDS:
+            if KBO_TEAM_WORDS[w] not in out:
+                out.append(KBO_TEAM_WORDS[w])
+        elif w in TEAM_NICKS or u in TEAM_NICKS or w in FARM_WORDS:
+            continue
+        else:
+            return None
+    return out
 
 
 def write_csv(path, header, rows):

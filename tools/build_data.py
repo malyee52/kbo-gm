@@ -62,6 +62,9 @@ HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
 WIKI = ROOT / 'data-src' / 'wiki'
 WIKI_REPORT = ROOT / 'reports' / 'wiki-fill.md'
+# --no-wiki: 위키 가공값을 넣지 않은 기반 자료를 만든다 (tools/wiki/s5_merge.py가 '우리 값'으로 견줄 때 쓴다.
+# 위키 값이 이미 들어간 public/data와 견주면 채운 칸이 채움 후보에서 빠져 다음 빌드에서 사라진다)
+NO_WIKI = '--no-wiki' in sys.argv
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
 TRAIT_LABELS = {
     '승부사': 'clutch', '가을 사나이': 'october', '위기 탈출': 'escape', '철인': 'ironman', '늦게 지는 꽃': 'evergreen',
@@ -483,10 +486,10 @@ def build_military(profiles, out_dir):
 # ---- 위키 가공값 (data-src/wiki/, 빈 칸만 채운다)
 
 def wiki_profile():
-    """인적사항.csv → 선수 ID → {항목: (값, 출처)}. 파일이 없으면 빈 사전"""
+    """인적사항.csv → 선수 ID → {항목: (값, 출처)}. 파일이 없으면(또는 --no-wiki) 빈 사전"""
     out = defaultdict(dict)
     path = WIKI / '인적사항.csv'
-    if path.exists():
+    if path.exists() and not NO_WIKI:
         with path.open(encoding='utf-8-sig', newline='') as f:
             for r in csv.DictReader(f):
                 out[r['선수ID']][r['항목']] = (r['값'], r['출처'])
@@ -536,7 +539,7 @@ WIKI_BAT_KO = {'경기': 'g', '타석': 'pa', '타수': 'ab', '득점': 'r', '�
                '희생번트': 'sac'}
 WIKI_PIT_KO = {'경기': 'g', '선발': 'gs', '승': 'w', '패': 'l', '세이브': 'sv', '홀드': 'hld', '아웃(이닝×3)': 'outs', '상대 타자': 'tbf',
                '자책점': 'er', '실점': 'r', '피안타': 'h', '피홈런': 'hr', '볼넷': 'bb', '몸에 맞는 공': 'hbp', '탈삼진': 'so'}
-# 위키 표의 구단 이름 → 계보 (tools/wiki/common.py의 FRANCHISE_KEYS와 같다. 위에서부터 처음 맞는 것)
+# 위키 표의 구단 이름 → 계보 (계보 열이 없는 옛 CSV용. tools/wiki/common.py의 FRANCHISE_KEYS와 같다. 위에서부터 처음 맞는 것)
 WIKI_FRANCHISE_KEYS = [
     ('MBC', 'LG'), ('LG', 'LG'), ('삼성', '삼성'), ('롯데', '롯데'), ('해태', 'KIA'), ('KIA', 'KIA'), ('기아', 'KIA'),
     ('OB', '두산'), ('두산', '두산'), ('삼미', '현대계'), ('청보', '현대계'), ('태평양', '현대계'), ('현대', '현대계'),
@@ -559,7 +562,7 @@ def fill_records_from_wiki(bat, pit, teams):
     path = WIKI / '기록_채움후보.csv'
     n = defaultdict(int)
     filled = defaultdict(int)  # (구분, 항목) → 칸
-    if not path.exists():
+    if not path.exists() or NO_WIKI:
         return filled, n
     bi = {f: i for i, f in enumerate(BAT_FIELDS)}
     pi = {f: i for i, f in enumerate(PIT_FIELDS)}
@@ -571,7 +574,7 @@ def fill_records_from_wiki(bat, pit, teams):
                 continue
             y, pid, is_pit = int(r['연도']), r['선수ID'], r['구분'] == '투수'
             key = (WIKI_PIT_KO if is_pit else WIKI_BAT_KO).get(r['항목'])
-            fr = wiki_franchise(r['구단'])
+            fr = r.get('계보') or wiki_franchise(r['구단'])  # 계보 열: s5_merge가 구단 칸을 낱말로 읽은 값 (한 구단 줄만)
             if not key or not fr or not r['채울 값']:
                 n['읽지 못함'] += 1
                 continue
@@ -610,7 +613,32 @@ WIKI_SERVICE = [
 ]
 
 
-def write_wiki_report(players_n, records, record_n, mil, special):
+def apply_record_fixes(bat, pit, teams):
+    """기록_고침.csv (tools/wiki/resolve_209.py: 위키 209칸 중 신뢰 순서로 고칠 칸)를 시즌 행에 적용한다.
+    저장소 값이 지금 행 값과 같을 때만 고친다 (원자료가 바뀌었으면 건너뛴다). (고친 칸 목록, 건너뛴 칸 목록)을 돌려준다"""
+    path = WIKI / '기록_고침.csv'
+    done, skip = [], []
+    if not path.exists() or NO_WIKI:
+        return done, skip
+    bi = {f: i for i, f in enumerate(BAT_FIELDS)}
+    pi = {f: i for i, f in enumerate(PIT_FIELDS)}
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            y, pid, is_pit = int(r['연도']), r['선수ID'], r['구분'] == '투수'
+            key = (WIKI_PIT_KO if is_pit else WIKI_BAT_KO).get(r['항목'])
+            fr_of = {t['name']: t['franchise'] for t in teams.get(y, [])}
+            rows_ = [row for row in (pit if is_pit else bat).get(y, []) if row[0] == pid and fr_of.get(row[1]) == r['계보']]
+            col = (pi if is_pit else bi).get(key)
+            label = f"{r['이름']}({pid}) {y} {r['구분']} {r['항목']} {r['저장소 값']} → {r['고칠 값']}"
+            if col is None or len(rows_) != 1 or rows_[0][col] != int(r['저장소 값']):
+                skip.append(label)
+                continue
+            rows_[0][col] = int(r['고칠 값'])
+            done.append(label)
+    return done, skip
+
+
+def write_wiki_report(players_n, records, record_n, mil, special, fixes=((), ())):
     """reports/wiki-fill.md: 위키 값으로 채운 수 (build_data.py가 쓴다)"""
     L = ['# 위키 가공값 반영 결과', '',
          '`python tools/build_data.py`가 만든다. `data-src/wiki/`(위키데이터·위키백과·나무위키 가공값)로 우리 자료의 **빈 칸만** 채운다.',
@@ -628,6 +656,10 @@ def write_wiki_report(players_n, records, record_n, mil, special):
     L += ['', '후보 처리: ' + ', '.join(f'{k} {v}' for k, v in sorted(record_n.items())) +
           ". '행 없음'은 우리 자료에 그 해 행이 없는 후보로, 선수 구성(저장 호환)이 바뀌어 더하지 않았다.", '',
           f"특별 엔트리(은퇴식 규칙) 연도별 인원: {sum(len(v) for v in special.values())}명 ({len(special)}개 연도).", '']
+    L += ['## 위키 209칸 고침 (`data-src/wiki/기록_고침.csv`, `reports/wiki-209-resolve.md`)', '',
+          f'하드힛·KBO 공식 자료가 둘 다 위키 값과 같은 칸만 고친다. 고침 {len(fixes[0])}칸, 건너뜀 {len(fixes[1])}칸.', '']
+    L += [f'- 고침: {x}' for x in fixes[0]] + [f'- 건너뜀 (행이 없거나 저장소 값이 바뀜): {x}' for x in fixes[1]]
+    L.append('')
     WIKI_REPORT.write_text('\n'.join(L) + '\n', encoding='utf-8', newline='\n')
     print(f"위키: 선수 {dict(players_n)}, 기록 {sum(records.values())}칸, 병역 {mil['wiki']}명 → {WIKI_REPORT}")
 
@@ -1240,6 +1272,7 @@ def main():
     parks, park_report = park_factors(teams)
     hardhit_report = fill_running(bat) + fill_gmli(pit) + fill_pitch_roles(pit) + hand_report + park_report
     wiki_records, wiki_record_n = fill_records_from_wiki(bat, pit, teams)
+    wiki_fixes = apply_record_fixes(bat, pit, teams)
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -1402,7 +1435,8 @@ def main():
     }, OUT / 'meta.json')
     wiki_mil = build_military(profiles_of(wb), OUT)
     build_managers(OUT)
-    write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special)
+    if not NO_WIKI:
+        write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special, wiki_fixes)
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')
