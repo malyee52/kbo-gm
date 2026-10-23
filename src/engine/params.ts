@@ -467,8 +467,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   pitchesPerPaDefault: 3.9,
   // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
   // 기준 × 이 값까지 맡긴다 (임시값 (2026-10-22 사용자 승인), 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다
-  // (투수 능력과 무관, 경기 상황. 임시값 (2026-10-22 사용자 승인))
-  planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.12 },
+  // (투수 능력과 무관, 경기 상황. 임시값: 2026-10-22 사용자 승인 ±12% → 2026-10-23 사용자 결정 ±14%, 2023·2024 선발 100구 이상이 모자라서)
+  planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.14 },
 
   roePerUnearnedShare: 0.2,
   // 엔진 2 7단계: 경기 안 자책 판정을 넣고 0.68 → 0.45로 다시 맞춤 (2023~2025 engine2_baseline 비자책 비율)
