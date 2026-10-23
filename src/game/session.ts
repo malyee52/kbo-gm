@@ -1339,7 +1339,7 @@ export class GameSession {
   checkEntry(idxs: Iterable<number>): EntryCheck {
     const set = new Set(idxs);
     const players = this.team.org.filter((p) => set.has(p.idx));
-    const { rosterSize, foreignLimit } = teamRules(this.world, this.team);
+    const { rosterSize, foreignLimit, foreignActive } = teamRules(this.world, this.team);
     const errors: string[] = [];
     const warnings: string[] = [];
     const devs = players.filter((p) => p.dev);
@@ -1351,6 +1351,8 @@ export class GameSession {
     if (players.length > rosterSize) errors.push(`1군 엔트리는 최대 ${rosterSize}명입니다 (지금 ${players.length}명)`);
     const foreign = players.filter((p) => p.foreign).length;
     if (foreign > foreignLimit) errors.push(`외국인 선수는 1군에 ${foreignLimit}명까지 등록할 수 있습니다 (지금 ${foreign}명)`);
+    // 외국인 출전 한도 (리그 규칙 1-6): 등록은 보유 한도까지, 경기에는 출전 한도까지 (선발 투수 → 야수 주전 → 나머지 순, team.ts gameSide)
+    else if (foreign > foreignActive) warnings.push(`외국인은 한 경기에 ${foreignActive}명까지 나옵니다. 1군 외국인 ${foreign}명 중 그날 선발 투수·주전 야수부터 나오고 나머지는 그 경기에 빠집니다`);
     const ready = players.filter((p) => !this.isAbsent(p));
     const hit = ready.filter((p) => !p.isPitcher).length;
     const pit = ready.filter((p) => p.isPitcher).length;

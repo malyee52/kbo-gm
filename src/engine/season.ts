@@ -11,7 +11,7 @@ import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
 import { Rng } from './rng';
-import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { CHURN_DAYS, gameSide, lineupForeignCap, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -460,8 +460,11 @@ export class Season {
     for (const g of games) {
       const h = season[g.home];
       const a = season[g.away];
-      const homeLineup = todaysLineup(h, world.league, params, dayRng);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng);
+      // 선발 투수를 먼저 정한다: 외국인 출전 한도(리그 규칙 1-6)에서 선발이 먼저 자리를 쓴다. 난수를 쓰지 않아 순서를 바꿔도 결과는 같다
+      const homeStarter = todaysStarter(h, states, day, params);
+      const awayStarter = todaysStarter(a, states, day, params);
+      const homeLineup = todaysLineup(h, world.league, params, dayRng, lineupForeignCap(h, world, homeStarter));
+      const awayLineup = todaysLineup(a, world.league, params, dayRng, lineupForeignCap(a, world, awayStarter));
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
@@ -469,7 +472,7 @@ export class Season {
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
-      const res = simulateGame(h, a, homeLineup, awayLineup, todaysStarter(h, states, day, params), todaysStarter(a, states, day, params), ctx);
+      const res = simulateGame(gameSide(h, world, homeStarter, homeLineup), gameSide(a, world, awayStarter, awayLineup), homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
@@ -572,9 +575,11 @@ export class Season {
     a.away = true;
     refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
-    const hl = todaysLineup(h, this.world.league, params, rng);
-    const al = todaysLineup(a, this.world.league, params, rng);
-    const result = simulateGame(h, a, hl, al, todaysStarter(h, this.states, day, params), todaysStarter(a, this.states, day, params), ctx);
+    const hs = todaysStarter(h, this.states, day, params);
+    const aws = todaysStarter(a, this.states, day, params);
+    const hl = todaysLineup(h, this.world.league, params, rng, lineupForeignCap(h, this.world, hs));
+    const al = todaysLineup(a, this.world.league, params, rng, lineupForeignCap(a, this.world, aws));
+    const result = simulateGame(gameSide(h, this.world, hs, hl), gameSide(a, this.world, aws, al), hl, al, hs, aws, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 

@@ -309,12 +309,17 @@ def rules_for(year):
     elif year <= 2013: foreign, fs = 2, 'assumed'
     elif year <= 2025: foreign, fs = 3, 'confirmed'
     else: foreign, fs = 4, 'confirmed'
+    # 한 경기 출전 외국인 (보유와 따로, 리그 규칙 기획안 D16): 2001~2002·2014~2019는 3명 보유·2명 출전 (자료집 제도연표 확인).
+    # 그 밖의 해는 보유한 외국인이 모두 출전할 수 있다
+    if 2001 <= year <= 2002 or 2014 <= year <= 2019: active, acs = 2, 'confirmed'
+    else: active, acs = foreign, fs
     if year <= 1988: post = 2
     elif year <= 2014: post = 4
     else: post = 5
     return {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
+        'foreignActive': active, 'foreignActiveSource': acs,
         # 2008 정규시즌은 무제한 연장(끝장승부)·무승부 없음 → 0 = 무제한 (사용자 확인 2026-10-22. 자료집 엑셀 '제도연표'는 openpyxl 저장 때
         # 서식이 깨질 수 있어 고치지 않았다). 다른 해의 연장 연표(1982~2002 15회 등)는 경기 엔진 2 14단계에서 고친다
         'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',

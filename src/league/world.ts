@@ -87,6 +87,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       maxInnings: p.rules.maxInnings + futureDelta(league, 'extra', year),
       rosterSize: p.rules.rosterSize + futureDelta(league, 'roster', year),
       foreignLimit: p.rules.foreignLimit + futureDelta(league, 'foreign', year),
+      // 한 경기 출전 외국인 (리그 규칙 1-6): 2026년은 보유와 같아서 보유 한도를 따라간다
+      foreignActive: p.rules.foreignActive + futureDelta(league, 'foreign', year),
     };
   }
 

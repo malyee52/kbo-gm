@@ -150,6 +150,11 @@ export interface SeasonData {
 export interface YearRules {
   rosterSize: number;
   foreignLimit: number;
+  /**
+   * 한 경기에 나올 수 있는 외국인 (리그 규칙 1-6, D16). 1군 등록(보유)은 foreignLimit까지 하되 경기마다 이 수까지만 뛴다.
+   * 2001~2002·2014~2019 = 2 (3명 보유·2명 출전), 그 밖의 해는 foreignLimit과 같다
+   */
+  foreignActive: number;
   /** 정규시즌 최대 이닝. 0 = 무제한 (2008 끝장승부, 무승부 없음) */
   maxInnings: number;
   postseasonTeams: number;

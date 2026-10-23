@@ -17,7 +17,7 @@ import { currentRuns, type ValueContext } from '../ai/value';
 import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
-import { foreignRule } from './eras';
+import { foreignMixOk, foreignRule, teamForeignRule } from './eras';
 import { payOf, paydays } from './finance';
 import { minSalary, wageIndex, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -159,11 +159,17 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
   }
   if (!p.dev && regularCount(ctx.world, team) >= ruleOf(ctx.league, 'orgLimit')) return `정식 선수 정원(${ruleOf(ctx.league, 'orgLimit')}명)이 차 있습니다. 먼저 방출하세요.`;
   if (p.foreign) {
-    const rule = foreignRule(ctx.meta, year, ctx.league);
+    // 창단 특례 구단은 1명 더 (eras.ts teamForeignRule)
+    const rule = teamForeignRule(foreignRule(ctx.meta, year, ctx.league), ctx.league, team, year);
     const held = foreignHeld(ctx.world, team, lp);
     const asia = !!lp.get(p.id)?.asia;
     if (asia ? held.asia >= rule.asia : held.regular >= rule.regular) {
       return `외국인 ${asia ? '아시아쿼터' : '선수'} 보유 한도(${asia ? rule.asia : rule.regular}명)가 차 있습니다. 먼저 외국인 선수를 방출하세요.`;
+    }
+    // 구성 제한 (2014~2019, eras.ts foreignMixOk): 보유 자리를 모두 투수 또는 모두 타자로 채울 수 없다
+    const same = ctx.world.teams[team].org.filter((x) => x.foreign && !lp.get(x.id)?.asia && x.isPitcher === p.isPitcher).length;
+    if (!asia && !foreignMixOk(year, rule.regular, same)) {
+      return `${year}년에는 외국인 ${rule.regular}명을 모두 ${p.isPitcher ? '투수' : '타자'}로 채울 수 없습니다 (${p.isPitcher ? '투수' : '타자'}는 ${rule.regular - 1}명까지).`;
     }
     if (foreignSwapsUsed(ctx, team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체는 한 시즌 ${ruleOf(ctx.league, 'foreignSwaps')}번까지입니다.`;
   }

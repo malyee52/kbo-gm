@@ -43,10 +43,10 @@ describe('kt 2015 (시작 때 이미 1군)', () => {
     const { league, world } = createLeague(store, 2015, 'perk-kt', FAST);
     const kt = league.teams.findIndex((t) => t.franchise === 'KT');
     expect(league.expansions).toEqual([{ team: kt, firstYear: 2015 }]);
-    expect(teamRules(world, world.teams[kt])).toEqual({ rosterSize: 28, foreignLimit: 4 });
-    for (const t of world.teams.filter((x) => x.idx !== kt)) expect(teamRules(world, t)).toEqual({ rosterSize: 27, foreignLimit: 3 });
+    expect(teamRules(world, world.teams[kt])).toEqual({ rosterSize: 28, foreignLimit: 4, foreignActive: 3 });
+    for (const t of world.teams.filter((x) => x.idx !== kt)) expect(teamRules(world, t)).toEqual({ rosterSize: 27, foreignLimit: 3, foreignActive: 2 });
     const w16 = worldFromLeague({ ...league, year: 2016 }, store, FAST);
-    expect(teamRules(w16, w16.teams[kt])).toEqual({ rosterSize: 28, foreignLimit: 4 });
+    expect(teamRules(w16, w16.teams[kt])).toEqual({ rosterSize: 28, foreignLimit: 4, foreignActive: 3 });
     const later = createLeague(store, 2017, 'perk-kt', FAST);
     expect(later.league.expansions ?? []).toEqual([]);
   });

@@ -221,9 +221,17 @@ export function battingOrder(nine: SimPlayer[], lg: Rates): SimPlayer[] {
   return [first, second, third, fourth, ...rest];
 }
 
-/** 구단의 1군 엔트리·외국인 1군 한도: 리그 규칙 + 창단 특례 (SimTeam.rosterBonus·foreignBonus) */
-export function teamRules(world: Pick<World, 'rules'>, team: Pick<SimTeam, 'rosterBonus' | 'foreignBonus'>): { rosterSize: number; foreignLimit: number } {
-  return { rosterSize: world.rules.rosterSize + (team.rosterBonus ?? 0), foreignLimit: world.rules.foreignLimit + (team.foreignBonus ?? 0) };
+/**
+ * 구단의 1군 엔트리·외국인 1군 한도(보유)·한 경기 출전 외국인 한도: 리그 규칙 + 창단 특례 (SimTeam.rosterBonus·foreignBonus).
+ * 창단 특례는 보유·출전 모두 1명 더 (NC 2014 4보유·3출전, kt 2015~2016 4보유·3출전, 자료집 제도연표)
+ */
+export function teamRules(world: Pick<World, 'rules'>, team: Pick<SimTeam, 'rosterBonus' | 'foreignBonus'>): { rosterSize: number; foreignLimit: number; foreignActive: number } {
+  const bonus = team.foreignBonus ?? 0;
+  return {
+    rosterSize: world.rules.rosterSize + (team.rosterBonus ?? 0),
+    foreignLimit: world.rules.foreignLimit + bonus,
+    foreignActive: world.rules.foreignActive + bonus,
+  };
 }
 
 function pitcherCount(rosterSize: number): number {
@@ -455,8 +463,11 @@ function planFixed(ts: TeamSeason, pool: SimPlayer[]): Map<Slot, SimPlayer> | un
   return fixed;
 }
 
-/** 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다 */
-export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng): SimPlayer[] {
+/**
+ * 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다.
+ * foreignCap: 라인업에 넣을 수 있는 외국인 타자 수 (lineupForeignCap, 출전 한도가 없으면 undefined). 넘치는 외국인은 가치 낮은 쪽부터 그 경기만 빠진다
+ */
+export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, foreignCap?: number): SimPlayer[] {
   ts.lineupCache ??= new Map();
   let full = ts.lineupCache.get('');
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
@@ -472,12 +483,20 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
     if (rng.chance(Math.min(0.6, base * factor))) resting.add(p.idx);
   });
-  const key = [...resting].sort((a, b) => a - b).join(',');
+  // 외국인 출전 한도 (리그 규칙 1-6): 쉬지 않는 외국인 타자가 한도를 넘으면 가치 낮은 쪽부터 그 경기만 빠진다 (직접 정한 주전도)
+  const sitOut = new Set<number>();
+  if (foreignCap !== undefined) {
+    const fh = ts.hitters.filter((p) => p.foreign && !resting.has(p.idx)).sort((a, b) => b.value - a.value);
+    for (const p of fh.slice(Math.max(0, foreignCap))) sitOut.add(p.idx);
+  }
+  const off = sitOut.size ? new Set([...resting, ...sitOut]) : resting;
+  const key = [...off].sort((a, b) => a - b).join(',');
   ts.lineupCache ??= new Map();
   let placed = ts.lineupCache.get(key);
   if (!placed) {
-    const avail = ts.hitters.filter((p) => !resting.has(p.idx));
-    const pool = avail.length >= 9 ? avail : ts.hitters;
+    const avail = ts.hitters.filter((p) => !off.has(p.idx));
+    const allowed = ts.hitters.filter((p) => !sitOut.has(p.idx));
+    const pool = avail.length >= 9 ? avail : allowed.length >= 9 ? allowed : ts.hitters;
     placed = assignSlots(pool, planFixed(ts, pool));
     ts.lineupCache.set(key, placed);
   }
@@ -490,6 +509,49 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
     if (out.length === placed.length) return out;
   }
   return battingOrder(placed.map((x) => x.p), lg);
+}
+
+/**
+ * 외국인 출전 한도 (리그 규칙 1-6, D16): 오늘 라인업에 넣을 수 있는 외국인 타자 수. 1군 외국인이 출전 한도 안이면 undefined (제한 없음).
+ * 그날 선발 투수가 먼저 한 자리를 쓴다 (선발 투수 → 야수 주전 → 나머지)
+ */
+export function lineupForeignCap(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPlayer): number | undefined {
+  const { foreignActive } = teamRules(world, ts.team);
+  if (foreignOnRoster(ts) <= foreignActive) return undefined;
+  return Math.max(0, foreignActive - (starter.foreign ? 1 : 0));
+}
+
+/** 1군(야수·로테이션·불펜)에 있는 외국인 수. 이도류 얼굴은 한 명으로 센다 */
+function foreignOnRoster(ts: TeamSeason): number {
+  const seen = new Set<number>();
+  for (const p of [...ts.hitters, ...ts.rotation, ...ts.bullpen]) if (p.foreign) seen.add(p.idx);
+  return seen.size;
+}
+
+/**
+ * 외국인 출전 한도 (리그 규칙 1-6, D16): 이 경기에 쓰는 구단 쪽 명단. 선발 투수와 라인업의 외국인을 먼저 세고,
+ * 남은 자리만큼 불펜(좋은 순) → 벤치 야수(가치 순)의 외국인을 넣는다. 넘치는 외국인은 그 경기만 결장 (대타·구원으로 못 나온다).
+ * 난수를 쓰지 않는다. 한도 안이면 ts를 그대로 돌려준다
+ */
+export function gameSide(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPlayer, lineup: SimPlayer[]): TeamSeason {
+  const { foreignActive } = teamRules(world, ts.team);
+  if (foreignOnRoster(ts) <= foreignActive) return ts;
+  const dressed = new Set<number>();
+  if (starter.foreign) dressed.add(starter.idx);
+  for (const p of lineup) if (p.foreign) dressed.add(p.idx);
+  const inLineup = new Set(lineup.map((p) => p.idx));
+  const rest = [
+    ...ts.bullpen.filter((p) => p.foreign && p.idx !== starter.idx),
+    ...ts.hitters.filter((p) => p.foreign && !inLineup.has(p.idx)).sort((a, b) => b.value - a.value),
+  ];
+  for (const p of rest) if (dressed.size < foreignActive) dressed.add(p.idx);
+  const ok = (p: SimPlayer) => !p.foreign || dressed.has(p.idx);
+  return {
+    ...ts,
+    hitters: ts.hitters.filter((p) => ok(p) || inLineup.has(p.idx)),
+    bullpen: ts.bullpen.filter((p) => ok(p) || p.idx === starter.idx),
+    closer: ts.closer && (ok(ts.closer) || ts.closer.idx === starter.idx) ? ts.closer : null,
+  };
 }
 
 /** 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수 */
