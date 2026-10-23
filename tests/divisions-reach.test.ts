@@ -246,7 +246,7 @@ describe('개막 알림 "올해 달라지는 규칙"의 리그 줄', () => {
     const n00 = news(2000);
     expect(n00).toHaveLength(1);
     expect(n00[0].title).toBe('리그 재편');
-    expect(n00[0].after.startsWith('삼성 드림, 롯데 매직 (')).toBe(true);
+    expect(n00[0].after!.startsWith('삼성 드림, 롯데 매직 (')).toBe(true);
     const n01 = news(2001);
     expect(n01).toEqual([{ key: 'league', title: '리그', before: '양대 리그', after: '단일 리그', status: '자료집' }]);
     expect(news(1998)).toEqual([]);
@@ -256,7 +256,7 @@ describe('개막 알림 "올해 달라지는 규칙"의 리그 줄', () => {
   it('자료는 양대 리그인데 게임 구단과 맞지 않아 나누지 않은 해는 "단일 리그로 진행"', () => {
     const n = leagueNews(null, teamsOf(1999), store.season(1999), store.season(1998));
     expect(n).toHaveLength(1);
-    expect(n[0].after.startsWith('단일 리그로 진행')).toBe(true);
+    expect(n[0].after!.startsWith('단일 리그로 진행')).toBe(true);
   });
 });
 
