@@ -22,6 +22,8 @@ export interface RuleSnapshot {
   rosterSize: number;
   foreignTotal: number;
   foreignAsia: number;
+  /** 한 경기 출전 외국인 (리그 규칙 1-6). 보유(foreignTotal)와 같으면 따로 적지 않는다 */
+  foreignActive?: number;
   /** 정규시즌 연장 최대 이닝 (0 = 무제한) */
   maxInnings: number;
   postseasonTeams: number;
@@ -60,6 +62,8 @@ export function ruleSnapshot(meta: Meta, year: number, league?: Pick<LeagueState
     rosterSize: (r?.rosterSize ?? 26) + d('roster'),
     foreignTotal: f.total,
     foreignAsia: f.asia,
+    // 출전 한도가 보유보다 작은 해 (2001~2002·2014~2019)만. 미래·자유 모드 변경은 보유와 같이 움직인다
+    ...(r && r.foreignActive < r.foreignLimit && !future ? { foreignActive: f.total - (r.foreignLimit - r.foreignActive) } : {}),
     maxInnings: (r?.maxInnings ?? 12) + d('extra'),
     postseasonTeams: r?.postseasonTeams ?? 4,
     faEnabled: faEnabled(year),
@@ -245,7 +249,8 @@ function eokText(man: number): string {
 export function keyValueText(key: RuleValueKey, s: RuleSnapshot): string {
   switch (key) {
     case 'rosterSize': return `${s.rosterSize}명`;
-    case 'foreignLimit': return s.foreignTotal === 0 ? '없음' : s.foreignAsia ? `${s.foreignTotal}명 (아시아쿼터 ${s.foreignAsia}명 포함)` : `${s.foreignTotal}명`;
+    case 'foreignLimit': return s.foreignTotal === 0 ? '없음' : s.foreignAsia ? `${s.foreignTotal}명 (아시아쿼터 ${s.foreignAsia}명 포함)`
+      : s.foreignActive !== undefined && s.foreignActive < s.foreignTotal ? `${s.foreignTotal}명 보유·${s.foreignActive}명 출전` : `${s.foreignTotal}명`;
     case 'maxInnings': return s.maxInnings === 0 ? '무제한 (무승부 없음)' : `${s.maxInnings}회`;
     case 'postseasonTeams': return `${s.postseasonTeams}팀`;
     case 'faEnabled': return s.faEnabled ? '있음' : '없음';

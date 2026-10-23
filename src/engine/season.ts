@@ -15,7 +15,7 @@ import { sbShiftOf } from './rules';
 import { openCondition, stepCondition } from './condition';
 import { condToday } from './pa';
 import { Rng } from './rng';
-import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { CHURN_DAYS, currentBody, currentOveruse, gameSide, lineupForeignCap, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -537,15 +537,16 @@ export class Season {
     for (const g of games) {
       const h = season[g.home];
       const a = season[g.away];
-      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
+      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계).
+      // 외국인 출전 한도(리그 규칙 1-6)에서도 선발이 먼저 자리를 쓴다
       // AI 감독은 보이는 컨디션을 라인업·선발 고르기에 쓴다 (엔진 2 12단계, 반영 정도는 감독 성향 tactics.cond)
       const cond = (p: SimPlayer) => condToday(ctx, p.idx);
       const homeStarter = todaysStarter(h, states, day, params, cond);
       const awayStarter = todaysStarter(a, states, day, params, cond);
       // 야수 휴식은 경기 전 피로로 (엔진 2 11단계)
       const tired = (p: SimPlayer) => currentBody(states, p.idx, day, params.body);
-      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond);
+      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond, lineupForeignCap(h, world, homeStarter));
+      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond, lineupForeignCap(a, world, awayStarter));
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
@@ -556,7 +557,7 @@ export class Season {
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
-      const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
+      const res = simulateGame(gameSide(h, world, homeStarter, homeLineup), gameSide(a, world, awayStarter, awayLineup), homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
@@ -717,10 +718,10 @@ export class Season {
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const cond = (p: SimPlayer) => condToday(ctx, p.idx);
     const hs = todaysStarter(h, this.states, day, params, cond);
-    const as = todaysStarter(a, this.states, day, params, cond);
-    const hl = todaysLineup(h, this.world.league, params, rng, as.throws, undefined, cond);
-    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond);
-    const result = simulateGame(h, a, hl, al, hs, as, ctx);
+    const aws = todaysStarter(a, this.states, day, params, cond);
+    const hl = todaysLineup(h, this.world.league, params, rng, aws.throws, undefined, cond, lineupForeignCap(h, this.world, hs));
+    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond, lineupForeignCap(a, this.world, aws));
+    const result = simulateGame(gameSide(h, this.world, hs, hl), gameSide(a, this.world, aws, al), hl, al, hs, aws, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 

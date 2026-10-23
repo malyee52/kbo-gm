@@ -138,7 +138,7 @@ export function Roster() {
     <div className="stack tight">
       <section className="row-between wrap">
         <div className="muted small roster-sum">
-          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit} ·{' '}
+          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit}{rules.foreignActive < rules.foreignLimit ? ` (경기 출전 ${rules.foreignActive}명)` : ''} ·{' '}
           정식 {session.regularCount()}/{ruleOf(session.league, 'orgLimit')}{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}` : ''} ·{' '}
           {view.manual ? '엔트리 직접 관리' : '엔트리 AI 관리'}{view.manual ? (session.plan ? ' · 기용 직접' : ' · 기용 AI 감독') : ''}
         </div>

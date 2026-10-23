@@ -284,8 +284,7 @@
    "after": "3명 보유·2명 출전",
    "effect": "league",
    "status": "confirmed",
-   "source": "자료집 제도연표",
-   "simplified": "3명 모두 출전 가능 (출전 한도는 다음 개발 단계)"
+   "source": "자료집 제도연표"
   },
   {
    "year": 2001,
@@ -593,8 +592,7 @@
    "after": "3명 보유·2명 출전 (투수만·타자만 3명 불가)",
    "effect": "league",
    "status": "confirmed",
-   "source": "자료집 제도연표",
-   "simplified": "3명 모두 출전 가능 (출전 한도는 다음 개발 단계)"
+   "source": "자료집 제도연표"
   },
   {
    "year": 2014,

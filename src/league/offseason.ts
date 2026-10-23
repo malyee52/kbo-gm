@@ -47,7 +47,7 @@ import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
-import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
+import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
 import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
 import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
@@ -1701,6 +1701,8 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
       .sort((a, b) => currentRuns(view.sim.get(b.id)!, view.ctx) - currentRuns(view.sim.get(a.id)!, view.ctx) || a.id.localeCompare(b.id));
     for (const p of cands) {
       if (p.asia ? asia >= lim.asia : regular >= lim.regular) continue;
+      // 구성 제한 (2014~2019, eras.ts foreignMixOk): 보유 자리를 모두 투수 또는 모두 타자로 채울 수 없다
+      if (!p.asia && !foreignMixOk(year + 1, lim.regular, kept.filter((x) => x.isPitcher === p.isPitcher).length)) continue;
       if (!p.asia && foreignTeamCap(league, t, year + 1, [...kept, p]) - pay < FOREIGN_MIN_DEAL) continue;
       advised.add(p.id);
       if (p.asia) asia++;
@@ -1777,7 +1779,15 @@ export function foreignLimits(off: OffseasonState, league: Pick<LeagueState, 'ex
   return { regular: r.regular, asia: r.asia };
 }
 
-/** 이 외국인 후보와 계약할 수 있는가 (보유 한도와 금액 상한) */
+/** 구성 제한 (2014~2019, eras.ts foreignMixOk) 안내 문구. 지킬 수 있으면 null */
+function foreignMixBlock(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer, regular: number): string | null {
+  const same = league.players.filter((x) => isForeignOf(x, team) && !x.asia && x.id !== p.id && x.isPitcher === p.isPitcher
+    && !(off.foreign && off.foreign.keep[x.id] === false)).length;
+  if (foreignMixOk(off.year + 1, regular, same)) return null;
+  return `${off.year + 1}년에는 외국인 ${regular}명을 모두 ${p.isPitcher ? '투수' : '타자'}로 채울 수 없습니다 (${p.isPitcher ? '투수' : '타자'}는 ${regular - 1}명까지).`;
+}
+
+/** 이 외국인 후보와 계약할 수 있는가 (보유 한도, 구성 제한, 금액 상한) */
 export function canSignForeign(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer): OfferCheck {
   if (!off.foreign?.pool.includes(p.id) || p.team !== -1) return { ok: false, message: '계약할 수 없는 선수입니다.' };
   const s = foreignSlots(league, team, off);
@@ -1790,6 +1800,8 @@ export function canSignForeign(league: LeagueState, off: OffseasonState, team: n
     return feeCheck(league, team, p);
   }
   if (s.regular >= lim.regular) return { ok: false, message: `외국인 선수는 ${lim.asia ? '아시아쿼터를 빼고 ' : ''}${lim.regular}명까지입니다.` };
+  const mix = foreignMixBlock(league, off, team, p, lim.regular);
+  if (mix) return { ok: false, message: mix };
   const total = foreignContractTotal(p.contract);
   if (isNewForeign(p) && total > cap('foreignNewCap')) return { ok: false, message: `신규 외국인 계약 상한(${dollarText(cap('foreignNewCap'))}, 연봉 + 계약금)을 넘습니다.` };
   // 재계약하기로 한 선수는 지난 연봉으로 센다 (아시아쿼터는 총액에 넣지 않는다). 숫자를 함께 보여 준다 (2026-10-22 사용자: 왜 막혔는지 몰랐다).
@@ -1860,6 +1872,8 @@ export function setForeignKeep(league: LeagueState, off: OffseasonState, id: str
     if (p.asia ? s.asia >= lim.asia : s.regular >= lim.regular) {
       return { ok: false, message: p.asia ? '아시아쿼터 자리가 찼습니다.' : `외국인 선수는 ${lim.regular}명까지입니다.` };
     }
+    const mix = p.asia ? null : foreignMixBlock(league, off, off.userTeam, p, lim.regular);
+    if (mix) return { ok: false, message: mix };
   }
   off.foreign.keep[id] = keep;
   return { ok: true, message: '' };

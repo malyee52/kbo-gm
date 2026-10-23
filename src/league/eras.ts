@@ -62,6 +62,19 @@ export function foreignRule(meta: Meta, year: number, league?: Pick<LeagueState,
   return { total: regular + asia, asia, regular };
 }
 
+/**
+ * 외국인 구성 제한 (리그 규칙 1-6, D17): 2014~2019 외국인 보유 자리(아시아쿼터 제외)를 모두 투수 또는 모두 타자로 채울 수 없다
+ * (자료집 제도연표 "외국인 보유·출전 (2014~2019) … 투수만·타자만 3명 불가"). 보유 한도가 4명인 창단 특례 구단은 같은 쪽 3명까지
+ * (NC 2014 투수 3·타자 1). 그 밖의 해는 제한 없음
+ */
+export const FOREIGN_MIX_YEARS: readonly [number, number] = [2014, 2019];
+
+/** 이 외국인(투수/타자)을 더해도 구성 제한을 지키는가. sameSide: 이미 있는 같은 쪽 일반 외국인 수, regular: 구단의 일반 외국인 보유 한도 */
+export function foreignMixOk(year: number, regular: number, sameSide: number): boolean {
+  if (year < FOREIGN_MIX_YEARS[0] || year > FOREIGN_MIX_YEARS[1] || regular < 2) return true;
+  return sameSide + 1 <= regular - 1;
+}
+
 /** 창단 특례가 있는 창단 구단: 1군 첫해가 이 해 이후 (NC 2013부터. 빙그레·쌍방울은 지명 특례만 있었다, 자료집 제도연표 42) */
 export const EXPANSION_PERK_FROM = 2013;
 /** 창단 특례 기간: 1군 첫해부터 몇 시즌 */
