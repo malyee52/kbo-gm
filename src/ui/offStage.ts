@@ -44,7 +44,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
         out.push({
           key: 'fa-own', title: `우리 FA ${open.length}명 제시 전 (${names(open)})`,
           then: last
-            ? '마지막 라운드입니다. 넘기면 계약하지 못한 우리 FA는 떠납니다 (무적 선수).'
+            ? '마지막 라운드라 계약하지 못한 우리 FA는 떠납니다 (무적 선수).'
             : `이번 라운드에 우리 제시가 없어 다른 구단이 제시하면 그 구단과 계약할 수 있습니다 (남은 라운드 ${Off.FA_ROUNDS - off.fa.round}).`,
         });
       }
@@ -61,7 +61,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
         if (c.to === me) {
           const limit = FA_COMP[c.grade].protect ?? 0;
           if (c.protect.length < limit) {
-            out.push({ key: `comp-protect:${c.fa}`, title: `${name(c.fa)} 보호 명단 ${c.protect.length}/${limit}명`, then: `넘기면 이 명단으로 확정됩니다. 빈 ${limit - c.protect.length}자리만큼 덜 지킵니다.` });
+            out.push({ key: `comp-protect:${c.fa}`, title: `${name(c.fa)} 보호 명단 ${c.protect.length}/${limit}명`, then: `이 명단으로 확정됩니다. 빈 ${limit - c.protect.length}자리만큼 덜 지킵니다.` });
           }
         }
       }
@@ -73,13 +73,13 @@ export function stageLeftovers(s: GameSession): Leftover[] {
         const label = d.kind === 'second' ? '2차 드래프트' : '특별 지명';
         if (Off.protectDraftTeams(L, off, d).includes(me)) {
           const n = (d.protect[String(me)] ?? []).length;
-          if (n < d.limit) out.push({ key: `${d.kind}-protect`, title: `${label} 보호 명단 ${n}/${d.limit}명`, then: `넘기면 이 명단으로 확정됩니다. 빈 ${d.limit - n}자리만큼 덜 지킵니다.` });
+          if (n < d.limit) out.push({ key: `${d.kind}-protect`, title: `${label} 보호 명단 ${n}/${d.limit}명`, then: `이 명단으로 확정됩니다. 빈 ${d.limit - n}자리만큼 덜 지킵니다.` });
         }
         const picker = d.kind === 'second' || d.team === me;
         if (picker && d.wish.length === 0) {
           out.push({
             key: `${d.kind}-wish`, title: `${label} 지명 희망 없음`,
-            then: d.kind === 'second' ? '넘기면 우리 구단은 지명하지 않습니다 (패스).' : '넘기면 구단마다 보호 명단 밖 최고 가치 선수를 자동으로 지명합니다.',
+            then: d.kind === 'second' ? '우리 구단은 지명하지 않습니다 (패스).' : '구단마다 보호 명단 밖 최고 가치 선수를 자동으로 지명합니다.',
           });
         }
       }
@@ -89,7 +89,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
       const f = off.foreign;
       if (!f) break;
       const drop = Object.entries(f.keep).filter(([, k]) => !k).map(([id]) => id);
-      if (drop.length) out.push({ key: 'foreign-drop', title: `재계약하지 않는 외국인 ${drop.length}명 (${names(drop)})`, then: '넘기면 계약이 끝나 후보 명단으로 나갑니다. 다른 구단이 데려갈 수 있습니다.' });
+      if (drop.length) out.push({ key: 'foreign-drop', title: `재계약하지 않는 외국인 ${drop.length}명 (${names(drop)})`, then: '계약이 끝나 후보 명단으로 나갑니다. 다른 구단이 데려갈 수 있습니다.' });
       if (f.order[f.pointer] === me) {
         const sl = Off.foreignSlots(L, me, off);
         const lim = Off.foreignLimits(off);
@@ -97,7 +97,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
         const asia = lim.asia - sl.asia;
         if (reg > 0 || asia > 0) {
           const parts = [reg > 0 ? `일반 ${reg}명` : '', asia > 0 ? `아시아쿼터 ${asia}명` : ''].filter(Boolean).join(' · ');
-          out.push({ key: 'foreign-empty', title: `외국인 빈자리 ${parts}`, then: '넘기면 우리 차례가 끝나고, 빈자리를 비운 채 남은 구단이 고릅니다.' });
+          out.push({ key: 'foreign-empty', title: `외국인 빈자리 ${parts}`, then: '우리 차례가 끝나고, 빈자리를 비운 채 남은 구단이 고릅니다.' });
         }
       }
       break;
@@ -120,7 +120,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
       const sal = off.salary;
       if (sal) {
         const low = Object.keys(sal.offers).filter((id) => sal.offers[id] < sal.demands[id]);
-        if (low.length) out.push({ key: 'salary-low', title: `요구액보다 낮게 제시 ${low.length}명 (${names(low)})`, then: '넘기면 조정을 거쳐 제시액과 요구액의 가운데로 정합니다.' });
+        if (low.length) out.push({ key: 'salary-low', title: `요구액보다 낮게 제시 ${low.length}명 (${names(low)})`, then: '조정을 거쳐 제시액과 요구액의 가운데로 정합니다.' });
       }
       const postings = (off.postings ?? []).filter((x) => !x.decided).map((x) => x.id);
       if (postings.length) out.push({ key: 'posting', title: `포스팅 요청 답하지 않음 ${postings.length}건 (${names(postings)})`, then: '정원 정리 단계부터는 답할 수 없고, 답하지 않으면 붙잡은 것으로 합니다.' });

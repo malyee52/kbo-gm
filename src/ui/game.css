@@ -487,6 +487,7 @@ table.cmp td .small-btn + .small-btn { margin-left: 4px; }
 .steps li.now { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); font-weight: 800; }
 .steps li.now::before { background: color-mix(in srgb, var(--accent-fg) 25%, transparent); color: var(--accent-fg); border-color: transparent; }
 .steps .step-btn { all: unset; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.steps .step-btn:hover:not(:disabled) { background: none; color: inherit; text-decoration-style: solid; }
 .steps .step-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .steps li.viewing { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 /* 오프시즌 단계 화면 (UI 2단계 U2-6): 단계 위 줄 요약, 남은 처리 + 다음 단추(아래 붙음), 확인 창, 개막 준비 카드 */
@@ -501,6 +502,7 @@ table.cmp td .small-btn + .small-btn { margin-left: 4px; }
 .off-next > button { flex: none; }
 .warn-tag { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--line); }
 dialog.off-confirm { width: min(560px, calc(100vw / var(--z) - 32px)); }
+.stage-record .news li { grid-template-columns: minmax(0, 1fr); gap: 0; }
 .leftover-list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .leftover-list li:last-child { border-bottom: 0; }
 .leftover-list .small { margin-top: 2px; color: var(--muted); }

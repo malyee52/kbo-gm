@@ -143,7 +143,9 @@ export function Offseason() {
         </li>
         {STAGES.map((s, i) => (
           <li key={s} className={`${i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''}${record === s && i < stageIdx ? ' viewing' : ''}`} aria-current={i === stageIdx ? 'step' : undefined}>
-            {i < stageIdx
+            {i < stageIdx && s === 'second' && !off.second && !off.expansion
+              ? <span title="이번 오프시즌은 2차 드래프트·특별 지명이 없어 건너뛰었습니다">{STAGE_LABEL[s]} <span className="muted">(없음)</span></span>
+              : i < stageIdx
               ? <button type="button" className="step-btn" aria-pressed={record === s} onClick={() => setRecord(record === s ? null : s)} title={`${STAGE_LABEL[s]} 기록 보기`}>{STAGE_LABEL[s]}</button>
               : i === stageIdx && viewing
                 ? <button type="button" className="step-btn" onClick={() => setRecord(null)} title="지금 단계로 돌아가기">{STAGE_LABEL[s]}</button>
@@ -230,7 +232,7 @@ function LeftoverDialog({ items, stage, label, onCancel, onGo }: {
           {items.map((l) => (
             <li key={l.key}>
               <b>{l.blocking && <span className="tag warn-tag">먼저</span>} {l.title}</b>
-              <div className="small">넘기면: {l.then}</div>
+              <div className="small">{l.blocking ? l.then : `넘기면: ${l.then}`}</div>
             </li>
           ))}
         </ul>
@@ -312,6 +314,7 @@ interface PRow { p: LeaguePlayer; i: Info }
 const useFull = () => useShell().density === 'full';
 
 // 오프시즌 표의 공통 열 (UI 2단계 U2-6: 단계 판 표를 공통 표 부품 DataTable로). 이름은 늘 보이고(휴대폰 왼쪽 고정), brief 열은 요약에서도 보인다
+// 조작 칸(보호·지명·계약·제시·결정)은 fixed로 두어 열 고르기로 숨길 수 없게 한다
 function nameCol<R extends PRow>(extra?: (r: R) => ReactNode): Column<R> {
   return { key: 'name', label: '선수', text: true, fixed: true, value: (r) => r.p.name, cell: (r) => <>{r.p.name}{extra?.(r)}</> };
 }
@@ -386,7 +389,7 @@ function CompPanel({ act }: { act: Act }) {
         const cols: Column<(typeof rows)[number]>[] = [
           nameCol((r) => (r.p.id === rec ? <span className="tag" title="자동 선택과 같은 기준 (보호 밖 최고 가치)">추천</span> : null)),
           ...baseCols(), payCol(won),
-          { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={c.pick === r.p.id} onClick={() => act(session.pickComp(c.fa, r.p.id))}>{c.pick === r.p.id ? '고름' : '지명'}</button> },
+          { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={c.pick === r.p.id} onClick={() => act(session.pickComp(c.fa, r.p.id))}>{c.pick === r.p.id ? '고름' : '지명'}</button> },
         ];
         return (
           <div className="panel mine" key={c.fa}>
@@ -444,7 +447,7 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
   };
   const cols: Column<(typeof rows)[number]>[] = [
     nameCol(),
-    { key: 'on', label: '보호', brief: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && c.protect.length >= limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
+    { key: 'on', label: '보호', fixed: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && c.protect.length >= limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
     ...baseCols(), payCol(won),
   ];
   return (
@@ -499,12 +502,12 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
   const rule = d.kind === 'second' ? Off.secondRule(off.year) : null;
   const protCols: Column<(typeof pool)[number]>[] = [
     nameCol(),
-    { key: 'on', label: '보호', brief: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && prot.size >= d.limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
+    { key: 'on', label: '보호', fixed: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && prot.size >= d.limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
     ...baseCols(), payCol(won),
   ];
   const wishCols: Column<(typeof cands)[number]>[] = [
     nameCol(),
-    { key: 'on', label: '지명', brief: true, value: (r) => Number(wish.has(r.p.id)), cell: (r) => <input type="checkbox" checked={wish.has(r.p.id)} onChange={() => toggleWish(r.p.id)} aria-label={`${r.p.name} 지명 희망`} /> },
+    { key: 'on', label: '지명', fixed: true, value: (r) => Number(wish.has(r.p.id)), cell: (r) => <input type="checkbox" checked={wish.has(r.p.id)} onChange={() => toggleWish(r.p.id)} aria-label={`${r.p.name} 지명 희망`} /> },
     teamCol(names, (r) => r.p.team), ...baseCols(), payCol(won),
   ];
   return (
@@ -615,7 +618,7 @@ function FaPanel({ act }: { act: Act }) {
       key: 'vs', label: '제시/요구', title: '우리 제시 연봉이 요구 연봉의 몇 %인가', value: (r) => (off.fa.userOffers[r.e.id] ? off.fa.userOffers[r.e.id].salary / r.e.ask : null),
       cell: (r) => (off.fa.userOffers[r.e.id] ? `${Math.round((off.fa.userOffers[r.e.id].salary / r.e.ask) * 100)}%` : '-'),
     },
-    { key: 'state', label: '상태 · 우리 제시', text: true, brief: true, value: statusOrder, cell: state },
+    { key: 'state', label: '상태 · 우리 제시', text: true, fixed: true, value: statusOrder, cell: state },
   ];
 
   return (
@@ -664,7 +667,7 @@ function ForeignPanel({ act }: { act: Act }) {
     ...baseCols().filter((c) => c.key !== 'pot'),
     { key: 'pay', label: '지난 연봉', brief: true, value: (r) => foreignContractTotal(r.p.contract), cell: (r) => dollarText(foreignContractTotal(r.p.contract)) },
     {
-      key: 'keep', label: '결정', text: true, brief: true, value: (r) => Number(f.keep[r.p.id]),
+      key: 'keep', label: '결정', text: true, fixed: true, value: (r) => Number(f.keep[r.p.id]),
       cell: (r) => <label className="inline small"><input type="checkbox" checked={f.keep[r.p.id]} onChange={(e) => act(session.setForeignKeep(r.p.id, e.target.checked))} /> 재계약</label>,
     },
   ];
@@ -675,7 +678,7 @@ function ForeignPanel({ act }: { act: Act }) {
     { key: 'ask', label: '요구액', brief: true, title: '연봉 + 계약금', value: (r) => foreignContractTotal(r.p.contract), cell: (r) => dollarText(foreignContractTotal(r.p.contract)) },
     { key: 'fee', label: '이적료', brief: true, value: (r) => r.p.transferFee ?? null, cell: (r) => (r.p.transferFee ? dollarText(r.p.transferFee) : '-') },
     {
-      key: 'act', label: '', text: true, brief: true, value: (r) => Number(r.check.ok),
+      key: 'act', label: '', text: true, fixed: true, value: (r) => Number(r.check.ok),
       cell: (r) => (
         <>
           <button type="button" className="small-btn" disabled={!myTurn || !r.check.ok} title={r.check.ok ? '' : r.check.message}
@@ -700,7 +703,6 @@ function ForeignPanel({ act }: { act: Act }) {
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}
         </p>
         {!myTurn && <p className="muted small">다음 단계로 넘기면 남은 구단이 고릅니다.</p>}
-        {full && <p className="muted small">국적 자료가 없어 실존 외국인은 모두 일반 외국인으로 봅니다 (아시아쿼터는 자료에 아시아쿼터로 적힌 선수만).</p>}
       </div>
 
       {expiringMine.length > 0 && (
@@ -739,7 +741,7 @@ function DraftPanel({ act }: { act: Act }) {
     ...baseCols('잠재(평가)').slice(0, 2),
     { key: 'school', label: '학력', brief: true, value: (r) => (r.p.school === 'UNIV' ? '대졸' : '고졸') },
     ...baseCols('잠재(평가)').slice(2),
-    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(r.p.id))}>지명</button> },
+    { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(r.p.id))}>지명</button> },
   ];
 
   return (
@@ -941,7 +943,7 @@ function SalaryPanel({ act }: { act: Act }) {
     payCol(won, '지난 연봉'),
     { key: 'demand', label: '요구액', brief: true, value: (r) => s.demands[r.id], cell: (r) => won(s.demands[r.id]) },
     {
-      key: 'offer', label: '제시액 (억 원)', text: true, brief: true, value: (r) => s.offers[r.id],
+      key: 'offer', label: '제시액 (억 원)', text: true, fixed: true, value: (r) => s.offers[r.id],
       cell: ({ p, id }) => {
         // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
         // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
@@ -1010,7 +1012,7 @@ function ReleasePanel({ act }: { act: Act }) {
     ...baseCols(), payCol(won, '계약'),
     { key: 'until', label: '계약 끝', value: (r) => r.p.contract.until, cell: (r) => `${r.p.contract.until}년` },
     {
-      key: 'act', label: '', text: true, brief: true, value: () => null,
+      key: 'act', label: '', text: true, fixed: true, value: () => null,
       cell: ({ p }) => (
         <>
           {canDev(p) && <button type="button" className="small-btn" title="방출하지 않고 육성선수로 돌립니다 (정원에서 빠지고, 시즌 중 5월 1일부터 정식 등록)" onClick={() => act(session.toDev(p.id))}>육성 전환</button>}{' '}
@@ -1022,12 +1024,12 @@ function ReleasePanel({ act }: { act: Act }) {
   const devRows = devPool.slice(0, 40).map((p) => ({ p, i: info(p) }));
   const devCols: Column<(typeof devRows)[number]>[] = [
     nameCol(virtualTag), ...baseCols('잠재(평가)'),
-    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(r.p.id))}>육성 영입</button> },
+    { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(r.p.id))}>육성 영입</button> },
   ];
   const claimRows = claimable.map((p) => ({ p, i: info(p), from: session.offseason!.released!.find((r) => r.id === p.id)!.from }));
   const claimCols: Column<(typeof claimRows)[number]>[] = [
     nameCol(virtualTag), teamCol(names, (r) => r.from, '방출 구단'), ...baseCols(),
-    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" onClick={() => act(session.claim(r.p.id))}>영입</button> },
+    { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" onClick={() => act(session.claim(r.p.id))}>영입</button> },
   ];
   return (
     <section className="stack">
