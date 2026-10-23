@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, injuryProneness, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { AUTO_IBB_YEAR, eraPitching } from './eras';
+import { AUTO_IBB_YEAR, eraPitching, withEraRunning } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -315,8 +315,10 @@ export class Season {
   private condDay = -1;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
-  constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
+  constructor(world: World, baseParams: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
     this.world = world;
+    // 시대별 주루·병살·희생플라이·도루 배율 (엔진 2 13단계)을 여기서 한 번 곱한다. 아래 params는 모두 그 해 값
+    const params = withEraRunning(baseParams, world.year);
     this.params = params;
     this.seed = rng.seed;
     this.cal = cal;

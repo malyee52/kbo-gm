@@ -164,6 +164,20 @@ export interface Manager2Params {
   setup: number;
 }
 
+/** 시대별 주루·병살·희생플라이·도루 배율 한 줄 (엔진 2 13단계). 현대 값(params의 기본값)에 곱한다 */
+export interface EraRunning {
+  /** 기준 해 (검증 도구로 맞춘 해) */
+  year: number;
+  /** 병살 기본 확률 배율 */
+  dp: number;
+  /** 희생플라이 기본 확률 배율 */
+  sf: number;
+  /** 도루 시도 배율 */
+  steal: number;
+  /** 주자 추가 진루(단타 1루→3루·2루→홈, 2루타 1루→홈) 확률 배율 */
+  adv: number;
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -307,6 +321,11 @@ export interface EngineParams {
   twoOutBonus: number;
   /** 도루 시도 배율: 선수의 "1루 출루당 시도율"을 타석 기회당 확률로 바꾸는 값 */
   stealScale: number;
+  /**
+   * 시대별 주루·병살·희생플라이·도루 배율 (엔진 2 13단계, eras.ts withEraRunning). year 오름차순 기준 해의 값이고, 사이 해는 앞뒤 기준 해를
+   * 선으로 잇고 처음보다 앞·끝보다 뒤는 그 끝 값을 쓴다. 비어 있으면 모두 1. 시즌을 열 때 doublePlay·sacFly·stealScale과 주자 추가 진루 확률(firstToThirdOnSingle·secondToHomeOnSingle·firstToHomeOnDouble)에 곱한다
+   */
+  eraRunning: EraRunning[];
 
   // ---- 선수 기용
   /**
@@ -613,6 +632,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   firstToHomeOnDouble: 0.58,
   twoOutBonus: 0.15,
   stealScale: 1.2,
+  eraRunning: [],
 
   restChance: 0.6,
   catcherRestChance: 0.6,
