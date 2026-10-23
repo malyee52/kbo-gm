@@ -5,6 +5,7 @@
 
 쓰는 것 (data-src/wiki/, 견본은 저장소 밖 견본 폴더):
   인적사항.csv        우리 자료가 빈 인적 사항 → 채울 값 (선수ID, 이름, 항목, 값, 출처, 문서 제목, 받은 날짜)
+                      게임에 쓸 일이 없는 긴 글 항목(LONG_ITEMS)은 저장소 밖 ~/kbo-gm-raw/정리/인적사항_긴글.csv로 (같은 열)
   인적사항_차이.csv   우리 값이 있는데 위키·나무 값이 다른 것 (자동 반영 안 함, 짝 확인용)
   기록_채움후보.csv   우리 시즌 기록의 빈 칸(또는 빈 행)을 위키·나무 값으로 채울 후보
   기록_차이.csv       우리 값과 다른 칸 (비슷해도 모두) — 자동 반영 금지, 사용자 확인용
@@ -136,6 +137,11 @@ def page_url(src, title):
     return N.source_url(title)
 
 
+# 인적 사항 중 게임 자료에 칸이 없고 글이 긴 항목: 저장소에 올리지 않고 정리 폴더에 둔다 (2026-10-23 카드).
+# 출신 학교(고졸·대졸)·입단 연도·키·몸무게처럼 게임이 쓸 수 있는 것은 인적사항.csv에 남긴다.
+LONG_ITEMS = {'소속팀', '첫 출장', '마지막 경기', '지도자', '출신지', '응원가', '연봉', '계약', '드래프트', '프로 입단'}
+
+
 def write_note(note_dir, p, exs):
     safe = re.sub(r'[\\/:*?"<>|]', '_', p['name'])
     f = note_dir / '선수' / f'{p["id"]}_{safe}.md'
@@ -239,7 +245,9 @@ def main():
         if narr:
             write_note(note_dir, p, narr)
 
-    C.write_csv(out_dir / '인적사항.csv', ['선수ID', '이름', '항목', '값', '출처', '문서 제목', '받은 날짜'], prof_rows)
+    prof_head = ['선수ID', '이름', '항목', '값', '출처', '문서 제목', '받은 날짜']
+    C.write_csv(out_dir / '인적사항.csv', prof_head, [r for r in prof_rows if r[2] not in LONG_ITEMS])
+    C.write_csv(note_dir / '인적사항_긴글.csv', prof_head, [r for r in prof_rows if r[2] in LONG_ITEMS])
     C.write_csv(out_dir / '인적사항_차이.csv', ['선수ID', '이름', '항목', '우리 값', '위키 값', '위키데이터 값', '나무 값'], prof_diff)
     C.write_csv(out_dir / '기록_채움후보.csv',
                 ['선수ID', '이름', '연도', '구단', '구분', '항목', '우리 값', '위키 값', '나무 값', '채울 값', '채울 출처'], fill_rows)

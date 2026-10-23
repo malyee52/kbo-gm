@@ -39,7 +39,7 @@
 | `data-src/wiki/` | `짝.csv`, `인적사항.csv`, `인적사항_차이.csv`, `기록_채움후보.csv`, `기록_차이.csv`, `출처.csv` (설명은 `data-src/wiki/README.md`) | 올림 (가공값) |
 | `C:/Users/ararp/kbo-gm-raw/wiki/` | `sparql/` 위키데이터 질의 결과, `pages/` 위키백과 원문 캐시, `요청기록.log` | 올리지 않음 |
 | `C:/Users/ararp/kbo-gm-raw/namuwiki/` | `namu-md.sqlite` 덤프, `문서/` 짝 맞은 문서 캐시 | 올리지 않음 |
-| `C:/Users/ararp/kbo-gm-raw/정리/` | `짝_애매.csv`, `위키_못받음.csv`, `추출/`(4단계 중간값), `선수/<선수ID>_<이름>.md` 서술 요점 노트, `목차.md`, `기록_확인_209.csv`(끝 열 '고름'에 우리/위키) | 올리지 않음 |
+| `C:/Users/ararp/kbo-gm-raw/정리/` | `짝_애매.csv`, `위키_못받음.csv`, `추출/`(4단계 중간값), `선수/<선수ID>_<이름>.md` 서술 요점 노트, `목차.md`, `인적사항_긴글.csv`(게임에 안 쓰는 긴 글 항목), `기록_확인_209.csv`(끝 열 '고름'에 우리/위키) | 올리지 않음 |
 | `reports/` | `wiki-diff.md`, `wiki-diff-209.md` | 올림 |
 
 다시 돌리면 받은 원문·질의 결과는 캐시에서 읽고 새로 받지 않는다 (이어 받기). 위키데이터 질의를 새로 하려면 `s1_match.py --refresh-sparql`.
