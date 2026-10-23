@@ -9,7 +9,7 @@
 
 import type { ParkEvents } from '../data/types';
 import { Rng } from '../engine';
-import { realParkAt, realParkOpening } from './ballparks';
+import { realParkAt, realParkOpening, realParkRename } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
 
 // ---- 구장
@@ -273,6 +273,13 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
       if (real.dome) s.dome = true; else delete s.dome;
       if (real.checked) delete s.unchecked; else s.unchecked = true;
       out.push(`${league.teams[t].name}, ${year + 1} 시즌부터 ${real.name}${real.planned ? ' (실제 계획)' : ''} 사용 (${real.capacity.toLocaleString()}석${real.dome ? ', 돔' : ''})`);
+    } else if (!(s.done ?? []).some((d) => d.kind === 'new')) {
+      // 자료(parks.json)에서 구장이 바뀌었지만 옮기는 해가 아닌 경우: 이름·확인 표시만 (시설·좌석·돔은 그대로, ballparks.ts)
+      const renamed = realParkRename(league.teams[t].franchise, year + 1);
+      if (renamed && renamed.name !== s.name) {
+        s.name = renamed.name;
+        if (renamed.checked) delete s.unchecked; else s.unchecked = true;
+      }
     }
     // AI 신구장: 오래되고 낡은 구장, 자금이 넉넉하면 (지자체 표준 분담, 중립 구장. 연고 시장이 크면 큰 구장)
     const age = year + 1 - (s.opened ?? realParkAt(league.teams[t].franchise, year)?.from ?? league.startYear);

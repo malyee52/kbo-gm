@@ -289,6 +289,56 @@ export interface DataStore {
   defense?: DefenseData;
   /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
   pitches?: PitchData;
+  /** 실제 구장 제원 기간과 구단 계보별 주 구장 (parks.json, 구장효과 기획안 7.1·7.2). league/ballparks.ts가 구장 이름·좌석·돔·이전 해를 읽는다 (경기 배율은 아직 meta.parkFactors·parkEvents만). 없으면 ballparks.ts의 코드 안 표 */
+  parks?: ParkData;
+}
+
+/**
+ * parks.json (tools/build_data.py build_parks ← data-src/구장.csv · 구장_사용.csv, 나무위키 덤프 가공값).
+ * specs: 구장 × 제원 기간. 펜스 거리·높이가 바뀐 해마다 행이 나뉜다. use: 구단 계보 × 구장 × 기간 (제2구장 행은 없다).
+ */
+export interface ParkData {
+  version: number;
+  specs: ParkSpec[];
+  use: ParkUse[];
+}
+
+export interface ParkSpec {
+  /** 구장 ID (이름이 바뀌어도 같은 구장이면 같다) */
+  id: string;
+  /** 그 기간의 이름 */
+  name: string;
+  city: string;
+  from: number;
+  /** null이면 지금까지 */
+  to: number | null;
+  /** 앞 행과 다른 것: 없음 = 좌석·이름·잔디만, 펜스 = 펜스 거리·높이만, 리모델링 = 좌석·지붕·그라운드까지 큰 공사 (결정 14) */
+  change: '없음' | '펜스' | '리모델링';
+  /** 값이 있으면 그 구단 홈 경기에만 쓰는 제원 (실제 역사의 가벽, 잠실 X-존). null이면 그 구장을 쓰는 모든 구단 */
+  franchise: string | null;
+  seats: number | null;
+  /** 펜스 거리 (m): 좌·좌중·중·우중·우. 빈 칸 null */
+  fence: { l: number | null; lc: number | null; c: number | null; rc: number | null; r: number | null };
+  /** 펜스 높이 (m): 좌우·중앙 */
+  height: { lr: number | null; c: number | null };
+  turf: { infield: string | null; outfield: string | null };
+  dome: boolean;
+  source: string;
+  /** '출처 확인' | '미확인' */
+  confirmed: string;
+  note: string;
+}
+
+export interface ParkUse {
+  franchise: string;
+  park: string;
+  from: number;
+  to: number | null;
+  /** 주 = 주 구장, 계획 = 아직 열지 않은 실제 계획 */
+  kind: '주' | '계획';
+  source: string;
+  confirmed: string;
+  note: string;
 }
 
 /**

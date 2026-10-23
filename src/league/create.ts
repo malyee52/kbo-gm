@@ -14,8 +14,9 @@ import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
+import { useParkData } from './ballparks';
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'> & Partial<Pick<DataStore, 'parks'>>;
 
 /** 1군 연차로 치는 시즌: 100타석 또는 상대 타자 100명 이상 (임시값. 실제 등록일수 자료가 없다) */
 function servedSeason(idx: CareerIndex, id: string, year: number): boolean {
@@ -53,6 +54,8 @@ export function openingForeigners(store: Pick<DataStore, 'meta'>, year: number):
  * 같은 데이터·시드면 같은 결과가 나온다.
  */
 export function createLeague(store: Store, startYear: number, seed: string, params: EngineParams = DEFAULT_PARAMS): CreatedLeague {
+  // 실제 구장 이름·좌석 (parks.json). 자료가 없는 store면 지금 쓰는 표를 그대로 둔다
+  if (store.parks) useParkData(store.parks);
   const recorded = worldForYear(store, startYear, params);
   const ctx = valueContext(recorded);
   const opening = openingForeigners(store, startYear);

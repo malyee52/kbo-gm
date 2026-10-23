@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type PitchData, type PlayerMaster, type PpaData, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlayerMaster, type PpaData, type RawSeason, type SeasonData } from './types';
 
 export type { DataStore } from './types';
 
@@ -29,6 +29,7 @@ export function loadDataStore(): DataStore {
     ppa: existsSync(join(DATA_DIR, 'ppa.json')) ? read<PpaData>('ppa.json') : undefined,
     defense: existsSync(join(DATA_DIR, 'defense.json')) ? read<DefenseData>('defense.json') : undefined,
     pitches: existsSync(join(DATA_DIR, 'pitches.json')) ? read<PitchData>('pitches.json') : undefined,
+    parks: existsSync(join(DATA_DIR, 'parks.json')) ? read<ParkData>('parks.json') : undefined,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);

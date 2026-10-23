@@ -14,11 +14,12 @@ import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
+import { useParkData } from './ballparks';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'parks'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -60,6 +61,8 @@ export function isFuturesTeam(league: Pick<LeagueState, 'expansions'>, team: num
  * 슬럼프는 능력을 그 시즌만 옮기고, 넘어온 부상·병역 복귀는 개막부터의 결장(startAbsent)이 된다.
  */
 export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS, opts: WorldOptions = {}): World {
+  // 불러온 게임도 실제 구장 이름·좌석을 자료에서 (create.ts와 같다)
+  if (store.parks) useParkData(store.parks);
   const form = opts.form ?? true;
   const year = league.year;
   const data = store.season(year);
