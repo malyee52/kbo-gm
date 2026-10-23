@@ -48,7 +48,7 @@ export function Standings() {
       </div>
       {divs && view !== 'futures' && <p className="muted small">
         {session.world.year}년은 {divs.map((d) => d.name).join('·')} 양대 리그입니다. 각 리그 1·2위가 가을야구에 나가고, 한 리그 3위의 승률이 다른 리그 2위보다 높으면 둘이 준플레이오프를 치릅니다.
-        {semi.size > 0 && ` 지금 순위로는 ${[...semi].map((t) => session.world.teams[t].name).join('·')}이(가) 준플레이오프에 해당합니다.`}
+        {semi.size > 0 && ` 지금 순위로는 준플레이오프 조건이 걸립니다: ${[...semi].map((t) => session.world.teams[t].name).join(' 대 ')}.`}
       </p>}
       {view !== 'futures' && <div className="scroll">
         <table>
