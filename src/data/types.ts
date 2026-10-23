@@ -321,7 +321,13 @@ export interface ManagerInfo {
    */
   push?: number;
   pen?: number;
-  byYear?: Record<string, { push: number; pen: number }>;
+  /**
+   * 엔진 2 13단계, 같은 자료: ibb = 팀 고의4구 ÷ 상대 타석을 2023~2025 리그 합친 비율로 나눈 값 (해마다 리그 수준 차이를 담는다),
+   * cond = 팀 선발 라인업 변동(전 경기와 바뀐 선발 수) ÷ 그 해 리그 ('컨디션 반영' 대리값). 평균은 push·pen처럼 당긴 값
+   */
+  ibb?: number;
+  cond?: number;
+  byYear?: Record<string, { push: number; pen: number; ibb?: number; cond?: number }>;
 }
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */

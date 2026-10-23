@@ -48,7 +48,7 @@ describe('감독 성향 (엔진 2 10단계)', () => {
 
   it('가상 감독: 이름으로 정한 값 (같은 이름은 늘 같다)', () => {
     for (const name of ['가상감독가', '가상감독나']) {
-      for (const k of ['hook', 'pen'] as const) {
+      for (const k of ['hook', 'pen', 'cond', 'ibb'] as const) {
         const v = virtualTactic(name, k);
         expect(v).toBeGreaterThanOrEqual(VIRTUAL_RANGE[k][0]);
         expect(v).toBeLessThanOrEqual(VIRTUAL_RANGE[k][1]);
@@ -88,6 +88,23 @@ describe('고의4구 (엔진 2 10단계)', () => {
 
   it('같은 시드는 같은 고의4구·전진 수비·원포인트', () => {
     expect(play(w2025, DEFAULT_PARAMS, 'mgr2-same', 10).pen).toEqual(play(w2025, DEFAULT_PARAMS, 'mgr2-same', 10).pen);
+  });
+  it('감독 성향 고의4구 빈도 (엔진 2 13단계): 0이면 고의4구가 없고, 클수록 잦다. 실존 감독은 그 해 구단 값', () => {
+    const t = (ibb: number) => () => ({ ...NEUTRAL_TACTICS, ibb });
+    expect(play(w2025, IBB_HEAVY, 'ibb-tend', 8, t(0)).pen.ibb).toBe(0);
+    const lo = play(w2025, DEFAULT_PARAMS, 'ibb-tend', 20, t(0.5)).pen.ibb;
+    const hi = play(w2025, DEFAULT_PARAMS, 'ibb-tend', 20, t(2)).pen.ibb;
+    expect(hi).toBeGreaterThan(lo * 2);
+    const info = infoOf(store, '이강철')!;
+    expect(tacticsOf(info, '이강철', 2025).ibb).toBeCloseTo(info.byYear!['2025'].ibb!, 3);
+    expect(tacticsOf(info, '이강철').ibb).toBeCloseTo(info.ibb!, 3);
+    // 2023~2025 구단 값을 합친 기준이라 리그 고의4구가 적었던 2024는 평균이 1보다 작다
+    const mean = (y: string) => {
+      const vs = Object.values(store.managers!.people).map((i) => i.byYear?.[y]?.ibb).filter((v): v is number => v !== undefined);
+      return vs.reduce((a, b) => a + b, 0) / vs.length;
+    };
+    expect(mean('2024')).toBeLessThan(0.95);
+    expect(mean('2025')).toBeGreaterThan(1.05);
   });
 });
 

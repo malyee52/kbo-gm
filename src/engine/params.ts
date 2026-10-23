@@ -143,7 +143,7 @@ export interface SubParams {
   defGain: number;
 }
 
-/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv에 맞춤) */
+/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv 세 해 평균에 맞춤: 10단계 0.3, 13단계 감독 성향 고의4구 빈도를 넣으며 0.26) */
 export interface Manager2Params {
   /**
    * 고의4구: 1루가 비고 득점권 주자, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 gap 이상 높을 때 확률 rate × 아웃별 배율(outs) × (후반 접전이 아니면 early).
@@ -498,7 +498,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     pitches: [0.509, 0.301, 0.142, 0.038, 0.01] },
   sub: { phInning: 7, phMaxDiff: 3, phGain: 0.02, prInning: 8, prMaxDiff: 2, prSlow: 0.4, prGap: 0.25, defInning: 7, defGain: 8 },
   mgr: {
-    ibb: { rate: 0.3, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
+    ibb: { rate: 0.26, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
     infieldIn: { inning: 7, maxLead: 1, rate: 0.8, hit: 0.1, score: 0.4 },
     onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
     setup: 2,
