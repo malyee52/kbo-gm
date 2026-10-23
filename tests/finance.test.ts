@@ -241,6 +241,9 @@ describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 
       g.advance(100000);
       g.beginOffseason();
       for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
+        // 시드에 따라 해고될 수 있다: 첫 영입 제의를 받아들이고 이어 간다
+        const offers = g.league.owner?.offers;
+        if (offers?.length) g.acceptOffer(offers[0]);
         const st = g.offseason!.stage;
         if (st === 'draft') g.autoDraft(); if (st === 'comp') g.autoComp(); if (st === 'release') g.autoRelease();
         g.nextStage();
