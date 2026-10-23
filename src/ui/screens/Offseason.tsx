@@ -189,7 +189,8 @@ export function Offseason() {
       {off.stage === 'release' && <ReleasePanel act={act} />}
       {off.stage === 'ready' && <ReadyCard busy={busy} onOpen={() => void open()} />}
       {off.stage === 'ready' && <CapRulesPanel act={act} />}
-      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
+      {/* 단장 회의 중에는 FA 대상을 아직 몰라 다년 계약 후보가 없다 (offseason.ts extensionCandidates) */}
+      {off.stage !== 'ready' && off.stage !== 'vote' && <ExtensionPanel act={act} />}
       {off.stage !== 'ready' && (
         <section className="off-next" aria-label="남은 처리">
           <div className="off-left">
@@ -315,7 +316,11 @@ const pushWord = (p: number) => (p > PUSH_EDGE ? '찬성 쪽' : p < -PUSH_EDGE ?
 /** 실무진 추천 까닭: 가장 크게 민 지표 둘 (명분·현상 유지는 모든 구단에 같아서 뺀다) */
 function adviceReason(parts: InterestPart[], advice: VoteChoice): string {
   const top = parts.filter((p) => (advice === 'yes' ? p.push > PUSH_EDGE : p.push < -PUSH_EDGE)).sort((a, b) => Math.abs(b.push) - Math.abs(a.push)).slice(0, 2);
-  if (!top.length) return '우리 구단 사정이 리그 평균과 비슷해 리그 전체 명분대로';
+  if (!top.length) {
+    // 우리 사정은 반대쪽이거나 중간인데 리그 전체 명분·현상 유지가 더 크다
+    const against = parts.some((p) => (advice === 'yes' ? p.push < -PUSH_EDGE : p.push > PUSH_EDGE));
+    return against ? `우리 구단 사정은 ${advice === 'yes' ? '반대' : '찬성'} 쪽이지만 리그 전체 명분이 더 커서` : '우리 구단 사정이 리그 평균과 비슷해 리그 전체 명분대로';
+  }
   return top.map((p) => `${FACT_LABEL[p.key]} ${p.of}개 구단 중 ${p.rank}위`).join(', ');
 }
 
