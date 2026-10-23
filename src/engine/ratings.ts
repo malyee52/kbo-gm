@@ -30,6 +30,8 @@ export interface Weighted<T> {
   aging?: Partial<Record<string, number>>;
   /** 그 시즌 소속 구단의 시즌 단위 구장 효과 (seasonPark). 없으면 중립 */
   park?: SeasonPark;
+  /** 그 시즌 리그 도루 성공률 (도루 실패 기록이 없는 해만, params.sbPctByYear). 도루 시도 수 추정에 쓴다. 없으면 0.7 */
+  sbPct?: number;
 }
 
 /** 시즌 단위 구장 효과: run = (1 + 홈 구장 계수) / 2, ev = 사건별 홈 구장 배율 (있으면 사건마다 (1 + 배율) / 2로 쓴다) */
@@ -87,15 +89,15 @@ export function batSkillFrom(rows: Weighted<BatRow>[], priors: Rates, p: EngineP
   }
   skill.sample = rows.reduce((s, x) => s + x.w * x.row.pa, 0);
 
-  // 도루: 1루 출루(단타+볼넷+사구)당 시도율. 도루 실패 기록이 없으면 성공률 70%로 시도 수를 추정
+  // 도루: 1루 출루(단타+볼넷+사구)당 시도율. 도루 실패 기록이 없으면 그 해 리그 성공률(없으면 70%)로 시도 수를 추정
   let att = 0;
   let onFirst = 0;
   let sb = 0;
   let known = 0;
-  for (const { row, w } of rows) {
+  for (const { row, w, sbPct } of rows) {
     if (row.sb === null) continue;
     const times = row.h - row.d - row.t - row.hr + (row.bb ?? 0) + (row.hbp ?? 0);
-    const a = row.cs !== null ? row.sb + row.cs : row.sb / DEFAULT_SB_PCT;
+    const a = row.cs !== null ? row.sb + row.cs : row.sb / (sbPct ?? DEFAULT_SB_PCT);
     att += w * a;
     onFirst += w * times;
     if (row.cs !== null) {
@@ -436,10 +438,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = rateBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null) });
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null), sbPct: params.sbPctByYear[s.year] });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
-        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null) });
+        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null), sbPct: params.sbPctByYear[current.year] });
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);

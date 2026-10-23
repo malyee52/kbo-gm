@@ -176,6 +176,11 @@ export interface EraRunning {
   steal: number;
   /** 주자 추가 진루(단타 1루→3루·2루→홈, 2루타 1루→홈) 확률 배율 */
   adv: number;
+  /**
+   * 실책 배율: 그 해 실책 출루 값(LeagueEnv.roe = roePerUnearnedShare × 비자책 비율)에 곱한다. 실책 출루와 모든 실책 확률이 roe를 따른다.
+   * 2001~2026은 리그 경기당 실책이 비자책 비율에 비례해(약 15.6배) 1이고, 2000년 이전은 비자책 비율이 실책보다 높아 1보다 작다
+   */
+  err: number;
 }
 
 export interface EngineParams {
@@ -292,6 +297,12 @@ export interface EngineParams {
   groundBallShare: number;
   /** 그 해 리그의 아웃 타구 땅볼 몫 (임시값, 출처 미확인: data-src/batted_ball_derived/batted_ball.csv gb_share_of_gb_fb) */
   groundBallShareByYear: Record<number, number>;
+  /**
+   * 도루 실패 기록이 없는 해(1982~2002, 자료집 선수 행에 cs가 비었다)의 리그 도루 성공률 (엔진 2 13단계).
+   * 가공값: FM코리아 "KBO 타자 기록 DB (1982-2024)" 리그타자 시트의 도루 ÷ (도루 + 도루실패). 원본은 저장소에 두지 않는다.
+   * 쓰는 곳: 그 시즌 선수 도루 시도 수 추정(시도 = 도루 ÷ 이 값, 없으면 0.7)과 그 해 리그 도루 환경(LeagueEnv.sbPct, 선수 기록에서 낼 수 없을 때)
+   */
+  sbPctByYear: Record<number, number>;
   /** 인플레이 아웃 처리 (rules.ts, 엔진 2 6단계): 병살·포스·진루·희생플라이를 타구 유형·자리·주력·어깨로 */
   play: PlayParams;
   /** 타구 모형 (battedball.ts, 엔진 2 5단계) */
@@ -507,7 +518,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   },
   wildPitchScale: 2,
   wildPitchDefault: 0.012,
-  sacBuntScale: 16,
+  // 16 → 17.6 (엔진 2 13단계, 2026-10-23): 희생번트가 전 시대 −6~−15%였다 (2012 −15.3%, 2025 −7.3%, 1995 −13.8%)
+  sacBuntScale: 17.6,
   run: {
     thirdShare: 0.15, thirdPct: 0, double: 0.5,
     leftyAttempt: 0.85, leftyPct: -0.03, rightyPct: 0.01, pickoff: 0.002, leftyPickoff: 1.5,
@@ -527,6 +539,11 @@ export const DEFAULT_PARAMS: EngineParams = {
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
   groundBallShare: 0.52,
+  sbPctByYear: {
+    1982: 0.692, 1983: 0.587, 1984: 0.607, 1985: 0.603, 1986: 0.581, 1987: 0.615, 1988: 0.651, 1989: 0.644,
+    1990: 0.619, 1991: 0.622, 1992: 0.654, 1993: 0.642, 1994: 0.653, 1995: 0.690, 1996: 0.632, 1997: 0.646,
+    1998: 0.649, 1999: 0.687, 2000: 0.675, 2001: 0.663, 2002: 0.657,
+  },
   groundBallShareByYear: {
     2010: 0.5489, 2011: 0.5304, 2012: 0.5402, 2013: 0.5329, 2014: 0.5222, 2015: 0.5362, 2016: 0.5233, 2017: 0.5214,
     2018: 0.5131, 2019: 0.5156, 2020: 0.5031, 2021: 0.5182, 2022: 0.5343, 2023: 0.5114, 2024: 0.4995, 2025: 0.5247, 2026: 0.5124,
@@ -632,7 +649,19 @@ export const DEFAULT_PARAMS: EngineParams = {
   firstToHomeOnDouble: 0.58,
   twoOutBonus: 0.15,
   stealScale: 1.2,
-  eraRunning: [],
+  // 엔진 2 13단계 (2026-10-23, 모두 임시값): tools/validate_engine.ts 20~40시즌으로 1985·1990·1995 득점 ±5%, 병살·희생플라이(온전한 구단) ±10%,
+  // 2012·2019 병살·희생플라이·도루를 맞춘 값. 실책(err)은 근거가 있다: 2001~2026은 사용자 수비 기록(리그 실책 합)이 비자책 비율에 비례하고,
+  // 2000년 이전은 기사의 경기당 실책(1984 1.7개, 1990년대 1.5개대, OSEN 2023-04-18 등, docs/temp-values.md)이 그 비례식(1985 2.3개)보다 적다.
+  // 추가 진루(adv) 1985 0.8은 근거 없이 득점을 맞춘 값이다
+  eraRunning: [
+    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71 },
+    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79 },
+    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83 },
+    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1 },
+    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1 },
+    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1 },
+    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1 },
+  ],
 
   restChance: 0.6,
   catcherRestChance: 0.6,

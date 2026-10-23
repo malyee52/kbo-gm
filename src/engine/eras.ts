@@ -1,4 +1,5 @@
 import type { EngineParams, EraRunning } from './params';
+import type { LeagueEnv, World } from './types';
 
 // 시대별 투수 기용 (M8). 2000년 이전 KBO는 선발 4인 로테이션에 에이스가 길게 던지고 구원도 겸했다.
 // 5인 로테이션을 모든 시대에 쓰면 1985년 득점이 실제보다 11% 높고 상위 5명 투수의 이닝 비중이 0.56(실제 0.77)에 그친다.
@@ -39,7 +40,7 @@ export function eraPitching(year: number): EraPitching {
 /** 자동 고의4구 (공 없이) 도입 해: 2018년 (조사값, docs/경기엔진2_기획안.md 3.10.1). 그 전은 공 4개를 실제로 던지는 수동 고의4구 */
 export const AUTO_IBB_YEAR = 2018;
 
-const NO_ERA_RUNNING: EraRunning = { year: 0, dp: 1, sf: 1, steal: 1, adv: 1 };
+const NO_ERA_RUNNING: EraRunning = { year: 0, dp: 1, sf: 1, steal: 1, adv: 1, err: 1 };
 
 /** 그 해의 주루·병살·희생플라이·도루 배율 (params.eraRunning 기준 해 사이는 선으로 잇는다, 비어 있으면 모두 1) */
 export function eraRunningOf(params: EngineParams, year: number): EraRunning {
@@ -50,13 +51,16 @@ export function eraRunningOf(params: EngineParams, year: number): EraRunning {
     const a = rows[i - 1], b = rows[i];
     if (year > b.year) continue;
     const w = (year - a.year) / (b.year - a.year);
-    const mix = (k: 'dp' | 'sf' | 'steal' | 'adv') => a[k] + (b[k] - a[k]) * w;
-    return { year, dp: mix('dp'), sf: mix('sf'), steal: mix('steal'), adv: mix('adv') };
+    const mix = (k: 'dp' | 'sf' | 'steal' | 'adv' | 'err') => a[k] + (b[k] - a[k]) * w;
+    return { year, dp: mix('dp'), sf: mix('sf'), steal: mix('steal'), adv: mix('adv'), err: mix('err') };
   }
   return rows[rows.length - 1];
 }
 
-/** 그 해의 시대 배율을 곱한 조정값 (엔진 2 13단계). 시즌을 열 때 한 번 부른다. 배율이 모두 1이면 받은 객체를 그대로 돌려준다 */
+/**
+ * 그 해의 시대 배율을 곱한 조정값 (엔진 2 13단계). 시즌을 열 때 한 번 부른다. 배율이 모두 1이면 받은 객체를 그대로 돌려준다.
+ * 실책 배율(err)은 조정값이 아니라 리그 환경(env.roe)에 곱하므로 여기서 다루지 않는다 (Season 생성자)
+ */
 export function withEraRunning(params: EngineParams, year: number): EngineParams {
   const e = eraRunningOf(params, year);
   if (e.dp === 1 && e.sf === 1 && e.steal === 1 && e.adv === 1) return params;
@@ -70,4 +74,10 @@ export function withEraRunning(params: EngineParams, year: number): EngineParams
     secondToHomeOnSingle: adv(params.secondToHomeOnSingle),
     firstToHomeOnDouble: adv(params.firstToHomeOnDouble),
   };
+}
+
+/** 그 해의 실책 배율(err)을 곱한 리그 환경 (엔진 2 13단계). 배율이 1이면 월드의 환경 그대로 */
+export function eraEnv(world: Pick<World, 'year' | 'env'>, params: EngineParams): LeagueEnv {
+  const err = eraRunningOf(params, world.year).err;
+  return err === 1 ? world.env : { ...world.env, roe: world.env.roe * err };
 }

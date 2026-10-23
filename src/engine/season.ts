@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, injuryProneness, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { AUTO_IBB_YEAR, eraPitching, withEraRunning } from './eras';
+import { AUTO_IBB_YEAR, eraEnv, eraPitching, withEraRunning } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -342,13 +342,15 @@ export class Season {
     this.gamesRoot = rng.fork('games');
     this.condRoot = rng.fork('cond');
     this.ctx = {
-      league: world.league, env: world.env, cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
+      league: world.league, env: eraEnv(world, baseParams), cal, params, maxInnings: world.rules.maxInnings, day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
       errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
       autoIbb: world.year >= AUTO_IBB_YEAR,
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
-    this.ctx.sbShift = sbShiftOf(world.players, world.env);
+    // 도루 실패 기록이 없는 해(params.sbPctByYear)는 그 표의 리그 성공률에 맞춘다 (엔진 2 13단계. 2002년처럼 몇 행만 있는 해도 표가 앞선다)
+    const sbEra = params.sbPctByYear[world.year];
+    this.ctx.sbShift = sbShiftOf(world.players, sbEra !== undefined ? { ...world.env, sbPct: sbEra } : world.env);
     // 실제 한계 투구 수 배율 (기획안 4.6, 엔진 2 11단계): 리그 시드·선수 ID 해시로 [1 − realSpread, 1 + realSpread] 고르게. 난수를 쓰지 않는다.
     // 저장·짐작 문구·리그 상태 보관은 16단계 (숨은 능력)
     this.hiddenSeed = init.hiddenSeed ?? this.seed;
