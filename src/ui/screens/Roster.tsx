@@ -9,6 +9,7 @@ import { seasonWar } from '../../league/awards';
 import { runsGrade } from '../grades';
 import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
+import { worldParkFactor } from '../../game/parkView';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
 import {
   babip, bbPct, bbPerK, fip, int0, iso, kPct, leagueBase, lobPct, pct1, per9, pitBabip, pitBbPct, pitKPct, sbPct, woba, wraa, wrcPlus,
@@ -79,6 +80,8 @@ export function Roster() {
 
   // 세이버 기록의 리그 기준값 (이번 시즌 리그 전체 시뮬레이션 기록)
   const lg = useMemo(() => leagueBase(session.season.bat, session.season.pit), [session, version]);
+  // wRC+ 구장 보정: 선수 소속 구단의 시즌 구장 계수 (경기에 쓰는 구장 배율 그대로, game/parkView.ts)
+  const pfOf = (p: SimPlayer) => worldParkFactor(session.world, p.teamIdx, lg.runsPerPa);
   // WAR (근사, league/awards.ts seasonWar)
   const war = useMemo(() => seasonWar(session.world, session.season), [session, version]);
   const warCol: Column = { h: 'WAR', title: '대체 선수보다 몇 승을 더 벌었나 (근사, 시상과 같은 계산)', v: (p) => (war.has(p.idx) ? war.get(p.idx)!.toFixed(1) : '-') };
@@ -263,7 +266,12 @@ export function Roster() {
       }
       return [
         warCol, bat('타석', (b) => b.pa), bat('wOBA', (b) => rate3(woba(b)), '가중 출루율: 타석 결과별 득점 가치로 가중한 출루율'),
-        bat('wRC+', (b) => int0(wrcPlus(b, lg)), '조정 득점 창출력: 100 = 리그 평균'),
+        { h: 'wRC+', title: '조정 득점 창출력: 100 = 리그 평균, 구장 보정 (칸에 마우스를 올리면 보정 전 → 후)', v: (p) => {
+          const b = B(p);
+          if (!b.pa) return '-';
+          const pf = pfOf(p);
+          return <span title={pf !== 1 ? `구장 보정 전 ${int0(wrcPlus(b, lg))} → 후 ${int0(wrcPlus(b, lg, pf))}` : undefined}>{int0(wrcPlus(b, lg, pf))}</span>;
+        } },
         bat('wRAA', (b) => fixed1(wraa(b, lg)), '리그 평균 타자보다 더 낸 득점'),
         bat('ISO', (b) => rate3(iso(b)), '순수 장타력: 장타율 - 타율'), bat('BABIP', (b) => rate3(babip(b)), '인플레이 타구 타율'),
         bat('볼넷%', (b) => pct1(bbPct(b))), bat('삼진%', (b) => pct1(kPct(b))), bat('BB/K', (b) => fixed2(bbPerK(b))),
@@ -322,7 +330,7 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
   };
   /** wRC+ (야수) 또는 -FIP (투수). 기록이 없으면 맨 뒤 */
   const saberOf = (p: SimPlayer): number => {
-    const v = kind === 'hit' ? wrcPlus(session.season.bat[p.idx], lg) : -fip(session.season.pit[p.idx], lg);
+    const v = kind === 'hit' ? wrcPlus(session.season.bat[p.idx], lg, worldParkFactor(session.world, p.teamIdx, lg.runsPerPa)) : -fip(session.season.pit[p.idx], lg);
     return Number.isFinite(v) ? v : -9999;
   };
   const by: Record<SortKey, (a: SimPlayer, b: SimPlayer) => number> = {

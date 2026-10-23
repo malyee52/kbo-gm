@@ -32,6 +32,7 @@ export {
   type Trait, type TraitParams, type Situation,
 } from './traits';
 export { eraPitching, leagueQuality, type EraPitching } from './eras';
+export { gameParkOf, parkIndexOf, runFactorOf, type ParkIndex } from './park';
 export { dateOfDay, postseasonMaxInnings, regularMaxInnings, winPctBy, winPctRuleOf, POSTSEASON_INNINGS_DEFAULT, type GameDayInfo, type WinPctRule } from './records';
 export type * from './types';
 

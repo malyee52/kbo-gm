@@ -269,7 +269,13 @@ export interface EngineParams {
    * 2026-10-22부터 하드힛 구장 표(2022~2025, 전체·좌타·우타)에 있는 구장은 사건별 배율(meta.parkEvents)을 쓰고, 이 지수는 표에 없는
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
-  park: { hitExp: number; hrExp: number; specFit: ParkSpecFit };
+  park: {
+    hitExp: number;
+    hrExp: number;
+    /** 사건별 득점 가치: 그 사건이 1개 더 날 때 느는 득점 (tools/park_run_value.ts). 사건별 배율이 내는 득점 계수를 셀 때만 쓴다 (park.ts runFactorOf) */
+    runValue: { s1: number; d2: number; t3: number; hr: number };
+    specFit: ParkSpecFit;
+  };
   /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (엔진 2 4단계) */
   fatiguePerPitch: number;
   /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
@@ -520,6 +526,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   park: {
     hitExp: 0.4,
     hrExp: 1.2,
+    // build_data.py PARK_RUN_VALUE와 같은 값 (tools/park_run_value.ts, 2025년 6시드). 3루타는 잰 값 0.47이 표본이 작아 2루타 값 (임시값)
+    runValue: { s1: 0.61, d2: 0.69, t3: 0.69, hr: 1.67 },
     // 자리값 (P4 reports/park-specs-fit.md, 하드힛 구성표 9곳): 평균 거리 식. 한 구장 빼고 맞히기 오차가 중립보다 커서
     // (홈런 log 0.350 대 0.255, (2루타 + 3루타) 0.132 대 0.088) 오차가 가장 작은 당김은 0 (= 중립)이지만, 사용자 결정 15
     // (2026-10-24, 기획안 4.3)로 옛 구장마다 다른 맛을 남기려고 C안 짐작을 그대로 쓴다: w 0.5 (임시값, w 0.5의 홈런 오차 0.302).

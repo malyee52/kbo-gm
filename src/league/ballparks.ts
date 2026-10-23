@@ -95,6 +95,14 @@ function shownAt(franchise: string, year: number): ParkShown | undefined {
   return { parkId: use.park, name: spec?.name ?? use.park, ...(spec?.seats != null ? { seats: spec.seats } : {}), checked: use.confirmed === '출처 확인' };
 }
 
+/** 그 해 그 구단 계보 주 구장의 제원 행 (구장 화면 정보 칸). 그 구단 홈 경기에만 쓰는 행(잠실 X-존)이 있으면 그 행. 자료가 없으면 undefined */
+export function realParkSpec(franchise: string, year: number): ParkSpec | undefined {
+  const shown = shownAt(franchise, year);
+  if (!parkData || !shown) return undefined;
+  const covers = (s: ParkSpec) => s.id === shown.parkId && s.from <= year && year <= (s.to ?? Infinity);
+  return parkData.specs.find((s) => covers(s) && s.franchise === franchise) ?? specAt(parkData, shown.parkId, year);
+}
+
 /** 코드 안 표의 행에 자료의 이름·좌석·확인을 덧씌운다 (그 해 자료가 없으면 표 그대로) */
 function withShown(p: RealPark, year: number): RealPark {
   const shown = shownAt(p.franchise, year);

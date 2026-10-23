@@ -18,6 +18,7 @@ import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
 import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
+import { realSeasonParkFactor, seasonParkFactor, worldParkFactor } from '../../game/parkView';
 
 export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
   const { session, grades, store, changed } = useGame();
@@ -41,24 +42,31 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   const decode = <T extends object>(empty: T, arr: number[]): T => Object.fromEntries(Object.keys(empty).map((k, i) => [k, arr[i] ?? 0])) as T;
   // 투타 겸업 (2026-10-13): 타격·투구 기록을 둘 다 모은다 (본업 쪽 표가 먼저, 반대쪽은 기록이 있을 때만)
   // 세이버 지표의 리그 기준값 (2026-10-22): 게임 안 시즌은 결산 때 남긴 값(예전 저장은 없음 → 표시 안 함), 실제 시즌은 자료집 리그 합계
-  type Hist = { label: string; bat?: BatLike; pit?: PitLike; lg: LeagueBase | null };
+  // 구장 보정 (구장효과 기획안 P2): 그 시즌 소속 구단의 시즌 구장 계수 pf (game/parkView.ts)
+  type Hist = { label: string; bat?: BatLike; pit?: PitLike; lg: LeagueBase | null; pf: number };
   const history: Hist[] = [year - 1, year - 2, year - 3].flatMap<Hist>((y) => {
     if (y >= start) {
-      return (lp?.history ?? []).filter((h) => h.year === y && (h.pit || h.bat)).map((h) => ({
-        label: `${y} ${h.team}`, lg: session.league.seasonSaber?.[String(y)] ?? null,
-        ...(h.pit ? { pit: decode(emptyPitLine(), h.pit) } : {}),
-        ...(h.bat ? { bat: decode(emptyBatLine(), h.bat) } : {}),
-      }));
+      return (lp?.history ?? []).filter((h) => h.year === y && (h.pit || h.bat)).map((h) => {
+        const lg = session.league.seasonSaber?.[String(y)] ?? null;
+        return {
+          label: `${y} ${h.team}`, lg,
+          pf: lg ? seasonParkFactor(store, session.league, h.team, y, { rates: session.world.league, rpa: lg.runsPerPa }) : 1,
+          ...(h.pit ? { pit: decode(emptyPitLine(), h.pit) } : {}),
+          ...(h.bat ? { bat: decode(emptyBatLine(), h.bat) } : {}),
+        };
+      });
     }
     const s = store.season(y);
     const pr = s?.pit.find((r) => r.id === p.id);
     const br = s?.bat.find((r) => r.id === p.id);
     if (!pr && !br) return [];
-    const label = `${y} ${(pr ?? br)!.team} (게임 전 실제)`;
-    return [{ label, lg: realLeagueBase(s!.league), ...(pr ? { pit: pitFromRow(pr as PitRow) } : {}), ...(br ? { bat: batFromRow(br as BatRow) } : {}) }];
+    const team = (pr ?? br)!.team;
+    const label = `${y} ${team} (게임 전 실제)`;
+    return [{ label, lg: realLeagueBase(s!.league), pf: realSeasonParkFactor(store, s!, team), ...(pr ? { pit: pitFromRow(pr as PitRow) } : {}), ...(br ? { bat: batFromRow(br as BatRow) } : {}) }];
   });
   // 이번 시즌 세이버 지표의 리그 기준 (시뮬 리그 전체 기록)
   const lgNow = leagueBase(session.season.bat, session.season.pit);
+  const pfNow = worldParkFactor(session.world, p.teamIdx, lgNow.runsPerPa);
   const batHist = history.filter((h) => h.bat && (h.bat.pa ?? 0) > 0);
   const pitHist = history.filter((h) => h.pit && ((h.pit as { bf?: number }).bf ?? (h.pit as { outs?: number }).outs ?? 0) > 0);
 
@@ -123,7 +131,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
             {!p.isPitcher && session.season.pit[p.idx].bf > 0 && <PitTable rows={[{ label: `${year} 투구`, l: session.season.pit[p.idx] }]} />}
             {p.isPitcher
               ? session.season.pit[p.idx].bf > 0 && <PitSaberTable rows={[{ label: String(year), l: session.season.pit[p.idx], lg: lgNow }]} />
-              : session.season.bat[p.idx].pa > 0 && <BatSaberTable rows={[{ label: String(year), l: session.season.bat[p.idx], lg: lgNow }]} />}
+              : session.season.bat[p.idx].pa > 0 && <BatSaberTable rows={[{ label: String(year), l: session.season.bat[p.idx], lg: lgNow, pf: pfNow }]} />}
           </div>
           {session.phase === 'season' && p.teamIdx >= 0 && (() => {
             const f = futuresText(session.futures().lines.get(p.idx));
@@ -173,7 +181,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
               ) : (
                 <>
                   {batHist.length > 0 && <BatTable rows={batHist.map((h) => ({ label: h.label, l: h.bat! }))} />}
-                  {batHist.length > 0 && <BatSaberTable rows={batHist.map((h) => ({ label: h.label, l: h.bat!, lg: h.lg }))} />}
+                  {batHist.length > 0 && <BatSaberTable rows={batHist.map((h) => ({ label: h.label, l: h.bat!, lg: h.lg, pf: h.pf }))} />}
                   {pitHist.length > 0 && <PitTable rows={pitHist.map((h) => ({ label: `${h.label} 투구`, l: h.pit! }))} />}
                 </>
               )}
@@ -375,7 +383,7 @@ function BatTable({ rows }: { rows: { label: string; l: BatLike }[] }) {
 
 // ---- 세이버 지표 (2026-10-22, 기획안 2.8): 실제 기록도 게임 기록도 같은 식(game/saber.ts)으로 직접 계산한다. 리그 상수는 그 해 리그 기록
 const SABER_TIP = {
-  wrc: 'wRC+: 득점 생산력. 100이 그 해 리그 평균, 120이면 평균보다 20% 더 낸다 (구장 보정 없음)',
+  wrc: 'wRC+: 득점 생산력. 100이 그 해 리그 평균, 120이면 평균보다 20% 더 낸다 (구장 보정: 타자 구장에서 낸 기록은 깎고 투수 구장은 올린다. 칸에 마우스를 올리면 보정 전 → 후)',
   woba: 'wOBA: 볼넷·안타 종류마다 득점 가치를 매긴 출루율 꼴 지표',
   iso: 'ISO: 순장타율 (장타율 - 타율)',
   babip: 'BABIP: 인플레이 타구 타율 (홈런·삼진 제외). 크게 높거나 낮으면 운이 섞였을 수 있다',
@@ -388,17 +396,19 @@ const SABER_TIP = {
   pbabip: '피BABIP: 인플레이 타구 피안타율 (희생타 기록이 없어 근사값)',
 } as const;
 
-function BatSaberTable({ rows }: { rows: { label: string; l: BatLike; lg: LeagueBase | null }[] }) {
+function BatSaberTable({ rows }: { rows: { label: string; l: BatLike; lg: LeagueBase | null; pf: number }[] }) {
   return (
     <table>
       <thead><tr><th className="l">시즌 (세이버)</th><th title={SABER_TIP.wrc}>wRC+</th><th title={SABER_TIP.woba}>wOBA</th><th title={SABER_TIP.iso}>ISO</th><th title={SABER_TIP.babip}>BABIP</th><th title={SABER_TIP.bb}>BB%</th><th title={SABER_TIP.k}>K%</th></tr></thead>
       <tbody>
-        {rows.map(({ label, l, lg }) => {
+        {rows.map(({ label, l, lg, pf }) => {
           const b = { ...l, cs: 0, gdp: 0, sac: 0 };
-          const w = lg ? wrcPlus(b, lg) : NaN;
+          const w = lg ? wrcPlus(b, lg, pf) : NaN;
+          const raw = lg ? wrcPlus(b, lg) : NaN;
           return (
             <tr key={label}>
-              <td className="l">{label}</td><td>{Number.isFinite(w) ? Math.round(w) : '-'}</td><td>{rate3(woba(b))}</td><td>{rate3(iso(b))}</td>
+              <td className="l">{label}</td>
+              <td title={Number.isFinite(w) && pf !== 1 ? `구장 보정 전 ${Math.round(raw)} → 후 ${Math.round(w)} (시즌 구장 계수 ${pf.toFixed(3)})` : undefined}>{Number.isFinite(w) ? Math.round(w) : '-'}</td><td>{rate3(woba(b))}</td><td>{rate3(iso(b))}</td>
               <td>{rate3(babip(b))}</td><td>{pct1(bbPct(b))}</td><td>{pct1(kPct(b))}</td>
             </tr>
           );

@@ -7,8 +7,8 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
-import type { ParkEvents } from '../data/types';
-import { Rng } from '../engine';
+import type { Meta, ParkEvents } from '../data/types';
+import { Rng, type SimTeam } from '../engine';
 import { realParkAt, realParkOpening, realParkRename } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
 
@@ -108,6 +108,17 @@ function realParkValue<T>(table: Record<string, Record<string, T>> | undefined, 
 
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
   return { hr: s?.hr ?? 1, dome: !!s?.dome };
+}
+
+/**
+ * 그 해 그 구단 홈 구장의 경기 배율 (world.ts SimTeam.park, 구장 화면·세이버 보정이 같은 값을 읽는다).
+ * 실제 구장 계수(parkRunFactor·parkEventFactor) + 게임 안 신구장 홈런 배율. 중립이면 undefined
+ */
+export function teamParkAt(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, franchise: string, year: number, s: StadiumState | undefined): SimTeam['park'] {
+  const hr = parkFactor(s).hr;
+  const run = parkRunFactor(meta.parkFactors, franchise, year, s);
+  const ev = run !== 1 ? parkEventFactor(meta.parkEvents, franchise, year, s) : undefined;
+  return hr !== 1 || run !== 1 ? { hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } : undefined;
 }
 
 /** 리모델링: 구단 부담 250억, 한 시즌 공사(그 시즌 관중석 20% 못 씀), 시설 +30, 좌석 +1,000 (임시값) */

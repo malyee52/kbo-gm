@@ -7,9 +7,27 @@ import {
 import { TeamName, useGame, useWon } from '../context';
 import { ConfirmButton } from '../ConfirmButton';
 import { namingAt, namingOffers, stadiumName } from '../../league/naming';
+import { realParkSpec } from '../../league/ballparks';
+import { PARK_BASIS_LABEL, teamParkView, type ParkLeague, type TeamParkView } from '../../game/parkView';
+import { leagueBase } from '../../game/saber';
+import type { ParkSpec } from '../../data/types';
 
 const levelClass = (v: number) => (v >= 75 ? 'g-hi' : v >= 60 ? 'g-up' : v <= 25 ? 'g-lo' : v <= 40 ? 'g-dn' : '');
 const pctp = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%p`;
+/** 구장 배율 → 지수 (100 = 리그 평균) */
+const ix = (m: number) => Math.round(m * 100);
+/** 지난 시즌과 다르면 "전 → 후" */
+const ixChange = (prev: number, now: number) => (ix(prev) !== ix(now) ? `${ix(prev)} → ${ix(now)}` : String(ix(now)));
+const m = (v: number | null) => (v == null ? '?' : `${v}`);
+
+/** 구장 제원 한 줄: 좌·중·우 펜스, 높이, 잔디, 좌석 (parks.json, 나무위키 구장 문서) */
+function specLine(sp: ParkSpec): string {
+  const f = sp.fence;
+  const h = sp.height.lr === sp.height.c || sp.height.c == null ? m(sp.height.lr) : `${m(sp.height.lr)}(좌우)·${m(sp.height.c)}(중앙)`;
+  const turf = sp.turf.infield || sp.turf.outfield ? ` · 잔디 ${sp.turf.infield ?? '?'}${sp.turf.outfield && sp.turf.outfield !== sp.turf.infield ? `/${sp.turf.outfield}` : ''}` : '';
+  const fence = f.l == null && f.c == null ? '펜스 제원 없음' : `펜스 좌 ${m(f.l)} · 중 ${m(f.c)} · 우 ${m(f.r)}m · 높이 ${h}m`;
+  return `${fence}${turf}${sp.dome ? ' · 돔' : ''}${sp.seats ? ` · 좌석 ${sp.seats.toLocaleString()}` : ''}`;
+}
 
 function Meter({ label, v }: { label: string; v: number }) {
   return (
@@ -22,7 +40,7 @@ function Meter({ label, v }: { label: string; v: number }) {
 }
 
 export function StadiumPanel() {
-  const { session, changed, autosave } = useGame();
+  const { session, store, changed, autosave } = useGame();
   const won = useWon();
   const L = session.league;
   const me = session.teamIdx;
@@ -39,6 +57,14 @@ export function StadiumPanel() {
   const [deal, setDeal] = useState<'standard' | 'push'>('standard');
 
   if (!s) return <section className="panel"><p className="muted">구장 정보가 없습니다 (예전 저장). 다음 결산 뒤에 생깁니다.</p></section>;
+
+  // 구장 지수 (구장효과 기획안 5.5): 경기에 쓰는 배율 그대로 (game/parkView.ts). 신구장 배율만 있을 때 득점 계수는 리그 타석당 득점으로 센다
+  const rpa = leagueBase(session.season.bat, session.season.pit).runsPerPa || (L.seasonSaber?.[String(session.year - 1)]?.runsPerPa ?? 0);
+  const pl: ParkLeague = { rates: session.world.league, rpa };
+  const parkNow = L.teams.map((_, t) => teamParkView(store, L, t, year, pl));
+  const parkPrev = L.teams.map((_, t) => teamParkView(store, L, t, year - 1, pl));
+  const mine = parkNow[me];
+  const spec = (s.done ?? []).some((d) => d.kind === 'new') ? undefined : realParkSpec(L.teams[me].franchise, year);
 
   const order = (id: string) => {
     const r = session.orderStadium(id, id.startsWith('new') ? { size, dome, deal } : {});
@@ -60,8 +86,12 @@ export function StadiumPanel() {
             {underConstruction(s, year) && p?.kind === 'remodel' && <span className="small down">{year} 시즌 공사 중 {seatsAt(s, year).toLocaleString()}석만</span>}</div>
           <div className="stat"><span className="stat-label">관중률 보정 (시설{honey ? '·새 구장' : ''})</span><strong className="stat-value">{pctp(stadiumFill(s, year))}</strong></div>
           <div className="stat"><span className="stat-label">객단가</span><strong className="stat-value">×{ticketScale(s).toFixed(2)}</strong></div>
-          <div className="stat"><span className="stat-label">구장 특성</span><strong className="stat-value">홈런 ×{(s.hr ?? 1).toFixed(2)}</strong>{s.dome && <span className="small">돔</span>}</div>
+          <div className="stat"><span className="stat-label">구장 지수 ({year} 시즌, {PARK_BASIS_LABEL[mine.basis]})</span>
+            <strong className="stat-value">득점 {ix(mine.index.run)} · 홈런 {ix(mine.index.hr)}</strong>
+            {ix(parkPrev[me].index.hr) !== ix(mine.index.hr) && <span className="small">홈런 {ixChange(parkPrev[me].index.hr, mine.index.hr)} (지난 시즌 → {year})</span>}
+            {s.dome && <span className="small">돔</span>}</div>
         </div>
+        {spec && <p className="small">{spec.name}: {specLine(spec)} <span className="muted">({spec.source}{spec.confirmed === '출처 확인' ? '' : ', 미확인'})</span></p>}
         <Meter label="시설" v={s.quality} />
         <p className="muted small">시설은 해마다 1씩 낡습니다 (바닥 20). 50이 보통이고, 높을수록 관중이 더 들고 입장권을 비싸게 받을 수 있습니다. 신구장은 개장 뒤 세 시즌 동안 관중이 더 듭니다.</p>
 
@@ -141,7 +171,7 @@ export function StadiumPanel() {
         <h2>리그 구장·팬</h2>
         <div className="scroll">
           <table>
-            <thead><tr><th className="l">구단</th><th>수용 인원</th><th>시설</th><th>홈런</th><th>팬 만족도</th><th className="l">공사</th></tr></thead>
+            <thead><tr><th className="l">구단</th><th>수용 인원</th><th>시설</th><th>돔</th><th>팬 만족도</th><th className="l">공사</th></tr></thead>
             <tbody>
               {L.teams.map((_, t) => {
                 const st = L.stadiums?.[t];
@@ -149,7 +179,7 @@ export function StadiumPanel() {
                 const pr = st.project && st.project.open > session.year ? st.project : null;
                 return (
                   <tr key={t} className={t === me ? 'me' : ''}>
-                    <td className="l"><TeamName idx={t} />{stadiumName(L, t, year) && <span className="muted small"> {stadiumName(L, t, year)}</span>}</td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>×{(st.hr ?? 1).toFixed(2)}{st.dome ? ' 돔' : ''}</td>
+                    <td className="l"><TeamName idx={t} />{stadiumName(L, t, year) && <span className="muted small"> {stadiumName(L, t, year)}</span>}</td><td>{st.capacity.toLocaleString()}</td><td>{st.quality}</td><td>{st.dome ? '돔' : ''}</td>
                     <td>{Math.round(fanLevel(L, t, session.year, off ? undefined : session.day - 1))}</td>
                     <td className="l small">{pr ? `${pr.kind === 'new' ? '신구장' : '리모델링'} ${pr.open} 개장` : st.opened !== undefined ? `${st.opened} 개장` : ''}</td>
                   </tr>
@@ -159,7 +189,48 @@ export function StadiumPanel() {
           </table>
         </div>
       </section>
+
+      <ParkIndexTable year={year} now={parkNow} prev={parkPrev} />
     </>
+  );
+}
+
+/**
+ * 리그 구장 지수 (구장효과 기획안 5.5, 결정 5): 100 = 리그 평균. 홈·원정 두 팀 타자 모두에게 곱해지는 홈 구장 배율.
+ * 지난 시즌과 달라진 칸은 "전 → 후"
+ */
+function ParkIndexTable({ year, now, prev }: { year: number; now: TeamParkView[]; prev: TeamParkView[] }) {
+  const { session } = useGame();
+  const L = session.league;
+  const me = session.teamIdx;
+  const cell = (t: number, k: 'run' | 'hr' | 'd2' | 't3' | 'hrL' | 'hrR') => {
+    const v = now[t].index[k];
+    const was = prev[t].index[k];
+    return <td className={now[t].basis === 'none' ? 'muted' : undefined}>{ixChange(was, v)}</td>;
+  };
+  return (
+    <section className="panel">
+      <h2>리그 구장 지수 <span className="muted small">{year} 시즌 · 100 = 리그 평균</span></h2>
+      <div className="scroll">
+        <table>
+          <thead><tr><th className="l">구단</th><th>득점</th><th>홈런</th><th>2루타</th><th>3루타</th><th>좌타 홈런</th><th>우타 홈런</th><th className="l">근거</th></tr></thead>
+          <tbody>
+            {L.teams.map((_, t) => (
+              <tr key={t} className={t === me ? 'me' : ''}>
+                <td className="l"><TeamName idx={t} />{stadiumName(L, t, year) && <span className="muted small"> {stadiumName(L, t, year)}</span>}</td>
+                {cell(t, 'run')}{cell(t, 'hr')}{cell(t, 'd2')}{cell(t, 't3')}{cell(t, 'hrL')}{cell(t, 'hrR')}
+                <td className="l small">{PARK_BASIS_LABEL[now[t].basis]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small">
+        홈 구장 경기에서 두 팀 타자 모두의 단타·2루타·3루타·홈런에 곱해지는 배율입니다 (삼진·볼넷에는 구장 효과가 없습니다). 실측은 2015년 뒤 하드힛 파크팩터와
+        2022~2025 구장 구성 지수로 만든 값이고, 2014년 이전은 자료가 없어 중립(100)입니다. 지난 시즌과 달라진 칸은 "지난 시즌 → {year}"로 보여 줍니다.
+        wRC+는 이 득점 지수의 절반(원정 경기는 리그 평균 구장)으로 구장을 보정합니다.
+      </p>
+    </section>
   );
 }
 
