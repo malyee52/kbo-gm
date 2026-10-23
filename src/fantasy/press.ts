@@ -1,5 +1,5 @@
 // 기자회견·인터뷰 (2026-10-13 사용자 선택 "기자회견·인터뷰"): 담당 기자(가상 인물, cast.ts)가 요즘 성적·트레이드·사건으로 질문하고
-// 단장이 답하면 AI가 반응을 판정해 기사로 쓰고, 팬 만족도·구단주 신뢰·선수단 분위기(컨디션)가 바뀐다.
+// 단장이 답하면 AI가 반응을 판정해 기사로 쓰고, 팬 만족도·구단주 신뢰·선수단 분위기(경기력)가 바뀐다.
 // 시즌 중 7일에 한 번, 오프시즌에 한 번. 크기는 판정 단계(leniency.ts)에 따라
 import type { GameSession } from '../game/session';
 import type { DataStore } from '../data/types';
@@ -46,7 +46,7 @@ ${RULES}
   return { reporter: rep.name, questions };
 }
 
-/** 답을 판정해 기사로 (효과: 팬·구단주 신뢰·선수단 컨디션) */
+/** 답을 판정해 기사로 (효과: 팬·구단주 신뢰·선수단 경기력) */
 export async function pressJudge(g: GameSession, store: Store, s: LlmSettings, reporter: string, questions: string[], answer: string): Promise<Omit<FantasyEntry, 'year' | 'day'>> {
   const l = leniencyOf(g.league);
   const k = NEGOTIATE_SCALE[l];
@@ -55,7 +55,7 @@ export async function pressJudge(g: GameSession, store: Store, s: LlmSettings, r
     system: `너는 KBO 단장 시뮬레이션에서 기자회견 반응을 판정하는 이야기꾼이다. 단장이 기자 질문에 답했다.
 답이 상황에 맞는지, 솔직한지, 팬·구단주·선수단이 어떻게 받아들일지 판정하고, 다음 날 나갈 기사로 쓴다.
 - fans: 팬 만족도 변화 (−${max.fans}~${max.fans} 정수), trust: 구단주 신뢰 변화 (−${max.trust}~${max.trust} 정수),
-  morale: 선수단 분위기(컨디션) 변화 (−${max.edge}~${max.edge} 소수, 3~7일). 대부분은 작게, 실언·명언이면 크게
+  morale: 선수단 분위기(경기력) 변화 (−${max.edge}~${max.edge} 소수, 3~7일). 대부분은 작게, 실언·명언이면 크게
 ${leniencyRule(l)}
 ${RULES}
 

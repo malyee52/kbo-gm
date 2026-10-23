@@ -16,7 +16,7 @@ beforeAll(() => {
 
 const GAME_EVENTS = ['team-meeting', 'momentum', 'bullpen-rest', 'slump-hitter', 'ace-manage', 'hitting-coach', 'pitching-coach', 'summer-heat', 'rival-week', 'trade-offer', 'veteran-mentor'];
 
-describe('경기력 효과 (컨디션)', () => {
+describe('경기력 효과 (이벤트·코치·캠프)', () => {
   it('formToday: 구단 전체·타자만·한 선수, 기간 밖은 0', () => {
     const players = [
       { idx: 0, id: 'a', teamIdx: 0, isPitcher: false },

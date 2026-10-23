@@ -46,7 +46,7 @@ export interface EventLog {
 }
 
 /**
- * 며칠 동안 경기력을 바꾸는 효과 (컨디션). 타석마다 타자에게 유리한 정도(edge)에 더한다 (engine/game.ts).
+ * 며칠 동안 경기력을 바꾸는 효과 (경기력). 타석마다 타자에게 유리한 정도(edge)에 더한다 (engine/game.ts).
  * 크기 비교: 홈 이점 0.013, 좌우 상성 0.035. 세션이 날마다 이 목록으로 선수별 값을 만든다 (formToday)
  */
 export interface FormBuff {
@@ -62,6 +62,23 @@ export interface FormBuff {
   note: string;
 }
 
+/**
+ * 며칠 동안 선수 컨디션을 내리는 몸 상태 사건 (감기·몸살·배탈·컨디션 난조, 엔진 2 12단계, docs/컨디션_기획안.md 1.3).
+ * 흐름(engine/condition.ts)에 더한다. 화면에는 "나쁨 · 감기"처럼 사유만 보이고 숫자는 없다. 실존 선수에게도 쓰는 허용 사건이다
+ */
+export interface CondBuff {
+  team: number;
+  year: number;
+  from: number;
+  until: number;
+  /** 한 선수만 (선수 id). 없으면 구단 전체 */
+  player?: string;
+  /** 컨디션에 더하는 값 (음수, −1~0) */
+  value: number;
+  /** 화면 사유 (감기·몸살·배탈·컨디션 난조) */
+  reason: string;
+}
+
 export interface EventState {
   /** 오늘 확률 */
   chance: number;
@@ -70,6 +87,8 @@ export interface EventState {
   buffs: FillBuff[];
   /** 경기력 효과 (2026-10-11 추가, 예전 저장에는 없다) */
   forms?: FormBuff[];
+  /** 컨디션 사건 (엔진 2 12단계, 예전 저장에는 없다) */
+  conds?: CondBuff[];
 }
 
 export function ensureEvents(league: LeagueState): EventState {
@@ -108,8 +127,10 @@ export interface EventContext {
   hasRival: boolean;
   /** 트레이드 마감 전인가 */
   tradeOpen: boolean;
-  /** 컨디션 효과. delay일 뒤부터 days일 동안 */
+  /** 경기력 효과. delay일 뒤부터 days일 동안 */
   addForm(edge: number, days: number, note: string, opts?: { player?: string; side?: 'bat' | 'pit' | 'all'; delay?: number }): void;
+  /** 컨디션 사건 (몸 상태 계열만). delay일 뒤부터 days일 동안 우리 선수단(또는 한 선수)의 컨디션에 value를 더한다 */
+  addCond(value: number, days: number, reason: string, opts?: { player?: string; delay?: number }): void;
   /** 구원 투수(또는 투수 전체) 피로를 없앤다 */
   restPitchers(all?: boolean): void;
   /** 그 선수를 오늘부터 days일 쉬게 한다 (결장) */
@@ -321,7 +342,7 @@ export const EVENTS: EventDef[] = [
     ],
   },
 
-  // ---- 경기에 영향을 주는 이벤트 (컨디션·휴식·트레이드). 2026-10-11 사용자 요청
+  // ---- 경기에 영향을 주는 이벤트 (경기력·휴식·트레이드). 2026-10-11 사용자 요청
   {
     id: 'team-meeting', title: '연패 탈출 대책', weight: 14,
     when: (c) => c.streak <= -3,
@@ -507,7 +528,7 @@ export function fillBuff(league: Pick<LeagueState, 'events'>, team: number, year
   return s;
 }
 
-/** 그날(day) 선수별 컨디션 값. 효과가 없으면 null (엔진이 아무것도 하지 않는다) */
+/** 그날(day) 선수별 경기력 값. 효과가 없으면 null (엔진이 아무것도 하지 않는다) */
 export function formToday(league: Pick<LeagueState, 'events'>, year: number, day: number,
                           players: { idx: number; id: string; teamIdx: number; isPitcher: boolean }[]): Float64Array | null {
   const act = (league.events?.forms ?? []).filter((f) => f.year === year && day >= f.from && day < f.until);
@@ -524,4 +545,24 @@ export function formToday(league: Pick<LeagueState, 'events'>, year: number, day
     }
   }
   return out;
+}
+
+/** 그날(day) 선수별 컨디션 사건 값과 사유 (가장 크게 내리는 사건의 사유). 사건이 없으면 null */
+export function condToday(league: Pick<LeagueState, 'events'>, year: number, day: number,
+                          players: { idx: number; id: string; teamIdx: number }[]): { value: Float64Array; reason: Map<number, string> } | null {
+  const act = (league.events?.conds ?? []).filter((f) => f.year === year && day >= f.from && day < f.until);
+  if (!act.length) return null;
+  const value = new Float64Array(players.length);
+  const reason = new Map<number, string>();
+  const worst = new Map<number, number>();
+  const add = (idx: number, f: CondBuff) => {
+    value[idx] += f.value;
+    if (f.value < (worst.get(idx) ?? 0)) { worst.set(idx, f.value); reason.set(idx, f.reason); }
+  };
+  const byId = new Map(players.map((p) => [p.id, p]));
+  for (const f of act) {
+    if (f.player) { const p = byId.get(f.player); if (p) add(p.idx, f); continue; }
+    for (const p of players) if (p.teamIdx === f.team) add(p.idx, f);
+  }
+  return { value, reason };
 }

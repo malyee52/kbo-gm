@@ -112,7 +112,8 @@ export interface TeamSeason {
    * 감독 성향 배율 (league/managers.ts Tactics): 도루 시도, 희생번트, hook 투수 밀어붙이기(선발 투구 수 기준·여유), 없으면 모두 1.
    * sub = 대타·대주자 빈도 (엔진 2 9단계), pen = 불펜 연투 허용 (엔진 2 10단계). 없으면 1
    */
-  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number };
+  /** cond: 컨디션 반영 (엔진 2 12단계, 없으면 1) */
+  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number; cond?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
 }
@@ -507,10 +508,14 @@ function planFixed(ts: TeamSeason, pool: SimPlayer[]): Map<Slot, SimPlayer> | un
  * 플래툰 (엔진 2 9단계): 상대 선발의 손(oppThrows)을 알면 좌우 상성을 넣은 타격 런으로 자리를 배정한다 (주전 휴식 순위는 그대로)
  */
 export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, oppThrows: string | null = null,
-                             tired?: (p: SimPlayer) => number): SimPlayer[] {
+                             tired?: (p: SimPlayer) => number, cond?: (p: SimPlayer) => number): SimPlayer[] {
   ts.lineupCache ??= new Map();
   const hand = oppThrows === 'L' || oppThrows === 'R' ? oppThrows : '';
-  const runsOf = hand ? (p: SimPlayer, slot: Slot) => batRunsVs(p, hand, params.platoon) + defenseAt(p, slot) : slotRuns;
+  // 컨디션 (엔진 2 12단계, docs/컨디션_기획안.md 7.4): 타격 런 × (1 + 컨디션 반영 성향 × condEdge × 그날 컨디션). 좌우 상성과 같은 꼴.
+  // 날마다 바뀌는 값이라 이때는 자리 배정을 캐시하지 않는다. 성향 0이거나 효과 0이면 예전과 같다
+  const condMul = cond ? (ts.tactics?.cond ?? 1) * params.cond.edge : 0;
+  const batRuns = (p: SimPlayer) => (hand ? batRunsVs(p, hand, params.platoon) : p.value * RUNS_PER_VALUE) * (condMul ? 1 + condMul * cond!(p) : 1);
+  const runsOf = hand || condMul ? (p: SimPlayer, slot: Slot) => batRuns(p) + defenseAt(p, slot) : slotRuns;
   let full = ts.lineupCache.get('');
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
   const regulars = full.map((x) => x.p);
@@ -535,12 +540,12 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   }
   const key = `${hand}:${[...resting].sort((a, b) => a - b).join(',')}`;
   ts.lineupCache ??= new Map();
-  let placed = ts.lineupCache.get(key);
+  let placed = condMul ? undefined : ts.lineupCache.get(key);
   if (!placed) {
     const avail = ts.hitters.filter((p) => !resting.has(p.idx));
     const pool = avail.length >= 9 ? avail : ts.hitters;
     placed = assignSlots(pool, planFixed(ts, pool), runsOf);
-    ts.lineupCache.set(key, placed);
+    if (!condMul) ts.lineupCache.set(key, placed);
   }
   ts.field = new Map(placed.map((x) => [x.p.idx, x.slot]));
   // 플레이어가 정한 타순: 자리 순서대로 (그 자리에 나온 선수가 그 타순)
@@ -553,13 +558,21 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   return battingOrder(placed.map((x) => x.p), lg);
 }
 
-/** 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수 */
-export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams): SimPlayer {
+/**
+ * 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수.
+ * 컨디션 (엔진 2 12단계, cond가 있을 때): 차례인 투수의 (컨디션 반영 성향 × 컨디션)이 나쁨 경계(cond.bad) 이하이고
+ * 다음으로 오래 쉰 투수가 등판할 수 있으면 하루 미룬다 (성향 0이면 미루지 않는다, 1.5면 컨디션 −0.27부터, 0.5면 −0.8부터)
+ */
+export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams, cond?: (p: SimPlayer) => number): SimPlayer {
   let best: SimPlayer | null = null;
+  let next: SimPlayer | null = null;
   for (const p of ts.rotation) {
     if (day - st.lastStartDay[p.idx] < (ts.restDays ?? params.starterRestDays)) continue;
-    if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) best = p;
+    if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) { next = best; best = p; }
+    else if (!next || st.lastStartDay[p.idx] < st.lastStartDay[next.idx]) next = p;
   }
+  const tac = ts.tactics?.cond ?? 1;
+  if (best && next && cond && tac > 0 && params.cond.edge > 0 && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
   if (best) return best;
   let spot: SimPlayer | null = null;
   for (const p of ts.bullpen) {

@@ -103,3 +103,88 @@ describe('시즌의 컨디션 (엔진 2 12단계)', () => {
     expect(JSON.stringify(r1.toSave().cond)).toBe(JSON.stringify(full.toSave().cond));
   });
 });
+
+describe('컨디션 사건과 화면 정보 (엔진 2 12단계)', () => {
+  it('몸 상태 사건: 구단 전체·한 선수, 기간 안에만, 사유는 가장 크게 내리는 사건', async () => {
+    const { condToday } = await import('../src/league/events');
+    const players = [{ idx: 0, id: 'a', teamIdx: 0 }, { idx: 1, id: 'b', teamIdx: 0 }, { idx: 2, id: 'c', teamIdx: 1 }];
+    const league = { events: { chance: 0, pending: null, log: [], buffs: [], conds: [
+      { team: 0, year: 2026, from: 10, until: 17, value: -0.5, reason: '감기' },
+      { team: 0, year: 2026, from: 12, until: 15, value: -0.25, reason: '몸살', player: 'b' },
+    ] } } as never;
+    expect(condToday(league, 2026, 9, players)).toBeNull();
+    const t = condToday(league, 2026, 13, players)!;
+    expect([...t.value]).toEqual([-0.5, -0.75, 0]);
+    expect(t.reason.get(1)).toBe('감기');
+    expect(t.reason.has(2)).toBe(false);
+    expect(condToday(league, 2026, 17, players)).toBeNull();
+    expect(condToday(league, 2027, 13, players)).toBeNull();
+  });
+
+  it('몸 상태 이벤트(감기·배탈·몸살·컨디션 난조)는 경기력이 아니라 컨디션 사건을 건다', async () => {
+    const { eventDef } = await import('../src/league/events');
+    for (const id of ['x-team-flu', 'x-food-poison', 'x-body-ache', 'x-cond-slump']) {
+      const def = eventDef(id)!;
+      expect(def).toBeDefined();
+      const src = def.choices.map((c) => c.apply.toString()).join('\n');
+      expect(src).toMatch(/addCond/);
+      expect(src).not.toMatch(/addForm/);
+    }
+  });
+
+  it('화면은 낱말 · 사유만 받는다: 컨디션 숫자·흐름을 직접 읽지 않고, 컨디션 계산은 숨은 능력을 읽지 않는다', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+    for (const f of walk('src/ui')) {
+      const src = readFileSync(f, 'utf8');
+      expect(src, f).not.toMatch(/states\.cond\b|conditionFlow|\.condition\(|condToday|conditionOf/);
+    }
+    const cond = readFileSync('src/engine/condition.ts', 'utf8');
+    expect(cond).not.toMatch(/traits|hidden|injuryProne|overuse|realLimit/);
+  });
+});
+
+describe('AI 감독의 컨디션 반영 (엔진 2 12단계, 기획안 7.4)', () => {
+  it('성향 0이면 컨디션을 보지 않은 라인업·선발과 같고, 성향이 크면 컨디션 좋은 백업이 들어온다', async () => {
+    const { refreshActive, todaysLineup, todaysStarter } = await import('../src/engine/team');
+    const s = run(NO_PILOT, 'cond-ai', 20);
+    const ts = s.teamSeasons[0];
+    refreshActive(ts, s.world, s.states, s.day);
+    const ids = (xs: { idx: number }[]) => xs.map((p) => p.idx).join(',');
+    const noTired = () => 0;
+    ts.tactics = { steal: 1, bunt: 1, hook: 1, cond: 0 };
+    const cond = (p: { idx: number }) => s.condition(p.idx);
+    const base = todaysLineup(ts, s.world.league, NO_PILOT, new Rng('l'), 'R', noTired);
+    expect(ids(todaysLineup(ts, s.world.league, NO_PILOT, new Rng('l'), 'R', noTired, cond))).toBe(ids(base));
+    expect(todaysStarter(ts, s.states, s.day, NO_PILOT, () => -1).idx).toBe(todaysStarter(ts, s.states, s.day, NO_PILOT).idx);
+    // 벤치 선수 한 명만 컨디션 +1, 주전 모두 −1이면 (성향 1.5) 그 선수가 들어온다
+    const bench = ts.hitters.find((p) => !base.includes(p))!;
+    ts.tactics = { steal: 1, bunt: 1, hook: 1, cond: 1.5 };
+    const skewed = (p: { idx: number }) => (p.idx === bench.idx ? 1 : -1);
+    const big = { ...NO_PILOT, cond: { ...NO_PILOT.cond, edge: 0.4 } };
+    expect(todaysLineup(ts, s.world.league, big, new Rng('l'), 'R', noTired, skewed).some((p) => p.idx === bench.idx)).toBe(true);
+  });
+
+  it('차례인 선발의 컨디션이 나쁨이면 다음 투수가 먼저 나온다 (성향 1)', async () => {
+    const { todaysStarter } = await import('../src/engine/team');
+    const s = run(NO_PILOT, 'cond-ai2', 30);
+    const ts = s.teamSeasons[1];
+    ts.tactics = { steal: 1, bunt: 1, hook: 1, cond: 1 };
+    const day = s.day + 6; // 모두 충분히 쉰 날
+    const first = todaysStarter(ts, s.states, day, NO_PILOT);
+    const bad = (p: { idx: number }) => (p.idx === first.idx ? -0.6 : 0);
+    expect(todaysStarter(ts, s.states, day, NO_PILOT, bad).idx).not.toBe(first.idx);
+    expect(todaysStarter(ts, s.states, day, NO_PILOT, (p) => (p.idx === first.idx ? -0.3 : 0)).idx).toBe(first.idx);
+  });
+
+  it('가상 감독의 컨디션 반영은 0.5~1.5, 실존 감독은 1', async () => {
+    const { tacticsOf } = await import('../src/league/managers');
+    for (const n of ['가상가', '가상나', '가상다', '가상라']) {
+      const t = tacticsOf(undefined, n);
+      expect(t.cond).toBeGreaterThanOrEqual(0.5);
+      expect(t.cond).toBeLessThanOrEqual(1.5);
+    }
+    expect(tacticsOf({ steal: 1, bunt: 1, relief: 1 } as never, '실존').cond).toBe(1);
+  });
+});

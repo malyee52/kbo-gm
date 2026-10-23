@@ -521,12 +521,14 @@ export class Season {
       const h = season[g.home];
       const a = season[g.away];
       // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
-      const homeStarter = todaysStarter(h, states, day, params);
-      const awayStarter = todaysStarter(a, states, day, params);
+      // AI 감독은 보이는 컨디션을 라인업·선발 고르기에 쓴다 (엔진 2 12단계, 반영 정도는 감독 성향 tactics.cond)
+      const cond = (p: SimPlayer) => condToday(ctx, p.idx);
+      const homeStarter = todaysStarter(h, states, day, params, cond);
+      const awayStarter = todaysStarter(a, states, day, params, cond);
       // 야수 휴식은 경기 전 피로로 (엔진 2 11단계)
       const tired = (p: SimPlayer) => currentBody(states, p.idx, day, params.body);
-      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired);
+      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond);
+      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond);
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
@@ -618,7 +620,7 @@ export class Season {
     this.states.streak[idx] = 0;
   }
 
-  /** 오늘부터 쓸 선수별 컨디션 (무작위 이벤트 효과). null이면 없앤다. 저장하지 않는다: 세션이 날마다 리그 상태에서 다시 만든다 */
+  /** 오늘부터 쓸 선수별 경기력 (무작위 이벤트·코치 효과). null이면 없앤다. 저장하지 않는다: 세션이 날마다 리그 상태에서 다시 만든다 */
   setForm(form: Float64Array | null): void {
     this.ctx.form = form ?? undefined;
   }
@@ -644,10 +646,16 @@ export class Season {
     }
   }
 
-  /** 그날 선수 컨디션 (흐름 + 사건, 화면·AI 감독용). 날짜를 넘기면 흐름을 그날까지 옮긴다 (지난 날은 볼 수 없다) */
+  /** 그날 선수 컨디션 (흐름 + 오늘 걸린 사건, 측정·AI 감독용). 날짜를 넘기면 흐름을 그날까지 옮긴다 (지난 날은 볼 수 없다) */
   condition(idx: number, day = this.day): number {
     if (day > this.condDay) this.advanceCondition(day);
     return condToday(this.ctx, idx);
+  }
+
+  /** 그날 컨디션의 흐름 몫만 (사건은 화면이 리그 상태에서 따로 더한다) */
+  conditionFlow(idx: number, day = this.day): number {
+    if (day > this.condDay) this.advanceCondition(day);
+    return this.states.cond[idx];
   }
 
   private addAbsence(a: Absence, ts: TeamSeason): void {
@@ -675,10 +683,11 @@ export class Season {
     a.away = true;
     refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
-    const hs = todaysStarter(h, this.states, day, params);
-    const as = todaysStarter(a, this.states, day, params);
-    const hl = todaysLineup(h, this.world.league, params, rng, as.throws);
-    const al = todaysLineup(a, this.world.league, params, rng, hs.throws);
+    const cond = (p: SimPlayer) => condToday(ctx, p.idx);
+    const hs = todaysStarter(h, this.states, day, params, cond);
+    const as = todaysStarter(a, this.states, day, params, cond);
+    const hl = todaysLineup(h, this.world.league, params, rng, as.throws, undefined, cond);
+    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond);
     const result = simulateGame(h, a, hl, al, hs, as, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }

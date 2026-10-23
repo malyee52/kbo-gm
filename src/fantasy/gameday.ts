@@ -1,6 +1,6 @@
 // 경기에도 AI 연출 (2026-10-13 사용자 선택 "경기에도 AI 연출").
 // 1) 후일담: 우리 경기가 끝난 뒤 중계 화면에서 AI가 중계석 후일담을 쓴다 (기사, 경기 key로 이어 둔다). 게임 수치는 바꾸지 않는다
-// 2) 경기 전 미팅: 단장이 선수단에 한 말을 AI가 듣고 분위기를 판정해 선수단 컨디션(teamForm)을 1~3일 바꾼다. 하루 한 번.
+// 2) 경기 전 미팅: 단장이 선수단에 한 말을 AI가 듣고 분위기를 판정해 선수단 경기력(teamForm)을 1~3일 바꾼다. 하루 한 번.
 //    크기는 판정 단계(leniency.ts NEGOTIATE_SCALE)에 따라: 기본 ±2%p, 판타지 리그 ±4%p
 import type { GameSession, CastGame } from '../game/session';
 import type { DataStore } from '../data/types';
@@ -74,7 +74,7 @@ export function pregameBlock(g: GameSession): string | null {
 export function pregameSystem(maxEdge: number, l: ReturnType<typeof leniencyOf>): string {
   return `너는 KBO 단장 시뮬레이션에서 선수단 분위기를 판정하는 이야기꾼이다. 단장이 경기 전 선수단(또는 감독·주장)에게 말을 했다.
 그 말이 지금 상황(순위, 연승·연패, 다음 상대, 중요한 경기인지)에 맞는지, 진심인지, 압박이 지나친지 보고 선수단 반응과 분위기 변화를 판정한다.
-- edge는 선수단 컨디션 변화 (−${maxEdge}~${maxEdge}, 소수). 좋은 말이면 +, 역효과면 −, 보통은 작게. days는 1~3일
+- edge는 선수단 경기력 변화 (−${maxEdge}~${maxEdge}, 소수). 좋은 말이면 +, 역효과면 −, 보통은 작게. days는 1~3일
 - 반응은 선수단 전체·주장·감독의 분위기로 그린다.
 ${leniencyRule(l)}
 ${RULES}
@@ -82,7 +82,7 @@ ${RULES}
 [형식] JSON 하나만: {"title": "한 줄 제목", "text": "선수단 반응 (2~4문장)", "edge": 소수, "days": 정수}`;
 }
 
-/** 경기 전 미팅 → 대화 글 (효과: 선수단 컨디션) */
+/** 경기 전 미팅 → 대화 글 (효과: 선수단 경기력) */
 export async function pregameTalk(g: GameSession, store: Store, s: LlmSettings, speech: string): Promise<Omit<FantasyEntry, 'year' | 'day'>> {
   const l = leniencyOf(g.league);
   const maxEdge = Math.round(PREGAME_EDGE * NEGOTIATE_SCALE[l] * 1000) / 1000;

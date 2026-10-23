@@ -694,7 +694,7 @@ function CampPanel({ act }: { act: Act }) {
         </label>
       </div>
       <p className="small">비용 {won(place.cost)} · 효과 배율 {place.factor}{place.injury > 1 ? ' · 추운 날씨로 부상 조금 늘어남' : ''}</p>
-      <p className="muted small">{focus.label}: {focus.note}. 컨디션 효과는 개막 뒤 {CAMP_DAYS}일 동안 이어지고, 개막할 때 비용을 냅니다.</p>
+      <p className="muted small">{focus.label}: {focus.note}. 경기력 효과는 개막 뒤 {CAMP_DAYS}일 동안 이어지고, 개막할 때 비용을 냅니다.</p>
     </section>
   );
 }

@@ -79,7 +79,7 @@ export interface GameContext {
   planNorms?: { starter: number; relief: number };
   /** 모든 도루 성공률에 더하는 값 = 그 해 리그 도루 성공률 − 선수 성공률 평균 (sbShiftOf). 없으면 0 */
   sbShift?: number;
-  /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
+  /** 선수별 경기력 (선수 색인, 무작위 이벤트·코치·캠프 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
   /** 선수별 컨디션 사건 값 (선수 색인, 감기·몸살 같은 몸 상태 이벤트, league/events.ts condToday). 흐름(states.cond)에 더한다. 없으면 0 */
   condEvent?: Float64Array;

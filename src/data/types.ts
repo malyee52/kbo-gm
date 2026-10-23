@@ -269,7 +269,7 @@ export interface DataStore {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 연도별 구단 감독과 감독 경력·운영 경향 (managers.json). 없으면 감독 기능을 쓰지 않는다 */
   managers?: ManagerData;
-  /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 원정 거리 컨디션(엔진 2 12단계)에 쓴다. 없으면 거리를 모른다 */
+  /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 거리 측정(tools/condition_check.ts)에만 쓴다 (원정 거리 컨디션은 2026-10-22 사용자 결정으로 없앰). 없으면 거리를 모른다 */
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;

@@ -6,7 +6,7 @@
 
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -18,7 +18,7 @@ import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
-import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
@@ -433,6 +433,18 @@ export class GameSession {
   /** 하루 진행 직전 준비 (실제 진행과 미리보기가 같게) */
   private prepareDay(s: Season): void {
     s.setForm(this.formWithCoaches(formToday(this.league, this.world.year, s.day, this.world.players)));
+    s.setCondEvents(condToday(this.league, this.world.year, s.day, this.world.players)?.value ?? null);
+  }
+
+  /**
+   * 화면용 선수 컨디션 한 줄 "낱말 · 사유" (엔진 2 12단계, docs/컨디션_기획안.md 6장). 숫자는 내보내지 않는다.
+   * 기복·숨은 능력·경기 결과를 읽지 않는다 (흐름 + 몸 상태 사건만)
+   */
+  conditionText(idx: number): string {
+    const s = this.season;
+    const day = Math.min(s.day, s.schedule.length - 1);
+    const ev = condToday(this.league, this.world.year, day, this.world.players);
+    return condLine(conditionOf(s.conditionFlow(idx, day), ev?.value[idx] ?? 0), this.params.cond, ev?.reason.get(idx));
   }
 
   /** 실제 시즌을 건드리지 않는 복사본 (개막 월드를 복사해 지금 시즌 상태를 복원한다) */
@@ -1777,6 +1789,10 @@ export class GameSession {
         (ensureEvents(L).forms ??= []).push({ team, year, from, until: from + days, edge, note,
           ...(opts?.player ? { player: opts.player } : {}), ...(opts?.side && opts.side !== 'all' ? { side: opts.side } : {}) });
       },
+      addCond: (value, days, reason, opts) => {
+        const from = day + (opts?.delay ?? 0);
+        (ensureEvents(L).conds ??= []).push({ team, year, from, until: from + days, value, reason, ...(opts?.player ? { player: opts.player } : {}) });
+      },
       restPitchers: (all) => {
         for (const p of this.team.org) if (p.isPitcher && (all || !isStarterSkill(p.pit))) s.clearFatigue(p.idx);
       },
@@ -2399,7 +2415,7 @@ export class GameSession {
         const pipelineNews = this.openPipeline(); // 자유 모드 입단 예약
         const twoWayNews = Off.openTwoWay(L, this.store, this.params, this.teamIdx); // 이도류 (league/twoway.ts)
         twoWayNews.unshift(...pipelineNews);
-        // 스프링캠프 (league/camp.ts): 비용·개막 뒤 컨디션·유망주 성장
+        // 스프링캠프 (league/camp.ts): 비용·개막 뒤 경기력·유망주 성장
         {
           const w = worldFromLeague(L, this.store, this.params, { form: false });
           const userPick = L.campPlan?.year === L.year ? L.campPlan.pick : null;
