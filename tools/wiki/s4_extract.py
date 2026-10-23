@@ -33,6 +33,21 @@ POS = {
     '투수': 'P', '포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격수': 'SS', '좌익수': 'LF', '중견수': 'CF',
     '우익수': 'RF', '외야수': 'OF', '내야수': 'IF', '지명타자': 'DH', '지명 타자': 'DH',
 }
+POS_RE = re.compile('|'.join(sorted(map(re.escape, POS), key=len, reverse=True)))
+POS_NARROW = {'IF': {'1B', '2B', '3B', 'SS'}, 'OF': {'LF', 'CF', 'RF'}}
+
+
+def pos_code(text):
+    """정보 상자 포지션 글 → 코드. 첫 포지션('유틸리티 내야수'·'선발 투수'처럼 꾸밈말이 붙어도 읽는다).
+    첫 포지션이 내야수·외야수면 뒤에 적힌 그 안쪽 세부 자리로 좁힌다 ('외야수 (좌익수)' → LF).
+    '외야수, 1루수'처럼 뒤 자리가 다른 쪽이면 좁히지 않는다 (주 포지션은 앞의 것). 못 읽으면 None"""
+    codes = [POS[m.group(0)] for m in POS_RE.finditer(text or '')]
+    if not codes:
+        return None
+    first = codes[0]
+    return next((c for c in codes[1:] if c in POS_NARROW.get(first, ())), first)
+
+
 HAND = {'좌': 'L', '우': 'R', '양': 'S'}
 
 
@@ -210,10 +225,8 @@ def extract_wiki(page):
                     ('첫 출장', '첫 출장'), ('마지막 경기', '마지막 경기')):
         if g(k):
             prof[item] = g(k)
-    if '포지션' in prof:
-        first = re.split(r'[,/·]', prof['포지션'])[0].strip()
-        if first in POS:
-            prof['포지션 코드'] = POS[first]
+    if pos_code(prof.get('포지션')):
+        prof['포지션 코드'] = pos_code(prof['포지션'])
     m = re.search(r'(\d{4})', g('프로 입단 연도'))
     if m:
         prof['입단 연도'] = int(m.group(1))

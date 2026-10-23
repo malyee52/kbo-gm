@@ -45,6 +45,10 @@ PIT_KO = {'r': '실점', 'h': '피안타', 'hr': '피홈런', 'so': '탈삼진'}
 # 위키·나무에서 뽑는 인적 사항 항목 (이 순서로 쓴다)
 ITEMS = ['생년월일', '사망일', '출신지', '국적', '키', '몸무게', '투', '타', '언더핸드', '포지션', '포지션 코드', '입단 연도',
          '드래프트', '프로 입단', '첫 출장', '마지막 경기', '소속팀', '병역', '출신 학교', '연봉', '계약', '등번호', '지도자', '응원가']
+# 세부 포지션을 위키로 채우는 선수: 1군 마지막 해가 이 해까지인 야수 (2026-10-23 빈 자료 결정 3).
+# 그 뒤에도 뛴 야수는 '세부 포지션(위키)' 칸으로만 남긴다 (수비 기록으로 정하는 능력치 v2 16-3a 몫)
+POS_FILL_UNTIL = 2000
+POS_GROUP = {'1B': 'IF', '2B': 'IF', '3B': 'IF', 'SS': 'IF', 'LF': 'OF', 'CF': 'OF', 'RF': 'OF'}
 HOLD_FROM = 2000  # KBO 홀드 공식 기록 시작 (자료집 제도연표 기준으로 확인 필요, 2000년 이전 값은 견주지 않음)
 UNIT = {'Q174728': 1, 'Q11573': 100, 'Q218593': 2.54, 'Q11570': 1, 'Q100995': 0.45359237}
 
@@ -397,6 +401,20 @@ def main():
         for item in ITEMS:
             vals = {s: exs[s]['profile'][item] for s in order if exs[s]['profile'].get(item) not in (None, '')}
             if not vals:
+                continue
+            if item == '포지션 코드':
+                # 출처 중 가장 자세한 값 (나무위키 '좌익수'가 위키백과 '외야수'보다 앞), 같으면 신뢰 순서
+                s = next((s for s in order if vals.get(s) not in (None, 'IF', 'OF')), None) or next(s for s in order if s in vals)
+                if vals[s] != 'P' and max(our_years.get(pid, {0})) > POS_FILL_UNTIL:
+                    # 2001년 뒤에도 뛴 야수는 위키로 채우지 않고 칸으로만 남긴다 (수비 기록으로 정한다)
+                    prof_rows.append([pid, p['name'], '세부 포지션(위키)', vals[s], SRC_NAME[s], exs[s]['title'], exs[s].get('fetched') or ''])
+                    if not p.get('pos'):
+                        # 포지션이 아예 빈 선수는 큰 갈래(C·IF·OF·DH)만 채운다
+                        prof_rows.append([pid, p['name'], item, POS_GROUP.get(vals[s], vals[s]), SRC_NAME[s], exs[s]['title'],
+                                          exs[s].get('fetched') or ''])
+                    continue
+                if item not in o:
+                    prof_rows.append([pid, p['name'], item, vals[s], SRC_NAME[s], exs[s]['title'], exs[s].get('fetched') or ''])
                 continue
             if item in o:
                 bad = {s: v for s, v in vals.items() if not same(item, o[item], v)}

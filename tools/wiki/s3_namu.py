@@ -267,10 +267,8 @@ def extract(doc):
     for k in ('국적', '포지션', '학력', '프로 입단', '소속팀', '병역', '연봉', '계약', '가족', '등번호', '지도자', '응원가'):
         if box.get(k) and k not in ('가족',):  # 가족은 사생활이라 뽑지 않는다
             prof[k if k != '학력' else '출신 학교'] = box[k].replace('\n', ' / ')
-    if '포지션' in prof:
-        first = re.split(r'[,/·\s]', prof['포지션'])[0].strip()
-        if first in X.POS:
-            prof['포지션 코드'] = X.POS[first]
+    if X.pos_code(prof.get('포지션')):
+        prof['포지션 코드'] = X.pos_code(prof['포지션'])
     m = re.search(r'(\d{4})', box.get('프로 입단', ''))
     if m:
         prof['입단 연도'] = int(m.group(1))
