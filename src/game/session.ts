@@ -29,7 +29,7 @@ import { dollarText, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
+import { isNoGame, type BoxScore, type CommandChoice, type CommandRequest, type KnownSchedule, type Play, type PlanCancel } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
@@ -108,6 +108,8 @@ export interface CommandPreview {
   final?: { away: number; home: number };
   /** 더블헤더 2차전이면 2 (확정할 때 commitCommand에 넘긴다) */
   dh?: 2;
+  /** 비로 멈춘 경기 (일정 개편 10단계): 몇 회를 마치고 강우 콜드·노게임이 됐는지 */
+  rain?: { kind: 'cold' | 'nogame'; inning: number };
 }
 
 /** 조작 기록으로 받은 지휘 (dh: 더블헤더 2차전이면 2) */
@@ -497,11 +499,14 @@ export class GameSession {
       if (!(e instanceof CommandPause)) throw e;
       return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1, ...(dh ? { dh } : {}) };
     }
+    // 노게임은 기록(log)에 없고 noGames에만 있다
     const i = s.log.findIndex((g, k) => k >= this.season.log.length && isTarget(g));
-    const g = s.log[i];
+    const ng = i < 0 ? s.noGames.find((x) => x.day === s.day - 1 && isTarget(x)) : undefined;
+    const g = ng ?? s.log[i];
     return {
-      req: null, choices: out, plays: s.plays.get(i) ?? [], home: g?.home ?? -1, away: g?.away ?? -1,
+      req: null, choices: out, plays: (ng ? ng.plays : s.plays.get(i)) ?? [], home: g?.home ?? -1, away: g?.away ?? -1,
       ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}), ...(dh ? { dh } : {}),
+      ...(g?.rain ? { rain: { kind: g.rain, inning: g.innings } } : {}),
     };
   }
 
@@ -1716,6 +1721,7 @@ export class GameSession {
     s.simulateDay();
     s.commander = null;
     this.pendingCommands = [];
+    this.rainNews(day);
 
     org.forEach((p, i) => {
       const until = s.states.absentUntil[p.idx];
@@ -1927,7 +1933,8 @@ export class GameSession {
   private scheduleNews(day: number): void {
     const s = this.season;
     const { cancels, remainingFrom } = s.plan;
-    const today = cancels.filter((c) => c[0] === day);
+    // 노게임(cancels의 다섯째 값)은 경기 뒤 소식 (rainNews)
+    const today = cancels.filter((c) => c[0] === day && !c[4]);
     if (day !== remainingFrom && !today.length) return;
     const year = this.world.year;
     const name = (t: number) => this.world.teams[t].name;
@@ -1945,20 +1952,59 @@ export class GameSession {
       this.addNews(day, 'season', `잔여 경기 일정이 발표됐습니다. 우리 팀 남은 경기 ${left}경기${last >= 0 ? `, 마지막 경기 ${formatDate(year, last)}` : ''}.`);
     }
     if (!today.length) return;
-    // 옮긴 날: 알려진 일정에 그 대진이 있으면 그날, 발표 전 잔여 경기면 "추후 편성"
-    const late = new Set(s.plan.held);
-    const when = (c: [number, number, number, number]): { text: string; short: string } => {
-      if (late.has(cancels.indexOf(c)) && day < remainingFrom) return { text: '추후 편성합니다 (잔여 경기 일정 발표 때)', short: '추후 편성' };
-      const dh = known.days[c[3]]?.find((g) => g.home === c[1] && g.away === c[2] && g.dh === 1);
-      return { text: `${formatDate(year, c[3])}에 ${dh ? '더블헤더 1차전으로 ' : ''}다시 치릅니다`, short: `${shortDate(year, c[3])}${dh ? ' 더블헤더' : ''}` };
-    };
     const others: string[] = [];
     for (const c of today) {
-      const w = when(c);
+      const w = this.replayWhen(c, day, known);
       if (mine({ home: c[1], away: c[2] })) this.addNews(day, 'season', `${name(c[2])} 대 ${name(c[1])} 경기는 우천으로 취소됐습니다. ${w.text}.`);
       else others.push(`${name(c[2])} 대 ${name(c[1])} (${w.short})`);
     }
     if (others.length) this.addNews(day, 'season', `우천 취소: ${others.join(', ')}.`);
+  }
+
+  /**
+   * 다시 치르는 날 문구: 알려진 일정에 그 대진이 있으면 그날, 잔여 경기 발표 전 잔여 경기면 "추후 편성".
+   * known은 그 취소가 알려진 날(경기 전 취소는 그날, 노게임은 다음 날)의 knownSchedule, day는 그날
+   */
+  private replayWhen(c: PlanCancel, day: number, known: KnownSchedule): { text: string; short: string } {
+    const { cancels, remainingFrom, held } = this.season.plan;
+    const year = this.world.year;
+    if (held.includes(cancels.indexOf(c)) && day < remainingFrom) return { text: '추후 편성합니다 (잔여 경기 일정 발표 때)', short: '추후 편성' };
+    const dh = known.days[c[3]]?.find((g) => g.home === c[1] && g.away === c[2] && g.dh === 1);
+    return { text: `${formatDate(year, c[3])}에 ${dh ? '더블헤더 1차전으로 ' : ''}다시 치릅니다`, short: `${shortDate(year, c[3])}${dh ? ' 더블헤더' : ''}` };
+  }
+
+  /**
+   * 경기 중 비 소식 (일정 개편 기획안 4.7): 그날 경기 뒤 강우 콜드 점수와 노게임·다시 치르는 날.
+   * 콜드 점수는 경기 기록(log), 노게임은 개막 때 정해 둔 일정(plan)과 다음 날 아침에 알려진 일정만 읽는다
+   */
+  private rainNews(day: number): void {
+    const s = this.season;
+    const games = (s.plan.days[day] ?? []).filter((g) => g.rainInning);
+    if (!games.length) return;
+    const name = (t: number) => this.world.teams[t].name;
+    const mine = (g: { home: number; away: number }) => g.home === this.teamIdx || g.away === this.teamIdx;
+    const dhText = (g: { dh?: 1 | 2 }) => (g.dh ? ` ${g.dh}차전` : '');
+    const others: string[] = [];
+    const nextDay = day + 1;
+    let known: KnownSchedule | null = null;
+    for (const g of games) {
+      const vs = `${name(g.away)} 대 ${name(g.home)}`;
+      if (isNoGame(g.rainInning)) {
+        const c = s.plan.cancels.find((x) => x[4] && x[0] === day && x[1] === g.home && x[2] === g.away);
+        if (!c) continue;
+        known ??= s.knownSchedule(nextDay);
+        const w = this.replayWhen(c, nextDay, known);
+        if (mine(g)) this.addNews(day, 'season', `${vs}${dhText(g)} 경기는 ${g.rainInning}회 노게임이 선언됐습니다 (비). 기록은 남지 않습니다. ${w.text}.`);
+        else others.push(`${vs} ${g.rainInning}회 노게임 (${w.short})`);
+      } else {
+        const r = s.log.find((x) => x.day === day && x.home === g.home && x.away === g.away && x.dh === g.dh);
+        if (!r) continue;
+        const score = `${r.awayRuns}:${r.homeRuns}`;
+        if (mine(g)) this.addNews(day, 'season', `${vs}${dhText(g)} 경기는 ${g.rainInning}회 강우 콜드로 끝났습니다 (${score}${r.awayRuns === r.homeRuns ? ', 무승부' : ''}).`);
+        else others.push(`${vs} ${g.rainInning}회 강우 콜드 ${score}`);
+      }
+    }
+    if (others.length) this.addNews(day, 'season', `경기 중 비: ${others.join(', ')}.`);
   }
 
   private addNews(day: number, kind: NewsKind, text: string): void {

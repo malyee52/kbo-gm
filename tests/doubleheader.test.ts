@@ -3,7 +3,7 @@
 // 더블헤더 날 저장 → 이어 하기 = 끊김 없이, 더블헤더 날 우리 2차전 직접 지휘 재현
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { currentBody, currentFatigue, DEFAULT_PARAMS, Season, simulateSeason, worldForYear, type CommandChoice, type World } from '../src/engine';
+import { currentBody, currentFatigue, DEFAULT_PARAMS, isNoGame, Season, simulateSeason, worldForYear, type CommandChoice, type World } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { NO_STOPS } from '../src/game/stops';
 import type { Rates } from '../src/data/types';
@@ -65,12 +65,14 @@ describe('더블헤더 엔진 처리 (9단계)', () => {
         const firstTwo = logs.findIndex((l) => l.dh === 2);
         expect(firstTwo, `${seed} ${day}`).toBeGreaterThan(0);
         expect(logs.slice(firstTwo).every((l) => l.dh === 2)).toBe(true);
-        expect(logs.length).toBe(s.schedule[day].length);
+        // 노게임(10단계)은 경기 기록에 없다
+        expect(logs.length).toBe(s.schedule[day].filter((g) => !isNoGame(g.rainInning)).length);
         for (const l of logs) expect(l.dh).toBe(s.schedule[day].find((g) => g.home === l.home && g.away === l.away && (g.dh === 2) === (l.dh === 2))!.dh);
         // 1차전 선발은 2차전에 나오지 않는다 (두 팀 모두)
         for (const [k, l] of logs.entries()) {
           if (l.dh !== 2) continue;
           const k1 = logs.findIndex((x) => x.dh === 1 && x.home === l.home && x.away === l.away);
+          if (k1 < 0) continue; // 1차전 노게임
           const b1 = s.boxes.get(from + k1)!;
           const b2 = s.boxes.get(from + k)!;
           for (const side of ['home', 'away'] as const) {
@@ -85,6 +87,7 @@ describe('더블헤더 엔진 처리 (9단계)', () => {
         const m = mid!;
         const k2 = logs.findIndex((l) => l.dh === 2 && l.home === team);
         const k1 = logs.findIndex((l) => l.dh === 1 && l.home === team);
+        if (k2 < 0 || k1 < 0) continue; // 1·2차전 중 노게임
         const box1 = s.boxes.get(from + k1)!.home;
         const box2 = s.boxes.get(from + k2)!.home;
         for (const p of box2.pitchers) {

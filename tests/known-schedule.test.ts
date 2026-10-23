@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { scheduleRule } from '../src/data/schedule';
-import { DEFAULT_PARAMS, knownSchedule, Rng } from '../src/engine';
+import { DEFAULT_PARAMS, isNoGame, knownSchedule, Rng } from '../src/engine';
 import { planForWorld, type PlanGame, type SchedulePlan } from '../src/engine/schedule';
 import { GameSession, type GameSave } from '../src/game/session';
 
@@ -41,10 +41,10 @@ describe('알려진 일정 knownSchedule (8단계)', () => {
         for (let e = day; e < k.days.length; e++) for (const g of k.days[e]) expect(g.rainInning, `${at} 비 회 ${e}`).toBeUndefined();
         // day 뒤에 취소될 발표 일정 경기는 아직 원래 날에 있다 (순연으로 옮겨 온 경기는 옮긴 취소가 알려진 뒤에만)
         for (const [d, h, a] of p.cancels) if (d > day && has(p.planned[d], h, a)) expect(has(k.days[d], h, a), `${at} 취소 ${d}`).toBe(true);
-        // 남은 경기 수 = 알려진 앞날 경기 + 날짜 미정 경기 = 실제 남은 경기 (팀마다)
+        // 남은 경기 수 = 알려진 앞날 경기 + 날짜 미정 경기 = 실제 남은 경기 (팀마다). 노게임 경기는 다시 치르는 경기가 따로 있어 세지 않는다
         for (let t = 0; t < n; t++) {
           const mine = (g: PlanGame) => g.home === t || g.away === t;
-          const real = p.days.slice(day).reduce((s, d) => s + d.filter(mine).length, 0);
+          const real = p.days.slice(day).reduce((s, d) => s + d.filter((g) => mine(g) && !isNoGame(g.rainInning)).length, 0);
           const known = k.days.slice(day).reduce((s, d) => s + d.filter(mine).length, 0) + k.pending.filter(mine).length;
           expect(known, `${at} 팀 ${t}`).toBe(real);
         }
@@ -110,7 +110,7 @@ describe('일정 소식 (8단계)', () => {
 
     // 소식의 날짜와 내용이 일정과 맞는다
     const p = a.season.plan;
-    const ours = p.cancels.filter((x) => x[1] === 3 || x[2] === 3);
+    const ours = p.cancels.filter((x) => !x[4] && (x[1] === 3 || x[2] === 3));
     const mineNews = ra.filter((n) => /경기는 우천으로 취소/.test(n.text));
     expect(mineNews.map((n) => n.day)).toEqual(ours.map((x) => x[0]));
     for (const n of mineNews) expect(n.text).toMatch(/다시 치릅니다|추후 편성/);

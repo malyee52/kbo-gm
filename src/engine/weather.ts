@@ -6,12 +6,13 @@
 // 난수 줄기는 시즌 뿌리의 'weather'에서 날짜·구장마다 따로 갈라 쓴다 (weather/<날짜 색인>/<구장 계보>, 더블헤더 2차전은 /2).
 // 순연이 생겨 그 날 경기가 늘어도 그 날 그 구장 날씨는 같다. 돔 구장은 비가 오지 않는다.
 //
-// 경기 중 비는 rainInning(1~8)만 달아 둔다. 엔진은 아직 이 값을 무시하고 끝까지 치른다 (강우 콜드·노게임은 10단계).
-// 그래서 노게임(1~4회)도 지금은 다시 편성하지 않는다 (편성하면 그 대진 경기 수가 늘어난다).
+// 경기 중 비는 rainInning(1~8)을 달아 두고 엔진(game.ts)이 그 회를 마치고 멈춘다 (기획안 4.7, 8장 10단계).
+// 정식 경기 성립(5회) 전에 멈추는 노게임은 그 경기를 일정에 남긴 채(피로·부상만 남는다) 같은 순연 규칙으로 한 경기를 더 편성한다.
+// 온 이닝 끝에서만 멈추므로 노게임 여부가 점수와 무관해 개막 때 미리 굴릴 수 있다.
 import type { YearScheduleRule } from '../data/schedule';
 import { addDays, daysBetween, weekdayOf } from '../data/schedule';
 import { Rng } from './rng';
-import type { PlanGame, SchedulePlan } from './schedule';
+import type { PlanCancel, PlanGame, SchedulePlan } from './schedule';
 
 /**
  * 월별 전국 비 날 확률 (1월 = 0번, 임시값). 3~4월 낮음, 6월 하순~7월 장마 높음, 8월 태풍 중간, 9월 중간, 10월 낮음 (기획안 4.2).
@@ -27,6 +28,14 @@ export const RAIN_PARK = { wide: 0.5, local: 0.025 };
 export const RAIN_SCALE = 1.17;
 /** 구장에 비가 왔을 때 경기 중 비의 비율 (경기 전 취소 : 경기 중 비 = 5 : 1, 임시값). 멈추는 회는 1~8회 균등 */
 export const RAIN_MID_SHARE = 1 / 6;
+/** 정식 경기 성립 회: 이 회를 마치기 전에 멈추면 노게임 (조사값: 1982년부터 5회, 홈팀이 앞선 5회초 끝 성립은 온 이닝 끝에서만 멈춰 쓰지 않는다) */
+export const OFFICIAL_INNINGS = 5;
+
+/** 경기 중 비 회가 노게임인가 (1~4회) */
+export function isNoGame(rainInning: number | undefined): boolean {
+  return rainInning !== undefined && rainInning > 0 && rainInning < OFFICIAL_INNINGS;
+}
+
 /** 2015년부터(R3~) 한 팀이 연달아 경기하는 날의 한도 (조사값 "9연전까지") */
 export const MAX_STREAK = 9;
 
@@ -229,7 +238,7 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
     return greedy(g, pushBack());
   };
 
-  const cancels: [number, number, number, number][] = [];
+  const cancels: PlanCancel[] = [];
   const placeHeld = (from: number) => {
     const list = input.rng.fork('remaining').shuffle([...held]);
     held.length = 0;
@@ -252,16 +261,18 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
       if (w === 0) continue;
       if (w > 0) {
         g.rainInning = w;
-        continue;
-      }
-      today.splice(today.indexOf(g), 1);
-      if (g.dh) {
-        const partner = today.find((x) => x.home === g.home && x.away === g.away && x.dh);
-        if (partner) delete partner.dh;
+        // 강우 콜드(5~8회)는 그 회까지로 끝난 경기. 노게임은 경기를 남긴 채 다시 치를 한 경기를 순연 규칙으로 더 놓는다
+        if (!isNoGame(w)) continue;
+      } else {
+        today.splice(today.indexOf(g), 1);
+        if (g.dh) {
+          const partner = today.find((x) => x.home === g.home && x.away === g.away && x.dh);
+          if (partner) delete partner.dh;
+        }
       }
       const idx = cancels.length;
-      cancels.push([d, g.home, g.away, -1]);
-      const to = reschedule(g, d, idx);
+      cancels.push(w > 0 ? [d, g.home, g.away, -1, 1] : [d, g.home, g.away, -1]);
+      const to = reschedule({ home: g.home, away: g.away }, d, idx);
       cancels[idx][3] = to;
       if (to < 0 || (announce < 0 && d < reveal && to > mainEnd)) late.push(idx);
     }
@@ -279,7 +290,8 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
 export interface KnownSchedule {
   /**
    * 날짜별 경기. day 전은 실제로 치른 일정(days) 그대로, day부터는 발표 일정 + day까지 생긴 우천 취소·순연 (+ 발표 뒤 잔여 경기).
-   * day부터는 경기 중 비 회(rainInning)가 없고, day 뒤에 생길 취소는 아직 반영하지 않는다
+   * day부터는 경기 중 비 회(rainInning)가 없고, day 뒤에 생길 취소는 아직 반영하지 않는다.
+   * 노게임은 그 경기를 치른 다음 날 아침부터 알려진다 (다시 치르는 경기가 그때 생긴다)
    */
   days: PlanGame[][];
   /** 날짜를 아직 모르는 경기 ("추후 편성": 잔여 경기 발표 전의 순연 경기와 미편성 경기). 발표(remainingFrom) 때 days로 들어간다 */
@@ -322,8 +334,8 @@ export function knownSchedule(plan: Pick<SchedulePlan, 'days' | 'planned' | 'can
   if (day < plan.remainingFrom) {
     for (let e = day; e < plan.planned.length; e++) at(e).push(...plan.planned[e].map(strip));
     const late = new Set(plan.held);
-    plan.cancels.forEach(([d, h, a, to], i) => {
-      if (d > day) return;
+    plan.cancels.forEach(([d, h, a, to, nogame], i) => {
+      if (d > day || (nogame && d === day)) return;
       if (d === day) remove(d, h, a);
       if (late.has(i)) pending.push({ home: h, away: a });
       else if (to >= day) add(to, h, a);
@@ -333,14 +345,17 @@ export function knownSchedule(plan: Pick<SchedulePlan, 'days' | 'planned' | 'can
     const key = (g: PlanGame) => g.home * 1000 + g.away;
     for (const d of plan.days) for (const g of d) extra.set(key(g), (extra.get(key(g)) ?? 0) + 1);
     for (const d of plan.planned) for (const g of d) extra.set(key(g), (extra.get(key(g)) ?? 0) - 1);
+    // 노게임은 그 경기와 다시 치르는 경기가 모두 실제 일정에 있다
+    for (const [, h, a, , nogame] of plan.cancels) if (nogame) extra.set(h * 1000 + a, (extra.get(h * 1000 + a) ?? 0) - 1);
     for (const [k, n] of [...extra].sort((x, y) => x[0] - y[0])) for (let i = 0; i < n; i++) pending.push({ home: Math.floor(k / 1000), away: k % 1000 });
   } else {
     for (let e = day; e < plan.days.length; e++) at(e).push(...plan.days[e].map(strip));
     for (let i = plan.cancels.length - 1; i >= 0; i--) {
-      const [d, h, a, to] = plan.cancels[i];
-      if (d <= day) continue;
+      const [d, h, a, to, nogame] = plan.cancels[i];
+      if (nogame ? d < day : d <= day) continue;
       remove(to, h, a);
-      add(d, h, a);
+      // 노게임 경기는 그날 일정에 그대로 있다
+      if (!nogame) add(d, h, a);
     }
   }
   while (out.length > day && !out[out.length - 1].length) out.pop();

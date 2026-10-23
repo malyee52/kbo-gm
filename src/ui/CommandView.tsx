@@ -212,7 +212,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           </>
         ) : (
           <div className="note">
-            <p><strong>경기 끝: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
+            {pv.rain && <p className="small">비로 경기가 중단됐습니다 ({pv.rain.inning}회 {pv.rain.kind === 'cold' ? '강우 콜드' : '노게임'}).{pv.rain.kind === 'nogame' ? ' 정식 경기(5회)가 되기 전이라 기록은 남지 않고 다른 날 다시 치릅니다.' : ''}</p>}
+            <p><strong>{pv.rain?.kind === 'nogame' ? '노게임' : '경기 끝'}: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
             <p className="small muted">확정하면 이 결과로 오늘 경기가 진행됩니다. 그만두면 오늘은 그대로 남습니다.</p>
             <div className="actions"><button type="button" onClick={commit} disabled={busy}>경기 확정</button></div>
           </div>

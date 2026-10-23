@@ -5,7 +5,7 @@ import { addDays, daysBetween, divisionsOf, scheduleRule, weekdayOf } from '../s
 import { DEFAULT_PARAMS, Season } from '../src/engine';
 import { Rng } from '../src/engine/rng';
 import { generatePlan, planForWorld, type SchedulePlan } from '../src/engine/schedule';
-import { MAX_STREAK, parkWeather } from '../src/engine/weather';
+import { isNoGame, MAX_STREAK, parkWeather } from '../src/engine/weather';
 import { createLeague } from '../src/league/create';
 import { homeIsDome } from '../src/league/stadium';
 
@@ -43,7 +43,7 @@ describe('날씨와 우천 순연 (7단계)', () => {
     each((y, s, p) => {
       const n = worldOf(y).teams.length;
       const m = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-      for (const d of p.days) for (const g of d) m[g.home][g.away]++;
+      for (const d of p.days) for (const g of d) if (!isNoGame(g.rainInning)) m[g.home][g.away]++; // 노게임은 다시 치르는 경기가 따로 있다
       const rule = scheduleRule(store.schedule!, y)!;
       const games = m.map((row, a) => row.reduce((x, z) => x + z, 0) + m.reduce((x, r) => x + r[a], 0));
       expect(games, `${y}/${s}`).toEqual(new Array(n).fill(rule.games));

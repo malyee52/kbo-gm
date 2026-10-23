@@ -15,7 +15,7 @@ import type { YearScheduleRule } from '../data/schedule';
 import { addDays, daysBetween, defaultOpening, weekdayOf } from '../data/schedule';
 import { Rng } from './rng';
 import type { World } from './types';
-import { applyWeather } from './weather';
+import { applyWeather, isNoGame } from './weather';
 
 export interface PlanGame {
   home: number;
@@ -25,6 +25,12 @@ export interface PlanGame {
   /** 경기 중 비: 이 회를 마치고 멈춘다 (10단계) */
   rainInning?: number;
 }
+
+/**
+ * 다시 치르는 경기 한 건 [날짜, 홈, 원정, 옮긴 날짜, 노게임이면 1].
+ * 경기 전 취소는 그날 일정에서 빠지고, 노게임(10단계)은 그날 일정에 rainInning 1~4회로 남는다 (weather.ts)
+ */
+export type PlanCancel = [day: number, home: number, away: number, to: number, nogame?: 1];
 
 /** 연전 하나 (본 일정). day는 개막일부터 센 날짜 색인 */
 export interface PlanSeries {
@@ -42,8 +48,8 @@ export interface SchedulePlan {
   days: PlanGame[][];
   /** 개막 때 발표한 일정 (잔여 경기 발표가 있는 해는 잔여 경기가 없다) */
   planned: PlanGame[][];
-  /** 경기 전 우천 취소 [날짜, 홈, 원정, 옮긴 날짜] (7단계) */
-  cancels: [number, number, number, number][];
+  /** 다시 치르는 경기: 경기 전 우천 취소(7단계)와 노게임(10단계) [날짜, 홈, 원정, 옮긴 날짜, 노게임이면 1] */
+  cancels: PlanCancel[];
   /** 잔여 경기 일정 발표 날짜 색인 (없으면 -1) */
   remainingFrom: number;
   /** 옮긴 날을 잔여 경기 일정 발표(remainingFrom) 때 알리는 취소 (cancels 색인). 그 전에는 "추후 편성" (8단계 knownSchedule) */
@@ -795,6 +801,8 @@ export function planProblems(plan: SchedulePlan, input: ScheduleInput, opts: { r
     if (games.length && !(opts.rain ? !rule.breaks.some((b) => b.from <= d && d <= b.to) : playable(rule, d))) out.push(`${d}: 경기 없는 날에 경기`);
     const seen = new Set<number>();
     for (const g of games) {
+      // 노게임(rainInning 1~4회)은 다시 치르는 경기가 따로 있어 경기 수에 넣지 않는다
+      if (isNoGame(g.rainInning)) continue;
       const dh = opts.rain && g.dh === 2 && games.some((x) => x.dh === 1 && x.home === g.home && x.away === g.away);
       if (!dh && (seen.has(g.home) || seen.has(g.away))) out.push(`${d}: 한 팀이 두 경기`);
       seen.add(g.home);

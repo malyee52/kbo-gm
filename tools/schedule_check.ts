@@ -1,6 +1,6 @@
 // 일정 개편 7단계 점검 (기획안 7장): 날씨·우천 순연을 넣은 시즌 일정을 해마다 시드 여러 개로 본다.
 //  - 다시 치르는 경기 = 경기 전 취소 + 노게임(경기 중 비 1~4회). 2015~2025 평균 60~70, 시드별 범위 대략 40~90이 목표
-//    (조사값: 2015~2025 평균 65경기, 42~85). 노게임은 아직 다시 편성하지 않는다 (10단계) → 종료일에는 빠져 있다
+//    (조사값: 2015~2025 평균 65경기, 42~85). 노게임도 경기 전 취소와 같은 순연 규칙으로 다시 편성한다 (10단계) → 종료일에 들어 있다
 //  - 종료일 = 마지막 경기 날. 중앙값이 참고 종료일 ±10일 (출처 갈림 해는 두 값 사이도 맞음)
 // 월드는 시작 판과 같은 모양 (worldForYear + 그 해 실제 구장의 돔). 2027~는 2026 구단으로 계산한 자료 없는 해 규칙.
 // npx tsx tools/schedule_check.ts --seeds 50 [--from 1982 --to 2027] [--out reports/schedule-check.md]
@@ -9,7 +9,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { addDays, daysBetween, scheduleRule } from '../src/data/schedule';
 import { DEFAULT_PARAMS, planForWorld, Rng, worldForYear, type World } from '../src/engine';
 import { framedRule } from '../src/engine/schedule';
-import { RAIN_SCALE } from '../src/engine/weather';
+import { isNoGame, RAIN_SCALE } from '../src/engine/weather';
 import { homeIsDome } from '../src/league/stadium';
 import { projectedEnvironment } from '../src/league/world';
 
@@ -68,14 +68,17 @@ for (let y = from; y <= to; y++) {
     p.days.forEach((d, i) => {
       const monday = new Date(`${addDays(p.opening, i)}T00:00:00Z`).getUTCDay() === 1;
       for (const g of d) {
-        if (g.rainInning && g.rainInning < 5) nogame++;
+        if (isNoGame(g.rainInning)) nogame++;
         else if (g.rainInning) cold++;
         if (g.dh === 2) dh++;
         if (monday) mon++;
       }
     });
-    cancels.push(p.cancels.length);
-    replays.push(p.cancels.length + nogame);
+    // cancels에는 경기 전 취소와 노게임(다섯째 값 1)이 함께 있다 (10단계부터 노게임도 다시 편성)
+    const pre = p.cancels.filter((c) => !c[4]).length;
+    if (pre + nogame !== p.cancels.length) throw new Error(`${y}/${k}: 노게임 ${nogame}경기와 다시 편성한 노게임 ${p.cancels.length - pre}건이 다름`);
+    cancels.push(pre);
+    replays.push(p.cancels.length);
     colds.push(cold);
     dhs.push(dh);
     mondays.push(mon);
@@ -106,7 +109,7 @@ const lines = [
   '',
   `\`npx tsx tools/schedule_check.ts --seeds ${seeds} --from ${from} --to ${to}\`. 시드 ${seeds}개, 월드는 시작 판 모양 (그 해 실제 구장 돔). 날씨 전체 계수 RAIN_SCALE = ${RAIN_SCALE} (engine/weather.ts, 임시값).`,
   '',
-  '- 다시 치르는 경기 = 경기 전 취소 + 노게임 (경기 중 비 1~4회). 노게임은 엔진이 아직 무시해서(10단계) 다시 편성하지 않았다 → 종료일에 빠져 있다.',
+  '- 다시 치르는 경기 = 경기 전 취소 + 노게임 (경기 중 비 1~4회). 노게임도 같은 순연 규칙으로 다시 편성한다 (10단계) → 종료일에 들어 있다.',
   '- 강우 콜드 = 경기 중 비 5~8회 (경기는 그대로 성립). 더블헤더는 2차전 수. 월요일 경기는 우천 순연·잔여 경기·어린이날.',
   '- 종료 판정: 마지막 경기 날 중앙값이 참고 종료일 ±10일 (출처 갈림 해는 두 값 사이 포함).',
   '',

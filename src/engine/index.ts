@@ -31,8 +31,8 @@ export {
   type Trait, type TraitParams, type Situation,
 } from './traits';
 export { eraPitching, leagueQuality, type EraPitching } from './eras';
-export { knownSchedule, type KnownSchedule } from './weather';
-export { planForWorld, pickOpeningHosts, rankedFromSeason, OPENING_HOSTS_FROM, type SchedulePlan, type PlanGame } from './schedule';
+export { isNoGame, knownSchedule, OFFICIAL_INNINGS, type KnownSchedule } from './weather';
+export { planForWorld, pickOpeningHosts, rankedFromSeason, OPENING_HOSTS_FROM, type SchedulePlan, type PlanGame, type PlanCancel } from './schedule';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */

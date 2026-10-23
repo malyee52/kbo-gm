@@ -13,7 +13,7 @@ import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
 import { sbShiftOf } from './rules';
 import { Rng } from './rng';
-import { planForWorld, type PlanGame, type SchedulePlan } from './schedule';
+import { planForWorld, type PlanCancel, type PlanGame, type SchedulePlan } from './schedule';
 import { knownSchedule, type KnownSchedule } from './weather';
 import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
@@ -29,7 +29,7 @@ export interface SavedSchedule {
   opening: string;
   days: number[][][];
   planned: number[][][];
-  cancels: [number, number, number, number][];
+  cancels: PlanCancel[];
   remainingFrom: number;
   /** 옮긴 날을 잔여 경기 발표 때 알리는 취소 (cancels 색인) */
   held?: number[];
@@ -48,14 +48,14 @@ function unpackGame(a: number[]): PlanGame {
 export function packSchedule(p: SeasonPlan): SavedSchedule {
   return {
     opening: p.opening, days: p.days.map((d) => d.map(packGame)), planned: p.planned.map((d) => d.map(packGame)),
-    cancels: p.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: p.remainingFrom, held: [...p.held],
+    cancels: p.cancels.map((c) => [...c] as PlanCancel), remainingFrom: p.remainingFrom, held: [...p.held],
   };
 }
 
 export function unpackSchedule(s: SavedSchedule): SeasonPlan {
   return {
     opening: s.opening, days: s.days.map((d) => d.map(unpackGame)), planned: s.planned.map((d) => d.map(unpackGame)),
-    cancels: s.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: s.remainingFrom, held: [...(s.held ?? [])],
+    cancels: s.cancels.map((c) => [...c] as PlanCancel), remainingFrom: s.remainingFrom, held: [...(s.held ?? [])],
   };
 }
 
@@ -98,6 +98,8 @@ export interface GameLog {
   save: number | null;
   /** 더블헤더 몇 차전 (일정 개편 9단계). 더블헤더가 아니면 없다 */
   dh?: 1 | 2;
+  /** 경기 중 비로 멈춘 경기 (일정 개편 10단계): 강우 콜드(innings = 멈춘 회). 노게임은 log에 없고 Season.noGames에만 */
+  rain?: 'cold' | 'nogame';
 }
 
 export interface BoxBatter {
@@ -275,6 +277,11 @@ export class Season {
   readonly totals: LeagueCounters;
   readonly teamSeasons: TeamSeason[];
   readonly log: GameLog[] = [];
+  /**
+   * 노게임이 된 경기 (일정 개편 10단계): 순위·기록에 넣지 않고 다시 치른다 (일정의 cancels). 저장하지 않는다:
+   * 그날 직접 지휘 미리보기가 점수·중계를 보여 줄 때만 쓴다. 일정 쪽 사실(어느 경기가 몇 회 노게임인지)은 plan에 있다
+   */
+  readonly noGames: (GameLog & { plays?: Play[] })[] = [];
   /** 경기 로그 색인 → 박스스코어 */
   readonly boxes = new Map<number, BoxScore>();
   /** 박스스코어 구단 경기의 중계 기록 (경기 로그 색인 → 기록). 저장하지 않고 최근 PLAYS_KEEP경기만 메모리에 둔다 */
@@ -547,11 +554,13 @@ export class Season {
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
       ctx.dh = g.dh;
+      ctx.rainInning = g.rainInning;
       const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
       ctx.dh = undefined;
+      ctx.rainInning = undefined;
       // 경기 중 부상 (엔진 2 11단계): 다음 날부터 결장. 구단 의료 투자의 기간 배율은 경기 전 부상과 같다
       for (const inj of ctx.injuries) {
         const ts = season[world.players[inj.idx].teamIdx];
@@ -561,6 +570,14 @@ export class Season {
         }, ts);
       }
       ctx.injuries = undefined;
+      // 노게임: 피로·부상만 남고 순위·기록·경기 기록(log)에는 없다. 다시 치르는 경기는 개막 때 일정에 들어가 있다 (weather.ts)
+      if (res.rain === 'nogame') {
+        this.noGames.push({
+          day, home: g.home, away: g.away, homeRuns: res.homeRuns, awayRuns: res.awayRuns, innings: res.innings,
+          win: null, loss: null, save: null, ...(g.dh ? { dh: g.dh } : {}), rain: 'nogame', ...(plays ? { plays } : {}),
+        });
+        continue;
+      }
       const ht = this.teams[g.home];
       const at = this.teams[g.away];
       ht.g++; at.g++;
@@ -571,7 +588,7 @@ export class Season {
       else { ht.t++; at.t++; ht.homeT++; }
       this.log.push({
         day, home: g.home, away: g.away, homeRuns: res.homeRuns, awayRuns: res.awayRuns, innings: res.innings,
-        win: res.win, loss: res.loss, save: res.save, ...(g.dh ? { dh: g.dh } : {}),
+        win: res.win, loss: res.loss, save: res.save, ...(g.dh ? { dh: g.dh } : {}), ...(res.rain ? { rain: res.rain } : {}),
       });
       if (pitBefore && batBefore) {
         const line = (idx: number): BoxBatter => {

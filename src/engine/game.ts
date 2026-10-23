@@ -14,6 +14,7 @@ import { aiDefense, pickPinchHitter, pickPinchRunner, replaceInjured } from './s
 import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type TeamSeason } from './team';
 import { drawInjury, hitterAgeFactor, injuryProneness, type AbsenceKind, type InjuryCause, type InjuryPart } from './injury';
 import { injuryScale } from './traits';
+import { isNoGame } from './weather';
 import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
 
 export { BUNT_SUCCESS, emptyRunTally, type RunTally } from './rules';
@@ -105,6 +106,11 @@ export interface GameContext {
   injuries?: GameInjury[];
   /** 선수별 실제 한계 투구 수 배율 (선수 색인, 기획안 4.6, Season이 리그 시드로 만든다). 없으면 1 */
   realLimitScale?: Float32Array;
+  /**
+   * 경기 중 비 (일정 개편 기획안 4.7, 8장 10단계): 이 회(말 공격까지)를 마치고 멈춘다. 5~8회면 강우 콜드(그때 점수로 끝, 기록은 남는다),
+   * 1~4회면 노게임(기록·집계를 경기 전으로 되돌리고 피로·부상만 남긴다). 없으면 끝까지 치른다
+   */
+  rainInning?: number;
 }
 
 /** 경기 중 부상 한 건 (엔진 2 11단계). 다음 날부터 days일 결장 */
@@ -216,6 +222,8 @@ export interface GameResult {
   /** 경기 중 들어온 대타·대주자 (들어온 순서) */
   homeSubs: GameSub[];
   awaySubs: GameSub[];
+  /** 경기 중 비로 멈춘 경기: 강우 콜드(innings = 멈춘 회) 또는 노게임(기록 없음, 승패·세이브 없음) */
+  rain?: 'cold' | 'nogame';
 }
 
 export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup: SimPlayer[], awayLineup: SimPlayer[],
@@ -223,6 +231,9 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   if (homeLineup.length !== 9 || awayLineup.length !== 9) {
     throw new Error(`라인업은 9명이어야 합니다 (홈 ${homeLineup.length}명, 원정 ${awayLineup.length}명)`);
   }
+  // 노게임이 될 경기는 기록·집계를 경기 전 모습으로 잡아 둔다 (온 이닝 끝에서만 멈추므로 점수와 무관하게 미리 안다)
+  const noGame = isNoGame(ctx.rainInning);
+  const before = noGame ? snapshotRecords(ctx) : null;
   const mkSide = (ts: TeamSeason, lineup: SimPlayer[], starter: SimPlayer, isHome: boolean): Side => {
     const pitcher = enterPitcher(starter, true, 0, ctx);
     // 감독 작전: 선발을 일찍(작으면)·늦게 바꾸는 정도 (league/managers.ts). 난수를 더 쓰지 않는다
@@ -267,11 +278,55 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     lineScore.home.push(home.runs - h0);
     if (ctx.pen && inning >= 7) ctx.pen.lateRuns += home.runs - h0;
     if (walkOff) break;
+    // 경기 중 비: 그 회를 마치고 멈춘다 (1~8회라 끝내기·9회 판정보다 먼저 온다)
+    if (ctx.rainInning && inning >= ctx.rainInning) break;
     if (inning >= 9 && home.runs !== away.runs) break;
     if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
   }
   if (ctx.running) for (const side of [home, away]) for (const s of side.subs) ctx.running[s.kind === 'PH' ? 'ph' : s.kind === 'PR' ? 'pr' : 'def']++;
-  return finishGame(st, inning, lineScore);
+  const res = finishGame(st, inning, lineScore);
+  if (!ctx.rainInning) return res;
+  if (!before) return { ...res, rain: 'cold' };
+  // 노게임: 피로·혹사·선발일(finishGame이 states에 남긴 것)과 경기 중 부상(ctx.injuries)은 그대로, 기록·집계만 되돌린다
+  restoreRecords(ctx, before);
+  return { ...res, win: null, loss: null, save: null, rain: 'nogame' };
+}
+
+/** 노게임 때 되돌릴 기록·집계 (선수별 기록은 객체를 그대로 두고 값만 되돌린다: 경기 중 PitcherInGame.line이 같은 객체를 가리킨다) */
+interface RecordSnapshot {
+  bat: BatLine[];
+  pit: PitLine[];
+  totals: LeagueCounters;
+  errors?: number[];
+  tallies: Partial<Pick<GameContext, 'balls' | 'running' | 'pen' | 'splits'>>;
+}
+
+const TALLIES = ['balls', 'running', 'pen', 'splits'] as const;
+
+function snapshotRecords(ctx: GameContext): RecordSnapshot {
+  const tallies: RecordSnapshot['tallies'] = {};
+  for (const k of TALLIES) if (ctx[k]) (tallies as Record<string, unknown>)[k] = structuredClone(ctx[k]);
+  return {
+    bat: ctx.bat.map((l) => ({ ...l })), pit: ctx.pit.map((l) => ({ ...l })), totals: { ...ctx.totals },
+    ...(ctx.errors ? { errors: ctx.errors.slice() } : {}), tallies,
+  };
+}
+
+function restoreInto(target: object, snap: object): void {
+  const t = target as Record<string, unknown>;
+  for (const k of Object.keys(t)) if (!(k in snap)) delete t[k];
+  Object.assign(t, snap);
+}
+
+function restoreRecords(ctx: GameContext, s: RecordSnapshot): void {
+  s.bat.forEach((l, i) => Object.assign(ctx.bat[i], l));
+  s.pit.forEach((l, i) => Object.assign(ctx.pit[i], l));
+  Object.assign(ctx.totals, s.totals);
+  if (ctx.errors && s.errors) {
+    ctx.errors.length = s.errors.length;
+    s.errors.forEach((v, i) => { ctx.errors![i] = v; });
+  }
+  for (const k of TALLIES) if (ctx[k] && s.tallies[k]) restoreInto(ctx[k]!, s.tallies[k]!);
 }
 
 /** 직접 지휘자에게 묻는다 */
