@@ -52,6 +52,24 @@ describe('경기별 난수 줄기', () => {
     expect(next(changed)).toEqual(next(base));
   });
 
+  it('경기 전 부상·이탈 뽑기는 선수·날짜 줄기 (엔진 2 13단계): 한 선수가 빠져도 다른 선수의 그날 뽑기는 같다', () => {
+    // 경기 전 부상이 많은 조정값으로, 어느 날 한 선수를 결장시킨 시즌과 아닌 시즌의 그날 부상·이탈을 견준다
+    const P = { ...FAST, injury: { ...FAST.injury, eventChance: 0.02 } };
+    const go = (drop: boolean) => {
+      const s = Season.start(world, P, 'inj-iso', { cal });
+      while (s.day < 30) s.simulateDay();
+      const p = world.teams[0].org.find((x) => s.states.absentUntil[x.idx] <= s.day)!;
+      if (drop) s.states.absentUntil[p.idx] = s.day + 1;
+      const before = s.absences.length;
+      s.simulateDay();
+      return { p: p.idx, today: s.absences.slice(before).filter((a) => a.day === 30 && a.idx !== p.idx).map((a) => ({ ...a })) };
+    };
+    const a = go(false);
+    const b = go(true);
+    expect(b.today.length).toBeGreaterThan(0);
+    expect(b.today).toEqual(a.today);
+  });
+
   it('경기 난수는 날짜와 대진으로만 정해진다 (저장에 경기 난수 위치가 없다)', () => {
     const s = Season.start(world, FAST, 'rng-key', { cal });
     const save = s.toSave() as SeasonSave & { rngGames?: number };
