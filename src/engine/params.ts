@@ -619,7 +619,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     load: 1, catcher: 1.3, dh: 0.6, sub: 0.3, agePer: 0.02, recover: 0.6, cap: 4, restFrom: 1, penaltyFrom: 2, penaltyPer: 0.01, penaltyMax: 0.02,
   },
   // 선수 컨디션 (엔진 2 12단계, docs/컨디션_기획안.md v1). rho·sd·경계·난조는 임시값, edge 0.04는 사용자 결정 크기 (2026-10-22, 근거 자료 없음이라 임시값)
-  cond: { rho: 0.9, sd: 0.153, edge: 0, good: 0.4, bad: -0.4, awful: -0.7 },
+  cond: { rho: 0.9, sd: 0.153, edge: 0.04, good: 0.4, bad: -0.4, awful: -0.7 },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md
