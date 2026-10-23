@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, injuryProneness, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { AUTO_IBB_YEAR, eraPitching } from './eras';
+import { AUTO_IBB_YEAR, eraPitching, withEraRunning } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -223,7 +223,7 @@ export interface SeasonSave {
   demotedDay?: number[];
   /** 부상·이탈 기록 (M6) */
   absences?: Absence[];
-  /** 이탈 이벤트 난수 위치 (M6) */
+  /** 이탈 이벤트 난수 위치 (M6). 엔진 2 13단계부터 선수·날짜 줄기라 쓰지 않는다 (예전 저장에 있어도 무시) */
   rngEvents?: number;
   /** 구단별 기용표 (선수 색인) */
   plans?: (DepthPlan | null)[];
@@ -299,8 +299,11 @@ export class Season {
   private dayRng: Rng;
   /** 정규시즌 경기 난수의 뿌리. 경기마다 여기서 따로 줄기를 갈라 쓴다 (gameRng) */
   private readonly gamesRoot: Rng;
-  /** 이탈 이벤트 난수. 부상·경기 난수와 따로 둔다 */
-  private eventRng: Rng;
+  /**
+   * 경기 전 부상·이탈 이벤트 난수의 뿌리 (엔진 2 13단계). 선수·날짜마다 줄기를 갈라 쓴다 (`${날}/${선수 색인}`):
+   * 한 경기 결과(누가 다치고 지쳤는지)가 바뀌어도 다른 선수의 부상 뽑기는 그대로다
+   */
+  private readonly injRoot: Rng;
   private ctx: GameContext;
   /** 이번 시즌 부상·이탈 기록 (발생 순) */
   readonly absences: Absence[] = [];
@@ -323,8 +326,10 @@ export class Season {
   private condDay = -1;
 
   /** rng는 시즌의 뿌리 난수. 일정·결장·경기 난수를 여기서 갈라 쓴다 */
-  constructor(world: World, params: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
+  constructor(world: World, baseParams: EngineParams, rng: Rng, cal: Rates, init: SeasonInit = {}) {
     this.world = world;
+    // 시대별 주루·병살·희생플라이·도루 배율 (엔진 2 13단계)을 여기서 한 번 곱한다. 아래 params는 모두 그 해 값
+    const params = withEraRunning(baseParams, world.year);
     this.params = params;
     this.seed = rng.seed;
     this.cal = cal;
@@ -344,7 +349,7 @@ export class Season {
     }));
     this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
     this.dayRng = rng.fork('days');
-    this.eventRng = rng.fork('events');
+    this.injRoot = rng.fork('inj');
     this.gamesRoot = rng.fork('games');
     this.condRoot = rng.fork('cond');
     this.ctx = {
@@ -484,7 +489,7 @@ export class Season {
       states.absentUntil[a.p] = a.until;
       season[a.team].dirty = true;
     }
-    // 부상과 이탈 이벤트 (injury.ts). 부상은 하루·선수당 난수 한 번, 이벤트는 따로 둔 난수에서.
+    // 부상과 이탈 이벤트 (injury.ts). 선수·날짜마다 따로 둔 난수 줄기에서 부상 한 번, 부상이 아니면 이벤트를 뽑는다 (엔진 2 13단계).
     // 최근 1군 경기에 나온 선수(야수 3일·투수 7일 안, 저장되는 상태로 판정해 화면 조회·저장과 상관없다)는 경기 중 부상(game.ts)이
     // 몫을 나눠 맡아 경기 전 확률이 inGame.preShare배.
     // 투수는 혹사지수만큼 확률이 오르고(1 + overuse.injury × 혹사지수), 그 더해진 몫에서 생긴 부상은 혹사 부상으로 표시한다
@@ -499,13 +504,14 @@ export class Season {
           const base = injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1)
             * injuryProneness(p) * (active ? ip.inGame.preShare : 1);
           const extra = ou.on && p.isPitcher ? base * ou.injury * currentOveruse(states, p.idx, day, ou) : 0;
-          const u = dayRng.next();
+          const r = this.injRoot.fork(`${day}/${p.idx}`);
+          const u = r.next();
           if (u < base + extra) {
-            const inj = drawInjury(dayRng, ip, p.isPitcher);
+            const inj = drawInjury(r, ip, p.isPitcher);
             const days = ts.team.injuryDays ? Math.max(1, Math.round(inj.days * ts.team.injuryDays)) : inj.days;
             this.addAbsence({ day, idx: p.idx, until: day + days, kind: inj.kind, part: inj.part, ...(u >= base ? { overuse: true as const } : {}) }, ts);
-          } else if (this.eventRng.chance(ip.eventChance)) {
-            const ev = pickEvent(p, this.eventRng, ip);
+          } else if (r.chance(ip.eventChance)) {
+            const ev = pickEvent(p, r, ip);
             this.addAbsence({ day, idx: p.idx, until: day + ev.days, kind: 'event', event: ev.event }, ts);
           }
         }
@@ -791,7 +797,6 @@ export class Season {
       activeDays: Array.from(this.activeDays),
       demotedDay: Array.from(this.demotedDay),
       absences: this.absences.map((a) => ({ ...a })),
-      rngEvents: this.eventRng.state(),
       plans: this.teamSeasons.map((ts) => (ts.plan ? structuredClone(ts.plan) : null)),
       overuse: Array.from(st.overuse),
       body: Array.from(st.body),
@@ -818,7 +823,6 @@ export class Season {
     }
     s.day = save.day;
     s.dayRng = Rng.fromState(root.fork('days').seed, save.rngDays);
-    if (save.rngEvents !== undefined) s.eventRng = Rng.fromState(root.fork('events').seed, save.rngEvents);
     s.absences.push(...(save.absences ?? []).map((a) => ({ ...a })));
     if (save.activeDays) s.activeDays.set(save.activeDays);
     if (save.demotedDay) s.demotedDay.set(save.demotedDay);

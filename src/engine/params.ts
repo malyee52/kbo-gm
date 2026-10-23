@@ -143,7 +143,7 @@ export interface SubParams {
   defGain: number;
 }
 
-/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv에 맞춤) */
+/** AI 감독 2 (엔진 2 10단계, manager.ts): 고의4구, 전진 수비, 좌우 원포인트. 모두 임시값 (고의4구 rate만 2023~2025 ibb.csv 세 해 평균에 맞춤: 10단계 0.3, 13단계 감독 성향 고의4구 빈도를 넣으며 0.26) */
 export interface Manager2Params {
   /**
    * 고의4구: 1루가 비고 득점권 주자, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 gap 이상 높을 때 확률 rate × 아웃별 배율(outs) × (후반 접전이 아니면 early).
@@ -162,6 +162,20 @@ export interface Manager2Params {
   onePoint: { inning: number; maxDiff: number; rate: number };
   /** 기용표로 역할을 정하지 않은 불펜에서 필승조로 보는 서열 수 (마무리 빼고) */
   setup: number;
+}
+
+/** 시대별 주루·병살·희생플라이·도루 배율 한 줄 (엔진 2 13단계). 현대 값(params의 기본값)에 곱한다 */
+export interface EraRunning {
+  /** 기준 해 (검증 도구로 맞춘 해) */
+  year: number;
+  /** 병살 기본 확률 배율 */
+  dp: number;
+  /** 희생플라이 기본 확률 배율 */
+  sf: number;
+  /** 도루 시도 배율 */
+  steal: number;
+  /** 주자 추가 진루(단타 1루→3루·2루→홈, 2루타 1루→홈) 확률 배율 */
+  adv: number;
 }
 
 export interface EngineParams {
@@ -307,6 +321,11 @@ export interface EngineParams {
   twoOutBonus: number;
   /** 도루 시도 배율: 선수의 "1루 출루당 시도율"을 타석 기회당 확률로 바꾸는 값 */
   stealScale: number;
+  /**
+   * 시대별 주루·병살·희생플라이·도루 배율 (엔진 2 13단계, eras.ts withEraRunning). year 오름차순 기준 해의 값이고, 사이 해는 앞뒤 기준 해를
+   * 선으로 잇고 처음보다 앞·끝보다 뒤는 그 끝 값을 쓴다. 비어 있으면 모두 1. 시즌을 열 때 doublePlay·sacFly·stealScale과 주자 추가 진루 확률(firstToThirdOnSingle·secondToHomeOnSingle·firstToHomeOnDouble)에 곱한다
+   */
+  eraRunning: EraRunning[];
 
   // ---- 선수 기용
   /**
@@ -411,6 +430,8 @@ export interface CondParams {
   bad: number;
   /** 흐름 사유 '컨디션 난조'로 바꾸는 값 (≤) */
   awful: number;
+  /** false면 AI 감독이 컨디션 나쁜 선발을 미루지 않는다 (점검용 스위치, 엔진 2 13단계 0-4). 없으면 미룬다 */
+  delayStarter?: boolean;
 }
 
 export interface BodyParams {
@@ -467,8 +488,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   pitchesPerPaDefault: 3.9,
   // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
   // 기준 × 이 값까지 맡긴다 (임시값 (2026-10-22 사용자 승인), 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다
-  // (투수 능력과 무관, 경기 상황. 임시값 (2026-10-22 사용자 승인))
-  planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.12 },
+  // (투수 능력과 무관, 경기 상황. 임시값: 2026-10-22 사용자 승인 ±12% → 2026-10-23 사용자 결정 ±14%, 2023·2024 선발 100구 이상이 모자라서)
+  planScale: { starter: 0.92, relief: 0.9, earlyRelief: 1.6, spread: 0.14 },
 
   roePerUnearnedShare: 0.2,
   // 엔진 2 7단계: 경기 안 자책 판정을 넣고 0.68 → 0.45로 다시 맞춤 (2023~2025 engine2_baseline 비자책 비율)
@@ -498,7 +519,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     pitches: [0.509, 0.301, 0.142, 0.038, 0.01] },
   sub: { phInning: 7, phMaxDiff: 3, phGain: 0.02, prInning: 8, prMaxDiff: 2, prSlow: 0.4, prGap: 0.25, defInning: 7, defGain: 8 },
   mgr: {
-    ibb: { rate: 0.3, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
+    ibb: { rate: 0.26, gap: 0.02, outs: [0.4, 1, 1], early: 0.4, minInning: 4, wildShare: 0.1 },
     infieldIn: { inning: 7, maxLead: 1, rate: 0.8, hit: 0.1, score: 0.4 },
     onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
     setup: 2,
@@ -611,6 +632,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   firstToHomeOnDouble: 0.58,
   twoOutBonus: 0.15,
   stealScale: 1.2,
+  eraRunning: [],
 
   restChance: 0.6,
   catcherRestChance: 0.6,

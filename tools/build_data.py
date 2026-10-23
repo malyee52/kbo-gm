@@ -423,7 +423,11 @@ def build_managers(out_dir):
     투구 단위 자료가 있는 해(2023~, data-src/pbp_derived/team_pitching.csv, 엔진 2 10단계)는 더 본다:
       push: 팀 선발 평균 투구 수 / 리그, pen: 팀 구원 연투(전날 등판) 비율 / 리그 (감독 성향 '투수 밀어붙이기'·'불펜 연투 허용').
       개막 감독에게는 그 해 팀 값을 byYear에 그대로 남기고 (시즌 중 교체가 있던 해도), 시즌 내내 맡은 해의 평균은 위처럼 당겨 push·pen에.
-      자료가 없는 감독은 push·pen이 없다 (엔진은 push 대신 relief, pen은 보통)."""
+      자료가 없는 감독은 push·pen이 없다 (엔진은 push 대신 relief, pen은 보통).
+    엔진 2 13단계에서 더 본다 (같은 자료, 같은 방식으로 byYear·평균):
+      ibb: 팀 고의4구 ÷ 상대 타석을 2023~2025(온전한 시즌) 리그 합친 비율로 나눈 값 (감독 성향 '고의4구 빈도'). 해마다 리그 수준 차이도 담는다
+        (2024 리그 0.88배). 그래서 세 해 평균은 1 근처.
+      cond: 팀 선발 라인업 변동(전 경기와 바뀐 선발 수 평균, team_lineup.csv) ÷ 그 해 리그 (감독 성향 '컨디션 반영' 대리값)."""
     if not MANAGERS_CSV.exists():
         return
     meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
@@ -492,7 +496,21 @@ def build_managers(out_dir):
             for r in ys:
                 pitch[y][PBP_TEAM[r['team']]] = {'push': round(float(r['starter_mean']) / lg_mean, 3),
                                                  'pen': round(float(r['back_to_back_rate']) / lg_b2b, 3)}
-    pacc = defaultdict(lambda: {'push': [], 'pen': []})
+        # 고의4구: 온전한 시즌을 합친 리그 비율이 기준 (해마다 리그 수준 차이를 남긴다)
+        full = [r for r in trows if r['partial'] == '0']
+        ibb_base = sum(int(r['ibb']) for r in full) / sum(int(r['bf']) for r in full)
+        for r in trows:
+            pitch[r['year']][PBP_TEAM[r['team']]]['ibb'] = round(int(r['ibb']) / int(r['bf']) / ibb_base, 3)
+    tl = PBP_DERIVED / 'team_lineup.csv'
+    if tl.exists():
+        with tl.open(encoding='utf-8', newline='') as f:
+            lrows = list(csv.DictReader(f))
+        for y in sorted({r['year'] for r in lrows}):
+            ys = [r for r in lrows if r['year'] == y]
+            lg_moved = sum(int(r['games']) * float(r['mean_changed']) for r in ys) / sum(int(r['games']) for r in ys)
+            for r in ys:
+                pitch[y].setdefault(PBP_TEAM[r['team']], {})['cond'] = round(float(r['mean_changed']) / lg_moved, 3)
+    pacc = defaultdict(lambda: {'push': [], 'pen': [], 'ibb': [], 'cond': []})
     for y, teams in pitch.items():
         for fr, v in teams.items():
             ms = seasons.get(y, {}).get(fr, [])
@@ -502,10 +520,11 @@ def build_managers(out_dir):
             name = opening[0]['name']
             people[name].setdefault('byYear', {})[y] = v
             if len(ms) == 1 and y not in [str(x) for x in meta.get('inProgress', [])]:
-                for k in ('push', 'pen'):
-                    pacc[name][k].append(v[k])
+                for k in ('push', 'pen', 'ibb', 'cond'):
+                    if k in v:
+                        pacc[name][k].append(v[k])
     for name, a in pacc.items():
-        for k in ('push', 'pen'):
+        for k in ('push', 'pen', 'ibb', 'cond'):
             vs = a[k]
             if vs:
                 people[name][k] = round(1 + (sum(vs) / len(vs) - 1) * len(vs) / (len(vs) + 2), 3)

@@ -112,8 +112,8 @@ export interface TeamSeason {
    * 감독 성향 배율 (league/managers.ts Tactics): 도루 시도, 희생번트, hook 투수 밀어붙이기(선발 투구 수 기준·여유), 없으면 모두 1.
    * sub = 대타·대주자 빈도 (엔진 2 9단계), pen = 불펜 연투 허용 (엔진 2 10단계). 없으면 1
    */
-  /** cond: 컨디션 반영 (엔진 2 12단계, 없으면 1) */
-  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number; cond?: number };
+  /** cond: 컨디션 반영 (엔진 2 12단계), ibb: 고의4구 빈도 (엔진 2 13단계). 없으면 1 */
+  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number; cond?: number; ibb?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
 }
@@ -572,7 +572,7 @@ export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, par
     else if (!next || st.lastStartDay[p.idx] < st.lastStartDay[next.idx]) next = p;
   }
   const tac = ts.tactics?.cond ?? 1;
-  if (best && next && cond && tac > 0 && params.cond.edge > 0 && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
+  if (best && next && cond && tac > 0 && params.cond.edge > 0 && params.cond.delayStarter !== false && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
   if (best) return best;
   let spot: SimPlayer | null = null;
   for (const p of ts.bullpen) {

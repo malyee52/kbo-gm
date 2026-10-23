@@ -265,7 +265,8 @@ export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEm
 
 /**
  * 고의4구 (AI 감독, 엔진 2 10단계): 1루가 비고 득점권 주자가 있을 때, 지금 타자가 팀 중간 이상이고 다음 타자보다 가치가 params.mgr.ibb.gap 이상 높으면
- * 확률로 거른다. 후반(7회~) 접전(2점 차 이내)이 아니면 early 배율, minInning회 전에는 후반 접전이 아니므로 하지 않는다. 걸면 true (임시값)
+ * 확률로 거른다. 후반(7회~) 접전(2점 차 이내)이 아니면 early 배율, minInning회 전에는 후반 접전이 아니므로 하지 않는다. 걸면 true (임시값).
+ * 확률에 감독 성향 '고의4구 빈도'(tactics.ibb, 엔진 2 13단계)를 곱한다
  */
 export function wantIntentionalWalk(st: GameState): boolean {
   const { bases, bat, fld, ctx } = st;
@@ -275,7 +276,7 @@ export function wantIntentionalWalk(st: GameState): boolean {
   const next = bat.lineup[(bat.spot + 1) % 9];
   if (batter.value < bat.medianValue || batter.value - next.value < ib.gap) return false;
   const late = st.inning >= 7 && Math.abs(fld.runs - bat.runs) <= 2;
-  if (!ctx.rng.chance(ib.rate * ib.outs[st.outs] * (late ? 1 : ib.early))) return false;
+  if (!ctx.rng.chance(ib.rate * ib.outs[st.outs] * (late ? 1 : ib.early) * (fld.ts.tactics?.ibb ?? 1))) return false;
   if (ctx.pen) ctx.pen.ibb++;
   return true;
 }

@@ -6,7 +6,7 @@ import { AUTO_IBB_YEAR } from '../src/engine/eras';
 import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY } from '../src/engine/params';
 import { BLOWN_FROM_INNING } from '../src/engine/state';
 import { availableBelow } from '../src/engine/team';
-import { infoOf, NEUTRAL_TACTICS, tacticsOf, VIRTUAL_RANGE, virtualTactic } from '../src/league/managers';
+import { infoOf, NEUTRAL_TACTICS, TACTIC_SHARE, tacticsOf, VIRTUAL_RANGE, virtualTactic } from '../src/league/managers';
 
 const store = loadDataStore();
 const w2025 = worldForYear(store, 2025);
@@ -48,7 +48,7 @@ describe('감독 성향 (엔진 2 10단계)', () => {
 
   it('가상 감독: 이름으로 정한 값 (같은 이름은 늘 같다)', () => {
     for (const name of ['가상감독가', '가상감독나']) {
-      for (const k of ['hook', 'pen'] as const) {
+      for (const k of ['hook', 'pen', 'cond', 'ibb'] as const) {
         const v = virtualTactic(name, k);
         expect(v).toBeGreaterThanOrEqual(VIRTUAL_RANGE[k][0]);
         expect(v).toBeLessThanOrEqual(VIRTUAL_RANGE[k][1]);
@@ -88,6 +88,37 @@ describe('고의4구 (엔진 2 10단계)', () => {
 
   it('같은 시드는 같은 고의4구·전진 수비·원포인트', () => {
     expect(play(w2025, DEFAULT_PARAMS, 'mgr2-same', 10).pen).toEqual(play(w2025, DEFAULT_PARAMS, 'mgr2-same', 10).pen);
+  });
+  it('감독 성향 고의4구 빈도 (엔진 2 13단계): 0이면 고의4구가 없고, 클수록 잦다. 실존 감독은 그 해 구단 값', () => {
+    const t = (ibb: number) => () => ({ ...NEUTRAL_TACTICS, ibb });
+    expect(play(w2025, IBB_HEAVY, 'ibb-tend', 8, t(0)).pen.ibb).toBe(0);
+    const lo = play(w2025, DEFAULT_PARAMS, 'ibb-tend', 20, t(0.5)).pen.ibb;
+    const hi = play(w2025, DEFAULT_PARAMS, 'ibb-tend', 20, t(2)).pen.ibb;
+    expect(hi).toBeGreaterThan(lo * 2);
+    const info = infoOf(store, '이강철')!;
+    expect(tacticsOf(info, '이강철', 2025).ibb).toBeCloseTo(info.byYear!['2025'].ibb!, 3);
+    expect(tacticsOf(info, '이강철').ibb).toBeCloseTo(info.ibb!, 3);
+    // 2023~2025 구단 값을 합친 기준이라 리그 고의4구가 적었던 2024는 평균이 1보다 작다
+    const mean = (y: string) => {
+      const vs = Object.values(store.managers!.people).map((i) => i.byYear?.[y]?.ibb).filter((v): v is number => v !== undefined);
+      return vs.reduce((a, b) => a + b, 0) / vs.length;
+    };
+    expect(mean('2024')).toBeLessThan(0.95);
+    expect(mean('2025')).toBeGreaterThan(1.05);
+  });
+
+  it('실존 감독 컨디션 반영 = 선발 라인업 변동 대리값 (그 해 구단 값 → 평균, 몫 0.6, 0.5~1.5), 자료 없으면 1 (13-0-5)', () => {
+    const info = infoOf(store, '염경엽')!;
+    const by = info.byYear!['2024'].cond!;
+    expect(by).toBeLessThan(1);
+    expect(tacticsOf(info, '염경엽', 2024).cond).toBeCloseTo(1 + (by - 1) * TACTIC_SHARE.cond, 3);
+    expect(tacticsOf(info, '염경엽').cond).toBeCloseTo(1 + (info.cond! - 1) * TACTIC_SHARE.cond, 3);
+    expect(tacticsOf({ ...info, cond: undefined, byYear: undefined }, '염경엽').cond).toBe(1);
+    for (const i of Object.values(store.managers!.people)) {
+      const c = tacticsOf(i).cond;
+      expect(c).toBeGreaterThanOrEqual(VIRTUAL_RANGE.cond[0]);
+      expect(c).toBeLessThanOrEqual(VIRTUAL_RANGE.cond[1]);
+    }
   });
 });
 
