@@ -111,8 +111,9 @@ describe('일정 소식 (8단계)', () => {
     // 소식의 날짜와 내용이 일정과 맞는다
     const p = a.season.plan;
     const ours = p.cancels.filter((x) => !x[4] && (x[1] === 3 || x[2] === 3));
-    const mineNews = ra.filter((n) => /경기는 우천으로 취소/.test(n.text));
-    expect(mineNews.map((n) => n.day)).toEqual(ours.map((x) => x[0]));
+    // 더블헤더 두 경기가 함께 취소되면 소식 하나에 취소 둘 (일정 마무리 1)
+    const mineNews = ra.filter((n) => /경기는 우천으로 취소|더블헤더 두 경기가 모두 우천으로 취소/.test(n.text));
+    expect(mineNews.flatMap((n) => (/더블헤더 두 경기/.test(n.text) ? [n.day, n.day] : [n.day]))).toEqual(ours.map((x) => x[0]));
     for (const n of mineNews) expect(n.text).toMatch(/다시 치릅니다|추후 편성/);
     const announce = ra.filter((n) => /잔여 경기 일정이 발표/.test(n.text));
     expect(announce.map((n) => n.day)).toEqual([p.remainingFrom]);
