@@ -14,6 +14,7 @@ import { managerNorms } from './manager';
 import { sbShiftOf } from './rules';
 import { openCondition, stepCondition } from './condition';
 import { condToday } from './pa';
+import { dateOfDay, rankTeams, regularMaxInnings, winPctBy, winPctRuleOf } from './records';
 import { Rng } from './rng';
 import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
@@ -160,14 +161,8 @@ const PIT_KEYS = Object.keys(emptyPitLine()) as (keyof PitLine)[];
 /** 메모리에 남기는 중계 기록 경기 수 */
 export const PLAYS_KEEP = 32;
 
-export function winPct(t: TeamRecord): number {
-  return t.w + t.l > 0 ? t.w / (t.w + t.l) : 0;
-}
-
-/** 승률 순 팀 색인 (같으면 승수, 그다음 색인 순) */
-export function rankTeams(teams: TeamRecord[]): number[] {
-  return teams.map((_, i) => i).sort((x, y) => winPct(teams[y]) - winPct(teams[x]) || teams[y].w - teams[x].w || x - y);
-}
+// 승률·순위는 그 해 무승부 처리를 따른다 (엔진 2 14단계, records.ts)
+export { winPct, rankTeams } from './records';
 
 interface FixedAbsence {
   p: number;
@@ -391,8 +386,20 @@ export class Season {
     return this.day >= this.schedule.length;
   }
 
+  /** 순위 (그 해 승률의 무승부 처리, records.ts) */
   standings(): number[] {
-    return rankTeams(this.teams);
+    return rankTeams(this.teams, winPctRuleOf(this.world.rules));
+  }
+
+  /** 그 해 승률 방식으로 낸 승률 (화면용) */
+  winPct(t: TeamRecord): number {
+    return winPctBy(t, winPctRuleOf(this.world.rules));
+  }
+
+  /** 그날 정규시즌 경기의 최대 이닝 (records.ts regularMaxInnings, 0 = 무제한) */
+  maxInningsOn(day: number): number {
+    const d = dateOfDay(this.world.year, day);
+    return regularMaxInnings(this.world.rules, { md: d.month * 100 + d.date, weekday: d.weekday });
   }
 
   /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */
@@ -525,6 +532,8 @@ export class Season {
       }
     }
 
+    // 연장 한도는 그날 날짜로 (2021 후반기 9회 등, records.ts). 직접 지휘 경기도 같다
+    const maxInnings = this.maxInningsOn(day);
     for (const g of games) {
       const h = season[g.home];
       const a = season[g.away];
@@ -545,6 +554,7 @@ export class Season {
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
+      ctx.maxInnings = maxInnings;
       const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;

@@ -1,7 +1,7 @@
 // AI 감독 판단 (공통 규칙 계층, 타석 경계에서): 투수 등판·교체, 구원 투수 고르기.
 
 import type { GameContext } from './game';
-import { isSaveSituation, type GameState, type PitcherInGame, type Side } from './state';
+import { isSaveSituation, tyingRunNear, type GameState, type PitcherInGame, type Side } from './state';
 import { isStarterSkill } from './params';
 import { availableBelow, currentFatigue, currentOveruse, needsRest } from './team';
 import type { SimPlayer } from './types';
@@ -90,7 +90,7 @@ export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx
   const overuse = o.on ? currentOveruse(ctx.states, p.idx, ctx.day, o) : 0;
   return {
     p, skill, line, bf: 0, runs: 0, outs: 0, limit, realLimit, overuse, injChecked: 0, plan, isStarter, enteredLead: lead,
-    saveSit: !isStarter && isSaveSituation(lead, 0), er: 0, blown: false, pitches: 0, ppa,
+    saveSit: !isStarter && isSaveSituation(lead, 0), tyingNear: !isStarter && tyingRunNear(lead, 0), er: 0, blown: false, pitches: 0, ppa,
   };
 }
 
@@ -207,6 +207,7 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
 /** 새 투수를 마운드에 올린다 (등판 기록과 경기 투수 명단) */
 export function bringIn(fld: Side, p: SimPlayer, lead: number, ctx: GameContext): PitcherInGame {
   fld.usedIdx.add(p.idx);
+  fld.pitcher.exitLead = lead;
   fld.pitcher = enterPitcher(p, false, lead, ctx);
   fld.staff.push(fld.pitcher);
   return fld.pitcher;

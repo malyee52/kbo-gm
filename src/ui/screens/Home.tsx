@@ -7,7 +7,6 @@ import type { NewsKind } from '../../game/session';
 import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
-import { winPct } from '../../engine';
 import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
 import { CountUp, useRankMoves } from '../Motion';
@@ -128,7 +127,7 @@ export function Home() {
             </div>
           )}
           <p className="small muted dash-line">
-            {rec.g > 0 && <>승률 <strong>{rate3(winPct(rec))}</strong> · 최근 10경기 <strong>{form.w}-{form.l}{form.t ? `-${form.t}` : ''}</strong> · 득점 {rec.rs} / 실점 {rec.ra}· </>}
+            {rec.g > 0 && <>승률 <strong>{rate3(s.winPct(rec))}</strong> · 최근 10경기 <strong>{form.w}-{form.l}{form.t ? `-${form.t}` : ''}</strong> · 득점 {rec.rs} / 실점 {rec.ra}· </>}
             {session.owner.goal?.year === year && <>구단주 목표 <strong>{GOAL_LABEL[session.owner.goal.kind]}</strong> · 신뢰도 {session.owner.trust} · 자금 <strong><CountUp value={session.cashNow()} format={(v) => won(Math.round(v))} /></strong></>}
           </p>
         </div>

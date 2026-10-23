@@ -42,6 +42,10 @@ export interface PitcherInGame {
   ppa: number;
   /** 구원 등판한 회 (블론 기록 BLOWN_FROM_INNING, 엔진 2 10단계) */
   entryInning?: number;
+  /** 등판 때 동점 주자가 누상·타석·대기 타석에 있었나 (세이브 조건 ②, 이닝 수와 관계없이. 엔진 2 14단계) */
+  tyingNear?: boolean;
+  /** 마운드를 내려갈 때 우리 팀 리드 (홀드 판정, 엔진 2 14단계). 경기를 끝낸 투수는 없다 */
+  exitLead?: number;
   /** 좌우 원포인트로 올라왔다 (엔진 2 10단계): 맡은 좌타자 뒤 다음 타자가 좌타가 아니면 바꾼다 */
   onePoint?: boolean;
   /** 세이브 상황 등판 집계 칸 (검증 도구 ctx.pen이 있을 때만, manager.ts tallySaveEntry) */
@@ -55,6 +59,21 @@ export interface PitcherInGame {
  * (리드 ≤ 누상 주자 + 2). 기록에만 쓰고 경기 진행에는 쓰지 않는다
  */
 export const isSaveSituation = (lead: number, runners: number): boolean => lead >= 1 && (lead <= 3 || lead <= runners + 2);
+
+/** 동점 주자가 누상·타석·대기 타석에 있다 (리드 ≤ 누상 주자 + 2). 세이브 조건 ②: 이 상황에 나왔으면 아웃 하나로도 세이브 */
+export const tyingRunNear = (lead: number, runners: number): boolean => lead >= 1 && lead <= runners + 2;
+
+/**
+ * 세이브 (기록 규정, 엔진 2 14단계): 이긴 팀의 마지막 투수가 승리 투수가 아니고 아웃을 하나 이상 잡았으며,
+ * ① 3점 이하 리드에 나와 1이닝 이상 던졌거나 ② 동점 주자가 누상·타석·대기 타석일 때 나왔거나 ③ 3이닝 이상 던졌을 때.
+ * 리드는 끝까지 지켰다고 본다 (잃었다가 다시 앞서면 그 투수가 승리 투수가 된다). ③의 "효과적으로"는 판정하지 않는다
+ */
+export function earnsSave(pg: Pick<PitcherInGame, 'isStarter' | 'saveSit' | 'tyingNear' | 'enteredLead' | 'outs'>): boolean {
+  if (pg.isStarter || pg.outs < 1) return false;
+  if (pg.outs >= 9) return true;
+  if (!pg.saveSit) return false;
+  return !!pg.tyingNear || (pg.enteredLead <= 3 && pg.outs >= 3);
+}
 
 /**
  * 블론 세이브를 기록하는 등판 회 (엔진 2 10단계): 이 회 이후 세이브 상황에 나온 투수만 리드를 잃으면 블론으로 센다.

@@ -13,6 +13,8 @@
   drafts.json           입단 연도별 신인 지명 (1982~2027, 원년 멤버·육성선수 포함)
 
 함께 읽는 파일
+  (연도별 규칙)                 meta.json의 rules는 rules_for·innings_rules에 적은 연표 (자료집 '제도연표'와 조사 결과를 옮긴 값).
+                                 이것만 다시 만들려면: build_data.py --rules-only (다른 JSON과 저장 호환은 그대로)
   data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
                                  자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
   data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
@@ -310,14 +312,44 @@ def rules_for(year):
     if year <= 1988: post = 2
     elif year <= 2014: post = 4
     else: post = 5
-    return {
+    rules = {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
-        # 2008 정규시즌은 무제한 연장(끝장승부)·무승부 없음 → 0 = 무제한 (사용자 확인 2026-10-22. 자료집 엑셀 '제도연표'는 openpyxl 저장 때
-        # 서식이 깨질 수 있어 고치지 않았다). 다른 해의 연장 연표(1982~2002 15회 등)는 경기 엔진 2 14단계에서 고친다
-        'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
+        **innings_rules(year),
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
+    return rules
+
+
+def innings_rules(year):
+    """연장·무승부·승률 연표 (경기 엔진 2 14단계, docs/경기엔진2_기획안.md 3.10.1, 자료집 '제도연표' 연장 줄).
+    근거: 나무위키 '연장전'(KBO 리그 절)·'승률', 잼쨩 웹 조사(2026-10-22, 기획안 3.10.1)와 빈 자료 조사(2026-10-23, 2_제도연표_미확인_조사결과.csv 102).
+    위키로 확인한 제도는 '출처 확인'으로 본다 (사용자 결정 2026-10-23). 출처가 갈리는 해는 다수 설을 넣고 source를 'disputed'로 남긴다.
+    시간제한(1982~2002 야간 4시간, 2004 4시간)은 엔진에 경기 시각이 없어 넣지 않는다.
+      maxInnings: 1982~2002 15회, 2003~2007 12회 (2003은 출처 갈림: 빈 자료 조사는 2004년부터 12회), 2008 무제한(0, 무승부 없음),
+        2009~2024 12회, 2025~ 11회
+      nineInningsDhMonday: 2020 더블헤더·월요일 편성 경기는 9회 / nineInningsFrom: 2021 후반기(8월 10일~) 모든 경기 9회 (월×100 + 일)
+      postseasonMaxInnings: 15회. 2003·2004 12회 (2003 출처 갈림: 15회 설), 2008 무제한 (출처 갈림: 15회 설)
+      winPct: 'wl' 승 ÷ (승+패), 1987~1997 'half' 무승부 0.5승, 2003~2004 'wins' 다승제, 2009~2010 'tieLoss' 무승부 = 패"""
+    if year <= 2002: inn = 15
+    elif year == 2008: inn = 0
+    elif year <= 2024: inn = 12
+    else: inn = 11
+    post = 0 if year == 2008 else 12 if year in (2003, 2004) else 15
+    if 1987 <= year <= 1997: pct = 'half'
+    elif year in (2003, 2004): pct = 'wins'
+    elif year in (2009, 2010): pct = 'tieLoss'
+    else: pct = 'wl'
+    out = {
+        'maxInnings': inn, 'maxInningsSource': 'disputed' if year == 2003 else 'confirmed',
+        'postseasonMaxInnings': post, 'postseasonMaxInningsSource': 'disputed' if year in (2003, 2008) else 'confirmed',
+        'winPct': pct, 'winPctSource': 'confirmed',
+    }
+    if year == 2020:
+        out['nineInningsDhMonday'] = 1
+    if year == 2021:
+        out['nineInningsFrom'] = 810
+    return out
 
 
 # ---- 감독 (managers.json)
@@ -1068,6 +1100,13 @@ def main():
     if '--homes-only' in sys.argv:
         # 연고지 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         print(f'연고지 {len(build_homes())}행')
+        return
+    if '--rules-only' in sys.argv:
+        # 연도별 규칙(meta.json rules)만 다시 만든다 (엑셀을 읽지 않는다. 다른 칸은 그대로)
+        meta = json.loads((OUT / 'meta.json').read_text(encoding='utf-8'))
+        meta['rules'] = {y: rules_for(y) for y in meta['years']}
+        (OUT / 'meta.json').write_text(json.dumps(meta, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        print(f'연도별 규칙 {len(meta["rules"])}개 연도')
         return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)

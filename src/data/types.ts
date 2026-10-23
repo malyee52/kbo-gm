@@ -154,8 +154,20 @@ export interface YearRules {
   foreignLimit: number;
   /** 정규시즌 최대 이닝. 0 = 무제한 (2008 끝장승부, 무승부 없음) */
   maxInnings: number;
+  /** 이 날짜(월×100 + 일)부터 모든 정규시즌 경기는 9회까지 (2021 후반기 810). 없으면 해당 없음 */
+  nineInningsFrom?: number;
+  /** 1이면 더블헤더·월요일 편성 경기는 9회까지 (2020 코로나 특별 규정) */
+  nineInningsDhMonday?: number;
+  /** 포스트시즌 최대 이닝. 0 = 무제한. 없으면 15 */
+  postseasonMaxInnings?: number;
+  /**
+   * 순위·승률의 무승부 처리: 'wl' 승 ÷ (승+패), 'half' (승 + 0.5 × 무) ÷ 경기 수, 'wins' 다승 순 (승률은 승 ÷ (승+패)),
+   * 'tieLoss' 승 ÷ (승+패+무). 없으면 'wl'
+   */
+  winPct?: string;
   postseasonTeams: number;
-  [source: string]: number | string;
+  /** 값마다 확인 상태 ('<키>Source': 'confirmed' 출처 확인, 'assumed' 가정, 'disputed' 출처 갈림 다수 설) */
+  [source: string]: number | string | undefined;
 }
 
 export interface Meta {

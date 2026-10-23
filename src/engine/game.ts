@@ -9,7 +9,7 @@ import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
 import { addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
-import { fieldDefense, fielderAt, fieldSlots, GameState, isSaveSituation, substitute, type GameSub, type PitcherInGame, type Side } from './state';
+import { earnsSave, fieldDefense, fielderAt, fieldSlots, GameState, isSaveSituation, substitute, tyingRunNear, type GameSub, type PitcherInGame, type Side } from './state';
 import { aiDefense, pickPinchHitter, pickPinchRunner, replaceInjured } from './subs';
 import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type TeamSeason } from './team';
 import { drawInjury, hitterAgeFactor, injuryProneness, type AbsenceKind, type InjuryCause, type InjuryPart } from './injury';
@@ -316,6 +316,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     if (fld.pitcher !== was) {
       const runners = st.bases.filter(Boolean).length;
       fld.pitcher.saveSit = isSaveSituation(fld.pitcher.enteredLead, runners);
+      fld.pitcher.tyingNear = tyingRunNear(fld.pitcher.enteredLead, runners);
       fld.pitcher.entryInning = inning;
       if (ctx.pen) tallySaveEntry(fld, fld.pitcher, inning, runners, ctx);
     }
@@ -535,6 +536,23 @@ function addOveruse(ps: PlayerStates, pg: PitcherInGame, side: Side, prevStart: 
   ps.recoverMul[i] = 1 / (1 + o.recovery * ps.overuse[i]);
 }
 
+/**
+ * 승리 투수 (기록 규정, 엔진 2 14단계). record: 이긴 팀이 마지막으로 앞설 때 마운드에 있던 투수 (pitcher of record).
+ * - 선발은 5이닝(15아웃)을 채워야 승리. 못 채웠으면 구원 가운데 가장 길게 던진 투수 (같으면 실점이 적은, 그다음 먼저 나온 투수).
+ *   규정의 "가장 효과적인 구원"은 기록원 판단이라 아웃 수·실점으로 대신한다 (임시 규칙)
+ * - 구원이 짧고 나쁘게 던졌으면 (아웃 3개 미만에 2실점 이상) 뒤에 나와 1이닝 이상 무실점으로 리드를 지킨 구원에게 넘긴다
+ */
+function winningPitcher(winner: Side, record: PitcherInGame | null): PitcherInGame {
+  const relievers = winner.staff.filter((x) => !x.isStarter);
+  const longest = (list: PitcherInGame[]) => list.reduce<PitcherInGame | null>((b, x) => (!b || x.outs > b.outs || (x.outs === b.outs && x.runs < b.runs) ? x : b), null);
+  if (!record || (record.isStarter && record.outs < 15)) return longest(relievers) ?? winner.staff[0];
+  if (!record.isStarter && record.outs < 3 && record.runs >= 2) {
+    const after = relievers.slice(relievers.indexOf(record) + 1).filter((x) => x.outs >= 3 && x.runs === 0);
+    return longest(after) ?? record;
+  }
+  return record;
+}
+
 /** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */
 function finishGame(st: GameState, inning: number, lineScore: GameResult['lineScore']): GameResult {
   const { ctx, home, away, rec } = st;
@@ -582,9 +600,7 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
   } else {
     const winner = home.runs > away.runs ? home : away;
     if (winner === home) ctx.totals.homeWins++;
-    let wp: PitcherInGame | null = rec.leader === winner ? rec.win : null;
-    // 선발은 5이닝을 채워야 승리. 못 채웠으면 첫 번째 구원에게
-    if (!wp || (wp.isStarter && wp.outs < 15)) wp = winner.staff.find((x) => !x.isStarter) ?? winner.staff[0];
+    const wp = winningPitcher(winner, rec.leader === winner ? rec.win : null);
     wp.line.w++;
     win = wp.p.idx;
     const lp = rec.loss;
@@ -593,18 +609,19 @@ function finishGame(st: GameState, inning: number, lineScore: GameResult['lineSc
       loss = lp.p.idx;
     }
     const last = winner.staff[winner.staff.length - 1];
-    if (last !== wp && !last.isStarter && ((last.saveSit && last.outs >= 1) || last.outs >= 9)) {
+    if (last !== wp && earnsSave(last)) {
       last.line.sv++;
       save = last.p.idx;
     }
   }
-  // 홀드 (2026-10-12): 세이브 상황(isSaveSituation, 2026-10-22부터 4점 이상 리드에 동점 주자가 누상·타석·대기 타석인 때 포함)에 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
-  // 경기를 끝낸 투수, 승리 투수, 블론 세이브를 한 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
+  // 홀드 (2026-10-12, 엔진 2 14단계): 세이브 상황(isSaveSituation: 1~3점 리드, 또는 동점 주자가 누상·타석·대기 타석)에 나온 구원 투수가
+  // 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면 (exitLead, 내려갈 때 리드. 남긴 주자가 뒤에 들어와도 홀드는 그대로).
+  // 경기를 끝낸 투수, 승리 투수, 블론 세이브를 한 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다)
   for (const side of [home, away]) {
     const fin = side.staff[side.staff.length - 1];
     for (const pg of side.staff) {
       if (pg.isStarter || pg === fin || pg.p.idx === win || pg.blown) continue;
-      if (pg.saveSit && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
+      if (pg.saveSit && pg.outs >= 1 && (pg.exitLead ?? 0) > 0) pg.line.hld++;
     }
   }
   return {

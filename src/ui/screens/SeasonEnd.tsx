@@ -3,7 +3,6 @@ import { ScenarioBanner } from '../ScenarioBanner';
 import { useState } from 'react';
 import { FlowNext, useSettle } from '../FlowNext';
 import type { BatLine, PitLine } from '../../engine';
-import { winPct } from '../../engine';
 import {
   BAT_CATEGORIES, PIT_CATEGORIES, avg, batQualified, era, fixed2, gamesBehind, ipText, leaders, ops, pitQualified, rate3,
 } from '../../game/stats';
@@ -80,7 +79,7 @@ export function SeasonEnd() {
         <div className="card hero">
           <h2><TeamName idx={me} /></h2>
           <p className="big">{verdict}</p>
-          <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
+          <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(s.winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
           <p className="muted small">{session.postseason?.done ? '결산하면 구단주 평가를 받습니다.' : '결산하면 먼저 포스트시즌을 치르고 구단주 평가를 받습니다.'} 이어서 성장 판정·1군 연차·부상 후유증이 반영되고 은퇴와 입대가 정해진 뒤 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다. 입대할 선수는 결산 전에 "입대 선택" 탭에서 고릅니다.</p>
         </div>
       </section>
@@ -96,7 +95,7 @@ export function SeasonEnd() {
                 return (
                   <tr key={i} className={`${i === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}`}>
                     <td>{k + 1}</td><td className="l"><TeamName idx={i} /></td><td>{t.w}</td><td>{t.l}</td><td>{t.t}</td>
-                    <td>{rate3(winPct(t))}</td><td>{k === 0 ? '-' : gamesBehind(leader, t).toFixed(1)}</td><td>{t.rs}</td><td>{t.ra}</td>
+                    <td>{rate3(s.winPct(t))}</td><td>{k === 0 ? '-' : gamesBehind(leader, t).toFixed(1)}</td><td>{t.rs}</td><td>{t.ra}</td>
                   </tr>
                 );
               })}

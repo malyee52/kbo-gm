@@ -1,14 +1,15 @@
 // 포스트시즌(가을야구) (M7): 정규시즌 순위 상위 팀의 사다리식 시리즈. 정규시즌 기록에는 남기지 않는다.
 //
 // 2015년 이후 방식 (자료집 "시즌구조"·"제도연표", 출처 확인): 4위 대 5위 와일드카드 → 준플레이오프(3위) → 플레이오프(2위) → 한국시리즈(1위).
-// 시리즈 길이와 와일드카드 1승 어드밴티지, 포스트시즌 연장 이닝은 자료집에서 확인하지 못한 값이라 임시값이다.
+// 시리즈 길이와 와일드카드 1승 어드밴티지는 자료집에서 확인하지 못한 값이라 임시값이다.
+// 연장 이닝은 해마다 meta.json rules[연도].postseasonMaxInnings (엔진 2 14단계 연표: 2003·2004 12회, 2008 무제한, 나머지 15회. 2003·2008은 출처 갈림).
 // 한국시리즈 홈경기 2-3-2 방식은 자료집 2025년 비고에 있다 (출처 확인).
 //
 // 진행 상태(PostseasonState)는 JSON으로 저장할 수 있고 한 경기씩 진행한다 (플레이어가 가을야구를 직접 진행, 2026-10-08 사용자 요청).
 // 난수 위치를 상태에 담으므로 저장했다 이어 해도 결과가 같다.
 
 import {
-  emptyBatLine, emptyLeagueCounters, emptyPitLine, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type GameCommand, type Play, type Season, type SimPlayer,
+  emptyBatLine, emptyLeagueCounters, emptyPitLine, postseasonMaxInnings, Rng, type BoxBatter, type BoxPitcher, type BoxScore, type GameCommand, type Play, type Season, type SimPlayer,
 } from '../engine';
 
 export type SeriesRound = 'wc' | 'semi' | 'po' | 'ks';
@@ -36,8 +37,6 @@ export const RULES: Record<SeriesRound, RoundRule> = {
   ks: { need: 4, maxGames: 9, highHeadStart: 0, homePattern: [true, true, false, false, false, true, true, true, true] },
 };
 
-/** 포스트시즌 연장 한계 이닝 (임시값: 자료집에는 2024년까지 15회만 확인) */
-export const POSTSEASON_MAX_INNINGS = 15;
 /** 정규시즌이 끝나고 포스트시즌 첫 경기까지 쉬는 날 (임시값) */
 const REST_BEFORE = 3;
 /** 시리즈 사이에 쉬는 날 (임시값) */
@@ -158,7 +157,7 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
   const rng = new Rng(st.seed).fork(`ps/${x.round}/${x.games.length}`);
   const n = season.world.players.length;
   const rec = { bat: Array.from({ length: n }, emptyBatLine), pit: Array.from({ length: n }, emptyPitLine), totals: emptyLeagueCounters() };
-  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, st.maxInnings ?? POSTSEASON_MAX_INNINGS, rec, command);
+  const { result: r, home: hl, away: al, plays } = season.playExtraGame(home, away, st.day, rng, st.maxInnings ?? postseasonMaxInnings(season.world.rules), rec, command);
   const g: SeriesGame = {
     day: st.day, home, away, homeRuns: r.homeRuns, awayRuns: r.awayRuns, innings: r.innings,
     box: {
