@@ -19,7 +19,7 @@ import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { foreignRule } from './eras';
 import { payOf, paydays } from './finance';
-import { MIN_SALARY, WON_PER_RUN } from './salary';
+import { minSalary, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { ruleDate, ruleOf } from './rules';
 
@@ -170,9 +170,9 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
   return null;
 }
 
-/** 영입할 때의 계약 연봉 (외국인 후보는 후보의 요구액(달러), 자유계약 국내 선수는 최저 연봉) */
-export function signSalary(p: SimPlayer, lp: LeaguePlayer | undefined): number {
-  return p.foreign && lp ? lp.contract.salary : MIN_SALARY;
+/** 영입할 때의 계약 연봉 (외국인 후보는 후보의 요구액(달러), 자유계약 국내 선수는 그 해 최저 연봉) */
+export function signSalary(p: SimPlayer, lp: LeaguePlayer | undefined, year: number): number {
+  return p.foreign && lp ? lp.contract.salary : minSalary(year);
 }
 
 /**
@@ -217,7 +217,7 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): void {
   const year = world.year;
   const lp = league.players.find((x) => x.id === p.id)!;
   if (!(p.foreign && lp.market === year)) {
-    const cost = Math.round(MIN_SALARY * remainingShare(year, season.schedule.length, season.day));
+    const cost = Math.round(minSalary(year) * remainingShare(year, season.schedule.length, season.day));
     if (cost > 0) league.ledger.push({ year, from: team, to: -1, amount: cost, note: `${p.name} 영입 연봉 (남은 기간)`, kind: 'release' });
   }
   season.transfer(p.idx, team);
@@ -241,7 +241,7 @@ export function settleMarketContracts(league: LeagueState, year: number): void {
   for (const m of movesOf(league, year)) {
     const p = byId.get(m.id);
     if (!p) continue;
-    if (m.kind === 'sign' && !(p.foreign && p.market === year)) p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year };
+    if (m.kind === 'sign' && !(p.foreign && p.market === year)) p.contract = { kind: 'reserve', salary: minSalary(year), until: year };
   }
 }
 

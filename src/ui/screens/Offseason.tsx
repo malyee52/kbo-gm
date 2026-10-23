@@ -8,10 +8,10 @@ import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
-  capPayroll, dollarText, FA_COMP, MIN_SALARY, salaryCap,
+  capPayroll, dollarText, FA_COMP, minSalary, salaryCap,
 } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
-import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
+import { posName, TeamName, useGame, usePriceIndex, usePriceYear, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { ruleOf } from '../../league/rules';
 
@@ -376,6 +376,7 @@ function CapLine() {
 }
 
 function FaPanel({ act }: { act: Act }) {
+  const priceYear = usePriceYear(); // 오프시즌 계약은 다음 시즌 최저 연봉
   const { session } = useGame();
   const px = usePriceIndex();
   const won = useWon();
@@ -437,7 +438,7 @@ function FaPanel({ act }: { act: Act }) {
                       </span>
                     ) : (
                       <span className="inline">
-                        <input type="number" min={(MIN_SALARY * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+                        <input type="number" min={(minSalary(priceYear) * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
                           onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
                         <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
                           {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
@@ -745,6 +746,7 @@ function PostingPanel({ act }: { act: Act }) {
 }
 
 function SalaryPanel({ act }: { act: Act }) {
+  const priceYear = usePriceYear(); // 오프시즌 계약은 다음 시즌 최저 연봉
   const { session } = useGame();
   const px = usePriceIndex();
   const won = useWon();
@@ -785,7 +787,7 @@ function SalaryPanel({ act }: { act: Act }) {
                   <td>{won(p.contract.salary)}</td><td>{won(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={(MIN_SALARY * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
+                      <input type="number" min={(minSalary(priceYear) * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
                         onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
@@ -802,6 +804,7 @@ function SalaryPanel({ act }: { act: Act }) {
 }
 
 function ReleasePanel({ act }: { act: Act }) {
+  const priceYear = usePriceYear(); // 오프시즌 계약은 다음 시즌 최저 연봉
   const { session } = useGame();
   const won = useWon();
   const info = useInfo();
@@ -905,7 +908,7 @@ function ReleasePanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>방출 선수 영입 <span className="muted small">{claimable.length}명</span></h2>
         <p className="muted small">
-          다른 구단이 이번에 방출한 선수를 최저 연봉({won(Off.CLAIM_SALARY)}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
+          다른 구단이 이번에 방출한 선수를 최저 연봉({won(Off.claimSalary(priceYear))}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
           단계를 마감하면 AI 구단이 남은 방출 선수 중 쓸 만한 선수를 데려갑니다 (구단당 {Off.CLAIM_PER_TEAM}명까지).
         </p>
       </div>

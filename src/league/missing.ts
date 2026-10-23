@@ -12,7 +12,7 @@ import type { ValueContext } from '../ai/value';
 import { growthRoom, skillForRuns, type CareerIndex } from './growth';
 import { initialMilitary } from './careers';
 import { makeDraftee, matchDraftee, type LeagueView } from './offseason';
-import { MIN_SALARY } from './salary';
+import { minSalary } from './salary';
 import type { LeaguePlayer, LeagueState, Military } from './types';
 
 type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'drafts' | 'military'>;
@@ -81,7 +81,7 @@ export function makeLateDraftee(league: LeagueState, view: LeagueView, x: LateDr
   Object.assign(p, skillForRuns({ ...p }, runs, view.ctx as ValueContext, year));
   p.team = team;
   p.entryYear = x.entry;
-  p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year };
+  p.contract = { kind: 'reserve', salary: minSalary(year), until: year };
   p.military = servingAt(store, p.id, year) ?? initialMilitary({ id: p.id, foreign: false, real: true, birthYear: p.birthYear }, career(), year, store.military?.[p.id]);
   return p;
 }

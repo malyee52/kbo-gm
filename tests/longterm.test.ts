@@ -184,7 +184,7 @@ describe('정원 정리', () => {
     const p = pool[0];
     expect(g.claim(p.id).ok).toBe(true);
     expect(p.team).toBe(g.teamIdx);
-    expect(p.contract).toMatchObject({ kind: 'reserve', salary: Off.CLAIM_SALARY, until: 2027 });
+    expect(p.contract).toMatchObject({ kind: 'reserve', salary: Off.claimSalary(2027), until: 2027 });
     expect(g.claim(p.id).ok).toBe(false); // 이미 데려왔다
     // 우리 구단에서 방출 순서 맨 끝(가장 아까운) 선수를 내보내면 AI 구단이 데려간다
     const view = Off.leagueView(g.league, store, FAST);

@@ -8,7 +8,7 @@ import { makeDraftee, openMarket, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
-import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget } from './salary';
+import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
@@ -113,12 +113,12 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
-        salary: Math.max(MIN_SALARY, Math.round((active.guaranteed * 10000) / active.years)),
+        salary: Math.max(minSalary(startYear), Math.round((active.guaranteed * 10000) / active.years)),
         until: active.first + active.years - 1,
       };
-    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: MIN_SALARY, until: startYear };
-    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(MIN_SALARY, Math.round(marketSalary(now) * 0.8)), until: startYear };
-    else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
+    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: minSalary(startYear), until: startYear };
+    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(minSalary(startYear), Math.round(marketSalary(now, startYear) * 0.8)), until: startYear };
+    else contract = { kind: 'reserve', salary: reserveTarget(now, service, startYear), until: startYear };
 
     return {
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,

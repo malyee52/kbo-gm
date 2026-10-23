@@ -7,15 +7,14 @@ import { faServiceNeeded } from './eras';
 import type { LeagueState, LeaguePlayer, School } from './types';
 import { ruleOf } from './rules';
 
-/** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
+/** 최저 연봉: 2021년부터 3,000만 원 (출처 확인). 2026년 물가 그대로라 2021년 이후 내부 값과 같다. 규정은 그 해 값 minSalary(year)를 쓴다 */
 export const MIN_SALARY = 3000;
 
 /**
  * 연도별 최저 연봉 (그 해 명목 금액, 만 원). data-src/제도연표_보정.csv 44 (나무위키 선수 문서 주석·KBO 규약).
  * 2010 2,400만·2015 2,700만·2021 3,000만은 원문 문장으로 확인했고, 1982 600만·1988 840만·2000 1,500만·2005 2,000만은 위키 조사 요약에서,
  * 1991 1,000만·1996 1,200만은 "1990년대 초·후반"이라 해가 임시값이다.
- * 게임 규정에는 아직 쓰지 않는다: 내부 연봉은 2026년 물가라 옛 시대 최저 연봉이 MIN_SALARY보다 커진다 (1982년 600만 ÷ 물가 0.08 = 7,500만).
- * 연결할지는 사용자 결정 (경제 균형이 바뀐다).
+ * 게임 규정은 minSalary(year)로 쓴다 (2026-10-23 결정: 내부 연봉은 2026년 물가라 옛 시대 최저 연봉이 3,000만보다 커진다, 1982년 600만 ÷ 물가 0.08 = 7,500만).
  */
 export const MIN_SALARY_HISTORY: [number, number][] = [
   [1982, 600], [1988, 840], [1991, 1000], [1996, 1200], [2000, 1500], [2005, 2000], [2010, 2400], [2015, 2700], [2021, 3000],
@@ -25,6 +24,15 @@ export function minSalaryNominal(year: number): number {
   let v = MIN_SALARY_HISTORY[0][1];
   for (const [y, won] of MIN_SALARY_HISTORY) if (year >= y) v = won;
   return v;
+}
+
+/**
+ * 그 해 최저 연봉 (내부 값, 2026년 물가 만 원): 명목 최저 연봉 ÷ 물가 계수, 10만 원 단위.
+ * 1982 7,500만 · 1990 6,000만 · 2000 5,000만 · 2010 4,290만 · 2015 3,750만 · 2020 2,900만 · 2026 3,000만.
+ * 계약은 그 계약으로 뛰는 시즌의 값을 쓴다 (오프시즌 계약은 다음 해). 물가 계수가 임시값이라 내부 값도 임시값이다
+ */
+export function minSalary(year: number): number {
+  return Math.round(minSalaryNominal(year) / priceIndex(year) / 10) * 10;
 }
 
 /**
@@ -85,8 +93,8 @@ export function capPayroll(players: LeaguePlayer[], team: number, topN = CAP_TOP
  * FA 시장 연봉 (연평균, 만 원): 계약 기간 평균 기여(런)에 따라 오른다 (임시값).
  * 기준점: 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억.
  */
-export function marketSalary(runs: number): number {
-  return Math.max(MIN_SALARY, Math.round(1200 * Math.max(0, runs) ** 1.31));
+export function marketSalary(runs: number, year: number): number {
+  return Math.max(minSalary(year), Math.round(1200 * Math.max(0, runs) ** 1.31));
 }
 
 /** 시장 연봉식의 역함수: 이 연봉이면 시장에서 몇 런짜리 선수 값인가 */
@@ -94,18 +102,18 @@ export function runsForSalary(salary: number): number {
   return (Math.max(0, salary) / 1200) ** (1 / 1.31);
 }
 
-/** 보류 선수(FA 전) 연봉 목표: 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음) */
-export function reserveTarget(runs: number, service: number): number {
+/** 보류 선수(FA 전) 연봉 목표: 그 해 최저 연봉 + 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음) */
+export function reserveTarget(runs: number, service: number, year: number): number {
   const seniority = Math.min(1.2, 0.4 + 0.12 * service);
-  return Math.round(MIN_SALARY + SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority);
+  return Math.round(minSalary(year) + SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority);
 }
 
 const SENIORITY_PAY = 900;
 const RUN_PAY = 220;
 
 /** 보류 선수 다음 해 연봉: 목표값을 향하되 한 해 변동 폭을 제한한다 (삭감 25%, 인상 150%까지. 임시값, 실제 삭감 한도 규정 미확인) */
-export function nextReserveSalary(prev: number, target: number): number {
-  return Math.max(MIN_SALARY, Math.round(Math.min(prev * 2.5, Math.max(prev * 0.75, target))));
+export function nextReserveSalary(prev: number, target: number, year: number): number {
+  return Math.max(minSalary(year), Math.round(Math.min(prev * 2.5, Math.max(prev * 0.75, target))));
 }
 
 /** FA 계약 기간 (임시값): 나이가 많을수록 짧다 */

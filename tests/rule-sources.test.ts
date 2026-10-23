@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type EngineParams } from '../src/engine';
 import { createLeague, openingTeamMoves } from '../src/league/create';
-import { MIN_SALARY, minSalaryNominal, salaryCap } from '../src/league/salary';
+import { MIN_SALARY, minSalary, minSalaryNominal, salaryCap } from '../src/league/salary';
 
 let store: DataStore;
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -65,8 +65,9 @@ describe('제도연표 위키 확인값', () => {
     expect(minSalaryNominal(2020)).toBe(2700);
     expect(minSalaryNominal(2021)).toBe(3000);
     expect(minSalaryNominal(2040)).toBe(3000);
-    // 게임 규정(내부 2026년 물가)은 아직 연결하지 않았다
+    // 게임 규정은 그 해 값을 2026년 물가로 (명목 ÷ 물가 계수, 10만 원 단위)
     expect(MIN_SALARY).toBe(3000);
+    expect([1982, 1990, 2000, 2010, 2015, 2020, 2026, 2040].map(minSalary)).toEqual([7500, 6000, 5000, 4290, 3750, 2900, 3000, 3000]);
   });
 
   it('샐러리캡: 2023·2024 114억 2,638만, 2025 137억 1,165만 (2024-08 20% 상향)', () => {
