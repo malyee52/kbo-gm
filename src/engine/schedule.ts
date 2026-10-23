@@ -875,6 +875,15 @@ export function pickOpeningHosts(year: number, ranked: number[], franchises: str
   return out;
 }
 
+/**
+ * 시즌 자료의 정규시즌 승률 순위를 그 해 월드 구단 색인으로 (양대 리그 동률 규칙 ③ 전년도 순위, 기획안 10.4).
+ * 자료의 rank는 가을야구를 반영한 최종 순위이고 1999·2000은 리그별이라 pct로 다시 정렬한다 (같으면 승수)
+ */
+export function pctRankedFromSeason(prev: Pick<SeasonData, 'teams'> | undefined, franchises: string[]): number[] {
+  if (!prev) return [];
+  return [...prev.teams].sort((a, b) => b.pct - a.pct || b.w - a.w).map((t) => franchises.indexOf(t.franchise)).filter((i) => i >= 0);
+}
+
 /** 시즌 자료의 최종 순위를 그 해 월드 구단 색인으로 (계보로 잇는다. 지난 시즌에 없던 구단은 빠진다) */
 export function rankedFromSeason(prev: Pick<SeasonData, 'teams'> | undefined, franchises: string[]): number[] {
   if (!prev) return [];

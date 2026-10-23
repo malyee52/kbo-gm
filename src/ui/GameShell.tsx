@@ -31,6 +31,7 @@ import { Articles } from './screens/Articles';
 import { currentSeries, ROUND_LABEL, stillAlive } from '../league/postseason';
 import { teamVars } from './teams';
 import { gamesBehind, recentForm } from '../game/stats';
+import { lastSeasonPlace, seasonPlace } from '../game/rank';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
@@ -375,9 +376,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const left = known ? known.days.slice(session.day).reduce((n, d) => n + d.filter(ours).length, 0) + known.pending.filter(ours).length : 0;
   // 머리 부분 성적: 시즌 중이면 이번 시즌, 오프시즌이면 지난 시즌 순위
   const recNow = off ? null : session.season.teams[session.teamIdx];
-  const order = off ? session.league.lastSeason?.standings ?? [] : session.season.standings();
-  const rankNow = order.indexOf(session.teamIdx) + 1;
-  const lead = !off && recNow && rankNow > 1 ? session.season.teams[order[0]] : null;
+  // 양대 리그 해(1999·2000)는 우리 리그 안 순위와 그 리그 선두 (기획안 10.4)
+  const place = off ? lastSeasonPlace(session.league, session.teamIdx) : seasonPlace(session.season, session.teamIdx);
+  const rankNow = place?.rank ?? 0;
+  const lead = !off && recNow && rankNow > 1 ? session.season.teams[place!.order[0]] : null;
   const form = !off ? recentForm(session.season.log, session.teamIdx) : null;
   const disabled = !!busy || session.done || !!session.pendingEvent;
 
@@ -400,7 +402,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             <strong className="mast-team">{team.name}</strong>
             <span className="mast-score" title={summaryOf(session)}>
               {recNow && recNow.g > 0 && <span className="mast-rec">{recNow.w}<span className="dim">–{recNow.l}{recNow.t ? `–${recNow.t}` : ''}</span></span>}
-              {rankNow > 0 && (!recNow || recNow.g > 0) && <span className="mast-rank"><b>{rankNow}</b>위{off && <small> 지난 시즌</small>}</span>}
+              {rankNow > 0 && (!recNow || recNow.g > 0) && <span className="mast-rank">{place?.league && <small>{place.league} </small>}<b>{rankNow}</b>위{off && <small> 지난 시즌</small>}</span>}
               {recNow && recNow.g === 0 && <span className="mast-sub">개막 전</span>}
               {recNow && recNow.g > 0 && <span className="mast-sub">{lead ? `선두와 ${gamesBehind(lead, recNow).toFixed(1)}` : '선두'}{form?.streak ? ` · ${form.streak}` : ''}</span>}
             </span>

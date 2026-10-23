@@ -9,7 +9,7 @@ import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, Season
 import { makeDefense } from './defense';
 import type { DefenseAward, PpaData, ScheduleData } from '../data/types';
 import { divisionsOf, scheduleRule } from '../data/schedule';
-import { pickOpeningHosts, rankedFromSeason } from './schedule';
+import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
 import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
@@ -525,7 +525,7 @@ export function buildWorld(input: BuildWorldInput): World {
     players,
     ...(rule ? { schedule: rule } : {}),
     ...(hosts ? { openingHosts: hosts } : {}),
-    ...(divisions ? { divisions } : {}),
+    ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
 }
 

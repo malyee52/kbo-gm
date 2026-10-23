@@ -6,7 +6,7 @@ import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pitValue, rankedFromSeason, traitsOf,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pctRankedFromSeason, pitValue, rankedFromSeason, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
@@ -159,8 +159,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const hosts = pickOpeningHosts(year, ranked, franchises);
   // 양대 리그 나눔 (1999·2000): 결산의 구단 변화(쌍방울 → SK 승계) 뒤 새 해 자료로 다시 계산한다
   const divisions = divisionsFor(store, year, teams);
+  // 동률 규칙 ③ 전년도 정규시즌 순위: 게임에서 치렀으면 그 통합 순위, 아니면 시즌 자료의 승률 순 (기획안 10.4)
+  const prevStandings = divisions ? (last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : pctRankedFromSeason(store.season(year - 1), franchises)) : null;
   return {
     year, gamesPerTeam: games, rules, league: lg, env, teams, players,
-    ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}), ...(divisions ? { divisions } : {}),
+    ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}), ...(divisions ? { divisions, prevStandings: prevStandings! } : {}),
   };
 }

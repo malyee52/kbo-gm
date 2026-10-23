@@ -482,7 +482,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * futuresForm(fl), dev);
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
-  league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings() };
+  const divisions = season.divisionStandings();
+  league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), ...(divisions ? { divisions } : {}) };
   // 계약하지 못한 FA (freeAgent): 시즌 중 구단을 찾았으면 보통 선수, 끝내 못 찾았으면 은퇴 (리그 명단에는 오프시즌 끝까지 남아 통산이 보관된다)
   for (const p of league.players) {
     if (!p.freeAgent) continue;

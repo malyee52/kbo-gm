@@ -7,6 +7,7 @@ import type { NewsKind } from '../../game/session';
 import { isRivalry } from '../../league/rivals';
 import { formatDate, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, rate3, recentForm } from '../../game/stats';
+import { placeLabel, seasonPlace } from '../../game/rank';
 import { winPct } from '../../engine';
 import { useWon, PlayerLink, TeamName, useGame } from '../context';
 import { GOAL_LABEL } from '../../league/owner';
@@ -34,8 +35,9 @@ export function Home() {
   const me = session.teamIdx;
   const year = session.world.year;
   const rec = s.teams[me];
-  const order = s.standings();
-  const rank = order.indexOf(me) + 1;
+  // 우리 구단이 속한 순위표: 단일 리그는 통합, 양대 리그 해(1999·2000)는 우리 리그 (기획안 10.4)
+  const place = seasonPlace(s, me);
+  const order = place.order;
   const leader = s.teams[order[0]];
   const form = recentForm(s.log, me);
   const next = session.nextGame();
@@ -46,7 +48,7 @@ export function Home() {
   const setNewsKind = (k: NewsGroup) => { setNewsKindState(k); try { localStorage.setItem('kbo-news-kind', k); } catch { /* 저장 못 해도 화면은 그대로 */ } };
   const [newsMore, setNewsMore] = useState(false);
   const news = [...session.news].reverse().filter((n) => newsKind === 'all' || NEWS_GROUPS[newsKind].kinds.includes(n.kind)).slice(0, 30);
-  const cut = session.world.rules.postseasonTeams;
+  const cut = place.league ? 2 : session.world.rules.postseasonTeams;
   const moves = useRankMoves(order);
 
   // 순위는 우리 팀 앞뒤 5줄만 (전체는 리그 > 순위)
@@ -59,7 +61,7 @@ export function Home() {
       {session.done && (
         <div className="note row-between">
           <span>
-            정규시즌이 끝났습니다. 최종 {rank}위.
+            정규시즌이 끝났습니다. 최종 {placeLabel(place)}.
             {session.postseasonRunning ? ' 가을야구가 진행 중입니다 (위쪽 버튼으로 한 경기씩).' : session.postseason?.done ? ' 가을야구가 끝났습니다. 시즌 결과에서 결산하세요.' : ''}
           </span>
           <span className="inline">
@@ -134,7 +136,7 @@ export function Home() {
         </div>
 
         <div className="card side">
-          <h2>순위 <span className="muted small">상위 {cut}팀 가을야구</span> <button type="button" className="link small card-more" onClick={() => go('standings')}>전체 순위</button></h2>
+          <h2>순위 <span className="muted small">{place.league ? `${place.league}리그 · 1·2위 가을야구` : `상위 ${cut}팀 가을야구`}</span> <button type="button" className="link small card-more" onClick={() => go('standings')}>전체 순위</button></h2>
           <table className="mini">
             <tbody>
               {near.map((t) => {

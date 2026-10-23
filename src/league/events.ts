@@ -89,6 +89,8 @@ export interface EventContext {
   /** 지금 순위 (1부터)와 구단 수 */
   rank: number;
   teams: number;
+  /** 순위 문장 ("3위", 양대 리그 해는 "드림 2위"). 없으면 rank로 */
+  rankLabel?: string;
   winPct: number;
   /** 지금 자금 (만 원) */
   cash: number;
@@ -202,7 +204,7 @@ export const EVENTS: EventDef[] = [
     id: 'parent-bonus', title: '모기업 격려금', weight: 4,
     when: (c) => c.rank <= 3,
     vars: (_c, rng) => ({ amount: Math.round(80_000 + rng.range(0, 70_000)) }),
-    text: (c, v) => `${c.rank}위로 순항하자 모기업이 ${eok(num(v, 'amount'))}의 격려금을 보내겠다고 합니다. 받으면 구단주의 기대도 함께 높아집니다.`,
+    text: (c, v) => `${c.rankLabel ?? `${c.rank}위`}로 순항하자 모기업이 ${eok(num(v, 'amount'))}의 격려금을 보내겠다고 합니다. 받으면 구단주의 기대도 함께 높아집니다.`,
     choices: [
       { label: '감사히 받는다', note: (_c, v) => `자금 +${eok(num(v, 'amount'))}`, apply: (c, v) => { c.addCash(num(v, 'amount'), '모기업 격려금'); return '격려금을 받았습니다.'; } },
       { label: '성적으로 보답하겠다며 사양한다', note: () => '구단주 신뢰도 +3', apply: (c) => { c.addTrust(3); return '구단주가 단장의 태도를 높이 샀습니다.'; } },
@@ -273,7 +275,7 @@ export const EVENTS: EventDef[] = [
   {
     id: 'media-criticism', title: '언론의 비판 기사', weight: 5,
     when: (c) => c.rank > Math.ceil(c.teams / 2),
-    text: (c) => `${c.rank}위에 머문 ${c.teamName}의 운영을 비판하는 기사가 나왔습니다. 구단주도 기사를 읽었습니다.`,
+    text: (c) => `${c.rankLabel ?? `${c.rank}위`}에 머문 ${c.teamName}의 운영을 비판하는 기사가 나왔습니다. 구단주도 기사를 읽었습니다.`,
     choices: [
       { label: '대응하지 않는다', note: () => '구단주 신뢰도 −1', apply: (c) => { c.addTrust(-1); return '조용히 넘어갔습니다.'; } },
       { label: '단장이 직접 인터뷰로 설명한다', note: () => '반반: 신뢰도 +3 / −4',

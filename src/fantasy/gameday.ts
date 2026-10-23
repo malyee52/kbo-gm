@@ -5,6 +5,7 @@
 import type { GameSession, CastGame } from '../game/session';
 import type { DataStore } from '../data/types';
 import { formatDate } from '../game/calendar';
+import { rankText } from '../game/rank';
 import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { leniencyOf, leniencyRule, NEGOTIATE_SCALE } from './leniency';
@@ -88,8 +89,7 @@ export async function pregameTalk(g: GameSession, store: Store, s: LlmSettings, 
   const maxEdge = Math.round(PREGAME_EDGE * NEGOTIATE_SCALE[l] * 1000) / 1000;
   const next = g.nextGame();
   const opp = next ? (next.home === g.teamIdx ? next.away : next.home) : -1;
-  const st = g.season.standings();
-  const oppInfo = opp >= 0 ? `다음 경기: ${g.league.teams[opp].name}전 (상대 ${st.indexOf(opp) + 1}위, 우리 ${st.indexOf(g.teamIdx) + 1}위)` : '';
+  const oppInfo = opp >= 0 ? `다음 경기: ${g.league.teams[opp].name}전 (상대 ${rankText(g, opp)}, 우리 ${rankText(g, g.teamIdx)})` : '';
   const raw = await completeJsonText(s, {
     system: pregameSystem(maxEdge, l),
     messages: [{ role: 'user', content: `[게임 상황]\n${gameContextFor(g, store)}\n${oppInfo}\n\n[단장의 말]\n${speech}` }],

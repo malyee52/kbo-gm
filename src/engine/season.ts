@@ -160,6 +160,45 @@ export function rankTeams(teams: TeamRecord[]): number[] {
   return teams.map((_, i) => i).sort((x, y) => winPct(teams[y]) - winPct(teams[x]) || teams[y].w - teams[x].w || x - y);
 }
 
+/** 리그 하나의 순위 (Season.divisionStandings). teams는 1위부터 */
+export interface DivisionTable {
+  name: string;
+  teams: number[];
+}
+
+/**
+ * 양대 리그 해(1999·2000)의 순위 (일정 개편 기획안 10.4). ids를 승률 순으로 놓고, 승률이 같은 구단끼리는
+ * ① 그 구단들 사이 상대 전적 다승 → ② 그 구단들 사이 맞대결 득점 → ③ 전년도 순위(prev에 없으면 뒤, 그다음 색인).
+ * 셋 이상이 같으면 묶음 전체의 맞대결로 한 번에 가린다 (갈린 뒤 남은 구단끼리 다시 세지 않는다, 임시 규칙).
+ * 상대 전적·득점은 경기 기록(log)에서 센다. 난수를 쓰지 않는다
+ */
+export function rankWithTiebreak(ids: number[], teams: TeamRecord[], log: readonly GameLog[], prev: readonly number[] = []): number[] {
+  const byPct = [...ids].sort((x, y) => winPct(teams[y]) - winPct(teams[x]) || x - y);
+  const prevAt = (t: number) => { const k = prev.indexOf(t); return k >= 0 ? k : prev.length + t; };
+  const out: number[] = [];
+  for (let i = 0; i < byPct.length;) {
+    let j = i + 1;
+    while (j < byPct.length && winPct(teams[byPct[j]]) === winPct(teams[byPct[i]])) j++;
+    const group = byPct.slice(i, j);
+    if (group.length > 1) {
+      const inGroup = new Set(group);
+      const wins = new Map(group.map((t) => [t, 0]));
+      const runs = new Map(group.map((t) => [t, 0]));
+      for (const g of log) {
+        if (!inGroup.has(g.home) || !inGroup.has(g.away)) continue;
+        runs.set(g.home, runs.get(g.home)! + g.homeRuns);
+        runs.set(g.away, runs.get(g.away)! + g.awayRuns);
+        if (g.homeRuns > g.awayRuns) wins.set(g.home, wins.get(g.home)! + 1);
+        else if (g.awayRuns > g.homeRuns) wins.set(g.away, wins.get(g.away)! + 1);
+      }
+      group.sort((x, y) => wins.get(y)! - wins.get(x)! || runs.get(y)! - runs.get(x)! || prevAt(x) - prevAt(y));
+    }
+    out.push(...group);
+    i = j;
+  }
+  return out;
+}
+
 interface FixedAbsence {
   p: number;
   team: number;
@@ -384,8 +423,17 @@ export class Season {
     return this.day >= this.schedule.length;
   }
 
+  /** 통합 순위 (승률 순 팀 색인). 양대 리그 해는 동률 규칙(rankWithTiebreak)으로, 다른 해는 rankTeams */
   standings(): number[] {
-    return rankTeams(this.teams);
+    if (!this.world.divisions) return rankTeams(this.teams);
+    return rankWithTiebreak(this.teams.map((_, i) => i), this.teams, this.log, this.world.prevStandings);
+  }
+
+  /** 리그별 순위 (양대 리그 해, 기획안 10.4). 단일 리그 해는 null */
+  divisionStandings(): DivisionTable[] | null {
+    const d = this.world.divisions;
+    if (!d) return null;
+    return d.names.map((name, k) => ({ name, teams: rankWithTiebreak(d.teams[k], this.teams, this.log, this.world.prevStandings) }));
   }
 
   /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */

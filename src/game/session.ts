@@ -20,6 +20,7 @@ import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
+import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, type RankPlace } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
@@ -351,6 +352,8 @@ interface ArticleState {
   gameIdx: number;
   /** 지난번 선두 (20경기 전에는 -1) */
   leader: number;
+  /** 양대 리그 해: 리그마다 지난번 선두 (Season.divisionStandings 순서) */
+  leaders?: number[];
   /** 우리 구단이 가을야구권에 있었나 */
   psIn: boolean;
   /** 부상 기사를 어디까지 봤나 (season.absences 색인) */
@@ -573,16 +576,24 @@ export class GameSession {
    * 지난 시즌에 없던 구단(창단)이면 null
    */
   lastSeasonRank(): number | null {
+    return this.lastSeasonPlace()?.rank ?? null;
+  }
+
+  /** lastSeasonRank의 자리: 지난 시즌이 양대 리그 해면 리그 안 순위와 리그 이름 (placeLabel로 "드림 2위") */
+  lastSeasonPlace(): RankPlace | null {
     const L = this.league;
     if (L.lastSeason && L.lastSeason.year === this.world.year - 1) {
-      const k = L.lastSeason.standings.indexOf(this.teamIdx);
-      return k >= 0 ? k + 1 : null;
+      const p = lastSeasonPlace(L, this.teamIdx);
+      return p && p.rank > 0 ? p : null;
     }
     const prev = this.store.season(this.world.year - 1);
     if (!prev) return null;
-    const order = [...prev.teams].sort((a, b) => b.pct - a.pct || b.w - a.w);
-    const k = order.findIndex((t) => t.franchise === this.team.franchise);
-    return k >= 0 ? k + 1 : null;
+    const mine = prev.teams.find((t) => t.franchise === this.team.franchise);
+    if (!mine) return null;
+    // 자료의 league 칸이 두 가지인 해(1999·2000)는 리그 안 승률 순 (rank는 가을야구를 반영한 리그별 최종 순위라 쓰지 않는다)
+    const split = new Set(prev.teams.map((t) => t.league)).size === 2 && !!mine.league;
+    const order = prev.teams.filter((t) => !split || t.league === mine.league).sort((a, b) => b.pct - a.pct || b.w - a.w);
+    return { league: split ? mine.league : null, order: [], rank: order.indexOf(mine) + 1 };
   }
 
   /** 우리 구단 경기 (fromDay 일정 색인부터, 날짜 순). 가을야구 경기도 뒤에 붙는다 */
@@ -1749,9 +1760,8 @@ export class GameSession {
     this.lastCallUps = new Set(ups.map((p) => p.idx));
 
     if (s.done) {
-      const rank = s.standings().indexOf(this.teamIdx) + 1;
       const t = s.teams[this.teamIdx];
-      this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rank}위 (${t.w}승 ${t.l}패 ${t.t}무).`);
+      this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rankText(this, this.teamIdx)} (${t.w}승 ${t.l}패 ${t.t}무).`);
       this.openPostseason();
     } else {
       if (day === this.allStarDay) this.allStarBreak(day);
@@ -1800,7 +1810,7 @@ export class GameSession {
     const team = this.teamIdx;
     return {
       league: L, team, teamName: this.team.name, year, day, seasonDays: s.schedule.length,
-      rank: st.indexOf(team) + 1, teams: st.length,
+      rank: st.indexOf(team) + 1, teams: st.length, rankLabel: placeLabel(seasonPlace(s, team)),
       winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
       cash: this.cashNow(),
       roster: L.players.filter((p) => p.team === team),
@@ -2847,7 +2857,8 @@ export class GameSession {
     const st: ArticleState = {
       year, base, prev: new Map(), records, broken: new Set(), streak: this.world.teams.map(() => 0), logIdx: 0,
       gameIdx: s.log.length, leader: s.teams[order[0]].g >= 20 ? order[0] : -1,
-      psIn: order.indexOf(this.teamIdx) < this.world.rules.postseasonTeams, absSeen: s.absences.length,
+      ...(s.divisionStandings() ? { leaders: s.divisionStandings()!.map((d) => (s.teams[d.teams[0]].g >= 20 ? d.teams[0] : -1)) } : {}),
+      psIn: seasonPostseasonPlaces(s, this.world.rules.postseasonTeams).includes(this.teamIdx), absSeen: s.absences.length,
       month: dateOf(year, s.day).month,
     };
     // 월간 MVP 기준점: 저장에 남아 있으면 그것, 없으면(새 시즌·예전 저장) 지금
@@ -3008,20 +3019,27 @@ export class GameSession {
       }
     }
 
-    // 순위: 선두 교체, 우리 구단의 가을야구권 진입·이탈 (20경기부터)
+    // 순위: 선두 교체, 우리 구단의 가을야구권 진입·이탈 (20경기부터). 양대 리그 해는 리그마다 선두, 가을야구권은 진출 규칙대로
     const order = s.standings();
     if (s.teams[order[0]].g >= 20) {
-      const lead = order[0];
-      if (st.leader >= 0 && lead !== st.leader) {
-        put('rank', lead, `선두 교체: ${tname(lead)} 1위`, `${josa(tname(lead), '이', '가')} ${date} 경기 뒤 ${josa(tname(st.leader), '을', '를')} 끌어내리고 1위에 올랐다.${lead === me ? quoteLine('first', rng) : ''}`);
-      }
-      st.leader = lead;
+      const divs = s.divisionStandings();
+      const tables = divs ?? [{ name: '', teams: order }];
+      tables.forEach((d, k) => {
+        const lead = d.teams[0];
+        const was = divs ? st.leaders?.[k] ?? -1 : st.leader;
+        const lg = d.name ? `${d.name}리그 ` : '';
+        if (was >= 0 && lead !== was) {
+          put('rank', lead, `${lg}선두 교체: ${tname(lead)} 1위`, `${josa(tname(lead), '이', '가')} ${date} 경기 뒤 ${josa(tname(was), '을', '를')} 끌어내리고 ${lg}1위에 올랐다.${lead === me ? quoteLine('first', rng) : ''}`);
+        }
+        if (divs) (st.leaders ??= [])[k] = lead;
+        else st.leader = lead;
+      });
       const cut = W.rules.postseasonTeams;
-      const inNow = order.indexOf(me) < cut;
+      const inNow = seasonPostseasonPlaces(s, cut).includes(me);
       if (inNow !== st.psIn) {
-        const rank = order.indexOf(me) + 1;
-        put('rank', me, inNow ? `${tname(me)}, 가을야구권 진입 (${rank}위)` : `${tname(me)}, 가을야구권 밖으로 (${rank}위)`,
-          `${josa(tname(me), '이', '가')} ${date} 경기 뒤 ${rank}위가 됐다.${quoteLine(inNow ? 'ps-in' : 'ps-out', rng)}`);
+        const rank = rankText(this, me);
+        put('rank', me, inNow ? `${tname(me)}, 가을야구권 진입 (${rank})` : `${tname(me)}, 가을야구권 밖으로 (${rank})`,
+          `${josa(tname(me), '이', '가')} ${date} 경기 뒤 ${rank}가 됐다.${quoteLine(inNow ? 'ps-in' : 'ps-out', rng)}`);
         st.psIn = inNow;
       }
     }
@@ -3083,7 +3101,7 @@ export class GameSession {
       const sit = streak >= 4 ? 'gm-hot' : streak <= -4 ? 'gm-cold' : rank <= 2 ? 'gm-top' : rank >= n - 2 ? 'gm-low' : 'gm-mid';
       const t = s.teams[me];
       put('interview', me, `[인터뷰] ${tname(me)} 단장 "${voice(sit, rng).say.split('.')[0]}"`,
-        `${josa(tname(me), '은', '는')} ${date} 현재 ${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}로 ${rank}위다.${quoteLine(sit, rng, tname(me))}`);
+        `${josa(tname(me), '은', '는')} ${date} 현재 ${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}로 ${rankText(this, me)}다.${quoteLine(sit, rng, tname(me))}`);
     }
   }
 

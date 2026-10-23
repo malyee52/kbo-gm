@@ -2,6 +2,7 @@
 // 숨겨진 특수능력(traits)은 넣지 않는다 (CLAUDE.md). 선수마다 실존/가상을 붙여 AI가 규칙을 지키게 한다.
 import type { GameSession } from '../game/session';
 import { formatDate } from '../game/calendar';
+import { rankText } from '../game/rank';
 import { avg, era, fixed2, ipText, ops, rate3, recentForm } from '../game/stats';
 import { lineTeam, type SimPlayer } from '../engine';
 
@@ -19,8 +20,11 @@ export function gameContext(g: GameSession): string {
     out.push(`[날짜] ${formatDate(year, day)} (${year} 정규시즌${g.done ? ' 종료' : ''})`);
     const order = s.standings();
     const rec = s.teams[me];
-    out.push(`[우리 구단] ${team.name} — ${rec.w}승 ${rec.l}패 ${rec.t}무, ${order.indexOf(me) + 1}위 / ${order.length}구단`);
-    out.push(`[순위] ${order.map((t, i) => `${i + 1}.${g.world.teams[t].name} ${s.teams[t].w}-${s.teams[t].l}`).join(', ')}`);
+    const divs = s.divisionStandings();
+    out.push(`[우리 구단] ${team.name} — ${rec.w}승 ${rec.l}패 ${rec.t}무, ${rankText(g, me)} / ${divs ? `${divs.find((d) => d.teams.includes(me))?.teams.length ?? order.length}구단 (양대 리그)` : `${order.length}구단`}`);
+    for (const d of divs ?? [{ name: '', teams: order }]) {
+      out.push(`[${d.name ? `${d.name}리그 ` : ''}순위] ${d.teams.map((t, i) => `${i + 1}.${g.world.teams[t].name} ${s.teams[t].w}-${s.teams[t].l}`).join(', ')}`);
+    }
     const form = recentForm(s.log, me);
     if (form.w + form.l + form.t) out.push(`[최근 ${form.w + form.l + form.t}경기] ${form.w}승 ${form.l}패 ${form.t}무${form.streak ? `, ${form.streak}` : ''}`);
     const mine = g.world.players.filter((p) => lineTeam(p) === me);
@@ -49,7 +53,9 @@ export function gameContext(g: GameSession): string {
   } else {
     out.push(`[날짜] ${year} 시즌 뒤 오프시즌 (${g.offseason?.stage ?? ''} 단계)`);
     const last = g.league.lastSeason;
-    if (last) out.push(`[지난 시즌 순위] ${last.standings.map((t, i) => `${i + 1}.${g.league.teams[t].name}`).join(', ')}`);
+    for (const d of last ? last.divisions ?? [{ name: '', teams: last.standings }] : []) {
+      out.push(`[지난 시즌 ${d.name ? `${d.name}리그 ` : ''}순위] ${d.teams.map((t, i) => `${i + 1}.${g.league.teams[t].name}`).join(', ')}`);
+    }
     if (last?.postseason) out.push(`[우승] ${g.league.teams[last.postseason.champion]?.name ?? '-'}`);
   }
   const o = g.league.owner;
