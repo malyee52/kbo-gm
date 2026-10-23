@@ -20,6 +20,9 @@ import { capFloorShorts } from '../src/league/owner';
 import { foreignCap, minSalary, salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
 import { ballHrMul, FUTURE_RULE_SPEC, futureValue, futureValueText, type FutureRuleKey } from '../src/league/futureRules';
 import { realSpread, sdOf, SPREAD_HEAD, spreadLine } from './real_spread';
+import { countVotes, meritExcess, voteParts, type RuleVoteRecord } from '../src/ai/vote';
+import { asSim } from '../src/league/growth';
+import { agendaChange, agendaLabel, voteFacts } from '../src/league/ruleVote';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -72,6 +75,21 @@ export interface YearMetrics {
   ball: { hrMul: number; hrPa: number; era: number; topHr: number; subTwo: number; foreign: number };
   /** 규정·흥행 (외국인 한도 판정 신호): 다음 해 최저 연봉(만 원)·외국인 신규·총액 상한(달러), 그 시즌 경기당 관중·외국인 연봉 부담·적자 구단 */
   rule: { minPay: number; foreignNew: number; foreignTotal: number; attendance: number; foreignShare: number; deficit: number };
+  /** 그 해 결산의 단장 회의 (구단 투표). 모든 구단 AI로 개표한 결과와, 구단마다 "그 구단이 플레이어라면" 따져 본 값 */
+  votes: VoteRow[];
+}
+
+/** 단장 회의 안건 하나 (longsim 집계, 구단투표 기획안 V5) */
+export interface VoteRow {
+  record: RuleVoteRecord;
+  /** 명분이 쓰는 신호 초과 정도 (0~1) */
+  excess: number;
+  /** 결정표 구단 수: 그 구단을 플레이어로 볼 때 나머지 AI 찬성이 문턱 − 1 (우리 표가 결과를 가른다) */
+  decisive: number;
+  /** 그 구단이 플레이어로 반대(또는 표 없음)할 때 가결되는 구단 수 */
+  passIfNo: number;
+  /** 값을 다시 맞출 때 쓰는 구단별 몫 (ai/vote.ts VoteParts) */
+  parts: { team: number; interest: number; lean: number }[];
 }
 
 /** 리그 상태에서 한 시즌을 돌리고 오프시즌을 AI로 끝까지 진행한다 */
@@ -117,10 +135,25 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
   const specific = abs.filter((a) => a.event && isSpecificEvent(a.event));
 
   const shiftsBefore = league.ruleShifts?.length ?? 0;
+  const votesBefore = league.ruleVotes?.length ?? 0;
   const off = Off.beginOffseason(league, world, season, store, -1, params);
-  const newShift = (league.ruleShifts ?? []).slice(shiftsBefore)[0];
+  // 단장 회의가 열렸으면 AI 표를 낸 지표를 다시 모은다 (결산 직후와 같은 상태, offseason.ts와 같은 기여)
+  const ctxNow = valueContext(world);
+  const facts = off.vote ? voteFacts(league, world, season, world.year, (p) => currentRuns(asSim(p, world.league, world.year + 1), ctxNow)) : [];
+  const agendaParts = (off.vote?.agendas ?? []).map((a) => voteParts(a, facts).map((x) => ({ team: x.team, interest: x.interest, lean: x.lean })));
   let guard = 0;
   while (off.stage !== 'ready' && guard++ < 50) Off.advanceStage(league, off, store, params);
+  const newShift = (league.ruleShifts ?? []).slice(shiftsBefore)[0];
+  const votes: VoteRow[] = (league.ruleVotes ?? []).slice(votesBefore).map((record, i) => {
+    const ai = record.votes;
+    const voters = ai.map((v, t) => (v >= 0 ? t : -1)).filter((t) => t >= 0);
+    return {
+      record, excess: meritExcess(record),
+      decisive: voters.filter((t) => countVotes(ai, t, 'yes').passed !== countVotes(ai, t, 'no').passed).length,
+      passIfNo: voters.filter((t) => countVotes(ai, t, 'no').passed).length,
+      parts: agendaParts[i] ?? [],
+    };
+  });
   if (off.stage !== 'ready') throw new Error(`${league.year} 오프시즌이 끝나지 않았습니다 (단계 ${off.stage})`);
   const retiredNow = (league.retired ?? []).filter((r) => r.year === off.year).length;
   const faEntries = (off.fa?.entries ?? []).filter((e) => !e.returnee);
@@ -183,9 +216,12 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
       core: core.reduce((a, b) => a + b, 0) / core.length,
       fa,
       cap,
-      shift: newShift ? `${newShift.year} ${newShift.key} ${futureValueText(newShift.key, newShift.before)}→${futureValueText(newShift.key, newShift.after)}` : '',
+      shift: [
+        ...votes.filter((v) => !v.record.passed).map((v) => `${v.record.year} ${v.record.key} ${agendaChange(v.record).replace(' → ', '→')} 부결 ${v.record.yes}:${v.record.no}`),
+        ...(newShift ? [`${newShift.year} ${newShift.key} ${futureValueText(newShift.key, newShift.before)}→${futureValueText(newShift.key, newShift.after)}${newShift.vote ? ` 가결 ${newShift.vote.yes}:${newShift.vote.no}` : ''}`] : []),
+      ].join(', '),
       pressure: { hr: 1 / season.cal.hr, so: 1 / season.cal.so, bb: 1 / season.cal.bb },
-      econ, ball, rule,
+      econ, ball, rule, votes,
     },
   };
 }
@@ -206,12 +242,34 @@ function table(rows: YearMetrics[]): string {
   return [head, sep, ...body, '', ...econ, '', ...ball, '', ...rule].join('\n');
 }
 
+/** 단장 회의 집계 (구단투표 기획안 V5): 안건 표와 요약 */
+function voteSection(rows: YearMetrics[]): string {
+  const vs = rows.flatMap((r) => r.votes);
+  if (!vs.length) return '단장 회의 안건 없음.\n';
+  const head = ['| 결산 | 안건 | 전 → 후 | 신호 초과 | AI 찬성 (문턱) | 결과 | 결정표 구단 | 플레이어 반대일 때 가결 구단 |', '|---|---|---|---|---|---|---|---|'];
+  const body = vs.map((v) => `| ${v.record.year - 1} | ${agendaLabel(v.record)} | ${agendaChange(v.record)} | ${v.excess.toFixed(2)} | ${v.record.yes} (${v.record.need}) | ${v.record.passed ? '가결' : '부결'} | ${v.decisive}/${v.record.yes + v.record.no} | ${v.passIfNo}/${v.record.yes + v.record.no} |`);
+  const n = vs.length;
+  const passed = vs.filter((v) => v.record.passed).length;
+  const voters = vs.reduce((a, v) => a + v.record.yes + v.record.no, 0);
+  const dist = new Map<number, number>();
+  for (const v of vs) dist.set(v.record.yes, (dist.get(v.record.yes) ?? 0) + 1);
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  return [...head, ...body, '',
+    `안건 ${n}건: 가결 ${passed} · 부결 ${n - passed} (가결률 ${pct(passed / n)}, 플레이어 구단도 AI처럼 표를 낼 때). `
+    + `플레이어 구단이 늘 반대(표 없음)일 때 가결률 ${pct(vs.reduce((a, v) => a + v.passIfNo, 0) / voters)} (구단마다 플레이어로 놓고 평균). `
+    + `결정표 비율 ${pct(vs.reduce((a, v) => a + v.decisive, 0) / voters)} (구단마다 플레이어로 놓고 평균), 결정표가 한 구단이라도 있는 안건 ${vs.filter((v) => v.decisive > 0).length}건. `
+    + `AI 찬성 수 분포: ${[...dist.entries()].sort((a, b) => a[0] - b[0]).map(([k, c]) => `${k}곳 ${c}건`).join(', ')}.`, ''].join('\n');
+}
+
 async function main(): Promise<void> {
   const start = Number(arg('start') ?? 2026);
   const n = Number(arg('seasons') ?? 20);
   const seeds = (arg('seeds') ?? 'longsim').split(',');
   const params: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: Number(arg('pilot') ?? DEFAULT_PARAMS.pilotSeasons) };
   const out = arg('out');
+  const voteDump = arg('vote-dump');
+  const allRows: YearMetrics[] = [];
+  const dump: unknown[] = [];
   const store = loadDataStore();
   const real = realSpread(store, 2010, 2026).summary;
   const spreads: string[] = [];
@@ -225,7 +283,9 @@ async function main(): Promise<void> {
       rows.push(m);
       console.log(`[${seed}] ${m.year}: 득점 ${m.runs.toFixed(2)}, cal 홈런 ${m.cal.hr.toFixed(2)}, SD ${m.sd.toFixed(3)}, 은퇴 ${m.retired}, 복무 ${m.serving}, 실존 ${(m.realPa * 100).toFixed(0)}%, 구체적 사건(실존) ${m.specificOnReal}`);
     }
-    parts.push(`## 시드 ${seed} (${((Date.now() - t0) / 1000).toFixed(0)}초)\n`, table(rows), '');
+    parts.push(`## 시드 ${seed} (${((Date.now() - t0) / 1000).toFixed(0)}초)\n`, table(rows), '', '### 단장 회의 (구단 투표)\n', voteSection(rows));
+    allRows.push(...rows);
+    dump.push(...rows.flatMap((r) => r.votes.map((v) => ({ seed, ...v }))));
     // 공·타격 퍼짐: 시즌 반발계수를 쓰는 해(2027~)만, 실제 2010~2026과 나란히
     const fut = rows.filter((r) => r.year >= 2027);
     if (fut.length) {
@@ -246,6 +306,11 @@ async function main(): Promise<void> {
     }
   }
   if (spreads.length) parts.push('## 공·타격 퍼짐 (실제와 나란히)\n', SPREAD_HEAD, spreadLine(`실제 ${real.from}~${real.to}`, real), ...spreads, '');
+  if (seeds.length > 1) parts.push(`## 단장 회의 전체 (시드 ${seeds.join('·')})\n`, voteSection(allRows));
+  if (voteDump) {
+    mkdirSync(dirname(voteDump), { recursive: true });
+    writeFileSync(voteDump, JSON.stringify(dump));
+  }
   const text = parts.join('\n');
   if (out) {
     mkdirSync(dirname(out), { recursive: true });
