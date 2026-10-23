@@ -411,6 +411,8 @@ export interface CondParams {
   bad: number;
   /** 흐름 사유 '컨디션 난조'로 바꾸는 값 (≤) */
   awful: number;
+  /** false면 AI 감독이 컨디션 나쁜 선발을 미루지 않는다 (점검용 스위치, 엔진 2 13단계 0-4). 없으면 미룬다 */
+  delayStarter?: boolean;
 }
 
 export interface BodyParams {

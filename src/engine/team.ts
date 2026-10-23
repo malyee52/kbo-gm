@@ -572,7 +572,7 @@ export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, par
     else if (!next || st.lastStartDay[p.idx] < st.lastStartDay[next.idx]) next = p;
   }
   const tac = ts.tactics?.cond ?? 1;
-  if (best && next && cond && tac > 0 && params.cond.edge > 0 && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
+  if (best && next && cond && tac > 0 && params.cond.edge > 0 && params.cond.delayStarter !== false && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
   if (best) return best;
   let spot: SimPlayer | null = null;
   for (const p of ts.bullpen) {
