@@ -47,10 +47,8 @@ def size_bucket(d):
     return '±1' if d <= 1 else ('2~5' if d <= 5 else '6 이상')
 
 
-def main():
-    C.stdout_utf8()
-    rows = C.read_csv(C.OUT_DIR / '기록_차이.csv')
-    prof = C.read_csv(C.OUT_DIR / '인적사항_차이.csv')
+def classify(rows):
+    """기록_차이.csv 행마다 누가 다른가·차이·크기·짐작한 까닭을 붙인다 (diff_209.py도 쓴다)"""
     seasons = C.load_seasons()
     ours = M.our_season_rows(seasons)
     by_year = defaultdict(list)  # (선수, 연도, 종류) → [행 값]
@@ -84,11 +82,21 @@ def main():
         elif k == 'outs' and abs(diff) <= 2:
             why = '이닝 끝수'
         out.append({**r, 'src': src, 'diff': diff, 'size': size_bucket(diff), 'why': why, 'era': era(y), 'kind': kind})
+    return out
+
+
+def main():
+    C.stdout_utf8()
+    rows = C.read_csv(C.OUT_DIR / '기록_차이.csv')
+    prof = C.read_csv(C.OUT_DIR / '인적사항_차이.csv')
+    out = classify(rows)
 
     L = ['# 위키 차이 정리 (사용자 확인용)', '',
          f'`python tools/wiki/diff_report.py`가 만든다. 원자료: `data-src/wiki/기록_차이.csv` {len(rows):,}칸, `인적사항_차이.csv` {len(prof):,}칸.',
          '신뢰도 규칙(2026-10-23 사용자): 우리 원자료 > 위키백과 > 나무위키. **기록 값이 다르면 자동으로 바꾸지 않는다.** 이 문서는 고를 규칙을 정하기 위한 묶음이다.',
-         '칸마다 고르는 표는 `기록_차이.csv` 그대로 쓴다 (고르기 열을 더한 사본은 만들지 않았다).', '']
+         '칸마다 고르는 표는 `기록_차이.csv` 그대로 쓴다.',
+         '**2026-10-23 사용자 결정: 4장의 "나".** 위키 두 곳이 같은 값으로 다른 칸만 `reports/wiki-diff-209.md`로 하나씩 확인하고 (`tools/wiki/diff_209.py`), '
+         '확인 전까지와 나머지 칸은 우리 값을 그대로 쓴다.', '']
 
     def table(title, key, order=None):
         c = Counter(key(x) for x in out)

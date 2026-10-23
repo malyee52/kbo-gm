@@ -23,6 +23,8 @@
 | 4 | `python tools/wiki/s3_namu.py` | 덤프에서 우리 선수 문서 찾기 (제목 색인, 인터넷 안 씀) | 5~20분 | `[3단계 끝]` |
 | 5 | `python tools/wiki/s4_extract.py` | 인적 사항·시즌 기록·서술 요점 뽑기 | 몇 분 | `[4단계 끝]` |
 | 6 | `python tools/wiki/s5_merge.py` | 신뢰도 순 합치기, CSV·정리 노트 쓰기 | 1~2분 | `[요약]` |
+| 7 | `python tools/wiki/diff_report.py` | 차이 정리 → `reports/wiki-diff.md` (개수·까닭 짐작·처리 규칙 안) | 몇 초 | `[차이 정리 끝]` |
+| 8 | `python tools/wiki/diff_209.py` | 위키 두 곳이 같은 값으로 우리와 다른 칸 확인표 → `reports/wiki-diff-209.md`, 고르기 사본 `C:/Users/ararp/kbo-gm-raw/정리/기록_확인_209.csv` (2026-10-23 사용자 결정) | 몇 초 | `[확인표 끝]` |
 
 - 3번은 시작 전에 남은 공간이 30 GB 이상인지 본다 (이미 받은 만큼은 빼 준다). 모자라면 `[3단계 받기 멈춤] 남은 공간 …`이 나온다 → 멈추고 보고.
 - 3번이 중간에 끊겨 `[3단계 받기 멈춤]`이 나오면 멈추고 보고한다 (같은 명령을 다시 치면 이어 받기가 되지만, 다시 칠지는 클사장이 정한다).
@@ -37,7 +39,8 @@
 | `data-src/wiki/` | `짝.csv`, `인적사항.csv`, `인적사항_차이.csv`, `기록_채움후보.csv`, `기록_차이.csv`, `출처.csv` (설명은 `data-src/wiki/README.md`) | 올림 (가공값) |
 | `C:/Users/ararp/kbo-gm-raw/wiki/` | `sparql/` 위키데이터 질의 결과, `pages/` 위키백과 원문 캐시, `요청기록.log` | 올리지 않음 |
 | `C:/Users/ararp/kbo-gm-raw/namuwiki/` | `namu-md.sqlite` 덤프, `문서/` 짝 맞은 문서 캐시 | 올리지 않음 |
-| `C:/Users/ararp/kbo-gm-raw/정리/` | `짝_애매.csv`, `위키_못받음.csv`, `추출/`(4단계 중간값), `선수/<선수ID>_<이름>.md` 서술 요점 노트 | 올리지 않음 |
+| `C:/Users/ararp/kbo-gm-raw/정리/` | `짝_애매.csv`, `위키_못받음.csv`, `추출/`(4단계 중간값), `선수/<선수ID>_<이름>.md` 서술 요점 노트, `목차.md`, `기록_확인_209.csv`(끝 열 '고름'에 우리/위키) | 올리지 않음 |
+| `reports/` | `wiki-diff.md`, `wiki-diff-209.md` | 올림 |
 
 다시 돌리면 받은 원문·질의 결과는 캐시에서 읽고 새로 받지 않는다 (이어 받기). 위키데이터 질의를 새로 하려면 `s1_match.py --refresh-sparql`.
 
