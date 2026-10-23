@@ -13,17 +13,18 @@ export {
   type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
-  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, type Slot, type TeamSeason,
+  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
-export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
+export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
   FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
 } from './defense';
 export {
   ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
-  type Absence, type AbsenceKind, type EventCode, type InjuryParams,
+  INJURY_PARTS, SEVERITY_LABEL, overuseDecay, type Absence, type AbsenceKind, type EventCode, type InjuryCause, type InjuryParams, type InjuryPart, type OveruseParams,
 } from './injury';
+export { condLine, condWord, condSpread, conditionOf, type CondWord } from './condition';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
 // 숨겨진 특수능력: 화면(src/ui)은 이것을 가져다 쓰면 안 된다 (tests/traits.test.ts가 검사). 도구·테스트·리그 계층용
 export {
@@ -34,7 +35,7 @@ export { eraPitching, leagueQuality, type EraPitching } from './eras';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -48,5 +49,6 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     // 수비 포지션 이력은 커리어 전체에서 (2026-10-13 사용자 "수비 포지션 능력치가 실제와 다르게 작동")
     career: store.meta.years.filter((y) => y < year).map((y) => store.season(y)).filter((s): s is SeasonData => !!s),
     defenseAwards: store.defenseAwards,
+    ppa: store.ppa,
   });
 }

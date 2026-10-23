@@ -88,7 +88,7 @@ function SideTables({ side, log, full }: { side: BoxSide; log: Pick<GameLog, 'wi
               <tr key={b.idx} className={b.sub ? 'sub-row' : undefined}>
                 <td className="muted">{b.sub ? '' : b.order ?? i + 1}</td>
                 <td className="l">
-                  {b.sub && <span className="tag" title={b.sub === 'PH' ? '대타' : '대주자'}>{b.sub}</span>} <PlayerLink p={P[b.idx]} />
+                  {b.sub && <span className="tag" title={b.sub === 'PH' ? '대타' : b.sub === 'DEF' ? '대수비' : '대주자'}>{b.sub}</span>} <PlayerLink p={P[b.idx]} />
                 </td>
                 <td className="small">{b.sub ? '' : b.pos ? <Pos pos={b.pos} /> : '—'}</td>
                 <td>{b.ab}</td><td>{b.r}</td><td>{b.h}</td><td>{b.rbi}</td><td>{b.hr}</td><td>{b.bb}</td><td>{b.so}</td>

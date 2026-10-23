@@ -34,6 +34,7 @@ export function projectedEnvironment(store: Store, params: EngineParams = DEFAUL
     unearnedShare: avg((s) => s.league.unearnedShare),
     sacPerPa: avg((s) => s.league.sacPerPa),
     wpbkPerPa: avg((s) => s.league.wpbkPerPa ?? params.wildPitchDefault),
+    sbPct: avg((s) => s.league.sbPct ?? 0) || null,
   }, params);
   const lastYear = years[years.length - 1];
   return { rates, env, games: last.games, rules: store.meta.rules[String(lastYear)] };
@@ -141,6 +142,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       ...(lp.dev ? { dev: true } : {}),
       ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
+      ...(lp.overuse ? { overuseStart: lp.overuse } : {}),
       ...(homeOnlyUntil(lp, year) ? { homeOnlyUntil: homeOnlyUntil(lp, year)! } : {}),
       // 이도류 (league/twoway.ts): 반대쪽 실제 능력치
       ...(lp.twoWay && (lp.alt?.bat || lp.alt?.pit) ? { alt: { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) } } : {}),

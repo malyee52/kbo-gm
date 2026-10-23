@@ -14,7 +14,7 @@ import { envFrom } from './war';
 import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
-  ageDefense, agingScale, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, penTrustOf, Rng, traitsOf,
+  ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, penTrustOf, Rng, traitsOf,
   type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -377,6 +377,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     delete p.slump;
     delete p.startAbsent;
     delete p.startAbsentReason;
+    delete p.overuse;
   }
 
   // 퓨처스리그 성적 (futures.ts): 2군 선수의 출전 기회와 활약을 성장 판정에 쓴다. 시즌 마지막 1군 명단 기준
@@ -432,8 +433,12 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const eff = injuryEffect(list, seasonDays, params.injury.offseasonDays, new Rng(`${league.seed}/injury/${year}/${p.id}`));
     for (const a of list) {
       if (a.kind !== 'long' && a.kind !== 'major') continue;
-      (p.injuries ??= []).push({ year, kind: a.kind, days: a.until - a.day, seasonOut: a.until >= seasonDays });
+      (p.injuries ??= []).push({ year, kind: a.kind, days: a.until - a.day, seasonOut: a.until >= seasonDays, ...(a.part ? { part: a.part } : {}) });
     }
+    // 혹사지수는 오프시즌을 넘기며 크게 빠진다 (기획안 4.6, 시즌 마지막 날 값 × overuse.offseason). 아주 작으면 버린다
+    const ou = params.injury.overuse;
+    const left = ou.on ? currentOveruse(season.states, sp.idx, seasonDays, ou) * ou.offseason : 0;
+    if (left >= 0.05) p.overuse = Math.round(left * 100) / 100;
     p.potential -= eff.potentialCut;
     if (eff.carry > 0) {
       p.startAbsent = Math.ceil(eff.carry);

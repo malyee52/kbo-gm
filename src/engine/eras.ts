@@ -33,3 +33,6 @@ export function eraPitching(year: number): EraPitching {
   if (year <= 1999) return { rotation: 5, restDays: 5, limitScale: 1.05 };
   return { rotation: 5, restDays: 5, limitScale: 1 };
 }
+
+/** 자동 고의4구 (공 없이) 도입 해: 2018년 (조사값, docs/경기엔진2_기획안.md 3.10.1). 그 전은 공 4개를 실제로 던지는 수동 고의4구 */
+export const AUTO_IBB_YEAR = 2018;

@@ -85,6 +85,8 @@ export interface LeagueTotals {
   unearnedShare: number;
   /** 타석당 폭투+보크. 2000년 이전은 기록이 없어 null */
   wpbkPerPa: number | null;
+  /** 도루 성공률: 도루 실패가 기록된 타자 행의 도루 ÷ (도루 + 도루 실패). 불러올 때 계산 (decodeSeason), 기록이 없으면 null */
+  sbPct?: number | null;
 }
 
 export interface BatRow {
@@ -270,6 +272,10 @@ export interface DataStore {
   managers?: ManagerData;
   /** 연도별 리그 규칙 변경과 공인구 (rule_changes.json). 없으면 "달라지는 규칙" 알림에 게임 규칙 값의 변화만 보인다 */
   ruleChanges?: RuleChangeData;
+  /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 거리 측정(tools/condition_check.ts)에만 쓴다 (원정 거리 컨디션은 2026-10-22 사용자 결정으로 없앰). 없으면 거리를 모른다 */
+  homes?: HomeCity[];
+  /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
+  ppa?: PpaData;
 }
 
 /** 규칙 변경 자료 (tools/build_data.py build_rule_changes, data-src/규칙변경.csv·공인구.csv) */
@@ -318,6 +324,22 @@ export interface BallYear {
   source?: string;
 }
 
+/** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
+export interface PpaData {
+  bat: Record<string, Record<string, [number, number]>>;
+  pit: Record<string, Record<string, [number, number]>>;
+}
+
+/** 계보의 연고 도시 한 구간 (homes.json). to가 없으면 지금까지. 위·경도는 임시값 (data-src/연고지.csv 출처 열) */
+export interface HomeCity {
+  franchise: string;
+  from: number;
+  to?: number;
+  city: string;
+  lat: number;
+  lon: number;
+}
+
 /** 감독 자료 (tools/build_data.py build_managers, data-src/감독.csv) */
 export interface ManagerData {
   /** 연도 → 계보 → 그 해 감독 (개막 감독이 먼저, mid는 시즌 중 바뀐 감독) */
@@ -342,6 +364,13 @@ export interface ManagerInfo {
   steal: number;
   bunt: number;
   relief: number;
+  /**
+   * 투구 단위 자료(2023~)의 팀 선발 평균 투구 수 ÷ 리그, 팀 구원 연투 비율 ÷ 리그 (시즌 내내 맡은 해 평균, 시즌이 적으면 1 쪽으로 당김).
+   * byYear: 개막 감독으로 맡은 해의 팀 값 그대로 (엔진 2 10단계). 자료가 없으면 없다
+   */
+  push?: number;
+  pen?: number;
+  byYear?: Record<string, { push: number; pen: number }>;
 }
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
@@ -370,7 +399,11 @@ function unpack<T>(fields: string[], rows: unknown[][]): T[] {
 
 export function decodeSeason(raw: RawSeason): SeasonData {
   const { batFields, bat, pitFields, pit, ...rest } = raw;
-  return { ...rest, bat: unpack<BatRow>(batFields, bat), pit: unpack<PitRow>(pitFields, pit) };
+  const batRows = unpack<BatRow>(batFields, bat);
+  let sb = 0;
+  let cs = 0;
+  for (const r of batRows) if (r.sb !== null && r.cs !== null && r.cs !== undefined) { sb += r.sb; cs += r.cs; }
+  return { ...rest, league: { ...rest.league, sbPct: sb + cs > 0 ? sb / (sb + cs) : null }, bat: batRows, pit: unpack<PitRow>(pitFields, pit) };
 }
 
 /** KBO 수비상 한 건 (감독·코치·단장 투표 75% + 수비 기록 25%, 언론 보도) */

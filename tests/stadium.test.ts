@@ -75,7 +75,7 @@ describe('구장·팬덤 기본값', () => {
 
 describe('구장 공사와 팬 반응 (시즌을 넘기며)', () => {
   it('리모델링: 착공금은 바로, 할부는 공사 시즌 결산 때. 공사 시즌엔 좌석 20% 못 쓰고, 끝나면 좌석·시설이 오른다. 재현해도 같다', () => {
-    const o = opts('st-remodel-4'); // 시드에 따라 자금이 착공금보다 적을 수 있다 (2026-10-12 트레이드 제안 장치 추가 때 st-remodel → st-remodel-3, 2026-10-22 2026 투수 보직 채움 때 → st-remodel-4)
+    const o = opts('st-remodel-5'); // 시드에 따라 자금이 착공금보다 적을 수 있다 (2026-10-12 트레이드 제안 장치 추가 때 st-remodel → st-remodel-3, 2026-10-22 2026 투수 보직 채움 때 → st-remodel-4, 2026-10-22 엔진 2 5단계 타구 모형 때 → st-remodel-5)
     const g = GameSession.create(store, o, FAST);
     g.advance(100000);
     g.beginOffseason();

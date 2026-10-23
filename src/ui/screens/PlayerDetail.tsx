@@ -827,7 +827,7 @@ function CareerInfo({ p }: { p: { idx: number; id: string; real?: boolean } }) {
         {past.length > 0 && (
           <>
             <dt>장기 결장 이력</dt>
-            <dd>{past.map((x) => `${x.year} ${absenceLabel({ kind: x.kind }, p)} ${x.days}일${x.seasonOut ? '(시즌 아웃)' : ''}`).join(', ')}</dd>
+            <dd>{past.map((x) => `${x.year} ${absenceLabel({ kind: x.kind, part: x.part }, p)} ${x.days}일${x.seasonOut ? '(시즌 아웃)' : ''}`).join(', ')}</dd>
           </>
         )}
       </dl>

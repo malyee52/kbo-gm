@@ -129,6 +129,8 @@ export interface LeaguePlayer {
   startAbsent?: number;
   /** 개막부터 결장하는 까닭 */
   startAbsentReason?: 'injury' | 'military';
+  /** 다음 시즌 개막 때 혹사지수 (엔진 2 11단계, 기획안 4.6: 시즌 끝 값 × overuse.offseason). 숨김 값, 화면에 쓰지 않는다 */
+  overuse?: number;
   /** 부상 이력 (게임 안에서 치른 시즌만, 장기·큰 부상) */
   injuries?: InjuryLine[];
   /** 생년이 자료에 없어 입단 연도로 가늠한 값 (M8). 화면에는 "약 N세" */
@@ -167,6 +169,8 @@ export interface InjuryLine {
   year: number;
   kind: 'long' | 'major';
   days: number;
+  /** 부위 (엔진 2 11단계부터) */
+  part?: import('../engine').InjuryPart;
   /** 시즌 끝까지 이어졌는가 */
   seasonOut: boolean;
 }

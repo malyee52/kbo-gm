@@ -23,6 +23,8 @@
                                  입단 연도별 실제 신인 지명 (drafts.json). baseballchart.kr에서 받은 원본, CC BY-NC-SA 2.0 KR.
                                  같은 폴더의 SOURCE.md 참조. 지명받고 그해 입단하지 않은 선수(해외 진출 등)는 실제 입단 해로 옮긴다 (defer_unsigned).
                                  이것만 다시 만들려면: build_data.py --drafts-only
+  data-src/연고지.csv            구단 계보별 연고 도시·위도·경도 (homes.json, 원정 거리 컨디션). 출처 열 참조, 모두 임시값.
+                                 이것만 다시 만들려면: build_data.py --homes-only
   data-src/감독.csv              연도별 구단 감독 실명 (managers.json). 한국어 위키백과 구단별 감독 틀·감독 목록, 2026 보도로 만든 것.
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
@@ -52,6 +54,9 @@ from openpyxl import load_workbook
 ROOT = Path(__file__).resolve().parent.parent
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SRC = Path(ARGS[0]) if ARGS else ROOT / 'data-src' / 'KBO_단장게임_자료집.xlsx'
+HOMES_CSV = ROOT / 'data-src' / '연고지.csv'
+PBP_DERIVED = ROOT / 'data-src' / 'pbp_derived'
+HARDHIT_DERIVED = ROOT / 'data-src' / 'hardhit_derived'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
@@ -406,11 +411,19 @@ def build_rule_changes(out_dir):
 
 # ---- 감독 (managers.json)
 
+# 문자중계 팀 코드 → 계보 (data-src/pbp_derived/team_pitching.csv)
+PBP_TEAM = {'HH': '한화', 'HT': 'KIA', 'KT': 'KT', 'LG': 'LG', 'LT': '롯데', 'NC': 'NC', 'OB': '두산', 'SK': 'SSG', 'SS': '삼성', 'WO': '히어로즈'}
+
+
 def build_managers(out_dir):
     """감독.csv → {seasons: {연도: {계보: [{name, kind, mid}]}}, people: {이름: 경력·운영 경향}}.
     운영 경향은 그 감독이 개막부터 끝까지 맡은 시즌(중도 교체가 없는 해)의 팀 기록을 그 해 리그 평균과 견준 배율이다.
       steal: (도루 + 도루자) / (단타 + 볼넷 + 사구), bunt: 희생번트 / 타석, relief: (등판 − 선발) / 경기
-    시즌이 적으면 1 쪽으로 당긴다 (n / (n + 2)). 성격·인물평은 넣지 않는다 (기록 사실만)."""
+    시즌이 적으면 1 쪽으로 당긴다 (n / (n + 2)). 성격·인물평은 넣지 않는다 (기록 사실만).
+    투구 단위 자료가 있는 해(2023~, data-src/pbp_derived/team_pitching.csv, 엔진 2 10단계)는 더 본다:
+      push: 팀 선발 평균 투구 수 / 리그, pen: 팀 구원 연투(전날 등판) 비율 / 리그 (감독 성향 '투수 밀어붙이기'·'불펜 연투 허용').
+      개막 감독에게는 그 해 팀 값을 byYear에 그대로 남기고 (시즌 중 교체가 있던 해도), 시즌 내내 맡은 해의 평균은 위처럼 당겨 push·pen에.
+      자료가 없는 감독은 push·pen이 없다 (엔진은 push 대신 relief, pen은 보통)."""
     if not MANAGERS_CSV.exists():
         return
     meta = json.loads((out_dir / 'meta.json').read_text(encoding='utf-8'))
@@ -464,6 +477,38 @@ def build_managers(out_dir):
                          ('relief', ratio(t['relief'], t['games'], lg['relief'], lg['games']))):
                 if v is not None:
                     acc[name][k].append(v)
+    # 투구 단위 자료 (2023~): 구단-시즌 → push·pen 배율
+    pitch = defaultdict(dict)
+    tp = PBP_DERIVED / 'team_pitching.csv'
+    if tp.exists():
+        with tp.open(encoding='utf-8', newline='') as f:
+            trows = list(csv.DictReader(f))
+        for y in sorted({r['year'] for r in trows}):
+            ys = [r for r in trows if r['year'] == y]
+            starts = sum(int(r['starts']) for r in ys)
+            lg_mean = sum(int(r['starts']) * float(r['starter_mean']) for r in ys) / starts
+            apps = sum(int(r['relief_apps']) for r in ys)
+            lg_b2b = sum(int(r['relief_apps']) * float(r['back_to_back_rate']) for r in ys) / apps
+            for r in ys:
+                pitch[y][PBP_TEAM[r['team']]] = {'push': round(float(r['starter_mean']) / lg_mean, 3),
+                                                 'pen': round(float(r['back_to_back_rate']) / lg_b2b, 3)}
+    pacc = defaultdict(lambda: {'push': [], 'pen': []})
+    for y, teams in pitch.items():
+        for fr, v in teams.items():
+            ms = seasons.get(y, {}).get(fr, [])
+            opening = [m for m in ms if not m.get('mid')]
+            if not opening or opening[0]['name'] not in people:
+                continue
+            name = opening[0]['name']
+            people[name].setdefault('byYear', {})[y] = v
+            if len(ms) == 1 and y not in [str(x) for x in meta.get('inProgress', [])]:
+                for k in ('push', 'pen'):
+                    pacc[name][k].append(v[k])
+    for name, a in pacc.items():
+        for k in ('push', 'pen'):
+            vs = a[k]
+            if vs:
+                people[name][k] = round(1 + (sum(vs) / len(vs) - 1) * len(vs) / (len(vs) + 2), 3)
     for name, pe in people.items():
         a = acc.get(name)
         n = len(a['steal']) if a else 0
@@ -493,6 +538,57 @@ def service_unit(career):
             if part.startswith(u):
                 return u
     return None
+
+
+def build_ppa():
+    """선수별 타석당 투구 수 → public/data/ppa.json (경기 엔진 2 D단계, 사슬 길이 손잡이).
+    {bat|pit: {선수 ID: {연도: [타석, 리그 대비 비율]}}}. 비율 = 그 선수 P/PA ÷ 같은 자료·같은 정의의 그 해 리그 P/PA.
+    투구 단위 자료(2023~, data-src/pbp_derived/{batter,pitcher}_ppa.csv, 고의4구 뺌)가 먼저, 투수 2015~2022는 하드힛 월별 표
+    (data-src/hardhit_derived/pitcher_ppa.csv, 자동 고의4구 포함 정의, 리그 값은 league_ppa.csv)."""
+    out = {'bat': defaultdict(dict), 'pit': defaultdict(dict)}
+    lg = {}
+    with (PBP_DERIVED / 'pa_pitches.csv').open(encoding='utf-8') as f:
+        lg = {int(r['year']): float(r['mean']) for r in csv.DictReader(f) if r['group'] == 'all'}
+    for side, name in (('bat', 'batter_ppa.csv'), ('pit', 'pitcher_ppa.csv')):
+        with (PBP_DERIVED / name).open(encoding='utf-8') as f:
+            for r in csv.DictReader(f):
+                y = int(r['year'])
+                out[side][r['id']][str(y)] = [int(r['pa']), round(float(r['ppa']) / lg[y], 4)]
+    with (HARDHIT_DERIVED / 'league_ppa.csv').open(encoding='utf-8') as f:
+        hlg = {int(r['year']): float(r['ppa']) for r in csv.DictReader(f)}
+    acc = defaultdict(lambda: [0, 0])
+    with (HARDHIT_DERIVED / 'pitcher_ppa.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            if int(r['year']) < min(lg):
+                a = acc[(r['id'], int(r['year']))]
+                a[0] += int(r['pa'])
+                a[1] += int(r['pitches'])
+    for (pid, y), (pa, pitches) in sorted(acc.items()):
+        if pa > 0 and pitches > 0:
+            out['pit'][pid][str(y)] = [pa, round(pitches / pa / hlg[y], 4)]
+    (OUT / 'ppa.json').write_text(json.dumps({
+        'version': 1,
+        'note': '선수별 타석당 투구 수의 리그 대비 비율 [타석, 비율]. 투구 단위 자료(slothman3878 KBO Play-by-Play v0, CC BY 4.0) 2023~, '
+                '투수 2015~2022는 하드힛(https://hardhit.ai) 월별 표. tools/build_data.py build_ppa',
+        'bat': out['bat'], 'pit': out['pit'],
+    }, ensure_ascii=False, separators=(',', ':'), sort_keys=True), encoding='utf-8')
+    return sum(len(v) for v in out['bat'].values()), sum(len(v) for v in out['pit'].values())
+
+
+def build_homes():
+    """data-src/연고지.csv → public/data/homes.json: 계보별 연도 구간의 연고 도시와 위·경도 (원정 거리 컨디션, 경기 엔진 2 12단계).
+    끝 연도가 빈 칸이면 지금까지. 거리는 엔진(src/league/distance.ts)이 위·경도로 계산한다 (직선 거리, 임시값)."""
+    rows = []
+    with HOMES_CSV.open(encoding='utf-8-sig') as f:
+        for r in csv.DictReader(f):
+            rows.append({'franchise': r['계보'], 'from': int(r['시작']), **({'to': int(r['끝'])} if r['끝'] else {}),
+                         'city': r['도시'], 'lat': float(r['위도']), 'lon': float(r['경도'])})
+    (OUT / 'homes.json').write_text(json.dumps({
+        'version': 1,
+        'note': '구단 계보별 연고 도시와 위·경도. 출처·확인 상태는 data-src/연고지.csv (모두 임시값).',
+        'homes': rows,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return rows
 
 
 def build_military(profiles, out_dir):
@@ -1039,6 +1135,14 @@ def main():
         # 규칙 변경 CSV만 다시 반영한다 (선수 월드 지문과 무관해 저장 호환은 그대로)
         build_rule_changes(OUT)
         return
+    if '--ppa-only' in sys.argv:
+        # 선수별 P/PA만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
+        print('선수별 P/PA 타자 %d·투수 %d 시즌' % build_ppa())
+        return
+    if '--homes-only' in sys.argv:
+        # 연고지 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        print(f'연고지 {len(build_homes())}행')
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1296,6 +1400,8 @@ def main():
     build_military(profiles_of(wb), OUT)
     build_managers(OUT)
     build_rule_changes(OUT)
+    build_homes()
+    build_ppa()
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')

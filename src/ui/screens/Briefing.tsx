@@ -481,7 +481,7 @@ function WeekCard() {
   );
 }
 
-/** 판타지·자유 모드: 경기 전 미팅 (src/fantasy/gameday.ts). 단장의 말을 AI가 듣고 선수단 컨디션을 1~3일 바꾼다. 하루 한 번 */
+/** 판타지·자유 모드: 경기 전 미팅 (src/fantasy/gameday.ts). 단장의 말을 AI가 듣고 선수단 경기력을 1~3일 바꾼다. 하루 한 번 */
 function PregameTalk() {
   const { session, store, changed, autosave } = useGame();
   const [open, setOpen] = useState(false);
@@ -508,7 +508,7 @@ function PregameTalk() {
   };
   if (today) {
     const fx = today.effects?.[0];
-    return <p className="small pregame">🗣 오늘 미팅: {today.text} {fx && fx.type === 'teamForm' && <span className={fx.edge > 0 ? 'up' : 'down'}>(선수단 컨디션 {fx.edge > 0 ? '+' : ''}{Math.round(fx.edge * 1000) / 10}%p, {fx.days}일)</span>}</p>;
+    return <p className="small pregame">🗣 오늘 미팅: {today.text} {fx && fx.type === 'teamForm' && <span className={fx.edge > 0 ? 'up' : 'down'}>(선수단 경기력 {fx.edge > 0 ? '+' : ''}{Math.round(fx.edge * 1000) / 10}%p, {fx.days}일)</span>}</p>;
   }
   if (block) return null;
   if (!open) return <button type="button" className="small-btn ghost" onClick={() => setOpen(true)}>경기 전 미팅</button>;

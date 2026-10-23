@@ -1,5 +1,5 @@
 // 자유 모드 (AI 진행, 2026-10-13 사용자 결정): 플레이어가 무엇이든 글로 하겠다고 하면 AI 게임 마스터가 판정하고, 그 결과를 실제 게임 조작(FreeOp)으로 낸다.
-// 사용자 결정: 바꿀 수 있는 범위는 거의 전부(트레이드·이동·방출·영입·가상 선수 만들기·모든 선수의 능력·잠재력·컨디션·계약·자금·구단주·팬, 다른 구단끼리도).
+// 사용자 결정: 바꿀 수 있는 범위는 거의 전부(트레이드·이동·방출·영입·가상 선수 만들기·모든 선수의 능력·잠재력·경기력·계약·자금·구단주·팬, 다른 구단끼리도).
 // 판단에 안전망은 두지 않는다 (AI가 정하면 그대로). 경기는 엔진이 시뮬레이션한다.
 // 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)도 데려올 수 있다 (사용자: "자유 모드의 목적이 그거야"). 실존 선수 규칙은 지시문에서 뺐다 (prompts.ts)
 // 조작은 이름 대신 id로 바꿔 이야기 기록(FantasyEntry.ops)에 남기고, 재현·불러오기 때는 AI 없이 그대로 다시 적용한다 (session.applyFreeOps).
@@ -43,7 +43,7 @@ export type FreeOp =
   | { op: 'contract'; player: string; salary: number; years: number }
   /** 다른 구단 자금 (만 원) */
   | { op: 'teamCash'; team: number; amount: number }
-  /** 판타지 효과 (신뢰·팬·자금·관중·컨디션·휴식 등, 상한 넉넉히) */
+  /** 판타지 효과 (신뢰·팬·자금·관중·경기력·휴식 등, 상한 넉넉히) */
   | { op: 'effect'; effect: FantasyEffect }
   /** 지명권 주인을 바꾼다 (draft 입단 연도, round 라운드, from 원래 구단, to 새 주인) */
   | { op: 'pick'; draft: number; round: number; from: number; to: number }
@@ -74,7 +74,7 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"teamCash","team":"구단 이름","amount":억 원} 다른 구단 자금
 - {"op":"trust","delta":정수} 구단주 신뢰 (0~100 안에서)
 - {"op":"fans","delta":정수} 우리 팬 만족도
-- {"op":"teamForm","side":"bat|pit|all","edge":−0.05~0.05,"days":1~60} 우리 선수단 컨디션 (시즌 중)
+- {"op":"teamForm","side":"bat|pit|all","edge":−0.05~0.05,"days":1~60} 우리 선수단 경기력 (시즌 중)
 - {"op":"playerForm","player":"우리 선수 이름","edge":−0.05~0.05,"days":1~60} (시즌 중)
 - {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)
 - {"op":"pick","draft":입단 연도,"round":라운드,"from":"원래 구단 이름","to":"새 주인 구단 이름"} 신인 지명권을 넘긴다 ([지명권]의 남은 지명권만)
