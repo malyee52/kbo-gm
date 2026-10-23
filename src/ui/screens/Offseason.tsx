@@ -1,11 +1,11 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { isStarterSkill } from '../../engine';
 import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { OfferPanel } from './Club';
-import { useCurrentStep } from '../shell';
+import { useCurrentStep, useShell } from '../shell';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
-import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
+import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, type LogStage, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
@@ -16,11 +16,15 @@ import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
-import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import { DataTable, PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import type { Column } from '../table';
 import { ruleOf } from '../../league/rules';
 import { WatchStar } from './Watch';
 import { previewOrder } from '../../league/ruleNews';
-import { RuleNewsBody, StatusBadge } from '../RuleNews';
+import { RulePreviewBody, StatusBadge } from '../RuleNews';
+import { FIX_LABEL, stageHeadline, stageLeftovers, stageRecord, type Leftover, type LeftoverFix } from '../offStage';
+import { teamVars } from '../teams';
+import { useNarrow } from '../BoxScore';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -42,19 +46,15 @@ function useInfo() {
 
 export function Offseason() {
   const { session, changed, autosave, go } = useGame();
+  const { setPrimary } = useShell();
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 지난 단계 기록 보기 (단계 표시줄에서 지난 단계를 누름, 읽기 전용). null이면 지금 단계 판
+  const [record, setRecord] = useState<LogStage | null>(null);
+  // 남은 처리 확인 창: 남은 처리가 있는데 '다음'을 눌렀을 때 (기획안 2.5.1)
+  const [confirm, setConfirm] = useState<Leftover[] | null>(null);
   const steps = useCurrentStep<HTMLOListElement>(off?.stage);
-
-  if (!off) {
-    return (
-      <div className="stack">
-        <h1>오프시즌</h1>
-        <p className="muted">정규시즌이 끝나면 오프시즌을 시작할 수 있습니다.</p>
-      </div>
-    );
-  }
 
   const act = (r: { ok: boolean; message: string }, okText?: string) => {
     setMsg(r.ok ? (okText || r.message ? { text: okText ?? r.message } : null) : { text: r.message, error: true });
@@ -62,11 +62,18 @@ export function Offseason() {
     if (r.ok) void autosave();
   };
 
-  const next = async () => {
+  // 단계 넘기기. fix가 있으면 그 자동 처리(조작 하나)를 먼저 하고 넘긴다
+  const step = async (fix?: LeftoverFix) => {
+    setConfirm(null);
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
+    if (fix) {
+      const f = fix === 'auto-comp' ? session.autoComp() : fix === 'auto-draft' ? session.autoDraft() : session.autoRelease();
+      if (!f.ok) { setBusy(false); act(f); return; }
+    }
     const r = session.nextStage();
     setBusy(false);
+    setRecord(null);
     act(r);
   };
 
@@ -85,28 +92,62 @@ export function Offseason() {
     go('home');
   };
 
-  const stageIdx = STAGES.indexOf(off.stage);
-  const nextLabel = off.stage === 'fa'
-    ? (off.fa.round < FA_ROUNDS ? `${off.fa.round}라운드 마감` : `${off.fa.round}라운드 마감 → 다음 단계`)
-    : `다음: ${STAGE_LABEL[STAGES[stageIdx + 1]] ?? ''}`;
+  const left = off ? stageLeftovers(session) : [];
+  const next = () => {
+    if (!off) return;
+    if (off.stage === 'ready') { void open(); return; }
+    if (left.length) setConfirm(left);
+    else void step();
+  };
+  const stageIdx = off ? STAGES.indexOf(off.stage) : -1;
+  const nextLabel = !off ? '' : off.stage === 'ready'
+    ? `${off.year + 1} 시즌 개막`
+    : off.stage === 'fa'
+      ? (off.fa.round < FA_ROUNDS ? `FA ${off.fa.round}라운드 마감` : `FA ${off.fa.round}라운드 마감 → ${STAGE_LABEL[STAGES[stageIdx + 1]]}`)
+      : `다음: ${STAGE_LABEL[STAGES[stageIdx + 1]] ?? ''}`;
+
+  // 주 진행 단추(상태 줄·휴대폰 아래 고정)가 이 화면의 '다음'·'개막'을 맡는다
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const label = busy ? '처리 중' : nextLabel;
+  useEffect(() => {
+    if (!off) return;
+    setPrimary({ label, act: () => nextRef.current(), disabled: busy, title: left.length ? `남은 처리 ${left.length}건 (넘기기 전에 확인 창이 뜹니다)` : undefined });
+    return () => setPrimary(null);
+  }, [off, label, busy, left.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!off) {
+    return (
+      <div className="stack">
+        <h1>오프시즌</h1>
+        <p className="muted">정규시즌이 끝나면 오프시즌을 시작할 수 있습니다.</p>
+      </div>
+    );
+  }
+
+  const head = stageHeadline(session);
+  const viewing = record !== null && record !== off.stage;
 
   return (
     <div className="stack">
       <OfferPanel />
-      <section className="row-between wrap">
-        <div>
-          <h1>{off.year} 오프시즌</h1>
-          <p className="muted small">결산(성장·연차·은퇴·병역)은 끝났습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다.</p>
-        </div>
-        {off.stage !== 'ready' && (
-          <button type="button" onClick={() => void next()} disabled={busy}>{busy ? '처리 중' : nextLabel}</button>
-        )}
+      <section>
+        <h1>{off.year} 오프시즌</h1>
+        <p className="muted small">결산(성장·연차·은퇴·병역)은 끝났습니다. 단계를 차례로 마치면 {off.year + 1} 시즌이 열립니다. 지난 단계를 누르면 그 단계 기록을 봅니다.</p>
       </section>
 
+      {/* 단계 표시줄: 지난 단계 ✓(누르면 기록), 지금 단계, 남은 단계. 휴대폰에서는 지금 단계로 저절로 밀린다 */}
       <ol className="steps" aria-label="오프시즌 단계" ref={steps}>
+        <li className={`done${record === 'settle' ? ' viewing' : ''}`}>
+          <button type="button" className="step-btn" aria-pressed={record === 'settle'} onClick={() => setRecord(record === 'settle' ? null : 'settle')} title="결산 기록 보기">결산</button>
+        </li>
         {STAGES.map((s, i) => (
-          <li key={s} className={i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''} aria-current={i === stageIdx ? 'step' : undefined}>
-            {STAGE_LABEL[s]}
+          <li key={s} className={`${i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''}${record === s && i < stageIdx ? ' viewing' : ''}`} aria-current={i === stageIdx ? 'step' : undefined}>
+            {i < stageIdx
+              ? <button type="button" className="step-btn" aria-pressed={record === s} onClick={() => setRecord(record === s ? null : s)} title={`${STAGE_LABEL[s]} 기록 보기`}>{STAGE_LABEL[s]}</button>
+              : i === stageIdx && viewing
+                ? <button type="button" className="step-btn" onClick={() => setRecord(null)} title="지금 단계로 돌아가기">{STAGE_LABEL[s]}</button>
+                : STAGE_LABEL[s]}
           </li>
         ))}
       </ol>
@@ -116,6 +157,12 @@ export function Offseason() {
       {/* 2026-10-12 UI 개편: 지금 단계와 다년 계약은 본문, 지명권·포스팅·소식은 오른쪽 곁 칸 (좁으면 아래로) */}
       <div className="off-split">
       <div className="stack off-main">
+      {viewing ? <StageRecord stage={record!} onBack={() => setRecord(null)} /> : (<>
+      {head.length > 0 && (
+        <p className="off-head" aria-label={`${STAGE_LABEL[off.stage]} 요약`}>
+          <strong>{STAGE_LABEL[off.stage]}</strong>{head.map((h) => <span key={h}>{h}</span>)}
+        </p>
+      )}
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'second' && <SecondPanel act={act} />}
@@ -123,16 +170,23 @@ export function Offseason() {
       {off.stage === 'draft' && <DraftPanel act={act} />}
       {off.stage === 'salary' && <SalaryPanel act={act} />}
       {off.stage === 'release' && <ReleasePanel act={act} />}
-      {off.stage === 'ready' && (
-        <section className="panel">
-          <h2>{off.year + 1} 시즌 개막 준비 완료</h2>
-          <p className="muted">선수단 구성이 끝났습니다. 개막하면 1군 엔트리는 AI가 짠 명단으로 시작하고, 선수단 화면에서 바꿀 수 있습니다.</p>
-          <div className="actions"><button type="button" onClick={() => void open()} disabled={busy}>{busy ? '준비 중' : `${off.year + 1} 시즌 개막`}</button></div>
+      {off.stage === 'ready' && <ReadyCard busy={busy} onOpen={() => void open()} />}
+      {off.stage === 'ready' && <CapRulesPanel act={act} />}
+      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
+      {off.stage !== 'ready' && (
+        <section className="off-next" aria-label="남은 처리">
+          <div className="off-left">
+            {left.length === 0 ? <span className="muted small">남은 처리 없음</span> : (
+              <>
+                <span className="small"><b>남은 처리</b> {left.length}건</span>
+                <ul className="plain small">{left.map((l) => <li key={l.key}>{l.blocking && <span className="tag warn-tag">먼저</span>} {l.title}</li>)}</ul>
+              </>
+            )}
+          </div>
+          <button type="button" onClick={next} disabled={busy}>{label} ▶</button>
         </section>
       )}
-      {off.stage === 'ready' && <CapRulesPanel act={act} />}
-      {off.stage === 'ready' && <RulePreview year={off.year + 1} />}
-      {off.stage !== 'ready' && <ExtensionPanel act={act} />}
+      </>)}
       </div>
       <aside className="stack off-side">
         {stageIdx <= STAGES.indexOf('draft') && <PickPanel />}
@@ -146,11 +200,141 @@ export function Offseason() {
         <OffLog />
       </aside>
       </div>
+      {confirm && <LeftoverDialog items={confirm} stage={off.stage} label={nextLabel} onCancel={() => setConfirm(null)} onGo={(fix) => void step(fix)} />}
     </div>
   );
 }
 
+/** 남은 처리 확인 창 (기획안 2.5.1): 남은 일과 "넘기면 일어나는 일". 막히는 일이 있으면 그대로 넘기기는 없고 자동 처리 길만 */
+function LeftoverDialog({ items, stage, label, onCancel, onGo }: {
+  items: Leftover[]; stage: Off.Stage; label: string; onCancel: () => void; onGo: (fix?: LeftoverFix) => void;
+}) {
+  const { session } = useGame();
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+  }, []);
+  const blocked = items.some((l) => l.blocking);
+  const fixes = [...new Set(items.flatMap((l) => (l.fix ? [l.fix] : [])))];
+  return (
+    <dialog ref={ref} className="player summary off-confirm" onClose={onCancel} aria-label="남은 처리 확인" style={teamVars(session.team.franchise, session.team.name)}>
+      <div className="dialog-body">
+        <header className="row-between">
+          <div>
+            <h2>{STAGE_LABEL[stage]}: 남은 처리 {items.length}건</h2>
+            <p className="muted small">{blocked ? '먼저 해야 하는 일이 있어 그대로는 넘길 수 없습니다.' : '그대로 넘기면 아래처럼 됩니다.'}</p>
+          </div>
+        </header>
+        <ul className="plain leftover-list">
+          {items.map((l) => (
+            <li key={l.key}>
+              <b>{l.blocking && <span className="tag warn-tag">먼저</span>} {l.title}</b>
+              <div className="small">넘기면: {l.then}</div>
+            </li>
+          ))}
+        </ul>
+        <div className="actions">
+          {fixes.map((f) => <button key={f} type="button" onClick={() => onGo(f)}>{FIX_LABEL[f]}</button>)}
+          {!blocked && <button type="button" onClick={() => onGo()}>그대로 넘기기 ({label})</button>}
+          <button type="button" className="ghost" onClick={() => { ref.current?.close(); onCancel(); }}>돌아가서 처리하기</button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+/** 지난 단계 기록 (읽기 전용): 그 단계 소식 묶음 */
+function StageRecord({ stage, onBack }: { stage: LogStage; onBack: () => void }) {
+  const { session } = useGame();
+  const [all, setAll] = useState(false);
+  const rows = stageRecord(session, stage, all);
+  return (
+    <section className="panel stage-record">
+      <div className="row-between wrap">
+        <h2>{LOG_LABEL[stage]} 기록 <span className="muted small">읽기 전용 · 지난 단계는 바꿀 수 없습니다</span></h2>
+        <button type="button" className="ghost small-btn" onClick={onBack}>지금 단계({STAGE_LABEL[session.offseason!.stage]})로</button>
+      </div>
+      <label className="inline small"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> 다른 구단 소식도</label>
+      {rows.length === 0 ? <p className="muted">{all ? '이 단계 소식이 없습니다.' : '우리 구단·큰 소식이 없습니다. "다른 구단 소식도"를 켜 보세요.'}</p> : (
+        <ul className="news">
+          {rows.map((l, k) => <li key={k} className={l.mine ? 'news-season' : ''}><span>{l.text}</span></li>)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** 개막 준비 카드 (기획안 2.5.3): 준비 확인 줄 → 달라지는 규칙 미리 보기 → 개막 */
+function ReadyCard({ busy, onOpen }: { busy: boolean; onOpen: () => void }) {
+  const { session, go } = useGame();
+  const won = useWon();
+  const narrow = useNarrow();
+  const L = session.league;
+  const me = session.teamIdx;
+  const year = session.year + 1;
+  const size = Off.userOrgSize(L, session.offseason!);
+  const limit = ruleOf(L, 'orgLimit');
+  const cap = salaryCap(year, L);
+  const floor = salaryFloor(year, L);
+  const pay = teamCapPayroll(L, me, year);
+  const capOver = cap !== null && pay > cap;
+  const under = floor !== null && pay < floor;
+  const news = session.ruleNewsFor(year);
+  const showCapRules = cap !== null && year >= FRANCHISE_TAG_FROM;
+  return (
+    <section className="panel ready-card">
+      <h2>{year} 시즌 개막 준비 완료</h2>
+      <ul className="plain ready-checks">
+        <li className={size > limit ? 'warn' : 'ok'}>{size > limit ? '⚠' : '✓'} 선수단 {size}/{limit}명</li>
+        <li className="ok">✓ 1군 엔트리: 개막하면 AI가 짠 명단으로 시작 (개막 뒤 전력 &gt; 기용 보드에서 바꿈)</li>
+        <li className={capOver || under ? 'warn' : 'ok'}>
+          {capOver || under ? '⚠' : '✓'} {cap ? '캡 대상 연봉' : '연봉 총액'} {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ' (샐러리캡 없는 시대)'}{floor ? ` · 하한 ${won(floor)}` : ''}
+          {showCapRules && <> <button type="button" className="link small" onClick={() => document.getElementById('cap-rules')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>프랜차이즈 예외 고르기 ▾</button></>}
+        </li>
+      </ul>
+      <h3>{year}년 달라지는 규칙 <span className="muted small">미리 보기 · 개막 때 창으로 한 번 더 보입니다</span></h3>
+      <RulePreviewBody news={news} lines={previewOrder(news)} top={narrow ? 2 : 4} />
+      <div className="actions">
+        <button type="button" className="ghost" onClick={() => go('rules')}>규칙 연표 전체 보기</button>
+        <button type="button" onClick={onOpen} disabled={busy}>{busy ? '준비 중' : `${year} 시즌 개막 ▶`}</button>
+      </div>
+    </section>
+  );
+}
+
 type Act = (r: { ok: boolean; message: string }, okText?: string) => void;
+
+type Info = ReturnType<ReturnType<typeof useInfo>>;
+interface PRow { p: LeaguePlayer; i: Info }
+
+/** 요약/상세 (정보 깊이) */
+const useFull = () => useShell().density === 'full';
+
+// 오프시즌 표의 공통 열 (UI 2단계 U2-6: 단계 판 표를 공통 표 부품 DataTable로). 이름은 늘 보이고(휴대폰 왼쪽 고정), brief 열은 요약에서도 보인다
+function nameCol<R extends PRow>(extra?: (r: R) => ReactNode): Column<R> {
+  return { key: 'name', label: '선수', text: true, fixed: true, value: (r) => r.p.name, cell: (r) => <>{r.p.name}{extra?.(r)}</> };
+}
+function baseCols<R extends PRow>(potLabel = '잠재'): Column<R>[] {
+  return [
+    { key: 'role', label: '자리', brief: true, value: (r) => r.i.role },
+    { key: 'age', label: '나이', brief: true, value: (r) => r.i.age },
+    { key: 'now', label: '종합', brief: true, title: '다음 시즌 예상 기여를 20~80으로 (50 = 리그 평균 주전)', value: (r) => r.i.now },
+    { key: 'pot', label: potLabel, brief: true, value: (r) => potentialSortValue(r.i.pot), cell: (r) => <PotCell v={r.i.pot} /> },
+  ];
+}
+function payCol<R extends PRow>(won: (man: number) => string, label = '연봉', brief = true): Column<R> {
+  return {
+    key: 'pay', label, brief, value: (r) => (r.p.foreign ? foreignContractTotal(r.p.contract) : r.p.contract.salary),
+    cell: (r) => (r.p.foreign ? dollarText(foreignContractTotal(r.p.contract)) : won(r.p.contract.salary)),
+  };
+}
+function teamCol<R extends PRow>(names: string[], team: (r: R) => number, label = '구단', brief = true): Column<R> {
+  return { key: 'team', label, text: true, brief, value: (r) => names[team(r)] ?? '', cell: (r) => <TeamName idx={team(r)} /> };
+}
+const byName = (r: PRow) => r.p.name;
+const virtualTag = (r: PRow) => (!r.p.real ? <span className="tag" title="가상 선수">가상</span> : null);
+
 
 /** 지명 구분 짧은 표시: 1R, 우선, 특별 */
 function pickShort(kind: number): string {
@@ -161,6 +345,7 @@ function pickShort(kind: number): string {
 function CompPanel({ act }: { act: Act }) {
   const { session } = useGame();
   const won = useWon();
+  const full = useFull();
   const off = session.offseason!;
   const info = useInfo();
   const me = session.teamIdx;
@@ -169,6 +354,8 @@ function CompPanel({ act }: { act: Act }) {
   const mineIn = cases.filter((c) => c.to === me);
   const mineOut = cases.filter((c) => c.from === me);
   const others = cases.filter((c) => c.to !== me && c.from !== me);
+  // 추천(자동 선택과 같은 기준)은 우리가 고를 건에만 한 번씩 계산한다
+  const recs = useMemo(() => Object.fromEntries(mineOut.map((c) => [c.fa, session.compRecommendation(c.fa)])), [session, off.comp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <section className="stack">
@@ -192,9 +379,15 @@ function CompPanel({ act }: { act: Act }) {
       {mineIn.map((c) => <ProtectEditor key={c.fa} c={c} act={act} />)}
 
       {mineOut.map((c) => {
-        const cands = Off.compCandidates(session.league, off, c)
-          .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+        const rec = recs[c.fa];
+        const rows = Off.compCandidates(session.league, off, c)
+          .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
           .sort((a, b) => b.runs - a.runs);
+        const cols: Column<(typeof rows)[number]>[] = [
+          nameCol((r) => (r.p.id === rec ? <span className="tag" title="자동 선택과 같은 기준 (보호 밖 최고 가치)">추천</span> : null)),
+          ...baseCols(), payCol(won),
+          { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={c.pick === r.p.id} onClick={() => act(session.pickComp(c.fa, r.p.id))}>{c.pick === r.p.id ? '고름' : '지명'}</button> },
+        ];
         return (
           <div className="panel mine" key={c.fa}>
             <h2>
@@ -202,6 +395,7 @@ function CompPanel({ act }: { act: Act }) {
             </h2>
             <p className="small">
               지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${won(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${won(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
+              {rec && <span className="muted"> · 추천: {rec === 'cash' ? '보상금만' : name(rec)}</span>}
             </p>
             <div className="actions">
               <button type="button" className={c.pick === 'cash' ? '' : 'ghost'} onClick={() => act(session.pickComp(c.fa, 'cash'))}>
@@ -209,21 +403,11 @@ function CompPanel({ act }: { act: Act }) {
               </button>
               <button type="button" className="ghost" onClick={() => act(session.autoComp(), '추천 기준으로 골랐습니다.')}>추천대로 고르기</button>
             </div>
-            <table>
-              <thead><tr><th className="l">보호 명단 밖 선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th><th /></tr></thead>
-              <tbody>
-                {cands.map(({ p }) => {
-                  const i = info(p);
-                  return (
-                    <tr key={p.id} className={c.pick === p.id ? 'me' : ''}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
-                      <td>{won(p.contract.salary)}</td>
-                      <td><button type="button" className="small-btn" onClick={() => act(session.pickComp(c.fa, p.id))}>지명</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            {full && <p className="muted small">보상선수를 고르면 보상금 {FA_COMP[c.grade].withPlayer! * 100}%({won(FA_COMP[c.grade].withPlayer! * c.prevSalary)})를 함께 받고, 보상금만이면 {FA_COMP[c.grade].cashOnly * 100}%({won(FA_COMP[c.grade].cashOnly * c.prevSalary)})를 받습니다.</p>}
+            <div className="pick-table">
+              <DataTable id="off-comp-pick" label="보호 명단 밖 선수" cols={cols} rows={rows} rowKey={(r) => r.p.id} full={full} searchText={byName}
+                rowClass={(r) => (c.pick === r.p.id ? 'me' : undefined)} empty="보호 명단 밖 선수가 없습니다 (보상금만)." />
+            </div>
           </div>
         );
       })}
@@ -245,39 +429,34 @@ function CompPanel({ act }: { act: Act }) {
 function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
   const { session } = useGame();
   const won = useWon();
+  const full = useFull();
   const off = session.offseason!;
   const info = useInfo();
   const limit = FA_COMP[c.grade].protect!;
   const prot = new Set(c.protect);
-  const pool = Off.protectPool(session.league, off, c)
-    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+  const rows = Off.protectPool(session.league, off, c)
+    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
     .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs);
   const auto = session.league.players.filter((p) => p.team === c.to && Off.autoProtected(off, p)).length;
   const toggle = (id: string) => {
     const next = prot.has(id) ? c.protect.filter((x) => x !== id) : [...c.protect, id];
     act(session.setProtect(c.fa, next));
   };
+  const cols: Column<(typeof rows)[number]>[] = [
+    nameCol(),
+    { key: 'on', label: '보호', brief: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && c.protect.length >= limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
+    ...baseCols(), payCol(won),
+  ];
   return (
     <div className="panel mine">
       <h2>
         {session.leaguePlayer(c.fa)?.name} 영입: 보호선수 명단 <span className="muted small">{c.protect.length}/{limit}명 · 자동 보호 {auto}명 · 원 소속 {session.league.teams[c.from].name}</span>
       </h2>
       <p className="muted small">처음에는 가치 높은 순 추천 명단이 들어 있습니다. 체크를 풀거나 넣어 바꾸세요. 명단 밖 선수 중 1명을 상대 구단이 데려갈 수 있습니다.</p>
-      <table>
-        <thead><tr><th>보호</th><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
-        <tbody>
-          {pool.map(({ p }) => {
-            const i = info(p);
-            const on = prot.has(p.id);
-            return (
-              <tr key={p.id} className={on ? 'me' : ''}>
-                <td><input type="checkbox" checked={on} disabled={!on && c.protect.length >= limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
-                <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="pick-table">
+        <DataTable id="off-comp-protect" label="보호선수 명단" cols={cols} rows={rows} rowKey={(r) => r.p.id} full={full} searchText={byName}
+          rowClass={(r) => (prot.has(r.p.id) ? 'me' : undefined)} />
+      </div>
     </div>
   );
 }
@@ -290,6 +469,7 @@ function SecondPanel({ act }: { act: Act }) {
     <section className="stack">
       {off.expansion && <ProtectDraftPanel d={off.expansion} act={act} />}
       {off.second && <ProtectDraftPanel d={off.second} act={act} />}
+      {!off.expansion && !off.second && <p className="panel muted">이번 오프시즌에는 2차 드래프트·특별 지명이 없습니다. 다음 단계로 넘기세요.</p>}
     </section>
   );
 }
@@ -297,25 +477,36 @@ function SecondPanel({ act }: { act: Act }) {
 function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
   const { session } = useGame();
   const won = useWon();
+  const full = useFull();
   const info = useInfo();
   const off = session.offseason!;
   const me = session.teamIdx;
   const L = session.league;
-  const [showAll, setShowAll] = useState(false);
+  const names = L.teams.map((t) => t.name);
   const title = d.kind === 'second' ? `${off.year} 2차 드래프트` : `${L.teams[d.team!].name} 창단 특별 지명`;
   const takesPart = Off.protectDraftTeams(L, off, d).includes(me);
   const prot = new Set(d.protect[String(me)] ?? []);
   const pool = takesPart ? Off.protectDraftPool(L, off, d, me)
-    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
     .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs) : [];
   const toggle = (id: string) => act(session.setDraftProtect(d.kind, prot.has(id) ? [...prot].filter((x) => x !== id) : [...prot, id]));
   const picker = d.kind === 'second' || d.team === me;
   const wish = new Set(d.wish);
   const cands = picker ? Off.protectDraftCandidates(L, off, d, me)
-    .map((p) => ({ p, runs: session.nextRuns(p.id) }))
+    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
     .sort((a, b) => Number(wish.has(b.p.id)) - Number(wish.has(a.p.id)) || b.runs - a.runs) : [];
   const toggleWish = (id: string) => act(session.setDraftWish(d.kind, wish.has(id) ? d.wish.filter((x) => x !== id) : [...d.wish, id]));
   const rule = d.kind === 'second' ? Off.secondRule(off.year) : null;
+  const protCols: Column<(typeof pool)[number]>[] = [
+    nameCol(),
+    { key: 'on', label: '보호', brief: true, value: (r) => Number(prot.has(r.p.id)), cell: (r) => <input type="checkbox" checked={prot.has(r.p.id)} disabled={!prot.has(r.p.id) && prot.size >= d.limit} onChange={() => toggle(r.p.id)} aria-label={`${r.p.name} 보호`} /> },
+    ...baseCols(), payCol(won),
+  ];
+  const wishCols: Column<(typeof cands)[number]>[] = [
+    nameCol(),
+    { key: 'on', label: '지명', brief: true, value: (r) => Number(wish.has(r.p.id)), cell: (r) => <input type="checkbox" checked={wish.has(r.p.id)} onChange={() => toggleWish(r.p.id)} aria-label={`${r.p.name} 지명 희망`} /> },
+    teamCol(names, (r) => r.p.team), ...baseCols(), payCol(won),
+  ];
   return (
     <>
       <div className="panel">
@@ -333,24 +524,10 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
         <div className="panel mine">
           <h2>우리 보호선수 명단 <span className="muted small">{prot.size}/{d.limit}명 · 대상 {pool.length}명</span></h2>
           <p className="muted small">처음에는 가치 높은 순 추천 명단이 들어 있습니다. 체크를 풀거나 넣어 바꾸세요.</p>
-          <div className="scroll flat">
-            <table>
-              <thead><tr><th>보호</th><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
-              <tbody>
-                {(showAll ? pool : pool.slice(0, d.limit + 15)).map(({ p }) => {
-                  const i = info(p);
-                  const on = prot.has(p.id);
-                  return (
-                    <tr key={p.id} className={on ? 'me' : ''}>
-                      <td><input type="checkbox" checked={on} disabled={!on && prot.size >= d.limit} onChange={() => toggle(p.id)} aria-label={`${p.name} 보호`} /></td>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="pick-table">
+            <DataTable id="off-pd-protect" label="우리 보호선수 명단" cols={protCols} rows={pool} rowKey={(r) => r.p.id} full={full} searchText={byName}
+              rowClass={(r) => (prot.has(r.p.id) ? 'me' : undefined)} />
           </div>
-          {!showAll && pool.length > d.limit + 15 && <button type="button" className="ghost small-btn" onClick={() => setShowAll(true)}>나머지 {pool.length - d.limit - 15}명 보기</button>}
         </div>
       )}
       {picker && (
@@ -358,22 +535,9 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
           <h2>지명 희망 <span className="muted small">{d.wish.length}명 고름 · 고른 순서대로, 우리 차례에 남아 있는 선수를 지명</span></h2>
           {d.kind === 'second' && <p className="muted small">아무도 고르지 않으면 지명하지 않습니다 (패스).</p>}
           {d.wish.length > 0 && <p className="small">순서: {d.wish.map((id, k) => <span key={id}>{k > 0 && ' → '}{L.players.find((p) => p.id === id)?.name ?? id}</span>)}</p>}
-          <div className="scroll flat">
-            <table>
-              <thead><tr><th>지명</th><th className="l">선수</th><th className="l">구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>연봉</th></tr></thead>
-              <tbody>
-                {cands.slice(0, 40).map(({ p }) => {
-                  const i = info(p);
-                  const on = wish.has(p.id);
-                  return (
-                    <tr key={p.id} className={on ? 'me' : ''}>
-                      <td><input type="checkbox" checked={on} onChange={() => toggleWish(p.id)} aria-label={`${p.name} 지명 희망`} /></td>
-                      <td className="l">{p.name}</td><td className="l"><TeamName idx={p.team} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{won(p.contract.salary)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="pick-table">
+            <DataTable id="off-pd-wish" label="지명 후보" cols={wishCols} rows={cands.slice(0, 40)} rowKey={(r) => r.p.id} full={full} searchText={byName}
+              rowClass={(r) => (wish.has(r.p.id) ? 'me' : undefined)} />
           </div>
           <p className="muted small">가치 높은 순 40명까지 보입니다.</p>
         </div>
@@ -400,13 +564,59 @@ function FaPanel({ act }: { act: Act }) {
   const { session } = useGame();
   const px = usePriceIndex();
   const won = useWon();
+  const full = useFull();
   const off = session.offseason!;
   const info = useInfo();
   const [draft, setDraft] = useState<Record<string, { salary: string; years: string }>>({});
   const players = new Map(session.league.players.map((p) => [p.id, p]));
+  const names = session.league.teams.map((t) => t.name);
   const entries = off.fa.entries;
   const mineLeaving = entries.filter((e) => e.from === session.teamIdx && e.status === 'open');
   const externalOffers = Object.keys(off.fa.userOffers).filter((id) => entries.find((e) => e.id === id)?.from !== session.teamIdx).length;
+  const rows = entries.map((e) => { const p = players.get(e.id)!; return { p, i: info(p), e }; });
+  type Row = (typeof rows)[number];
+  const state = ({ p, e }: Row) => {
+    const mine = off.fa.userOffers[e.id];
+    // 제시 연봉은 억 원 단위로 입력한다 (소수 한 자리). 내부 계산은 만 원 단위.
+    // 기본값은 요구액을 0.1억 단위로 올림 (내림하면 요구액보다 모자라 1라운드에서 거절된다)
+    const d = draft[e.id] ?? { salary: (Math.ceil((e.ask * px) / 1000) / 10).toFixed(1), years: String(e.years) };
+    return e.status === 'signed' ? (
+      <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
+    ) : e.status === 'left' ? (
+      <span className="muted">미계약 (무적: 2차 드래프트·육성선수 후보)</span>
+    ) : mine ? (
+      <span className="inline">제시함: {mine.years}년 연 {won(mine.salary)}
+        <button type="button" className="small-btn" onClick={() => act(session.withdrawFa(e.id), '제시를 거뒀습니다.')}>거두기</button>
+      </span>
+    ) : (
+      <span className="inline">
+        <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+          onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
+        <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
+          {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
+        </select>
+        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Math.round((Number(d.salary) * 10000) / px), Number(d.years)))}>제시</button>
+      </span>
+    );
+  };
+  const statusOrder = (r: Row) => (r.e.status === 'open' ? (off.fa.userOffers[r.e.id] ? 1 : 0) : r.e.status === 'signed' ? 2 : 3);
+  const cols: Column<Row>[] = [
+    nameCol((r) => <> <WatchStar id={r.p.id} name={r.p.name} small bare /></>),
+    teamCol(names, (r) => r.e.from, '원 소속', false),
+    ...baseCols(),
+    { key: 'grade', label: '등급', brief: true, value: (r) => (isPreGrade(r.e.grade) ? null : r.e.grade), cell: (r) => (isPreGrade(r.e.grade) ? '-' : r.e.grade) },
+    { key: 'prev', label: '전년 연봉', brief: true, value: (r) => r.e.prevSalary, cell: (r) => won(r.e.prevSalary) },
+    {
+      key: 'ask', label: '요구 (연)', brief: true, value: (r) => r.e.ask,
+      cell: ({ p, e }) => <>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</>,
+    },
+    { key: 'years', label: '기간', brief: true, value: (r) => r.e.years, cell: (r) => `${r.e.years}년` },
+    {
+      key: 'vs', label: '제시/요구', title: '우리 제시 연봉이 요구 연봉의 몇 %인가', value: (r) => (off.fa.userOffers[r.e.id] ? off.fa.userOffers[r.e.id].salary / r.e.ask : null),
+      cell: (r) => (off.fa.userOffers[r.e.id] ? `${Math.round((off.fa.userOffers[r.e.id].salary / r.e.ask) * 100)}%` : '-'),
+    },
+    { key: 'state', label: '상태 · 우리 제시', text: true, brief: true, value: statusOrder, cell: state },
+  ];
 
   return (
     <section className="stack">
@@ -425,61 +635,18 @@ function FaPanel({ act }: { act: Act }) {
         {mineLeaving.length > 0 && (
           <p className="note small">우리 구단 FA {mineLeaving.length}명이 시장에 나와 있습니다. 붙잡으려면 제시하세요. 마지막 라운드까지 계약하지 못하면 떠납니다.</p>
         )}
+        {full && <p className="muted small">보상 규정: A·B등급 FA를 데려가면 원 소속 구단이 보호 명단 밖 선수 1명 + 보상금, 또는 보상금만을 고릅니다 (다음 단계). C등급은 보상금만.</p>}
       </div>
-      <div className="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th className="l">선수</th><th className="l">원 소속</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>등급</th>
-              <th>전년 연봉</th><th>요구 (연)</th><th>기간</th><th className="l">상태 · 우리 제시</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((e) => {
-              const p = players.get(e.id)!;
-              const i = info(p);
-              const mine = off.fa.userOffers[e.id];
-              // 제시 연봉은 억 원 단위로 입력한다 (소수 한 자리). 내부 계산은 만 원 단위.
-              // 기본값은 요구액을 0.1억 단위로 올림 (내림하면 요구액보다 모자라 1라운드에서 거절된다)
-              const d = draft[e.id] ?? { salary: (Math.ceil((e.ask * px) / 1000) / 10).toFixed(1), years: String(e.years) };
-              return (
-                <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
-                  <td className="l">{p.name} <WatchStar id={p.id} name={p.name} small bare /></td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{isPreGrade(e.grade) ? '-' : e.grade}</td><td>{won(e.prevSalary)}</td>
-                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
-                  <td className="l">
-                    {e.status === 'signed' ? (
-                      <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
-                    ) : e.status === 'left' ? (
-                      <span className="muted">미계약 (무적: 2차 드래프트·육성선수 후보)</span>
-                    ) : mine ? (
-                      <span className="inline">제시함: {mine.years}년 연 {won(mine.salary)}
-                        <button type="button" className="small-btn" onClick={() => act(session.withdrawFa(e.id), '제시를 거뒀습니다.')}>거두기</button>
-                      </span>
-                    ) : (
-                      <span className="inline">
-                        <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
-                          onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
-                        <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
-                          {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
-                        </select>
-                        <button type="button" className="small-btn" onClick={() => act(session.offerFa(e.id, Math.round((Number(d.salary) * 10000) / px), Number(d.years)))}>제시</button>
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="muted small">현재·잠재는 한 시즌 기여를 20~80으로 바꾼 값입니다 (50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
+      <DataTable id="off-fa" label="FA 시장" cols={cols} rows={rows} rowKey={(r) => r.e.id} full={full} searchText={byName}
+        rowClass={(r) => (r.e.from === session.teamIdx ? 'me' : undefined)} empty="이번 오프시즌 FA가 없습니다." />
+      <p className="muted small">종합·잠재는 한 시즌 기여를 20~80으로 바꾼 값입니다 (50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
     </section>
   );
 }
 
 function ForeignPanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const full = useFull();
   const off = session.offseason!;
   const f = off.foreign!;
   const info = useInfo();
@@ -487,9 +654,38 @@ function ForeignPanel({ act }: { act: Act }) {
   const slots = foreignSlots(session.league, session.teamIdx, off);
   const lim = foreignLimits(off);
   const myTurn = f.order[f.pointer] === session.teamIdx;
-  const pool = f.pool.map((id) => players.get(id)!).sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id));
-  const expiringMine = Object.keys(f.keep).map((id) => players.get(id)!);
+  const pool = f.pool.map((id) => players.get(id)!).sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id))
+    .map((p) => ({ p, i: info(p), check: canSignForeign(session.league, off, session.teamIdx, p) }));
+  const expiringMine = Object.keys(f.keep).map((id) => { const p = players.get(id)!; return { p, i: info(p) }; });
   const pickedBefore = f.order.slice(0, f.pointer).filter((t) => t !== session.teamIdx);
+  const keepCols: Column<(typeof expiringMine)[number]>[] = [
+    nameCol(),
+    { key: 'kind', label: '구분', brief: true, value: (r) => (r.p.asia ? '아시아쿼터' : '일반') },
+    ...baseCols().filter((c) => c.key !== 'pot'),
+    { key: 'pay', label: '지난 연봉', brief: true, value: (r) => foreignContractTotal(r.p.contract), cell: (r) => dollarText(foreignContractTotal(r.p.contract)) },
+    {
+      key: 'keep', label: '결정', text: true, brief: true, value: (r) => Number(f.keep[r.p.id]),
+      cell: (r) => <label className="inline small"><input type="checkbox" checked={f.keep[r.p.id]} onChange={(e) => act(session.setForeignKeep(r.p.id, e.target.checked))} /> 재계약</label>,
+    },
+  ];
+  const poolCols: Column<(typeof pool)[number]>[] = [
+    nameCol(virtualTag),
+    { key: 'kind', label: '구분', brief: true, value: (r) => (r.p.asia ? '아시아쿼터' : '일반') },
+    ...baseCols(),
+    { key: 'ask', label: '요구액', brief: true, title: '연봉 + 계약금', value: (r) => foreignContractTotal(r.p.contract), cell: (r) => dollarText(foreignContractTotal(r.p.contract)) },
+    { key: 'fee', label: '이적료', brief: true, value: (r) => r.p.transferFee ?? null, cell: (r) => (r.p.transferFee ? dollarText(r.p.transferFee) : '-') },
+    {
+      key: 'act', label: '', text: true, brief: true, value: (r) => Number(r.check.ok),
+      cell: (r) => (
+        <>
+          <button type="button" className="small-btn" disabled={!myTurn || !r.check.ok} title={r.check.ok ? '' : r.check.message}
+            onClick={() => act(session.signForeign(r.p.id), `${r.p.name}와 계약했습니다.`)}>계약</button>
+          {/* 막힌 까닭을 옆에 적는다 (2026-10-22 사용자: 비활성 버튼만 보여 왜 막혔는지 몰랐다) */}
+          {myTurn && !r.check.ok && <span className="muted small"> {r.check.message}</span>}
+        </>
+      ),
+    },
+  ];
 
   return (
     <section className="stack">
@@ -504,61 +700,21 @@ function ForeignPanel({ act }: { act: Act }) {
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}
         </p>
         {!myTurn && <p className="muted small">다음 단계로 넘기면 남은 구단이 고릅니다.</p>}
+        {full && <p className="muted small">국적 자료가 없어 실존 외국인은 모두 일반 외국인으로 봅니다 (아시아쿼터는 자료에 아시아쿼터로 적힌 선수만).</p>}
       </div>
 
       {expiringMine.length > 0 && (
         <div>
           <h2>재계약 대상 <span className="muted small">계약이 끝난 우리 외국인</span></h2>
-          <div className="scroll">
-            <table>
-              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th className="l">결정</th></tr></thead>
-              <tbody>
-                {expiringMine.map((p) => {
-                  const i = info(p);
-                  const keep = f.keep[p.id];
-                  return (
-                    <tr key={p.id}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(foreignContractTotal(p.contract))}</td>
-                      <td className="l">
-                        <label className="inline small">
-                          <input type="checkbox" checked={keep} onChange={(e) => act(session.setForeignKeep(p.id, e.target.checked))} /> 재계약
-                        </label>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable id="off-foreign-keep" label="재계약 대상" cols={keepCols} rows={expiringMine} rowKey={(r) => r.p.id} full={full} />
           <p className="muted small">재계약 연봉은 성적에 따라 정해지고, 3명 총액 상한을 넘으면 남은 몫까지만 줍니다. 단계를 넘기기 전까지는 재계약으로 남긴 선수를 지난 연봉으로 총액에 셉니다 (아시아쿼터는 총액에 넣지 않습니다).</p>
         </div>
       )}
 
       <div>
         <h2>후보 <span className="muted small">{pool.length}명 (실존 선수는 다른 구단에서 재계약하지 않은 선수, 나머지는 가상 선수)</span></h2>
-        <div className="scroll pick">
-          <table>
-            <thead><tr><th className="l">선수</th><th>구분</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>요구액</th><th>이적료</th><th /></tr></thead>
-            <tbody>
-              {pool.map((p) => {
-                const i = info(p);
-                const check = canSignForeign(session.league, off, session.teamIdx, p);
-                return (
-                  <tr key={p.id}>
-                    <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
-                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{dollarText(foreignContractTotal(p.contract))}</td>
-                    <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
-                    <td className="l">
-                      <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}
-                        onClick={() => act(session.signForeign(p.id), `${p.name}와 계약했습니다.`)}>계약</button>
-                      {/* 막힌 까닭을 옆에 적는다 (2026-10-22 사용자: 비활성 버튼만 보여 왜 막혔는지 몰랐다) */}
-                      {myTurn && !check.ok && <span className="muted small"> {check.message}</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="pick-table">
+          <DataTable id="off-foreign-pool" label="외국인 후보" cols={poolCols} rows={pool} rowKey={(r) => r.p.id} full={full} searchText={byName} />
         </div>
       </div>
     </section>
@@ -567,6 +723,7 @@ function ForeignPanel({ act }: { act: Act }) {
 
 function DraftPanel({ act }: { act: Act }) {
   const { session } = useGame();
+  const full = useFull();
   const off = session.offseason!;
   const d = off.draft!;
   const info = useInfo();
@@ -574,8 +731,16 @@ function DraftPanel({ act }: { act: Act }) {
   const total = draftTotal(off);
   const done = d.pick >= total || d.pool.length === 0;
   const onClock = !done && draftTeamAt(off, d.pick) === session.teamIdx;
-  const pool = d.pool.map((id) => players.get(id)!).sort((a, b) => (b.scoutPotential ?? 0) - (a.scoutPotential ?? 0) || a.id.localeCompare(b.id));
+  const pool = d.pool.map((id) => players.get(id)!).sort((a, b) => (b.scoutPotential ?? 0) - (a.scoutPotential ?? 0) || a.id.localeCompare(b.id))
+    .map((p) => ({ p, i: info(p) }));
   const mine = d.picks.filter((p) => p.team === session.teamIdx);
+  const cols: Column<(typeof pool)[number]>[] = [
+    nameCol((r) => <> <WatchStar id={r.p.id} name={r.p.name} small bare /></>),
+    ...baseCols('잠재(평가)').slice(0, 2),
+    { key: 'school', label: '학력', brief: true, value: (r) => (r.p.school === 'UNIV' ? '대졸' : '고졸') },
+    ...baseCols('잠재(평가)').slice(2),
+    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(r.p.id))}>지명</button> },
+  ];
 
   return (
     <section className="stack">
@@ -599,21 +764,8 @@ function DraftPanel({ act }: { act: Act }) {
       <div className="two">
         <div>
           <h2>지명 가능 선수 <span className="muted small">{pool.length}명</span></h2>
-          <div className="scroll pick">
-            <table>
-              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>학력</th><th>현재</th><th>잠재(평가)</th><th /></tr></thead>
-              <tbody>
-                {pool.map((p) => {
-                  const i = info(p);
-                  return (
-                    <tr key={p.id}>
-                      <td className="l">{p.name} <WatchStar id={p.id} name={p.name} small bare /></td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
-                      <td><button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(p.id))}>지명</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="pick-table">
+            <DataTable id="off-draft-pool" label="지명 가능 선수" cols={cols} rows={pool} rowKey={(r) => r.p.id} full={full} searchText={byName} />
           </div>
         </div>
         <div>
@@ -773,6 +925,7 @@ function SalaryPanel({ act }: { act: Act }) {
   const { session } = useGame();
   const px = usePriceIndex();
   const won = useWon();
+  const full = useFull();
   const off = session.offseason!;
   const s = off.salary!;
   const info = useInfo();
@@ -780,6 +933,32 @@ function SalaryPanel({ act }: { act: Act }) {
   const ids = Object.keys(s.offers).sort((a, b) => s.demands[b] - s.demands[a]);
   const [edit, setEdit] = useState<Record<string, string>>({});
   const total = ids.reduce((sum, id) => sum + s.offers[id], 0);
+  const rows = ids.map((id) => { const p = players.get(id)!; return { p, i: info(p), id }; });
+  const cols: Column<(typeof rows)[number]>[] = [
+    nameCol(),
+    ...baseCols().filter((c) => c.key !== 'pot'),
+    { key: 'service', label: '1군 연차', title: 'FA까지 세는 1군 등록 연차', value: (r) => r.p.service ?? null, cell: (r) => `${r.p.service ?? 0}년` },
+    payCol(won, '지난 연봉'),
+    { key: 'demand', label: '요구액', brief: true, value: (r) => s.demands[r.id], cell: (r) => won(s.demands[r.id]) },
+    {
+      key: 'offer', label: '제시액 (억 원)', text: true, brief: true, value: (r) => s.offers[r.id],
+      cell: ({ p, id }) => {
+        // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
+        // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
+        const shown = (Math.ceil((s.offers[id] * px) / 100) / 100).toFixed(2);
+        const v = edit[id] ?? shown;
+        const low = s.offers[id] < s.demands[id];
+        return (
+          <span className="inline">
+            <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
+              onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
+              onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
+            {low && <span className="status temp">조정 예상</span>}
+          </span>
+        );
+      },
+    },
+  ];
 
   return (
     <section className="stack">
@@ -792,36 +971,8 @@ function SalaryPanel({ act }: { act: Act }) {
         <p className="small">제시 합계 {won(total)}</p>
         <CapLine />
       </div>
-      <div className="scroll">
-        <table>
-          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>지난 연봉</th><th>요구액</th><th className="l">제시액 (억 원)</th></tr></thead>
-          <tbody>
-            {ids.map((id) => {
-              const p = players.get(id)!;
-              const i = info(p);
-              // 제시액은 억 원 단위로 보여 주고 입력한다 (0.01억 = 100만 원). 기본값은 지금 제시액을 0.01억 단위로 올림.
-              // 값을 고쳤을 때만 제시액을 바꾼다 (보여 주려고 올린 값 때문에 제시액이 바뀌지 않게)
-              const shown = (Math.ceil((s.offers[id] * px) / 100) / 100).toFixed(2);
-              const v = edit[id] ?? shown;
-              const low = s.offers[id] < s.demands[id];
-              return (
-                <tr key={id}>
-                  <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td>
-                  <td>{won(p.contract.salary)}</td><td>{won(s.demands[id])}</td>
-                  <td className="l">
-                    <span className="inline">
-                      <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
-                        onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
-                        onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
-                      {low && <span className="status temp">조정 예상</span>}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <DataTable id="off-salary" label="연봉 협상" cols={cols} rows={rows} rowKey={(r) => r.id} full={full} searchText={byName}
+        empty="협상할 선수가 없습니다." />
     </section>
   );
 }
@@ -829,7 +980,9 @@ function SalaryPanel({ act }: { act: Act }) {
 function ReleasePanel({ act }: { act: Act }) {
   const { session } = useGame();
   const won = useWon();
+  const full = useFull();
   const info = useInfo();
+  const names = session.league.teams.map((t) => t.name);
   // 복무 중인 선수는 정원에 들지 않는다 (league/offseason.ts orgSize와 같은 기준. 2026-10-09 전수조사 H4)
   const serving = session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state === 'serving').length;
   // 자동 방출과 같은 순서 (Off.releaseOrder): 내보낼 수 있는 선수 → 최소 인원 때문에 미룬 선수 → 방출 순서에 없는 선수(외국인·FA·다년 계약)
@@ -845,6 +998,37 @@ function ReleasePanel({ act }: { act: Act }) {
   const canDev = (p: (typeof mine)[number]) => !p.foreign && ageOf(p) <= ruleOf(session.league, 'devMaxAge') && p.contract.kind !== 'fa' && devs.length < ruleOf(session.league, 'devLimit');
   const over = mine.length - ruleOf(session.league, 'orgLimit');
   const claimable = session.claimable().sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id) || a.id.localeCompare(b.id));
+  const mineRows = mine.map((p, order) => ({ p, i: info(p), order }));
+  const mineCols: Column<(typeof mineRows)[number]>[] = [
+    nameCol(({ p }) => (
+      <>
+        {p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}{p.contract.kind === 'rookie' && <span className="tag">신인</span>}
+        {over > 0 && plan.order.indexOf(p) >= 0 && plan.order.indexOf(p) < over && <span className="tag" title="정원까지 자동 방출하면 나갑니다">방출 대상</span>}
+      </>
+    )),
+    { key: 'order', label: '순서', title: '자동 방출 순서 (앞일수록 먼저 나감)', value: (r) => r.order, cell: (r) => (r.order < plan.order.length ? r.order + 1 : '-') },
+    ...baseCols(), payCol(won, '계약'),
+    { key: 'until', label: '계약 끝', value: (r) => r.p.contract.until, cell: (r) => `${r.p.contract.until}년` },
+    {
+      key: 'act', label: '', text: true, brief: true, value: () => null,
+      cell: ({ p }) => (
+        <>
+          {canDev(p) && <button type="button" className="small-btn" title="방출하지 않고 육성선수로 돌립니다 (정원에서 빠지고, 시즌 중 5월 1일부터 정식 등록)" onClick={() => act(session.toDev(p.id))}>육성 전환</button>}{' '}
+          <button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button>
+        </>
+      ),
+    },
+  ];
+  const devRows = devPool.slice(0, 40).map((p) => ({ p, i: info(p) }));
+  const devCols: Column<(typeof devRows)[number]>[] = [
+    nameCol(virtualTag), ...baseCols('잠재(평가)'),
+    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(r.p.id))}>육성 영입</button> },
+  ];
+  const claimRows = claimable.map((p) => ({ p, i: info(p), from: session.offseason!.released!.find((r) => r.id === p.id)!.from }));
+  const claimCols: Column<(typeof claimRows)[number]>[] = [
+    nameCol(virtualTag), teamCol(names, (r) => r.from, '방출 구단'), ...baseCols(),
+    { key: 'act', label: '', brief: true, value: () => null, cell: (r) => <button type="button" className="small-btn" onClick={() => act(session.claim(r.p.id))}>영입</button> },
+  ];
   return (
     <section className="stack">
       <div className="panel">
@@ -859,29 +1043,8 @@ function ReleasePanel({ act }: { act: Act }) {
           <button type="button" className="ghost" disabled={over <= 0} onClick={() => act(session.autoRelease(), '정원에 맞게 방출했습니다.')}>정원까지 자동 방출</button>
         </div>
       </div>
-      <div className="scroll pick">
-        <table>
-          <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>계약</th><th /></tr></thead>
-          <tbody>
-            {mine.map((p) => {
-              const i = info(p);
-              return (
-                <tr key={p.id}>
-                  <td className="l">
-                    {p.name}{p.foreign && <span className="tag">외</span>}{!p.real && <span className="tag">가상</span>}{p.contract.kind === 'rookie' && <span className="tag">신인</span>}
-                    {over > 0 && plan.order.indexOf(p) >= 0 && plan.order.indexOf(p) < over && <span className="tag" title="정원까지 자동 방출하면 나갑니다">방출 대상</span>}
-                  </td>
-                  <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
-                  <td className="small">{p.foreign ? dollarText(p.contract.salary) : won(p.contract.salary)}</td>
-                  <td>
-                    {canDev(p) && <button type="button" className="small-btn" title="방출하지 않고 육성선수로 돌립니다 (정원에서 빠지고, 시즌 중 5월 1일부터 정식 등록)" onClick={() => act(session.toDev(p.id))}>육성 전환</button>}{' '}
-                    <button type="button" className="small-btn danger" onClick={() => act(session.release(p.id))}>방출</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="pick-table">
+        <DataTable id="off-release" label="우리 선수 (자동 방출 순)" cols={mineCols} rows={mineRows} rowKey={(r) => r.p.id} full={full} searchText={byName} />
       </div>
       <div className="panel">
         <h2>육성선수 <span className="muted small">{devs.length}/{ruleOf(session.league, 'devLimit')}명</span></h2>
@@ -908,21 +1071,8 @@ function ReleasePanel({ act }: { act: Act }) {
       {devPool.length > 0 && (
         <div className="panel">
           <h3>육성선수로 데려오기 <span className="muted small">드래프트 미지명·방출 선수·무적 FA {devPool.length}명</span></h3>
-          <div className="scroll pick">
-            <table>
-              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재(평가)</th><th /></tr></thead>
-              <tbody>
-                {devPool.slice(0, 40).map((p) => {
-                  const i = info(p);
-                  return (
-                    <tr key={p.id}>
-                      <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
-                      <td><button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(p.id))}>육성 영입</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="pick-table">
+            <DataTable id="off-dev-pool" label="육성선수 후보" cols={devCols} rows={devRows} rowKey={(r) => r.p.id} full={full} searchText={byName} />
           </div>
           <p className="muted small">단계를 마감하면 AI 구단이 남은 선수 가운데 잠재력이 높은 선수를 육성선수로 데려갑니다.</p>
         </div>
@@ -935,24 +1085,8 @@ function ReleasePanel({ act }: { act: Act }) {
         </p>
       </div>
       {claimable.length > 0 && (
-        <div className="scroll pick">
-          <table>
-            <thead><tr><th className="l">선수</th><th className="l">방출 구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th /></tr></thead>
-            <tbody>
-              {claimable.map((p) => {
-                const i = info(p);
-                const from = session.offseason!.released!.find((r) => r.id === p.id)!.from;
-                return (
-                  <tr key={p.id}>
-                    <td className="l">{p.name}{!p.real && <span className="tag">가상</span>}</td>
-                    <td className="l"><TeamName idx={from} /></td>
-                    <td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
-                    <td><button type="button" className="small-btn" onClick={() => act(session.claim(p.id))}>영입</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="pick-table">
+          <DataTable id="off-claim" label="방출 선수 영입" cols={claimCols} rows={claimRows} rowKey={(r) => r.p.id} full={full} searchText={byName} />
         </div>
       )}
     </section>
@@ -1037,7 +1171,7 @@ function CapRulesPanel({ act }: { act: Act }) {
   const chosen = L.franchiseTags?.[me] ?? null;
   const cands = L.players.filter((p) => franchiseTagEligible(L, p, me)).sort((a, b) => b.contract.salary - a.contract.salary || a.id.localeCompare(b.id));
   return (
-    <section className="panel">
+    <section className="panel" id="cap-rules">
       <h2>{year} 샐러리캡 <StatusBadge status="research" /></h2>
       <p className="muted small">
         캡 대상 연봉 {won(pay)} / 상한 {won(cap)}{floor ? ` · 하한 ${won(floor)}` : ''}.
@@ -1063,19 +1197,6 @@ function CapRulesPanel({ act }: { act: Act }) {
           </select>
         </label>
       )}
-    </section>
-  );
-}
-
-/** 개막 준비: 다음 시즌 "달라지는 규칙" 미리 보기 (FA·외국인·캡·엔트리처럼 오프시즌 결정에 닿는 것을 앞에) */
-function RulePreview({ year }: { year: number }) {
-  const { session, go } = useGame();
-  const news = session.ruleNewsFor(year);
-  return (
-    <section className="panel">
-      <h2>{year} 시즌, 달라지는 규칙</h2>
-      <RuleNewsBody news={news} lines={previewOrder(news)} />
-      <div className="actions"><button type="button" className="ghost" onClick={() => go('rules')}>규칙 연표 전체 보기</button></div>
     </section>
   );
 }

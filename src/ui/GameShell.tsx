@@ -60,7 +60,7 @@ import { About } from './screens/About';
 import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
 import { blockOf, entryOf, GROUPS, hidden, itemBlock, itemOf, itemsOf, MOBILE_GROUPS, tabLabel, type Group, type MenuItem } from './menu';
 import { countByGroup, decisions, loadAcked, saveAcked, type Acked } from './decisions';
-import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ShellUi } from './shell';
+import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ScreenPrimary, type ShellUi } from './shell';
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
@@ -92,6 +92,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 오프시즌 단계 화면이 맡은 주 진행 단추 (shell.tsx ScreenPrimary)
+  const [screenPrimary, setScreenPrimary] = useState<ScreenPrimary | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   // 개막 "달라지는 규칙" 창: 시즌마다 한 번 꼭 띄운다 (2026-10-22 사용자 결정). 자동 진행으로 개막일을 지나쳤으면 진행이 멈춘 뒤에 띄운다.
   // 본 해는 메모리에만 두고, 시즌 중간 저장을 불러온 경우(개막일이 지난 채로 화면을 연 경우)는 이미 본 것으로 친다
@@ -410,7 +412,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.postseasonRunning) void advancePs('one', '경기 진행 중');
     else void advanceNextGame();
   };
-  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list, ack };
+  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list, ack, setPrimary: setScreenPrimary };
 
   const curItem = itemOf(screen);
   const curGroup = curItem?.group;
@@ -429,7 +431,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const primary = seasonRunning || session.postseasonRunning
     ? { label: '다음 경기', act: advanceNext, disabled: advanceDisabled, title: session.postseasonRunning ? '가을야구 한 경기' : '휴식일은 건너뛰고 다음 경기일까지' }
     : off
-      ? { label: session.offseason!.stage === 'ready' ? '개막 준비' : `오프시즌 ${STAGE_LABEL[session.offseason!.stage]}`, act: () => go('offseason'), disabled: !!busy, title: '오프시즌 단계 화면으로' }
+      ? screen === 'offseason' && screenPrimary
+        ? { ...screenPrimary, disabled: !!busy || !!screenPrimary.disabled }
+        : { label: session.offseason!.stage === 'ready' ? '개막 준비' : `오프시즌 ${STAGE_LABEL[session.offseason!.stage]}`, act: () => go('offseason'), disabled: !!busy, title: '오프시즌 단계 화면으로' }
       : { label: '시즌 결산', act: () => go('season-end'), disabled: !!busy, title: '시즌 결산 화면으로' };
 
   const progressMenu = (

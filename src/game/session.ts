@@ -3208,6 +3208,12 @@ export class GameSession {
   setProtect(fa: string, ids: string[]) { return this.dispatchOff({ year: this.year, type: 'comp-protect', fa, ids }); }
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
   autoComp() { return this.dispatchOff({ year: this.year, type: 'comp-auto' }); }
+  /** 우리 보상 건의 추천 (자동 선택과 같은 기준, 조작 아님): 선수 id 또는 'cash' */
+  compRecommendation(fa: string): string | null {
+    const off = this.offseason;
+    const c = off?.comp?.find((x) => x.fa === fa);
+    return off && c ? Off.compRecommendation(this.league, off, c, this.store, this.params) : null;
+  }
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }

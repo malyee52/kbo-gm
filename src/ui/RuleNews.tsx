@@ -71,6 +71,34 @@ export function RuleNewsBody({ news, lines }: { news: RuleNews; lines?: RuleLine
   );
 }
 
+/**
+ * 개막 준비 카드의 미리 보기 (UI 2단계 기획안 2.5.3): 위 칸 앞 top줄만 펼치고 나머지 위 칸·그 밖의 변경은 접는다.
+ * 줄 모양은 개막 창(RuleNewsBody)과 같다
+ */
+export function RulePreviewBody({ news, lines, top }: { news: RuleNews; lines: RuleLine[]; top: number }) {
+  const head = lines.slice(0, top);
+  const rest = [...lines.slice(top), ...news.other];
+  return (
+    <div className="rule-news">
+      {news.summary.length > 0 && (
+        <details className="rule-cat">
+          <summary>{news.year}년 리그 규칙 (게임 값)</summary>
+          <ul className="rule-summary">{news.summary.map((x) => <li key={x}>{x}</li>)}</ul>
+        </details>
+      )}
+      {lines.length === 0 && news.other.length === 0 && <p className="muted small">지난해와 달라진 규칙이 없습니다.</p>}
+      {head.length > 0 && <ul className="rule-lines">{head.map((l, i) => <Line key={`${l.title}-${i}`} l={l} />)}</ul>}
+      {rest.length > 0 && (
+        <details className="rule-other">
+          <summary>그 밖의 변경 {rest.length}가지</summary>
+          <ul className="rule-lines">{rest.map((l, i) => <Line key={`${l.title}-${i}`} l={l} />)}</ul>
+        </details>
+      )}
+      {news.dated.length > 0 && <p className="muted small">시즌 중 바뀌는 것 {news.dated.length}가지는 그날 소식으로 알립니다.</p>}
+    </div>
+  );
+}
+
 /** 개막 전용 창 (한 번 보고 닫으면 끝) */
 export function RuleNewsDialog({ news, onClose }: { news: RuleNews; onClose: () => void }) {
   const { session, go } = useGame();
@@ -86,6 +114,8 @@ export function RuleNewsDialog({ news, onClose }: { news: RuleNews; onClose: () 
         <header className="row-between">
           <div>
             <h2>{news.start ? `${news.year} 시즌 리그 규칙` : `${news.year} 시즌, 달라지는 규칙`}</h2>
+            {/* 시작 해가 아니면 개막 준비 단계에서 미리 본 내용과 같다 (UI 2단계 기획안 2.5.3: 반복을 덜 느끼게 한 줄) */}
+            {!news.start && <p className="muted small">개막 준비에서 미리 본 내용과 같습니다.</p>}
             <p className="muted small">조사값 배지는 웹 조사 값으로, 자료집 제도연표로 확인하기 전입니다.</p>
           </div>
           <button type="button" className="ghost" onClick={close}>닫기</button>

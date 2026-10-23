@@ -1103,6 +1103,11 @@ function aiCompPick(league: LeagueState, off: OffseasonState, c: CompCase, view:
   return best ? best.p.id : 'cash';
 }
 
+/** 플레이어 구단 보상의 추천 (자동 선택과 같은 기준, 읽기만): 선수 id 또는 'cash' */
+export function compRecommendation(league: LeagueState, off: OffseasonState, c: CompCase, store: Store, params: EngineParams = DEFAULT_PARAMS): string {
+  return aiCompPick(league, off, c, leagueView(league, store, params));
+}
+
 /** 플레이어 구단의 보상을 AI 기준으로 고른다 (자동 선택) */
 export function autoCompUser(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams = DEFAULT_PARAMS): void {
   if (off.stage !== 'comp') return;
