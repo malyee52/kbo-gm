@@ -11,7 +11,8 @@ from html.parser import HTMLParser
 
 
 class _Tables(HTMLParser):
-    """맨 바깥 표만 모은다. 칸 글에는 안쪽 표의 글도 섞인다. 칸 = (글, rowspan, colspan)"""
+    """맨 바깥 표만 모은다. 칸 글에는 안쪽 표의 글도 섞인다. 칸 = (글, rowspan, colspan, 링크 제목)
+    링크 제목은 칸 안 <a title=…> 값 (구단 칸이 엠블럼 그림 링크뿐인 표를 읽으려고)"""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -30,8 +31,10 @@ class _Tables(HTMLParser):
             self.row = []
             self.tables[-1].append(self.row)
         elif self.depth == 1 and tag in ('td', 'th') and self.row is not None:
-            self.cell = [[], int(a.get('rowspan') or 1), int(a.get('colspan') or 1)]
+            self.cell = [[], int(a.get('rowspan') or 1), int(a.get('colspan') or 1), []]
             self.row.append(self.cell)
+        elif tag == 'a' and self.cell is not None and a.get('title'):
+            self.cell[3].append(a['title'])
         elif tag == 'br' and self.cell is not None:
             self.cell[0].append('\n')
 
@@ -46,8 +49,9 @@ class _Tables(HTMLParser):
             self.cell[0].append(data)
 
 
-def tables(md):
-    """HTML 표들 → 각 표는 행 목록, 행은 칸 글 목록 (rowspan·colspan 펼침)"""
+def tables(md, links=False):
+    """HTML 표들 → 각 표는 행 목록, 행은 칸 글 목록 (rowspan·colspan 펼침).
+    links=True면 칸이 (글, [링크 제목]) 짝"""
     p = _Tables()
     p.feed(md)
     out = []
@@ -55,7 +59,10 @@ def tables(md):
         grid = []
         pending = {}
         for row in t:
-            cells = [(re.sub(r'[ \t]+', ' ', ''.join(c[0])).strip(), c[1], c[2]) for c in row]
+            cells = []
+            for c in row:
+                text = re.sub(r'[ \t]+', ' ', ''.join(c[0])).strip()
+                cells.append(((text, tuple(c[3])) if links else text, c[1], c[2]))
             r, col = [], 0
             while cells or pending.get(col):
                 if pending.get(col):

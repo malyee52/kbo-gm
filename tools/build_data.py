@@ -38,6 +38,11 @@
                                  인적사항.csv: 생년·투타·언더핸드·세부 포지션(빈 칸·IF·OF만), 병역(실제 자료가 없는 선수, military.json src 'wiki')
                                  기록_채움후보.csv: 있는 시즌 행의 빈 칸만 (빈 행 '(행 없음)'은 더하지 않는다: 선수 구성이 바뀐다)
                                  키·몸무게는 아직 게임에 쓰지 않아 싣지 않는다. 결과는 reports/wiki-fill.md
+                                 세부 포지션은 1군 마지막 해가 2000년까지인 야수만 (그 뒤 선수는 '세부 포지션(위키)' 칸으로만 남는다)
+  data-src/수상.csv · 올스타.csv  골든글러브·MVP·신인왕·한국시리즈 MVP·올스타전 MVP와 올스타전 경기 (awards.json, allstar_history.json).
+                                 나무위키 덤프에서 tools/wiki/s6_awards.py가 만든다. 짝 결과는 reports/wiki-awards.md
+  data-src/구장.csv · 구장_사용.csv  구장 × 제원 기간(펜스·좌석·잔디·돔)과 구단 계보별 주 구장 (parks.json). 나무위키 구장 문서에서 읽어 적은 값.
+                                 열은 docs/구장효과_기획안.md 7.1·7.2 (plan/park-effects). 이것만 다시 만들려면: build_data.py --history-only
 """
 import csv
 import json
@@ -323,6 +328,65 @@ def rules_for(year):
         'maxInnings': 0 if year == 2008 else 11 if year >= 2025 else 12, 'maxInningsSource': 'confirmed' if year >= 2008 else 'assumed',
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
+
+
+# ---- 수상·구장·올스타전 (awards.json, parks.json, allstar_history.json)
+# 나무위키 덤프에서 뽑은 가공 CSV (tools/wiki/s6_awards.py, data-src/구장.csv·구장_사용.csv). 2026-10-23 빈 자료 결정 4.
+# 게임 코드는 아직 읽지 않는다 (구장 효과·수상 표시는 따로). 선수 구성에 닿지 않아 저장 호환은 그대로.
+
+def read_src_csv(path):
+    if not path.exists():
+        return []
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def num(v):
+    """CSV 칸 → 정수·소수, 빈 칸은 None"""
+    if v in (None, ''):
+        return None
+    f = float(v)
+    return int(f) if f.is_integer() else f
+
+
+def build_history(out_dir):
+    src = ROOT / 'data-src'
+    awards = [{'award': r['상'], 'year': int(r['연도']), 'part': r['부문'], 'name': r['이름'], 'id': r['선수ID'] or None,
+               'team': r['구단'], 'franchise': r['계보'] or None} for r in read_src_csv(src / '수상.csv')]
+    (out_dir / 'awards.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/수상.csv (나무위키 덤프 2026-08-29, tools/wiki/s6_awards.py)',
+        'note': 'id가 null이면 선수 ID와 짝짓지 못한 수상 (reports/wiki-awards.md)', 'awards': awards,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    specs = [{
+        'id': r['구장ID'], 'name': r['이름'], 'city': r['도시'], 'from': int(r['시작']), 'to': num(r['끝']),
+        'specChange': r['제원변경'] == '1', 'franchise': r['계보'] or None, 'seats': num(r['좌석']),
+        'fence': {k: num(r[c]) for k, c in (('l', '좌'), ('lc', '좌중'), ('c', '중'), ('rc', '우중'), ('r', '우'))},
+        'height': {'lr': num(r['높이_좌우']), 'c': num(r['높이_중앙'])},
+        'turf': {'infield': r['잔디_내야'] or None, 'outfield': r['잔디_외야'] or None}, 'dome': r['돔'] == '1',
+        'source': r['출처'], 'confirmed': r['확인'], 'note': r['비고'],
+    } for r in read_src_csv(src / '구장.csv')]
+    use = [{'franchise': r['계보'], 'park': r['구장ID'], 'from': int(r['시작']), 'to': num(r['끝']), 'kind': r['구분'],
+            'source': r['출처'], 'confirmed': r['확인'], 'note': r['비고']} for r in read_src_csv(src / '구장_사용.csv')]
+    (out_dir / 'parks.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/구장.csv · 구장_사용.csv (나무위키 덤프 2026-08-29)',
+        'note': 'specs: 구장 × 제원 기간 (to null = 지금까지, franchise 값이 있으면 그 구단 홈 경기에만 쓰는 제원). use: 구단 계보별 주 구장',
+        'specs': specs, 'use': use,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    years = {}
+    for r in read_src_csv(src / '올스타.csv'):
+        y = years.setdefault(int(r['연도']), {'year': int(r['연도']), 'games': [], 'mvp': None})
+        y['games'].append({'n': int(r['경기']), 'date': r['날짜'], 'park': r['구장'], 'parkId': r['구장ID'] or None,
+                           'teams': [r['팀1'], r['팀2']], 'score': [int(r['점수1']), int(r['점수2'])], 'win': r['승리']})
+    for a in awards:
+        if a['award'] == '올스타전 MVP':
+            years.setdefault(a['year'], {'year': a['year'], 'games': [], 'mvp': None})['mvp'] = \
+                {'name': a['name'], 'id': a['id'], 'team': a['team']}
+    (out_dir / 'allstar_history.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/올스타.csv · 수상.csv 올스타전 MVP (나무위키 덤프 2026-08-29)',
+        'years': [years[y] for y in sorted(years)],
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'수상 {len(awards)}줄 (짝 {sum(1 for a in awards if a["id"])}), 구장 제원 {len(specs)}줄 · 사용 {len(use)}줄, '
+          f'올스타전 {len(years)}개 해 → {out_dir}')
 
 
 # ---- 감독 (managers.json)
@@ -1182,6 +1246,10 @@ def main():
         # 감독 CSV만 다시 반영한다 (시즌 JSON에서 운영 경향을 계산한다)
         build_managers(OUT)
         return
+    if '--history-only' in sys.argv:
+        # 수상·구장·올스타전 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        build_history(OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1435,6 +1503,7 @@ def main():
     }, OUT / 'meta.json')
     wiki_mil = build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    build_history(OUT)
     if not NO_WIKI:
         write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special, wiki_fixes)
     if hardhit_report:
