@@ -40,9 +40,11 @@ describe('경기력 효과 (이벤트·코치·캠프)', () => {
     // 6시드 평균: 순환 없음 +6.9%p, 순환 +3.3%p (form-b 포함). 경기력 효과는 선수마다 그대로 들어가고 순환과 관계없다
     // 2026-10-22 선수별 P/PA(사슬 길이)를 넣은 뒤 c~f 평균이 +2.1%p(운)였다. 시드 하나의 퍼짐이 약 6%p라 네 시드로는 모자라
     // 여덟 시드(c~j)로 늘렸다: P/PA 전 +6.8%p, 뒤 +5.6%p (c~f만 보면 전 +10.6 · 뒤 +2.1, g~j만 보면 전 +3.0 · 뒤 +9.1)
+    // 2026-10-23 엔진 2 14단계(세이브·홀드·승리 투수 규정, 결과가 바뀜) 뒤 c~j 평균이 +0.3%p(운)였다. 시드 하나가 −13.1~+21.5%p로 퍼져
+    // 열여섯 시드(c~r)로 늘렸다: c~j +0.3%p, k~r +8.1%p, 16시드 +4.2%p
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
     let diff = 0;
-    const seeds = ['form-c', 'form-d', 'form-e', 'form-f', 'form-g', 'form-h', 'form-i', 'form-j'];
+    const seeds = ['c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r'].map((x) => `form-${x}`);
     for (const seed of seeds) {
       const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
@@ -55,7 +57,7 @@ describe('경기력 효과 (이벤트·코치·캠프)', () => {
       diff += (w(boosted) - w(base)) / seeds.length;
     }
     expect(diff).toBeGreaterThan(0.025);
-  }, 1_200_000);
+  }, 2_400_000);
 });
 
 describe('경기에 영향을 주는 이벤트', () => {
