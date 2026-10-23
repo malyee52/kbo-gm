@@ -848,6 +848,7 @@ export class GameSession {
       now: ruleSnapshot(this.store.meta, year, L, shape(year)), prev: ruleSnapshot(this.store.meta, year - 1, L, shape(year - 1)),
       seasonDays: year === this.year ? this.season.schedule.length : undefined,
       shifts: shiftsFor(L, year),
+      rejected: (L.ruleVotes ?? []).filter((v) => v.year === year && !v.passed),
       ...(() => {
         const value = seasonCor(L, year);
         return value === null ? {} : { cor: { value, prev: seasonCor(L, year - 1), range: corRange(L, year), hrMul: ballHrMul(L, year) } };

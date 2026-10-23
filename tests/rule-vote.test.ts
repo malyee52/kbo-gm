@@ -4,7 +4,10 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Season } from '../src/engine';
 import { GameSession, type GameSave } from '../src/game/session';
-import { aiVotes, countVotes, meritExcess, voteOutlook, voteParts, votesNeeded, type RuleAgenda, type VoteFacts } from '../src/ai/vote';
+import { aiVotes, countVotes, interestBreakdown, meritExcess, voteOutlook, voteParts, votesNeeded, type RuleAgenda, type VoteFacts } from '../src/ai/vote';
+import { readFileSync } from 'node:fs';
+import { stageHeadline, stageLeftovers } from '../src/ui/offStage';
+import { ruleNews, voteResultText } from '../src/league/ruleNews';
 import { createLeague } from '../src/league/create';
 import { FUTURE_RULE_SPEC, futureValue, proposeFutureRule, type FutureRuleKey, type RuleSignal } from '../src/league/futureRules';
 import * as Off from '../src/league/offseason';
@@ -348,5 +351,64 @@ describe('세션: 우리 표·저장·재현', () => {
     expect(text).toContain('(우리)');
     expect(g.offseason!.log.some((l) => l.stage === 'vote' && l.text.includes('단장 회의 안건'))).toBe(true);
     expect(FUTURE_RULE_SPEC.foreign.base).toBe(3);
+  });
+});
+
+describe('V4 화면 계산 (단장 회의 탭·개표·알림)', () => {
+  it('남은 처리·위 줄: 표를 안 냈으면 넘기면 반대로 센다는 줄 (막지 않음), 내면 사라진다', () => {
+    const g = toVote();
+    const left = stageLeftovers(g);
+    expect(left).toHaveLength(1);
+    expect(left[0].blocking).toBeFalsy();
+    expect(left[0].then).toContain('반대로');
+    expect(stageHeadline(g)).toContain('우리 표 0/1');
+    g.voteRule('yes');
+    expect(stageLeftovers(g)).toEqual([]);
+    expect(stageHeadline(g)).toContain('우리 표 1/1');
+  });
+
+  it('우리 구단에 닿는 것: 저장한 구단 지표로 낸 몫의 합이 AI 점수의 이해 항과 같다', () => {
+    const g = toVote();
+    const v = g.offseason!.vote!;
+    expect(v.facts?.length).toBe(v.ai[0].filter((x) => x >= 0).length);
+    const parts = interestBreakdown(v.agendas[0], v.facts!, TEAM);
+    expect(parts.length).toBeGreaterThan(0);
+    const mine = voteParts(v.agendas[0], v.facts!).find((p) => p.team === TEAM)!;
+    expect(parts.reduce((a, p) => a + p.push, 0)).toBeCloseTo(mine.interest, 9);
+    for (const p of parts) expect(p.rank).toBeGreaterThanOrEqual(1);
+  });
+
+  it('개막 알림: 가결은 규칙 줄에 표결 결과, 부결은 부결 줄 (가짓수에 세지 않음)', () => {
+    for (const pass of [true, false]) {
+      const g = toVote();
+      const ai = g.offseason!.vote!.ai[0];
+      g.offseason!.vote!.ai[0] = ai.map((x) => (x < 0 ? x : pass ? 1 : 0));
+      g.voteRule(pass ? 'yes' : 'no');
+      g.nextStage();
+      const news = g.ruleNewsFor(g.year + 1);
+      const line = [...news.main, ...news.other].find((l) => l.status === 'virtual' && l.vote);
+      if (pass) {
+        expect(line?.vote).toContain('가결');
+        expect(line?.vote).toContain('우리 구단 찬성');
+        expect(news.rejected).toBeUndefined();
+      } else {
+        expect(line).toBeUndefined();
+        expect(news.rejected).toHaveLength(1);
+        expect(news.rejected![0]).toContain('부결');
+      }
+    }
+  });
+
+  it('표결 결과 문구: 표를 안 냈으면 "표를 내지 않음", 모든 구단 AI면 우리 구단 줄 없음', () => {
+    expect(voteResultText({ yes: 7, no: 3, need: 7, userTeam: 2 }, true)).toBe('단장 회의 찬성 7 : 반대 3 가결 (문턱 7, 우리 구단 반대 (표를 내지 않음))');
+    expect(voteResultText({ yes: 5, no: 5, need: 7 }, false)).toBe('단장 회의 찬성 5 : 반대 5 부결 (문턱 7)');
+    const news = ruleNews({ year: 2031, now: {} as never, rejected: [] });
+    expect(news.rejected).toBeUndefined();
+  });
+
+  it('화면은 우리 표를 GameSession.voteRule로만 낸다 (새 조작·직접 castVote 없음)', () => {
+    const src = readFileSync('src/ui/screens/Offseason.tsx', 'utf8');
+    expect(src).toContain('session.voteRule(');
+    expect(src).not.toMatch(/castVote|'rule-vote'/);
   });
 });

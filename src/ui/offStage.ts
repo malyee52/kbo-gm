@@ -5,6 +5,8 @@ import type { GameSession } from '../game/session';
 import * as Off from '../league/offseason';
 import { dollarText, FA_COMP, salaryCap, teamCapPayroll, wonText } from '../league/salary';
 import { ruleOf } from '../league/rules';
+import { voteAgendaText } from '../league/ruleNews';
+import { voteOutlook } from '../ai/vote';
 
 /** 남은 처리를 한 번에 해결하고 넘기는 길 (조작 하나 + 다음 단계) */
 export type LeftoverFix = 'auto-comp' | 'auto-draft' | 'auto-release';
@@ -37,6 +39,14 @@ export function stageLeftovers(s: GameSession): Leftover[] {
   const out: Leftover[] = [];
 
   switch (off.stage) {
+    case 'vote': {
+      // 표를 안 내도 넘길 수 있다. 안 낸 안건은 반대로 센다 (구단투표 결정 4)
+      for (const a of off.vote?.agendas ?? []) {
+        if (off.vote!.user[a.id]) continue;
+        out.push({ key: `vote:${a.id}`, title: `안건 표 안 냄 (${voteAgendaText(a)})`, then: '우리 표를 반대로 세어 개표합니다. 실무진 추천은 자동으로 내지 않습니다.' });
+      }
+      break;
+    }
     case 'fa': {
       const open = off.fa.entries.filter((e) => e.from === me && e.status === 'open' && !off.fa.userOffers[e.id]).map((e) => e.id);
       if (open.length) {
@@ -154,8 +164,13 @@ export function stageHeadline(s: GameSession): string[] {
   const pay = teamCapPayroll(L, me, next);
   const capText = cap ? `캡 여유 ${wonText(cap - pay, next)}` : `연봉 총액 ${wonText(pay, next)}`;
   switch (off.stage) {
-    case 'vote':
-      return [];
+    case 'vote': {
+      const v = off.vote;
+      if (!v) return [];
+      const swing = v.agendas.map((_, i) => voteOutlook(v.ai[i], me).swing);
+      return [`안건 ${v.agendas.length}건`, `우리 표 ${v.agendas.filter((a) => v.user[a.id]).length}/${v.agendas.length}`,
+        ...(swing.includes('decisive') ? [`우리 표에 달린 안건 ${swing.filter((x) => x === 'decisive').length}건`] : [])];
+    }
     case 'fa': {
       const offers = Object.keys(off.fa.userOffers).length;
       return [`${off.fa.round}/${Off.FA_ROUNDS}라운드`, `우리 제시 ${offers}건`, capText];

@@ -26,6 +26,10 @@ import { FIX_LABEL, stageHeadline, stageLeftovers, stageRecord, type Leftover, t
 import { teamVars } from '../teams';
 import { useNarrow } from '../BoxScore';
 import { openingEdits, openWithPreview } from '../openingBoard';
+import { countVotes, interestBreakdown, SWING_LABEL, voteOutlook, type FactKey, type InterestPart, type RuleAgenda, type RuleVoteRecord, type VoteChoice, type VoteFacts } from '../../ai/vote';
+import { agendaChange, agendaLabel } from '../../league/ruleVote';
+import { voteResultText } from '../../league/ruleNews';
+import { REJECT_COOLDOWN, type RuleShift } from '../../league/futureRules';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -55,6 +59,8 @@ export function Offseason() {
   const [record, setRecord] = useState<LogStage | null>(null);
   // 남은 처리 확인 창: 남은 처리가 있는데 '다음'을 눌렀을 때 (기획안 2.5.1)
   const [confirm, setConfirm] = useState<Leftover[] | null>(null);
+  // 개표 결과 창 (단장 회의 '다음' 직후): 이번 개표 기록
+  const [tally, setTally] = useState<RuleVoteRecord[] | null>(null);
   const steps = useCurrentStep<HTMLOListElement>(off?.stage);
 
   const act = (r: { ok: boolean; message: string }, okText?: string) => {
@@ -72,10 +78,13 @@ export function Offseason() {
       const f = fix === 'auto-comp' ? session.autoComp() : fix === 'auto-draft' ? session.autoDraft() : session.autoRelease();
       if (!f.ok) { setBusy(false); act(f); return; }
     }
+    const voting = session.offseason?.stage === 'vote';
+    const counted = session.league.ruleVotes?.length ?? 0;
     const r = session.nextStage();
     setBusy(false);
     setRecord(null);
     act(r);
+    if (r.ok && voting) setTally((session.league.ruleVotes ?? []).slice(counted));
   };
 
   const open = async () => {
@@ -104,6 +113,8 @@ export function Offseason() {
   const stageIdx = off ? STAGES.indexOf(off.stage) : -1;
   const nextLabel = !off ? '' : off.stage === 'ready'
     ? `${off.year + 1} 시즌 개막`
+    : off.stage === 'vote'
+      ? `개표하고 ${STAGE_LABEL.fa}로`
     : off.stage === 'fa'
       ? (off.fa.round < FA_ROUNDS ? `FA ${off.fa.round}라운드 마감` : `FA ${off.fa.round}라운드 마감 → ${STAGE_LABEL[STAGES[stageIdx + 1]]}`)
       : `다음: ${STAGE_LABEL[STAGES[stageIdx + 1]] ?? ''}`;
@@ -168,6 +179,7 @@ export function Offseason() {
           <strong>{STAGE_LABEL[off.stage]}</strong>{head.map((h) => <span key={h}>{h}</span>)}
         </p>
       )}
+      {off.stage === 'vote' && <VotePanel act={act} />}
       {off.stage === 'fa' && <FaPanel act={act} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'second' && <SecondPanel act={act} />}
@@ -205,6 +217,7 @@ export function Offseason() {
         <OffLog />
       </aside>
       </div>
+      {tally && tally.length > 0 && <TallyDialog records={tally} onClose={() => setTally(null)} />}
       {confirm && <LeftoverDialog items={confirm} stage={off.stage} label={nextLabel} onCancel={() => setConfirm(null)} onGo={(fix) => void step(fix)} />}
     </div>
   );
@@ -260,6 +273,7 @@ function StageRecord({ stage, onBack }: { stage: LogStage; onBack: () => void })
         <h2>{LOG_LABEL[stage]} 기록 <span className="muted small">읽기 전용 · 지난 단계는 바꿀 수 없습니다</span></h2>
         <button type="button" className="ghost small-btn" onClick={onBack}>지금 단계({STAGE_LABEL[session.offseason!.stage]})로</button>
       </div>
+      {stage === 'vote' && <VoteResults />}
       <label className="inline small"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> 다른 구단 소식도</label>
       {rows.length === 0 ? <p className="muted">{all ? '이 단계 소식이 없습니다.' : '우리 구단·큰 소식이 없습니다. "다른 구단 소식도"를 켜 보세요.'}</p> : (
         <ul className="news">
@@ -268,6 +282,193 @@ function StageRecord({ stage, onBack }: { stage: LogStage; onBack: () => void })
       )}
     </section>
   );
+}
+
+// ---- 단장 회의 (구단투표 기획안 v0.2 2.3, 개발 V4): 안건 카드·여론·우리 구단에 닿는 것·실무진 추천·우리 표, 개표 결과
+
+/** 이해 지표 이름 (ai/vote.ts VoteFacts) */
+const FACT_LABEL: Record<FactKey, string> = {
+  cash: '자금', strength: '다음 시즌 주전 전력', domestic: '국내 선수층 (상위 25명)', foreign: '외국인 기여 몫 (상위 25명 중)',
+  capUse: '캡 사용률', net: '올해 수지', absence: '부상·이탈 결장', depth: '선수층 깊이 (30번째 선수)', bullpen: '불펜 (구원 상위 7명)',
+  pitchBat: '투수 전력 − 타자 전력', hr: '팀 홈런 (리그 평균 대비)', eye: '타자 볼넷 ÷ 삼진', kPitch: '투수 삼진율',
+};
+
+/** 지표 값 글자. 런 단위 지표(전력·선수층·불펜)는 숫자 대신 순위만 보인다 */
+function factValue(k: FactKey, x: number, won: (man: number) => string): string | null {
+  switch (k) {
+    case 'cash': return won(Math.round(x));
+    case 'net': return x < 0 ? `적자 ${won(Math.round(-x))}` : `흑자 ${won(Math.round(x))}`;
+    case 'capUse': return x > 5 ? `연봉 합 ${won(Math.round(x))} (캡 없음)` : `${Math.round(x * 100)}%`;
+    case 'foreign': return `${Math.round(x * 100)}%`;
+    case 'absence': return `${Math.round(x)}선수-일`;
+    case 'hr': return `${x.toFixed(2)}배`;
+    case 'eye': return x.toFixed(2);
+    case 'kPitch': return `${(x * 100).toFixed(1)}%`;
+    default: return null;
+  }
+}
+
+/** 미는 쪽: 표준화 몫이 작으면 중간 */
+const PUSH_EDGE = 0.1;
+const pushWord = (p: number) => (p > PUSH_EDGE ? '찬성 쪽' : p < -PUSH_EDGE ? '반대 쪽' : '중간');
+
+/** 실무진 추천 까닭: 가장 크게 민 지표 둘 (명분·현상 유지는 모든 구단에 같아서 뺀다) */
+function adviceReason(parts: InterestPart[], advice: VoteChoice): string {
+  const top = parts.filter((p) => (advice === 'yes' ? p.push > PUSH_EDGE : p.push < -PUSH_EDGE)).sort((a, b) => Math.abs(b.push) - Math.abs(a.push)).slice(0, 2);
+  if (!top.length) return '우리 구단 사정이 리그 평균과 비슷해 리그 전체 명분대로';
+  return top.map((p) => `${FACT_LABEL[p.key]} ${p.of}개 구단 중 ${p.rank}위`).join(', ');
+}
+
+/** 규칙이 바뀌면 우리 구단 숫자가 어떻게 되는지 (전 → 후). 지금은 캡 상향률만 숫자로 셀 수 있다 */
+function useRuleImpact(a: RuleAgenda): string | null {
+  const { session } = useGame();
+  const won = useWon();
+  if (a.big || a.key !== 'capGrowth') return null;
+  const L = session.league;
+  const shift: RuleShift = { year: a.year, key: 'capGrowth', before: a.before, after: a.after, reason: a.reason, signal: a.signal };
+  const withIt = { ...L, ruleShifts: [...(L.ruleShifts ?? []), shift] };
+  const before = salaryCap(a.year, L);
+  const after = salaryCap(a.year, withIt);
+  if (before === null || after === null) return null;
+  const pay = teamCapPayroll(L, session.teamIdx, a.year);
+  const fb = salaryFloor(a.year, L);
+  const fa = salaryFloor(a.year, withIt);
+  return `${a.year} 샐러리캡 ${won(before)} → ${won(after)} · 우리 캡 여유 ${won(before - pay)} → ${won(after - pay)}`
+    + (fb !== null && fa !== null && fb !== fa ? ` · 하한 ${won(fb)} → ${won(fa)}` : '');
+}
+
+function VotePanel({ act }: { act: (r: { ok: boolean; message: string }, okText?: string) => void }) {
+  const { session } = useGame();
+  const v = session.offseason?.vote;
+  if (!v) return null;
+  const many = v.agendas.length > 1;
+  return (
+    <>
+      <p className="muted small">
+        결산 때 리그 흐름 신호가 켜져 규칙 안건이 올라왔습니다. 문턱 이상 구단이 찬성하면 다음 시즌부터 바뀝니다.
+        다른 구단 표는 결산 때 정해져 이 단계에서 무엇을 해도 바뀌지 않습니다. 우리 표는 넘기기 전까지 몇 번이고 바꿀 수 있습니다.
+      </p>
+      {v.agendas.map((a, i) => (
+        <AgendaCard key={a.id} a={a} ai={v.ai[i]} facts={v.facts} pick={v.user[a.id]} onPick={(c) => act(session.voteRule(c, many ? a.id : undefined))} />
+      ))}
+    </>
+  );
+}
+
+function AgendaCard({ a, ai, facts, pick, onPick }: { a: RuleAgenda; ai: number[]; facts?: VoteFacts[]; pick?: VoteChoice; onPick: (c: VoteChoice) => void }) {
+  const { session } = useGame();
+  const won = useWon();
+  const impact = useRuleImpact(a);
+  const me = session.teamIdx;
+  const o = voteOutlook(ai, me);
+  const voters = ai.filter((x) => x >= 0).length;
+  const parts = facts ? interestBreakdown(a, facts, me) : [];
+  const ifYes = countVotes(ai, me, 'yes');
+  const ifNo = countVotes(ai, me, 'no');
+  const result = (c: { yes: number; no: number; passed: boolean }) => `${c.yes} : ${c.no} ${c.passed ? '가결' : '부결'}`;
+  return (
+    <section className="panel agenda-card" aria-label={`${a.year} 시즌 규칙 안건: ${agendaLabel(a)}`}>
+      <div className="row-between wrap">
+        <h2>{a.year} 시즌 규칙 안건</h2>
+        <StatusBadge status="virtual" />
+      </div>
+      <p className="agenda-head"><strong>{agendaLabel(a)}</strong> <span className="rule-change">{agendaChange(a)}</span></p>
+      <p className="small">발의 까닭: {a.reason}</p>
+      <dl className="agenda-facts small">
+        <dt>통과 문턱</dt><dd>{voters}개 구단 중 {o.need}곳 찬성</dd>
+        <dt>여론</dt>
+        <dd>
+          찬성 {o.yes} · 반대 {o.no} · <span className={`tag swing-${o.swing}`}>{SWING_LABEL[o.swing]}</span>
+          <span className="muted"> (우리 구단 빼고. 미리 보인 수가 그대로 개표됩니다)</span>
+        </dd>
+        <dt>우리 표에 따라</dt><dd>찬성하면 {result(ifYes)} · 반대하면 {result(ifNo)}</dd>
+      </dl>
+      <h3>우리 구단에 닿는 것</h3>
+      {impact && <p className="small">{impact}</p>}
+      {parts.length > 0 ? (
+        <ul className="plain small agenda-interest">
+          {parts.map((p) => {
+            const val = factValue(p.key, p.value, won);
+            return (
+              <li key={p.key}>
+                {FACT_LABEL[p.key]} {val && <b>{val}</b>} <span className="muted">{p.of}개 구단 중 {p.rank}위</span>{' '}
+                <span className={`tag push-${p.push > PUSH_EDGE ? 'yes' : p.push < -PUSH_EDGE ? 'no' : 'mid'}`}>{pushWord(p.push)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : <p className="muted small">{a.big ? '큰 안건의 구단 지표는 아직 없습니다.' : '이 저장에는 결산 때 구단 지표가 없습니다.'}</p>}
+      {parts.length > 0 && <p className="muted small">다른 구단도 같은 지표로 표를 정했습니다 (결산 직후 값).</p>}
+      {o.advice && (
+        <p className="small">
+          <b>실무진 추천: {o.advice === 'yes' ? '찬성' : '반대'}</b> ({adviceReason(parts, o.advice)})
+          <span className="muted"> · 보이기만 하고 자동으로 내지 않습니다</span>
+        </p>
+      )}
+      <div className="agenda-vote" role="group" aria-label="우리 표">
+        <b className="small">우리 표</b>
+        <button type="button" className={pick === 'yes' ? '' : 'ghost'} aria-pressed={pick === 'yes'} onClick={() => onPick('yes')}>찬성</button>
+        <button type="button" className={pick === 'no' ? '' : 'ghost'} aria-pressed={pick === 'no'} onClick={() => onPick('no')}>반대</button>
+        <span className="muted small">{pick ? `지금 우리 표: ${pick === 'yes' ? '찬성' : '반대'}` : '아직 내지 않음 · 고르지 않으면 반대로 셉니다'}</span>
+      </div>
+    </section>
+  );
+}
+
+/** 개표 결과 하나: 가결·부결, 찬반 수, 구단별 찬반, 바뀌는 규칙 */
+function TallyCard({ r }: { r: RuleVoteRecord }) {
+  const side = (x: number) => r.votes.map((v, t) => (v === x ? t : -1)).filter((t) => t >= 0);
+  const teams = (ts: number[]) => (ts.length ? ts.map((t, k) => <span key={t}>{k > 0 && ' · '}<TeamName idx={t} /></span>) : '없음');
+  return (
+    <div className="tally">
+      <p className="agenda-head">
+        <span className={`tag ${r.passed ? 'tally-pass' : 'tally-fail'}`}>{r.passed ? '가결' : '부결'}</span>{' '}
+        <strong>{agendaLabel(r)}</strong> <span className="rule-change">{agendaChange(r)}</span>
+      </p>
+      <p className="small">{voteResultText(r, r.passed)}</p>
+      <dl className="agenda-facts small">
+        <dt>찬성 {r.yes}</dt><dd>{teams(side(1))}</dd>
+        <dt>반대 {r.no}</dt><dd>{teams(side(0))}</dd>
+      </dl>
+      <p className="small">
+        {r.passed
+          ? <>{r.year} 시즌부터 <b>{agendaLabel(r)} {agendaChange(r)}</b></>
+          : <>규칙은 그대로입니다. 같은 안건은 {REJECT_COOLDOWN}시즌 쉬고 {r.year + REJECT_COOLDOWN + 1} 시즌 안건부터 다시 올라올 수 있습니다.</>}
+      </p>
+    </div>
+  );
+}
+
+/** 개표 결과 창 (단장 회의 '다음' 직후) */
+function TallyDialog({ records, onClose }: { records: RuleVoteRecord[]; onClose: () => void }) {
+  const { session } = useGame();
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+  }, []);
+  return (
+    <dialog ref={ref} className="player summary off-confirm" onClose={onClose} aria-label="단장 회의 개표 결과" style={teamVars(session.team.franchise, session.team.name)}>
+      <div className="dialog-body">
+        <header>
+          <h2>단장 회의 개표 결과</h2>
+          <p className="muted small">게임 속 가상 결정입니다. 구단별 찬반은 규칙 연표의 표결 이력에도 남습니다.</p>
+        </header>
+        {records.map((r) => <TallyCard key={r.id} r={r} />)}
+        <div className="actions">
+          <button type="button" onClick={() => { ref.current?.close(); onClose(); }}>확인</button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+/** 지난 단장 회의 기록: 이번 오프시즌 개표 결과 */
+function VoteResults() {
+  const { session } = useGame();
+  const ids = new Set(session.offseason?.vote?.agendas.map((a) => a.id) ?? []);
+  const recs = (session.league.ruleVotes ?? []).filter((r) => ids.has(r.id));
+  return recs.length ? <div className="stack">{recs.map((r) => <TallyCard key={r.id} r={r} />)}</div> : null;
 }
 
 /** 개막 준비 카드 (기획안 2.5.3): 준비 확인 줄 → 달라지는 규칙 미리 보기 → 개막 */

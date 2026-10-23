@@ -18,6 +18,7 @@ function Line({ l }: { l: RuleLine }) {
         <strong>{l.title}</strong>
         {(l.before || l.after) && <span className="rule-change">{l.before ? <>{l.before} → {l.after}</> : l.after}</span>}
       </div>
+      {l.vote && <div className="small rule-vote">{l.vote}</div>}
       {l.real && <div className="muted small">실제: {l.real}</div>}
       {l.detail?.map((d) => <div key={d} className="muted small">{d}</div>)}
       {l.simplified && <div className="muted small">게임은 단순화: {l.simplified}</div>}
@@ -46,6 +47,17 @@ function Grouped({ lines, fold }: { lines: RuleLine[]; fold: boolean }) {
   );
 }
 
+/** 단장 회의에서 부결된 안건 (접힌 줄 하나, 구단투표 기획안 2.3) */
+function Rejected({ news }: { news: RuleNews }) {
+  if (!news.rejected?.length) return null;
+  return (
+    <details className="rule-other">
+      <summary>부결된 안건 ({news.rejected.length}건, 게임 속 가상 결정)</summary>
+      <ul className="plain small">{news.rejected.map((r) => <li key={r}>{r}</li>)}</ul>
+    </details>
+  );
+}
+
 /** 알림 본문: 시작 연도 요약 → 위 칸 → 그 밖의 변경(접힘) → 지난 시즌 한 줄 */
 export function RuleNewsBody({ news, lines }: { news: RuleNews; lines?: RuleLine[] }) {
   const main = lines ?? news.main;
@@ -65,6 +77,7 @@ export function RuleNewsBody({ news, lines }: { news: RuleNews; lines?: RuleLine
           <ul className="rule-lines">{news.other.map((l, i) => <Line key={`${l.title}-${i}`} l={l} />)}</ul>
         </details>
       )}
+      <Rejected news={news} />
       {news.dated.length > 0 && <p className="muted small">시즌 중 바뀌는 것 {news.dated.length}가지는 그날 소식으로 알립니다.</p>}
       {news.lastSeason && <p className="muted small">{news.lastSeason}</p>}
     </div>
@@ -94,6 +107,7 @@ export function RulePreviewBody({ news, lines, top }: { news: RuleNews; lines: R
           <ul className="rule-lines">{rest.map((l, i) => <Line key={`${l.title}-${i}`} l={l} />)}</ul>
         </details>
       )}
+      <Rejected news={news} />
       {news.dated.length > 0 && <p className="muted small">시즌 중 바뀌는 것 {news.dated.length}가지는 그날 소식으로 알립니다.</p>}
     </div>
   );

@@ -89,7 +89,7 @@ export interface VoteFacts {
   tendency: Tendency;
 }
 
-type FactKey = Exclude<keyof VoteFacts, 'team' | 'tendency'>;
+export type FactKey = Exclude<keyof VoteFacts, 'team' | 'tendency'>;
 
 /**
  * 안건별 이해 지표와 가중 (기획안 3.2, 임시값). 값을 올리는 쪽(after > before) 기준이고, 내리는 안건은 부호를 뒤집는다.
@@ -247,4 +247,25 @@ export const SWING_LABEL: Record<VoteOutlook['swing'], string> = {
 export function bigAgendaSignal(_year: number): RuleAgenda | null {
   if (!BIG_AGENDAS_ON) return null;
   return null;
+}
+
+/** 한 구단의 이해 몫 (화면 "우리 구단에 닿는 것"): 지표마다 값·순위·표준화 값과 찬성 쪽으로 미는 크기 (+ 찬성 · − 반대) */
+export interface InterestPart {
+  key: FactKey;
+  value: number;
+  /** 표결권 있는 구단 중 값이 큰 순서 (1부터) */
+  rank: number;
+  of: number;
+  /** 방향·가중을 곱한 몫 (voteParts의 interest를 이루는 항) */
+  push: number;
+}
+
+export function interestBreakdown(a: RuleAgenda, facts: VoteFacts[], team: number): InterestPart[] {
+  const i = facts.findIndex((f) => f.team === team);
+  if (i < 0 || a.big) return [];
+  const weights = INTEREST_WEIGHTS[a.key as FutureRuleKey] ?? {};
+  return (Object.entries(weights) as [FactKey, number][]).map(([k, w]) => {
+    const xs = facts.map((f) => f[k]);
+    return { key: k, value: xs[i], rank: 1 + xs.filter((x) => x > xs[i]).length, of: xs.length, push: dirOf(a) * w * zscores(xs)[i] };
+  });
 }

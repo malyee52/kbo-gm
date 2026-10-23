@@ -28,6 +28,8 @@ export interface VoteStage {
   ai: number[][];
   /** 안건 id → 우리 표 (없으면 반대, 결정 4) */
   user: Record<string, VoteChoice>;
+  /** AI 표를 낼 때 쓴 구단 지표 (화면 "우리 구단에 닿는 것"이 같은 값을 보인다). 이 항목이 생기기 전 저장에는 없다 */
+  facts?: VoteFacts[];
 }
 
 /** 규칙 변경 후보 → 안건 */
@@ -121,7 +123,7 @@ export function voteFacts(league: LeagueState, world: World, season: Season, yea
 
 /** 단장 회의를 연다: 안건마다 AI 표를 계산해 둔다 (이 뒤로 바뀌지 않는다) */
 export function openVoteStage(league: LeagueState, agendas: RuleAgenda[], facts: VoteFacts[]): VoteStage {
-  return { agendas, ai: agendas.map((a) => aiVotes(a, facts, league.teams.length)), user: {} };
+  return { agendas, ai: agendas.map((a) => aiVotes(a, facts, league.teams.length)), user: {}, facts };
 }
 
 /** 안건 이름 */
