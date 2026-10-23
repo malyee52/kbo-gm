@@ -55,6 +55,11 @@ export const REASON_TEXT: Record<Exclude<TradeVerdict, 'accept'>, string> = {
   'reject-invalid': '잘못된 제안 (규정·마감·자금)',
 };
 
+/** 요구안을 찾지 못했을 때 알림 한 줄: 상대의 답 + 거절 이유 구분 (session.askPackageWhy) */
+export function noPackageNote(team: string, r: { verdict: TradeVerdict; message: string }): string {
+  return `${team}: "${r.message}" (요구안 없음: ${r.verdict === 'accept' ? '' : REASON_TEXT[r.verdict]})`;
+}
+
 // ---- 제안판
 
 export function emptyDraft(team: number): TradeDraft {

@@ -10,7 +10,7 @@ import {
   absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
-import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackage, tendencyOf, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
+import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackageWhy, tendencyOf, type PackageResult, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
@@ -2340,9 +2340,18 @@ export class GameSession {
 
   /** AI 구단에게 "이 선수를 주려면 무엇을 원하나"를 묻는다. 수락할 만한 조합이 없으면 null */
   askPackage(aiTeam: number, want: SimPlayer[]): SimPlayer[] | null {
-    if (!this.tradeOpen || want.length === 0 || want.some((p) => p.teamIdx !== aiTeam || p.foreign)) return null;
+    return this.askPackageWhy(aiTeam, want).pkg;
+  }
+
+  /** askPackage와 같고, 조합이 없으면 이유(평가의 세 구분)를 함께 돌려준다 */
+  askPackageWhy(aiTeam: number, want: SimPlayer[]): PackageResult {
+    const invalid = (message: string): PackageResult => ({ pkg: null, verdict: 'reject-invalid', message });
+    if (!this.tradeOpen) return invalid('지금은 트레이드를 할 수 없습니다.');
+    if (want.length === 0) return invalid('받을 선수를 고르세요.');
+    if (want.some((p) => p.foreign)) return invalid('외국인 선수는 트레이드할 수 없습니다.');
+    if (want.some((p) => p.teamIdx !== aiTeam)) return invalid('상대 구단 소속이 아닌 선수가 있습니다.');
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
-    return suggestPackage(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
+    return suggestPackageWhy(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
   }
 
   private applyTrade(aiTeam: number, give: number[], get: number[], cash = 0, picks: PickSwap = NO_PICKS): void {

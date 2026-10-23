@@ -1,5 +1,6 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
+import { horizonWeights, suggestPackageWhy } from '../src/ai/trade';
 import { currentRuns } from '../src/ai/value';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
@@ -292,4 +293,43 @@ describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
     for (const o of g.shopOffers(offer, 200_000, 'players')) expect(o.picks).toEqual([]);
     expect(g.shopOffers(offer, 200_000, 'picks').length).toBeGreaterThan(0);
   }, 120_000);
+});
+
+describe('요구안 실패 이유 (askPackageWhy, UI 2단계 U2-6 엔진 메모)', () => {
+  it('요구안은 askPackage와 같고, 찾으면 accept', () => {
+    const g = newGame();
+    for (const t of g.world.teams) {
+      if (t.idx === g.teamIdx) continue;
+      const want = byNow(g, t.org)[3];
+      const r = g.askPackageWhy(t.idx, [want]);
+      expect(r.pkg?.map((p) => p.idx) ?? null).toEqual(g.askPackage(t.idx, [want])?.map((p) => p.idx) ?? null);
+      expect(r.verdict === 'accept').toBe(r.pkg !== null);
+    }
+  });
+
+  it('외국인·빈 요구·남의 선수는 잘못된 제안', () => {
+    const g = newGame();
+    const kt = teamIdx(g, 'KT');
+    expect(g.askPackageWhy(kt, [g.world.teams[kt].org.find((p) => p.foreign)!])).toMatchObject({ pkg: null, verdict: 'reject-invalid' });
+    expect(g.askPackageWhy(kt, [])).toMatchObject({ pkg: null, verdict: 'reject-invalid' });
+    expect(g.askPackageWhy(kt, [byNow(g, g.team.org)[0]])).toMatchObject({ pkg: null, verdict: 'reject-invalid' });
+  });
+
+  it('모든 조합이 상대 최소 인원에 걸리면 선수단 규칙, 내줄 선수가 약하기만 하면 가치', () => {
+    const g = newGame();
+    const kt = teamIdx(g, 'KT');
+    const w = horizonWeights(g.tendency(g.teamIdx), g.situation(g.teamIdx).remaining);
+    const theirs = byNow(g, g.world.teams[kt].org);
+    // 상대 선수단이 최소 인원(야수·투수 18명)보다 적으면 어떤 조합도 선수단 규칙에 걸린다
+    const tiny = theirs.slice(0, 12);
+    const roster = suggestPackageWhy([tiny[0]], kt, tiny, g.team.org, g.situation(kt), g.values, w);
+    expect(roster.pkg).toBeNull();
+    expect(roster.verdict).toBe('reject-roster');
+    // 상대 에이스를 우리 최약체 두 명으로: 가치가 모자람
+    const weak = byNow(g, g.team.org).slice(-2);
+    const value = suggestPackageWhy([theirs[0]], kt, g.world.teams[kt].org, weak, g.situation(kt), g.values, w);
+    expect(value.pkg).toBeNull();
+    expect(value.verdict).toBe('reject-value');
+    expect(value.message).not.toMatch(/\d/); // 수치를 보이지 않는다
+  });
 });

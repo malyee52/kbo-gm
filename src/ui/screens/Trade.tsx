@@ -24,7 +24,7 @@ import { useShell } from '../shell';
 import { useLeague } from './PlayerDetail';
 import {
   addToCompare, addToDraft, agreementStatus, COMPARE_MAX, confirmAgreement, deskOf, draftKey, draftParts, draftText, editDraft, isEmptyDraft, ourStarter, overall,
-  pruneDraft, REASON_TEXT, removeFromCompare, sendDraft, slotOf, SLOTS, STEPS, tradeBlockReason, tradeImpact, updateDesk, useDesk, VERDICT_SHORT, weakSlots,
+  pruneDraft, noPackageNote, REASON_TEXT, removeFromCompare, sendDraft, slotOf, SLOTS, STEPS, tradeBlockReason, tradeImpact, updateDesk, useDesk, VERDICT_SHORT, weakSlots,
   type DeskState, type Step, type TradeDraft,
 } from '../tradeDesk';
 
@@ -372,10 +372,11 @@ function Offer() {
   const ask = async () => {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
-    const pkg = session.askPackage(other, get);
+    const r = session.askPackageWhy(other, get);
+    const pkg = r.pkg;
     setBusy(false);
     const nm = session.world.teams[other].name;
-    if (!pkg) { updateDesk(session, () => ({ note: `${nm}: "지금 우리 선수단과 맞바꿀 만한 조합이 없습니다."` })); return; }
+    if (!pkg) { updateDesk(session, () => ({ note: noPackageNote(nm, r) })); return; }
     editDraft(session, (d) => ({ ...d, give: pkg.map((p) => p.idx) }), `${nm}: "${pkg.map((p) => p.name).join(', ')}을(를) 주시면 생각해 보겠습니다." (내줄 칸에 넣었습니다. 아직 보내지 않았습니다)`);
   };
 
@@ -546,9 +547,10 @@ function Talk() {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
     const get = draftParts(session, desk.draft).get;
-    const pkg = get.length ? session.askPackage(team, get) : null;
+    const r = session.askPackageWhy(team, get);
+    const pkg = r.pkg;
     setBusy(false);
-    if (!pkg) { updateDesk(session, () => ({ note: `${name}: "지금 우리 선수단과 맞바꿀 만한 조합이 없습니다."` })); return; }
+    if (!pkg) { updateDesk(session, () => ({ note: noPackageNote(name, r) })); return; }
     editDraft(session, (d) => ({ ...d, give: pkg.map((p) => p.idx) }), `${name}: "${pkg.map((p) => p.name).join(', ')}을(를) 주시면 생각해 보겠습니다." (내줄 칸에 넣었습니다. 아직 보내지 않았습니다)`);
     updateDesk(session, () => ({ step: 'offer' }));
   };
