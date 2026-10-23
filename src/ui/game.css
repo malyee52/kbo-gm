@@ -961,6 +961,8 @@ td .inline { flex-wrap: nowrap; }
 .alerts li:last-child { border-bottom: 0; }
 .alerts li.news-absence > span:last-child { color: var(--loss); }
 .alerts li.news-season > span:last-child, .alerts li.news-trade > span:last-child { font-weight: 700; }
+/* 관심 선수 소식 (game/watch.ts): 구단 색 별 */
+.alerts li.news-watch > span:last-child::before { content: '☆ '; color: var(--team); font-weight: 700; }
 .week h2 { margin-bottom: 10px !important; }
 .week-days { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; }
 .week-days li { display: flex; flex-direction: column; gap: 3px; padding: 4px 12px; border-left: 1px solid var(--line); min-width: 0; }

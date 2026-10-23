@@ -4,7 +4,8 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { shortDate } from '../src/game/calendar';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { pruneUndrafted, watchStatus, type WatchCtx } from '../src/game/watch';
+import { markTold, pruneUndrafted, watchNews, watchSignals, watchStatus, type WatchCtx, type WatchEntry, type WatchNewsCtx } from '../src/game/watch';
+import * as Off from '../src/league/offseason';
 import { findAll, parseQuery } from '../src/ui/find';
 import { teamDeals, teamDepth, teamMoney, teamRows } from '../src/ui/teamView';
 
@@ -35,7 +36,8 @@ describe('관심 명단: 저장 파일에 담고 조작 기록에는 넣지 않�
     expect(g.isWatched(a.id)).toBe(true);
     expect(g.actions.length).toBe(actions); // 재현과 상관없음
     const save = roundTrip(g.toSave());
-    expect(save.watch).toEqual([{ id: a.id, name: a.name, year: 2026 }]);
+    expect(save.watch).toMatchObject([{ id: a.id, name: a.name, year: 2026 }]);
+    expect(save.watch![0].told).toContain(`trade:2026:${teamIdx(g, 'KT')}`); // 담을 때 이미 트레이드 가능 = 알리지 않음
     const h = GameSession.load(store, save, FAST);
     expect(h.watch.map((w) => w.id)).toEqual([a.id]);
     expect(h.watchStatus(a.id)).toMatchObject({ kind: 'team', team: teamIdx(g, 'KT'), gray: false });
@@ -168,4 +170,160 @@ describe('전체 검색', () => {
     const k = findAll(g, `${p.name.slice(0, 1)} KT`);
     expect(k.hits.player.every((h) => h.team === kt)).toBe(true);
   });
+});
+
+// 관심 선수 소식 (2026-10-23 사용자 결정 "관심 명단 알림"): 소식함에 한 줄, 같은 일은 한 번, 그날 상태에서 계산 (난수·조작 기록 밖)
+describe('관심 선수 소식', () => {
+  const ctxOf = (g: GameSession, over: Partial<WatchNewsCtx> = {}): WatchNewsCtx => ({
+    phase: 'season', league: roundTrip(g.league), worldPlayers: g.world.players.map((p) => ({ ...p })), offseason: null,
+    year: 2026, userTeam: g.teamIdx, tradeOpen: true, deadline: { month: 7, date: 31 }, ...over,
+  });
+
+  it('신호: 트레이드 가능·시즌 중 방출·FA 신청과 계약·포스팅·방출 시장·지명·해외·은퇴', () => {
+    const g = newGame('watch-sig');
+    const kt = teamIdx(g, 'KT');
+    const p = g.world.teams[kt].org.find((x) => !x.foreign)!;
+    const f = g.world.teams[kt].org.find((x) => x.foreign)!;
+    const keys = (c: WatchNewsCtx, id: string) => watchSignals(c, id, 'x').map((s) => s.key);
+    // 시즌 중: 다른 구단 국내 선수만 트레이드 가능 (외국인·우리 선수·마감 뒤는 없음)
+    expect(keys(ctxOf(g), p.id)).toEqual([`trade:2026:${kt}`]);
+    expect(keys(ctxOf(g), f.id)).toEqual([]);
+    expect(keys(ctxOf(g, { tradeOpen: false }), p.id)).toEqual([]);
+    expect(keys(ctxOf(g, { userTeam: kt }), p.id)).toEqual([]);
+    // 입단 첫해 트레이드 금지 선수
+    const nt = ctxOf(g);
+    nt.league.players.find((x) => x.id === p.id)!.noTradeYear = 2026;
+    expect(keys(nt, p.id)).toEqual([]);
+    // 시즌 중 방출 → 오프시즌 방출 선수 시장: 같은 열쇠라 한 번만 알린다
+    const rel = ctxOf(g);
+    const wp = rel.worldPlayers.find((x) => x.id === p.id)!;
+    wp.teamIdx = -1;
+    wp.formerTeam = kt;
+    const relSig = watchSignals(rel, p.id, '김관심');
+    expect(relSig.map((s) => s.key)).toEqual([`release:2026:${kt}`]);
+    expect(relSig[0].text).toBe('관심 선수 김관심이 KT에서 방출돼 시장에 나왔습니다.');
+    // 오프시즌: FA 신청·계약, 포스팅 요청, 방출 시장, 지명
+    const off = ctxOf(g, { phase: 'offseason', tradeOpen: false });
+    const lp = off.league.players.find((x) => x.id === p.id)!;
+    off.offseason = {
+      year: 2026, stage: 'fa', fa: { entries: [{ id: p.id, from: kt, grade: 'A', prevSalary: 1, ask: 1, years: 4, status: 'open' }] },
+      postings: [{ id: p.id, fee: 1 }], released: [{ id: p.id, from: kt }], draft: { pool: [], picks: [{ team: 0, id: p.id, round: 1 }], pick: 1, order: [] },
+    } as unknown as NonNullable<WatchNewsCtx['offseason']>;
+    lp.team = -1;
+    const offSig = watchSignals(off, p.id, '김관심');
+    expect(offSig.map((s) => s.key).sort()).toEqual(['draft:2026', 'fa:2026', 'posting:2026', `release:2026:${kt}`].sort());
+    expect(offSig.find((s) => s.kind === 'fa')!.text).toBe('관심 선수 김관심이 FA를 신청했습니다 (원 소속 KT).');
+    lp.team = teamIdx(g, 'LG');
+    off.offseason!.fa.entries[0].status = 'signed';
+    expect(watchSignals(off, p.id, '김관심').find((s) => s.kind === 'fa-sign')!.text).toBe('관심 선수 김관심이 LG와 FA 계약했습니다.');
+    // 해외 (포스팅)·은퇴
+    lp.abroad = { since: 2027, origin: kt, mode: 'posting' };
+    expect(watchSignals(off, p.id, '김관심').find((s) => s.kind === 'abroad')).toMatchObject({ key: 'abroad:2027', text: '관심 선수 김관심이 포스팅으로 해외 구단에 입단했습니다.' });
+    off.league.players = off.league.players.filter((x) => x.id !== p.id);
+    off.league.retired = [{ id: p.id, name: '김관심', real: true, year: 2026, age: 40, team: kt, reason: 'age' }];
+    expect(watchSignals(off, p.id, '김관심')).toEqual([{ key: 'retired', kind: 'retired', text: '관심 선수 김관심이 은퇴했습니다.' }]);
+  });
+
+  it('담을 때의 상태는 알리지 않고, 새로 생긴 일만 한 번, 트레이드 가능 여럿은 한 줄로', () => {
+    const g = newGame('watch-once');
+    const kt = teamIdx(g, 'KT');
+    const [a, b] = g.world.teams[kt].org.filter((x) => !x.foreign);
+    const closed = ctxOf(g, { tradeOpen: false });
+    // 마감 뒤에 담음 → 알린 것 없음. 트레이드가 열리면(다음 해 개막처럼) 두 사람을 한 줄로
+    let watch: WatchEntry[] = [a, b].map((p) => markTold(closed, { id: p.id, name: p.name, year: 2026 }));
+    expect(watch.every((w) => w.told!.length === 0)).toBe(true);
+    const open = ctxOf(g);
+    const r = watchNews(open, watch);
+    expect(r.lines).toEqual([`관심 선수 2명을 트레이드로 데려올 수 있습니다 (마감 7월 31일): ${a.name}(KT), ${b.name}(KT).`]);
+    watch = r.watch;
+    expect(watchNews(open, watch).lines).toEqual([]); // 같은 일은 두 번 알리지 않는다
+    // 열려 있을 때 담으면 알리지 않는다
+    expect(watchNews(open, [markTold(open, { id: a.id, name: a.name, year: 2026 })]).lines).toEqual([]);
+    // 지난해보다 오래된 열쇠는 지운다 (은퇴처럼 해가 없는 열쇠는 남김)
+    const pruned = markTold(ctxOf(g, { year: 2028, tradeOpen: false }), { id: a.id, name: a.name, year: 2026, told: ['trade:2026:1', 'trade:2027:1', 'retired'] });
+    expect(pruned.told).toEqual(['trade:2027:1', 'retired']);
+  });
+
+  it('2026 시즌 → 오프시즌 → 2027 개막: FA 신청·방출·개막 트레이드 가능을 한 번씩, 저장 뒤 이어 해도 같은 소식, 진행은 그대로', () => {
+    const SEED = 'watch-news';
+    let offReleased: { id: string; from: number }[] = [];
+    const toOpening = (start: GameSession, mid?: (g: GameSession) => GameSession): GameSession => {
+      let g = start;
+      for (let k = 0; k < 30 && g.offseason!.stage !== 'ready'; k++) {
+        const st = g.offseason!.stage;
+        if (Off.blockedReason(g.league, g.offseason!)) {
+          if (st === 'comp') g.autoComp();
+          else if (st === 'draft') g.autoDraft();
+          else g.autoRelease();
+        }
+        if (mid && st === 'comp') g = mid(g);
+        expect(g.nextStage().ok).toBe(true);
+      }
+      offReleased = g.offseason!.released ?? [];
+      expect(g.openNextSeason().ok).toBe(true);
+      return g;
+    };
+    // 관심 명단 없이 한 번 돌려 FA 신청 선수·시즌 중 방출 선수를 찾는다 (같은 시드 = 같은 진행)
+    const probe = newGame(SEED);
+    probe.advance(100000);
+    const released = probe.world.players.filter((p) => p.teamIdx < 0 && p.formerTeam !== undefined && p.formerTeam !== probe.teamIdx && !p.foreign);
+    probe.beginOffseason();
+    const fa = probe.offseason!.fa.entries.filter((e) => e.from !== probe.teamIdx && !e.returnee).slice(0, 3).map((e) => e.id);
+    const probeEnd = toOpening(probe);
+    expect(fa.length).toBe(3);
+    // 오프시즌 정원 정리에서 AI 구단이 방출한 선수 (방출 선수 시장)
+    const marketId = offReleased.find((r) => r.from !== probe.teamIdx && !fa.includes(r.id))?.id;
+    expect(marketId).toBeDefined();
+
+    const play = (withSaves: boolean) => {
+      let g = newGame(SEED);
+      g.advance(10);
+      // 10일째 다른 구단에 있는 선수만 (그 뒤 방출될 선수 하나 포함)
+      const rel = released.find((p) => g.world.players[p.idx].teamIdx >= 0);
+      const ids = [...fa, marketId!, ...(rel ? [rel.id] : [])];
+      for (const id of ids) g.toggleWatch(id, g.world.players.find((p) => p.id === id)!.name);
+      expect(g.news.some((n) => n.kind === 'watch')).toBe(false); // 담을 때는 알리지 않음 (이미 트레이드 가능)
+      g.advance(40);
+      if (withSaves) g = GameSession.load(store, roundTrip(g.toSave()), FAST);
+      g.advance(100000);
+      g.beginOffseason();
+      g = toOpening(g, withSaves ? (x) => GameSession.load(store, roundTrip(x.toSave()), FAST) : undefined);
+      g.advance(3);
+      return { g, rel };
+    };
+    const { g, rel } = play(true);
+    const { g: h } = play(false);
+    const watchLines = (x: GameSession) => x.news.filter((n) => n.kind === 'watch');
+    // 저장 뒤 이어 해도, 같은 시드로 끊김 없이 해도 같은 소식·같은 관심 명단
+    expect(watchLines(g)).toEqual(watchLines(h));
+    expect(g.watch).toEqual(h.watch);
+    // 관심 명단은 진행에 끼지 않는다: 소식(관심 선수 줄 빼고)·시즌·조작 기록이 관심 명단 없이 돌린 것과 같다
+    probeEnd.advance(3);
+    expect(g.news.filter((n) => n.kind !== 'watch')).toEqual(probeEnd.news);
+    expect(g.season.toSave()).toEqual(probeEnd.season.toSave());
+    expect(g.actions).toEqual(probeEnd.actions);
+
+    const lines = watchLines(g);
+    const nameOf = (id: string) => g.watch.find((w) => w.id === id)!.name;
+    for (const id of fa) {
+      const n = nameOf(id);
+      const filed = lines.filter((l) => l.text.startsWith(`관심 선수 ${n}`) && l.text.includes('FA를 신청했습니다'));
+      expect(filed, n).toHaveLength(1);
+      expect(filed[0]).toMatchObject({ year: 2026, day: -1 });
+    }
+    const mName = nameOf(marketId!);
+    // 시즌 중에 방출됐으면 그때, 아니면 오프시즌 방출 선수 시장에서 한 번만 (이 시드는 시즌 중 외국인 교체로 방출)
+    expect(lines.filter((l) => l.text.startsWith(`관심 선수 ${mName}`) && l.text.includes('방출돼'))).toHaveLength(1);
+    if (rel) {
+      // 시즌 중 방출 + 오프시즌 방출 선수 시장 = 한 번만
+      expect(lines.filter((l) => l.text.includes(rel.name) && l.text.includes('방출'))).toHaveLength(1);
+    }
+    // 2027 개막 날 트레이드 가능 한 줄 (다른 구단 국내 선수로 남은 관심 선수가 있으면)
+    const tradable = g.watch.filter((w) => { const p = g.world.players.find((x) => x.id === w.id); return p && p.teamIdx >= 0 && p.teamIdx !== g.teamIdx && !p.foreign; });
+    const opening = lines.filter((l) => l.year === 2027 && l.text.includes('트레이드로 데려올 수 있습니다'));
+    expect(opening).toHaveLength(tradable.length ? 1 : 0);
+    if (tradable.length) expect(opening[0].day).toBe(0);
+    // 같은 줄이 두 번 나오지 않는다
+    expect(new Set(lines.map((l) => `${l.year}/${l.text}`)).size).toBe(lines.length);
+  }, 300_000);
 });

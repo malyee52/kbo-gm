@@ -4,7 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
-import { pruneUndrafted, watchStatus, type WatchEntry, type WatchStatus } from './watch';
+import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
 import {
   absenceLabel, assignSlots, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, isVirtual, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
@@ -148,7 +148,7 @@ export interface ReproInfo {
   actions: GameAction[];
 }
 
-export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason' | 'plan' | 'owner' | 'event';
+export type NewsKind = 'absence' | 'return' | 'callup' | 'entry' | 'season' | 'trade' | 'offseason' | 'plan' | 'owner' | 'event' | 'watch';
 
 /** 기용표를 선수 id로 적은 것 (조작 기록용) */
 export interface PlanIds {
@@ -691,6 +691,8 @@ export class GameSession {
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
     g.applyChoice = save.phase === 'season' && save.applyChoice ? [...save.applyChoice] : null;
     g.watch = save.watch ? clone(save.watch) : [];
+    // 알린 일 칸이 없는 관심 선수(2026-10-23 소식 알림 전 저장)는 지금 상태를 알린 것으로 둔다
+    if (g.watch.some((w) => !w.told)) g.watch = g.watch.map((w) => (w.told ? w : markTold(g.watchCtx(), w)));
     g.ensureOwner();
     ensureFinance(g.league);
     ensureCoaches(g.league);
@@ -1819,6 +1821,7 @@ export class GameSession {
       const ev = rollEvent(ensureEvents(this.league), this.eventContext());
       if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
     }
+    this.watchCheck(day);
   }
 
   /**
@@ -2086,12 +2089,31 @@ export class GameSession {
       this.watch = this.watch.filter((w) => w.id !== id);
       return false;
     }
-    this.watch = [...this.watch, { id, name, year: this.year }];
+    // 담을 때 이미 참인 일(FA 시장에 있음, 트레이드 가능 등)은 알리지 않는다
+    this.watch = [...this.watch, markTold(this.watchCtx(), { id, name, year: this.year })];
     return true;
   }
 
   watchStatus(id: string): WatchStatus {
-    return watchStatus({ phase: this.phase, league: this.league, worldPlayers: this.world.players, offseason: this.offseason }, id);
+    return watchStatus(this.watchCtx(), id);
+  }
+
+  private watchCtx(): WatchNewsCtx {
+    return {
+      phase: this.phase, league: this.league, worldPlayers: this.world.players, offseason: this.offseason,
+      year: this.year, userTeam: this.teamIdx, tradeOpen: this.tradeOpen, deadline: this.tradeDl,
+    };
+  }
+
+  /**
+   * 관심 선수 소식 (game/watch.ts watchNews): 하루 진행·오프시즌 조작 뒤 그날 상태에서 새로 생긴 일만 소식에 한 줄씩.
+   * 난수를 쓰지 않고 진행 상태를 바꾸지 않는다 (관심 명단의 알린 일 칸만 고친다). 결정함에는 띄우지 않는다
+   */
+  private watchCheck(day: number): void {
+    if (!this.watch.length) return;
+    const r = watchNews(this.watchCtx(), this.watch);
+    this.watch = r.watch;
+    for (const text of r.lines) this.news.push({ year: this.year, day, kind: 'watch', text });
   }
 
   // ---- 리그 상태 조회
@@ -2523,6 +2545,7 @@ export class GameSession {
         this.actions.push(clone(a));
         this.awardNews();
         this.addOffNews(`${this.year} 오프시즌 시작. FA 신청 ${this.offseason.fa.entries.length}명.`);
+        this.watchCheck(-1);
         return res;
       }
       case 'open': {
@@ -2614,6 +2637,7 @@ export class GameSession {
           this.addNews(0, 'owner', `샐러리캡 하한 ${x.strike}회 연속 미달: 캡 대상 연봉 ${(x.pay / 10000).toFixed(1)}억 원으로 하한 ${(x.floor / 10000).toFixed(1)}억 원보다 ${((x.floor - x.pay) / 10000).toFixed(1)}억 원 적습니다. 유소년 발전기금 ${(x.fine / 10000).toFixed(1)}억 원.`);
         }
         this.setSeasonGoal();
+        this.watchCheck(0);
         return res;
       }
     }
@@ -2684,6 +2708,7 @@ export class GameSession {
     if (res.ok) this.actions.push(clone(a));
     this.offVersion++;
     this.offNews(logBefore);
+    this.watchCheck(-1);
     return res;
   }
 
