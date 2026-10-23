@@ -518,6 +518,14 @@ export function buildWorld(input: BuildWorldInput): World {
   };
 }
 
+/**
+ * 경기 안 판정으로 자책인 득점이 비자책이 될 확률: 그 해 비자책 비율(share)에서 경기 안 판정 몫(inGame)을 뺀 나머지를 채운다.
+ * 경기 안 몫은 해마다 다르다 (실책이 많은 옛 시대가 크다, eras.ts eraEnv가 시대 표의 ue로 다시 낸다)
+ */
+export function unearnedFill(params: EngineParams, share: number, inGame: number): number {
+  return params.unearnedRunScale * Math.max(0, share - inGame) / (1 - inGame);
+}
+
 /** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
 export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa' | 'sbPct'>, params: EngineParams, year?: number): LeagueEnv {
   const odds = (x: number) => x / (1 - x);
@@ -526,7 +534,8 @@ export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' 
     roe: params.roePerUnearnedShare * league.unearnedShare,
     sac: league.sacPerPa,
     // 경기 안 판정 몫(해마다 거의 같다)을 뺀 모자란 몫만 확률로 채운다. 비율에 곱하면 비자책이 적은 해(2012 0.079)에 넘쳤다
-    unearnedRun: params.unearnedRunScale * Math.max(0, league.unearnedShare - params.unearnedInGame) / (1 - params.unearnedInGame),
+    unearnedRun: unearnedFill(params, league.unearnedShare, params.unearnedInGame),
+    unearnedShare: league.unearnedShare,
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
     gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
     ...(league.sbPct ? { sbPct: league.sbPct } : {}),

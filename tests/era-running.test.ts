@@ -30,6 +30,18 @@ describe('시대별 주루 배율 (엔진 2 13단계)', () => {
     expect(eraEnv({ year: 2025, env }, TABLE)).toBe(env);
   });
 
+  it('경기 안 비자책 몫(ue)이 있으면 비자책 채우기는 그 해 비율에서 그 몫을 뺀 만큼 (엔진 2 14단계)', () => {
+    const env = { roe: 0.02, sac: 0.01, unearnedRun: 0.03, wildPitch: 0.005, gbOdds: 1, unearnedShare: 0.15 };
+    const P: EngineParams = { ...TABLE, eraRunning: [{ year: 1990, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.08 }, { year: 2000, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.06 }] };
+    expect(eraEnv({ year: 1990, env }, P).unearnedRun).toBeCloseTo((0.15 - 0.08) / (1 - 0.08), 10);
+    expect(eraEnv({ year: 1995, env }, P).unearnedRun).toBeCloseTo((0.15 - 0.07) / (1 - 0.07), 10);
+    // 경기 안 몫이 비율보다 크면 채우지 않는다
+    expect(eraEnv({ year: 1990, env: { ...env, unearnedShare: 0.05 } }, P).unearnedRun).toBe(0);
+    // 리그 비율이 없는 환경은 그대로
+    const { unearnedShare: _, ...bare } = env;
+    expect(eraEnv({ year: 1990, env: bare }, P)).toBe(bare);
+  });
+
   it('곱한 값: 병살·희생플라이·도루, 추가 진루는 1을 넘지 않는다', () => {
     const p = withEraRunning(TABLE, 1990);
     expect(p.doublePlay).toBeCloseTo(DEFAULT_PARAMS.doublePlay * 0.8, 10);

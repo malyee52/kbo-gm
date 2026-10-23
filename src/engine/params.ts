@@ -181,6 +181,11 @@ export interface EraRunning {
    * 2001~2026은 리그 경기당 실책이 비자책 비율에 비례해(약 15.6배) 1이고, 2000년 이전은 비자책 비율이 실책보다 높아 1보다 작다
    */
   err: number;
+  /**
+   * 경기 안 자책 판정(실책 출루 주자, 실책을 아웃으로 친 이닝 재구성, 실책·포일로 더 간 주자)이 만드는 비자책 실점 비율 (엔진 2 14단계).
+   * 모자란 몫 채우기(unearnedRun)가 그 해 비자책 비율에서 이것을 뺀 만큼만 채운다. 없으면 unearnedInGame (한 값)
+   */
+  ue?: number;
 }
 
 export interface EngineParams {
@@ -653,14 +658,16 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 2012·2019 병살·희생플라이·도루를 맞춘 값. 실책(err)은 근거가 있다: 2001~2026은 사용자 수비 기록(리그 실책 합)이 비자책 비율에 비례하고,
   // 2000년 이전은 기사의 경기당 실책(1984 1.7개, 1990년대 1.5개대, OSEN 2023-04-18 등, docs/temp-values.md)이 그 비례식(1985 2.3개)보다 적다.
   // 추가 진루(adv) 1985 0.8은 근거 없이 득점을 맞춘 값이다
+  // ue (엔진 2 14단계): 비자책 채우기를 끄고(unearnedRunScale 0) tools/validate_engine.ts 10시즌으로 잰 경기 안 비자책 몫 (측정값, 다른 조정값이 바뀌면 다시 잰다)
   eraRunning: [
-    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71 },
-    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79 },
-    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83 },
-    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1 },
-    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1 },
-    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1 },
-    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1 },
+    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71, ue: 0.083 },
+    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79, ue: 0.071 },
+    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83, ue: 0.070 },
+    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1, ue: 0.058 },
+    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1, ue: 0.054 },
+    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1, ue: 0.062 },
+    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
+    { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
   ],
 
   restChance: 0.6,

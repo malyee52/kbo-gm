@@ -145,6 +145,8 @@ export interface LeagueEnv {
   sac: number;
   /** 득점이 (타자 출루 외의 실책 때문에) 비자책으로 기록될 확률 */
   unearnedRun: number;
+  /** 그 해 리그 비자책 실점 비율 (엔진 2 14단계: 시대 표의 경기 안 몫으로 unearnedRun을 다시 낼 때, eras.ts eraEnv). 없으면 다시 내지 않는다 */
+  unearnedShare?: number;
   /** 주자가 있는 타석에서 폭투·포일·보크로 주자가 한 베이스씩 가는 확률 */
   wildPitch: number;
   /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */

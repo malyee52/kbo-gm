@@ -1,4 +1,5 @@
 import type { EngineParams, EraRunning } from './params';
+import { unearnedFill } from './ratings';
 import type { LeagueEnv, World } from './types';
 
 // 시대별 투수 기용 (M8). 2000년 이전 KBO는 선발 4인 로테이션에 에이스가 길게 던지고 구원도 겸했다.
@@ -52,7 +53,8 @@ export function eraRunningOf(params: EngineParams, year: number): EraRunning {
     if (year > b.year) continue;
     const w = (year - a.year) / (b.year - a.year);
     const mix = (k: 'dp' | 'sf' | 'steal' | 'adv' | 'err') => a[k] + (b[k] - a[k]) * w;
-    return { year, dp: mix('dp'), sf: mix('sf'), steal: mix('steal'), adv: mix('adv'), err: mix('err') };
+    const ue = a.ue !== undefined && b.ue !== undefined ? a.ue + (b.ue - a.ue) * w : undefined;
+    return { year, dp: mix('dp'), sf: mix('sf'), steal: mix('steal'), adv: mix('adv'), err: mix('err'), ...(ue !== undefined ? { ue } : {}) };
   }
   return rows[rows.length - 1];
 }
@@ -76,8 +78,18 @@ export function withEraRunning(params: EngineParams, year: number): EngineParams
   };
 }
 
-/** 그 해의 실책 배율(err)을 곱한 리그 환경 (엔진 2 13단계). 배율이 1이면 월드의 환경 그대로 */
+/**
+ * 그 해의 실책 배율(err)을 곱한 리그 환경 (엔진 2 13단계). 시대 표에 경기 안 비자책 몫(ue)이 있으면 비자책 채우기(unearnedRun)도
+ * 그 몫을 빼고 다시 낸다 (엔진 2 14단계: 한 값 unearnedInGame으로 빼면 실책이 많은 2000년 이전에 비자책을 두 번 세어 +11~17%).
+ * 바꿀 것이 없으면 월드의 환경 그대로
+ */
 export function eraEnv(world: Pick<World, 'year' | 'env'>, params: EngineParams): LeagueEnv {
-  const err = eraRunningOf(params, world.year).err;
-  return err === 1 ? world.env : { ...world.env, roe: world.env.roe * err };
+  const e = eraRunningOf(params, world.year);
+  const refill = e.ue !== undefined && world.env.unearnedShare !== undefined;
+  if (e.err === 1 && !refill) return world.env;
+  return {
+    ...world.env,
+    roe: world.env.roe * e.err,
+    ...(refill ? { unearnedRun: unearnedFill(params, world.env.unearnedShare!, e.ue!) } : {}),
+  };
 }
