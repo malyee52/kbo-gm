@@ -91,6 +91,10 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
   // 잔여 경기 발표가 있는 해(R3~): 본 일정 뒤 미편성 경기는 발표일까지 들고 있다가 순연분과 함께 짠다
   const announce = rule.remainingFrom ? Math.max(daysBetween(rule.opening, rule.remainingFrom), mainEnd - REMAINING_LEAD_DAYS) : -1;
   const held: { g: PlanGame; cancel: number }[] = [];
+  // 발표일이 없는 해(R1·R2): 본 일정 마지막 3주 전까지의 취소 중 시즌 끝 잔여 경기로 간 것은 "추후 편성"으로 두고 그날 날짜를 알린다 (임시 해석)
+  const reveal = announce >= 0 ? announce : Math.max(0, mainEnd - REMAINING_LEAD_DAYS);
+  /** 옮긴 날을 발표 때 알리는 취소 (cancels 색인, knownSchedule) */
+  const late: number[] = [];
   if (announce >= 0) {
     for (let e = mainEnd + 1; e < days.length; e++) for (const g of days[e]) held.push({ g, cancel: -1 });
     days.length = mainEnd + 1;
@@ -257,14 +261,89 @@ export function applyWeather(base: SchedulePlan, input: WeatherInput): ScheduleP
       }
       const idx = cancels.length;
       cancels.push([d, g.home, g.away, -1]);
-      cancels[idx][3] = reschedule(g, d, idx);
+      const to = reschedule(g, d, idx);
+      cancels[idx][3] = to;
+      if (to < 0 || (announce < 0 && d < reveal && to > mainEnd)) late.push(idx);
     }
   }
   while (days.length && !days[days.length - 1].length) days.pop();
   for (const d of days) d.sort((x, y) => (x.dh === 2 ? 1 : 0) - (y.dh === 2 ? 1 : 0) || x.home - y.home);
 
   return {
-    ...base, days, cancels,
-    remainingFrom: base.remainingFrom >= 0 ? base.remainingFrom : announce,
+    ...base, days, cancels, held: late,
+    remainingFrom: base.remainingFrom >= 0 ? base.remainingFrom : announce >= 0 ? announce : late.length ? reveal : -1,
   };
+}
+
+/** day날 아침에 알려진 일정 (기획안 4.5) */
+export interface KnownSchedule {
+  /**
+   * 날짜별 경기. day 전은 실제로 치른 일정(days) 그대로, day부터는 발표 일정 + day까지 생긴 우천 취소·순연 (+ 발표 뒤 잔여 경기).
+   * day부터는 경기 중 비 회(rainInning)가 없고, day 뒤에 생길 취소는 아직 반영하지 않는다
+   */
+  days: PlanGame[][];
+  /** 날짜를 아직 모르는 경기 ("추후 편성": 잔여 경기 발표 전의 순연 경기와 미편성 경기). 발표(remainingFrom) 때 days로 들어간다 */
+  pending: PlanGame[];
+}
+
+/**
+ * 화면이 보는 일정: 미리 굴려 둔 실제 일정(days)에서 day날 아침까지 알 수 있는 것만 남긴다 (기획안 4.5, 8장 8단계).
+ * 잔여 경기 발표 전이면 발표 일정(planned)에 지금까지의 취소·순연을 앞에서부터 반영하고,
+ * 발표 뒤(또는 발표가 없는 해)면 실제 일정에서 day 뒤의 취소를 뒤에서부터 되돌린다. 난수를 쓰지 않는다
+ */
+export function knownSchedule(plan: Pick<SchedulePlan, 'days' | 'planned' | 'cancels' | 'held' | 'remainingFrom'>, day: number): KnownSchedule {
+  const out: PlanGame[][] = [];
+  const at = (e: number) => {
+    while (out.length <= e) out.push([]);
+    return out[e];
+  };
+  const same = (g: PlanGame, h: number, a: number) => g.home === h && g.away === a;
+  // 같은 대진이 있으면 더블헤더로 넣는다 (넣는 경기가 1차전, applyWeather double과 같다)
+  const add = (e: number, h: number, a: number) => {
+    const list = at(e);
+    const other = list.find((x) => same(x, h, a));
+    if (other) other.dh = 2;
+    list.push(other ? { home: h, away: a, dh: 1 } : { home: h, away: a });
+  };
+  // 한 경기를 뺀다 (옮겨 온 1차전 먼저). 더블헤더였으면 남은 경기는 한 경기로
+  const remove = (e: number, h: number, a: number) => {
+    const list = at(e);
+    let i = list.findIndex((x) => same(x, h, a) && x.dh === 1);
+    if (i < 0) i = list.findIndex((x) => same(x, h, a));
+    if (i < 0) return;
+    list.splice(i, 1);
+    const rest = list.find((x) => same(x, h, a));
+    if (rest) delete rest.dh;
+  };
+  const strip = (g: PlanGame): PlanGame => ({ home: g.home, away: g.away, ...(g.dh ? { dh: g.dh } : {}) });
+  for (let e = 0; e < Math.min(day, plan.days.length); e++) at(e).push(...plan.days[e].map((g) => ({ ...g })));
+  const pending: PlanGame[] = [];
+
+  if (day < plan.remainingFrom) {
+    for (let e = day; e < plan.planned.length; e++) at(e).push(...plan.planned[e].map(strip));
+    const late = new Set(plan.held);
+    plan.cancels.forEach(([d, h, a, to], i) => {
+      if (d > day) return;
+      if (d === day) remove(d, h, a);
+      if (late.has(i)) pending.push({ home: h, away: a });
+      else if (to >= day) add(to, h, a);
+    });
+    // 발표 일정에 없는 본 일정 경기 (잔여 경기 발표 때 편성하는 미편성분)
+    const extra = new Map<number, number>();
+    const key = (g: PlanGame) => g.home * 1000 + g.away;
+    for (const d of plan.days) for (const g of d) extra.set(key(g), (extra.get(key(g)) ?? 0) + 1);
+    for (const d of plan.planned) for (const g of d) extra.set(key(g), (extra.get(key(g)) ?? 0) - 1);
+    for (const [k, n] of [...extra].sort((x, y) => x[0] - y[0])) for (let i = 0; i < n; i++) pending.push({ home: Math.floor(k / 1000), away: k % 1000 });
+  } else {
+    for (let e = day; e < plan.days.length; e++) at(e).push(...plan.days[e].map(strip));
+    for (let i = plan.cancels.length - 1; i >= 0; i--) {
+      const [d, h, a, to] = plan.cancels[i];
+      if (d <= day) continue;
+      remove(to, h, a);
+      add(d, h, a);
+    }
+  }
+  while (out.length > day && !out[out.length - 1].length) out.pop();
+  for (let e = day; e < out.length; e++) out[e].sort((x, y) => (x.dh === 2 ? 1 : 0) - (y.dh === 2 ? 1 : 0) || x.home - y.home);
+  return { days: out, pending };
 }

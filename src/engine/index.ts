@@ -31,6 +31,7 @@ export {
   type Trait, type TraitParams, type Situation,
 } from './traits';
 export { eraPitching, leagueQuality, type EraPitching } from './eras';
+export { knownSchedule, type KnownSchedule } from './weather';
 export { planForWorld, pickOpeningHosts, rankedFromSeason, OPENING_HOSTS_FROM, type SchedulePlan, type PlanGame } from './schedule';
 export type * from './types';
 

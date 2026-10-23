@@ -46,6 +46,8 @@ export interface SchedulePlan {
   cancels: [number, number, number, number][];
   /** 잔여 경기 일정 발표 날짜 색인 (없으면 -1) */
   remainingFrom: number;
+  /** 옮긴 날을 잔여 경기 일정 발표(remainingFrom) 때 알리는 취소 (cancels 색인). 그 전에는 "추후 편성" (8단계 knownSchedule) */
+  held: number[];
   /** 본 일정의 연전 (잔여 경기는 들지 않는다) */
   series: PlanSeries[];
   /** 본 일정이 끝난 날짜 색인 (마지막 연전의 마지막 날) */
@@ -733,7 +735,7 @@ function tryBuild(input: ScheduleInput, rng: Rng, attempt: number): SchedulePlan
   }
 
   const plan: SchedulePlan = {
-    opening: rule.opening, days, planned, cancels: [], remainingFrom,
+    opening: rule.opening, days, planned, cancels: [], remainingFrom, held: [],
     series: series.map(({ day, len, home, away }) => ({ day, len, home, away })), mainEnd, attempt,
   };
   const problems = planProblems(plan, input);
@@ -859,7 +861,7 @@ export function spreadPlan(rule: Pick<YearScheduleRule, 'opening' | 'breaks'>, n
     }
   }
   return {
-    opening: rule.opening, days, planned: days.map((d) => [...d]), cancels: [], remainingFrom: -1, series: [], mainEnd: days.length - 1, attempt: 1,
+    opening: rule.opening, days, planned: days.map((d) => [...d]), cancels: [], remainingFrom: -1, held: [], series: [], mainEnd: days.length - 1, attempt: 1,
   };
 }
 

@@ -195,7 +195,11 @@ describe('날씨와 우천 순연 (7단계)', () => {
       expect(planned).toBeLessThanOrEqual(p.days.flat().length);
       for (const [day, , , to] of p.cancels) if (day < p.remainingFrom && to >= p.planned.length) expect(to).toBeGreaterThan(p.remainingFrom);
     }
-    expect(planOf(1995, 0).remainingFrom).toBe(-1);
+    // 발표일이 없는 해(R1·R2)는 본 일정 마지막 3주 전 (그때까지 시즌 끝 잔여 경기로 간 순연이 있을 때만, 8단계)
+    for (let s = 0; s < SEEDS; s++) {
+      const q = planOf(1995, s);
+      expect(q.remainingFrom).toBe(q.held.length ? q.mainEnd - 21 : -1);
+    }
   });
 
   it('같은 시드 = 같은 취소·순연, 다른 시드 = 다름. 날씨는 그 날 그 구장마다 정해진다', () => {

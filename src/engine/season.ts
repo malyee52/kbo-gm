@@ -13,6 +13,7 @@ import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
 import { Rng } from './rng';
 import { planForWorld, type PlanGame, type SchedulePlan } from './schedule';
+import { knownSchedule, type KnownSchedule } from './weather';
 import { CHURN_DAYS, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
@@ -20,7 +21,7 @@ import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine
 export type ScheduledGame = PlanGame;
 
 /** 시즌이 쓰는 일정 (일정 개편 기획안 3.4). 시즌 저장에 그대로 들어간다 */
-export type SeasonPlan = Pick<SchedulePlan, 'opening' | 'days' | 'planned' | 'cancels' | 'remainingFrom'>;
+export type SeasonPlan = Pick<SchedulePlan, 'opening' | 'days' | 'planned' | 'cancels' | 'remainingFrom' | 'held'>;
 
 /** 저장한 일정. 경기는 [홈, 원정, 더블헤더 차전, 경기 중 비 회] (없는 값은 0, 뒤쪽 0은 줄인다) */
 export interface SavedSchedule {
@@ -29,6 +30,8 @@ export interface SavedSchedule {
   planned: number[][][];
   cancels: [number, number, number, number][];
   remainingFrom: number;
+  /** 옮긴 날을 잔여 경기 발표 때 알리는 취소 (cancels 색인) */
+  held?: number[];
 }
 
 function packGame(g: PlanGame): number[] {
@@ -44,14 +47,14 @@ function unpackGame(a: number[]): PlanGame {
 export function packSchedule(p: SeasonPlan): SavedSchedule {
   return {
     opening: p.opening, days: p.days.map((d) => d.map(packGame)), planned: p.planned.map((d) => d.map(packGame)),
-    cancels: p.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: p.remainingFrom,
+    cancels: p.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: p.remainingFrom, held: [...p.held],
   };
 }
 
 export function unpackSchedule(s: SavedSchedule): SeasonPlan {
   return {
     opening: s.opening, days: s.days.map((d) => d.map(unpackGame)), planned: s.planned.map((d) => d.map(unpackGame)),
-    cancels: s.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: s.remainingFrom,
+    cancels: s.cancels.map((c) => [...c] as [number, number, number, number]), remainingFrom: s.remainingFrom, held: [...(s.held ?? [])],
   };
 }
 
@@ -342,6 +345,14 @@ export class Season {
   }
 
   /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */
+  /**
+   * day날 아침에 알려진 일정 (기획안 4.5). 화면은 앞날 일정을 이것으로만 본다:
+   * 지난 날은 실제 일정, day부터는 발표 일정 + day까지의 우천 취소·순연 (+ 발표 뒤 잔여 경기). 앞날의 취소와 경기 중 비 회는 없다
+   */
+  knownSchedule(day = this.day): KnownSchedule {
+    return knownSchedule(this.plan, day);
+  }
+
   setPlan(teamIdx: number, plan: DepthPlan | null): void {
     const ts = this.teamSeasons[teamIdx];
     ts.plan = plan ? { starters: { ...plan.starters }, rotation: [...plan.rotation], closer: plan.closer, ...(plan.order ? { order: [...plan.order] } : {}), ...(plan.pen ? { pen: { ...plan.pen } } : {}) } : null;

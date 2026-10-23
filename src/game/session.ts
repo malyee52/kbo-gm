@@ -1661,6 +1661,8 @@ export class GameSession {
     }
     const before = org.map((p) => s.states.absentUntil[p.idx]);
     this.absencesToday = [];
+    // 그날 아침 일정 소식 (우천 취소·잔여 경기 발표): 미리 정해 둔 일정에서 그날 알 수 있는 것만 읽는다
+    this.scheduleNews(day);
     // 무작위 이벤트의 경기력 효과 (events.ts formToday) + 코치 (coaches.ts coachEdge)
     this.prepareDay(s);
     // 직접 지휘한 경기: 조작 기록의 선택을 물음 순서대로 (모자라면 자동)
@@ -1871,6 +1873,47 @@ export class GameSession {
     const result = resolveEvent(ensureEvents(this.league), this.eventContext(), choice);
     this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
     return result;
+  }
+
+  /**
+   * 일정 소식 (일정 개편 기획안 4.5): 잔여 경기 일정 발표, 그날 우천 취소와 다시 치르는 날.
+   * 개막 때 정해 둔 일정(Season.plan)과 그날 알려진 일정(knownSchedule)만 읽어서 같은 시드 같은 날은 같은 문장이다
+   */
+  private scheduleNews(day: number): void {
+    const s = this.season;
+    const { cancels, remainingFrom } = s.plan;
+    const today = cancels.filter((c) => c[0] === day);
+    if (day !== remainingFrom && !today.length) return;
+    const year = this.world.year;
+    const name = (t: number) => this.world.teams[t].name;
+    const mine = (g: { home: number; away: number }) => g.home === this.teamIdx || g.away === this.teamIdx;
+    const known = s.knownSchedule(day);
+    if (day === remainingFrom) {
+      let left = 0;
+      let last = -1;
+      known.days.forEach((games, e) => {
+        if (e < day) return;
+        const n = games.filter(mine).length;
+        left += n;
+        if (n) last = e;
+      });
+      this.addNews(day, 'season', `잔여 경기 일정이 발표됐습니다. 우리 팀 남은 경기 ${left}경기${last >= 0 ? `, 마지막 경기 ${formatDate(year, last)}` : ''}.`);
+    }
+    if (!today.length) return;
+    // 옮긴 날: 알려진 일정에 그 대진이 있으면 그날, 발표 전 잔여 경기면 "추후 편성"
+    const late = new Set(s.plan.held);
+    const when = (c: [number, number, number, number]): { text: string; short: string } => {
+      if (late.has(cancels.indexOf(c)) && day < remainingFrom) return { text: '추후 편성합니다 (잔여 경기 일정 발표 때)', short: '추후 편성' };
+      const dh = known.days[c[3]]?.find((g) => g.home === c[1] && g.away === c[2] && g.dh === 1);
+      return { text: `${formatDate(year, c[3])}에 ${dh ? '더블헤더 1차전으로 ' : ''}다시 치릅니다`, short: `${shortDate(year, c[3])}${dh ? ' 더블헤더' : ''}` };
+    };
+    const others: string[] = [];
+    for (const c of today) {
+      const w = when(c);
+      if (mine({ home: c[1], away: c[2] })) this.addNews(day, 'season', `${name(c[2])} 대 ${name(c[1])} 경기는 우천으로 취소됐습니다. ${w.text}.`);
+      else others.push(`${name(c[2])} 대 ${name(c[1])} (${w.short})`);
+    }
+    if (others.length) this.addNews(day, 'season', `우천 취소: ${others.join(', ')}.`);
   }
 
   private addNews(day: number, kind: NewsKind, text: string): void {

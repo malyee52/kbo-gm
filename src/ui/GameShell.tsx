@@ -369,7 +369,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     go(last && items.some((n) => n.id === last) ? last : items[0].id);
   };
   const psCur = session.postseasonRunning ? currentSeries(session.postseason!) : null;
-  const left = session.season.schedule.slice(session.day).filter((d) => d.some((g) => g.home === session.teamIdx || g.away === session.teamIdx)).length;
+  // 남은 경기 수: 오늘 알려진 일정 기준 (앞날의 우천 취소는 모른다). 날짜 미정(추후 편성) 경기와 더블헤더 두 경기를 모두 센다
+  const known = off || session.done ? null : session.season.knownSchedule(session.day);
+  const ours = (g: { home: number; away: number }) => g.home === session.teamIdx || g.away === session.teamIdx;
+  const left = known ? known.days.slice(session.day).reduce((n, d) => n + d.filter(ours).length, 0) + known.pending.filter(ours).length : 0;
   // 머리 부분 성적: 시즌 중이면 이번 시즌, 오프시즌이면 지난 시즌 순위
   const recNow = off ? null : session.season.teams[session.teamIdx];
   const order = off ? session.league.lastSeason?.standings ?? [] : session.season.standings();
