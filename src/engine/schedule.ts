@@ -1,7 +1,7 @@
 // 연전 단위 정규시즌 일정 생성기 (일정 개편 기획안 3장). 순수 함수이고 난수는 Rng만 쓴다: 같은 시드 = 같은 일정.
 // Season은 planForWorld로 일정을 만든다 (기획안 8장 4단계). 우천 취소·순연은 그 뒤에 날씨를 굴려 붙인다 (weather.ts applyWeather, 7단계).
-// 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-99(1999 양대 리그)·S33-9(2013~2014)·S33F(2023~)
-// (3·5·6단계). 아직 만들지 않은 틀(S33L2 2015~2022, 2연전기 시작 결정 대기)과 규칙 표에 맞지 않는 월드(리그 나눔이 없는 1999 월드 포함)는
+// 연전 틀: W82·W83(1982·1983)·T3W2(1984~1985)·S2(1986~1990)·S33(1991~2012)·S33-99(1999 양대 리그)·S33-9(2013~2014)·S33L2(2015~2022)·S33F(2023~)
+// (3·5·6단계, S33L2는 2연전 시작일 결정 뒤). 규칙 표에 맞지 않는 월드(리그 나눔이 없는 1999 월드 포함)는
 // 같은 달력(개막일·월요일·쉬는 기간) 위에 원형 대진을 하루 한 경기씩 편다 (spreadPlan, 연전 없음).
 //
 // 만드는 순서 (기획안 3.2):
@@ -81,8 +81,8 @@ const REMAINING_LEAD_DAYS = 21;
 const HOME_HEAVY_ODD = ['두산', '롯데', 'SSG', 'KT', '한화'];
 const HOME_HEAVY_EVEN = ['LG', 'KIA', '삼성', 'NC', '히어로즈'];
 
-/** 연전 생성기가 만드는 틀. S33L2(2015~2022, 2연전기 시작 사용자 결정 대기)는 아직 하루씩 */
-const SUPPORTED_FRAMES = ['W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-99', 'S33-9', 'S33F'];
+/** 연전 생성기가 만드는 틀 */
+const SUPPORTED_FRAMES = ['W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-99', 'S33-9', 'S33L2', 'S33F'];
 /**
  * W82·W83의 목요일(주중 셋째 날)을 열 때 맞추는 날: 참고 종료일보다 이만큼 앞에 본 일정이 끝나게 (임시값).
  * 남는 날은 우천 순연(7단계) 몫이다. 연전 해(S33)도 본 일정이 실제보다 2~4주 이르게 끝난다
@@ -265,6 +265,8 @@ function frameShape(rule: YearScheduleRule, horizon = 260, rng?: Rng, total?: Ma
       return { slots: weekPieces(rule, (d) => (w(d) === 2 || w(d) === 3 ? 'a' : w(d) === 4 || w(d) === 5 ? 'b' : 'c'), horizon), counts: new Map([[2, rule.vs / 2]]), unit: 1, minLen: 1 };
     case 'S33-9':
       return s339Shape(rule, horizon);
+    case 'S33L2':
+      return s33l2Shape(rule, horizon);
     case 'S33-99':
       return s3399Shape(rule, horizon, total!, rng!);
     default:
@@ -291,6 +293,45 @@ function s339Shape(rule: YearScheduleRule, horizon: number): FrameShape {
     if (end < best.end) best = { slots, end };
   }
   return { slots: best.slots, counts, unit: 1, minLen: 1 };
+}
+
+/**
+ * S33L2 (2015~2022, 10구단): 2연전 시작일(규칙 표, 해마다 실제 날짜) 전은 3연전 주(화~목 / 금~일), 그날부터는 2연전 주
+ * (화·수 / 목·금 / 토·일). 상대별 3×4 + 2×2 (사용자 결정: 상대별 구성을 지킨다).
+ * 2연전기 끝: 규칙 표에 끝 날이 있으면(2020) 그날까지. 없으면 2연전 칸이 다 찬 날까지 — 3연전기에 3연전 칸이 모자란 해
+ * (2015·2019·2021·2022: 개막 토·일 2연전, 쉬는 기간)는 그 뒤 남은 3연전을 다시 3연전 주에 놓는다 (임시 규칙. 2016·2021·2022
+ * 실제 일정도 시즌 끝에 3일 연전이 섞인다). 3연전 칸이 모자라지 않으면 본 일정 끝까지 2연전.
+ * 2연전이 토요일에 시작하는 해(2018·2019·2021·2022)는 앞 금요일이 하루짜리 칸이 되어 비운다 (2018·2019 실제 휴식·예비일과 같다).
+ * 개막 토·일처럼 쉬는 기간에 잘린 2일 칸은 3연전기에도 2연전으로 쓴다
+ */
+function s33l2Shape(rule: YearScheduleRule, horizon: number): FrameShape {
+  const from = rule.twoGameFrom;
+  if (!from || from === 'allStar') throw new Error(`일정 생성기: ${rule.year}년 S33L2 규칙에 2연전 시작일이 없음`);
+  const counts = threeTwo(rule.vs);
+  const rounds = (rule.teams ?? 10) % 2 === 0 ? (rule.teams ?? 10) - 1 : rule.teams ?? 10;
+  const need3 = counts.get(3)! * rounds;
+  const need2 = counts.get(2)! * rounds;
+  const build = (to?: string) => weekPieces(rule, (d) => {
+    const wd = weekdayOf(d);
+    if (from <= d && (!to || d <= to)) return wd === 2 || wd === 3 ? 'x' : wd === 4 || wd === 5 ? 'y' : 'z';
+    return wd >= 2 && wd <= 4 ? 'a' : 'b';
+  }, horizon);
+  let slots = build(rule.twoGameTo);
+  if (!rule.twoGameTo) {
+    // 날짜 순으로 칸을 쓸 때 2연전 칸이 다 차는 날 (3연전기의 2일 칸도 2연전으로 센다)
+    let three = 0;
+    let two = 0;
+    for (const s of slots) {
+      const pre = addDays(rule.opening, s.day) < from;
+      if (pre && s.len >= 3) three = Math.min(need3, three + 1);
+      else if (s.len >= 2) two++;
+      if (two >= need2) {
+        if (three < need3) slots = build(addDays(rule.opening, s.day + s.len - 1));
+        break;
+      }
+    }
+  }
+  return { slots, counts, unit: 1, minLen: 1 };
 }
 
 /** 3연전 주(화~목 / 금~일)에서 two의 주만 2연전 주(화·수 / 목·금 / 토·일)로 바꾼 달력 칸 (S33-9·S33-99) */

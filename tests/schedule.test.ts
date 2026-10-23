@@ -245,8 +245,10 @@ describe('연전 단위 일정 생성기 (S33·S33F)', () => {
     expect(JSON.stringify(a.days)).not.toBe(JSON.stringify(c.days));
   });
 
-  it('아직 만들지 않은 연전 틀, 리그 나눔이 없는 1999, 구단 수가 다른 월드는 오류', () => {
-    expect(() => generatePlan(inputFor(2019, 'x'))).toThrow(/연전 틀/);
+  it('모르는 연전 틀, 2연전 시작일이 없는 S33L2, 리그 나눔이 없는 1999, 구단 수가 다른 월드는 오류', () => {
+    const r2019 = inputFor(2019, 'x');
+    expect(() => generatePlan({ ...r2019, rule: { ...r2019.rule, frame: 'X' as never } })).toThrow(/연전 틀/);
+    expect(() => generatePlan({ ...r2019, rule: { ...r2019.rule, twoGameFrom: undefined } })).toThrow(/2연전 시작일/);
     expect(() => generatePlan(inputFor(1999, 'x', { divisions: undefined }))).toThrow(/리그 나눔/);
     expect(() => generatePlan(inputFor(2026, 'x', { teams: 8 }))).toThrow(/구단/);
   });
@@ -299,10 +301,13 @@ describe('생성기 연결 (월드와 시즌)', () => {
     expect(games).toEqual(new Array(10).fill(144));
   });
 
-  it('연전 틀이 아직 없는 해(2019 S33L2)는 같은 달력에 하루 한 경기씩: 개막일, 발표 일정의 월요일·쉬는 기간 경기 없음, 팀당 144경기', () => {
-    expect(framedRule(w2019)).toBeUndefined();
-    const p = planForWorld(w2019, new Rng('sched-2019'));
+  it('규칙 표와 팀당 경기 수가 다른 월드(2019 규칙, 팀당 140경기)는 같은 달력에 하루 한 경기씩: 개막일, 발표 일정의 월요일·쉬는 기간 경기 없음', () => {
+    const w = { ...w2019, gamesPerTeam: 140 };
+    expect(framedRule(w2019)?.frame).toBe('S33L2');
+    expect(framedRule(w)).toBeUndefined();
+    const p = planForWorld(w, new Rng('sched-2019'));
     expect(p.opening).toBe(w2019.schedule!.opening);
+    expect(p.series).toEqual([]);
     const games = new Array(10).fill(0);
     // 월요일 경기는 우천 순연뿐 (발표 일정 planned에는 없다), 쉬는 기간에는 실제 일정에도 없다
     p.planned.forEach((d, i) => { if (weekdayOf(addDays(p.opening, i)) === 1) expect(d).toEqual([]); });
@@ -311,7 +316,7 @@ describe('생성기 연결 (월드와 시즌)', () => {
       if (w2019.schedule!.breaks.some((b) => b.from <= date && date <= b.to)) expect(d).toEqual([]);
       for (const g of d) { games[g.home]++; games[g.away]++; }
     });
-    expect(games).toEqual(new Array(10).fill(144));
+    expect(games).toEqual(new Array(10).fill(140));
   });
 
   it('일정 규칙이 없는 월드는 기본 개막일(3월 넷째 토요일)에 하루 한 경기씩', () => {
@@ -324,6 +329,8 @@ describe('생성기 연결 (월드와 시즌)', () => {
 // 5단계: 전 시대 틀 (W82·W83·T3W2·S2·S33-9), 1988 가을야구 시작, 2027~ 규칙과 구단 수가 10이 아닌 월드
 describe('전 시대 연전 틀 (5단계)', () => {
   const OLD_YEARS = [1982, 1983, 1984, 1985, 1986, 1987, 1988, 1989, 1990, 2013, 2014];
+  /** S33L2 (2015~2022): 해마다 실제 2연전 시작일 (8차 개발) */
+  const L2_YEARS = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022];
   const ruleOf = (y: number) => scheduleRule(store.schedule!, y)!;
   const wd = (y: number, i: number) => weekdayOf(dateOf(ruleOf(y), i));
   /** 상대별 연전 길이 목록 (짧은 것부터) */
@@ -346,7 +353,7 @@ describe('전 시대 연전 틀 (5단계)', () => {
   });
 
   it('새 틀 해 × 50시드: 검사 통과, 상대별 경기 수 정확, 팀당 홈 수가 시즌 자료와 ±2 안', () => {
-    for (const y of OLD_YEARS) {
+    for (const y of [...OLD_YEARS, ...L2_YEARS]) {
       const input = inputFor(y, 'x');
       const n = input.teams;
       const sd = store.season(y)!;
@@ -381,6 +388,39 @@ describe('전 시대 연전 틀 (5단계)', () => {
         }
         if (s2) expect(p.series.every((x) => x.len === 2)).toBe(true);
       }
+    }
+  });
+
+  it('S33L2 × 50시드: 상대별 3×4 + 2×2, 2연전은 규칙 표의 시작일부터 (그 전은 개막 2연전 말고 3연전), 2020은 끝 날 뒤 다시 3연전', () => {
+    for (const y of L2_YEARS) {
+      const rule = ruleOf(y);
+      const from = rule.twoGameFrom as string;
+      for (let s = 0; s < SEEDS; s++) {
+        const p = plan(y, s);
+        for (let a = 0; a < 10; a++) for (let b = a + 1; b < 10; b++) expect(pairLens(p, a, b), `${y}/${s} ${a}-${b}`).toEqual([2, 2, 3, 3, 3, 3]);
+        const starts = p.series.map((x) => ({ date: dateOf(rule, x.day), len: x.len }));
+        // 2연전기 시작일에 2연전, 그 전 2연전은 개막 연전뿐
+        expect(starts.some((x) => x.date === from && x.len === 2), `${y}/${s}`).toBe(true);
+        for (const x of starts.filter((z) => z.date < from)) if (x.date !== rule.opening) expect(x.len, `${y}/${s} ${x.date}`).toBe(3);
+        // 2연전기 끝(규칙 표 또는 마지막 2연전)까지는 모두 2연전, 그 뒤는 모두 3연전
+        const lastTwo = Math.max(...starts.filter((x) => x.len === 2).map((x) => x.date).map((d) => daysBetween(rule.opening, d)));
+        for (const x of starts.filter((z) => z.date >= from)) {
+          const i = daysBetween(rule.opening, x.date);
+          expect(x.len, `${y}/${s} ${x.date}`).toBe(i <= lastTwo ? 2 : 3);
+        }
+        if (rule.twoGameTo) expect(dateOf(rule, lastTwo + 1) <= rule.twoGameTo, `${y}/${s}`).toBe(true);
+      }
+    }
+    // 2020: 9/29(화)부터 다시 3연전
+    expect(ruleOf(2020).twoGameTo).toBe('2020-09-27');
+    expect(plan(2020, 0).series.some((x) => dateOf(ruleOf(2020), x.day) === '2020-09-29' && x.len === 3)).toBe(true);
+  });
+
+  it('S33L2: 3연전 칸이 모자라지 않는 해(2016·2017·2018)는 본 일정 끝까지 2연전, 모자란 해는 끝에 남은 3연전', () => {
+    for (const y of L2_YEARS.filter((x) => x !== 2020)) {
+      const p = plan(y, 0);
+      const last = p.series.filter((x) => x.day === Math.max(...p.series.map((z) => z.day)));
+      expect(last.every((x) => x.len === ([2016, 2017, 2018].includes(y) ? 2 : 3)), `${y}`).toBe(true);
     }
   });
 
