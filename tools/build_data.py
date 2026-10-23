@@ -17,6 +17,8 @@
                                  자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다 ('확인'·'출처 확인'은 확인값).
                                  구분: 개막 명단(일반·아시아쿼터) 또는 제외(시즌 중 교체 선수). 계약구분: 아시아쿼터면 시장에서도 아시아쿼터.
                                  기록소속: 개막 구단과 그 해 기록 소속이 다를 때(시즌 중 이적) 기록 소속. 월드는 개막 구단에서 시작한다.
+  data-src/제도연표_보정.csv      자료집 '제도연표'의 미확인 항목을 위키로 확인한 값과 출처 (2026-10-23 사용자 결정 "위키 확인도 출처 확인").
+                                 엑셀은 고치지 않고 이 파일에 남긴다. 읽는 코드는 없고, 반영한 곳은 '게임 반영' 열 (rules_for 등).
   data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
                                  상무·경찰 복무는 자료집 선수마스터의 '출신교·경력(2026 프로필)'에서 읽는다.
                                  엑셀의 다른 내용을 바꾸지 않고 이것만 다시 만들려면: build_data.py --military-only
@@ -297,7 +299,8 @@ def contract_years(v):
 
 
 def rules_for(year):
-    """연도별 규칙. source: 'confirmed' = 자료집 제도연표에서 출처 확인, 'assumed' = 미확인이라 가정한 값."""
+    """연도별 규칙. source: 'confirmed' = 자료집 제도연표 또는 data-src/제도연표_보정.csv에서 출처 확인, 'assumed' = 미확인이라 가정한 값.
+    2013년까지 1군 엔트리 26명은 그대로 가정값 (위키 조사의 '1982년 25명 → 1990년대 중반 26명'은 원문 문장을 찾지 못함, 보정 CSV 13)."""
     if year >= 2026: roster, rs = 29, 'confirmed'
     elif year >= 2020: roster, rs = 28, 'confirmed'
     elif year >= 2015: roster, rs = 27, 'confirmed'
@@ -306,7 +309,7 @@ def rules_for(year):
     if year < 1998: foreign, fs = 0, 'confirmed'
     elif year <= 2000: foreign, fs = 2, 'confirmed'
     elif year <= 2002: foreign, fs = 3, 'confirmed'
-    elif year <= 2013: foreign, fs = 2, 'assumed'
+    elif year <= 2013: foreign, fs = 2, 'confirmed'  # 2003년 2명 보유로 환원 (보정 CSV 16, 나무위키 외국인 선수/KBO 리그)
     elif year <= 2025: foreign, fs = 3, 'confirmed'
     else: foreign, fs = 4, 'confirmed'
     if year <= 1988: post = 2

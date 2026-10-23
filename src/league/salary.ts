@@ -10,7 +10,27 @@ import { ruleOf } from './rules';
 /** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
 export const MIN_SALARY = 3000;
 
-/** 샐러리캡 (만 원). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1) */
+/**
+ * 연도별 최저 연봉 (그 해 명목 금액, 만 원). data-src/제도연표_보정.csv 44 (나무위키 선수 문서 주석·KBO 규약).
+ * 2010 2,400만·2015 2,700만·2021 3,000만은 원문 문장으로 확인했고, 1982 600만·1988 840만·2000 1,500만·2005 2,000만은 위키 조사 요약에서,
+ * 1991 1,000만·1996 1,200만은 "1990년대 초·후반"이라 해가 임시값이다.
+ * 게임 규정에는 아직 쓰지 않는다: 내부 연봉은 2026년 물가라 옛 시대 최저 연봉이 MIN_SALARY보다 커진다 (1982년 600만 ÷ 물가 0.08 = 7,500만).
+ * 연결할지는 사용자 결정 (경제 균형이 바뀐다).
+ */
+export const MIN_SALARY_HISTORY: [number, number][] = [
+  [1982, 600], [1988, 840], [1991, 1000], [1996, 1200], [2000, 1500], [2005, 2000], [2010, 2400], [2015, 2700], [2021, 3000],
+];
+/** 그 해 명목 최저 연봉 (만 원) */
+export function minSalaryNominal(year: number): number {
+  let v = MIN_SALARY_HISTORY[0][1];
+  for (const [y, won] of MIN_SALARY_HISTORY) if (year >= y) v = won;
+  return v;
+}
+
+/**
+ * 샐러리캡 (만 원). 2023~2024 114억 2,638만, 2025 137억 1,165만(2024-08-02 20% 상향, 이름 '경쟁균형세')은 출처 확인
+ * (나무위키 샐러리캡/KBO 리그, data-src/제도연표_보정.csv 34). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1)
+ */
 const CAP: Record<number, number> = { 2023: 1142638, 2024: 1142638, 2025: 1371165, 2026: 1439723, 2027: 1511709, 2028: 1587294 };
 export function salaryCap(year: number, league?: Pick<LeagueState, 'rules'>): number | null {
   if (year < 2023) return null;
@@ -99,7 +119,7 @@ export function faYears(age: number): number {
 /** 런을 돈으로 바꾸는 시장 단가 (만 원/런, 임시값). 시장 연봉식의 주전급 기울기 근처 */
 export const WON_PER_RUN = 4500;
 
-/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (임시값) */
+/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (1999~2000 고졸 10·대졸 9 출처 확인, 2001~2021 임시값) */
 export function serviceNeeded(school: School | null, entryYear: number, birthYear: number | null, year = 2022): number {
   const s = school ?? (birthYear && entryYear - birthYear >= 22 ? 'UNIV' : 'HS');
   return faServiceNeeded(year, s === 'UNIV');

@@ -16,10 +16,14 @@ beforeAll(() => {
 });
 
 describe('시대별 제도', () => {
-  it('FA는 1999 시즌 뒤부터, 자격 연차는 10 → 9(대졸 8) → 8(대졸 7)', () => {
+  it('FA는 1999 시즌 뒤부터, 자격 연차는 10(대졸 9) → 9(대졸 8) → 8(대졸 7)', () => {
     expect(faEnabled(1998)).toBe(false);
     expect(faEnabled(1999)).toBe(true);
+    // 도입 때 고졸 10·대졸 9 (출처 확인, data-src/제도연표_보정.csv 26)
     expect(faServiceNeeded(1999, false)).toBe(10);
+    expect(faServiceNeeded(1999, true)).toBe(9);
+    expect(faServiceNeeded(2000, true)).toBe(9);
+    expect(faServiceNeeded(2001, true)).toBe(8);
     expect(faServiceNeeded(2010, false)).toBe(9);
     expect(faServiceNeeded(2010, true)).toBe(8);
     expect(faServiceNeeded(2023, false)).toBe(8);
@@ -29,6 +33,12 @@ describe('시대별 제도', () => {
   it('외국인 한도는 연도별 규칙을 따른다: 1997년 0명, 1998년 2명, 2026년 3+아시아쿼터 1, 자료 밖 연도는 마지막 해 값', () => {
     expect(foreignRule(store.meta, 1997)).toEqual({ total: 0, asia: 0, regular: 0 });
     expect(foreignRule(store.meta, 1998)).toEqual({ total: 2, asia: 0, regular: 2 });
+    // 2001~2002 3명 보유, 2003년 2명으로 환원, 2014년 3명 (출처 확인, 보정 CSV 16)
+    expect(foreignRule(store.meta, 2002)).toEqual({ total: 3, asia: 0, regular: 3 });
+    expect(foreignRule(store.meta, 2003)).toEqual({ total: 2, asia: 0, regular: 2 });
+    expect(foreignRule(store.meta, 2013)).toEqual({ total: 2, asia: 0, regular: 2 });
+    expect(foreignRule(store.meta, 2014)).toEqual({ total: 3, asia: 0, regular: 3 });
+    expect(store.meta.rules['2008'].foreignLimitSource).toBe('confirmed');
     expect(foreignRule(store.meta, 2026)).toEqual({ total: 4, asia: 1, regular: 3 });
     expect(foreignRule(store.meta, 2040)).toEqual({ total: 4, asia: 1, regular: 3 });
   });

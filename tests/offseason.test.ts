@@ -104,7 +104,9 @@ describe('리그 상태 만들기', () => {
     }
     expect(league.players.filter((p) => p.asia).length).toBeGreaterThanOrEqual(9);
     const ssg = league.teams.findIndex((t) => t.name === 'SSG');
-    expect(league.players.find((p) => p.name === '아빌라')?.team).toBe(ssg);
+    // 나무위키 계약표의 개막 선수 미치 화이트(55855)는 SSG, 출전량 추정으로 넣었던 아빌라는 시즌 중 교체 선수라 시장 후보
+    expect(league.players.find((p) => p.id === '55855')?.team).toBe(ssg);
+    expect(league.players.find((p) => p.name === '아빌라')?.team).toBe(-1);
   });
 
   it('잠재력은 지금 능력 이상이고, 같은 시드면 같다', () => {
