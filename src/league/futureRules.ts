@@ -39,6 +39,11 @@ export const FOREIGN_JUDGE = {
 };
 /** 바뀐 항목은 이만큼 시즌 동안 다시 후보가 되지 않는다 (임시값) */
 export const SHIFT_COOLDOWN = 3;
+/**
+ * 단장 회의에서 부결된 항목·방향은 이만큼 시즌 동안 다시 안건이 되지 않는다 (구단 투표 결정 5).
+ * SHIFT_COOLDOWN과 같은 셈법: 부결된 안건의 적용 해가 Y이면 Y·Y+1 해 결산을 건너뛰고 Y+2 해 결산(Y+3 시즌 안건)부터. 반대 방향은 쉬지 않는다
+ */
+export const REJECT_COOLDOWN = 2;
 
 export type FutureRuleKey = 'ball' | 'zone' | 'extra' | 'roster' | 'foreign' | 'capGrowth';
 
@@ -129,6 +134,8 @@ export interface RuleShift {
   reason: string;
   /** 판단에 쓴 신호 값 */
   signal: number;
+  /** 단장 회의 표결 결과 (구단 투표, 2026-10-23부터. 표결 없이 바뀐 예전 기록에는 없다). user: 플레이어 구단이 낸 표 */
+  vote?: { yes: number; no: number; need: number; user?: 'yes' | 'no' };
 }
 
 /** 미래 규칙 변경을 쓰는 리그인가: 기본 모드만 (판타지·자유 모드는 끈다) */
@@ -166,11 +173,21 @@ function streak(signals: RuleSignal[], side: (s: RuleSignal) => number): 1 | -1 
 }
 
 /**
- * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정한다 (한 해 최대 1개).
- * 난수는 후보가 여럿일 때만 `${seed}/rules/${다음 해}` 갈래에서 하나 쓴다 (다른 진행의 난수를 건드리지 않는다).
- * 돌려주는 값은 새로 생긴 변경 (없으면 null)
+ * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정해 곧바로 넣는다 (한 해 최대 1개, 표결 없이).
+ * 돌려주는 값은 새로 생긴 변경 (없으면 null). 구단 투표가 켜진 리그는 proposeFutureRule로 안건만 받아 단장 회의에서 표결한다 (league/ruleVote.ts)
  */
 export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleShift | null {
+  const shift = proposeFutureRule(league, signal);
+  if (shift) (league.ruleShifts ??= []).push(shift);
+  return shift;
+}
+
+/**
+ * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경 후보를 하나 고른다 (넣지는 않는다).
+ * 난수는 후보가 여럿일 때만 `${seed}/rules/${다음 해}` 갈래에서 하나 쓴다 (다른 진행의 난수를 건드리지 않는다).
+ * 가결 뒤 3시즌(SHIFT_COOLDOWN), 부결된 같은 방향은 2시즌(REJECT_COOLDOWN) 후보가 되지 않는다
+ */
+export function proposeFutureRule(league: LeagueState, signal: RuleSignal): RuleShift | null {
   if (!futureRulesOn(league)) return null;
   const next = signal.year + 1;
   // 신호는 자료 없는 해의 환경(2022~2026 평균 목표)으로 돈 2027 시즌부터 남긴다. 기준 해 = 처음 남긴 신호
@@ -191,6 +208,8 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
     if (after < spec.min - 1e-9 || after > spec.max + 1e-9) return;
     const last = (league.ruleShifts ?? []).filter((s) => s.key === key).at(-1);
     if (last && next - last.year < SHIFT_COOLDOWN + 1) return;
+    const rejected = (league.ruleVotes ?? []).filter((v) => v.key === key && !v.passed && Math.sign(v.after - v.before) === dir).at(-1);
+    if (rejected && next - rejected.year < REJECT_COOLDOWN + 1) return;
     cands.push({ key, dir, signal: round(signalValue), why });
   };
   const avg = (f: (s: RuleSignal) => number) => recent.reduce((a, s) => a + f(s), 0) / recent.length;
@@ -222,10 +241,7 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
   const pick = cands.length === 1 ? cands[0] : cands[new Rng(`${league.seed}/rules/${next}`).int(cands.length)];
   const spec = FUTURE_RULE_SPEC[pick.key];
   const before = futureValue(league, pick.key, signal.year);
-  const shift: RuleShift = { year: next, key: pick.key, before, after: round(before + pick.dir * spec.step), reason: `${pick.why} (게임 속 가상 결정)`, signal: pick.signal };
-  league.ruleShifts ??= [];
-  league.ruleShifts.push(shift);
-  return shift;
+  return { year: next, key: pick.key, before, after: round(before + pick.dir * spec.step), reason: `${pick.why} (게임 속 가상 결정)`, signal: pick.signal };
 }
 
 /** 외국인 한도 판정 하나 (방향 +1 확대·−1 축소, 판단에 쓴 신호 값, 까닭 문구) */
