@@ -409,6 +409,24 @@ export class Season {
     return ts;
   }
 
+  /**
+   * 이 날짜 기준으로 1군을 짜 보기만 한다 (teamSeasons·부진 투수 캐시를 바꾸지 않는다).
+   * 마지막으로 짠 명단·홈원정처럼 저장에 없는 상태에 기대지 않아, 저장·불러오기와 화면 조회(refresh)를 끼워도 같은 답을 낸다.
+   * 퓨처스(2군) 명단을 정할 때 쓴다 (league/futures.ts registeredOf)
+   */
+  activeAt(teamIdx: number, day = this.day): TeamSeason {
+    const src = this.teamSeasons[teamIdx];
+    const ts: TeamSeason = {
+      ...src, hitters: [], rotation: [], bullpen: [], closer: null, callUps: [], dirty: true, away: undefined, field: undefined, lineupCache: undefined,
+    };
+    const rule = this.params.churnSlump;
+    const cycle = Math.floor(day / CHURN_DAYS);
+    const slump = !rule || !(this.params.rosterChurn ?? 0) ? null
+      : cycle === this.slumpCycle && this.slump ? this.slump : slumpingPitchers(this.world, this.pit, rule);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, slump);
+    return ts;
+  }
+
   /** 하루를 진행한다. 끝난 시즌이면 아무것도 하지 않는다 */
   simulateDay(): void {
     if (this.done) return;
