@@ -276,6 +276,104 @@ def main():
         warn(f'수비: 선수 {len(dj["players"]):,}명 · 자리-해 {n_pos:,}칸 ({dj["from"]}~{dj["to"]}, 2004년 야수 {rows_2004}행), '
              f'평판 {sum(len(v) for v in dj["rep"].values()):,}줄 ({len(dj["rep"]):,}명)')
 
+    # ---- 구종 (pitches.json, 능력치 v2 16-1a·16-1b: tools/build_pitches.py → build_data.py --pitches-only)
+    if (DATA / 'pitches.json').exists():
+        pj = load(DATA / 'pitches.json')
+        f = pj['fields']
+        isp, iu, i_n, irv = f.index('speed'), f.index('usage'), f.index('n'), f.index('rv')
+        n_rows = both = only_ars = only_rv = 0
+        slow = []
+        for pid, ys in pj['players'].items():
+            if pid not in by_id:
+                err(f'구종: 없는 선수 ID {pid}')
+            elif 'P' not in by_id[pid].get('kind', ''):
+                err(f'구종 {pid} {by_id[pid]["name"]}: 투수(kind P·BP)가 아님')
+            for y, pt in ys.items():
+                if not pj['from'] <= int(y) <= pj['to']:
+                    err(f'구종 {pid} {y}: 연도가 {pj["from"]}~{pj["to"]} 밖')
+                u = [v[iu] for v in pt.values() if v[iu] is not None]
+                # 사용률은 그 투수·시즌의 구종 사용률 문자열에서 나온다: 합 100 ± 1 (같은 이름 둘이 합쳐진 묶음은 빌드가 뺐다)
+                if u and abs(sum(u) - 100) > 1:
+                    err(f'구종 {pid} {y}: 사용률 합 {sum(u):.1f}')
+                for t, v in pt.items():
+                    n_rows += 1
+                    if t not in ('포심', '투심', '싱커', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼'):
+                        err(f'구종 {pid} {y}: 모르는 구종 {t}')
+                    sp = v[isp]
+                    if sp is not None and not 60 <= sp <= 170:
+                        err(f'구종 {pid} {y} {t}: 구속 {sp}')
+                    elif sp is not None and not 100 <= sp <= 165:
+                        slow.append(f'{by_id.get(pid, {}).get("name", pid)} {y} {t} {sp}')
+                    if v[i_n] is not None and v[i_n] < 10:
+                        err(f'구종 {pid} {y} {t}: 투구수 {v[i_n]} (원본은 10구 이상만)')
+                    has_ars, has_rv = sp is not None or v[iu] is not None, v[irv] is not None
+                    both += has_ars and has_rv
+                    only_ars += has_ars and not has_rv
+                    only_rv += has_rv and not has_ars
+        warn(f'구종: 선수 {len(pj["players"]):,}명 · {n_rows:,}행 ({pj["from"]}~{pj["to"]}), 구종 데이터·가치 짝 {both:,}행 · 데이터만 {only_ars:,}행 · '
+             f'가치만 {only_rv:,}행. 못 맞춘 원본 행은 reports/pitches-unmatched.md')
+        if slow:
+            warn(f'구종: 구속 100 미만·165 초과 {len(slow)}행 (야수 등판·느린 커브로 보임): ' + ', '.join(slow))
+        base = pj['prior']['rv']['baseRows']
+        warn('구종 가치 기준 행 (투구수 300 이상): ' + ', '.join(f'{k} {v:,}' for k, v in base.items()))
+        # 위키 구종 (16-1b): 선수 ID가 투수, 표준 이름이 목록 안, 선수별 순서 1..k 겹침 없음 (빌드가 순서대로 실으므로 원본 CSV로 본다)
+        wiki = pj['wiki']
+        std = ('포심', '투심', '싱커', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼', '기타')
+        for pid, w in wiki['players'].items():
+            if pid not in by_id or 'P' not in by_id[pid].get('kind', ''):
+                err(f'위키 구종: 투수가 아닌 선수 ID {pid}')
+            for t, ni, main_, a, b in w['p']:
+                if t not in std:
+                    err(f'위키 구종 {pid}: 표준 이름 밖 {t}')
+                if not 0 <= ni < len(wiki['names']):
+                    err(f'위키 구종 {pid}: 원문 색인 {ni}')
+                if a is not None and b is not None and a > b:
+                    err(f'위키 구종 {pid} {t}: 시기 {a}~{b}')
+        src_csv = ROOT / 'data-src' / '위키_구종.csv'
+        if src_csv.exists():
+            import csv
+            orders = defaultdict(list)
+            with src_csv.open(encoding='utf-8-sig', newline='') as fh:
+                for r in csv.DictReader(fh):
+                    orders[r['선수ID']].append(int(r['순서']))
+            for pid, o in orders.items():
+                if sorted(o) != list(range(1, len(o) + 1)):
+                    err(f'위키 구종 {pid}: 순서 {sorted(o)}')
+        # 실측 대조 (보고만, 15.6): 둘 다 있는 투수에서 위키 재현율·정확도·순위 상관. 싱커는 양쪽 모두 투심으로 센다
+        as_two = lambda t: '투심' if t == '싱커' else t  # noqa: E731
+        hit_r = all_r = hit_p = all_p = 0
+        rhos = []
+        for pid, w in wiki['players'].items():
+            ys = pj['players'].get(pid)
+            if not ys:
+                continue
+            share = defaultdict(list)
+            for pt in ys.values():
+                for t, v in pt.items():
+                    if v[iu] is not None:
+                        share[as_two(t)].append(v[iu])
+            if not share:
+                continue
+            seasons = max(len(v) for v in share.values())
+            meas = {t: sum(v) / seasons for t, v in share.items()}
+            wl = list(dict.fromkeys(as_two(t) for t, *_ in w['p']))
+            for t, s in meas.items():
+                if s >= 5:
+                    all_r += 1
+                    hit_r += t in wl
+            for t in wl:
+                all_p += 1
+                hit_p += t in meas
+            common = [t for t in wl if t in meas]
+            if len(common) >= 3:
+                k = len(common)
+                rw = {t: i for i, t in enumerate(common)}
+                rm = {t: i for i, t in enumerate(sorted(common, key=lambda t: -meas[t]))}
+                rhos.append(1 - 6 * sum((rw[t] - rm[t]) ** 2 for t in common) / (k * (k * k - 1)))
+        if all_r and all_p:
+            warn(f'위키 구종: {len(wiki["players"]):,}명. 실측 대조 (싱커 = 투심) 재현율 {100 * hit_r / all_r:.1f}% · 정확도 {100 * hit_p / all_p:.1f}% · '
+                 f'순위 상관 {sum(rhos) / len(rhos):.3f} (공통 구종 3개 이상 {len(rhos)}명)')
+
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
     for w in warnings:

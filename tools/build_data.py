@@ -50,6 +50,9 @@
   data-src/수비이닝.csv · 수비평판.csv  KBO 공식 사이트 수비 기록 2001~2026 (사용자 수집, 선수·연도·구단·자리별 G·GS·이닝·E·PO·A·DP·PB·SB·CS)과
                                  나무위키·위키백과 서술의 수비 평판 (등급·시기·문서 제목만) → defense.json. 저장소 밖 원본에서 tools/build_defense.py가 만든다.
                                  이것만 다시 만들려면: build_data.py --defense-only (능력치 v2 16-3a, 판정 함수는 src/engine/fielding.ts)
+  data-src/구종.csv · 위키_구종.csv  visualbaseball.com 구종 자료 2016~ (사용자 수집, 선수·연도·구종별 구속·무브·릴리스·낙차·사용률·투구수·RV/100)와
+                                 나무위키·위키백과 덤프의 구종 목록 (낱말·순서·주무기·시기·최고 구속만) → pitches.json (+ 15.5 측정 표 prior).
+                                 저장소 밖 원본에서 tools/build_pitches.py가 만든다. 이것만 다시 만들려면: build_data.py --pitches-only (능력치 v2 16-1a·16-1b)
 """
 import csv
 import json
@@ -492,6 +495,118 @@ def build_defense(out_dir):
         'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)},
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'수비 이닝 {len(rows):,}행 → 선수 {len(players):,}명 ({first}~{last}), 평판 {sum(len(v) for v in rep.values()):,}행 ({len(rep):,}명) → {out_dir / "defense.json"}')
+
+
+# ---- 구종 (pitches.json, 능력치 v2 16-1a·16-1b)
+# 가공 CSV: data-src/구종.csv (visualbaseball.com) · 위키_구종.csv (나무위키·위키백과 덤프). tools/build_pitches.py가 저장소 밖 원본에서 만든다.
+# 게임 코드는 아직 읽지 않는다 (16-1·16-2 짐작 식, 16-6 스킬, 16-7 화면에서 쓴다). 선수 구성에 닿지 않아 저장 호환은 그대로.
+# prior는 기획안 15.5의 측정 표를 이 CSV에서 다시 낸다 (손으로 옮기지 않는다): 구종 수별 순위 몫, 연도별 포심 평균 구속,
+# 같은 투수·시즌 포심과의 구속 차이, 구종 가치(RV/100) 등급 표.
+
+PITCH_FIELDS = ('구속', '수직무브', '수평무브', '릴리스높이', '낙차', '사용률', '투구수', 'RV100')
+RV_MIN_N = 300        # 구종 가치 등급 표의 기준 행: 투구수 300 이상 (15.5 ④ 가 2)
+RV_MIN_YEAR_ROWS = 30  # 그 해 기준 행이 이만큼 있어야 그 해 중앙값, 아니면 전체 중앙값 (임시값, 15.5 ④ 가 3)
+RV_OWN_TABLE = 100     # 기준 행이 이만큼 있어야 자기 표, 아니면 RV_BORROW (15.5 ④ 가 4)
+RV_BORROW = {'스위퍼': '슬라이더', '싱커': '투심'}
+
+
+def _median(v):
+    v = sorted(v)
+    n = len(v)
+    return (v[n // 2] + v[(n - 1) // 2]) / 2
+
+
+def pitch_prior(rows):
+    """15.5의 측정 표. rows = data-src/구종.csv 행"""
+    seasons = defaultdict(dict)  # (선수, 연도) → 구종 → 행
+    for r in rows:
+        seasons[(r['선수ID'], int(r['연도']))][r['구종']] = r
+    # ② 구종 수 k별 순위 몫 (사용률이 있는 투수·시즌, 사용률 순, 합 100으로 맞춤)
+    by_k = defaultdict(list)
+    for d in seasons.values():
+        u = sorted((float(r['사용률']) for r in d.values() if r['사용률'] not in ('', None)), reverse=True)
+        if not u or sum(u) <= 0:
+            continue
+        t = sum(u)
+        by_k[len(u)].append([100 * x / t for x in u])
+    share = {str(k): {'n': len(v), 's': [round(sum(x[i] for x in v) / len(v), 1) for i in range(k)]} for k, v in sorted(by_k.items())}
+    # ③ 연도별 포심 평균 구속 (투수·시즌 단순 평균), 같은 투수·시즌 포심과의 차이 [평균, 표준편차, 행 수]
+    fb = defaultdict(list)
+    diff = defaultdict(list)
+    for (pid, y), d in seasons.items():
+        f = d.get('포심')
+        if not f or f['구속'] in ('', None):
+            continue
+        v0 = float(f['구속'])
+        fb[y].append(v0)
+        for p, r in d.items():
+            if p != '포심' and r['구속'] not in ('', None):
+                diff[p].append(float(r['구속']) - v0)
+    fb_speed = {str(y): round(sum(v) / len(v), 1) for y, v in sorted(fb.items())}
+    speed_diff = {}
+    for p, v in diff.items():
+        m = sum(v) / len(v)
+        sd = math.sqrt(sum((x - m) ** 2 for x in v) / (len(v) - 1)) if len(v) > 1 else 0
+        speed_diff[p] = [round(m, 1), round(sd, 1), len(v)]
+    # ④ 가 구종 가치 등급 표: 기준 행(투구수 300 이상)에서 c = RV − m(그 해, 구종), 구종별로 정렬한 c
+    base = defaultdict(list)  # 구종 → [(연도, RV)]
+    for r in rows:
+        if r['투구수'] not in ('', None) and r['RV100'] not in ('', None) and int(r['투구수']) >= RV_MIN_N:
+            base[r['구종']].append((int(r['연도']), float(r['RV100'])))
+    tables = {}
+    for p, v in base.items():
+        if len(v) < RV_OWN_TABLE:
+            continue
+        by_y = defaultdict(list)
+        for y, x in v:
+            by_y[y].append(x)
+        med = {str(y): round(_median(xs), 3) for y, xs in sorted(by_y.items()) if len(xs) >= RV_MIN_YEAR_ROWS}
+        med['all'] = round(_median([x for _, x in v]), 3)
+        c = sorted(round(x - med.get(str(y), med['all']), 3) for y, x in v)
+        tables[p] = {'med': med, 'c': c}
+    return {
+        'share': share, 'fbSpeed': fb_speed, 'speedDiff': speed_diff,
+        'rv': {'minN': RV_MIN_N, 'baseRows': {p: len(v) for p, v in sorted(base.items(), key=lambda x: -len(x[1]))},
+               'borrow': RV_BORROW, 'tables': tables},
+    }
+
+
+def build_pitches(out_dir):
+    """선수 ID → 연도 → 구종 → [구속, 수직 무브, 수평 무브, 릴리스 높이, 낙차, 사용률, 투구수, RV/100] (빈 칸 null),
+    prior (15.5 측정 표), wiki: names(원문 낱말 목록) + 선수 ID → {p: [[표준 구종, 원문 색인, 주무기 0/1, 시작, 끝]] (위키 순서), top: 최고 구속}"""
+    src = ROOT / 'data-src'
+    rows = read_src_csv(src / '구종.csv')
+    if not rows:
+        print('구종 CSV 없음, pitches.json을 만들지 않음 (tools/build_pitches.py)')
+        return
+    players = defaultdict(lambda: defaultdict(dict))
+    for r in rows:
+        players[r['선수ID']][r['연도']][r['구종']] = [num(r[k]) for k in PITCH_FIELDS]
+    wiki_rows = read_src_csv(src / '위키_구종.csv')
+    names, name_at = [], {}
+    wiki = defaultdict(lambda: {'p': [], 'top': None})
+    for r in sorted(wiki_rows, key=lambda r: (r['선수ID'], int(r['순서']))):
+        raw = r['구종_원문']
+        if raw not in name_at:
+            name_at[raw] = len(names)
+            names.append(raw)
+        w = wiki[r['선수ID']]
+        w['p'].append([r['구종'], name_at[raw], 1 if r['주무기'] == '1' else 0, num(r['시작연도']), num(r['끝연도'])])
+        top = num(r['최고구속'])
+        if top is not None and (w['top'] is None or top > w['top']):
+            w['top'] = top
+    years = sorted({int(r['연도']) for r in rows})
+    (out_dir / 'pitches.json').write_text(json.dumps({
+        'version': 1,
+        'source': 'data-src/구종.csv (visualbaseball.com 구종 자료, 사용자 수집 2026-10, 가공) · 위키_구종.csv (나무위키·위키백과 덤프, 구종 낱말·순서·주무기·시기·최고 구속만)',
+        'fields': ['speed', 'vmov', 'hmov', 'rel', 'drop', 'usage', 'n', 'rv'], 'from': years[0], 'to': years[-1],
+        'note': 'players: 선수 ID → 연도 → 구종 → fields 순 값 (구속 km/h, 무브·릴리스 cm, 낙차 °, 사용률 %, 투구수, RV/100 — 음수가 투수에게 좋음, 화면에 내지 않는다). '
+                'wiki.players: 선수 ID → {p: [표준 구종, 원문 색인(wiki.names), 주무기, 시작, 끝(null = 커리어 전체)], top: 최고 구속}',
+        'players': {k: players[k] for k in sorted(players)},
+        'prior': pitch_prior(rows),
+        'wiki': {'names': names, 'players': {k: wiki[k] for k in sorted(wiki)}},
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'구종 {len(rows):,}행 → 선수 {len(players):,}명 ({years[0]}~{years[-1]}), 위키 구종 {len(wiki_rows):,}행 ({len(wiki):,}명) → {out_dir / "pitches.json"}')
 
 
 # ---- 감독 (managers.json)
@@ -1484,6 +1599,10 @@ def main():
         # 수비 이닝·평판 CSV만 다시 반영한다 (시즌 JSON에서 타석을 읽는다. 다른 JSON과 저장 호환은 그대로)
         build_defense(OUT)
         return
+    if '--pitches-only' in sys.argv:
+        # 구종 CSV(visualbaseball·위키)만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        build_pitches(OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1741,6 +1860,7 @@ def main():
     build_ppa()
     build_history(OUT)
     build_defense(OUT)
+    build_pitches(OUT)
     if not NO_WIKI:
         write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special, wiki_fixes)
     if hardhit_report:

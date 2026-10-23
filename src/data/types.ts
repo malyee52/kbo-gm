@@ -287,6 +287,49 @@ export interface DataStore {
   ppa?: PpaData;
   /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 판정 함수 src/engine/fielding.ts만 읽는다 (엔진·리그 생성에는 16-3에서 잇는다). 없으면 판정하지 않는다 */
   defense?: DefenseData;
+  /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
+  pitches?: PitchData;
+}
+
+/**
+ * pitches.json (tools/build_data.py build_pitches ← data-src/구종.csv · 위키_구종.csv).
+ * players: 선수 ID → 연도 → 구종(포심·투심·싱커·커터·슬라이더·스위퍼·커브·체인지업·포크·너클볼) → fields 순 값 (빈 칸 null).
+ * RV/100은 음수가 투수에게 좋다. 원래 숫자는 화면에 내지 않는다 (가공값 원칙, 등급과 스킬 판정 재료).
+ */
+export interface PitchData {
+  version: number;
+  /** 값의 순서: speed(km/h), vmov·hmov(무브 cm), rel(릴리스 높이 cm), drop(낙차 °), usage(사용률 %), n(투구수), rv(RV/100) */
+  fields: string[];
+  from: number;
+  to: number;
+  players: Record<string, Record<string, Record<string, (number | null)[]>>>;
+  prior: PitchPrior;
+  wiki: { names: string[]; players: Record<string, WikiPitcher> };
+}
+
+/** 기획안 15.5의 측정 표 (빌드가 data-src/구종.csv에서 다시 낸다) */
+export interface PitchPrior {
+  /** 구종 수 k → 투수·시즌 수 n과 사용률 순위별 평균 몫 s (%) */
+  share: Record<string, { n: number; s: number[] }>;
+  /** 연도 → 그 해 포심 평균 구속 (투수·시즌 단순 평균) */
+  fbSpeed: Record<string, number>;
+  /** 구종 → [같은 투수·시즌 포심과의 구속 차이 평균, 표준편차, 행 수] */
+  speedDiff: Record<string, [number, number, number]>;
+  rv: {
+    /** 등급 표의 기준 행: 투구수 이만큼 이상 */
+    minN: number;
+    baseRows: Record<string, number>;
+    /** 표가 없는 구종 → 빌릴 구종 (스위퍼 → 슬라이더, 싱커 → 투심) */
+    borrow: Record<string, string>;
+    /** 구종 → med: 연도별 중앙값(그 해 기준 행 30 이상) + all, c: 정렬한 (RV − 중앙값) */
+    tables: Record<string, { med: Record<string, number>; c: number[] }>;
+  };
+}
+
+/** 위키 구종 목록 한 투수: p = [표준 구종, 원문 색인(wiki.names), 주무기 0/1, 시작, 끝(null = 커리어 전체)] (위키 순서), top = 최고 구속 */
+export interface WikiPitcher {
+  p: [string, number, number, number | null, number | null][];
+  top: number | null;
 }
 
 /**

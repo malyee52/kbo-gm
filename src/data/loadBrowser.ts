@@ -1,5 +1,5 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
-import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type PlayerMaster, type PpaData, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type PitchData, type PlayerMaster, type PpaData, type RawSeason, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -18,7 +18,7 @@ export interface BrowserStore extends DataStore {
 
 export async function loadBrowserStore(): Promise<BrowserStore> {
   // 신인 지명(drafts.json)은 오프시즌 드래프트와 새 게임에 필요해서 처음부터 불러온다 (약 640KB, 압축 전송)
-  const [meta, pl, dr, tr, mil, mgr, dfa, homes, ppa, defense] = await Promise.all([
+  const [meta, pl, dr, tr, mil, mgr, dfa, homes, ppa, defense, pitches] = await Promise.all([
     get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json'), get<{ years: Record<string, DraftRow[]> }>('drafts.json'),
     // 숨겨진 특수능력 표. 파일이 없어도 게임은 돌아간다 (아무도 능력이 없는 것으로)
     get<{ traits: Record<string, string[]> }>('traits.json').then((t) => t.traits, () => undefined),
@@ -34,6 +34,8 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     get<PpaData>('ppa.json').catch(() => undefined),
     // 수비 이닝·평판 (약 650KB, 능력치 v2 16-3a). 판정에 커리어 전체가 필요해 한 번에 받는다. 없으면 판정하지 않는다
     get<DefenseData>('defense.json').catch(() => undefined),
+    // 구종 자료 (약 850KB, 압축 약 210KB, 능력치 v2 16-1a·16-1b). 직전 2시즌을 합쳐 보는 표시라 한 번에 받는다. 없으면 구종 자료 없음
+    get<PitchData>('pitches.json').catch(() => undefined),
   ]);
   const seasons = new Map<number, SeasonData>();
   const load = async (years: number[]) => {
@@ -54,6 +56,7 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     homes,
     ppa,
     defense,
+    pitches,
     async ensureYear(year) {
       await load([year, year - 1, year - 2, year - 3]);
     },
