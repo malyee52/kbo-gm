@@ -580,10 +580,17 @@ def build_schedule():
             row['postpone'] = r['순연']
             row['dhBan'] = ranges(r['더블헤더금지'], where)
             row['unscheduled'] = int(r['미편성(팀당)'] or 0)
-            if r['2연전시작']:
-                if r['2연전시작'] != '올스타':
-                    raise SystemExit(f'일정규칙.csv {where}: 2연전시작은 "올스타"만 ({r["2연전시작"]})')
-                row['twoGameFrom'] = 'allStar'
+            if r['2연전시작']:  # '올스타'(올스타 휴식 뒤), 'MM-DD'(그날부터 본 일정 끝까지), 'MM-DD~MM-DD'(그 뒤 다시 3연전, 2020)
+                v = r['2연전시작']
+                m = re.fullmatch(r'(\d\d-\d\d)(?:~(\d\d-\d\d))?', v)
+                if v == '올스타':
+                    row['twoGameFrom'] = 'allStar'
+                elif m:
+                    row['twoGameFrom'] = m.group(1)
+                    if m.group(2):
+                        row['twoGameTo'] = m.group(2)
+                else:
+                    raise SystemExit(f'일정규칙.csv {where}: 2연전시작은 "올스타", MM-DD, MM-DD~MM-DD ({v})')
             row['rainMid'] = r['경기중비']
             if r['확인'] not in SCHEDULE_STATUS:
                 raise SystemExit(f'일정규칙.csv {where}: 확인 값 "{r["확인"]}" (가능: {", ".join(SCHEDULE_STATUS)})')

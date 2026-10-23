@@ -323,8 +323,10 @@ export interface ScheduleRuleRow {
   unscheduled: number;
   /** 잔여 경기 일정 발표일 (2015~, 임시값) */
   remainingFrom?: MonthDay;
-  /** 2연전기 시작 (S33L2·S33-99): 올스타 휴식 뒤 */
-  twoGameFrom?: 'allStar';
+  /** 2연전기 시작: 'allStar' = 올스타 휴식 뒤 (S33-99), 'MM-DD' = 그날부터 (S33L2, 해마다 실제 날짜) */
+  twoGameFrom?: 'allStar' | MonthDay;
+  /** 2연전기 마지막 날 (그 뒤 다시 3연전, 2020). 없으면 본 일정 끝까지 */
+  twoGameTo?: MonthDay;
   /** 경기 중 비 규칙 코드 (C5 = 5회 성립, 일정 개편 기획안 4.7) */
   rainMid: string;
   /** 확인 상태: 확인·조사값·출처 갈림·미확인·임시값 */

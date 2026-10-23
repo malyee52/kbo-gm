@@ -245,6 +245,17 @@ def main():
                 d = r.get(k) and day(y, r[k])
                 if d and op and d <= op:
                     err(f'일정 규칙 {y}: {k} {r[k]}이 개막보다 이름')
+            # 2연전기 (S33L2는 해마다 실제 시작일, 2020은 끝 날도)
+            tf, tt = r.get('twoGameFrom'), r.get('twoGameTo')
+            if r['frame'] == 'S33L2' and (not tf or tf == 'allStar'):
+                err(f'일정 규칙 {y}: S33L2 해에 2연전 시작일(MM-DD)이 없음')
+            if tf and tf != 'allStar':
+                a, z = day(y, tf), tt and day(y, tt)
+                end = day(y, r['endRef']) if r.get('endRef') else None
+                if a and (op and a <= op or end and a >= end):
+                    err(f'일정 규칙 {y}: 2연전 시작 {tf}이 개막~종료 밖')
+                if z and a and z <= a:
+                    err(f'일정 규칙 {y}: 2연전 끝 {tt}이 시작 {tf}보다 이름')
             prev = None
             for b in r['breaks'] + r['dhBan']:
                 a, z = day(y, b['from']), day(y, b['to'])

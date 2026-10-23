@@ -28,7 +28,10 @@ export interface YearScheduleRule {
   dhBan: { from: IsoDate; to: IsoDate }[];
   unscheduled: number;
   remainingFrom?: IsoDate;
-  twoGameFrom?: 'allStar';
+  /** 2연전기: 'allStar' = 올스타 휴식 뒤 (S33-99), 날짜 = 그날부터 (S33L2) */
+  twoGameFrom?: 'allStar' | IsoDate;
+  /** 2연전기 마지막 날 (그 뒤 다시 3연전, 2020) */
+  twoGameTo?: IsoDate;
   rainMid: string;
   status: string;
   /** 자료 없는 해 줄에서 계산한 규칙 */
@@ -99,7 +102,8 @@ function resolve(row: ScheduleRuleRow, year: number, projected: boolean): YearSc
     dhBan: row.dhBan.map((b) => ({ from: at(year, b.from), to: at(year, b.to) })),
     unscheduled: row.unscheduled,
     ...(row.remainingFrom ? { remainingFrom: opt(row.remainingFrom) } : {}),
-    ...(row.twoGameFrom ? { twoGameFrom: row.twoGameFrom } : {}),
+    ...(row.twoGameFrom ? { twoGameFrom: row.twoGameFrom === 'allStar' ? 'allStar' : at(year, row.twoGameFrom) } : {}),
+    ...(row.twoGameTo ? { twoGameTo: at(year, row.twoGameTo) } : {}),
     rainMid: row.rainMid,
     status: row.status,
     projected,
