@@ -37,6 +37,16 @@
                                  pitch_hand.csv: 투타가 빈 투수의 던지는 손·언더핸드를 채운다 (여러 해 값이 갈리면 가장 많은 쪽)
                                  park.csv: 구단·연도별 홈 구장 계수 (meta.json의 parkFactors, park_factors 참조)
                                  park_components.csv: 구장별 구성 지수 → 사건별 구장 배율 (meta.json의 parkEvents, park_events 참조)
+  data-src/wiki/                 위키데이터·위키백과·나무위키에서 뽑은 가공값 (tools/wiki/ 하네스, data-src/wiki/README.md).
+                                 빈 칸만 채운다 (2026-10-23 사용자 결정, 원자료 > 위키백과 > 나무위키). 우리 값과 다른 칸은 바꾸지 않는다.
+                                 인적사항.csv: 생년·투타·언더핸드·세부 포지션(빈 칸·IF·OF만), 병역(실제 자료가 없는 선수, military.json src 'wiki')
+                                 기록_채움후보.csv: 있는 시즌 행의 빈 칸만 (빈 행 '(행 없음)'은 더하지 않는다: 선수 구성이 바뀐다)
+                                 키·몸무게는 아직 게임에 쓰지 않아 싣지 않는다. 결과는 reports/wiki-fill.md
+                                 세부 포지션은 1군 마지막 해가 2000년까지인 야수만 (그 뒤 선수는 '세부 포지션(위키)' 칸으로만 남는다)
+  data-src/수상.csv · 올스타.csv  골든글러브·MVP·신인왕·한국시리즈 MVP·올스타전 MVP와 올스타전 경기 (awards.json, allstar_history.json).
+                                 나무위키 덤프에서 tools/wiki/s6_awards.py가 만든다. 짝 결과는 reports/wiki-awards.md
+  data-src/구장.csv · 구장_사용.csv  구장 × 제원 기간(펜스·좌석·잔디·돔)과 구단 계보별 주 구장 (parks.json). 나무위키 구장 문서에서 읽어 적은 값.
+                                 열은 docs/구장효과_기획안.md 7.1·7.2 (plan/park-effects). 이것만 다시 만들려면: build_data.py --history-only
 """
 import csv
 import json
@@ -62,6 +72,11 @@ HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
 HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
+WIKI = ROOT / 'data-src' / 'wiki'
+WIKI_REPORT = ROOT / 'reports' / 'wiki-fill.md'
+# --no-wiki: 위키 가공값을 넣지 않은 기반 자료를 만든다 (tools/wiki/s5_merge.py가 '우리 값'으로 견줄 때 쓴다.
+# 위키 값이 이미 들어간 public/data와 견주면 채운 칸이 채움 후보에서 빠져 다음 빌드에서 사라진다)
+NO_WIKI = '--no-wiki' in sys.argv
 # 숨겨진 특수능력: CSV의 한글 이름 → 엔진 코드 (src/engine/traits.ts의 TRAIT_INFO와 같아야 한다)
 TRAIT_LABELS = {
     '승부사': 'clutch', '가을 사나이': 'october', '위기 탈출': 'escape', '철인': 'ironman', '늦게 지는 꽃': 'evergreen',
@@ -352,6 +367,65 @@ def innings_rules(year):
     return out
 
 
+# ---- 수상·구장·올스타전 (awards.json, parks.json, allstar_history.json)
+# 나무위키 덤프에서 뽑은 가공 CSV (tools/wiki/s6_awards.py, data-src/구장.csv·구장_사용.csv). 2026-10-23 빈 자료 결정 4.
+# 게임 코드는 아직 읽지 않는다 (구장 효과·수상 표시는 따로). 선수 구성에 닿지 않아 저장 호환은 그대로.
+
+def read_src_csv(path):
+    if not path.exists():
+        return []
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        return list(csv.DictReader(f))
+
+
+def num(v):
+    """CSV 칸 → 정수·소수, 빈 칸은 None"""
+    if v in (None, ''):
+        return None
+    f = float(v)
+    return int(f) if f.is_integer() else f
+
+
+def build_history(out_dir):
+    src = ROOT / 'data-src'
+    awards = [{'award': r['상'], 'year': int(r['연도']), 'part': r['부문'], 'name': r['이름'], 'id': r['선수ID'] or None,
+               'team': r['구단'], 'franchise': r['계보'] or None} for r in read_src_csv(src / '수상.csv')]
+    (out_dir / 'awards.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/수상.csv (나무위키 덤프 2026-08-29, tools/wiki/s6_awards.py)',
+        'note': 'id가 null이면 선수 ID와 짝짓지 못한 수상 (reports/wiki-awards.md)', 'awards': awards,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    specs = [{
+        'id': r['구장ID'], 'name': r['이름'], 'city': r['도시'], 'from': int(r['시작']), 'to': num(r['끝']),
+        'specChange': r['제원변경'] == '1', 'franchise': r['계보'] or None, 'seats': num(r['좌석']),
+        'fence': {k: num(r[c]) for k, c in (('l', '좌'), ('lc', '좌중'), ('c', '중'), ('rc', '우중'), ('r', '우'))},
+        'height': {'lr': num(r['높이_좌우']), 'c': num(r['높이_중앙'])},
+        'turf': {'infield': r['잔디_내야'] or None, 'outfield': r['잔디_외야'] or None}, 'dome': r['돔'] == '1',
+        'source': r['출처'], 'confirmed': r['확인'], 'note': r['비고'],
+    } for r in read_src_csv(src / '구장.csv')]
+    use = [{'franchise': r['계보'], 'park': r['구장ID'], 'from': int(r['시작']), 'to': num(r['끝']), 'kind': r['구분'],
+            'source': r['출처'], 'confirmed': r['확인'], 'note': r['비고']} for r in read_src_csv(src / '구장_사용.csv')]
+    (out_dir / 'parks.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/구장.csv · 구장_사용.csv (나무위키 덤프 2026-08-29)',
+        'note': 'specs: 구장 × 제원 기간 (to null = 지금까지, franchise 값이 있으면 그 구단 홈 경기에만 쓰는 제원). use: 구단 계보별 주 구장',
+        'specs': specs, 'use': use,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    years = {}
+    for r in read_src_csv(src / '올스타.csv'):
+        y = years.setdefault(int(r['연도']), {'year': int(r['연도']), 'games': [], 'mvp': None})
+        y['games'].append({'n': int(r['경기']), 'date': r['날짜'], 'park': r['구장'], 'parkId': r['구장ID'] or None,
+                           'teams': [r['팀1'], r['팀2']], 'score': [int(r['점수1']), int(r['점수2'])], 'win': r['승리']})
+    for a in awards:
+        if a['award'] == '올스타전 MVP':
+            years.setdefault(a['year'], {'year': a['year'], 'games': [], 'mvp': None})['mvp'] = \
+                {'name': a['name'], 'id': a['id'], 'team': a['team']}
+    (out_dir / 'allstar_history.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/올스타.csv · 수상.csv 올스타전 MVP (나무위키 덤프 2026-08-29)',
+        'years': [years[y] for y in sorted(years)],
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'수상 {len(awards)}줄 (짝 {sum(1 for a in awards if a["id"])}), 구장 제원 {len(specs)}줄 · 사용 {len(use)}줄, '
+          f'올스타전 {len(years)}개 해 → {out_dir}')
+
+
 # ---- 감독 (managers.json)
 
 # 문자중계 팀 코드 → 계보 (data-src/pbp_derived/team_pitching.csv)
@@ -602,17 +676,243 @@ def build_military(profiles, out_dir):
                 e = table.setdefault(pick[0]['id'], {})
                 if 'exempt' not in e or e['exempt']['year'] > y:
                     e['exempt'] = {'year': y, 'event': r['대회']}
+    real_n = len(table)
+    wiki_n, wiki_skip = wiki_military(table, players, seen)
     (out_dir / 'military.json').write_text(json.dumps({
         'version': 1,
         'note': '실제 병역 자료. served = 2026 프로필 경력의 상무·경찰(end = 1군 공백으로 본 복무 끝 해, 추정), '
-                'exempt = 국제대회 금메달 대표팀(병역_면제명단.csv, year = 대회 연도). 여기 없는 선수는 자료가 없는 것이다.',
+                'exempt = 국제대회 금메달 대표팀(병역_면제명단.csv, year = 대회 연도). '
+                'src = wiki 는 위 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (served.kind active = 현역, reserve = 보충역). '
+                '여기 없는 선수는 자료가 없는 것이다.',
         'players': dict(sorted(table.items())),
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-    served = sum(1 for v in table.values() if 'served' in v)
-    exempt = sum(1 for v in table.values() if 'exempt' in v)
-    print(f'병역: 상무·경찰 {served}명, 금메달 면제·대표 {exempt}명 → {out_dir / "military.json"}')
+    served = sum(1 for v in table.values() if 'served' in v and not v.get('src'))
+    exempt = sum(1 for v in table.values() if 'exempt' in v and not v.get('src'))
+    print(f'병역: 상무·경찰 {served}명, 금메달 면제·대표 {exempt}명, 위키로 채움 {wiki_n}명 (읽지 못함 {len(wiki_skip)}) → {out_dir / "military.json"}')
     for u in unmatched:
         print(f'  병역_면제명단.csv 연결 못 함: {u}')
+    return {'real': real_n, 'wiki': wiki_n, 'skip': wiki_skip}
+
+
+# ---- 위키 가공값 (data-src/wiki/, 빈 칸만 채운다)
+
+def wiki_profile():
+    """인적사항.csv → 선수 ID → {항목: (값, 출처)}. 파일이 없으면(또는 --no-wiki) 빈 사전"""
+    out = defaultdict(dict)
+    path = WIKI / '인적사항.csv'
+    if path.exists() and not NO_WIKI:
+        with path.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                out[r['선수ID']][r['항목']] = (r['값'], r['출처'])
+    return out
+
+
+# 세부 포지션: IF는 내야 칸으로만, OF는 외야 칸으로만 좁힌다
+WIKI_POS_NARROW = {'IF': {'1B', '2B', '3B', 'SS'}, 'OF': {'LF', 'CF', 'RF'}}
+WIKI_POS_CODES = {'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH', 'IF', 'OF', 'P'}
+
+
+def fill_players_from_wiki(players):
+    """선수 마스터의 빈 생년·투타·언더핸드·세부 포지션을 위키 값으로 채운다. 채운 수를 돌려준다"""
+    prof = wiki_profile()
+    n = defaultdict(int)
+    for p in players:
+        w = prof.get(p['id'])
+        if not w:
+            continue
+        if not p.get('birthYear') and '생년월일' in w:
+            m = re.match(r'(\d{4})', w['생년월일'][0])
+            if m:
+                p['birthYear'] = int(m.group(1))
+                n['생년'] += 1
+        if not p.get('throws') and w.get('투', ('',))[0] in ('R', 'L'):
+            p['throws'] = w['투'][0]
+            n['투'] += 1
+            if w.get('언더핸드', ('',))[0] == '예' and not p.get('underhand'):
+                p['underhand'] = True
+                n['언더핸드'] += 1
+        if not p.get('bats') and w.get('타', ('',))[0] in ('R', 'L', 'S'):
+            p['bats'] = w['타'][0]
+            n['타'] += 1
+        code = w.get('포지션 코드', ('',))[0]
+        cur = p.get('pos')
+        if code in WIKI_POS_CODES and code != cur and (cur is None or code in WIKI_POS_NARROW.get(cur, ())):
+            # 투수·야수 구분과 맞을 때만 (투수에게 야수 칸, 야수에게 'P'를 붙이지 않는다)
+            if cur is not None or (code == 'P') == (p['kind'] == 'P') or p['kind'] == 'BP':
+                p['pos'] = code
+                n['포지션'] += 1
+    return n
+
+
+# 위키 기록 항목 이름 → 시즌 행 필드 (tools/wiki/s5_merge.py의 FIELD_KO·PIT_KO와 같아야 한다)
+WIKI_BAT_KO = {'경기': 'g', '타석': 'pa', '타수': 'ab', '득점': 'r', '안타': 'h', '2루타': 'd', '3루타': 't', '홈런': 'hr', '타점': 'rbi',
+               '도루': 'sb', '도루실패': 'cs', '볼넷': 'bb', '몸에 맞는 공': 'hbp', '삼진': 'so', '병살타': 'gdp', '희생플라이': 'sf',
+               '희생번트': 'sac'}
+WIKI_PIT_KO = {'경기': 'g', '선발': 'gs', '승': 'w', '패': 'l', '세이브': 'sv', '홀드': 'hld', '아웃(이닝×3)': 'outs', '상대 타자': 'tbf',
+               '자책점': 'er', '실점': 'r', '피안타': 'h', '피홈런': 'hr', '볼넷': 'bb', '몸에 맞는 공': 'hbp', '탈삼진': 'so'}
+# 위키 표의 구단 이름 → 계보 (계보 열이 없는 옛 CSV용. tools/wiki/common.py의 FRANCHISE_KEYS와 같다. 위에서부터 처음 맞는 것)
+WIKI_FRANCHISE_KEYS = [
+    ('MBC', 'LG'), ('LG', 'LG'), ('삼성', '삼성'), ('롯데', '롯데'), ('해태', 'KIA'), ('KIA', 'KIA'), ('기아', 'KIA'),
+    ('OB', '두산'), ('두산', '두산'), ('삼미', '현대계'), ('청보', '현대계'), ('태평양', '현대계'), ('현대', '현대계'),
+    ('빙그레', '한화'), ('한화', '한화'), ('쌍방울', '쌍방울'), ('SSG', 'SSG'), ('SK', 'SSG'), ('우리', '히어로즈'),
+    ('서울 히어로즈', '히어로즈'), ('히어로즈', '히어로즈'), ('넥센', '히어로즈'), ('키움', '히어로즈'), ('NC', 'NC'),
+    ('KT', 'KT'), ('kt', 'KT'),
+]
+
+
+def wiki_franchise(text):
+    for k, v in WIKI_FRANCHISE_KEYS:
+        if re.search(r'(?<![A-Za-z])' + re.escape(k) + r'(?![A-Za-z])', text or ''):
+            return v
+    return None
+
+
+def fill_records_from_wiki(bat, pit, teams):
+    """기록_채움후보.csv로 있는 시즌 행의 빈 칸(None)만 채운다. 행이 없는 후보는 더하지 않는다.
+    한 해 같은 계보에 그 선수 행이 둘 이상이면(시즌 중 같은 계보 안 이동) 어느 행인지 몰라 건너뛴다. (채움, 셈) 을 돌려준다"""
+    path = WIKI / '기록_채움후보.csv'
+    n = defaultdict(int)
+    filled = defaultdict(int)  # (구분, 항목) → 칸
+    if not path.exists() or NO_WIKI:
+        return filled, n
+    bi = {f: i for i, f in enumerate(BAT_FIELDS)}
+    pi = {f: i for i, f in enumerate(PIT_FIELDS)}
+    done = []  # (행, 열, 투수 여부, (구분, 항목))
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            if r['우리 값'] == '(행 없음)':
+                n['행 없음'] += 1
+                continue
+            y, pid, is_pit = int(r['연도']), r['선수ID'], r['구분'] == '투수'
+            key = (WIKI_PIT_KO if is_pit else WIKI_BAT_KO).get(r['항목'])
+            fr = r.get('계보') or wiki_franchise(r['구단'])  # 계보 열: s5_merge가 구단 칸을 낱말로 읽은 값 (한 구단 줄만)
+            if not key or not fr or not r['채울 값']:
+                n['읽지 못함'] += 1
+                continue
+            fr_of = {t['name']: t['franchise'] for t in teams.get(y, [])}
+            rows_ = [row for row in (pit if is_pit else bat).get(y, []) if row[0] == pid and fr_of.get(row[1]) == fr]
+            if len(rows_) != 1:
+                n['행 여럿·못 찾음'] += 1
+                continue
+            col = (pi if is_pit else bi)[key]
+            if rows_[0][col] is not None:
+                n['이미 있음'] += 1  # 하드힛 등으로 이미 채워진 칸
+                continue
+            rows_[0][col] = int(float(r['채울 값']))
+            done.append((rows_[0], col, is_pit, (r['구분'], r['항목'])))
+    # 채운 뒤 타석과 맞지 않는 타자 행(타수+볼넷+사구 > 타석, validate_data.py와 같은 검사)은 그 행에 채운 칸을 모두 되돌린다
+    bad = {id(row) for row, _, is_pit, _ in done
+           if not is_pit and (row[bi['ab']] or 0) + (row[bi['bb']] or 0) + (row[bi['hbp']] or 0) > (row[bi['pa']] or 0)}
+    for row, col, _, label in done:
+        if id(row) in bad:
+            row[col] = None
+            n['타석과 맞지 않아 되돌림'] += 1
+        else:
+            filled[label] += 1
+            n['채움'] += 1
+    return filled, n
+
+
+# 위키 병역 글 → 복무 형태. 위에서부터 처음 맞는 것 (임시 규칙, 2026-10-23)
+WIKI_SERVICE = [
+    ('exempt', r'예술체육요원|예술 ?체육 ?요원|병역 ?면제|면제|전시근로역|제2국민역'),
+    ('상무', r'상무|국군체육부대'),
+    ('경찰', r'경찰'),
+    ('성무', r'성무'),  # 공군 야구단 (1970~80년대)
+    ('reserve', r'공익|사회복무|(?<!수도)방위|보충역|산업기능요원'),
+    ('active', r'현역|육군|해군|공군|해병|병장|전역|상근|사단|사령부|군단|여단|연대|대대|군필'),
+]
+
+
+def apply_record_fixes(bat, pit, teams):
+    """기록_고침.csv (tools/wiki/resolve_209.py: 위키 209칸 중 신뢰 순서로 고칠 칸)를 시즌 행에 적용한다.
+    저장소 값이 지금 행 값과 같을 때만 고친다 (원자료가 바뀌었으면 건너뛴다). (고친 칸 목록, 건너뛴 칸 목록)을 돌려준다"""
+    path = WIKI / '기록_고침.csv'
+    done, skip = [], []
+    if not path.exists() or NO_WIKI:
+        return done, skip
+    bi = {f: i for i, f in enumerate(BAT_FIELDS)}
+    pi = {f: i for i, f in enumerate(PIT_FIELDS)}
+    with path.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            y, pid, is_pit = int(r['연도']), r['선수ID'], r['구분'] == '투수'
+            key = (WIKI_PIT_KO if is_pit else WIKI_BAT_KO).get(r['항목'])
+            fr_of = {t['name']: t['franchise'] for t in teams.get(y, [])}
+            rows_ = [row for row in (pit if is_pit else bat).get(y, []) if row[0] == pid and fr_of.get(row[1]) == r['계보']]
+            col = (pi if is_pit else bi).get(key)
+            label = f"{r['이름']}({pid}) {y} {r['구분']} {r['항목']} {r['저장소 값']} → {r['고칠 값']}"
+            if col is None or len(rows_) != 1 or rows_[0][col] != int(r['저장소 값']):
+                skip.append(label)
+                continue
+            rows_[0][col] = int(r['고칠 값'])
+            done.append(label)
+    return done, skip
+
+
+def write_wiki_report(players_n, records, record_n, mil, special, fixes=((), ())):
+    """reports/wiki-fill.md: 위키 값으로 채운 수 (build_data.py가 쓴다)"""
+    L = ['# 위키 가공값 반영 결과', '',
+         '`python tools/build_data.py`가 만든다. `data-src/wiki/`(위키데이터·위키백과·나무위키 가공값)로 우리 자료의 **빈 칸만** 채운다.',
+         '우리 값과 다른 칸은 바꾸지 않는다 (`reports/wiki-diff.md`, `reports/wiki-diff-209.md`).', '',
+         '## 선수 마스터', '', '| 항목 | 채운 선수 |', '|---|---:|']
+    for k in ('생년', '투', '타', '언더핸드', '포지션'):
+        L.append(f'| {k} | {players_n.get(k, 0)} |')
+    L += ['', '## 병역 (military.json)', '',
+          f"실제 자료(자료집 프로필 상무·경찰, 병역_면제명단.csv) {mil['real']}명. 그 밖의 국내 선수 중 위키 병역 칸이 있는 선수 {mil['wiki']}명을 `src: wiki`로 더했다. "
+          f"읽지 못한 글 {len(mil['skip'])}개:", '']
+    L += [f'- {x}' for x in mil['skip']]
+    L += ['', '## 시즌 기록 빈 칸', '', '| 구분 | 항목 | 채운 칸 |', '|---|---|---:|']
+    for (kind, item), v in sorted(records.items(), key=lambda kv: -kv[1]):
+        L.append(f'| {kind} | {item} | {v} |')
+    L += ['', '후보 처리: ' + ', '.join(f'{k} {v}' for k, v in sorted(record_n.items())) +
+          ". '행 없음'은 우리 자료에 그 해 행이 없는 후보로, 선수 구성(저장 호환)이 바뀌어 더하지 않았다.", '',
+          f"특별 엔트리(은퇴식 규칙) 연도별 인원: {sum(len(v) for v in special.values())}명 ({len(special)}개 연도).", '']
+    L += ['## 위키 209칸 고침 (`data-src/wiki/기록_고침.csv`, `reports/wiki-209-resolve.md`)', '',
+          f'하드힛·KBO 공식 자료가 둘 다 위키 값과 같은 칸만 고친다. 고침 {len(fixes[0])}칸, 건너뜀 {len(fixes[1])}칸.', '']
+    L += [f'- 고침: {x}' for x in fixes[0]] + [f'- 건너뜀 (행이 없거나 저장소 값이 바뀜): {x}' for x in fixes[1]]
+    L.append('')
+    WIKI_REPORT.write_text('\n'.join(L) + '\n', encoding='utf-8', newline='\n')
+    print(f"위키: 선수 {dict(players_n)}, 기록 {sum(records.values())}칸, 병역 {mil['wiki']}명 → {WIKI_REPORT}")
+
+
+def wiki_military(table, players, seen):
+    """실제 병역 자료가 없는 국내 선수에게 위키 병역 칸을 더한다 (table을 고친다). 더한 수와 읽지 못한 글 목록을 돌려준다.
+    - 면제(예술체육요원·병역면제·전시근로역): exempt.year = 글 속 해, 없으면 첫 1군 시즌 (임시값: 언제 면제됐는지 모름)
+    - 상무·경찰·성무: served.unit, 현역·보충역(공익·사회복무·방위·산업기능요원): served.unit '현역'·'보충역' + kind.
+      end = 글 속 마지막 해 (없으면 모름). 미필·불명은 넣지 않는다"""
+    prof = wiki_profile()
+    added, skip = 0, []
+    for p in players:
+        if p.get('foreign') or p['id'] in table or '병역' not in prof.get(p['id'], {}):
+            continue
+        text = prof[p['id']]['병역'][0]
+        if re.search(r'미필|불명|입대 예정', text):  # '복무 중'은 글 속 마지막 해를 전역 예정 해로 본다
+            skip.append(f"{p['name']}({p['id']}): {text[:40]}")
+            continue
+        kind = next((k for k, pat in WIKI_SERVICE if re.search(pat, text)), None)
+        if not kind:
+            skip.append(f"{p['name']}({p['id']}): {text[:40]}")
+            continue
+        years = [int(y) for y in re.findall(r'(?<!\d)(19[4-9]\d|20[0-3]\d)(?!\d)', text)]
+        if kind == 'exempt':
+            year = max(years) if years else (p.get('first') or min(seen.get(p['id'], {}) or [None]) or None)
+            if not year:
+                skip.append(f"{p['name']}({p['id']}): {text[:40]}")
+                continue
+            event = '예술체육요원' if '요원' in text else '병역 면제'
+            table[p['id']] = {'src': 'wiki', 'exempt': {'year': year, 'event': event}}
+        else:
+            unit = {'active': '현역', 'reserve': '보충역'}.get(kind, kind)
+            # end는 실제 자료와 같은 뜻(복무로 빠진 마지막 시즌)으로 맞춘다: 전역한 해에 1군 기록이 있으면(시즌 중 전역, 방위병) 그 앞 해로.
+            # 그대로 두면 그 해 시작 게임에서 '시작 뒤 복무'로 잡혀 다시 입대한다
+            end = max(years) if years else None
+            while end and end in seen.get(p['id'], {}) and end > min(years):
+                end -= 1
+            served = {'unit': unit, **({'end': end} if end else {}),
+                      **({'kind': kind} if kind in ('active', 'reserve') else {})}
+            table[p['id']] = {'src': 'wiki', 'served': served}
+        added += 1
+    return added, skip
 
 
 def hardhit_csv(name):
@@ -1108,6 +1408,10 @@ def main():
         (OUT / 'meta.json').write_text(json.dumps(meta, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
         print(f'연도별 규칙 {len(meta["rules"])}개 연도')
         return
+    if '--history-only' in sys.argv:
+        # 수상·구장·올스타전 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        build_history(OUT)
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -1138,6 +1442,7 @@ def main():
         for k in [k for k, v in p.items() if v is None]:
             del p[k]
 
+    wiki_players = fill_players_from_wiki(players)
     hand_report = fill_hands(players)
 
     # ---- 외국인 개막 명단 (CSV)
@@ -1196,6 +1501,8 @@ def main():
     # ---- 하드힛 가공값으로 빈 기록 채우기
     parks, park_report = park_factors(teams)
     hardhit_report = fill_running(bat) + fill_gmli(pit) + fill_pitch_roles(pit) + hand_report + park_report
+    wiki_records, wiki_record_n = fill_records_from_wiki(bat, pit, teams)
+    wiki_fixes = apply_record_fixes(bat, pit, teams)
 
     # ---- 추가 명단 (CSV): 그 해 기록이 없는 선수를 기록 0인 행으로 넣는다. 능력은 직전 시즌 기록에서 나온다
     extra_ids = set()
@@ -1356,10 +1663,13 @@ def main():
         **({'parkFactors': parks} if parks else {}),
         **({'parkEvents': park_ev} if park_ev else {}),
     }, OUT / 'meta.json')
-    build_military(profiles_of(wb), OUT)
+    wiki_mil = build_military(profiles_of(wb), OUT)
     build_managers(OUT)
     build_homes()
     build_ppa()
+    build_history(OUT)
+    if not NO_WIKI:
+        write_wiki_report(wiki_players, wiki_records, wiki_record_n, wiki_mil, special, wiki_fixes)
     if hardhit_report:
         head = ['# 하드힛 가공값 반영 결과', '', '`python tools/build_data.py`가 만든다. 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용.', '']
         HARDHIT_REPORT.write_text('\n'.join(head + hardhit_report) + '\n', encoding='utf-8')

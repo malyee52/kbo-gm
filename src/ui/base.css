@@ -32,6 +32,22 @@
   --shadow-sm: 0 1px 2px rgba(20, 16, 18, 0.05);
   --shadow-md: 0 6px 18px rgba(20, 16, 18, 0.1);
   --shadow-lg: 0 18px 50px rgba(20, 16, 18, 0.28);
+  --shadow-dock: 0 -4px 14px rgba(0, 0, 0, 0.06);
+  --scrim: rgba(8, 12, 10, 0.5);
+  /* 나이트 게임 색 (다크 모드의 바탕·강조, 시작 화면 머리는 두 모드 모두 이 색) */
+  --night-bg: #0e1420;
+  --night-fg: #eef2f8;
+  --night-muted: #9aa7bc;
+  --night-accent: #ffb547;
+  --night-accent-hover: #ffc56e;
+  --night-accent-fg: #1a1206;
+  --night-accent-soft: #3a2e14;
+  --paper: #f7f6f4;
+  --hero-bg: var(--night-bg);
+  --hero-fg: var(--night-fg);
+  --hero-title: #ffffff;
+  --hero-muted: var(--night-muted);
+  --hero-accent: var(--night-accent);
   --font: 'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
   --font-display: 'Black Han Sans', var(--font);
   --font-num: 'Oswald', 'Pretendard Variable', system-ui, sans-serif;
@@ -63,6 +79,8 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.7);
+    --shadow-dock: 0 -4px 14px rgba(0, 0, 0, 0.45);
+    --scrim: rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }

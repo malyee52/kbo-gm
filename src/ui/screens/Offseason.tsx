@@ -3,6 +3,7 @@ import { isStarterSkill } from '../../engine';
 import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useMemo, useState } from 'react';
 import { OfferPanel } from './Club';
+import { useCurrentStep } from '../shell';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
 import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign, draftTeamAt, draftTotal, foreignLimits, foreignSlots, pickKindAt, pickNoAt } from '../../league/offseason';
 import * as Off from '../../league/offseason';
@@ -36,6 +37,7 @@ export function Offseason() {
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const steps = useCurrentStep<HTMLOListElement>(off?.stage);
 
   if (!off) {
     return (
@@ -93,7 +95,7 @@ export function Offseason() {
         )}
       </section>
 
-      <ol className="steps" aria-label="오프시즌 단계">
+      <ol className="steps" aria-label="오프시즌 단계" ref={steps}>
         {STAGES.map((s, i) => (
           <li key={s} className={i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''} aria-current={i === stageIdx ? 'step' : undefined}>
             {STAGE_LABEL[s]}
@@ -509,7 +511,7 @@ function ForeignPanel({ act }: { act: Act }) {
               </tbody>
             </table>
           </div>
-          <p className="muted small">재계약 연봉은 성적에 따라 정해지고, 3명 총액 상한을 넘으면 남은 몫까지만 줍니다.</p>
+          <p className="muted small">재계약 연봉은 성적에 따라 정해지고, 3명 총액 상한을 넘으면 남은 몫까지만 줍니다. 단계를 넘기기 전까지는 재계약으로 남긴 선수를 지난 연봉으로 총액에 셉니다 (아시아쿼터는 총액에 넣지 않습니다).</p>
         </div>
       )}
 
@@ -527,9 +529,11 @@ function ForeignPanel({ act }: { act: Act }) {
                     <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
                     <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{i.pot ?? '-'}</td><td>{dollarText(p.contract.salary)}</td>
                     <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
-                    <td>
+                    <td className="l">
                       <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}
                         onClick={() => act(session.signForeign(p.id), `${p.name}와 계약했습니다.`)}>계약</button>
+                      {/* 막힌 까닭을 옆에 적는다 (2026-10-22 사용자: 비활성 버튼만 보여 왜 막혔는지 몰랐다) */}
+                      {myTurn && !check.ok && <span className="muted small"> {check.message}</span>}
                     </td>
                   </tr>
                 );

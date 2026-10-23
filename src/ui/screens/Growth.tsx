@@ -3,7 +3,7 @@ import { isStarterSkill } from '../../engine';
 import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import type { GrowthEntry } from '../../league/offseason';
-import { posName, TeamName, useGame } from '../context';
+import { Pos, TeamName, useGame } from '../context';
 import { runsGrade } from '../grades';
 
 type Scope = 'mine' | 'league';
@@ -53,7 +53,7 @@ export function Growth() {
             <tr key={g.id}>
               <td className="l">{sp ? <button type="button" className="link" onClick={() => openPlayer(sp.idx)}>{p.name}</button> : p.name}</td>
               {showTeam && <td className="l"><TeamName idx={g.team} /></td>}
-              <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
+              <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
               <td>{g.age ?? '-'}</td>
               <td>{gb} → <strong>{ga}</strong> {ga > gb ? <span className="up">▲{ga - gb}</span> : ga < gb ? <span className="down">▼{gb - ga}</span> : ''}</td>
               <td className={d > 0.5 ? 'up' : d < -0.5 ? 'down' : ''}>{d > 0 ? '+' : ''}{d.toFixed(1)}</td>

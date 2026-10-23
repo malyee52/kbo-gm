@@ -6,7 +6,7 @@ import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
 import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
-import { Grade, PlayerLink, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
+import { Grade, PlayerLink, Pos, posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { currentRuns } from '../../ai/value';
 import { runsGrade } from '../grades';
 import { teamColor } from '../teams';
@@ -322,7 +322,7 @@ function ShopPanel({ open }: { open: boolean }) {
               {mine.map((p) => (
                 <tr key={p.idx} className={`pick${sel.has(p.idx) ? ' sel' : ''}`} onClick={(e) => { if (!(e.target as HTMLElement).closest('button')) pick(p); }}>
                   <td><input type="checkbox" checked={sel.has(p.idx)} onChange={() => pick(p)} aria-label={`${p.name} 내놓기`} /></td>
-                  <td className="l"><PlayerLink p={p} /></td><td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
+                  <td className="l"><PlayerLink p={p} /></td><td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
                   <td>{p.age ?? '-'}</td><td>{grade(p)}</td><td className="l small">{line(p)}</td><td>{salary(p)}</td>
                 </tr>
               ))}
@@ -397,7 +397,7 @@ function PickList({ title, org, selected, onToggle, disabled, showEntry = false 
                 <tr key={p.idx} className={on ? 'me' : ''}>
                   <td><input type="checkbox" checked={on} onChange={() => onToggle(p)} disabled={disabled || p.foreign} title={p.foreign ? '외국인 선수는 트레이드할 수 없습니다' : undefined} aria-label={`${p.name} 선택`} /></td>
                   <td className="l"><PlayerLink p={p} /></td>
-                  <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
+                  <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
                   <td>{p.age ?? '-'}</td>
                   <td className="grades-inline">{gs.map((v, i) => <Grade key={i} v={v} />)}</td>
                   <td className="small">{stat}</td>

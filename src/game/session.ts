@@ -1406,21 +1406,85 @@ export class GameSession {
    */
   private editPlan(edit: (pl: DepthPlan) => void): EntryCheck {
     const pl = structuredClone(this.effectivePlan());
-    const reg = new Map(this.registered().map((p) => [p.idx, p]));
+    const dropped = this.prunePlan(pl, this.registered().map((p) => p.idx));
+    edit(pl);
+    const r = this.setPlan(pl);
+    if (!r.errors.length && dropped.size) r.warnings.unshift(this.droppedText(dropped));
+    return r;
+  }
+
+  /** 기용표에서 1군(reg)에 없는 선수와 야수 자리의 투수를 뺀다. 뺀 선수 색인을 돌려준다 */
+  private prunePlan(pl: DepthPlan, reg: Iterable<number>): Set<number> {
+    const set = new Set(reg);
+    const players = this.world.players;
+    const isPit = (i: number) => set.has(i) && !!players[i]?.isPitcher;
     const dropped = new Set<number>();
     for (const s of LINEUP_SLOTS) {
       const i = pl.starters[s];
-      if (i !== undefined && (!reg.has(i) || reg.get(i)!.isPitcher)) { delete pl.starters[s]; dropped.add(i); }
+      if (i !== undefined && (!set.has(i) || players[i]?.isPitcher)) { delete pl.starters[s]; dropped.add(i); }
     }
-    pl.rotation = pl.rotation.filter((i) => (reg.get(i)?.isPitcher ? true : (dropped.add(i), false)));
-    if (pl.closer !== null && !reg.get(pl.closer)?.isPitcher) { dropped.add(pl.closer); pl.closer = null; }
-    if (pl.pen) for (const k of Object.keys(pl.pen)) if (!reg.get(Number(k))?.isPitcher) { dropped.add(Number(k)); delete pl.pen[Number(k)]; }
-    edit(pl);
-    const r = this.setPlan(pl);
-    if (!r.errors.length && dropped.size) {
-      r.warnings.unshift(`지금 1군에 없는 ${[...dropped].map((i) => this.world.players[i]?.name ?? i).join(', ')}을(를) 기용표에서 뺐습니다`);
+    pl.rotation = pl.rotation.filter((i) => (isPit(i) ? true : (dropped.add(i), false)));
+    if (pl.closer !== null && !isPit(pl.closer)) { dropped.add(pl.closer); pl.closer = null; }
+    if (pl.pen) for (const k of Object.keys(pl.pen)) if (!isPit(Number(k))) { dropped.add(Number(k)); delete pl.pen[Number(k)]; }
+    return dropped;
+  }
+
+  private droppedText(dropped: Set<number>): string {
+    return `지금 1군에 없는 ${[...dropped].map((i) => this.world.players[i]?.name ?? i).join(', ')}을(를) 기용표에서 뺐습니다`;
+  }
+
+  /**
+   * 기용 보드의 변경 묶음을 검사한다 (2026-10-22 UI 대개편 2차). 적용하지 않는다.
+   * entry: 새 1군 명단(바꾸지 않으면 생략), plan: 새 기용표(바꾸지 않으면 생략, null이면 AI 감독).
+   * 기용표는 새 1군 명단 기준으로 본다
+   */
+  checkBoard(change: { entry?: number[]; plan?: DepthPlan | null }): EntryCheck {
+    if (!this.canManage) return { errors: [this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다'], warnings: [] };
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const entry = change.entry ?? (change.plan && !this.manualEntry ? this.registered().map((p) => p.idx) : undefined);
+    if (entry) {
+      const r = this.checkEntry(entry);
+      errors.push(...r.errors);
+      warnings.push(...r.warnings);
     }
-    return r;
+    if (change.plan) {
+      const reg = entry ?? this.registered().map((p) => p.idx);
+      const pl = structuredClone(change.plan);
+      const dropped = this.prunePlan(pl, reg);
+      if (dropped.size) warnings.unshift(this.droppedText(dropped));
+      const r = this.checkPlan(pl, reg);
+      errors.push(...r.errors);
+      warnings.push(...r.warnings);
+    }
+    return { errors, warnings };
+  }
+
+  /**
+   * 기용 보드의 변경 묶음을 한 번에 적용한다. 엔트리와 기용표를 함께 검사해 하나라도 어기면 아무것도 바꾸지 않는다.
+   * AI가 엔트리를 관리하던 중이면 지금 1군 명단으로 직접 관리를 시작한다.
+   * 조작 기록은 기존 'entry'·'plan' 그대로 남는다 (재현·저장 호환)
+   */
+  applyBoard(change: { entry?: number[]; plan?: DepthPlan | null }): EntryCheck {
+    const check = this.checkBoard(change);
+    if (check.errors.length) return check;
+    const entry = change.entry ?? (change.plan && !this.manualEntry ? this.registered().map((p) => p.idx) : undefined);
+    if (entry) {
+      const before = new Set(this.registered().map((p) => p.idx));
+      const after = new Set(entry);
+      const r = this.setEntry(entry);
+      if (r.errors.length) return r;
+      for (const p of this.team.org) {
+        if (before.has(p.idx) !== after.has(p.idx)) this.addNews(this.day, 'entry', `${p.name} ${after.has(p.idx) ? '1군 등록' : '1군 말소'}`);
+      }
+    }
+    if (change.plan !== undefined) {
+      const pl = change.plan ? structuredClone(change.plan) : null;
+      if (pl) this.prunePlan(pl, this.registered().map((p) => p.idx));
+      const r = this.setPlan(pl);
+      if (r.errors.length) return r;
+    }
+    return check;
   }
 
   /** 야수를 주전 자리에 세우거나(slot) 서브로 돌린다(null). 그 자리에 있던 선수는 서브가 된다 */
@@ -1482,11 +1546,12 @@ export class GameSession {
     });
   }
 
-  /** 기용표 검사: 주전·로테이션·마무리는 지금 1군에 등록된 우리 선수여야 한다 */
-  checkPlan(plan: DepthPlan): EntryCheck {
+  /** 기용표 검사: 주전·로테이션·마무리는 지금 1군(regIdxs가 있으면 그 명단)에 등록된 우리 선수여야 한다 */
+  checkPlan(plan: DepthPlan, regIdxs?: Iterable<number>): EntryCheck {
     const errors: string[] = [];
     const warnings: string[] = [];
-    const reg = new Map(this.registered().map((p) => [p.idx, p]));
+    const regSet = regIdxs ? new Set(regIdxs) : null;
+    const reg = new Map((regSet ? this.team.org.filter((p) => regSet.has(p.idx)) : this.registered()).map((p) => [p.idx, p]));
     const seen = new Set<number>();
     for (const s of LINEUP_SLOTS) {
       const i = plan.starters[s];

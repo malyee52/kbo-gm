@@ -78,6 +78,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
 
   const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
+    const asia = p.foreign && (opening?.get(p.id) ?? m.asia ?? false);
     const ten = tenure0(p);
     const now = currentRuns(p, ctx);
     const peak = realPeakRuns(p, idx, store, ctx, params);
@@ -96,7 +97,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     for (let y = lastFaYear ?? m.entryYear; y < startYear; y++) if (servedSeason(idx, p.id, y)) service++;
 
     let contract: Contract;
-    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(now, false, false), until: startYear };
+    // 아시아쿼터도 아시아쿼터 연봉 식으로 (2026-10-22 사용자 보고: 웰스가 일반 외국인 재계약 식으로 100만 달러를 넘게 받았다)
+    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(now, false, asia), until: startYear };
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
@@ -109,7 +111,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
 
     return {
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
-      foreign: p.foreign, asia: p.foreign && (opening?.get(p.id) ?? m.asia ?? false), birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
+      foreign: p.foreign, asia, birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
       bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), ...(p.underhand ? { underhand: true } : {}), history: [], ...(ten ? { tenure0: ten } : {}),

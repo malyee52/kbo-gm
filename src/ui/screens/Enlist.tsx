@@ -2,7 +2,7 @@
 import { isStarterSkill } from '../../engine';
 import { MILITARY_LAST_AGE, MILITARY_MIN_AGE, serviceName, serviceTerms, UNIT_MAX_AGE } from '../../league/careers';
 import type { LeaguePlayer } from '../../league/types';
-import { Grade, PlayerLink, posName, useGame } from '../context';
+import { Grade, PlayerLink, Pos, useGame } from '../context';
 import { runsGrade } from '../grades';
 
 /** 병역 상태의 근거 (실제 자료 / 짐작 / 게임 신인) */
@@ -10,6 +10,7 @@ function basisText(p: LeaguePlayer): string {
   const m = p.military;
   if (!p.real) return '게임이 만든 신인';
   if (m?.basis === 'record') return `실제 자료: ${m.note ?? ''}`;
+  if (m?.basis === 'wiki') return `위키 자료: ${m.note ?? ''}`;
   if (m?.basis === 'estimate') return `짐작: ${m.note ?? '나이'}`;
   return '실제 자료에 복무·면제 기록 없음';
 }
@@ -117,7 +118,7 @@ export function EnlistPanel() {
                       </select>
                     </td>
                     <td className="l">{sp ? <PlayerLink p={sp} /> : p.name}</td>
-                    <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos)}</td>
+                    <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
                     <td>{c.age}</td>
                     <td><Grade v={runsGrade(c.runs, session.year)} /></td>
                     <td><Grade v={runsGrade(p.scoutPotential ?? p.potential, session.year)} /></td>

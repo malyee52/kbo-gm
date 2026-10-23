@@ -7,7 +7,7 @@
 """
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -201,6 +201,37 @@ def main():
     for y, ids in sorted(meta.get('specialEntries', {}).items()):
         if int(y) >= 2015:
             warn(f'특별 엔트리로 보고 새 게임에서 뺌 {y}: ' + ', '.join(by_id[i]['name'] for i in ids if i in by_id))
+
+    # ---- 수상·구장 (awards.json, parks.json: 나무위키 덤프 가공값)
+    if (DATA / 'awards.json').exists():
+        for a in load(DATA / 'awards.json')['awards']:
+            if a['id'] and a['id'] not in by_id:
+                err(f'수상 {a["year"]} {a["award"]} {a["name"]}: 없는 선수 ID {a["id"]}')
+    if (DATA / 'parks.json').exists():
+        parks = load(DATA / 'parks.json')
+        ids = {s['id'] for s in parks['specs']}
+        for s in parks['specs']:
+            for k, v in s['fence'].items():
+                if v is not None and not 85 <= v <= 130:
+                    err(f'구장 {s["id"]} {s["from"]}: 펜스 {k} {v}m가 85~130m 밖')
+            for k, v in s['height'].items():
+                if v is not None and not 1 <= v <= 8:
+                    err(f'구장 {s["id"]} {s["from"]}: 펜스 높이 {k} {v}m가 1~8m 밖')
+        spans = defaultdict(list)
+        for u in parks['use']:
+            if u['park'] not in ids:
+                err(f'구장 사용 {u["franchise"]}: 구장 표에 없는 구장 {u["park"]}')
+            if u['kind'] == '주':
+                spans[u['franchise']].append((u['from'], u['to'] or 9999))
+        for fr, ss in spans.items():
+            ss.sort()
+            for (a1, b1), (a2, _) in zip(ss, ss[1:]):
+                if a2 <= b1:
+                    err(f'구장 사용 {fr}: 주 구장 기간이 겹침 ({a1}~{b1}, {a2}~)')
+        for y in meta['years']:
+            for t in load(DATA / 'seasons' / f'{y}.json')['teams']:
+                if not any(a <= int(y) <= b for a, b in spans.get(t['franchise'], ())):
+                    warn(f'구장 사용 {y} {t["name"]}: 주 구장 없음')
 
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')
