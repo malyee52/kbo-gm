@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { computeGrades, DEFAULT_PARAMS, planForWorld, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
+import { computeGrades, DEFAULT_PARAMS, isNoGame, planForWorld, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
 import { assignLineup, newPlayerStates, refreshActive, type TeamSeason } from '../src/engine/team';
 import { spreadPlan } from '../src/engine/schedule';
 
@@ -66,6 +66,7 @@ describe('일정', () => {
     const { days } = planForWorld(world, new Rng('pairs'));
     const m = new Map<string, number>();
     for (const day of days) for (const g of day) {
+      if (isNoGame(g.rainInning)) continue; // 노게임은 다시 치르는 경기가 따로 있다
       const k = [g.home, g.away].sort((a, b) => a - b).join('-');
       m.set(k, (m.get(k) ?? 0) + 1);
     }

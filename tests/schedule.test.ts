@@ -4,6 +4,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { addDays, daysBetween, defaultOpening, divisionsOf, fitRuleToTeams, openingOf, scheduleRule, weekdayOf, type Divisions, type YearScheduleRule } from '../src/data/schedule';
 import { DEFAULT_PARAMS, Season, worldForYear } from '../src/engine';
 import { Rng } from '../src/engine/rng';
+import { isNoGame } from '../src/engine/weather';
 import { framedRule, generatePlan, homeHeavyTeams, MAX_AWAY_RUN, pickOpeningHosts, planForWorld, planProblems, type SchedulePlan, type ScheduleInput } from '../src/engine/schedule';
 import { createLeague } from '../src/league/create';
 import { divisionsFor } from '../src/league/eras';
@@ -38,7 +39,7 @@ function plan(year: number, s: number): SchedulePlan {
 /** 상대별 홈 경기 수 meet[홈][원정] */
 function meetings(p: SchedulePlan, n: number): number[][] {
   const m = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-  for (const d of p.days) for (const g of d) m[g.home][g.away]++;
+  for (const d of p.days) for (const g of d) if (!isNoGame(g.rainInning)) m[g.home][g.away]++; // 노게임은 다시 치르는 경기가 따로 있다
   return m;
 }
 
@@ -297,7 +298,7 @@ describe('생성기 연결 (월드와 시즌)', () => {
     expect(s.schedule).toBe(s.plan.days);
     expect(s.schedule[0].map((g) => g.home).sort()).toEqual([...w2026.openingHosts!].sort());
     const games = new Array(10).fill(0);
-    for (const d of s.schedule) for (const g of d) { games[g.home]++; games[g.away]++; }
+    for (const d of s.schedule) for (const g of d) if (!isNoGame(g.rainInning)) { games[g.home]++; games[g.away]++; }
     expect(games).toEqual(new Array(10).fill(144));
   });
 
@@ -314,7 +315,7 @@ describe('생성기 연결 (월드와 시즌)', () => {
     p.days.forEach((d, i) => {
       const date = addDays(p.opening, i);
       if (w2019.schedule!.breaks.some((b) => b.from <= date && date <= b.to)) expect(d).toEqual([]);
-      for (const g of d) { games[g.home]++; games[g.away]++; }
+      for (const g of d) if (!isNoGame(g.rainInning)) { games[g.home]++; games[g.away]++; }
     });
     expect(games).toEqual(new Array(10).fill(140));
   });
@@ -346,7 +347,7 @@ describe('전 시대 연전 틀 (5단계)', () => {
       for (let s = 0; s < SEEDS; s++) {
         const p = planForWorld(world, new Rng(`all-${y}-${s}`));
         const games = new Array(franchises.length).fill(0);
-        for (const d of p.days) for (const g of d) { games[g.home]++; games[g.away]++; }
+        for (const d of p.days) for (const g of d) if (!isNoGame(g.rainInning)) { games[g.home]++; games[g.away]++; }
         expect(games, `${y}/${s}`).toEqual(new Array(franchises.length).fill(rule.games));
       }
     }
@@ -673,7 +674,7 @@ describe('1999·2000 일정 (A2)', () => {
     const p = planForWorld(single, new Rng('single'));
     expect(p.series).toEqual([]);
     const games = new Array(8).fill(0);
-    for (const d of p.days) for (const g of d) { games[g.home]++; games[g.away]++; }
+    for (const d of p.days) for (const g of d) if (!isNoGame(g.rainInning)) { games[g.home]++; games[g.away]++; }
     expect(games).toEqual(new Array(8).fill(132));
   });
 
