@@ -13,6 +13,7 @@ import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPack
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
+import type { VoteChoice } from '../ai/vote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
@@ -240,6 +241,8 @@ export type GameAction =
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
+  /** 단장 회의 우리 표 (구단 투표, league/ruleVote.ts). agenda = 안건 id (없으면 첫 안건). 마지막 표로 개표, 안 내면 반대 */
+  | { year: number; type: 'rule-vote'; choice: VoteChoice; agenda?: string }
   | { year: number; type: 'next' }
   | { year: number; type: 'accept-offer'; team: number }
   | { year: number; type: 'open' };
@@ -2554,6 +2557,7 @@ export class GameSession {
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
+      case 'rule-vote': res = Off.castVote(off!, a.choice, a.agenda); break;
       case 'accept-offer': {
         const o = L.owner;
         if (!o?.offers?.includes(a.team)) return { ok: false, message: '받은 영입 제의가 아닙니다.' };
@@ -3386,6 +3390,8 @@ export class GameSession {
   }
   /** 다른 구단이 방출한 선수를 데려온다 (정원 정리 단계, 방출 선수 시장) */
   claim(id: string) { return this.dispatchOff({ year: this.year, type: 'claim', id }); }
+  /** 단장 회의 우리 표 (구단 투표). 단장 회의 단계에서만, 몇 번이고 바꿀 수 있다 */
+  voteRule(choice: VoteChoice, agenda?: string) { return this.dispatchOff({ year: this.year, type: 'rule-vote', choice, ...(agenda ? { agenda } : {}) }); }
   nextStage() { return this.dispatchOff({ year: this.year, type: 'next' }); }
   /** 해고된 뒤 영입 제의를 받아들인다 (M7) */
   acceptOffer(team: number) { return this.dispatchOff({ year: this.year, type: 'accept-offer', team }); }

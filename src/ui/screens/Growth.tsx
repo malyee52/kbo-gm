@@ -67,7 +67,7 @@ export function Growth() {
 
   return (
     <div className="stack">
-      {off.stage === 'fa' && <FlowNext step="선수 성장" label="다음: 오프시즌" onNext={() => go('offseason')} />}
+      {(off.stage === 'fa' || off.stage === 'vote') && <FlowNext step="선수 성장" label="다음: 오프시즌" onNext={() => go('offseason')} />}
       <section className="row-between wrap">
         <div>
           <h1>{off.year} 시즌 뒤 선수 성장</h1>

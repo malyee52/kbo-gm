@@ -98,11 +98,12 @@ export function Offseason() {
       </section>
 
       <ol className="steps" aria-label="오프시즌 단계">
-        {STAGES.map((s, i) => (
+        {/* 단장 회의는 안건이 있는 해만 (화면은 V4) */}
+        {STAGES.map((s, i) => (s === 'vote' && !off.vote ? null : (
           <li key={s} className={i < stageIdx ? 'done' : i === stageIdx ? 'now' : ''} aria-current={i === stageIdx ? 'step' : undefined}>
             {STAGE_LABEL[s]}
           </li>
-        ))}
+        )))}
       </ol>
 
       {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
