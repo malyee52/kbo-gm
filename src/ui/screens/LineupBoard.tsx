@@ -12,6 +12,7 @@ import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
 import { recentLines } from '../recent';
 import { lastOutings, outingText, type Outing } from '../../game/boxscore';
 import { futuresText } from './Roster';
+import { CondTag, CONDITION_HELP, useCondition } from '../parts';
 
 type Tab = 'hit' | 'pit' | 'entry';
 type PenRole = 'SU' | 'LR' | 'RP' | 'MOP';
@@ -37,6 +38,9 @@ interface Draft {
 /** 야구장 모양 배치 순서 (자리는 game.css의 .slot-○○ 격자 칸) */
 const FIELD: Slot[] = ['LF', 'CF', 'RF', 'SS', '2B', '3B', '1B', 'C', 'DH'];
 const PEN_ROLES: PenRole[] = ['SU', 'LR', 'RP', 'MOP'];
+
+/** 출전 상태 한 줄과 컨디션 낱말 (컨디션은 결장·육성이 아닐 때만) */
+type Status = { text: string; out: boolean; block?: string; cond?: string | null };
 
 function newDraft(s: GameSession, key: string): Draft {
   return { key, entry: new Set(s.registered().map((p) => p.idx)), plan: structuredClone(s.effectivePlan()), touched: false, penInit: false };
@@ -71,6 +75,7 @@ export function LineupBoard() {
   const org = session.team.org;
   const rules = session.world.rules;
   const editable = session.canManage;
+  const condOf = useCondition();
   const recent = useMemo(() => recentLines(session), [session, version]);
   // 투수 지난 등판 (투구 수·휴식일·연투, 2026-10-23 U2-3). 우리 구단 박스스코어로
   const outings = useMemo(() => lastOutings(session.season, session.teamIdx, session.season.day), [session, version]);
@@ -233,7 +238,7 @@ export function LineupBoard() {
   // ---- 표시 도우미
 
   const nameOf = (i: number | undefined | null) => (i === undefined || i === null ? '비어 있음' : players[i]?.name ?? String(i));
-  const statusOf = (p: SimPlayer): { text: string; out: boolean; block?: string } => {
+  const statusOf = (p: SimPlayer): Status => {
     if (p.dev) return { text: '육성선수', out: true, block: '정식 등록한 뒤에 1군에 올릴 수 있습니다 (선수 명단)' };
     const back = session.returnDay(p);
     if (back !== null) {
@@ -242,9 +247,9 @@ export function LineupBoard() {
     }
     if (!curReg.has(p.idx)) {
       const rd = session.reregisterDay(p);
-      if (rd !== null) return { text: `${shortDate(session.year, rd)}부터 등록 가능`, out: true, block: `말소 뒤 10일 규정: ${shortDate(session.year, rd)}부터 등록할 수 있습니다` };
+      if (rd !== null) return { text: `${shortDate(session.year, rd)}부터 등록 가능`, out: true, block: `말소 뒤 10일 규정: ${shortDate(session.year, rd)}부터 등록할 수 있습니다`, cond: condOf(p) };
     }
-    return { text: '출전 가능', out: false };
+    return { text: '출전 가능', out: false, cond: condOf(p) };
   };
   const bg = (p: SimPlayer) => grades.batters.get(p.id);
   const pg = (p: SimPlayer) => grades.pitchers.get(p.id);
@@ -330,6 +335,7 @@ export function LineupBoard() {
             전후를 확인하고 <strong>적용</strong>을 눌러야 바뀝니다. 대기 선수 칩을 자리 칸에 끌어다 놓아도 됩니다.
             직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 대기 선수로 채웁니다. 경기 중 교체는 AI 감독이 합니다.
             추천은 화면에 보이는 능력 등급과 출전 상태만으로 고른 것이며, 고르기 전에는 아무것도 바뀌지 않습니다.
+            선수 이름 옆 좋음·보통·나쁨은 컨디션입니다. {CONDITION_HELP}
           </details>
         </div>
         <span className="inline">
@@ -385,6 +391,7 @@ export function LineupBoard() {
                             <span className="slot-sub">
                               {p ? (s === 'DH' ? '지명타자' : <>수비 <Grade v={defAt(p, s)} /></>) : 'AI 감독이 채움'}
                               {st?.out && <span className="status out">{st.text}</span>}
+                              <CondTag text={st?.cond} />
                             </span>
                           </button>
                         );
@@ -403,6 +410,7 @@ export function LineupBoard() {
                           <button type="button" className="link name-btn" onClick={() => openPlayer(p.idx)}>{p.name}</button>
                           <span className="muted small">{posName(p.pos)}</span>
                           {st.out && <span className="status out">{st.text}</span>}
+                          <CondTag text={st.cond} />
                           {editable && <button type="button" className="small-btn" onClick={() => toggleEntry(p)} title="묶음에 넣습니다 (적용 전에는 바뀌지 않음)">2군으로</button>}
                         </li>
                       );
@@ -525,7 +533,7 @@ export function LineupBoard() {
 }
 
 function PitchButton({ p, label, on, changed, status, note, empty = '비어 있음', disabled, onClick }: {
-  p: SimPlayer | null; label?: string; on: boolean; changed?: boolean; status?: { text: string; out: boolean } | null;
+  p: SimPlayer | null; label?: string; on: boolean; changed?: boolean; status?: Status | null;
   /** 지난 등판 "6/08 104구 · 휴식 4일" */
   note?: string; empty?: string; disabled?: boolean; onClick: () => void;
 }) {
@@ -534,6 +542,7 @@ function PitchButton({ p, label, on, changed, status, note, empty = '비어 있�
       {label && <span className="slot-pos">{label}</span>}
       {p ? <strong>{p.name}</strong> : empty && <span className="muted small">{empty}</span>}
       {status?.out && <span className="status out">{status.text}</span>}
+      <CondTag text={status?.cond} />
       {p && note && <span className="slot-note" title="지난 등판 · 그 뒤 쉰 날">{note}</span>}
     </button>
   );
@@ -542,7 +551,7 @@ function PitchButton({ p, label, on, changed, status, note, empty = '비어 있�
 /** 후보 비교: 출전 가능 상태 · 지금 수비 등급(야수) · 능력 등급 · 최근 10경기. 2군 선수를 고르면 1군 등록도 묶음에 들어간다 */
 function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyText, recent, outings, defAt, editable, onPick, onClear, onClose }: {
   target: Target; label: string; occupant: number | null; d: Draft;
-  statusOf: (p: SimPlayer) => { text: string; out: boolean; block?: string }; nowText: (p: SimPlayer) => string;
+  statusOf: (p: SimPlayer) => Status; nowText: (p: SimPlayer) => string;
   score: (p: SimPlayer, t: Target) => number; whyText: (p: SimPlayer, t: Target) => string; recent: Map<number, string>; outings: Map<number, Outing>;
   defAt: (p: SimPlayer, s: Slot) => number | null; editable: boolean;
   onPick: (p: SimPlayer) => void; onClear: () => void; onClose: () => void;
@@ -575,6 +584,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
         지금: <strong>{cur ? cur.name : '비어 있음'}</strong>
         {cur && target.kind === 'slot' && target.slot !== 'DH' && <> · 수비 <Grade v={defAt(cur, target.slot)} /></>}
         {cur && <> · {statusOf(cur).text}{recent.get(cur.idx) ? ` · ${recent.get(cur.idx)}` : ''}</>}
+        {cur && statusOf(cur).cond && <> <CondTag text={statusOf(cur).cond} label /></>}
         {cur && pit && outings.has(cur.idx) && <> · 지난 등판 {outingText(outings.get(cur.idx)!, session.world.year)}</>}
       </p>
       <p className="small muted">
@@ -615,7 +625,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
                       <span className="cand-recent muted">{d.entry.has(p.idx) ? (recent.get(p.idx) ?? '최근 10경기 출전 없음') : '2군'}</span>
                       {pit && outings.has(p.idx) && <span className="cand-recent muted">지난 등판 {outingText(outings.get(p.idx)!, session.world.year)}</span>}
                     </td>
-                    <td className="l small">{nowText(p)}{st.out && <><br /><span className="status out">{st.text}</span></>}</td>
+                    <td className="l small">{nowText(p)}{st.out && <><br /><span className="status out">{st.text}</span></>}{st.cond && <><br /><CondTag text={st.cond} /></>}</td>
                     {pit ? (
                       <><td><Grade v={pgs?.stuff} /></td><td><Grade v={pgs?.control} /></td><td><Grade v={pgs?.hrSuppression} /></td>
                         <td><Grade v={target.kind === 'pen' && target.role === 'LR' ? pgs?.reliefStamina : pgs?.stamina} /></td></>
@@ -635,7 +645,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
 
 /** 엔트리: 1군·2군 명단. 옮기기는 묶음에 모았다가 검토 뒤 적용한다 */
 function EntryLists({ d, curReg, toggle, statusOf, nowText, recent, fut, editable }: {
-  d: Draft; curReg: Set<number>; toggle: (p: SimPlayer) => void; statusOf: (p: SimPlayer) => { text: string; out: boolean; block?: string };
+  d: Draft; curReg: Set<number>; toggle: (p: SimPlayer) => void; statusOf: (p: SimPlayer) => Status;
   nowText: (p: SimPlayer) => string; recent: Map<number, string>; fut: ReturnType<GameSession['futures']>['lines']; editable: boolean;
 }) {
   const { session, openPlayer } = useGame();
@@ -672,7 +682,7 @@ function EntryLists({ d, curReg, toggle, statusOf, nowText, recent, fut, editabl
                         {p.dev && <span className="tag">육성</span>}
                         <span className="muted small"> {p.isPitcher ? '투수' : posName(p.pos)} · {nowText(p)}</span>
                         <br />
-                        <span className="small">{st.out ? <span className="status out">{st.text}</span> : null} <span className="muted">{first ? (recent.get(p.idx) ?? '') : futuresText(fut.get(p.idx))}</span></span>
+                        <span className="small">{st.out ? <span className="status out">{st.text}</span> : null} <CondTag text={st.cond} /> <span className="muted">{first ? (recent.get(p.idx) ?? '') : futuresText(fut.get(p.idx))}</span></span>
                       </span>
                       <button type="button" className="small-btn" disabled={!editable || (!first && !!st.block)} title={!first ? st.block : undefined} onClick={() => toggle(p)}>
                         {moved ? '되돌리기' : first ? '2군으로' : '1군으로'}

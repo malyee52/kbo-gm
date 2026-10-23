@@ -90,6 +90,26 @@ export function Missing({ why }: { why?: string }) {
   return <span className="muted" title={why ?? '자료 없음'}>—{why ? <span className="small"> {why}</span> : null}</span>;
 }
 
+/** 컨디션 도움말 (docs/컨디션_기획안.md 6.3). 크기 숫자는 쓰지 않는다 */
+export const CONDITION_HELP = '컨디션은 며칠씩 이어지는 선수의 몸 상태입니다. 좋음이면 타석에서 조금 더 잘하고, 나쁨이면 조금 못합니다. 구단의 선택이나 날씨가 팀 전체에 주는 영향은 \'경기력\'으로 따로 보입니다.';
+
+/**
+ * 컨디션 한 줄 "낱말 · 사유" (2026-10-23 UI 2단계 U2-9, 엔진 2 12단계). session.conditionText만 거쳐 숫자는 받지도 보이지도 않는다.
+ * 정규시즌 중 구단 소속 선수만 (오프시즌·가을야구·시장 선수는 null)
+ */
+export function useCondition(): (p: { idx: number; teamIdx: number }) => string | null {
+  const { session } = useGame();
+  const on = session.phase === 'season' && !session.done;
+  return (p) => (on && p.teamIdx >= 0 ? session.conditionText(p.idx) : null);
+}
+
+/** 컨디션 낱말: 좋음·보통·나쁨에 따라 색. label이면 앞에 "컨디션"을 붙인다 */
+export function CondTag({ text, label }: { text: string | null | undefined; label?: boolean }) {
+  if (!text) return null;
+  const w = text.split(' · ')[0];
+  return <span className={`status cond-${w === '좋음' ? 'good' : w === '나쁨' ? 'bad' : 'ok'}`} title={CONDITION_HELP}>{label ? `컨디션 ${text}` : text}</span>;
+}
+
 /** 짐작 문구 칸 ("스카우트 메모"): 숫자 없이 문구만. 아직 문구가 없으면 비어 있다는 뜻을 적는다 */
 export function ScoutNote({ notes, full }: { notes: string[]; full: boolean }) {
   const shown = full ? notes : notes.slice(0, 1);

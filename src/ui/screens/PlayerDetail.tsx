@@ -27,7 +27,7 @@ import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pit
 import { currentRuns } from '../../ai/value';
 import { DensityToggle, useShell } from '../shell';
 import { leagueRank } from '../compare';
-import { DataTable, Delta, GradeBar, Missing, PotCell, ScoutNote, usePotentialOf, VsLeague } from '../parts';
+import { CondTag, DataTable, Delta, GradeBar, Missing, PotCell, ScoutNote, useCondition, usePotentialOf, VsLeague } from '../parts';
 import type { Column } from '../table';
 import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
@@ -138,6 +138,7 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
   const back = session.returnDay(p);
   const master = store.players.get(p.id);
   const lp = session.leaguePlayer(p.id);
+  const cond = useCondition()(p);
   const pos = p.isPitcher ? `P${p.underhand ? ' · 언더·사이드' : ''}` : [posName(p.pos), ...playablePositions(p.bat?.def).filter((q) => q !== p.pos).slice(0, 2)].join(' · ');
   const hand = `${p.throws ? HAND[p.throws] : '-'}투${p.bats ? HAND[p.bats] : '-'}타`;
   return (
@@ -160,6 +161,7 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
         {back !== null && (
           <span className="status out">{session.absenceReason(p)} · {back >= session.season.schedule.length ? '이번 시즌 복귀 어려움' : `${shortDate(year, back)} 복귀 예정`}</span>
         )}
+        {back === null && <CondTag text={cond} label />}
         {lp?.military?.state === 'homeOnly' && <span className="tag">방위병 복무 (홈경기만)</span>}
       </p>
     </>

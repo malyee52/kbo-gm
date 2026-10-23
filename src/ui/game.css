@@ -280,6 +280,9 @@ button.go { min-height: 40px; padding: 8px 18px; border-radius: 10px; font-size:
 .status { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
 .status.out { background: var(--out-bg); color: var(--out-fg); }
 .status.temp { background: var(--temp-bg); color: var(--temp-fg); }
+.status.cond-good { background: var(--win-bg); color: var(--win); }
+.status.cond-ok { background: var(--tie-bg); color: var(--tie); }
+.status.cond-bad { background: var(--loss-bg); color: var(--loss); }
 .res { display: inline-block; min-width: 1.9em; padding: 0 5px; border-radius: 4px; font-weight: 800; font-size: 12px; line-height: 19px; text-align: center; }
 .res-승 { color: var(--win); background: var(--win-bg); }
 .res-패 { color: var(--loss); background: var(--loss-bg); }

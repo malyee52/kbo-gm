@@ -12,12 +12,17 @@ const ratio = (v: number) => {
   return n === 0 ? '±0%' : `${n > 0 ? '+' : '−'}${Math.abs(n)}%`;
 };
 
-function Tendency({ info }: { info: ManagerInfo | undefined }) {
-  if (!info?.full) return <span className="muted small">기록 부족 (보통으로 봄)</span>;
+/** 컨디션 반영: 라인업·선발 순서에 선수 컨디션을 얼마나 보는지. 낱말만 (실존 감독은 자료가 없어 보통) */
+function CondTendency({ info, name }: { info: ManagerInfo | undefined; name?: string }) {
+  return <span title="AI 감독이 선수 컨디션을 라인업과 선발 순서에 얼마나 반영하는지 (기록이 아닌 성향)">컨디션 반영 {tendencyLabel(tacticsOf(info, name).cond)}</span>;
+}
+
+function Tendency({ info, name }: { info: ManagerInfo | undefined; name?: string }) {
+  if (!info?.full) return <span className="small"><span className="muted">기록 부족 (보통으로 봄)</span> · <CondTendency info={info} name={name} /></span>;
   return (
     <span className="small">
       도루 시도 {tendencyLabel(info.steal)} <span className="muted">({ratio(info.steal)})</span> · 희생번트 {tendencyLabel(info.bunt)} <span className="muted">({ratio(info.bunt)})</span>
-      {' '}· 구원 등판 {tendencyLabel(info.relief)} <span className="muted">({ratio(info.relief)})</span>
+      {' '}· 구원 등판 {tendencyLabel(info.relief)} <span className="muted">({ratio(info.relief)})</span> · <CondTendency info={info} name={name} />
     </span>
   );
 }
@@ -59,7 +64,7 @@ export function ManagerPanel() {
               <div className="stat"><span className="stat-label">계약</span><strong className="stat-value">{m.until}년까지</strong></div>
             </div>
             <p className="small">실제 경력: {careerLine(info)}</p>
-            <p>운영 경향: <Tendency info={info} /></p>
+            <p>운영 경향: <Tendency info={info} name={m.name} /></p>
             <p className="muted small">
               운영 경향은 이 감독이 시즌 내내 맡은 해의 팀 기록을 그 해 리그 평균과 견준 것입니다 (성격·능력 평가가 아닙니다). 팀 기록에는 선수 구성도 섞여 있어 경기에는 일부만 반영합니다:
               도루 시도 ×{t.steal.toFixed(2)}, 희생번트 ×{t.bunt.toFixed(2)}, 선발 투구 한계 ×{t.hook.toFixed(2)}. 경기 중 작전은 지금처럼 감독이 합니다.
@@ -89,7 +94,7 @@ export function ManagerPanel() {
                     const i = infoOf(store, name);
                     return (
                       <tr key={name}>
-                        <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><Tendency info={i} /></td>
+                        <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><Tendency info={i} name={name} /></td>
                         <td>{won(managerSalary(i))}</td>
                         <td>
                           {inSeason
@@ -119,7 +124,7 @@ export function ManagerPanel() {
                 return (
                   <tr key={k} className={k === me ? 'me' : ''}>
                     <td className="l"><TeamName idx={k} /></td><td className="l">{x?.name ?? '공석'}</td><td>{x?.since ?? ''}</td><td>{x ? `${x.until}년까지` : ''}</td>
-                    <td className="l">{x && <Tendency info={infoOf(store, x.name)} />}</td>
+                    <td className="l">{x && <Tendency info={infoOf(store, x.name)} name={x.name} />}</td>
                   </tr>
                 );
               })}

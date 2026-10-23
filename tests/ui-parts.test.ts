@@ -134,3 +134,15 @@ describe('잠재 범위 (결정 5)', () => {
     expect(bad).toEqual([]);
   });
 });
+
+describe('컨디션 낱말 (U2-9)', () => {
+  it('화면은 parts.tsx의 useCondition 한 곳에서만 conditionText를 부르고, 컨디션 도움말에도 숫자가 없다', () => {
+    const dir = 'src/ui';
+    const files = [...readdirSync(dir).map((f) => join(dir, f)), ...readdirSync(join(dir, 'screens')).map((f) => join(dir, 'screens', f))]
+      .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('parts.tsx'));
+    expect(files.filter((f) => /conditionText\(/.test(readFileSync(f, 'utf8')))).toEqual([]);
+    const help = /CONDITION_HELP = '([^\n]*)';/.exec(readFileSync(join(dir, 'parts.tsx'), 'utf8'));
+    expect(help).not.toBeNull();
+    expect(help![1]).not.toMatch(/\d/);
+  });
+});

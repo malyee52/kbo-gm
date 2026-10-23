@@ -15,6 +15,7 @@ import { PlayerLink, TeamName, useGame } from './context';
 import { BoxTables, LineScore } from './BoxScore';
 import { useShell } from './shell';
 import { teamVars } from './teams';
+import { CondTag, useCondition } from './parts';
 import { gameStory, storyOf } from '../fantasy/gameday';
 import { loadAiSettings } from '../fantasy/settings';
 
@@ -245,6 +246,7 @@ function PlayerOfGameLine({ log, game }: { log: Pick<GameLog, 'home' | 'away' | 
 /** 우리 선수의 다음 일: 이 경기가 우리 마지막 경기이고 시즌이 남았으면 다음 경기와 선발 예정 (지난 등판 투구 수·휴식) */
 function NextUp({ game }: { game: CastGame }) {
   const { session } = useGame();
+  const condOf = useCondition();
   const me = session.teamIdx;
   if (session.phase !== 'season' || session.done || game.label || game.year !== session.world.year) return null;
   const s = session.season;
@@ -262,6 +264,8 @@ function NextUp({ game }: { game: CastGame }) {
       <p className="small">
         {shortDate(session.world.year, next.day)} {home ? 'vs' : '@'} {session.teamInfo(home ? next.away : next.home).name}
         {sp && <> · 선발 예정 <PlayerLink p={sp} />{o && <span className="muted"> (지난 등판 {outingText(o, session.world.year)})</span>}</>}
+        {/* 컨디션은 지금 날의 값만 볼 수 있어 다음 경기가 오늘일 때만 */}
+        {sp && next.day === s.day && <> <CondTag text={condOf(sp)} label /></>}
       </p>
     </section>
   );
