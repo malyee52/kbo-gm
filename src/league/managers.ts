@@ -57,7 +57,8 @@ export interface Tactics {
   sub: number;
   /**
    * 컨디션 반영 (엔진 2 12단계, docs/컨디션_기획안.md 7.4): AI 감독이 라인업·선발을 고를 때 컨디션 효과를 얼마나 크게 보는가 (1 = 효과만큼).
-   * 실존 감독은 선발 라인업 변동 기록을 대리값으로 쓰기로 했지만(2026-10-22 사용자) 아직 재지 않아 모두 1, 가상 감독만 이름으로 정한 0.5~1.5 (임시값)
+   * 실존 감독은 선발 라인업 변동 기록(2023~ 투구 단위 자료, 경기마다 전 경기와 바뀐 선발 수 ÷ 그 해 리그, byYear·평균 cond)을 대리값으로 쓴다
+   * (2026-10-22 사용자 결정, 엔진 2 13-0-5). 자료 없으면 1, 가상 감독은 이름으로 정한 0.5~1.5 (임시값)
    */
   cond: number;
   /**
@@ -73,7 +74,7 @@ export const NEUTRAL_TACTICS: Tactics = { steal: 1, bunt: 1, hook: 1, pen: 1, su
  * 기록 배율을 경기 배율로 옮길 때의 비율: 팀 기록에는 선수 구성 몫도 섞여 있어 절반 남짓만 감독 몫으로 본다 (임시값).
  * push·pen (엔진 2 10단계)은 2023~2025 선발 100구 이상 비율·구원 연투에 맞춘 값 (임시값)
  */
-export const TACTIC_SHARE = { steal: 0.6, bunt: 0.8, hook: 0.6, push: 1, pen: 1, ibb: 1 };
+export const TACTIC_SHARE = { steal: 0.6, bunt: 0.8, hook: 0.6, push: 1, pen: 1, ibb: 1, cond: 0.6 };
 /** 가상 감독 성향 폭 (이름 해시, 임시값): 대타·대주자 빈도, 투수 밀어붙이기, 불펜 연투 허용, 컨디션 반영, 고의4구 빈도 */
 export const VIRTUAL_RANGE = { sub: [0.7, 1.3], hook: [0.94, 1.06], pen: [0.85, 1.15], cond: [0.5, 1.5], ibb: [0.5, 1.5] } as const;
 /** 고의4구 빈도 범위 (실존 구단 값 0.27~1.83: 팀당 수가 적어 흔들림이 크다, 임시값) */
@@ -108,9 +109,10 @@ export function tacticsOf(info: ManagerInfo | undefined, name?: string, year?: n
   const push = by?.push ?? info.push;
   const pen = by?.pen ?? info.pen;
   const ibb = by?.ibb ?? info.ibb;
+  const cond = by?.cond ?? info.cond;
   return {
     sub: 1,
-    cond: 1,
+    cond: cond !== undefined ? round3(clamp(1 + (cond - 1) * TACTIC_SHARE.cond, VIRTUAL_RANGE.cond[0], VIRTUAL_RANGE.cond[1])) : 1,
     ibb: ibb !== undefined ? round3(clamp(1 + (ibb - 1) * TACTIC_SHARE.ibb, IBB_CLAMP[0], IBB_CLAMP[1])) : 1,
     steal: clamp(1 + (info.steal - 1) * TACTIC_SHARE.steal, 0.7, 1.4),
     bunt: clamp(1 + (info.bunt - 1) * TACTIC_SHARE.bunt, 0.7, 1.4),

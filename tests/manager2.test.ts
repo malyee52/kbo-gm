@@ -6,7 +6,7 @@ import { AUTO_IBB_YEAR } from '../src/engine/eras';
 import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY } from '../src/engine/params';
 import { BLOWN_FROM_INNING } from '../src/engine/state';
 import { availableBelow } from '../src/engine/team';
-import { infoOf, NEUTRAL_TACTICS, tacticsOf, VIRTUAL_RANGE, virtualTactic } from '../src/league/managers';
+import { infoOf, NEUTRAL_TACTICS, TACTIC_SHARE, tacticsOf, VIRTUAL_RANGE, virtualTactic } from '../src/league/managers';
 
 const store = loadDataStore();
 const w2025 = worldForYear(store, 2025);
@@ -105,6 +105,20 @@ describe('고의4구 (엔진 2 10단계)', () => {
     };
     expect(mean('2024')).toBeLessThan(0.95);
     expect(mean('2025')).toBeGreaterThan(1.05);
+  });
+
+  it('실존 감독 컨디션 반영 = 선발 라인업 변동 대리값 (그 해 구단 값 → 평균, 몫 0.6, 0.5~1.5), 자료 없으면 1 (13-0-5)', () => {
+    const info = infoOf(store, '염경엽')!;
+    const by = info.byYear!['2024'].cond!;
+    expect(by).toBeLessThan(1);
+    expect(tacticsOf(info, '염경엽', 2024).cond).toBeCloseTo(1 + (by - 1) * TACTIC_SHARE.cond, 3);
+    expect(tacticsOf(info, '염경엽').cond).toBeCloseTo(1 + (info.cond! - 1) * TACTIC_SHARE.cond, 3);
+    expect(tacticsOf({ ...info, cond: undefined, byYear: undefined }, '염경엽').cond).toBe(1);
+    for (const i of Object.values(store.managers!.people)) {
+      const c = tacticsOf(i).cond;
+      expect(c).toBeGreaterThanOrEqual(VIRTUAL_RANGE.cond[0]);
+      expect(c).toBeLessThanOrEqual(VIRTUAL_RANGE.cond[1]);
+    }
   });
 });
 
