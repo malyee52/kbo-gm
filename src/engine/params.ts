@@ -188,6 +188,23 @@ export interface EraRunning {
   ue?: number;
 }
 
+/**
+ * 구장 제원 회귀 (구장효과 기획안 4.2·6.1, P4 reports/park-specs-fit.md). log 지수 = a + b × 평균 거리(좌·중·우 평균, m).
+ * 2026-10-24 자리값: 아직 어디에도 쓰지 않는다 (옛 구장 대리값 P5, 신구장 펜스 P6에서 쓴다)
+ */
+export interface ParkSpecFit {
+  /** 홈런 log 지수 [a, b] */
+  hr: [number, number];
+  /** (2루타 + 3루타) log 지수 [a, b] */
+  xb: [number, number];
+  /** 실제 구장 짐작의 당김: 짐작 log 지수 × w (0 = 중립) */
+  w: number;
+  /** 상·하한: 홈런·(2루타 + 3루타) 지수(100 = 리그), 득점 계수 f */
+  clamp: { hr: [number, number]; xb: [number, number]; f: [number, number] };
+  /** 신구장 고르기 범위 (m): 좌·우 펜스, 중앙 펜스, 높이 */
+  range: { side: [number, number]; center: [number, number]; height: [number, number] };
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -252,7 +269,7 @@ export interface EngineParams {
    * 2026-10-22부터 하드힛 구장 표(2022~2025, 전체·좌타·우타)에 있는 구장은 사건별 배율(meta.parkEvents)을 쓰고, 이 지수는 표에 없는
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
-  park: { hitExp: number; hrExp: number };
+  park: { hitExp: number; hrExp: number; specFit: ParkSpecFit };
   /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (엔진 2 4단계) */
   fatiguePerPitch: number;
   /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
@@ -500,7 +517,20 @@ export const DEFAULT_PARAMS: EngineParams = {
   platoon: 0.028,
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
-  park: { hitExp: 0.4, hrExp: 1.2 },
+  park: {
+    hitExp: 0.4,
+    hrExp: 1.2,
+    // 자리값 (P4 reports/park-specs-fit.md, 하드힛 구성표 9곳): 평균 거리 식. 한 구장 빼고 맞히기 오차가 중립보다 커서
+    // (홈런 log 0.350 대 0.255, (2루타 + 3루타) 0.132 대 0.088) 당김 w는 오차가 가장 작은 0 (= 중립). 기획안 기본 0.5에서 내릴지는 사용자 결정 전.
+    // 범위는 표본 최소~최대 (높이는 0.5m 단위로 2.4 → 2.5)
+    specFit: {
+      hr: [3.2501, -0.0308],
+      xb: [-0.5575, 0.0055],
+      w: 0,
+      clamp: { hr: [70, 147], xb: [86, 122], f: [0.886, 1.126] },
+      range: { side: [95, 101], center: [120, 125], height: [2.5, 6] },
+    },
+  },
   // 한계 투구 수를 넘기면 능력이 확 꺾인다: 5구당 약 10% (사용자 결정 2026-10-22, 엔진 1은 타자 1명당 0.012 = 공 1개당 약 0.003)
   fatiguePerPitch: 0.02,
   // 임시값 (2026-10-22 사용자 승인): 30구 넘김에서 멈춘다 (엔진 1은 0.3)
