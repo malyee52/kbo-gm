@@ -97,8 +97,8 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
           <table>
             <thead><tr><th className="l">시리즈</th><th className="l">대진</th><th>결과</th><th className="l">경기</th></tr></thead>
             <tbody>
-              {ps.series.map((x) => (
-                <tr key={x.round} className={x.high === me || x.low === me ? 'me' : ''}>
+              {ps.series.map((x, i) => (
+                <tr key={i} className={x.high === me || x.low === me ? 'me' : ''}>
                   <td className="l">{ROUND_LABEL[x.round]}</td>
                   <td className="l">{name(x.high)} vs {name(x.low)}</td>
                   <td>{x.winsHigh} - {x.winsLow}{x.round === 'wc' ? ' *' : ''} → {name(x.winner)}</td>

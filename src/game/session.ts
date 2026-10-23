@@ -64,8 +64,8 @@ import {
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
-  currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, RULES, startPostseason, stillAlive,
-  type PostseasonResult, type PostseasonState, type SeriesGame,
+  bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, seriesHome, seriesToday, startPostseason, stillAlive,
+  type PostseasonResult, type PostseasonState, type SeriesGame, type SeriesResult,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
@@ -448,11 +448,15 @@ export class GameSession {
     return (this.hasGameToday || this.ourPostseasonGameNext) && !this.pendingEvent;
   }
 
-  /** 가을야구의 다음 경기가 우리 경기인가 (직접 지휘, 2026-10-12) */
+  /** 가을야구의 다음 경기(날)가 우리 경기인가 (직접 지휘, 2026-10-12). 양대 리그 해는 같은 날 두 시리즈가 열릴 수 있다 */
   get ourPostseasonGameNext(): boolean {
-    if (!this.postseasonRunning) return false;
-    const x = currentSeries(this.postseason!);
-    return !!x && (x.high === this.teamIdx || x.low === this.teamIdx);
+    return !!this.ourPostseasonSeriesToday();
+  }
+
+  /** 다음 가을야구 경기 날에 우리 경기가 있는 시리즈 (없으면 null) */
+  private ourPostseasonSeriesToday(st: PostseasonState | null = this.postseason): SeriesResult | null {
+    if (!this.postseasonRunning || !st) return null;
+    return seriesToday(st).find((x) => x.high === this.teamIdx || x.low === this.teamIdx) ?? null;
   }
 
   /** 하루 진행 직전 준비 (실제 진행과 미리보기가 같게) */
@@ -529,11 +533,9 @@ export class GameSession {
   private postseasonCommandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto'): CommandPreview {
     const s = this.scratchSeason();
     const st: PostseasonState = JSON.parse(JSON.stringify(this.postseason));
-    const x = currentSeries(st)!;
-    const rule = RULES[x.round];
-    const highHome = rule.homePattern[x.games.length] ?? true;
-    const home = highHome ? x.high : x.low;
-    const away = highHome ? x.low : x.high;
+    // 같은 날 다른 시리즈 경기가 먼저여도 우리 경기만 돌린다 (구단이 겹치지 않아 순서가 결과에 닿지 않는다)
+    const x = this.ourPostseasonSeriesToday(st) ?? currentSeries(st)!;
+    const { home, away } = seriesHome(x, x.games.length);
     const out = choices.map((c) => ({ ...c }));
     let half: { inn: number; top: boolean } | null = null;
     const commander: GameCommand = {
@@ -549,7 +551,7 @@ export class GameSession {
     };
     s.boxTeams.add(this.teamIdx);
     try {
-      const g = playNextGame(st, s, commander)!;
+      const g = playNextGame(st, s, commander, x)!;
       return { req: null, choices: out, plays: g.plays ?? [], home, away, final: { away: g.awayRuns, home: g.homeRuns } };
     } catch (e) {
       if (!(e instanceof CommandPause)) throw e;
@@ -2036,23 +2038,32 @@ export class GameSession {
     this.postseason = startPostseason(this.season, st, this.world.rules.postseasonTeams, seasonSeed(this.league));
     if (ruleOf(this.league, 'postseasonMaxInnings') !== RULE_DEFAULTS.postseasonMaxInnings) this.postseason.maxInnings = ruleOf(this.league, 'postseasonMaxInnings');
     const name = (t: number) => this.world.teams[t].name;
-    const mine = this.postseason.seeds.includes(this.teamIdx);
-    this.addNews(this.day, 'season', `가을야구 대진: ${this.postseason.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ')}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
+    const ps = this.postseason;
+    const mine = ps.seeds.includes(this.teamIdx);
+    // 양대 리그 해: 준플레이오프 판정과 교차 대진 (기획안 10.5)
+    const text = ps.bracket ? `${semiCheckText(ps, name)} ${bracketText(ps, name)}` : ps.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ');
+    this.addNews(this.day, 'season', `가을야구 대진: ${text}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
   }
 
-  /** 가을야구를 games경기 진행한다. 실제로 치른 경기 수를 돌려준다 */
+  /**
+   * 가을야구를 games경기 진행한다. 실제로 치른 경기 수를 돌려준다.
+   * 같은 날 경기가 둘이면(양대 리그 해의 동시 시리즈) 그날 경기를 함께 치른다: 날짜 사이에서만 조작이 끼어들어 재현이 날짜로 맞는다
+   */
   advancePostseason(games: number): number {
     let n = 0;
     while (n < games && this.postseasonRunning) {
       const st = this.postseason!;
-      const before = currentSeries(st)!;
+      const day = st.day;
       // 직접 지휘한 경기 (조작 기록 command, 그 경기 날짜): 고른 대로, 나머지 물음은 감독에게
-      const cmds = this.pendingCommands.filter((c) => c.day === st.day);
+      const cmds = this.pendingCommands.filter((c) => c.day === day);
       const commander = replayCommander(this.teamIdx, cmds);
       if (cmds.length) this.pendingCommands = [];
-      const g = playNextGame(st, this.season, commander)!;
-      n++;
-      this.postseasonGameNews(before, g);
+      do {
+        const before = currentSeries(st)!;
+        const g = playNextGame(st, this.season, commander)!;
+        n++;
+        this.postseasonGameNews(before, g);
+      } while (this.postseasonRunning && st.day === day);
     }
     return n;
   }
@@ -2062,7 +2073,7 @@ export class GameSession {
     const x = this.postseason && currentSeries(this.postseason);
     if (!x) return 0;
     let n = 0;
-    while (this.postseasonRunning && currentSeries(this.postseason!) === x) n += this.advancePostseason(1);
+    while (this.postseasonRunning && x.winner < 0) n += this.advancePostseason(1);
     return n;
   }
 
@@ -2070,8 +2081,7 @@ export class GameSession {
   advanceToOurPostseasonGame(): number {
     let n = 0;
     while (this.postseasonRunning) {
-      const x = currentSeries(this.postseason!)!;
-      const ours = x.high === this.teamIdx || x.low === this.teamIdx;
+      const ours = this.ourPostseasonGameNext;
       n += this.advancePostseason(1);
       if (ours) break;
     }
@@ -2083,7 +2093,7 @@ export class GameSession {
     const mine = x.high === this.teamIdx || x.low === this.teamIdx;
     const no = x.games.length;
     if (mine) {
-      this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} ${no}차전: ${name(g.away)} ${g.awayRuns} - ${g.homeRuns} ${name(g.home)}${g.innings > 9 ? ` (${g.innings}회)` : ''} · 시리즈 ${name(x.high)} ${x.winsHigh} - ${x.winsLow} ${name(x.low)}`);
+      this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} ${no}차전: ${name(g.away)} ${g.awayRuns} - ${g.homeRuns} ${name(g.home)}${g.innings > 9 ? ` (${g.innings}회)` : ''}${g.neutral ? ' (잠실 중립)' : ''} · 시리즈 ${name(x.high)} ${x.winsHigh} - ${x.winsLow} ${name(x.low)}`);
     }
     if (x.winner >= 0) {
       this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} 종료: ${name(x.winner)} 승리 (${x.winsHigh} - ${x.winsLow}).`);

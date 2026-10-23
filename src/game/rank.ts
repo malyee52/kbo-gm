@@ -1,6 +1,7 @@
 // 순위 문장 도우미 (일정 개편 기획안 10.4). 단일 리그 해는 "3위", 양대 리그 해(1999·2000)는 "드림 2위".
 // 화면·소식·기사·기자회견이 순위를 문장으로 쓸 때 이것을 거친다. 지명·정산처럼 통합 순위가 필요한 곳은 standings()를 그대로 쓴다
-import { rankWithTiebreak, type DivisionTable, type Season, type TeamRecord } from '../engine';
+import type { DivisionTable, Season, TeamRecord } from '../engine';
+import { bracketFor } from '../league/postseason';
 import type { LeagueState } from '../league/types';
 
 /** 한 구단이 속한 순위표: 리그 이름(단일 리그면 null), 그 표의 순서(1위부터), 순위(1부터, 없으면 0) */
@@ -46,14 +47,8 @@ export function rankText(session: { phase: string; season: Season; league: Pick<
  */
 export function postseasonPlaces(order: number[], tables: DivisionTable[] | null | undefined, cut: number, teams: TeamRecord[], log: Season['log'], prev?: readonly number[]): number[] {
   if (!tables || tables.length !== 2) return order.slice(0, cut);
-  const out = tables.flatMap((d) => d.teams.slice(0, 2));
-  for (const [a, b] of [[0, 1], [1, 0]] as const) {
-    const third = tables[a].teams[2];
-    const second = tables[b].teams[1];
-    if (third === undefined || second === undefined) continue;
-    if (rankWithTiebreak([third, second], teams, log, prev)[0] === third) out.push(third);
-  }
-  return order.filter((t) => out.includes(t));
+  // 실제 가을야구 대진(league/postseason.ts bracketFor)과 같은 판정
+  return bracketFor(order, tables, teams, log, prev).seeds;
 }
 
 /** 시즌 중 지금 순위로 가을야구에 나가는 구단 */

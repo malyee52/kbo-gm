@@ -44,7 +44,7 @@ export function Home() {
   const myGames = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me);
   const recent = myGames.slice(-5).reverse();
   // 알림 종류별 보기 (2026-10-12). 고른 것은 이 브라우저에 기억한다
-  const [newsKind, setNewsKindState] = useState<NewsGroup>(() => { try { return (localStorage.getItem('kbo-news-kind') as NewsGroup) || 'all'; } catch { return 'all'; } });
+  const [newsKind, setNewsKindState] = useState<NewsGroup>(() => { try { const k = localStorage.getItem('kbo-news-kind'); return k && Object.prototype.hasOwnProperty.call(NEWS_GROUPS, k) ? k as NewsGroup : 'all'; /* 모르는 값(다른 브랜치가 남긴 것)이면 전체 */ } catch { return 'all'; } });
   const setNewsKind = (k: NewsGroup) => { setNewsKindState(k); try { localStorage.setItem('kbo-news-kind', k); } catch { /* 저장 못 해도 화면은 그대로 */ } };
   const [newsMore, setNewsMore] = useState(false);
   const news = [...session.news].reverse().filter((n) => newsKind === 'all' || NEWS_GROUPS[newsKind].kinds.includes(n.kind)).slice(0, 30);
