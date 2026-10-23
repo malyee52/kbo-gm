@@ -338,7 +338,8 @@ def write_report(unmatched, merged, why, n_ars, n_rv, out):
     ] + [f'| {y} | {t} | {n} | {s} | {k} |' for y, t, n, s, k in sorted(merged)] + [
         '', '## 못 맞춘 행', '', '| 연도 | 팀 | 이름 | 구종 | 투구수 | 사유 | 파일 |', '|---|---|---|---|---|---|---|',
     ] + [f'| {y} | {t} | {n} | {p} | {"" if c is None else c} | {r} | {f} |' for y, t, n, p, c, r, f in sorted(unmatched, key=lambda u: (u[0], u[1], u[2], u[3]))]
-    REPORT.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    with REPORT.open('w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(lines) + '\n')
 
 
 def main():
