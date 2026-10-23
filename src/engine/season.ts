@@ -533,8 +533,11 @@ export class Season {
       const awayStarter = todaysStarter(a, states, day, params);
       // 야수 휴식은 경기 전 피로로 (엔진 2 11단계)
       const tired = (p: SimPlayer) => currentBody(states, p.idx, day, params.body);
-      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired);
+      // 2차전 라인업(주전 휴식)은 그 경기 줄기에서 갈라 쓴다: 1차전 결과(피로·부상)에 따라 뽑는 횟수가 달라져도
+      // 그날 뒤에 오는 다른 경기의 하루 난수(dayRng)를 밀지 않는다 (tests/engine2-rng.test.ts)
+      const lineupRng = g.dh === 2 ? this.gameRng(day, g).fork('lineup') : dayRng;
+      const homeLineup = todaysLineup(h, world.league, params, lineupRng, awayStarter.throws, tired);
+      const awayLineup = todaysLineup(a, world.league, params, lineupRng, homeStarter.throws, tired);
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
