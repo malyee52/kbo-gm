@@ -3,7 +3,8 @@
 // 실제 수비 이닝(defense.json, 2001~)으로 주 포지션·익숙함·수비 가능·비상 포수·평판 무게를 정하는 순수 함수다.
 // 아직 엔진·리그 생성에 잇지 않는다 (16-3에서 makeDefense·posExp에 잇는다). 그래서 게임 결과·저장 지문은 그대로다.
 // 난수를 쓰지 않는다. 입력은 시작 연도 전 해들의 수비 경험(FieldYear)이고, 퓨처스(2군) 이닝은 1군 이닝과 따로 받아
-// 무게 W_F를 곱해 더한다 (15.2, 게임 시작 뒤에만 생긴다).
+// 무게 W_F를 곱해 더한다 (15.2, 게임 시작 뒤에만 생긴다). 퓨처스 이닝은 익숙함(u)과 비상 포수에만 쓰고, 주 포지션 판정과
+// 평판 거름은 1군 기록만 센다 (2026-10-23 클사장 결정: 그 규칙들은 1군 KBO 기록으로 정해졌다).
 
 import type { DataStore } from '../data/types';
 import { FIELD_POS, type FieldPos } from './defense';
@@ -36,7 +37,7 @@ export interface FieldOptions {
 
 /** 주 포지션 판정 결과 (12.2) */
 export interface MainPosition {
-  /** 화면 주 포지션. 수비 없는 타석 몫이 DH_SHARE 이상이거나 수비 본 자리가 없으면 DH */
+  /** 화면 주 포지션. 직전 3시즌 타석 DH_MIN_PA 이상에서 수비 없는 타석 몫이 DH_SHARE 이상이거나, 수비 본 자리가 없으면 DH */
   screen: FieldPos | 'DH';
   /** 수비 본 자리 (익숙함·자리 이동의 출발점). 수비 경험도 등록 포지션도 없으면 null */
   field: FieldPos | null;
@@ -57,8 +58,9 @@ const CATCHER_MAIN_INN = 500;
 const CATCHER_MAIN_GS = 60;
 /** 직전 3시즌 수비 이닝 합이 이만큼 안 되면 커리어 이닝(최근성)으로 본 자리를 정한다 (12.2 규칙 2, 임시값) */
 const WINDOW_MIN_INN = 500;
-/** 화면 주 포지션 DH: 직전 3시즌 수비 없는 타석 몫 (12.2 규칙 3, 임시값) */
+/** 화면 주 포지션 DH: 직전 3시즌 수비 없는 타석 몫 (12.2 규칙 3, 임시값). 3시즌 타석이 DH_MIN_PA 미만이면 DH로 보지 않는다 (12.4 ②와 같은 하한, 2026-10-23 결정) */
 const DH_SHARE = 0.6;
+const DH_MIN_PA = 300;
 /** 2000년 이전 해: 주 포지션 타석 → 그 자리 이닝 (측정 1.94), 포수 규칙용 타석 → 포수 이닝 (500이닝 ÷ 200타석, 결정 30에서 맞춘 값) */
 const PA_TO_INN = 1.94;
 const PROXY_C_INN_PER_PA = 2.5;
@@ -158,10 +160,11 @@ function recency(start: number, last: number | undefined): number {
  * 1. 직전 3시즌 포수 500이닝 또는 포수 선발 60경기 → C.
  * 2. 아니면 직전 3시즌 수비 이닝이 가장 많은 자리 (C 제외). 3시즌 수비 이닝 합이 500 미만이면 커리어 이닝 × 최근성이 가장 큰 자리.
  *    C 말고 맡은 자리가 없으면 C (포수만 본 2번 포수, 13.2). 수비 이닝이 전혀 없으면 등록 포지션(opts.listed).
- * 3. 직전 3시즌 수비 없는 타석 몫이 0.6 이상이면 화면 주 포지션은 DH (2의 자리는 수비 본 자리로 남는다).
+ * 3. 직전 3시즌 타석 300 이상이고 수비 없는 타석 몫이 0.6 이상이면 화면 주 포지션은 DH (2의 자리는 수비 본 자리로 남는다).
+ * 퓨처스 이닝은 세지 않는다 (1군 기록만, 2026-10-23 결정). opts에서는 등록 포지션(listed)만 쓴다.
  */
 export function mainPosition(years: FieldYear[], startYear: number, opts?: FieldOptions): MainPosition {
-  const wf = wfOf(opts);
+  const wf = 0;
   const past = before(years, startYear);
   const w3 = window3(years, startYear);
   let pa = 0;
@@ -203,7 +206,7 @@ export function mainPosition(years: FieldYear[], startYear: number, opts?: Field
       basis = field ? 'listed' : 'none';
     }
   }
-  return { screen: noDefShare >= DH_SHARE || !field ? 'DH' : field, field, basis, noDefShare };
+  return { screen: (pa >= DH_MIN_PA && noDefShare >= DH_SHARE) || !field ? 'DH' : field, field, basis, noDefShare };
 }
 
 /** 본 자리가 그대로 다 찬 것으로 보이는가 (13.2). 예외: 화면 DH인데 본 자리를 3시즌 넘게 맡지 않았거나 수비 이닝이 전혀 없으면 일반 식 */
@@ -239,6 +242,7 @@ export function playable(years: FieldYear[], startYear: number, main: MainPositi
 /**
  * 비상 포수 (14.2, 결정 20 고침): 포수가 수비 가능이 아니고 직전 3시즌 포수 이닝 합 150 이상 (최근성은 곱하지 않는다).
  * 2000년 이전 해는 주 포지션 C 시즌 타석 × 2.5만 센다 (주 포지션이 아닌 포수 경험은 잡히지 않는다).
+ * 포수 이닝은 익숙함과 같은 합(1군 + W_F × 퓨처스, 15.2)을 본다.
  */
 export function emergencyCatcher(years: FieldYear[], startYear: number, main: MainPosition, opts?: FieldOptions): boolean {
   if (familiarity(years, startYear, 'C', main, opts) >= 1) return false;
@@ -264,11 +268,12 @@ export type Reputation = readonly [pos: string, level: number, from: number | nu
  * - 시기 끝 + 3시즌까지 1, 그 뒤 해마다 × 0.7. 시기 없는 평판은 그 자리 누적 이닝 ÷ 2,300 (최대 1).
  * - 자리는 평판 자리와 그 유사 포지션 (같은 무게). IF·OF·전반은 그 시기에 300이닝 이상 맡은 해당 자리 모두.
  * - 수비 기록이 없는 시기(2000년 이전)는 그 자리가 주 포지션인 시즌이 하나라도 있으면 쓴다.
+ * - 이닝은 1군 기록만 센다 (퓨처스 이닝은 익숙함에만, 2026-10-23 결정).
  */
-export function reputationWeight(rep: Reputation, years: FieldYear[], startYear: number, opts?: FieldOptions): Partial<Record<FieldPos, number>> {
+export function reputationWeight(rep: Reputation, years: FieldYear[], startYear: number): Partial<Record<FieldPos, number>> {
   const [pos, level, from, to] = rep;
   if (from !== null && from >= startYear) return {};
-  const wf = wfOf(opts);
+  const wf = 0;
   const hi = Math.min(to ?? startYear - 1, startYear - 1);
   const span = years.filter((y) => y.year < startYear && (from === null || (y.year >= from && y.year <= hi)));
   if (level >= 1) {

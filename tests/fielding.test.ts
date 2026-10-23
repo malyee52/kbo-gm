@@ -1,8 +1,9 @@
 // 능력치 v2 16-3a: 수비 판정 함수 (src/engine/fielding.ts). 기획안 14.7 첫 카드 시험 + 15.8 퓨처스 이닝 하나.
-// 숫자는 docs/능력치v2_기획안.md 12.1·12.2·13.2·14.1·14.2·15.3의 측정값이다.
+// 숫자는 docs/능력치v2_기획안.md 12.1·12.2·13.2·14.1·14.2·15.3의 측정값이다. 2026-10-23 클사장 결정 ①~④ 반영
+// (주 포지션·평판은 1군 이닝만, 화면 DH 300타석 하한, 고교 시절뿐인 평판 버림, 시기 시작 ≥ 시작 연도 버림).
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
-import { emergencyCatcher, familiarity, fieldYears, mainPosition, playable, reputationWeight, type FieldYear } from '../src/engine/fielding';
+import { emergencyCatcher, familiarity, fieldYears, mainPosition, playable, reputationWeight, type FieldYear, type Reputation } from '../src/engine/fielding';
 import type { FieldPos } from '../src/engine/defense';
 
 const store = loadDataStore();
@@ -40,6 +41,13 @@ describe('주 포지션 (12.2)', () => {
 
   it('강백호 2024: 화면도 1B (수비 없는 몫 0.32)', () => {
     const j = judge(idOf('강백호'), 2024);
+    expect(j.main.screen).toBe('1B');
+    expect(j.main.field).toBe('1B');
+  });
+
+  it('박석민 2005: 직전 3시즌 타석이 300 미만이라 수비 없는 몫 0.66이어도 화면 DH가 아니다 (2026-10-23 결정)', () => {
+    const j = judge(idOf('박석민', 1985), 2005);
+    expect(j.main.noDefShare).toBeGreaterThan(0.6);
     expect(j.main.screen).toBe('1B');
     expect(j.main.field).toBe('1B');
   });
@@ -102,12 +110,35 @@ describe('익숙함·수비 가능·비상 포수 (13.1·13.2·14.1·14.2)', () 
       { year: 2026, fut: { C: 700 }, pa: 0, noDefPa: 0 },
     ];
     const m1 = mainPosition(years, 2027, { futWeight: 1 });
+    expect(m1.field).toBe('1B'); // 주 포지션은 퓨처스 이닝을 세지 않는다
     expect(familiarity(years, 2027, 'C', m1, { futWeight: 1 })).toBe(1);
     expect(playable(years, 2027, m1, { futWeight: 1 })).toContain('C');
     const m07 = mainPosition(years, 2027, { futWeight: 0.7 });
     expect(m07.field).toBe('1B');
     expect(familiarity(years, 2027, 'C', m07, { futWeight: 0.7 })).toBeCloseTo(0.77, 2);
     expect(emergencyCatcher(years, 2027, m07, { futWeight: 0.7 })).toBe(true);
+  });
+
+  it('퓨처스 이닝은 주 포지션 포수 규칙에 들지 않는다 (15.3 표 ①, 2026-10-23 결정): 1군 C 205 + 2군 C 450 = 655여도 비상 포수, 둘째 시즌 1,105에 정규 포수', () => {
+    // 강백호 2026을 빌린 꼴: 2023~2025 1군 C 205이닝(판정 창 안), 본 자리 1B. 2026·2027 2군에서 C 450이닝씩
+    const base: FieldYear[] = [
+      { year: 2023, inn: { C: 80, '1B': 700 }, gs: { C: 9, '1B': 80 }, pa: 550, noDefPa: 100 },
+      { year: 2024, inn: { C: 70, '1B': 700 }, gs: { C: 8, '1B': 80 }, pa: 550, noDefPa: 100 },
+      { year: 2025, inn: { C: 55, '1B': 700 }, gs: { C: 6, '1B': 80 }, pa: 550, noDefPa: 100 },
+    ];
+    const y1: FieldYear[] = [...base, { year: 2026, fut: { C: 450 }, pa: 0, noDefPa: 0 }];
+    const m1 = mainPosition(y1, 2027);
+    expect(m1.basis).toBe('window');
+    expect(m1.field).toBe('1B');
+    expect(familiarity(y1, 2027, 'C', m1)).toBeCloseTo(0.728, 3); // 655 ÷ 1,800 ÷ 0.5
+    expect(playable(y1, 2027, m1)).not.toContain('C');
+    expect(emergencyCatcher(y1, 2027, m1)).toBe(true);
+    const y2: FieldYear[] = [...y1, { year: 2027, fut: { C: 450 }, pa: 0, noDefPa: 0 }];
+    const m2 = mainPosition(y2, 2028);
+    expect(m2.field).toBe('1B');
+    expect(familiarity(y2, 2028, 'C', m2)).toBe(1);
+    expect(playable(y2, 2028, m2)).toContain('C');
+    expect(emergencyCatcher(y2, 2028, m2)).toBe(false);
   });
 });
 
@@ -129,5 +160,16 @@ describe('평판 무게 (12.4 ①)', () => {
     const chw = idOf('최형우');
     const lf = store.defense!.rep[chw].find((r) => r[0] === 'LF')!; // LF 매우 좋음 2020~2025, 그 시기 DH 90%
     expect(reputationWeight(lf, fieldYears(store, chw, 2026), 2026)).toEqual({});
+  });
+
+  it('시기 시작이 시작 연도와 같은 해인 평판도 버린다 (시기 시작 ≥ 시작 연도, 2026-10-23 결정)', () => {
+    const kgh = idOf('김건희', 2004);
+    const rep: Reputation = ['C', 1, 2025, 2025]; // 지어낸 한 줄: 2025 C 731이닝
+    expect(reputationWeight(rep, fieldYears(store, kgh, 2025), 2025)).toEqual({});
+    expect(reputationWeight(rep, fieldYears(store, kgh, 2026), 2026).C).toBe(1);
+  });
+
+  it("시기가 '고교 시절'뿐인 평판은 자료에 없다 (2026-10-23 결정): 평판 1,362줄", () => {
+    expect(Object.values(store.defense!.rep).reduce((a, r) => a + r.length, 0)).toBe(1362);
   });
 });

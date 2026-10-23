@@ -15,6 +15,7 @@
   정리본(kbo-gm-raw/정리/수비이닝/수비이닝_야수.csv)이 있으면 행 수와 선수 ID를 대조해 다르면 멈춘다.
 평판 CSV에는 근거 문장을 넣지 않는다 (실존 선수 서술 문장, 라이선스). 등급·시기·출처 문서 제목만 넣는다.
 평판의 시기 글은 적힌 연도만 연도 범위로 바꾼다 ('데뷔 초'·'20대'·'고교 시절' 같은 말은 버리고, 연도가 없으면 통산으로 본다).
+시기 글이 '고교 시절'뿐인 평판 줄은 버린다 (프로 수비 근거가 아님, 2026-10-23 클사장 결정).
 """
 import csv
 import json
@@ -219,6 +220,12 @@ def period_of(text):
     return min(a for a, _ in spans), max(b for _, b in spans), ', '.join(dict.fromkeys(used))
 
 
+def amateur_only(text):
+    """시기 글이 '고교 시절'(띄어쓰기 무관)만으로 된 줄인가. '고교 시절, 2017년'·'고교 시절, 데뷔 초'처럼 다른 시기가 섞이면 아니다"""
+    parts = [p.replace(' ', '') for p in (text or '').split(',') if p.strip()]
+    return bool(parts) and all(p == '고교시절' for p in parts)
+
+
 def build_reputation(players):
     with RAW_REP.open(encoding='utf-8-sig', newline='') as f:
         src = list(csv.DictReader(f))
@@ -229,6 +236,9 @@ def build_reputation(players):
             sys.exit(f'평판: 없는 선수 ID {pid} ({r["이름"]})')
         if r['자리'] not in REP_POS or r['평판'] not in REP_LEVEL:
             sys.exit(f'평판: 모르는 자리·등급 {r["자리"]} {r["평판"]} ({r["이름"]})')
+        if amateur_only(r['시기']):
+            skipped['시기가 고교 시절뿐이라 버림'] += 1
+            continue
         a, b, used = period_of(r['시기'])
         if r['시기'].strip() not in ('', '통산') and not used:
             skipped['연도 없는 시기 글이라 통산으로 봄'] += 1
