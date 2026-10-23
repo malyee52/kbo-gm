@@ -345,9 +345,14 @@ export interface EngineParams {
   /**
    * 시간 제한 흉내 (엔진 2 14단계 물음 1, 2026-10-23 사용자 결정): 경기 시각이 없어 시간 제한(1982~2002 야간 경기 개시 4시간, 2004 4시간)을
    * 그대로 넣을 수 없어서, 그 해 정규시즌 경기는 from회 끝에 동점이면 이닝마다 확률 end로 끝나 무승부가 된다 (game.ts, 경기 난수의 'time' 줄기).
-   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌에는 쓰지 않는다
+   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌은 timeLimitPostseason에 있는 해만 같은 값을 쓴다
    */
   timeLimit?: Record<number, { from: number; end: number }>;
+  /**
+   * 포스트시즌에도 시간 제한 흉내를 쓰는 해 (2026-10-24 사용자 결정: 원문으로 확인된 해만). 그 해 timeLimit 값(정규시즌과 같은 시작 회·확률)을 쓴다.
+   * 없는 해의 포스트시즌은 시간 제한 없음
+   */
+  timeLimitPostseason?: number[];
 
   // ---- 선수 기용
   /**
@@ -675,8 +680,18 @@ export const DEFAULT_PARAMS: EngineParams = {
     { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
     { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
   ],
-  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts로 그 해 실제 무승부 비율에 맞춘 값
-  timeLimit: {},
+  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts --seasons 40으로 그 해 실제 무승부 비율에 맞춘 값 (2026-10-23).
+  // 시작 회는 12회, 12회 끝 동점 비율이 실제 무승부보다 적으면 한 회씩 앞당겼다 (사용자 결정 전 임시). 1982는 실제 무승부 0이라 넣지 않는다
+  timeLimit: {
+    1983: { from: 12, end: 0.98 }, 1984: { from: 11, end: 0.35 }, 1985: { from: 12, end: 0.512 }, 1986: { from: 10, end: 0.392 },
+    1987: { from: 10, end: 0.386 }, 1988: { from: 11, end: 0.459 }, 1989: { from: 10, end: 0.399 }, 1990: { from: 11, end: 0.845 },
+    1991: { from: 11, end: 0.755 }, 1992: { from: 11, end: 0.572 }, 1993: { from: 10, end: 0.405 }, 1994: { from: 11, end: 0.369 },
+    1995: { from: 10, end: 0.376 }, 1996: { from: 10, end: 0.377 }, 1997: { from: 11, end: 0.869 }, 1998: { from: 11, end: 0.434 },
+    1999: { from: 10, end: 0.544 }, 2000: { from: 10, end: 0.366 }, 2001: { from: 10, end: 0.54 }, 2002: { from: 10, end: 0.396 },
+    2004: { from: 10, end: 0.911 },
+  },
+  // 출처: 나무위키, 2004 포스트시즌 4시간 제한. 다른 해는 원문이 확인되면 더한다
+  timeLimitPostseason: [2004],
 
   restChance: 0.6,
   catcherRestChance: 0.6,
