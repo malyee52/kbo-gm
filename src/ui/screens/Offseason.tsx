@@ -9,14 +9,18 @@ import { DRAFT_ROUNDS, FA_ROUNDS, LOG_LABEL, STAGE_LABEL, STAGES, canSignForeign
 import * as Off from '../../league/offseason';
 import { AgentTalk } from './FantasyNegotiate';
 import {
-  capPayroll, dollarText, FA_COMP, MIN_SALARY, salaryCap,
+  dollarText, FA_COMP, FA_GRADE_FROM, faGradeLabel, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS,
+  FRANCHISE_TAG_SHARE, foreignCap, foreignContractTotal, isPreGrade, minSalary, salaryCap, salaryFloor, teamCapPayroll,
 } from '../../league/salary';
+import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { runsGrade } from '../grades';
 import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
 import { ruleOf } from '../../league/rules';
 import { WatchStar } from './Watch';
+import { previewOrder } from '../../league/ruleNews';
+import { RuleNewsBody, StatusBadge } from '../RuleNews';
 
 /** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
 function useInfo() {
@@ -126,6 +130,8 @@ export function Offseason() {
           <div className="actions"><button type="button" onClick={() => void open()} disabled={busy}>{busy ? '준비 중' : `${off.year + 1} 시즌 개막`}</button></div>
         </section>
       )}
+      {off.stage === 'ready' && <CapRulesPanel act={act} />}
+      {off.stage === 'ready' && <RulePreview year={off.year + 1} />}
       {off.stage !== 'ready' && <ExtensionPanel act={act} />}
       </div>
       <aside className="stack off-side">
@@ -168,11 +174,19 @@ function CompPanel({ act }: { act: Act }) {
     <section className="stack">
       <div className="panel">
         <h2>FA 보상선수</h2>
-        <p className="muted small">
-          A·B등급 FA를 데려간 구단은 보호선수 명단(A 20명, B 25명)을 내고, 원 소속 구단은 명단 밖 선수 1명과 보상금
-          (A 직전 연봉 200%, B 100%) 또는 보상금만(A 300%, B 200%)을 고릅니다. 외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다.
-          "다음" 단계로 넘어가면 확정됩니다.
-        </p>
+        {off.year >= FA_GRADE_FROM ? (
+          <p className="muted small">
+            A·B등급 FA를 데려간 구단은 보호선수 명단(A 20명, B 25명)을 내고, 원 소속 구단은 명단 밖 선수 1명과 보상금
+            (A 직전 연봉 200%, B 100%) 또는 보상금만(A 300%, B 200%)을 고릅니다. 외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다.
+            "다음" 단계로 넘어가면 확정됩니다.
+          </p>
+        ) : (
+          <p className="muted small">
+            등급제(2020 시즌 뒤) 전이라 모든 FA가 같은 보상입니다: 데려간 구단은 보호선수 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].protect}명을 내고,
+            원 소속 구단은 명단 밖 선수 1명과 직전 연봉 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].withPlayer! * 100}% 또는 보상금만 {FA_COMP[off.year <= 2010 ? 'P1' : 'P2'].cashOnly * 100}%를 고릅니다.
+            외국인·군 보류(복무 중)·이번 FA 계약 선수는 자동으로 보호됩니다. <StatusBadge status="research" />
+          </p>
+        )}
       </div>
 
       {mineIn.map((c) => <ProtectEditor key={c.fa} c={c} act={act} />)}
@@ -184,7 +198,7 @@ function CompPanel({ act }: { act: Act }) {
         return (
           <div className="panel mine" key={c.fa}>
             <h2>
-              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {c.grade}등급 · 직전 연봉 {won(c.prevSalary)}</span>
+              {name(c.fa)} 보상 <span className="muted small">{session.league.teams[c.to].name} 영입 · {faGradeLabel(c.grade)} · 직전 연봉 {won(c.prevSalary)}</span>
             </h2>
             <p className="small">
               지금 선택: <strong>{c.pick === null ? '아직 고르지 않음' : c.pick === 'cash' ? `보상금만 (${won(FA_COMP[c.grade].cashOnly * c.prevSalary)})` : `${name(c.pick)} + 보상금 ${won(FA_COMP[c.grade].withPlayer! * c.prevSalary)}`}</strong>
@@ -219,7 +233,7 @@ function CompPanel({ act }: { act: Act }) {
           <h2>다른 구단 보상 건</h2>
           <ul className="small">
             {others.map((c) => (
-              <li key={c.fa}>{name(c.fa)} ({c.grade}등급): {session.league.teams[c.from].name} → {session.league.teams[c.to].name}. 단계를 마감하면 원 소속 구단이 고릅니다.</li>
+              <li key={c.fa}>{name(c.fa)} ({faGradeLabel(c.grade)}): {session.league.teams[c.from].name} → {session.league.teams[c.to].name}. 단계를 마감하면 원 소속 구단이 고릅니다.</li>
             ))}
           </ul>
         </div>
@@ -372,11 +386,12 @@ function CapLine() {
   const { session } = useGame();
   const won = useWon();
   const cap = salaryCap(session.year + 1, session.league);
-  const pay = capPayroll(session.league.players, session.teamIdx, ruleOf(session.league, 'capTopN'));
+  const floor = salaryFloor(session.year + 1, session.league);
+  const pay = teamCapPayroll(session.league, session.teamIdx, session.year + 1);
   const size = session.league.players.filter((p) => p.team === session.teamIdx).length;
   return (
     <p className="muted small">
-      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 40명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''} · 소속 선수 {size}/{ruleOf(session.league, 'orgLimit')}명
+      {session.year + 1} {cap ? '샐러리캡 대상 ' : ''}연봉 총액(외국인·신인 제외 상위 {ruleOf(session.league, 'capTopN')}명) {won(pay)}{cap ? ` / 상한 ${won(cap)}` : ''}{floor ? ` · 하한 ${won(floor)}` : ''} · 소속 선수 {size}/{ruleOf(session.league, 'orgLimit')}명
     </p>
   );
 }
@@ -430,8 +445,8 @@ function FaPanel({ act }: { act: Act }) {
               return (
                 <tr key={e.id} className={e.from === session.teamIdx ? 'me' : ''}>
                   <td className="l">{p.name} <WatchStar id={p.id} name={p.name} small bare /></td><td className="l"><TeamName idx={e.from} /></td><td>{i.role}</td><td>{i.age ?? '-'}</td>
-                  <td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{e.grade}</td><td>{won(e.prevSalary)}</td>
-                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${e.grade}등급, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
+                  <td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{isPreGrade(e.grade) ? '-' : e.grade}</td><td>{won(e.prevSalary)}</td>
+                  <td>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</td><td>{e.years}년</td>
                   <td className="l">
                     {e.status === 'signed' ? (
                       <span>{e.team === e.from ? '잔류' : '이적'} · <TeamName idx={e.team!} /> {e.signedYears}년 연 {won(e.salary!)}</span>
@@ -443,7 +458,7 @@ function FaPanel({ act }: { act: Act }) {
                       </span>
                     ) : (
                       <span className="inline">
-                        <input type="number" min={(MIN_SALARY * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
+                        <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.1} value={d.salary} aria-label={`${p.name} 제시 연봉(억 원)`}
                           onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, salary: ev.target.value } })} style={{ width: '6em' }} />억 원
                         <select value={d.years} aria-label="계약 기간" onChange={(ev) => setDraft({ ...draft, [e.id]: { ...d, years: ev.target.value } })}>
                           {[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>{y}년</option>)}
@@ -481,11 +496,11 @@ function ForeignPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>외국인 선수</h2>
         <p className="muted small">
-          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규 계약은 {dollarText(ruleOf(session.league, 'foreignNewCap'))}, 아시아쿼터 신규는 {dollarText(ruleOf(session.league, 'asiaNewCap'))}까지,{' '}
-          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(ruleOf(session.league, 'foreignTotalCap'))}까지입니다. 직전 시즌 성적 역순으로 고릅니다.
+          보유 한도: {lim.asia ? `아시아쿼터를 빼고 ${lim.regular}명 + 아시아쿼터 ${lim.asia}명` : `${lim.regular}명`}. 신규(KBO 1년차) 계약은 연봉 + 계약금 {dollarText(foreignCap(session.league, 'foreignNewCap', off.year + 1))}, 아시아쿼터 신규는 {dollarText(foreignCap(session.league, 'asiaNewCap', off.year + 1))}까지(재계약은 개인 제한 없음),{' '}
+          {lim.asia ? '아시아쿼터를 뺀 ' : ''}{lim.regular}명 총액은 {dollarText(foreignCap(session.league, 'foreignTotalCap', off.year + 1))}에 재계약 외국인마다 같은 구단 재계약 연차 × 10만 달러를 더한 값까지입니다. 직전 시즌 성적 역순으로 고릅니다.
         </p>
         <p className="small">
-          우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
+          우리 외국인: {slots.regular}/{lim.regular}명 (총액 {dollarText(slots.regularPay)} / 상한 {dollarText(slots.cap)}{slots.resignRoom > 0 ? `, 재계약 몫 +${dollarText(slots.resignRoom)}` : ''}){lim.asia ? ` · 아시아쿼터 ${slots.asia}/${lim.asia}명` : ''}
           {pickedBefore.length > 0 && <span className="muted"> · 우리보다 먼저 고른 구단: {pickedBefore.map((t) => session.league.teams[t].name).join(', ')}</span>}
         </p>
         {!myTurn && <p className="muted small">다음 단계로 넘기면 남은 구단이 고릅니다.</p>}
@@ -503,7 +518,7 @@ function ForeignPanel({ act }: { act: Act }) {
                   const keep = f.keep[p.id];
                   return (
                     <tr key={p.id}>
-                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(p.contract.salary)}</td>
+                      <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>{dollarText(foreignContractTotal(p.contract))}</td>
                       <td className="l">
                         <label className="inline small">
                           <input type="checkbox" checked={keep} onChange={(e) => act(session.setForeignKeep(p.id, e.target.checked))} /> 재계약
@@ -531,7 +546,7 @@ function ForeignPanel({ act }: { act: Act }) {
                 return (
                   <tr key={p.id}>
                     <td className="l">{p.name}{!p.real && <span className="tag" title="가상 선수">가상</span>}</td>
-                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{dollarText(p.contract.salary)}</td>
+                    <td>{p.asia ? '아시아쿼터' : '일반'}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td><td>{dollarText(foreignContractTotal(p.contract))}</td>
                     <td>{p.transferFee ? dollarText(p.transferFee) : '-'}</td>
                     <td className="l">
                       <button type="button" className="small-btn" disabled={!myTurn || !check.ok} title={check.ok ? '' : check.message}
@@ -795,7 +810,7 @@ function SalaryPanel({ act }: { act: Act }) {
                   <td>{won(p.contract.salary)}</td><td>{won(s.demands[id])}</td>
                   <td className="l">
                     <span className="inline">
-                      <input type="number" min={(MIN_SALARY * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
+                      <input type="number" min={(minSalary(session.offseason!.year + 1, session.league) * px) / 10000} step={0.01} value={v} aria-label={`${p.name} 제시액(억 원)`} style={{ width: '6em' }}
                         onChange={(e) => setEdit({ ...edit, [id]: e.target.value })}
                         onBlur={() => { if (edit[id] !== undefined && edit[id] !== shown) act(session.setSalaryOffer(id, Math.round((Number(v) * 10000) / px))); }} />억 원
                       {low && <span className="status temp">조정 예상</span>}
@@ -915,7 +930,7 @@ function ReleasePanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>방출 선수 영입 <span className="muted small">{claimable.length}명</span></h2>
         <p className="muted small">
-          다른 구단이 이번에 방출한 선수를 최저 연봉({won(Off.CLAIM_SALARY)}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
+          다른 구단이 이번에 방출한 선수를 최저 연봉({won(minSalary(session.offseason!.year + 1, session.league))}) 1년 계약으로 데려옵니다. 데려오면 정원이 늘어나니 다음 단계 전에 그만큼 방출해야 합니다.
           단계를 마감하면 AI 구단이 남은 방출 선수 중 쓸 만한 선수를 데려갑니다 (구단당 {Off.CLAIM_PER_TEAM}명까지).
         </p>
       </div>
@@ -1003,6 +1018,64 @@ function OffLog() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+/** 개막 준비: 2026년 샐러리캡 개편 (프랜차이즈 예외 고르기, 2027~ 하한). 캡이 없거나 2026년 전이면 숨긴다 */
+function CapRulesPanel({ act }: { act: Act }) {
+  const { session } = useGame();
+  const won = useWon();
+  const L = session.league;
+  const me = session.teamIdx;
+  const year = session.year + 1;
+  const cap = salaryCap(year, L);
+  if (cap === null || year < FRANCHISE_TAG_FROM) return null;
+  const floor = salaryFloor(year, L);
+  const pay = teamCapPayroll(L, me, year);
+  const tag = franchiseTag(L, me, year);
+  const chosen = L.franchiseTags?.[me] ?? null;
+  const cands = L.players.filter((p) => franchiseTagEligible(L, p, me)).sort((a, b) => b.contract.salary - a.contract.salary || a.id.localeCompare(b.id));
+  return (
+    <section className="panel">
+      <h2>{year} 샐러리캡 <StatusBadge status="research" /></h2>
+      <p className="muted small">
+        캡 대상 연봉 {won(pay)} / 상한 {won(cap)}{floor ? ` · 하한 ${won(floor)}` : ''}.
+        초과 제재: 1회 30%, 2회 연속 50%, 3회 연속부터 100%와 1라운드 지명권 9단계 하락 (한 해라도 지키면 1회부터 다시 셈).{floor ? ' 하한 미달은 미달액의 1회 30%, 2회 연속 50%, 3회 연속부터 100%를 유소년 발전기금으로 냅니다.' : ''}
+      </p>
+      {floor !== null && pay < floor && (
+        <p className="error-text small">하한보다 {won(floor - pay)} 적습니다. 이대로 개막하면 유소년 발전기금을 냅니다.</p>
+      )}
+      <h3>프랜차이즈 예외</h3>
+      <p className="muted small">
+        우리 구단에서 {FRANCHISE_TAG_SEASONS}시즌 이상 뛴 국내 선수 1명의 연봉은 {FRANCHISE_TAG_SHARE * 100}%만 캡에 넣습니다.
+        고르지 않으면 자격 선수 중 연봉이 가장 높은 선수로 자동 지정합니다.
+      </p>
+      {cands.length === 0 ? <p className="muted small">자격 선수가 없습니다.</p> : (
+        <label className="inline">
+          <span>예외 선수</span>
+          <select value={chosen && cands.some((p) => p.id === chosen) ? chosen : ''}
+            onChange={(e) => act(session.setFranchiseTag(e.target.value || null))}>
+            <option value="">자동 지정{tag && !(chosen && cands.some((p) => p.id === chosen)) ? ` (${tag.name})` : ''}</option>
+            {cands.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} · {seasonsWith(p, L, me)}시즌 · {won(p.contract.salary)}</option>
+            ))}
+          </select>
+        </label>
+      )}
+    </section>
+  );
+}
+
+/** 개막 준비: 다음 시즌 "달라지는 규칙" 미리 보기 (FA·외국인·캡·엔트리처럼 오프시즌 결정에 닿는 것을 앞에) */
+function RulePreview({ year }: { year: number }) {
+  const { session, go } = useGame();
+  const news = session.ruleNewsFor(year);
+  return (
+    <section className="panel">
+      <h2>{year} 시즌, 달라지는 규칙</h2>
+      <RuleNewsBody news={news} lines={previewOrder(news)} />
+      <div className="actions"><button type="button" className="ghost" onClick={() => go('rules')}>규칙 연표 전체 보기</button></div>
     </section>
   );
 }

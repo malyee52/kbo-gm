@@ -240,8 +240,10 @@ describe('여러 시즌 연속 진행 (M6 완료 기준의 축소판: 4시즌, �
         expect(v, `${r.year} cal`).toBeGreaterThan(0.8);
         expect(v, `${r.year} cal`).toBeLessThan(1.25);
       }
-      expect(r.runs).toBeGreaterThan(4.73 * 0.9);
-      expect(r.runs).toBeLessThan(5.2 * 1.1);
+      // 2027년부터 시즌 반발계수로 홈런 목표가 흔들려(×0.65~×1.47) 득점 범위도 그만큼 움직인다 (홈런 배율의 0.4제곱, 2026-10-22)
+      const ball = r.ball.hrMul ** 0.4;
+      expect(r.runs).toBeGreaterThan(4.73 * 0.9 * Math.min(1, ball));
+      expect(r.runs).toBeLessThan(5.2 * 1.1 * Math.max(1, ball));
       expect(r.players, `${r.year} 소속 최대`).toBeLessThanOrEqual(68);
       expect(r.orgMin, `${r.year} 월드 최소 인원`).toBeGreaterThanOrEqual(40);
       expect(r.maxAge).toBeLessThanOrEqual(45);

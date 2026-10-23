@@ -60,7 +60,7 @@ export const MENU: MenuItem[] = [
   one('staff', '경영', '감독·코치', 'staff'),
   one('owner', '경영', '구단주', 'owner'),
 
-  one('records', '아카이브', '연표', 'records'),
+  { key: 'records', group: '아카이브', label: '연표', tabs: [{ screen: 'records', label: '리그 연표' }, { screen: 'rules', label: '규칙 연표' }] },
   { key: 'rec-stats', group: '아카이브', label: '통산·시즌', tabs: [{ screen: 'rec-career', label: '통산' }, { screen: 'rec-season', label: '단일 시즌' }] },
   one('rec-teams', '아카이브', '구단 역사', 'rec-teams'),
   one('rec-dynasty', '아카이브', '왕조·라이벌', 'rec-dynasty'),

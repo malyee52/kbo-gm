@@ -698,7 +698,7 @@ function ContractInfo({ id, p }: { id: string; p: SimPlayer }) {
     <section>
       <h3>계약과 잠재력</h3>
       <dl className="facts">
-        <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</dd>
+        <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? `${dollarText(c.salary)}${c.bonus ? ` + 계약금 ${dollarText(c.bonus)}` : ''}` : won(c.salary)} · {c.until}년까지</dd>
         <dt>잠재력</dt>
         <dd>
           {potentialText(pot) ?? <Missing why="31세 이상은 보이지 않음" />}

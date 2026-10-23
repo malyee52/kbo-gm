@@ -7,7 +7,7 @@ import { isServing } from '../src/league/careers';
 import { createLeague, openingForeigners } from '../src/league/create';
 import * as Off from '../src/league/offseason';
 import {
-  ASIA_NEW_CAP, COMPENSATION, faEligible, faGrade, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
+  ASIA_NEW_CAP, COMPENSATION, FA_COMP, faEligible, faGrade, foreignContractTotal, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, foreignTeamCap, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
 } from '../src/league/salary';
 import { careerIndex } from '../src/league/growth';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
@@ -256,7 +256,10 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
       const regular = fs.filter((p) => !p.asia);
       expect(regular.length, h.league.teams[t].name).toBeLessThanOrEqual(3);
       expect(fs.length - regular.length).toBeLessThanOrEqual(1);
-      expect(regular.reduce((s, p) => s + p.contract.salary, 0)).toBeLessThanOrEqual(FOREIGN_TOTAL_CAP);
+      // 총액은 연봉 + 계약금, 상한은 기본 400만 달러 + 재계약 외국인마다 같은 구단 재계약 연차 × 10만 달러 (사용자 조사 2026-10-22)
+      const cap = foreignTeamCap(h.league, t, h.offseason!.year + 1, regular);
+      expect(cap).toBeGreaterThanOrEqual(FOREIGN_TOTAL_CAP);
+      expect(regular.reduce((s, p) => s + foreignContractTotal(p.contract), 0), h.league.teams[t].name).toBeLessThanOrEqual(cap);
       // 새로 온 가상 외국인만 신규 상한 (시즌 중 시장에서 데려와 뛴 가상 외국인은 재계약이라 상한이 다르다, market.ts)
       for (const p of fs.filter((x) => !x.real && !x.history.length)) expect(p.contract.salary).toBeLessThanOrEqual(p.asia ? ASIA_NEW_CAP : FOREIGN_NEW_CAP);
     }
@@ -504,4 +507,46 @@ describe('FA 보상선수 (A·B등급 이적)', () => {
     expect(Off.setProtectByUser(h.league, off, c.fa, pool.slice(0, (c.grade === 'A' ? 20 : 25) + 1)).ok).toBe(false);
     expect(Off.setProtectByUser(h.league, off, c.fa, pool.slice(0, 5)).ok).toBe(true);
   });
+});
+
+describe('등급제 전 FA 보상 (1-5, 조사값)', () => {
+  it('등급: 2010 시즌 뒤까지 P1, 2011~2019 시즌 뒤 P2, 2020 시즌 뒤부터 A·B·C', () => {
+    const { league } = createLeague(store, 2026, 's', FAST);
+    const top = [...league.players].filter((p) => !p.foreign).sort((a, b) => b.contract.salary - a.contract.salary)[0];
+    const p = { ...top, faCount: 0, birthYear: 2026 + 1 - 30 } as LeaguePlayer;
+    expect(faGrade(p, league.players, 2005)).toBe('P1');
+    expect(faGrade(p, league.players, 2010)).toBe('P1');
+    expect(faGrade(p, league.players, 2011)).toBe('P2');
+    expect(faGrade(p, league.players, 2019)).toBe('P2');
+    expect(faGrade(p, league.players, 2020)).toBe('A');
+    expect(FA_COMP.P1).toEqual({ cashOnly: 4.5, withPlayer: 3, protect: 18 });
+    expect(FA_COMP.P2).toEqual({ cashOnly: 3, withPlayer: 2, protect: 20 });
+  });
+
+  // 시대별 오프시즌: FA 신청 등급, 보상선수 단계의 보호 인원, 보상금
+  for (const [year, grades, protect] of [[2005, ['P1'], 18], [2015, ['P2'], 20], [2021, ['A', 'B', 'C'], null]] as const) {
+    it(`${year} 시즌 뒤: FA 등급 ${grades.join('·')}${protect ? `, 보호 ${protect}명` : ''}`, () => {
+      const g = GameSession.create(store, { year, teamIdx: 0, seed: `comp-${year}` }, FAST);
+      g.advance(1000);
+      g.beginOffseason();
+      const entries = g.offseason!.fa.entries.filter((e) => !e.returnee);
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.every((e) => (grades as readonly string[]).includes(e.grade))).toBe(true);
+      while (g.offseason!.stage === 'fa') g.nextStage();
+      const cases = g.offseason!.comp ?? [];
+      for (const c of cases) {
+        if (protect) {
+          expect(c.grade).toBe(grades[0]);
+          expect(c.protect.length).toBeLessThanOrEqual(protect);
+        }
+      }
+      if (g.offseason!.stage === 'comp') { g.autoComp(); g.nextStage(); }
+      for (const c of cases) {
+        const name = g.leaguePlayer(c.fa)!.name;
+        const l = g.league.ledger.find((x) => x.note.startsWith(`${name} FA 보상금`) && x.to === c.from)!;
+        const rule = FA_COMP[c.grade];
+        expect(l.amount).toBe(Math.round((c.pick === 'cash' ? rule.cashOnly : rule.withPlayer!) * c.prevSalary));
+      }
+    });
+  }
 });

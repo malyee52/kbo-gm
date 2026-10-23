@@ -11,6 +11,7 @@ import {
 } from '../src/league/stadium';
 import type { LeagueState } from '../src/league/types';
 import { BALLPARK } from '../src/league/finance';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -84,14 +85,17 @@ describe('구장 공사와 팬 반응 (시즌을 넘기며)', () => {
     const r = g.orderStadium('remodel');
     expect(r.ok).toBe(true);
     expect(g.orderStadium('remodel').ok).toBe(false); // 이미 잡혀 있다
-    expect(g.cashNow()).toBe(cash0 - downPayment(REMODEL.cost));
+    // 공사비는 착공하는 해(2027)의 연봉 상승 지수만큼 (2026-10-22)
+    const cost = Math.round(REMODEL.cost * wageIndex(2027, L));
+    expect(cost).toBeGreaterThan(REMODEL.cost);
+    expect(g.cashNow()).toBe(cash0 - downPayment(cost));
     nextSeason(g);
     expect(seatsAt(L.stadiums![lg], 2027)).toBe(Math.round(cap0 * (1 - REMODEL.closed)));
     g.advance(100000);
     g.beginOffseason();
     const fy = L.finance![lg].history.at(-1)!;
     expect(fy.year).toBe(2027);
-    expect(fy.items.stadium).toBe(-(downPayment(REMODEL.cost) + yearlyPayment(REMODEL.cost, REMODEL.years)));
+    expect(fy.items.stadium).toBe(-(downPayment(cost) + yearlyPayment(cost, REMODEL.years)));
     const s = L.stadiums![lg];
     expect(s.project).toBeUndefined();
     expect(s.capacity).toBe(cap0 + REMODEL.capacity);

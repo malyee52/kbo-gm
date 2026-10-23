@@ -197,6 +197,52 @@ def main():
                 warn(f'특수능력: 한 선수에 능력 {len(v)}개')
         warn(f'특수능력: {len(table)}명 (기준은 tools/suggest_traits.py, 수정은 data-src/특수능력.csv)')
 
+    # ---- 규칙 변경 (rule_changes.json): 연도 범위, 날짜 형식, 값 목록, 게임 규칙 키, 공인구 검사 날짜 순서, 실존 선수 이름
+    rules_path = DATA / 'rule_changes.json'
+    if rules_path.exists():
+        import re
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_data import RULE_CAT, RULE_EFFECT, RULE_STATUS, RULE_KEYS  # noqa: E402
+        rc = load(rules_path)
+        # 세 글자 이상 이름만 견준다 (두 글자 이름은 보통 낱말과 겹친다)
+        names = {p['name'] for p in players if len(p.get('name') or '') >= 3}
+        date_ok = re.compile(r'^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$')
+
+        def text_check(where, *texts):
+            for t in texts:
+                for n in names:
+                    if t and n in t:
+                        err(f'{where}: 실존 선수 이름 "{n}"이 문구에 있음')
+
+        for it in rc['items']:
+            where = f'규칙 변경 {it.get("year")} {it.get("title")}'
+            if not 1982 <= it['year'] <= 2027:
+                err(f'{where}: 연도 범위 밖')
+            if 'date' in it and not date_ok.match(it['date']):
+                err(f'{where}: 날짜 형식(MM-DD) 아님 {it["date"]}')
+            if it['cat'] not in RULE_CAT.values() or it['effect'] not in RULE_EFFECT.values() or it['status'] not in RULE_STATUS.values():
+                err(f'{where}: 분류·반영·확인 값 이상')
+            if 'key' in it and it['key'] not in RULE_KEYS:
+                err(f'{where}: 게임 규칙 키가 아님 {it["key"]}')
+            text_check(where, it['title'], it.get('before'), it.get('after'), it.get('note'), it.get('simplified'))
+        for b in rc['ball']:
+            where = f'공인구 {b["year"]}'
+            if 'range' in b and not b['range'][0] < b['range'][1]:
+                err(f'{where}: 기준 범위 순서')
+            dated = [t['date'] for t in b.get('tests', []) if 'date' in t]
+            for d in dated:
+                if not date_ok.match(d):
+                    err(f'{where}: 날짜 형식(MM-DD) 아님 {d}')
+            if dated != sorted(dated):
+                err(f'{where}: 검사 날짜가 차수 순서와 다름')
+            rounds = [t['round'] for t in b.get('tests', [])]
+            if rounds != sorted(rounds):
+                err(f'{where}: 검사 차수 순서')
+            if not any(x.get('range') for x in rc['ball'] if x['year'] <= b['year']):
+                err(f'{where}: 앞선 기준 범위가 없음')
+            text_check(where, b.get('note'), *(t.get('note') for t in b.get('tests', [])))
+        warn(f'규칙 변경: {len(rc["items"])}건 (조사값 {sum(1 for it in rc["items"] if it["status"] == "research")}건), 공인구 {len(rc["ball"])}개 연도')
+
     # ---- 특별 엔트리 (새 게임에서 빼는 선수, 규칙으로 고른 값이라 확인용으로 보여 준다)
     for y, ids in sorted(meta.get('specialEntries', {}).items()):
         if int(y) >= 2015:

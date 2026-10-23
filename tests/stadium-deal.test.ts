@@ -5,6 +5,10 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { AI_NEW_AGE, MUNICIPAL, municipalChance, NEW_PARK, orderStadium, stadiumYearEnd } from '../src/league/stadium';
 import type { LeagueState } from '../src/league/types';
+import { wageIndex } from '../src/league/salary';
+
+/** 2026 오프시즌 착공: 공사비는 2027년 연봉 상승 지수만큼 (2026-10-22) */
+const NEW0 = Math.round(NEW_PARK.options[0].cost * wageIndex(2027));
 
 let store: DataStore;
 let base: LeagueState;
@@ -21,7 +25,7 @@ describe('지자체 협상', () => {
   it('표준 분담은 표 그대로, 지원을 더 요구하면 성공 때 구단 부담 −30%, 실패 때 착공 한 시즌 늦어지고 팬이 실망한다', () => {
     const std = copy();
     expect(orderStadium(std, 0, 2026, 'new-0', 10_000_000).ok).toBe(true);
-    expect(std.stadiums![0].project).toMatchObject({ cost: NEW_PARK.options[0].cost, start: 2027, open: 2030 });
+    expect(std.stadiums![0].project).toMatchObject({ cost: NEW0, start: 2027, open: 2030 });
     // 여러 구단으로 굴려 성공·실패가 둘 다 나오는지 본다 (난수는 시드·연도·구단으로 정해진다)
     let win = 0;
     let lose = 0;
@@ -32,9 +36,9 @@ describe('지자체 협상', () => {
       const r = orderStadium(L, t, 2026, 'new-0', 10_000_000, { deal: 'push' });
       expect(r.ok).toBe(true);
       const p = L.stadiums![t].project!;
-      if (p.cost < NEW_PARK.options[0].cost) {
+      if (p.cost < NEW0) {
         win++;
-        expect(p.cost).toBe(Math.round(NEW_PARK.options[0].cost * MUNICIPAL.share));
+        expect(p.cost).toBe(Math.round(NEW0 * MUNICIPAL.share));
         expect(p.start).toBe(2027);
       } else {
         lose++;

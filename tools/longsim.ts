@@ -16,6 +16,10 @@ import { createLeague } from '../src/league/create';
 import * as Off from '../src/league/offseason';
 import type { LeagueState } from '../src/league/types';
 import { worldFromLeague } from '../src/league/world';
+import { capFloorShorts } from '../src/league/owner';
+import { foreignCap, minSalary, salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
+import { ballHrMul, FUTURE_RULE_SPEC, futureValue, futureValueText, type FutureRuleKey } from '../src/league/futureRules';
+import { realSpread, sdOf, SPREAD_HEAD, spreadLine } from './real_spread';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -54,6 +58,20 @@ export interface YearMetrics {
   serving: number;
   /** 구단별 주전(타자 9 + 선발 5 + 구원 7) 기여 합의 평균 (런) */
   core: number;
+  /** 그 해 시즌 뒤 FA: 신청(해외 복귀 제외), 다른 구단 이적, 보상선수로 옮긴 선수 */
+  fa: { filed: number; moved: number; compPlayers: number };
+  /** 오프시즌 뒤 다음 시즌 개막 기준 샐러리캡: 초과 구단, 하한 미달 구단, 구단 평균 사용률 (캡 없으면 null) */
+  cap: { over: number; short: number; use: number } | null;
+  /** 결산 때 정해진 다음 시즌 미래 규칙 변경 ② (없으면 빈 문자열) */
+  shift: string;
+  /** 그 시즌 선수층 압력 (1 / 맞춤 계수): 홈런·삼진·볼넷 */
+  pressure: { hr: number; so: number; bb: number };
+  /** 연봉·재정 (다음 시즌 개막 기준): 연봉 상승 지수, 캡 상향률, 결산 뒤 구단 자금 평균·최소, 긴급 지원 구단 수, FA 계약 수 */
+  econ: { wage: number; capGrowth: number; cashAvg: number; cashMin: number; rescued: number; faSigned: number };
+  /** 그 시즌 공·타격: 홈런 목표 배율, 타석당 홈런, 리그 평균자책, 최다 홈런, 규정이닝 평균자책 2점 미만 투수 수, 다음 해 외국인 한도 */
+  ball: { hrMul: number; hrPa: number; era: number; topHr: number; subTwo: number; foreign: number };
+  /** 규정·흥행 (외국인 한도 판정 신호): 다음 해 최저 연봉(만 원)·외국인 신규·총액 상한(달러), 그 시즌 경기당 관중·외국인 연봉 부담·적자 구단 */
+  rule: { minPay: number; foreignNew: number; foreignTotal: number; attendance: number; foreignShare: number; deficit: number };
 }
 
 /** 리그 상태에서 한 시즌을 돌리고 오프시즌을 AI로 끝까지 진행한다 */
@@ -98,13 +116,51 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
   const abs = season.absences;
   const specific = abs.filter((a) => a.event && isSpecificEvent(a.event));
 
+  const shiftsBefore = league.ruleShifts?.length ?? 0;
   const off = Off.beginOffseason(league, world, season, store, -1, params);
+  const newShift = (league.ruleShifts ?? []).slice(shiftsBefore)[0];
   let guard = 0;
   while (off.stage !== 'ready' && guard++ < 50) Off.advanceStage(league, off, store, params);
   if (off.stage !== 'ready') throw new Error(`${league.year} 오프시즌이 끝나지 않았습니다 (단계 ${off.stage})`);
   const retiredNow = (league.retired ?? []).filter((r) => r.year === off.year).length;
+  const faEntries = (off.fa?.entries ?? []).filter((e) => !e.returnee);
+  const faSigned = faEntries.filter((e) => e.status === 'signed').length;
+  const fa = {
+    filed: faEntries.length,
+    moved: faEntries.filter((e) => e.status === 'signed' && e.team !== undefined && e.team !== e.from).length,
+    compPlayers: (off.comp ?? []).filter((c) => c.pick !== null && c.pick !== 'cash').length,
+  };
   Off.closeOffseason(league, off);
   const sizes = league.teams.map((_, i) => league.players.filter((p) => p.team === i && !isServing(p) && !p.dev).length);
+  const capNext = salaryCap(league.year, league);
+  const pays = league.teams.map((_, i) => teamCapPayroll(league, i, league.year));
+  const cap = capNext === null ? null : {
+    over: pays.filter((x) => x > capNext).length,
+    short: capFloorShorts(league, league.year).length,
+    use: pays.reduce((a, b) => a + b, 0) / pays.length / capNext,
+  };
+
+  const hist = league.teams.map((_, i) => league.finance?.[i]?.history.find((h) => h.year === world.year)).filter((h) => !!h);
+  const outs = world.players.reduce((a, p) => a + season.pit[p.idx].outs, 0);
+  const games = Math.max(...teams.map((x) => x.g));
+  const qualified = world.players.filter((p) => season.pit[p.idx].outs >= games * 3);
+  const econ = {
+    wage: wageIndex(league.year, league), capGrowth: futureValue(league, 'capGrowth', league.year),
+    cashAvg: hist.reduce((a, h) => a + h.cash, 0) / (hist.length || 1), cashMin: Math.min(...hist.map((h) => h.cash)),
+    rescued: hist.filter((h) => h.rescue > 0).length, faSigned,
+  };
+  const ball = {
+    hrMul: ballHrMul(league, world.year), hrPa: t.hr / (t.pa || 1), era: (27 * t.er) / (outs || 1),
+    topHr: Math.max(...world.players.map((p) => season.bat[p.idx].hr)),
+    subTwo: qualified.filter((p) => (27 * season.pit[p.idx].er) / season.pit[p.idx].outs < 2).length,
+    foreign: futureValue(league, 'foreign', league.year),
+  };
+
+  const sig = (league.ruleSignals ?? []).find((s) => s.year === world.year);
+  const rule = {
+    minPay: minSalary(league.year, league), foreignNew: foreignCap(league, 'foreignNewCap', league.year), foreignTotal: foreignCap(league, 'foreignTotalCap', league.year),
+    attendance: sig?.attendance ?? 0, foreignShare: sig?.foreignShare ?? 0, deficit: sig?.deficit ?? 0,
+  };
 
   return {
     world,
@@ -125,16 +181,29 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
       retired: retiredNow,
       serving: league.players.filter(isServing).length,
       core: core.reduce((a, b) => a + b, 0) / core.length,
+      fa,
+      cap,
+      shift: newShift ? `${newShift.year} ${newShift.key} ${futureValueText(newShift.key, newShift.before)}→${futureValueText(newShift.key, newShift.after)}` : '',
+      pressure: { hr: 1 / season.cal.hr, so: 1 / season.cal.so, bb: 1 / season.cal.bb },
+      econ, ball, rule,
     },
   };
 }
 
 function table(rows: YearMetrics[]): string {
   const f = (x: number, d = 2) => x.toFixed(d);
-  const head = '| 연도 | 득점 | cal 단타·홈런·볼넷·삼진 | 승률SD | 최다·최소승 | 월드 인원 | 소속 최대 | 나이 타·투 | 최고령 | 실존 타석 | 부상(큰) | 이벤트(구체) | 은퇴 | 복무 | 주전 기여 |';
-  const sep = '|' + '---|'.repeat(15);
-  const body = rows.map((r) => `| ${r.year} | ${f(r.runs)} | ${f(r.cal.s1)} ${f(r.cal.hr)} ${f(r.cal.bb)} ${f(r.cal.so)} | ${f(r.sd, 3)} | ${r.maxW}·${r.minW} | ${r.orgMin}~${r.orgMax} | ${r.players} | ${f(r.ageBat, 1)}·${f(r.agePit, 1)} | ${r.maxAge} | ${f(r.realPa * 100, 0)}% | ${r.injuries}(${r.majors}) | ${r.events}(${r.specific}) | ${r.retired} | ${r.serving} | ${f(r.core, 0)} |`);
-  return [head, sep, ...body].join('\n');
+  const head = '| 연도 | 득점 | cal 단타·홈런·볼넷·삼진 | 승률SD | 최다·최소승 | 월드 인원 | 소속 최대 | 나이 타·투 | 최고령 | 실존 타석 | 부상(큰) | 이벤트(구체) | 은퇴 | 복무 | 주전 기여 | FA 신청·이적·보상선수 | 다음 해 캡 초과·하한 미달·사용률 | 압력 홈런·삼진·볼넷 | 다음 해 규칙 변경 (가상) |';
+  const sep = '|' + '---|'.repeat(19);
+  const body = rows.map((r) => `| ${r.year} | ${f(r.runs)} | ${f(r.cal.s1)} ${f(r.cal.hr)} ${f(r.cal.bb)} ${f(r.cal.so)} | ${f(r.sd, 3)} | ${r.maxW}·${r.minW} | ${r.orgMin}~${r.orgMax} | ${r.players} | ${f(r.ageBat, 1)}·${f(r.agePit, 1)} | ${r.maxAge} | ${f(r.realPa * 100, 0)}% | ${r.injuries}(${r.majors}) | ${r.events}(${r.specific}) | ${r.retired} | ${r.serving} | ${f(r.core, 0)} | ${r.fa.filed}·${r.fa.moved}·${r.fa.compPlayers} | ${r.cap ? `${r.cap.over}·${r.cap.short}·${f(r.cap.use * 100, 0)}%` : '-'} | ${f(r.pressure.hr)} ${f(r.pressure.so)} ${f(r.pressure.bb)} | ${r.shift} |`);
+  const eok = (v: number) => (v / 10000).toFixed(0);
+  const econ = ['| 연도 | 연봉 지수(다음 해) | 캡 상향률(다음 해) | 캡 사용률 | 자금 평균·최소(억) | 긴급 지원 구단 | FA 신청·계약 |', '|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.year} | ${f(r.econ.wage)} | ${f(r.econ.capGrowth * 100, 0)}% | ${r.cap ? f(r.cap.use * 100, 0) + '%' : '-'} | ${eok(r.econ.cashAvg)}·${eok(r.econ.cashMin)} | ${r.econ.rescued} | ${r.fa.filed}·${r.econ.faSigned} |`)];
+  const ball = ['| 연도 | 홈런 배율 | 타석당 홈런 | 평균자책 | 최다 홈런 | 2점 미만 투수 | 다음 해 외국인 한도 |', '|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.year} | ${f(r.ball.hrMul, 3)} | ${f(r.ball.hrPa * 100, 2)}% | ${f(r.ball.era)} | ${r.ball.topHr} | ${r.ball.subTwo} | ${r.ball.foreign} |`)];
+  const man = (v: number) => Math.round(v / 10000);
+  const rule = ['| 연도 | 다음 해 최저 연봉(만 원) | 다음 해 외국인 신규·총액 상한(만 달러) | 경기당 관중 | 외국인 연봉 부담 | 적자 구단 | 다음 해 외국인 한도 | 다음 해 규칙 변경 (가상) |', '|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.year} | ${r.rule.minPay.toLocaleString('ko-KR')} | ${man(r.rule.foreignNew)}·${man(r.rule.foreignTotal)} | ${r.rule.attendance ? r.rule.attendance.toLocaleString('ko-KR') : '-'} | ${r.rule.attendance ? f(r.rule.foreignShare * 100, 1) + '%' : '-'} | ${r.rule.attendance ? r.rule.deficit : '-'} | ${r.ball.foreign} | ${r.shift} |`)];
+  return [head, sep, ...body, '', ...econ, '', ...ball, '', ...rule].join('\n');
 }
 
 async function main(): Promise<void> {
@@ -144,6 +213,8 @@ async function main(): Promise<void> {
   const params: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: Number(arg('pilot') ?? DEFAULT_PARAMS.pilotSeasons) };
   const out = arg('out');
   const store = loadDataStore();
+  const real = realSpread(store, 2010, 2026).summary;
+  const spreads: string[] = [];
   const parts: string[] = [`# 장기 시뮬레이션 (${start}년부터 ${n}시즌)\n`, `만든 날: ${new Date().toISOString().slice(0, 10)}. 도구: \`npx tsx tools/longsim.ts\`. 모든 구단 AI.\n`];
   for (const seed of seeds) {
     const t0 = Date.now();
@@ -155,7 +226,26 @@ async function main(): Promise<void> {
       console.log(`[${seed}] ${m.year}: 득점 ${m.runs.toFixed(2)}, cal 홈런 ${m.cal.hr.toFixed(2)}, SD ${m.sd.toFixed(3)}, 은퇴 ${m.retired}, 복무 ${m.serving}, 실존 ${(m.realPa * 100).toFixed(0)}%, 구체적 사건(실존) ${m.specificOnReal}`);
     }
     parts.push(`## 시드 ${seed} (${((Date.now() - t0) / 1000).toFixed(0)}초)\n`, table(rows), '');
+    // 공·타격 퍼짐: 시즌 반발계수를 쓰는 해(2027~)만, 실제 2010~2026과 나란히
+    const fut = rows.filter((r) => r.year >= 2027);
+    if (fut.length) {
+      const range = (xs: number[]): [number, number] => [Math.min(...xs), Math.max(...xs)];
+      spreads.push(spreadLine(`게임 ${seed} ${fut[0].year}~${fut.at(-1)!.year}`, {
+        hrPa: range(fut.map((r) => r.ball.hrPa)), hrPaSd: sdOf(fut.map((r) => r.ball.hrPa)), era: range(fut.map((r) => r.ball.era)), eraSd: sdOf(fut.map((r) => r.ball.era)),
+        topHr: range(fut.map((r) => r.ball.topHr)), subTwo: range(fut.map((r) => r.ball.subTwo)),
+      }));
+    }
+    const shifts = league.ruleShifts ?? [];
+    if (shifts.length || league.year > 2028) {
+      const runs = rows.filter((r) => r.year >= 2028).map((r) => r.runs);
+      const keys = Object.keys(FUTURE_RULE_SPEC) as FutureRuleKey[];
+      const last = (k: FutureRuleKey) => shifts.filter((s) => s.key === k).at(-1)?.after ?? FUTURE_RULE_SPEC[k].base;
+      parts.push(`미래 규칙 변경 ② ${shifts.length}번: ${keys.map((k) => `${k} ${shifts.filter((s) => s.key === k).length}`).join(', ')}. ` +
+        `마지막 값: ${keys.map((k) => `${k} ${futureValueText(k, last(k))}`).join(', ')}. ` +
+        (runs.length ? `2028년부터 득점 ${Math.min(...runs).toFixed(2)}~${Math.max(...runs).toFixed(2)}.` : ''), '');
+    }
   }
+  if (spreads.length) parts.push('## 공·타격 퍼짐 (실제와 나란히)\n', SPREAD_HEAD, spreadLine(`실제 ${real.from}~${real.to}`, real), ...spreads, '');
   const text = parts.join('\n');
   if (out) {
     mkdirSync(dirname(out), { recursive: true });

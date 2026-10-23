@@ -3,7 +3,7 @@
 
 import { Rng } from '../engine';
 import type { PostseasonResult } from './postseason';
-import { capPayroll, salaryCap, PRE_CAP_BUDGET } from './salary';
+import { salaryCap, salaryFloor, PRE_CAP_BUDGET, teamCapPayroll } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { challengeBudget } from './challenges';
 import { ruleOf } from './rules';
@@ -76,17 +76,32 @@ export function budgetFor(league: LeagueState, team: number, year: number): numb
  */
 export function spendLimit(league: LeagueState, team: number, year: number): number | null {
   const cap = salaryCap(year, league);
-  const budget = league.challenge ? challengeBudget(league, team, year, (t) => capPayroll(league.players, t, ruleOf(league, 'capTopN'))) : null;
+  const budget = league.challenge ? challengeBudget(league, team, year, (t) => teamCapPayroll(league, t, year)) : null;
   if (budget === null) return cap;
   return cap === null ? budget : Math.min(cap, budget);
 }
 
-// ---- 샐러리캡 제재 (제도연표, 출처 확인)
+// ---- 샐러리캡 제재 (2023~2025: 제도연표, 출처 확인. 2026~: 조사값)
 
 /** 연속 초과 횟수별 제재금 비율 (초과분 대비): 1회 50%, 2회 연속 100%, 3회 이상 연속 150% */
 export const CAP_FINE_RATE = [0.5, 1.0, 1.5];
 /** 2회 이상 연속 초과하면 다음 드래프트 1라운드 지명권이 이만큼 밀린다 */
 export const CAP_PICK_DROP = 9;
+/** 제재 완화가 시작되는 해 (조사값) */
+export const CAP_RULES_2026 = 2026;
+/** 2026년부터: 1회 30%, 2회 연속 50%, 3회 이상 연속 100% (조사값) */
+export const CAP_FINE_RATE_2026 = [0.3, 0.5, 1.0];
+/** 2026년부터 지명권 하락은 3회 연속 초과부터 (조사값) */
+export const CAP_PICK_DROP_FROM_2026 = 3;
+
+/**
+ * 그 해 제재 규정: 연속 초과 횟수별 제재금 비율과 지명권 하락이 시작되는 횟수.
+ * 횟수는 통산이 아니라 연속 초과 기준이라 한 시즌이라도 지키면 처음부터 센다 (조사값). 2026년 개편 때 따로 새로 세지 않는다
+ * (실제로는 2025시즌 초과 구단이 없어 2026시즌 초과는 모두 1회부터였다)
+ */
+export function capSanctionRule(year: number): { rates: number[]; dropFrom: number } {
+  return year >= CAP_RULES_2026 ? { rates: CAP_FINE_RATE_2026, dropFrom: CAP_PICK_DROP_FROM_2026 } : { rates: CAP_FINE_RATE, dropFrom: 2 };
+}
 
 export interface CapSanction {
   team: number;
@@ -109,19 +124,69 @@ export function applyCapSanctions(league: LeagueState, year: number): CapSanctio
   league.draftPenalty ??= new Array(n).fill(null);
   const out: CapSanction[] = [];
   if (cap === null) return out;
+  const rule = capSanctionRule(year);
   for (let t = 0; t < n; t++) {
-    const pay = capPayroll(league.players, t, ruleOf(league, 'capTopN'));
+    const pay = teamCapPayroll(league, t, year);
     if (pay <= cap) {
       league.capStrikes[t] = 0;
       continue;
     }
     const strike = ++league.capStrikes[t];
     const over = pay - cap;
-    const fine = Math.round(over * CAP_FINE_RATE[Math.min(strike, 3) - 1] * ruleOf(league, 'capFineScale'));
-    const pickDrop = strike >= 2;
+    const fine = Math.round(over * rule.rates[Math.min(strike, 3) - 1] * ruleOf(league, 'capFineScale'));
+    const pickDrop = strike >= rule.dropFrom;
     league.ledger.push({ year, from: t, to: -1, amount: fine, note: `샐러리캡 초과 제재금 (${strike}회 연속, 초과 ${Math.round(over / 10000)}억 원)` });
     if (pickDrop) league.draftPenalty[t] = year;
     out.push({ team: t, year, over, strike, fine, pickDrop });
+  }
+  return out;
+}
+
+export interface CapFloorShort {
+  team: number;
+  year: number;
+  pay: number;
+  floor: number;
+}
+
+/** 개막 때 샐러리캡 하한(2027~) 미달 구단 (제재는 applyFloorSanctions) */
+export function capFloorShorts(league: LeagueState, year: number): CapFloorShort[] {
+  const floor = salaryFloor(year, league);
+  if (floor === null) return [];
+  const out: CapFloorShort[] = [];
+  for (let t = 0; t < league.teams.length; t++) {
+    const pay = teamCapPayroll(league, t, year);
+    if (pay < floor) out.push({ team: t, year, pay, floor });
+  }
+  return out;
+}
+
+/** 하한 미달 제재 (조사값): 미달액의 1회 30%, 2회 연속 50%, 3회 이상 연속 100%를 유소년 발전기금으로 낸다. 지명권 하락은 없다 */
+export const FLOOR_FINE_RATE = [0.3, 0.5, 1.0];
+
+export interface FloorSanction extends CapFloorShort {
+  strike: number;
+  fine: number;
+}
+
+/**
+ * 개막 때 샐러리캡 하한 판정 (2027~): 미달하면 연속 미달 횟수를 늘리고 유소년 발전기금을 장부에 남긴다. 지키면 횟수를 0으로.
+ * 미달액 기준으로 냈다 (조사 결과의 "미달분", 원문 규정 확인 전)
+ */
+export function applyFloorSanctions(league: LeagueState, year: number): FloorSanction[] {
+  const n = league.teams.length;
+  league.floorStrikes ??= new Array(n).fill(0);
+  while (league.floorStrikes.length < n) league.floorStrikes.push(0);
+  if (salaryFloor(year, league) === null) return [];
+  const short = new Map(capFloorShorts(league, year).map((x) => [x.team, x]));
+  const out: FloorSanction[] = [];
+  for (let t = 0; t < n; t++) {
+    const x = short.get(t);
+    if (!x) { league.floorStrikes[t] = 0; continue; }
+    const strike = ++league.floorStrikes[t];
+    const fine = Math.round((x.floor - x.pay) * FLOOR_FINE_RATE[Math.min(strike, 3) - 1]);
+    league.ledger.push({ year, from: t, to: -1, amount: fine, note: `샐러리캡 하한 미달 유소년 발전기금 (${strike}회 연속, 미달 ${Math.round((x.floor - x.pay) / 10000)}억 원)` });
+    out.push({ ...x, strike, fine });
   }
   return out;
 }
