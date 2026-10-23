@@ -6,7 +6,7 @@ import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar, PotCell, usePotentialOf } from '../parts';
 import { seasonWar } from '../../league/awards';
-import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
+import { defenseAt, defenseGrade, fieldPosOf, teamRules, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
 import {
@@ -58,7 +58,7 @@ export function Roster() {
     try { localStorage.setItem(PAGE_KEY, v); } catch { /* 기억하지 못해도 화면은 그대로 */ }
   };
   const year = session.world.year;
-  const rules = session.world.rules;
+  const rules = teamRules(session.world, session.team);
 
   // 다음 경기일 기준으로 엔진이 쓸 1군과 역할
   const view = useMemo(() => {

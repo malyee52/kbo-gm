@@ -274,6 +274,11 @@ export function battingOrder(nine: SimPlayer[], lg: Rates): SimPlayer[] {
   return [first, second, third, fourth, ...rest];
 }
 
+/** 구단의 1군 엔트리·외국인 1군 한도: 리그 규칙 + 창단 특례 (SimTeam.rosterBonus·foreignBonus) */
+export function teamRules(world: Pick<World, 'rules'>, team: Pick<SimTeam, 'rosterBonus' | 'foreignBonus'>): { rosterSize: number; foreignLimit: number } {
+  return { rosterSize: world.rules.rosterSize + (team.rosterBonus ?? 0), foreignLimit: world.rules.foreignLimit + (team.foreignBonus ?? 0) };
+}
+
 function pitcherCount(rosterSize: number): number {
   if (rosterSize >= 28) return 14;
   if (rosterSize === 27) return 13;
@@ -354,7 +359,7 @@ export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { 
  * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
  */
 export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null): void {
-  const limit = world.rules.foreignLimit;
+  const { rosterSize, foreignLimit: limit } = teamRules(world, ts.team);
   const manual = ts.manual ?? null;
   const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
@@ -428,8 +433,8 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const benchToday = new Set(avail.filter((p) => !p.isPitcher && p.alt?.pit && restedBat(p)).map((p) => p.idx));
 
   // 직접 정한 1군은 투수·야수 인원도 플레이어가 정한 그대로 쓴다
-  const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(world.rules.rosterSize);
-  const nHit = manual ? Number.MAX_SAFE_INTEGER : world.rules.rosterSize - nPit;
+  const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(rosterSize);
+  const nHit = manual ? Number.MAX_SAFE_INTEGER : rosterSize - nPit;
 
   // 투수: 선발 로테이션(시대별 4~5명), 나머지 구원. 기용표가 있으면 그 로테이션부터
   const era = eraPitching(world.year);

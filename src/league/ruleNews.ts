@@ -6,7 +6,7 @@
 
 import type { BallYear, Meta, RuleCat, RuleChangeData, RuleChangeItem, RuleEffect, RuleStatus } from '../data/types';
 import { dateOf } from '../game/calendar';
-import { faEnabled, faServiceNeeded, foreignRule } from './eras';
+import { EXPANSION_PERK_FROM, EXPANSION_PERK_SEASONS, faEnabled, faServiceNeeded, foreignRule } from './eras';
 import { dollarText, foreignCap, MIN_SALARY_STEP_YEARS, minSalary, ruleStepYear, salaryCap } from './salary';
 import type { LeagueState } from './types';
 import { FUTURE_RULE_LABEL, futureDelta, futureValueText, type FutureRuleKey, type RuleShift } from './futureRules';
@@ -148,8 +148,50 @@ export interface RuleNewsInput {
   shifts?: RuleShift[];
   /** 이 해 적용을 두고 단장 회의에서 부결된 안건 (league.ruleVotes 중 passed가 아닌 것) */
   rejected?: RuleVoteRecord[];
+  /** 창단 특례가 시작·진행·끝나는 구단 (perkTeamsFor) */
+  perks?: PerkTeam[];
   /** 2027년부터 시즌마다 정하는 반발계수 (futureRules.ts seasonCor): 이 해·지난해 값, 기준 범위, 홈런 목표 배율 */
   cor?: { value: number; prev: number | null; range: [number, number]; hrMul: number };
+}
+
+/** 창단 특례 구단 (eras.ts expansionPerk) */
+export interface PerkTeam {
+  name: string;
+  franchise: string;
+  /** 1군 첫 시즌 */
+  firstYear: number;
+}
+
+/** 그 해 창단 특례가 걸린 구단과 지난해로 특례가 끝난 구단 (알림·규칙 연표용) */
+export function perkTeamsFor(league: Pick<LeagueState, 'expansions' | 'teams'>, year: number): PerkTeam[] {
+  return (league.expansions ?? [])
+    .filter((e) => e.firstYear >= EXPANSION_PERK_FROM && year >= e.firstYear && year <= e.firstYear + EXPANSION_PERK_SEASONS)
+    .map((e) => ({ name: league.teams[e.team].name, franchise: league.teams[e.team].franchise, firstYear: e.firstYear }));
+}
+
+/** 창단 특례 내용 (사용자 결정 "빈 자료 물음 4", 2026-10-23) */
+export const PERK_TEXT = '외국인 보유·1군 1명 더 · 1군 엔트리 1명 더 · 외부 FA 보상선수 면제 (보상금만)';
+
+/** 창단 특례의 출처: kt는 자료집 제도연표 41(출처 확인), NC는 나무위키 원문, 게임 안 창단은 같은 규칙을 쓴 가상 결정 */
+function perkSource(t: PerkTeam): Pick<RuleLine, 'status' | 'source'> {
+  if (t.franchise === 'KT') return { status: 'confirmed', source: '자료집 제도연표 41 (kt 2015~2016)' };
+  if (t.franchise === 'NC') return { status: 'research', source: '나무위키 NC 다이노스/창단 과정·2014년 (원문 확인 2026-10-23)' };
+  return { status: 'virtual', source: '게임 속 창단, kt·NC와 같은 규칙' };
+}
+
+/** 창단 특례 줄: 1군 첫해에 시작, 특례가 끝난 다음 해에 끝 */
+function perkLines(perks: PerkTeam[], year: number): RuleLine[] {
+  const out: RuleLine[] = [];
+  for (const t of perks) {
+    const last = t.firstYear + EXPANSION_PERK_SEASONS - 1;
+    if (year === t.firstYear) {
+      out.push({ cat: 'roster', title: `창단 특례: ${t.name} (${t.firstYear}~${last} 시즌)`, after: PERK_TEXT, effect: 'league', ...perkSource(t),
+        simplified: '외국인 보유 한도와 1군 등록 한도를 같이 1명 늘린다. FA 보상 면제는 두 시즌 앞 오프시즌 영입' });
+    } else if (year === last + 1) {
+      out.push({ cat: 'roster', title: `창단 특례 끝: ${t.name}`, before: PERK_TEXT, after: '다른 구단과 같은 규칙', effect: 'league', ...perkSource(t) });
+    }
+  }
+  return out;
 }
 
 /** 미래 규칙 변경 항목 → 알림 분류·반영·게임 규칙 키 */
@@ -295,6 +337,8 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
     });
   }
 
+  lines.push(...perkLines(input.perks ?? [], year));
+
   // 자료에 없는 게임 값 변화
   if (prev) {
     for (const key of RULE_KEYS) {
@@ -335,7 +379,7 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
   const main = ordered(lines.filter(isMainLine));
   const other = ordered(lines.filter((l) => !isMainLine(l)));
   dated.sort((a, b) => a.day - b.day);
-  const summary = input.start ? ruleSummary(data, now) : [];
+  const summary = input.start ? ruleSummary(data, now, input.perks) : [];
   const changes = [...main, ...other].filter((l) => !l.info);
   const total = changes.length;
   const headline = input.start
@@ -432,12 +476,16 @@ function corLine(c: NonNullable<RuleNewsInput['cor']> & { prevReal?: boolean }, 
 }
 
 /** 시작 연도 규칙 요약 (2.4): 게임 값 + 공인구. 게임이 실제와 다른 곳은 그 해 자료 항목의 단순화 문구로 밝힌다 */
-export function ruleSummary(data: RuleChangeData | undefined, s: RuleSnapshot): string[] {
+export function ruleSummary(data: RuleChangeData | undefined, s: RuleSnapshot, perks: PerkTeam[] = []): string[] {
   const out: string[] = [];
   if (s.teams !== undefined && s.games !== undefined) out.push(`${s.teams}구단, 팀당 ${s.games}경기 (게임은 단일 시즌으로 진행)`);
   out.push(`1군 엔트리 ${keyValueText('rosterSize', s)}. 정규시즌 연장 ${keyValueText('maxInnings', s)}. 포스트시즌 ${keyValueText('postseasonTeams', s)}`);
   out.push(s.foreignTotal ? `외국인 선수 ${keyValueText('foreignLimit', s)}` : '외국인 선수 없음 (1998년 도입)');
   out.push(s.faEnabled ? `FA 자격 ${keyValueText('faService', s)}` : 'FA 없음 (1999년 시즌 뒤 도입)');
+  for (const t of perks) {
+    const last = t.firstYear + EXPANSION_PERK_SEASONS - 1;
+    if (s.year <= last) out.push(`창단 특례 ${t.name} (${t.firstYear}~${last} 시즌): ${PERK_TEXT}`);
+  }
   out.push(s.salaryCap === null ? (s.year < 2023 ? '샐러리캡 없음 (2023년 도입)' : '샐러리캡 없음') : `샐러리캡 ${keyValueText('salaryCap', s)} (연봉 상위 40명)`);
   const b = ballState(data, s.year);
   if (b.range) out.push(`공인구: ${b.single ? '단일' : '복수'} 공인구, 반발계수 기준 ${rangeText(b.range)}${STATUS_LABEL[b.status] === '조사값' ? ' (조사값)' : ''}`);

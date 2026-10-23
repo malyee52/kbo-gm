@@ -18,7 +18,7 @@ import type { VoteChoice } from '../ai/vote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { worldFromLeague } from '../league/world';
-import { ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
+import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
@@ -39,7 +39,7 @@ import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, makeDefense, pitValue, type Defense } from '../engine';
+import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import {
@@ -678,7 +678,7 @@ export class GameSession {
       g.addNews(0, 'season', `도전 「${ch.title}」: ${ch.intro}. ${ch.plan ? `${ch.plan.stages.length > 1 ? `단계 목표: ${ch.plan.stages.slice(0, -1).map((x) => x.label).join(' → ')}. ` : ''}` : ''}기한은 ${league.challenge.until} 시즌까지입니다.`);
     }
     for (const e of league.expansions ?? []) {
-      g.addNews(0, 'season', `${league.teams[e.team].name}: 창단 구단으로 ${world.year} 시즌은 퓨처스리그에서 뛰고 ${e.firstYear}년 1군에 들어옵니다.`);
+      if (e.firstYear > world.year) g.addNews(0, 'season', `${league.teams[e.team].name}: 창단 구단으로 ${world.year} 시즌은 퓨처스리그에서 뛰고 ${e.firstYear}년 1군에 들어옵니다.`);
     }
     g.setSeasonGoal();
     return g;
@@ -849,6 +849,7 @@ export class GameSession {
       seasonDays: year === this.year ? this.season.schedule.length : undefined,
       shifts: shiftsFor(L, year),
       rejected: (L.ruleVotes ?? []).filter((v) => v.year === year && !v.passed),
+      perks: perkTeamsFor(L, year),
       ...(() => {
         const value = seasonCor(L, year);
         return value === null ? {} : { cor: { value, prev: seasonCor(L, year - 1), range: corRange(L, year), hrMul: ballHrMul(L, year) } };
@@ -1362,7 +1363,7 @@ export class GameSession {
   checkEntry(idxs: Iterable<number>): EntryCheck {
     const set = new Set(idxs);
     const players = this.team.org.filter((p) => set.has(p.idx));
-    const { rosterSize, foreignLimit } = this.world.rules;
+    const { rosterSize, foreignLimit } = teamRules(this.world, this.team);
     const errors: string[] = [];
     const warnings: string[] = [];
     const devs = players.filter((p) => p.dev);
@@ -3379,7 +3380,7 @@ export class GameSession {
     if (!ts.manual || p.dev) return;
     const cur = new Set(ts.manual);
     cur.add(p.idx);
-    const size = this.world.rules.rosterSize;
+    const size = teamRules(this.world, this.team).rosterSize;
     if (cur.size > size) {
       const same = [...cur].map((i) => this.world.players[i]).filter((x) => x.idx !== p.idx && x.isPitcher === p.isPitcher);
       // 투수 value는 작을수록, 야수는 클수록 좋다

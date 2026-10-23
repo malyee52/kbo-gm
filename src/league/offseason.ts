@@ -47,7 +47,7 @@ import {
   activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
-import { changeText, faEnabled, faFilingRankPerTeam, foreignRule, teamChangesFor, type TeamChange } from './eras';
+import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
 import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
 import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
@@ -1104,6 +1104,17 @@ export function protectPool(league: LeagueState, off: OffseasonState, c: CompCas
   return league.players.filter((p) => p.team === c.to && !autoProtected(off, p));
 }
 
+/**
+ * 이 FA 이적의 보상 규정. 영입 구단이 창단 특례(다음 시즌이 1군 첫 두 시즌, eras.ts expansionPerk)면 보상선수 없이 보상금만:
+ * 실제 kt·NC는 직전 연봉 300%만 냈다 (그때 등급제 전 보상의 "보상금만"과 같은 값). 등급제 뒤에는 그 등급의 보상금만 비율
+ * (A 300%, B 200%, C 150%)로 읽었다 (해석: 특례가 보상을 늘리지는 않게)
+ */
+export function faCompRule(league: Pick<LeagueState, 'expansions'>, off: Pick<OffseasonState, 'year'>, grade: FaGrade, to: number): { cashOnly: number; withPlayer: number | null; protect: number | null; perk: boolean } {
+  const rule = FA_COMP[grade];
+  if (rule.withPlayer !== null && expansionPerk(league, to, off.year + 1)) return { cashOnly: rule.cashOnly, withPlayer: null, protect: null, perk: true };
+  return { ...rule, perk: false };
+}
+
 /** AI가 매기는 선수 가치 (보호·지명 판단): 지금과 앞으로 몇 해의 기여 (런) */
 function compValue(view: LeagueView, id: string): number {
   return playerValue(view.sim.get(id)!, view.ctx, horizonWeights('rebuild', 1));
@@ -1127,7 +1138,7 @@ export function compCandidates(league: LeagueState, off: OffseasonState, c: Comp
 function enterComp(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   const cases: CompCase[] = [];
   for (const e of off.fa.entries) {
-    if (e.status !== 'signed' || e.team === undefined || e.team === e.from || e.returnee || FA_COMP[e.grade].withPlayer === null) continue;
+    if (e.status !== 'signed' || e.team === undefined || e.team === e.from || e.returnee || faCompRule(league, off, e.grade, e.team).withPlayer === null) continue;
     cases.push({ fa: e.id, from: e.from, to: e.team, grade: e.grade, prevSalary: e.prevSalary, protect: [], pick: null });
   }
   if (!cases.length) {
@@ -1443,10 +1454,12 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
     log(off, 'fa', `${p.name}, ${league.teams[o.team].name} 잔류 (${money})`, mine);
   } else {
     off.fa.signings[o.team]++;
-    if (FA_COMP[e.grade].withPlayer === null) {
-      const comp = Math.round(FA_COMP[e.grade].cashOnly * e.prevSalary);
-      league.ledger.push({ year: year + 1, from: o.team, to: e.from, amount: comp, note: `${p.name} FA 보상금 (${e.grade}등급)` });
-      log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). 보상금 ${(comp / 10000).toFixed(1)}억 원`, mine);
+    const rule = faCompRule(league, off, e.grade, o.team);
+    if (rule.withPlayer === null) {
+      const comp = Math.round(rule.cashOnly * e.prevSalary);
+      const why = rule.perk ? `창단 특례로 보상선수 없이 직전 연봉 ${rule.cashOnly * 100}%` : faGradeLabel(e.grade);
+      league.ledger.push({ year: year + 1, from: o.team, to: e.from, amount: comp, note: `${p.name} FA 보상금 (${why})` });
+      log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). 보상금 ${(comp / 10000).toFixed(1)}억 원${rule.perk ? ` (${why})` : ''}`, mine);
     } else {
       log(off, 'fa', `${p.name}, ${league.teams[e.from].name} → ${league.teams[o.team].name} (${money}). ${e.grade}등급: 보상은 보상선수 단계에서`, mine);
     }
@@ -1676,6 +1689,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
   const keep: Record<string, boolean> = {};
   const advised = new Set<string>();
   for (let t = 0; t < league.teams.length; t++) {
+    const lim = teamForeignRule(rule, league, t, year + 1);
     const mine = league.players.filter((p) => p.team === t && p.foreign);
     const staying = mine.filter((p) => !expiring(p, year));
     let regular = staying.filter((p) => !p.asia).length;
@@ -1686,7 +1700,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     const cands = mine.filter((p) => expiring(p, year) && foreignKeepAdvice(view, p, year))
       .sort((a, b) => currentRuns(view.sim.get(b.id)!, view.ctx) - currentRuns(view.sim.get(a.id)!, view.ctx) || a.id.localeCompare(b.id));
     for (const p of cands) {
-      if (p.asia ? asia >= rule.asia : regular >= rule.regular) continue;
+      if (p.asia ? asia >= lim.asia : regular >= lim.regular) continue;
       if (!p.asia && foreignTeamCap(league, t, year + 1, [...kept, p]) - pay < FOREIGN_MIN_DEAL) continue;
       advised.add(p.id);
       if (p.asia) asia++;
@@ -1751,20 +1765,23 @@ export function foreignSlots(league: LeagueState, team: number, off?: OffseasonS
   const cap = foreignTeamCap(league, team, year, regular);
   return {
     regular: regular.length, asia: list.length - regular.length, regularPay: regular.reduce((s, p) => s + foreignContractTotal(p.contract), 0),
-    cap, resignRoom: cap - foreignCap(league, 'foreignTotalCap', year),
+    cap, resignRoom: cap - foreignCap(league, 'foreignTotalCap', year) - (expansionPerk(league, team, year) ? foreignCap(league, 'foreignNewCap', year) : 0),
   };
 }
 
-/** 이번 오프시즌의 외국인 보유 한도 (M8 전 저장에는 없어 2026년 값) */
-export function foreignLimits(off: OffseasonState): { regular: number; asia: number } {
-  return { regular: off.foreign?.regular ?? FOREIGN_REGULAR, asia: off.foreign?.asia ?? FOREIGN_ASIA };
+/** 이번 오프시즌 구단의 외국인 보유 한도 (M8 전 저장에는 없어 2026년 값). 창단 특례 구단은 1명 더 (eras.ts teamForeignRule) */
+export function foreignLimits(off: OffseasonState, league: Pick<LeagueState, 'expansions'>, team: number): { regular: number; asia: number } {
+  const regular = off.foreign?.regular ?? FOREIGN_REGULAR;
+  const asia = off.foreign?.asia ?? FOREIGN_ASIA;
+  const r = teamForeignRule({ total: regular + asia, asia, regular }, league, team, off.year + 1);
+  return { regular: r.regular, asia: r.asia };
 }
 
 /** 이 외국인 후보와 계약할 수 있는가 (보유 한도와 금액 상한) */
 export function canSignForeign(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer): OfferCheck {
   if (!off.foreign?.pool.includes(p.id) || p.team !== -1) return { ok: false, message: '계약할 수 없는 선수입니다.' };
   const s = foreignSlots(league, team, off);
-  const lim = foreignLimits(off);
+  const lim = foreignLimits(off, league, team);
   const cap = (key: ForeignCapKey) => foreignCap(league, key, off.year + 1);
   if (p.asia) {
     if (s.asia >= lim.asia) return { ok: false, message: lim.asia ? '아시아쿼터 자리가 찼습니다.' : '아시아쿼터 제도가 없는 시대입니다.' };
@@ -1839,7 +1856,7 @@ export function setForeignKeep(league: LeagueState, off: OffseasonState, id: str
   const p = league.players.find((x) => x.id === id)!;
   if (keep && !off.foreign.keep[id]) {
     const s = foreignSlots(league, off.userTeam, off);
-    const lim = foreignLimits(off);
+    const lim = foreignLimits(off, league, off.userTeam);
     if (p.asia ? s.asia >= lim.asia : s.regular >= lim.regular) {
       return { ok: false, message: p.asia ? '아시아쿼터 자리가 찼습니다.' : `외국인 선수는 ${lim.regular}명까지입니다.` };
     }

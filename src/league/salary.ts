@@ -3,7 +3,7 @@
 // 제도 값은 자료집 "제도연표"에서 "출처 확인"인 것만 확정값으로 쓰고, 나머지는 "임시값"으로 표시한다.
 // 연봉 단위는 만 원 (외국인 선수만 달러).
 
-import { faServiceNeeded } from './eras';
+import { expansionPerk, faServiceNeeded } from './eras';
 import type { Contract, LeagueState, LeaguePlayer, School } from './types';
 import { RULE_DEFAULTS, ruleOf } from './rules';
 import { seasonsWith } from './stadium';
@@ -376,9 +376,13 @@ export function foreignResignRoom(league: Pick<LeagueState, 'teams' | 'ruleShift
   return n > 0 ? Math.round((FOREIGN_RESIGN_CAP_STEP * n * ruleStepIndex(year, league)) / 10_000) * 10_000 : 0;
 }
 
-/** 그 구단의 외국인 총액 상한 (달러): 기본 상한 + 일반 외국인(members, 아시아쿼터 제외) 재계약 몫 */
-export function foreignTeamCap(league: Pick<LeagueState, 'teams' | 'rules' | 'ruleShifts'>, team: number, year: number, members: LeaguePlayer[]): number {
-  return foreignCap(league, 'foreignTotalCap', year) + members.reduce((s, p) => s + foreignResignRoom(league, p, team, year), 0);
+/**
+ * 그 구단의 외국인 총액 상한 (달러): 기본 상한 + 일반 외국인(members, 아시아쿼터 제외) 재계약 몫.
+ * 창단 특례 구단(eras.ts expansionPerk)은 늘어난 한 자리 몫으로 신규 상한만큼 더 (실제 규정 없음, 임시값)
+ */
+export function foreignTeamCap(league: Pick<LeagueState, 'teams' | 'rules' | 'ruleShifts' | 'expansions'>, team: number, year: number, members: LeaguePlayer[]): number {
+  return foreignCap(league, 'foreignTotalCap', year) + members.reduce((s, p) => s + foreignResignRoom(league, p, team, year), 0)
+    + (expansionPerk(league, team, year) ? foreignCap(league, 'foreignNewCap', year) : 0);
 }
 
 /** 소속선수 정원 68명 (2026~, 출처 확인) */

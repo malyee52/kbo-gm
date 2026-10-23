@@ -334,6 +334,9 @@ export interface LeagueState {
   reputation?: import('./reputation').RepState;
   /** 플레이어가 고른 다음 시즌 캠프 (year = 그 시즌) */
   campPlan?: { year: number; pick: import('./camp').CampPick };
-  /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
+  /**
+   * 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권, 1군 첫 두 시즌 창단 특례 (eras.ts expansionPerk).
+   * 시작 때 이미 1군인 구단도 특례 기간이 남았으면 넣는다 (create.ts, 2026-10-23)
+   */
   expansions?: { team: number; firstYear: number }[];
 }

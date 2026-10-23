@@ -5,7 +5,7 @@
 // 추천은 화면에 보이는 능력 등급·상태만으로 고르고, 표시만 할 뿐 자동으로 적용하지 않는다.
 import { ConfirmButton } from '../ConfirmButton';
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
+import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type GameSession, type PitcherRole } from '../../game/session';
 import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
@@ -73,7 +73,7 @@ export function LineupBoard() {
 
   const players = session.world.players;
   const org = session.team.org;
-  const rules = session.world.rules;
+  const rules = teamRules(session.world, session.team);
   const editable = session.canManage;
   const condOf = useCondition();
   const recent = useMemo(() => recentLines(session), [session, version]);

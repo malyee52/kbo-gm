@@ -2,7 +2,7 @@
 // 새 사건을 만들지 않는다. 이미 게임에 있는 처리 대상(이벤트, 오프시즌 단계, 시즌 마무리, 판타지 선택 등)만 모아 보여 준다.
 // 기한은 게임에 실제로 있는 단계 조건만 쓰고 날짜를 지어내지 않는다 (when).
 import type { GameSession } from '../game/session';
-import { LINEUP_SLOTS, MIN_PLAN_ROTATION } from '../engine';
+import { LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules } from '../engine';
 import * as Off from '../league/offseason';
 import { ruleOf } from '../league/rules';
 import { pendingChoices } from '../fantasy/types';
@@ -153,7 +153,7 @@ export function entryDecisions(s: GameSession): Decision[] {
   const out: Decision[] = [];
   const reg = s.registered();
   const regIdx = new Set(reg.map((p) => p.idx));
-  const size = s.world.rules.rosterSize;
+  const size = teamRules(s.world, s.team).rosterSize;
   const base = { kind: '엔트리' as const, group: '전력' as const, go: 'lineup' as const };
   if (reg.length > size) {
     out.push({ ...base, key: 'entry-size', title: `1군 정원 초과 ${reg.length - size}명`, why: `1군은 ${size}명까지입니다 (지금 ${reg.length}명).` });

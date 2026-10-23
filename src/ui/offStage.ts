@@ -103,7 +103,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
       if (drop.length) out.push({ key: 'foreign-drop', title: `재계약하지 않는 외국인 ${drop.length}명 (${names(drop)})`, then: '계약이 끝나 후보 명단으로 나갑니다. 다른 구단이 데려갈 수 있습니다.' });
       if (f.order[f.pointer] === me) {
         const sl = Off.foreignSlots(L, me, off);
-        const lim = Off.foreignLimits(off);
+        const lim = Off.foreignLimits(off, L, me);
         const reg = lim.regular - sl.regular;
         const asia = lim.asia - sl.asia;
         if (reg > 0 || asia > 0) {
@@ -191,7 +191,7 @@ export function stageHeadline(s: GameSession): string[] {
     }
     case 'foreign': {
       const sl = Off.foreignSlots(L, me, off);
-      const lim = Off.foreignLimits(off);
+      const lim = Off.foreignLimits(off, L, me);
       const turn = off.foreign && off.foreign.order[off.foreign.pointer] === me;
       return [
         `보유 ${sl.regular}/${lim.regular}명${lim.asia ? ` · 아시아쿼터 ${sl.asia}/${lim.asia}명` : ''}`,

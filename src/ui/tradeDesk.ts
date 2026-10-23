@@ -8,7 +8,7 @@
 import { useSyncExternalStore } from 'react';
 import { MIN_ORG_CATCHERS, MIN_ORG_HITTERS, MIN_ORG_PITCHERS, type TradeEvaluation, type TradeVerdict } from '../ai/trade';
 import { currentRuns } from '../ai/value';
-import { FIELD_POS, isStarterSkill, type SimPlayer } from '../engine';
+import { FIELD_POS, isStarterSkill, teamRules, type SimPlayer } from '../engine';
 import type { GameSession, PickSwap } from '../game/session';
 import { parsePick, type DraftPick } from '../league/picks';
 import { ruleOf } from '../league/rules';
@@ -219,7 +219,7 @@ export function tradeImpact(s: GameSession, d: TradeDraft): TradeImpact {
   const orgLimit = ruleOf(s.league, 'orgLimit');
   const out: TradeImpact = {
     active: [activeB, activeB - give.filter((p) => reg.has(p.idx)).length],
-    activeLimit: s.world.rules.rosterSize,
+    activeLimit: teamRules(s.world, s.team).rosterSize,
     org: [regular(mineB), regular(mineA)],
     orgLimit,
     cap: limit === null ? null : { before: capOf(s, mineB), after: capOf(s, mineA), limit },
