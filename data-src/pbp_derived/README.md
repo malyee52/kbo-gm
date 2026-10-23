@@ -117,3 +117,16 @@ python -I -X utf8 tools/pbp_derive.py
 
 검사 결과 (2026-10-22): 선수별 P/PA 합 = 리그 `all` 평균 (차이 0.0005구 이하, 리그 표는 소수 셋째 자리 반올림), 구종별 공 수·구원 등판 수·연투·3연투 비율·좌우 타석·타율은 완전히 같다.
 
+
+## 볼카운트 사슬 능력 가공값 (능력치 v2 16-1, `tools/pbp_plate.py`)
+
+`python -I -X utf8 tools/pbp_plate.py [원본 폴더]` (원본 폴더 기본 `data-src/naver_pbp/`). 기획: `docs/능력치v2_기획안.md` 1.2·1.5·1.8.
+
+| 파일 | 내용 |
+|---|---|
+| `count_zone.csv` | 연도 × 칸(그 공 전 볼카운트) × 존(`in`·`out`·위치 없는 `na`)별 공 수와 결과: 볼·루킹 스트라이크·사구(스윙 안 함), 헛스윙·파울·인플레이(스윙), 번트(W·V). 고의4구 타석의 공은 뺀다 |
+| `batter_plate.csv` | 타자-시즌: 존 안·밖 공과 스윙, 스윙 중 맞힘(파울 + 인플레이), 2스트라이크 칸 스윙·맞힘, 맞힘 중 파울, 2스트라이크에 이른 타석·그 삼진. `exp_*` = 같은 공(칸·존)을 리그 평균 타자가 받았을 때의 기대값 |
+| `pitcher_plate.csv` | 투수-시즌: 공·존 안 공(`exp_in` = 같은 칸에서 리그 존 비율), 존 밖 스윙, 스윙 중 맞힘, 맞힘 중 파울과 기대값, 2스트라이크 타석·삼진 |
+
+- 존 = `|plate_x| ≤ 17/24 + 0.121`피트, `sz_bot − 0.121 ≤ plate_z ≤ sz_top + 0.121`. 스윙 = S·F·H, 번트(W·V)는 스윙에서 뺀다. 위치 없는 공(약 1~2%)은 선수 값·리그 비율에서 뺀다.
+- 능력 = logit(실제) − logit(기대) (리그 대비 로짓 차, 칸 섞임을 걷어 냄). 엔진에는 `tools/build_data.py build_plate` → `public/data/plate.json`, 맞춤은 `tools/fit_plate_estimate.ts` → `reports/plate-estimate.md`.
