@@ -192,7 +192,7 @@ export function playNextGame(st: PostseasonState, season: Season, command: GameC
 function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], subs: { idx: number; order: number; kind: 'PH' | 'PR' | 'DEF' }[] = []): BoxBatter[] {
   const line = (idx: number): BoxBatter => {
     const b = bat[idx];
-    return { idx, ab: b.ab, r: b.r, h: b.h, rbi: b.rbi, hr: b.hr, bb: b.bb, so: b.so };
+    return { idx, ab: b.ab, r: b.r, h: b.h, rbi: b.rbi, hr: b.hr, bb: b.bb, so: b.so, d: b.d, t: b.t, sb: b.sb };
   };
   // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
   return lineup.flatMap((p, i) => [
@@ -204,7 +204,7 @@ function boxBat(lineup: SimPlayer[], bat: ReturnType<typeof emptyBatLine>[], sub
 function boxPit(staff: number[], pit: ReturnType<typeof emptyPitLine>[]): BoxPitcher[] {
   return staff.map((idx) => {
     const q = pit[idx];
-    return { idx, outs: q.outs, bf: q.bf, h: q.h, r: q.r, er: q.er, bb: q.bb, so: q.so, hr: q.hr, np: q.np };
+    return { idx, outs: q.outs, bf: q.bf, h: q.h, r: q.r, er: q.er, bb: q.bb, so: q.so, hr: q.hr, np: q.np, hld: q.hld, bsv: q.bsv };
   });
 }
 

@@ -4,12 +4,14 @@ import type { NewsKind } from '../../game/session';
 import { shortDate } from '../../game/calendar';
 import { useGame } from '../context';
 
-type NewsGroup = 'all' | 'player' | 'move' | 'club' | 'season';
+type NewsGroup = 'all' | 'player' | 'move' | 'watch' | 'club' | 'season';
 /** 알림 묶음 (session.ts NewsKind) */
 const NEWS_GROUPS: Record<NewsGroup, { label: string; kinds: NewsKind[] }> = {
   all: { label: '전체', kinds: [] },
   player: { label: '선수', kinds: ['absence', 'return', 'callup', 'entry', 'plan'] },
   move: { label: '이적', kinds: ['trade', 'offseason'] },
+  // 관심 명단 선수 소식 (game/watch.ts watchNews, 2026-10-23)
+  watch: { label: '관심 선수', kinds: ['watch'] },
   club: { label: '구단', kinds: ['owner', 'event'] },
   season: { label: '시즌', kinds: ['season'] },
 };

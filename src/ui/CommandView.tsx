@@ -11,6 +11,7 @@ import type { CommandPreview } from '../game/session';
 import { fixed2, ops, rate3 } from '../game/stats';
 import { Diamond } from './GameCast';
 import { useGame } from './context';
+import { CondTag, useCondition } from './parts';
 import { teamVars } from './teams';
 
 type Tactic = '' | 'swing' | 'bunt';
@@ -39,6 +40,10 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const s = session.season;
   const W = session.world;
   const name = (i: number) => W.players[i]?.name ?? '?';
+  // 오늘 컨디션 낱말 (복사본이 아닌 실제 시즌의 오늘 값. 숫자 없음)
+  const condOf = useCondition();
+  const cond = (i: number) => (W.players[i] ? condOf(W.players[i]) : null);
+  const condOpt = (i: number) => { const c = cond(i); return c ? ` · 컨디션 ${c.split(' · ')[0]}` : ''; };
   const teamName = (t: number) => session.teamInfo(t).name;
   const me = session.teamIdx;
   const req: CommandRequest | null = pv.req;
@@ -132,9 +137,9 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
               <div className="cast-now">
                 <p><strong>{inningLabel(req)} · {req.outs}아웃</strong> <span className="muted small">{req.step === 'run' ? '우리 공격 · 주자 작전 (투구 전)' : req.step === 'bat' ? '우리 공격 · 타격 작전' : '우리 수비'}</span></p>
                 <p className="outs" aria-hidden>{[0, 1, 2].map((i) => <i key={i} className={i < req.outs ? 'on' : ''} />)}</p>
-                <p>타자 <strong>{name(req.batter)}</strong> <span className="muted small">{batLine(req.batter)}</span></p>
+                <p>타자 <strong>{name(req.batter)}</strong> <span className="muted small">{batLine(req.batter)}</span> <CondTag text={cond(req.batter)} label /></p>
                 <p className="small muted">다음 타자 {name(req.onDeck)}</p>
-                <p>투수 <strong>{name(req.pitcher)}</strong> <span className="muted small">{pitLine(req.pitcher)} · 오늘 타자 {req.pitcherBf}명 {req.pitcherRuns}실점</span></p>
+                <p>투수 <strong>{name(req.pitcher)}</strong> <span className="muted small">{pitLine(req.pitcher)} · 오늘 타자 {req.pitcherBf}명 {req.pitcherRuns}실점</span> <CondTag text={cond(req.pitcher)} label /></p>
                 {req.bases.some((b) => b >= 0) && <p className="small">주자: {req.bases.map((b, k) => (b >= 0 ? `${k + 1}루 ${name(b)}` : '')).filter(Boolean).join(', ')}</p>}
               </div>
             </div>
@@ -165,7 +170,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                         <legend>대타 <span className="muted small">{name(req.batter)} 대신</span></legend>
                         <select value={ph} onChange={(e) => setPh(e.target.value)} disabled={!req.bench.length}>
                           <option value="">그대로</option>
-                          {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}</option>)}
+                          {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}{condOpt(i)}</option>)}
                         </select>
                       </fieldset>
                     </>
@@ -178,7 +183,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                           <span>{k + 1}루 {name(b)} 대신</span>
                           <select value={pr[k]} onChange={(e) => setPr((x) => { const y = ['', '', ''] as [string, string, string]; y[k] = e.target.value; return x[k] === e.target.value ? x : y; })} disabled={!req.bench.length}>
                             <option value="">그대로</option>
-                            {benchOpts(pr[k]).map((i) => <option key={i} value={i}>{name(i)} — 도루 {s.bat[i].sb}</option>)}
+                            {benchOpts(pr[k]).map((i) => <option key={i} value={i}>{name(i)} — 도루 {s.bat[i].sb}{condOpt(i)}</option>)}
                           </select>
                         </label>
                       ))}
@@ -193,7 +198,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                     <select value={pitcher} onChange={(e) => setPitcher(e.target.value)}>
                       <option value="">자동 (감독이 판단)</option>
                       <option value="keep">{name(req.pitcher)} 계속</option>
-                      {req.bullpen.map((i) => <option key={i} value={i}>교체: {name(i)} — {pitLine(i)}</option>)}
+                      {req.bullpen.map((i) => <option key={i} value={i}>교체: {name(i)} — {pitLine(i)}{condOpt(i)}</option>)}
                     </select>
                   </fieldset>
                   <label className="check"><input type="checkbox" checked={walk} onChange={(e) => setWalk(e.target.checked)} /> 고의4구로 {name(req.batter)} 내보내기</label>

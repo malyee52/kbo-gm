@@ -11,6 +11,7 @@ import type { ParkEvents } from '../data/types';
 import { Rng } from '../engine';
 import { realParkAt, realParkOpening } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
+import { wageIndex } from './salary';
 
 // ---- 구장
 
@@ -188,12 +189,12 @@ function startProject(league: LeagueState, team: number, offYear: number, kind: 
   league.ledger.push({ year: offYear + 1, from: team, to: -1, amount: downPayment(cost), note: `${league.teams[team].name} 구장 ${kind === 'new' ? '신축' : '리모델링'} 착공금`, kind: 'stadium' });
 }
 
-/** 고를 수 있는 공사 (화면·주문 검사) */
-export function stadiumOptions(): { id: string; kind: 'remodel' | 'new'; label: string; cost: number; years: number; capacity: (now: number) => number }[] {
+/** 고를 수 있는 공사 (화면·주문 검사). wage = 착공하는 해의 연봉 상승 지수 (salary.ts wageIndex, 공사비가 해마다 그만큼 오른다, 2026-10-22 사용자 결정) */
+export function stadiumOptions(wage = 1): { id: string; kind: 'remodel' | 'new'; label: string; cost: number; years: number; capacity: (now: number) => number }[] {
   return [
-    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: REMODEL.cost, years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
+    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: Math.round(REMODEL.cost * wage), years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
     ...NEW_PARK.options.map((o, i) => ({
-      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: o.cost, years: NEW_PARK.years, capacity: () => o.capacity,
+      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: Math.round(o.cost * wage), years: NEW_PARK.years, capacity: () => o.capacity,
     })),
   ];
 }
@@ -205,7 +206,7 @@ export function stadiumOptions(): { id: string; kind: 'remodel' | 'new'; label: 
 export function orderStadium(league: LeagueState, team: number, offYear: number, id: string, cash: number,
                              park: { size?: ParkSize; dome?: boolean; deal?: StadiumDeal } = {}): { ok: boolean; message: string } {
   const s = league.stadiums?.[team];
-  const opt = stadiumOptions().find((o) => o.id === id);
+  const opt = stadiumOptions(wageIndex(offYear + 1, league)).find((o) => o.id === id);
   if (!s || !opt) return { ok: false, message: '없는 공사입니다.' };
   if (s.project && s.project.open > offYear + 1) return { ok: false, message: '이미 공사가 잡혀 있습니다.' };
   if (park.size !== undefined && !PARK_SIZES[park.size]) return { ok: false, message: '없는 구장 크기입니다.' };
@@ -277,15 +278,18 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
     // AI 신구장: 오래되고 낡은 구장, 자금이 넉넉하면 (지자체 표준 분담, 중립 구장. 연고 시장이 크면 큰 구장)
     const age = year + 1 - (s.opened ?? realParkAt(league.teams[t].franchise, year)?.from ?? league.startYear);
     const bigMarket = (league.fans?.[t]?.level ?? 50) >= 60;
+    const wage = wageIndex(year + 1, league);
     const opt = NEW_PARK.options[bigMarket ? 1 : 0];
-    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= opt.cost * 1.5
+    const newCost = Math.round(opt.cost * wage);
+    const remodelCost = Math.round(REMODEL.cost * wage);
+    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= newCost * 1.5
         && !realParkOpening(league.teams[t].franchise, year + 1 + NEW_PARK.years)) {
-      startProject(league, t, year, 'new', NEW_PARK.years, opt.cost, opt.capacity, { hr: 1, dome: false });
+      startProject(league, t, year, 'new', NEW_PARK.years, newCost, opt.capacity, { hr: 1, dome: false });
       out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
       continue;
     }
-    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= REMODEL.cost * 1.5) {
-      startProject(league, t, year, 'remodel', REMODEL.years, REMODEL.cost, s.capacity + REMODEL.capacity);
+    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= remodelCost * 1.5) {
+      startProject(league, t, year, 'remodel', REMODEL.years, remodelCost, s.capacity + REMODEL.capacity);
       out.push(`${league.teams[t].name}, ${year + 1} 시즌 구장 리모델링`);
     }
   }

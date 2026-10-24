@@ -22,6 +22,9 @@ import { Standings } from './screens/Standings';
 import { Trade } from './screens/Trade';
 import { Market } from './screens/Market';
 import { Search } from './screens/Search';
+import { TeamView } from './screens/TeamView';
+import { Watch } from './screens/Watch';
+import { Find } from './screens/Find';
 import { AllStar } from './screens/AllStar';
 import { Fantasy } from './screens/Fantasy';
 import { autoEventDue, makeEvent } from '../fantasy/ai';
@@ -40,6 +43,8 @@ import { teamVars } from './teams';
 import { gamesBehind } from '../game/stats';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
+import { RuleNewsDialog } from './RuleNews';
+import { Rules } from './screens/Rules';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
 import { CommandView } from './CommandView';
@@ -53,9 +58,10 @@ import { duePromises } from '../fantasy/promises';
 import { rivalDue, rivalMove } from '../fantasy/rivals';
 import { About } from './screens/About';
 import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
+import { OpeningBoard } from './screens/OpeningBoard';
 import { blockOf, entryOf, GROUPS, hidden, itemBlock, itemOf, itemsOf, MOBILE_GROUPS, tabLabel, type Group, type MenuItem } from './menu';
-import { countByGroup, decisions } from './decisions';
-import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ShellUi } from './shell';
+import { countByGroup, decisions, loadAcked, saveAcked, type Acked } from './decisions';
+import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ScreenPrimary, type ShellUi } from './shell';
 
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
@@ -87,7 +93,18 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [player, setPlayer] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 오프시즌 단계 화면이 맡은 주 진행 단추 (shell.tsx ScreenPrimary)
+  const [screenPrimary, setScreenPrimary] = useState<ScreenPrimary | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  // 개막 "달라지는 규칙" 창: 시즌마다 한 번 꼭 띄운다 (2026-10-22 사용자 결정). 자동 진행으로 개막일을 지나쳤으면 진행이 멈춘 뒤에 띄운다.
+  // 본 해는 메모리에만 두고, 시즌 중간 저장을 불러온 경우(개막일이 지난 채로 화면을 연 경우)는 이미 본 것으로 친다
+  const [ruleYear, setRuleYear] = useState<number | null>(null);
+  const ruleSeen = useRef<number | null>(session.phase === 'season' && session.day > 0 ? session.year : null);
+  useEffect(() => {
+    if (session.phase !== 'season' || ruleSeen.current === session.year || busy) return;
+    ruleSeen.current = session.year;
+    setRuleYear(session.year);
+  }, [session, session.phase, session.year, busy, version]);
   // 새 시즌이 열리면 월드가 바뀌므로 월드에 맞춰 다시 계산한다. 시즌 중에도 능력이 바뀌는 조작(자유 모드 선수 만들기·능력 변경,
   // 이도류 등)이 있어 조작마다 다시 계산한다 (2026-10-13 사용자 보고: 자유 모드로 만든 선동열이 오버롤 70인데 세부 능력은 빈 자리의 40대로 보였다)
   const world = session.world;
@@ -101,11 +118,15 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   // 진행 설정 (하루·일주일·한 달·시즌 끝까지·멈춤 설정)과 휴대폰 '전체' 메뉴
   const [progressOpen, setProgressOpen] = useState(false);
   const [allOpen, setAllOpen] = useState(false);
-  // 상태 줄 검색 칸 → 영입 > 선수 검색의 이름 조건
+  // 상태 줄 검색 칸 → 전체 검색 (선수·은퇴 선수·구단·경기·소식). 영입 > 선수 검색의 이름 조건으로도 넘긴다
   const [searchText, setSearchText] = useState('');
   const [searchKey, setSearchKey] = useState(0);
   const [density, setDensityState] = useState<Density>(loadDensity);
   const setDensity = (d: Density) => { setDensityState(d); saveDensity(d); };
+  // 결정함에서 "확인"한 알림 (게임마다 이 브라우저에 기억, decisions.ts)
+  const gameKey = `${session.league.startYear}:${session.league.seed}`;
+  const [acked, setAcked] = useState<Acked>(() => loadAcked(gameKey));
+  useEffect(() => setAcked(loadAcked(gameKey)), [gameKey]);
   // 막힌 화면을 누르면 사유를 잠시 보여 준다
   const go = useCallback((s: Screen, arg?: number) => {
     setScreen(s);
@@ -380,14 +401,19 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const pending = !!session.pendingEvent;
   const seasonRunning = !off && !session.done;
   const advanceDisabled = !!busy || pending || (!seasonRunning && !session.postseasonRunning);
-  const list = useMemo(() => decisions(session), [session, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const list = useMemo(() => decisions(session, acked), [session, version, acked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ack = (key: string, sig: string) => {
+    const next = { ...acked, [key]: sig };
+    setAcked(next);
+    saveAcked(gameKey, next);
+  };
   const badges = countByGroup(list);
 
   const advanceNext = () => {
     if (session.postseasonRunning) void advancePs('one', '경기 진행 중');
     else void advanceNextGame();
   };
-  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list };
+  const shell: ShellUi = { busy, advanceDisabled, advanceNext, openProgress: () => setProgressOpen(true), density, setDensity, decisions: list, ack, setPrimary: setScreenPrimary };
 
   const curItem = itemOf(screen);
   const curGroup = curItem?.group;
@@ -406,7 +432,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const primary = seasonRunning || session.postseasonRunning
     ? { label: '다음 경기', act: advanceNext, disabled: advanceDisabled, title: session.postseasonRunning ? '가을야구 한 경기' : '휴식일은 건너뛰고 다음 경기일까지' }
     : off
-      ? { label: session.offseason!.stage === 'ready' ? '개막 준비' : `오프시즌 ${STAGE_LABEL[session.offseason!.stage]}`, act: () => go('offseason'), disabled: !!busy, title: '오프시즌 단계 화면으로' }
+      ? screen === 'offseason' && screenPrimary
+        ? { ...screenPrimary, disabled: !!busy || !!screenPrimary.disabled }
+        : { label: session.offseason!.stage === 'ready' ? '개막 준비' : `오프시즌 ${STAGE_LABEL[session.offseason!.stage]}`, act: () => go('offseason'), disabled: !!busy, title: '오프시즌 단계 화면으로' }
       : { label: '시즌 결산', act: () => go('season-end'), disabled: !!busy, title: '시즌 결산 화면으로' };
 
   const progressMenu = (
@@ -481,8 +509,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {head && head.g === 0 && <span className="muted">개막 전</span>}
               {off && lastRank > 0 && <><b>{lastRank}위</b> <span className="muted small">지난 시즌</span></>}
             </span>
-            <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('search'); }}>
-              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="선수 찾기" aria-label="선수 이름으로 찾기" />
+            <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('find'); }}>
+              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="검색: 선수·구단·날짜" aria-label="전체 검색 (선수·은퇴 선수·구단·경기·소식)" />
             </form>
             <span className={`sb-save${saveError ? ' error-text' : ''}`} role="status">{saveText}</span>
             <DensityToggle />
@@ -518,10 +546,11 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             <main className="content" aria-busy={!!busy}>
               <ErrorBoundary session={session} resetKey={`${screen}:${screenArg ?? ''}:${version}`} onQuit={onQuit}>
                 <EventDialog />
+                {ruleYear !== null && !session.pendingEvent && <RuleNewsDialog news={session.ruleNewsFor(ruleYear)} onClose={() => setRuleYear(null)} />}
                 {summary && !session.pendingEvent && (
                   <AdvanceSummary snap={summary.snap} attention={summary.attention} onClose={() => setSummary(null)} />
                 )}
-                {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={closeCast} />}
+                {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={closeCast} live />}
                 {cmd && !session.pendingEvent && <CommandView start={cmd} onDone={() => void endCommand(true)} onCancel={() => void endCommand(false)} />}
                 {party.length > 0 && !cast && !cmd && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
                 {tabs && (
@@ -548,10 +577,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'inbox' && <Inbox />}
                 {screen === 'news' && <ClubNews />}
                 {screen === 'roster' && <Roster />}
-                {screen === 'lineup' && <LineupBoard />}
+                {screen === 'lineup' && (session.phase === 'offseason' ? <OpeningBoard /> : <LineupBoard />)}
                 {screen === 'enlist' && <EnlistPanel />}
                 {screen === 'schedule' && <Schedule focusGame={screenArg} />}
                 {screen === 'standings' && <Standings />}
+                {screen === 'team' && <TeamView team={screenArg} />}
+                {screen === 'watch' && <Watch />}
+                {screen === 'find' && <Find key={searchKey} initialText={searchText.trim()} />}
                 {screen === 'leaders' && <Leaders />}
                 {screen === 'trade' && <Trade />}
                 {screen === 'market' && <Market />}
@@ -578,6 +610,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'rec-dynasty' && <Records tab="dynasty" />}
                 {screen === 'rec-hof' && <Records tab="hof" />}
                 {screen === 'articles' && <Articles />}
+                {screen === 'rules' && <Rules />}
                 </div>
                 )}
               </ErrorBoundary>
@@ -626,7 +659,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               ))}
               <section>
                 <h2>공통</h2>
-                <button type="button" className="sub-item" onClick={() => go('search')}>선수 찾기</button>
+                <button type="button" className="sub-item" onClick={() => go('find')}>전체 검색</button>
                 <button type="button" className="sub-item" onClick={() => go('save')}>저장·설정</button>
                 <button type="button" className="sub-item" onClick={() => go('about')}>정보·출처</button>
                 <button type="button" className="sub-item" onClick={onQuit}>시작 화면</button>
@@ -635,7 +668,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
           </div>
         )}
 
-        {player !== null && <PlayerDetail key={player} idx={player} onClose={() => setPlayer(null)} />}
+        {/* 판을 연 채 다른 선수를 누르면 내용만 바뀐다 (key 없음, U2-2) */}
+        {player !== null && <PlayerDetail idx={player} onClose={() => setPlayer(null)} />}
       </div>
       </ShellProvider>
     </GameProvider>

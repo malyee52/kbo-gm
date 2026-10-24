@@ -5,9 +5,9 @@ import { ScenarioBanner } from '../ScenarioBanner';
 import { FinancePanel } from './Finance';
 import { StadiumPanel } from './Stadium';
 import { ManagerPanel } from './Manager';
-import { capPayroll, salaryCap } from '../../league/salary';
+import { franchiseTag, salaryCap, salaryFloor, teamCapPayroll } from '../../league/salary';
 import {
-  ACHIEVEMENTS, budgetFor, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
+  ACHIEVEMENTS, budgetFor, capSanctionRule, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
 } from '../../league/owner';
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
@@ -29,7 +29,9 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
   // 오프시즌이면 다음 시즌 기준 예산
   const year = session.phase === 'offseason' ? session.year + 1 : session.year;
   const cap = salaryCap(year, L);
-  const payroll = capPayroll(L.players, me, ruleOf(L, 'capTopN'));
+  const payroll = teamCapPayroll(L, me, year);
+  const floor = salaryFloor(year, L);
+  const tag = franchiseTag(L, me, year);
   const ps = L.lastSeason?.postseason;
   const name = (t: number) => L.teams[t].name;
   const strikes = L.capStrikes?.[me] ?? 0;
@@ -68,11 +70,13 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
           <h2>연봉·샐러리캡 <span className="muted small">{year} 시즌</span></h2>
           <dl className="facts">
             <dt>구단</dt><dd>{team.name} (모기업 등급 {parentGrade(L, me)})</dd>
-            <dt>연봉 총액</dt><dd>{won(payroll)} <span className="muted small">외국인·신인 제외 상위 40명</span></dd>
+            <dt>연봉 총액</dt><dd>{won(payroll)} <span className="muted small">외국인·신인 제외 상위 {ruleOf(L, 'capTopN')}명</span></dd>
             <dt>샐러리캡</dt><dd>{cap === null ? '없음' : won(cap)}</dd>
             <dt>캡 여유</dt><dd>{cap === null ? '-' : won(cap - payroll)}</dd>
+            {floor !== null && <><dt>캡 하한</dt><dd className={payroll < floor ? 'error-text' : undefined}>{won(floor)}{payroll < floor ? ` (${won(floor - payroll)} 모자람)` : ''}</dd></>}
+            {tag && <><dt>프랜차이즈 예외</dt><dd>{tag.name} <span className="muted small">연봉 절반만 캡에 산정</span></dd></>}
             <dt>구단 자금</dt><dd>{won(session.cashNow())}</dd>
-            {strikes > 0 && <><dt>캡 초과</dt><dd className="error-text">{strikes}회 연속 초과 (2회부터 1라운드 지명권 9단계 하락)</dd></>}
+            {strikes > 0 && <><dt>캡 초과</dt><dd className="error-text">{strikes}회 연속 초과 ({capSanctionRule(year).dropFrom}회부터 1라운드 지명권 {ruleOf(L, 'capPickDrop')}단계 하락)</dd></>}
           </dl>
           <p className="muted small">
             FA 제시는 샐러리캡(2023년부터)을 넘을 수 없고, 계약금(계약 총액의 30%) 중 자금이 모자란 몫은 모기업이 지원합니다. 외국인 신규 계약은 이적료를 낼 자금이 있어야 합니다.

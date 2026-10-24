@@ -122,6 +122,9 @@ export interface SimTeam {
    * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
    */
   park?: { hr: number; run?: number; ev?: ParkEvents };
+  /** 창단 특례 (league/eras.ts expansionPerk): 1군 엔트리·외국인 1군 한도에 더하는 인원. 없으면 0 */
+  rosterBonus?: number;
+  foreignBonus?: number;
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */

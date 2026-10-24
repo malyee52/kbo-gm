@@ -16,7 +16,7 @@ import { openCondition, stepCondition } from './condition';
 import { condToday } from './pa';
 import { dateOfDay, rankTeams, regularMaxInnings, winPctBy, winPctRuleOf } from './records';
 import { Rng } from './rng';
-import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { CHURN_DAYS, currentBody, currentOveruse, gameSide, lineupForeignCap, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
 export interface ScheduledGame {
@@ -118,6 +118,8 @@ export interface BoxBatter {
   sub?: 'PH' | 'PR' | 'DEF';
   /** 타순 (1~9). 교체 타자는 바꾼 선수의 타순 */
   order?: number;
+  /** 선발 타자의 오늘 수비 자리 (C 1B … DH, 2026-10-23 U2-3. 교체 타자·예전 박스스코어에는 없다) */
+  pos?: string;
   ab: number;
   r: number;
   h: number;
@@ -125,6 +127,10 @@ export interface BoxBatter {
   hr: number;
   bb: number;
   so: number;
+  /** 2루타·3루타·도루 (2026-10-23 UI 2단계 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  d?: number;
+  t?: number;
+  sb?: number;
 }
 
 export interface BoxPitcher {
@@ -139,11 +145,16 @@ export interface BoxPitcher {
   hr: number;
   /** 투구 수 (엔진 2) */
   np: number;
+  /** 홀드·블론 세이브 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  hld?: number;
+  bsv?: number;
 }
 
 export interface BoxSide {
   batters: BoxBatter[];
   pitchers: BoxPitcher[];
+  /** 이 팀 수비 실책 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  e?: number;
 }
 
 /** 박스스코어. 타자는 타순, 투수는 등판 순 */
@@ -555,25 +566,28 @@ export class Season {
     for (const g of games) {
       const h = season[g.home];
       const a = season[g.away];
-      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
+      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계).
+      // 외국인 출전 한도(리그 규칙 1-6)에서도 선발이 먼저 자리를 쓴다
       // AI 감독은 보이는 컨디션을 라인업·선발 고르기에 쓴다 (엔진 2 12단계, 반영 정도는 감독 성향 tactics.cond)
       const cond = (p: SimPlayer) => condToday(ctx, p.idx);
       const homeStarter = todaysStarter(h, states, day, params, cond);
       const awayStarter = todaysStarter(a, states, day, params, cond);
       // 야수 휴식은 경기 전 피로로 (엔진 2 11단계)
       const tired = (p: SimPlayer) => currentBody(states, p.idx, day, params.body);
-      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond);
+      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond, lineupForeignCap(h, world, homeStarter));
+      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond, lineupForeignCap(a, world, awayStarter));
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
       const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
+      // 경기 전 실책 수 (박스스코어 E): 이 경기에 나올 수 있는 선수 전부
+      const errBefore = wantBox ? new Map([...batBefore!.keys(), ...pitBefore!.keys()].map((i) => [i, this.errors[i]])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
       ctx.maxInnings = maxInnings;
-      const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
+      const res = simulateGame(gameSide(h, world, homeStarter, homeLineup), gameSide(a, world, awayStarter, awayLineup), homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
@@ -604,12 +618,13 @@ export class Season {
           const was = batBefore.get(idx)!;
           return {
             idx, ab: now.ab - was.ab, r: now.r - was.r, h: now.h - was.h, rbi: now.rbi - was.rbi, hr: now.hr - was.hr,
-            bb: now.bb - was.bb, so: now.so - was.so,
+            bb: now.bb - was.bb, so: now.so - was.so, d: now.d - was.d, t: now.t - was.t, sb: now.sb - was.sb,
           };
         };
         // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
-        const boxBat = (lineup: SimPlayer[], subs: GameSub[]): BoxBatter[] => lineup.flatMap((p, i) => [
-          { ...line(p.idx), order: i + 1 },
+        // 선발 타자의 수비 자리는 오늘 라인업 배정(ts.field)
+        const boxBat = (lineup: SimPlayer[], subs: GameSub[], field?: Map<number, string>): BoxBatter[] => lineup.flatMap((p, i) => [
+          { ...line(p.idx), order: i + 1, ...(field?.has(p.idx) ? { pos: field.get(p.idx) } : {}) },
           ...subs.filter((s) => s.order === i && batBefore.has(s.idx)).map((s) => ({ ...line(s.idx), order: i + 1, sub: s.kind })),
         ]);
         const boxPit = (staff: number[]): BoxPitcher[] => staff.map((idx) => {
@@ -617,17 +632,29 @@ export class Season {
           const was = pitBefore.get(idx)!;
           return {
             idx, outs: now.outs - was.outs, bf: now.bf - was.bf, h: now.h - was.h, r: now.r - was.r, er: now.er - was.er,
-            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np,
+            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np, hld: now.hld - was.hld, bsv: now.bsv - was.bsv,
           };
         });
+        /** 이 팀 선수(타자·투수)의 이 경기 실책 합 */
+        const sideErrors = (s: BoxSide): number => {
+          const ids = new Set([...s.batters.map((b) => b.idx), ...s.pitchers.map((q) => q.idx)]);
+          let e = 0;
+          for (const i of ids) e += this.errors[i] - (errBefore!.get(i) ?? this.errors[i]);
+          return e;
+        };
+        const side = (lineup: SimPlayer[], subs: GameSub[], staff: number[], field?: Map<number, string>): BoxSide => {
+          const s: BoxSide = { batters: boxBat(lineup, subs, field), pitchers: boxPit(staff) };
+          s.e = sideErrors(s);
+          return s;
+        };
         if (plays) {
           this.plays.set(this.log.length - 1, plays);
           for (const k of this.plays.keys()) if (this.plays.size > PLAYS_KEEP) this.plays.delete(k);
         }
         this.boxes.set(this.log.length - 1, {
           lineScore: res.lineScore,
-          home: { batters: boxBat(homeLineup, res.homeSubs), pitchers: boxPit(res.homeStaff) },
-          away: { batters: boxBat(awayLineup, res.awaySubs), pitchers: boxPit(res.awayStaff) },
+          home: side(homeLineup, res.homeSubs, res.homeStaff, h.field),
+          away: side(awayLineup, res.awaySubs, res.awayStaff, a.field),
         });
       }
     }
@@ -724,10 +751,10 @@ export class Season {
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const cond = (p: SimPlayer) => condToday(ctx, p.idx);
     const hs = todaysStarter(h, this.states, day, params, cond);
-    const as = todaysStarter(a, this.states, day, params, cond);
-    const hl = todaysLineup(h, this.world.league, params, rng, as.throws, undefined, cond);
-    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond);
-    const result = simulateGame(h, a, hl, al, hs, as, ctx);
+    const aws = todaysStarter(a, this.states, day, params, cond);
+    const hl = todaysLineup(h, this.world.league, params, rng, aws.throws, undefined, cond, lineupForeignCap(h, this.world, hs));
+    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond, lineupForeignCap(a, this.world, aws));
+    const result = simulateGame(gameSide(h, this.world, hs, hl), gameSide(a, this.world, aws, al), hl, al, hs, aws, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 

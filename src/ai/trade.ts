@@ -30,10 +30,10 @@ export const SALARY_WON_PER_RUN = 9000;
 const CASH_WON_PER_RUN = 6_000;
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
-/** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값) */
-const MIN_ORG_HITTERS = 18;
-const MIN_ORG_PITCHERS = 18;
-const MIN_ORG_CATCHERS = 2;
+/** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값). 화면은 보내기 전 경고에 쓴다 (ui/tradeDesk.ts) */
+export const MIN_ORG_HITTERS = 18;
+export const MIN_ORG_PITCHERS = 18;
+export const MIN_ORG_CATCHERS = 2;
 
 export interface TeamSituation {
   teamIdx: number;
@@ -163,17 +163,44 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
  */
 export function suggestPackage(want: SimPlayer[], aiTeam: number, aiOrg: SimPlayer[], userOrg: SimPlayer[], situation: TeamSituation,
                                ctx: ValueContext, userWeights: number[]): SimPlayer[] | null {
+  return suggestPackageWhy(want, aiTeam, aiOrg, userOrg, situation, ctx, userWeights).pkg;
+}
+
+/** 요구안과, 찾지 못했을 때 그 이유 (평가 결과의 세 구분 그대로. 2026-10-23 UI 2단계 U2-6 엔진 메모) */
+export interface PackageResult {
+  pkg: SimPlayer[] | null;
+  /** 찾았으면 'accept' */
+  verdict: TradeVerdict;
+  /** 화면에 보여줄 AI 단장의 답 (수치 없음) */
+  message: string;
+}
+
+/**
+ * suggestPackage와 같은 순서로 같은 조합을 평가하고(판단은 그대로), 받아들일 조합이 없으면 이유를 고른다:
+ * 가치 때문에 거절된 조합이 하나라도 있으면 'reject-value', 모든 조합이 선수단 규칙에 걸렸으면 'reject-roster',
+ * 내줄 선수가 없거나 모든 조합이 잘못된 제안이면 'reject-invalid'
+ */
+export function suggestPackageWhy(want: SimPlayer[], aiTeam: number, aiOrg: SimPlayer[], userOrg: SimPlayer[], situation: TeamSituation,
+                                  ctx: ValueContext, userWeights: number[]): PackageResult {
   // 외국인 선수는 트레이드할 수 없다 (규정, 2026-10-08 사용자 지시)
   const pool = userOrg.filter((p) => !p.foreign)
     .map((p) => ({ p, v: playerValue(p, ctx, userWeights) }))
     .sort((a, b) => a.v - b.v || a.p.idx - b.p.idx);
-  const ok = (receive: SimPlayer[]) => evaluateTrade({ aiTeam, give: want, receive }, aiOrg, situation, ctx).verdict === 'accept';
-  for (const { p } of pool) if (ok([p])) return [p];
+  const seen: Partial<Record<TradeVerdict, string>> = {};
+  const ok = (receive: SimPlayer[]) => {
+    const ev = evaluateTrade({ aiTeam, give: want, receive }, aiOrg, situation, ctx);
+    seen[ev.verdict] ??= ev.message;
+    return ev.verdict === 'accept';
+  };
+  const found = (pkg: SimPlayer[]): PackageResult => ({ pkg, verdict: 'accept', message: '' });
+  for (const { p } of pool) if (ok([p])) return found([p]);
   // 두 명 조합: 비교적 가치 있는 선수 25명 안에서, 덜 아까운 조합부터
   const top = pool.slice(-25);
   const pairs: { ps: SimPlayer[]; v: number }[] = [];
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push({ ps: [top[i].p, top[j].p], v: top[i].v + top[j].v });
   pairs.sort((a, b) => a.v - b.v);
-  for (const x of pairs) if (ok(x.ps)) return x.ps;
-  return null;
+  for (const x of pairs) if (ok(x.ps)) return found(x.ps);
+  if (seen['reject-value'] !== undefined) return { pkg: null, verdict: 'reject-value', message: '지금 우리 선수단과 맞바꿀 만한 조합이 없습니다.' };
+  if (seen['reject-roster'] !== undefined) return { pkg: null, verdict: 'reject-roster', message: seen['reject-roster'] };
+  return { pkg: null, verdict: 'reject-invalid', message: seen['reject-invalid'] ?? '내줄 수 있는 선수가 없습니다.' };
 }

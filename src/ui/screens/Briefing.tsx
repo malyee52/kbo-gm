@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
 import { formatDate, gameTime, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, ipText, rate3, recentForm } from '../../game/stats';
+import { lastOutings, outingText } from '../../game/boxscore';
 import { isRivalry } from '../../league/rivals';
 import { stadiumName } from '../../league/naming';
 import { ROUND_LABEL, stillAlive, currentSeries } from '../../league/postseason';
@@ -18,6 +19,7 @@ import { chipVars, PlayerLink, Pos, TeamName, useGame } from '../context';
 import { byKind, type Decision } from '../decisions';
 import { DensityToggle, useCurrentStep, useShell } from '../shell';
 import { useRankMoves } from '../Motion';
+import { CondTag, CONDITION_HELP, Missing, useCondition } from '../parts';
 
 export function Briefing() {
   const { session } = useGame();
@@ -112,9 +114,12 @@ function MatchCard() {
   const park = stadiumName(session.league, next.home, session.year);
   const gap = next.day - session.day;
   const last = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me).at(-1);
+  // 우리 선발의 지난 등판 (투구 수·휴식일, 2026-10-23 U2-3). 상대 구단은 박스스코어가 우리와 붙은 경기뿐이라 보이지 않는다
+  const outings = lastOutings(s, me, next.day);
   const side = (t: number) => {
     const r = s.teams[t];
     const sp = session.probableStarter(t);
+    const o = t === me && sp ? outings.get(sp.idx) : undefined;
     return (
       <div className={`match-side${t === me ? ' mine' : ''}`} style={chipVars(session.teamInfo(t).franchise, session.teamInfo(t).name)}>
         <strong className="match-team">{session.teamInfo(t).name}</strong>
@@ -123,6 +128,7 @@ function MatchCard() {
         <div className="match-sp">
           <span className="tag">SP</span> {sp ? <PlayerLink p={sp} /> : <span className="muted">선발 미정</span>}
           <span className="small num">{sp ? spLine(session, sp) : ''}</span>
+          {o && <span className="small muted num" title="지난 등판 · 그 뒤 쉰 날">지난 등판 {outingText(o, session.world.year)}</span>}
         </div>
         <div className="small"><span className="muted">최근 5경기 </span><FormChips list={lastResults(session, t)} /></div>
       </div>
@@ -258,12 +264,27 @@ function OffseasonCard() {
 const FORM_OBP = 0.05;
 const FORM_ERA = 1.0;
 
-interface FormRow { p: SimPlayer; why: '결장' | '상승' | '하락' | '주목'; spark: number[]; base: number; line: string; note?: string; score: number }
+/** 컨디션 좋음·나쁨 줄의 순서 점수: 기준 넘은 상승·하락(10+)보다 아래, '주목'보다 위. 최근 출전이 많을수록 앞 (임시값) */
+const FORM_COND = 5;
 
-/** 우리 팀 박스스코어로 최근 10경기를 본다. 타자는 출루((안타+볼넷)/(타수+볼넷)), 투수는 평균자책의 누적 흐름 */
-function formRows(session: ReturnType<typeof useGame>['session']): FormRow[] {
+type FormWhy = '결장' | '상승' | '하락' | '주목' | '컨디션 좋음' | '컨디션 나쁨';
+const WHY_CLASS: Record<FormWhy, string> = { 결장: 'why-결장', 상승: 'why-상승', 하락: 'why-하락', 주목: '', '컨디션 좋음': 'why-상승', '컨디션 나쁨': 'why-하락' };
+
+interface FormRow { p: SimPlayer; why: FormWhy; spark: number[]; base: number; line: string; note?: string; score: number }
+
+/**
+ * 우리 팀 박스스코어로 최근 10경기를 본다. 타자는 출루((안타+볼넷)/(타수+볼넷)), 투수는 평균자책의 누적 흐름.
+ * 1군 선수의 컨디션이 좋음·나쁨이면 그것도 기준에 넣는다 (UI 1차 결정, 2단계 U2-9). 컨디션은 낱말만 받는다
+ */
+function formRows(session: ReturnType<typeof useGame>['session'], condOf: (p: SimPlayer) => string | null): FormRow[] {
   const s = session.season;
   const me = session.teamIdx;
+  const first = new Set(session.registered().map((p) => p.idx));
+  const condWhy = (p: SimPlayer): FormWhy | null => {
+    if (!first.has(p.idx)) return null;
+    const w = condOf(p)?.split(' · ')[0];
+    return w === '좋음' ? '컨디션 좋음' : w === '나쁨' ? '컨디션 나쁨' : null;
+  };
   const games = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me).slice(-10);
   const boxes = games.map(({ g, i }) => { const b = s.boxes.get(i); return b ? (g.home === me ? b.home : b.away) : null; });
   const org = session.team.org;
@@ -279,10 +300,16 @@ function formRows(session: ReturnType<typeof useGame>['session']): FormRow[] {
       const season = s.pit[p.idx];
       const base = season.outs ? (season.er * 27) / season.outs : 0;
       if (session.isAbsent(p) && apps) { rows.push({ p, why: '결장', spark, base, line: absentLine(session, p), score: 100 }); continue; }
-      if (apps < 2 || outs < 15) continue;
+      const cw = condWhy(p);
+      const cScore = FORM_COND + apps / 10;
+      if (apps < 2 || outs < 15) {
+        if (cw) rows.push({ p, why: cw, spark, base, line: apps ? `${apps}경기 ${ipText(outs)}이닝` : '최근 10경기 등판 없음', score: cScore });
+        continue;
+      }
       const now = (er * 27) / outs;
       const d = base - now; // 양수면 좋아짐
-      rows.push({ p, why: d >= FORM_ERA ? '상승' : d <= -FORM_ERA ? '하락' : '주목', spark, base, line: `${apps}경기 ${ipText(outs)}이닝 · 평균자책 ${fixed2(now)}`, note: `시즌 ${fixed2(base)}`, score: Math.abs(d) >= FORM_ERA ? 10 + Math.abs(d) : outs / 30 });
+      const big = Math.abs(d) >= FORM_ERA;
+      rows.push({ p, why: big ? (d > 0 ? '상승' : '하락') : cw ?? '주목', spark, base, line: `${apps}경기 ${ipText(outs)}이닝 · 평균자책 ${fixed2(now)}`, note: `시즌 ${fixed2(base)}`, score: big ? 10 + Math.abs(d) : cw ? cScore : outs / 30 });
     } else {
       let ab = 0, h = 0, bb = 0, hr = 0, rbi = 0, gp = 0;
       const spark: number[] = [];
@@ -294,10 +321,17 @@ function formRows(session: ReturnType<typeof useGame>['session']): FormRow[] {
       const season = s.bat[p.idx];
       const base = season.ab + season.bb > 0 ? (season.h + season.bb) / (season.ab + season.bb) : 0;
       if (session.isAbsent(p) && gp) { rows.push({ p, why: '결장', spark, base, line: absentLine(session, p), score: 100 }); continue; }
-      if (ab + bb < 15) continue;
+      const cw = condWhy(p);
+      const cScore = FORM_COND + gp / 10;
+      const line = `타율 ${rate3(ab ? h / ab : 0)} · 홈런 ${hr} · 타점 ${rbi}`;
+      if (ab + bb < 15) {
+        if (cw) rows.push({ p, why: cw, spark, base, line: gp ? line : '최근 10경기 출전 없음', score: cScore });
+        continue;
+      }
       const now = (h + bb) / (ab + bb);
       const d = now - base;
-      rows.push({ p, why: d >= FORM_OBP ? '상승' : d <= -FORM_OBP ? '하락' : '주목', spark, base, line: `타율 ${rate3(ab ? h / ab : 0)} · 홈런 ${hr} · 타점 ${rbi}`, note: `시즌 출루 ${rate3(base)}`, score: Math.abs(d) >= FORM_OBP ? 10 + Math.abs(d) * 20 : now });
+      const big = Math.abs(d) >= FORM_OBP;
+      rows.push({ p, why: big ? (d > 0 ? '상승' : '하락') : cw ?? '주목', spark, base, line, note: `시즌 출루 ${rate3(base)}`, score: big ? 10 + Math.abs(d) * 20 : cw ? cScore : now });
     }
   }
   return rows.sort((a, b) => b.score - a.score || a.p.idx - b.p.idx).slice(0, 3);
@@ -328,7 +362,8 @@ function Spark({ values, base, invert = false }: { values: number[]; base: numbe
 function FormCard() {
   const { session, go } = useGame();
   const { density } = useShell();
-  const rows = formRows(session);
+  const condOf = useCondition();
+  const rows = formRows(session, condOf);
   return (
     <section className="card form" aria-label="전력 변화">
       <div className="card-top">
@@ -336,14 +371,14 @@ function FormCard() {
         <span className="small muted">우리 팀 최근 10경기</span>
         <button type="button" className="link small card-more" onClick={() => go('roster')}>선수 명단</button>
       </div>
-      {rows.length === 0 ? <p className="muted small">최근 10경기에 눈에 띄는 변화가 없습니다. 경기를 더 치르면 결장·상승·하락한 선수가 여기 나옵니다.</p> : (
+      {rows.length === 0 ? <p className="muted small">최근 10경기에 눈에 띄는 변화가 없습니다. 경기를 더 치르면 결장·상승·하락한 선수와 컨디션이 좋거나 나쁜 1군 선수가 여기 나옵니다.</p> : (
         <table className="form-table">
           <thead>
             <tr>
               <th className="l">선수</th><th className="l">POS</th><th className="l">변화</th>
               <th className="l" title="타자: 출루 흐름, 투수: 평균자책 흐름 (점선은 시즌 값)">최근 10경기</th>
               <th className="l">기록</th>
-              {density === 'full' && <th className="l" title="컨디션 표시는 경기 엔진 2의 컨디션이 들어간 뒤 채웁니다">상태</th>}
+              {density === 'full' && <th className="l" title={CONDITION_HELP}>컨디션</th>}
             </tr>
           </thead>
           <tbody>
@@ -351,10 +386,10 @@ function FormCard() {
               <tr key={r.p.idx}>
                 <td className="l"><PlayerLink p={r.p} /></td>
                 <td className="l">{r.p.isPitcher ? (session.pitcherRole(r.p) === 'SP' ? 'SP' : session.pitcherRole(r.p) === 'CL' ? 'CP' : 'RP') : <Pos pos={session.slotOf(r.p) ?? r.p.pos} />}</td>
-                <td className="l"><span className={`why why-${r.why}`}>{r.why}</span></td>
+                <td className="l"><span className={`why ${WHY_CLASS[r.why]}`}>{r.why}</span></td>
                 <td className="l"><Spark values={r.spark} base={r.base} invert={r.p.isPitcher} /></td>
                 <td className="l small">{r.line}{density === 'full' && r.note && <span className="muted"> · {r.note}</span>}</td>
-                {density === 'full' && <td className="l muted">—</td>}
+                {density === 'full' && <td className="l">{condOf(r.p) ? <CondTag text={condOf(r.p)} /> : <Missing why={r.why === '결장' ? '결장' : undefined} />}</td>}
               </tr>
             ))}
           </tbody>

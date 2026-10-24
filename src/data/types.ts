@@ -152,6 +152,11 @@ export interface SeasonData {
 export interface YearRules {
   rosterSize: number;
   foreignLimit: number;
+  /**
+   * 한 경기에 나올 수 있는 외국인 (리그 규칙 1-6, D16). 1군 등록(보유)은 foreignLimit까지 하되 경기마다 이 수까지만 뛴다.
+   * 2001~2002·2014~2019 = 2 (3명 보유·2명 출전), 그 밖의 해는 foreignLimit과 같다
+   */
+  foreignActive: number;
   /** 정규시즌 최대 이닝. 0 = 무제한 (2008 끝장승부, 무승부 없음) */
   maxInnings: number;
   /** 이 날짜(월×100 + 일)부터 모든 정규시즌 경기는 9회까지 (2021 후반기 810). 없으면 해당 없음 */
@@ -186,8 +191,9 @@ export interface Meta {
   /**
    * 시작 연도 개막 때 구단별 외국인 (연도 → 구단 이름 → 선수). data-src/외국인_개막명단.csv에서 만든다.
    * 그 해 기록에는 시즌 중 교체된 외국인까지 있어서, 새 게임은 이 명단에 있는 외국인만 넣는다. 없는 해는 기록 그대로.
+   * salary·bonus: 실제 계약 연봉·계약금 (달러, 있는 선수만, source = 출처). 시작 계약에 그대로 쓴다
    */
-  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean }[]>>;
+  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean; salary?: number; bonus?: number; source?: string }[]>>;
   /**
    * 연도별 특별 엔트리 선수 id (은퇴식 등으로 하루 1군에 등록된 선수. tools/build_data.py의 규칙으로 고른 값).
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.
@@ -281,10 +287,58 @@ export interface DataStore {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 연도별 구단 감독과 감독 경력·운영 경향 (managers.json). 없으면 감독 기능을 쓰지 않는다 */
   managers?: ManagerData;
+  /** 연도별 리그 규칙 변경과 공인구 (rule_changes.json). 없으면 "달라지는 규칙" 알림에 게임 규칙 값의 변화만 보인다 */
+  ruleChanges?: RuleChangeData;
   /** 구단 계보별 연고 도시와 위·경도 (homes.json, data-src/연고지.csv). 거리 측정(tools/condition_check.ts)에만 쓴다 (원정 거리 컨디션은 2026-10-22 사용자 결정으로 없앰). 없으면 거리를 모른다 */
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+}
+
+/** 규칙 변경 자료 (tools/build_data.py build_rule_changes, data-src/규칙변경.csv·공인구.csv) */
+export interface RuleChangeData {
+  version: number;
+  items: RuleChangeItem[];
+  ball: BallYear[];
+}
+
+/** 분류: 공인구·경기 규칙·엔트리·외국인·FA·드래프트·샐러리캡·리그 운영 */
+export type RuleCat = 'ball' | 'game' | 'roster' | 'foreign' | 'fa' | 'draft' | 'cap' | 'league';
+/** 게임 반영: 표시만 / 표시만(그 해 리그 평균으로 녹음) / 리그 운영 / 경기 엔진 */
+export type RuleEffect = 'show' | 'show-env' | 'league' | 'engine';
+/** 확인 상태: 자료집 확인 / 조사값(웹 조사, 제도연표 확인 전) / 출처 갈림 / 미확인 */
+/** virtual = 게임 속 가상 결정 (2028년 이후 미래 규칙 변경, league/futureRules.ts). 자료에는 없다 */
+export type RuleStatus = 'confirmed' | 'research' | 'conflict' | 'unknown' | 'virtual';
+
+export interface RuleChangeItem {
+  year: number;
+  /** 시즌 중 바뀐 날짜 (MM-DD). 없으면 개막 때 */
+  date?: string;
+  cat: RuleCat;
+  /** 게임 규칙 값 키 (league/ruleNews.ts RULE_KEYS). 있으면 전·후를 게임 값에서 읽는다 */
+  key?: string;
+  title: string;
+  before?: string;
+  after?: string;
+  unit?: string;
+  effect: RuleEffect;
+  status: RuleStatus;
+  source?: string;
+  /** 게임이 실제와 다르게 단순화한 내용 ("게임은 단순화: …") */
+  simplified?: string;
+  note?: string;
+}
+
+/** 한 해의 공인구 (기준 범위는 바뀐 해에만 있다) */
+export interface BallYear {
+  year: number;
+  range?: [number, number];
+  /** 단일 공인구인가 (바뀐 해에만) */
+  single?: boolean;
+  tests?: { round: number; date?: string; avg?: number; note?: string }[];
+  note?: string;
+  status: RuleStatus;
+  source?: string;
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */

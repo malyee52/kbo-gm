@@ -14,6 +14,8 @@ import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
+import { expansionPerk } from './eras';
+import { ballD2, ballHrMul, futureDelta, futureValue, zoneBb } from './futureRules';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
@@ -73,12 +75,22 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     games = data.games;
     rules = store.meta.rules[String(year)];
   } else {
-    // 2027년 이후는 2026년 제도를 그대로 쓴다 (기획서 4.1)
+    // 2027년 이후는 2026년 제도를 그대로 쓴다 (기획서 4.1). 미래 규칙 변경 ②(futureRules.ts)는 목표 비율에 배율만 얹고
+    // 엔트리·연장·외국인 한도를 바꾼다 (변경이 없으면 배율 1, 값 그대로)
     const p = projectedEnvironment(store, params);
-    lg = p.rates;
+    const hr = ballHrMul(league, year);
+    const so = futureValue(league, 'zone', year);
+    lg = { ...p.rates, hr: p.rates.hr * hr, d2: p.rates.d2 * ballD2(hr), so: p.rates.so * so, bb: p.rates.bb * zoneBb(so) };
     env = p.env;
     games = p.games;
-    rules = p.rules;
+    rules = {
+      ...p.rules,
+      maxInnings: p.rules.maxInnings + futureDelta(league, 'extra', year),
+      rosterSize: p.rules.rosterSize + futureDelta(league, 'roster', year),
+      foreignLimit: p.rules.foreignLimit + futureDelta(league, 'foreign', year),
+      // 한 경기 출전 외국인 (리그 규칙 1-6): 2026년은 보유와 같아서 보유 한도를 따라간다
+      foreignActive: p.rules.foreignActive + futureDelta(league, 'foreign', year),
+    };
   }
 
   // 퓨처스 구단은 시즌 월드에서 뺀다. 창단 구단은 늘 구단 목록 끝에 붙으므로 빼도 다른 구단의 색인은 그대로다
@@ -96,8 +108,11 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const park = parkFactor(league.stadiums?.[idx]);
     const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
     const ev = run !== 1 ? parkEventFactor(store.meta.parkEvents, t.franchise, year, league.stadiums?.[idx]) : undefined;
+    // 창단 특례 (eras.ts expansionPerk): 1군 첫 두 시즌 엔트리 +1, 외국인 +1 (외국인 제도가 있는 해만)
+    const perk = expansionPerk(league, idx, year);
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}) };
+      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}),
+      ...(perk ? { rosterBonus: 1, ...(rules.foreignLimit > 0 ? { foreignBonus: 1 } : {}) } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {

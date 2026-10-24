@@ -51,7 +51,7 @@ function diff<T extends object>(now: T, before: T | undefined): T {
   return out as T;
 }
 
-const NEWS_KINDS = new Set(['trade', 'event', 'absence', 'return', 'owner', 'callup']);
+const NEWS_KINDS = new Set(['trade', 'event', 'absence', 'return', 'owner', 'callup', 'watch']);
 
 /** 멈춘 까닭별 제목과 바로 갈 화면 (멈춤 설정 stops.ts) */
 const STOP_INFO: Record<AttentionKind, { title: string; go: Screen; button: string }> = {
@@ -178,7 +178,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
                 return (
                   <li key={g.key}>
                     <span className={`res res-${res}`}>{res}</span> <span className="muted">{g.label ?? shortDate(year, g.day)}</span> {home ? 'vs' : '@'} {teamName(home ? g.away : g.home)} <strong>{mine}:{theirs}</strong>
-                    {g.plays && <button type="button" className="link" onClick={() => setCast(g)}>중계</button>}
+                    {(g.plays || g.box) && <button type="button" className="link" onClick={() => setCast(g)}>경기 결과</button>}
                     {hs.length > 0 && <div className="muted">{hs.map((m) => m.text).join(' · ')}</div>}
                   </li>
                 );

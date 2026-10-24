@@ -51,7 +51,7 @@ describe('목표와 신뢰도', () => {
   });
 });
 
-describe('예산과 샐러리캡 제재 (제도연표: 1회 50%, 2회 연속 100% + 1라운드 지명권 9단계 하락)', () => {
+describe('예산과 샐러리캡 제재 (제도연표 2023~2025: 1회 50%, 2회 연속 100% + 1라운드 지명권 9단계 하락. 2026~는 cap2026.test.ts)', () => {
   it('모기업 등급에 따라 예산이 다르고 샐러리캡을 넘지 않는다', () => {
     const { league } = createLeague(store, 2026, 'budget', FAST);
     const idx = (n: string) => league.teams.findIndex((t) => t.name === n);
@@ -60,23 +60,23 @@ describe('예산과 샐러리캡 제재 (제도연표: 1회 50%, 2회 연속 100
     expect(budgetFor(league, idx('키움'), 2026)!).toBeLessThan(budgetFor(league, idx('두산'), 2026)!);
   });
 
-  it('초과하면 제재금, 2회 연속이면 지명권 하락. 지키면 연속 횟수가 0으로', () => {
+  it('2025년까지: 초과하면 제재금, 2회 연속이면 지명권 하락. 지키면 연속 횟수가 0으로', () => {
     const { league } = createLeague(store, 2026, 'cap', FAST);
     const t = 0;
     const star = league.players.find((p) => p.team === t && !p.foreign && p.contract.kind !== 'rookie')!;
     const cap = salaryCap(2026)!;
     star.contract = { ...star.contract, salary: cap }; // 혼자 캡을 채워 초과시킨다
-    const first = applyCapSanctions(league, 2026).find((x) => x.team === t)!;
+    const first = applyCapSanctions(league, 2024).find((x) => x.team === t)!;
     expect(first.strike).toBe(1);
     expect(first.fine).toBe(Math.round(first.over * 0.5));
     expect(first.pickDrop).toBe(false);
-    const second = applyCapSanctions(league, 2027).find((x) => x.team === t)!;
+    const second = applyCapSanctions(league, 2025).find((x) => x.team === t)!;
     expect(second.strike).toBe(2);
     expect(second.fine).toBe(Math.round(second.over * 1.0));
-    expect(league.draftPenalty![t]).toBe(2027);
+    expect(league.draftPenalty![t]).toBe(2025);
     expect(league.ledger.filter((l) => l.from === t && l.note.includes('샐러리캡'))).toHaveLength(2);
     star.contract = { ...star.contract, salary: 3000 };
-    applyCapSanctions(league, 2028);
+    applyCapSanctions(league, 2026);
     expect(league.capStrikes![t]).toBe(0);
   });
 

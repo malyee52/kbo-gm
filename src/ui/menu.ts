@@ -35,8 +35,9 @@ export const MENU: MenuItem[] = [
   { key: 'news', group: '브리핑', label: '소식', tabs: [{ screen: 'news', label: '구단 소식' }, { screen: 'articles', label: '기사' }] },
   one('fantasy', '브리핑', '대화', 'fantasy'),
 
-  one('roster', '전력', '선수 명단', 'roster'),
+  // 전력에 들어가면 기용 보드가 먼저 (2026-10-23 사용자 결정), 1·2군 명단은 그다음
   one('lineup', '전력', '기용 보드', 'lineup'),
+  one('roster', '전력', '선수 명단', 'roster'),
   one('growth', '전력', '성장', 'growth'),
   one('enlist', '전력', '입대', 'enlist'),
 
@@ -44,9 +45,11 @@ export const MENU: MenuItem[] = [
   one('market', '영입', '시장', 'market'),
   one('trade', '영입', '트레이드', 'trade'),
   one('offseason', '영입', '계약·지명', 'offseason'),
+  one('watch', '영입', '관심 명단', 'watch'),
 
   one('schedule', '시즌', '일정·결과', 'schedule', '지난 시즌 일정'),
   one('standings', '시즌', '순위', 'standings', '지난 시즌 순위'),
+  one('teams', '시즌', '구단들', 'team'),
   one('leaders', '시즌', '개인 기록', 'leaders', '지난 시즌 기록'),
   one('allstar', '시즌', '올스타', 'allstar'),
   one('postseason', '시즌', '가을야구', 'postseason'),
@@ -58,13 +61,14 @@ export const MENU: MenuItem[] = [
   one('staff', '경영', '감독·코치', 'staff'),
   one('owner', '경영', '구단주', 'owner'),
 
-  one('records', '아카이브', '연표', 'records'),
+  { key: 'records', group: '아카이브', label: '연표', tabs: [{ screen: 'records', label: '리그 연표' }, { screen: 'rules', label: '규칙 연표' }] },
   { key: 'rec-stats', group: '아카이브', label: '통산·시즌', tabs: [{ screen: 'rec-career', label: '통산' }, { screen: 'rec-season', label: '단일 시즌' }] },
   one('rec-teams', '아카이브', '구단 역사', 'rec-teams'),
   one('rec-dynasty', '아카이브', '왕조·라이벌', 'rec-dynasty'),
   one('rec-hof', '아카이브', '명예의 전당', 'rec-hof'),
   one('club-history', '아카이브', '이력·업적', 'club-history'),
 
+  one('find', '공통', '전체 검색', 'find'),
   one('save', '공통', '저장·설정', 'save'),
   one('about', '공통', '정보·출처', 'about'),
 ];
@@ -91,8 +95,10 @@ export function blockOf(s: GameSession, screen: Screen): string | null {
   const off = s.phase === 'offseason';
   switch (screen) {
     case 'roster':
-    case 'lineup':
       return off ? '오프시즌에는 쉼 · 다음 시즌 개막 뒤 열림 (계약은 영입 > 계약·지명)' : null;
+    case 'lineup':
+      // 개막 준비 단계에서는 개막 날 기용 보드를 미리 연다 (2026-10-23 사용자 결정, OpeningBoard.tsx)
+      return off && s.offseason?.stage !== 'ready' ? '오프시즌에는 쉼 · 개막 준비 단계에서 열림 (개막 미리 보기)' : null;
     case 'search':
     case 'market':
     case 'trade':
