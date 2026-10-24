@@ -17,14 +17,26 @@ const PIT_KEYS = Object.keys(emptyPitLine()) as (keyof PitLine)[];
 /** 리그 기록 변화에 넣는 최소 표본: 두 해 모두 타석 / 아웃 (임시값) */
 const MIN_PA = 200;
 const MIN_OUTS = 150;
+/** 추측 가운데값이 이만큼 움직여야 ▲▼를 붙인다 (폭만 줄어든 작은 흔들림은 표시하지 않음, 임시값) */
+const ARROW_MIN = 2;
 
-/** 그 해 1군 기록 (여러 구단에서 뛰었으면 더한다) */
-function yearLine(p: LeaguePlayer, year: number): { bat: BatLine; pit: PitLine } {
+/**
+ * 그 해 1군 기록 (여러 구단에서 뛰었으면 더한다). 게임 안 이력에 그 해가 없으면(게임 시작 전 해) 실제 자료의 그 해 기록으로
+ */
+function yearLine(p: LeaguePlayer, year: number, store: ReturnType<typeof useGame>['store']): { bat: BatLine; pit: PitLine } {
   const bat = emptyBatLine();
   const pit = emptyPitLine();
-  for (const h of p.history.filter((x) => x.year === year)) {
+  const hs = p.history.filter((x) => x.year === year);
+  for (const h of hs) {
     if (h.bat) BAT_KEYS.forEach((k, i) => { (bat[k] as number) += h.bat![i] ?? 0; });
     if (h.pit) PIT_KEYS.forEach((k, i) => { (pit[k] as number) += h.pit![i] ?? 0; });
+  }
+  if (!hs.length) {
+    const ss = store.season(year);
+    for (const r of ss?.bat.filter((x) => x.id === p.id) ?? []) {
+      Object.assign(bat, { pa: bat.pa + r.pa, ab: bat.ab + r.ab, h: bat.h + r.h, d: bat.d + r.d, t: bat.t + r.t, hr: bat.hr + r.hr, bb: bat.bb + (r.bb ?? 0), hbp: bat.hbp + (r.hbp ?? 0), sf: bat.sf + (r.sf ?? 0) });
+    }
+    for (const r of ss?.pit.filter((x) => x.id === p.id) ?? []) Object.assign(pit, { outs: pit.outs + r.outs, er: pit.er + r.er });
   }
   return { bat, pit };
 }
@@ -32,7 +44,7 @@ function yearLine(p: LeaguePlayer, year: number): { bat: BatLine; pit: PitLine }
 interface RecRow { p: LeaguePlayer; team: number; age: number | null; text: string; d: number }
 
 export function Growth() {
-  const { session, grades, openPlayer, go } = useGame();
+  const { session, store, grades, openPlayer, go } = useGame();
   const off = session.offseason;
   const [scope, setScope] = useState<Scope>('mine');
   const list = off?.growth;
@@ -55,8 +67,8 @@ export function Growth() {
     const shift = before && after ? after.sort - before.sort : 0;
     return { g, before, after, shift };
   }).sort((a, b) => b.shift - a.shift || a.g.id.localeCompare(b.g.id));
-  const upN = mine.filter((r) => r.shift > 0).length;
-  const downN = mine.filter((r) => r.shift < 0).length;
+  const upN = mine.filter((r) => r.shift >= ARROW_MIN).length;
+  const downN = mine.filter((r) => r.shift <= -ARROW_MIN).length;
 
   // 리그 전체: 두 해 모두 표본이 있는 선수의 기록 변화 (타자 OPS, 투수 평균자책)
   const recs: RecRow[] = [];
@@ -64,8 +76,8 @@ export function Growth() {
     if (g.tags?.includes('복무 중')) continue;
     const p = session.leaguePlayer(g.id);
     if (!p) continue;
-    const a = yearLine(p, off.year - 1);
-    const b = yearLine(p, off.year);
+    const a = yearLine(p, off.year - 1, store);
+    const b = yearLine(p, off.year, store);
     if (p.isPitcher) {
       if (a.pit.outs < MIN_OUTS || b.pit.outs < MIN_OUTS) continue;
       recs.push({ p, team: g.team, age: g.age, text: `평균자책 ${fixed2(era(a.pit))} → ${fixed2(era(b.pit))}`, d: era(a.pit) - era(b.pit) });
@@ -94,7 +106,7 @@ export function Growth() {
             <span key={it.key}>
               <span className="muted small">{it.short}</span>
               {b && guessText(b.view) !== guessText(it.view) && <span className="small">{guessText(b.view)} → </span>}
-              <GuessGrade v={it.view} />{d > 0 ? <span className="up">▲</span> : d < 0 ? <span className="down">▼</span> : null}
+              <GuessGrade v={it.view} />{d >= ARROW_MIN ? <span className="up">▲</span> : d <= -ARROW_MIN ? <span className="down">▼</span> : null}
             </span>
           );
         })}

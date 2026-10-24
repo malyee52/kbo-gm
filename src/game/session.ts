@@ -1199,8 +1199,10 @@ export class GameSession {
     const sim = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : this.offView().sim.get(id);
     const sample = sim?.bat?.sample ?? sim?.pit?.sample ?? 0;
     const mine = this.phase === 'season' ? sim?.teamIdx === this.teamIdx : lp?.team === this.teamIdx;
-    const name = this.league.teams[this.teamIdx]?.name;
-    const seasonsWithUs = mine ? (lp?.history ?? []).filter((h) => h.team === name && (h.bat || h.pit)).length : null;
+    // 우리 구단에서 보낸 시즌: 게임 안 이력 + 게임 시작 전 실제 기록의 같은 계보 시즌 (stadium.ts 프랜차이즈 판정과 같은 셈)
+    const t = this.league.teams[this.teamIdx];
+    const seasonsWithUs = mine ? (lp?.history ?? []).filter((h) => h.team === t?.name && (h.bat || h.pit)).length
+      + (lp?.tenure0 && lp.tenure0.franchise === t?.franchise ? lp.tenure0.seasons : 0) : null;
     const amateur = !!lp && !lp.foreign && !lp.history.some((h) => h.bat || h.pit);
     return { id, sample, seasonsWithUs, ...(amateur ? { amateur } : {}) };
   }
