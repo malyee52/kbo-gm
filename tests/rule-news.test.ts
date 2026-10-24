@@ -57,14 +57,14 @@ describe('알림 계산 (1-2)', () => {
     expect(n.headline).toContain('공인구 반발계수 기준 하향');
   });
 
-  it('2026: 아시아쿼터·엔트리는 게임 값으로, 단순화 문구가 붙는다', () => {
+  it('2026: 아시아쿼터·엔트리(등록·출장)는 게임 값으로', () => {
     const n = news(2026);
     const foreign = n.main.find((l) => l.key === 'foreignLimit')!;
     expect(foreign.before).toBe('3명');
     expect(foreign.after).toBe('4명 (아시아쿼터 1명 포함)');
     const roster = n.main.find((l) => l.key === 'rosterSize')!;
-    expect([roster.before, roster.after]).toEqual(['28명', '29명']);
-    expect(roster.simplified).toContain('등록 인원 모두 출장');
+    expect([roster.before, roster.after]).toEqual(['28명 등록·26명 출장', '29명 등록·27명 출장']);
+    expect(roster.simplified).toBeUndefined();
     expect(n.main.find((l) => l.key === 'salaryCap')).toBeTruthy();
   });
 
