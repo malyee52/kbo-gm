@@ -244,10 +244,13 @@ describe('실제 미래 구장과 2027년 뒤 (4.5, P7)', () => {
     const v = park(L, nc, 2027);
     expect(v.basis).toBe('mean');
     expect(park(L, nc, 2040)).toEqual(v);
-    // 사건별·득점 계수 모두 구단 평균 1 (기간 평균만이면 2027 득점 계수 평균 1.0065)
+    // 사건별 구단 평균 1 (기간 평균만이면 2027 득점 계수 평균 1.0065). 득점 계수는 곱 꼴(runFactorOf, 2026-10-24 구장 개발 9)이라
+    // 사건별 평균이 1이어도 정확히 1은 아니고 조금 낮다 (오목함, 이 판 0.9955)
     const all = L.teams.map((_, t) => park(L, t, 2027).park!);
     for (const k of ['s1', 'd2', 't3', 'hr'] as const) expect(all.reduce((a, x) => a + x.ev![k], 0) / all.length).toBeCloseTo(1, 12);
-    expect(all.reduce((a, x) => a + x.run!, 0) / all.length).toBeCloseTo(1, 12);
+    const runMean = all.reduce((a, x) => a + x.run!, 0) / all.length;
+    expect(runMean).toBeLessThanOrEqual(1);
+    expect(runMean).toBeGreaterThan(0.99);
     // 펜스 조정의 조정 전 값(창원 2019~ 실측 기간 평균)을 같은 해 사건별 평균으로 나눈 값: 구단끼리의 비는 기간 평균 그대로
     const b = fenceBaseOf(src, 'NC', 2027, FENCE_PRESETS.neutral.fence, PP).base;
     const b2 = fenceBaseOf(src, 'SSG', 2027, FENCE_PRESETS.neutral.fence, PP).base;

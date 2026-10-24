@@ -58,7 +58,10 @@ describe('순위표', () => {
     const rows = standRows(s);
     expect(rows.map((r) => r.team)).toEqual(s.standings());
     expect(rows[0].gb).toBeNull();
-    expect(rows.slice(1).every((r) => r.gb !== null && r.gb >= 0)).toBe(true);
+    // 순위는 승률 순이라 경기 수가 다르면 게임차가 음수일 수 있다 (2026-10-24 구장 개발 9 뒤 1위 18승 11패 · 2위 21승 13패 = −0.5).
+    // 그래서 게임차는 값이 있는지만, 순서는 승률이 줄지 않는지로 본다
+    expect(rows.slice(1).every((r) => r.gb !== null)).toBe(true);
+    expect(rows.every((r, k) => k === 0 || r.pct <= rows[k - 1].pct)).toBe(true);
     const left = s.schedule.slice(s.day).flat().filter((x) => x.home === rows[0].team || x.away === rows[0].team).length;
     expect(rows[0].left).toBe(left);
     for (const r of rows) {
