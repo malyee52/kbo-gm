@@ -5,12 +5,15 @@
 // "횟수 ÷ 리그 비율"은 그 횟수를 리그 평균 선수가 내려면 필요한 타석 수라서, 시대가 달라도 그대로 더할 수 있다.
 // K가 클수록 표본이 적은 선수가 사전 평균(출전이 적은 선수들의 평균) 쪽으로 강하게 당겨진다.
 
-import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import type { BatRow, Hand, Meta, ParkData, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
+import { realParkYear } from './park';
 import { makeDefense } from './defense';
-import type { DefenseAward, PpaData, ScheduleData } from '../data/types';
+import type { DefenseAward, DefenseData, PlateData, PpaData, ScheduleData } from '../data/types';
 import { divisionsOf, scheduleRule } from '../data/schedule';
+import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
-import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
+import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
+import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -42,18 +45,25 @@ export interface SeasonPark {
   ev?: ParkRates;
 }
 
-/** 그 시즌 그 구단 기록에 들어 있는 구장 효과: 홈 경기 절반은 홈 구장, 원정은 리그 평균 구장으로 본다 (meta.parkFactors) */
-export function seasonPark(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, season: Pick<SeasonData, 'year' | 'teams'>, team: string,
-                           bats: Hand | null = null): SeasonPark | undefined {
-  const year = meta.parkFactors?.[String(season.year)];
-  if (!year) return undefined;
+/**
+ * 그 시즌 그 구단 기록에 들어 있는 구장 효과: 홈 경기 절반은 홈 구장, 원정은 리그 평균 구장으로 본다.
+ * 경기와 같은 실제 구장 값 (park.ts realParkYear): 2015~ 실측, 그 전은 구장 제원(parks)이 있으면 차이 방식·짐작 (구장효과 기획안 4.3, P5)
+ */
+export function seasonPark(meta: Pick<Meta, 'parkFactors' | 'parkEvents'>, season: Pick<SeasonData, 'year' | 'teams' | 'league'>, team: string,
+                           bats: Hand | null = null, parks?: ParkData, pp: EngineParams['park'] = DEFAULT_PARAMS.park): SeasonPark | undefined {
   const fr = season.teams.find((t) => t.name === team)?.franchise;
-  const f = fr ? year[fr] : undefined;
-  if (!f) return undefined;
+  if (!fr) return undefined;
+  const v = realParkYear({ parkFactors: meta.parkFactors, parkEvents: meta.parkEvents, parks }, season.year, season.teams.map((t) => t.franchise),
+    leagueRpa(season.league), pp).get(fr);
+  if (!v) return undefined;
   // 사건별 배율: 좌타·우타는 그 손의 표, 양타·투수·모름은 전체 (양타는 좌우 타석이 섞인다)
-  const all = fr ? meta.parkEvents?.[String(season.year)]?.[fr] : undefined;
-  const ev = all && (bats === 'L' || bats === 'R') ? all[bats] ?? all : all;
-  return { run: (1 + f) / 2, ...(ev ? { ev: { s1: ev.s1, d2: ev.d2, t3: ev.t3, hr: ev.hr } } : {}) };
+  const ev = v.ev && (bats === 'L' || bats === 'R') ? v.ev[bats] ?? v.ev : v.ev;
+  return { run: (1 + v.run) / 2, ...(ev ? { ev: { s1: ev.s1, d2: ev.d2, t3: ev.t3, hr: ev.hr } } : {}) };
+}
+
+/** 리그 합계 → 구장 계산에 쓰는 리그 비율·타석당 득점 */
+export function leagueRpa(L: SeasonData['league']): { rates: Rates; rpa: number } {
+  return { rates: L.rates, rpa: L.pa > 0 ? L.r / L.pa : 0 };
 }
 
 /** 구장 효과를 걷어 내는 배율. 사건별 배율이 있으면 그것, 없으면 득점 계수의 지수 (params.park). 투수의 'hit'은 단타·2루타·3루타를 리그 비율로 섞는다 */
@@ -254,6 +264,15 @@ export function ppaRelOf(rows: Record<string, [number, number]> | undefined, sea
   return den > 0 ? (num + regress) / (den + regress) : undefined;
 }
 
+/** 선수의 사슬 실측 시즌 (plate.json)을 능력과 같은 시즌·가중치로 */
+function plateRows(rows: Record<string, number[]> | undefined, seasons: (SeasonData | undefined)[], w: readonly number[]): PlateSeason[] {
+  if (!rows) return [];
+  return seasons.flatMap((s, i) => {
+    const c = s && rows[String(s.year)];
+    return c ? [{ w: w[i] ?? 0, c }] : [];
+  });
+}
+
 export interface BuildWorldInput {
   year: number;
   /** 로스터와 소속 팀을 정하는 시즌 (보통 year와 같다) */
@@ -271,6 +290,12 @@ export interface BuildWorldInput {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 선수별 볼카운트 사슬 실측 (plate.json, 능력치 v2 16-1). 없으면 결과 기록으로 짐작한다 */
+  plate?: PlateData;
+  /** 1군 수비 이닝·평판 (defense.json). 있으면 수비를 능력치 v2 식(fielding.ts defenseV2)으로 만든다. 없으면 예전 추정 (defense.ts makeDefense) */
+  defense?: DefenseData;
+  /** 실제 구장 제원 (parks.json). 있으면 2015년 이전 구장 효과를 차이 방식·짐작으로 넣는다 (park.ts). 없으면 그 해들은 중립 */
+  parks?: ParkData;
   /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
   schedule?: ScheduleData;
 }
@@ -363,14 +388,19 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
 export function buildWorld(input: BuildWorldInput): World {
   const { year, current, history, players: master, meta, params } = input;
   const lg = current.league.rates;
+  // 볼카운트 사슬 실측 몫 (능력치 v2 16-1): 그 해 리그 칸 상수. 시즌(Season)이 같은 식으로 다시 만들므로 시작 때 사슬 능력 = 실측
+  let lpCache: LeaguePlate | undefined;
+  const lpOf = () => (lpCache ??= leaguePlateFor(chainShapeFor(params, year), lg, params.plate));
   const histBat = history.map((s) => (s ? new Map(s.bat.map((r) => [r.id, r])) : undefined));
   const histPit = history.map((s) => (s ? new Map(s.pit.map((r) => [r.id, r])) : undefined));
 
-  const parks = meta.parkFactors?.[String(year)];
-  const parkEv = meta.parkEvents?.[String(year)];
-  const teams: SimTeam[] = current.teams.map((t, idx) => ({ idx, name: t.name, franchise: t.franchise, org: [],
-    ...(parks?.[t.franchise] && parks[t.franchise] !== 1
-      ? { park: { hr: 1, run: parks[t.franchise], ...(parkEv?.[t.franchise] ? { ev: parkEv[t.franchise] } : {}) } } : {}) }));
+  // 홈 구장 배율 (park.ts realParkYear): 2015~ 실측, 그 전은 구장 제원이 있으면 차이 방식·짐작
+  const parks = realParkYear({ parkFactors: meta.parkFactors, parkEvents: meta.parkEvents, parks: input.parks }, year,
+    current.teams.map((t) => t.franchise), leagueRpa(current.league), params.park);
+  const teams: SimTeam[] = current.teams.map((t, idx) => {
+    const v = parks.get(t.franchise);
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(v && v.run !== 1 ? { park: { hr: 1, run: v.run, ...(v.ev ? { ev: v.ev } : {}) } } : {}) };
+  });
   const teamIdx = new Map(teams.map((t) => [t.name, t.idx]));
   const players: SimPlayer[] = [];
   const curBat = new Map(current.bat.map((r) => [r.id, r]));
@@ -383,6 +413,11 @@ export function buildWorld(input: BuildWorldInput): World {
   const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
   const rp = seasonBasis ? seasonRegress(params, params.seasonPitRegressScale ?? params.seasonRegressScale) : params;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
+  // 능력치 v2 수비 (16-3): 증거는 시작 연도 전 해들 (역사 재현은 그 시즌도 넣는다). 2000년 이전 해는 시즌 자료의 주 포지션으로 (결정 30)
+  const defStart = seasonBasis ? year + 1 : year;
+  const defSeasons = new Map([...(input.career ?? []), ...history.filter((s): s is SeasonData => !!s), current].map((s) => [s.year, s]));
+  const defStore = input.defense ? { defense: input.defense, meta, season: (y: number) => defSeasons.get(y) } : undefined;
+  const defSeen: { v2: DefenseV2; pa: number }[] = [];
   // 커리어 수비 포지션: 선수 → 포지션 → 타석(최근일수록 무겁게, 해마다 0.85배). 역사 재현은 그 시즌도 넣는다
   const careerPos = new Map<string, Map<string, number>>();
   const careerSeasons = [...(input.career ?? history.filter((s): s is SeasonData => !!s)), ...(seasonBasis ? [current] : [])];
@@ -422,10 +457,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<PitRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = ratePit[i]?.get(id);
-        if (s && r && r.tbf > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team) });
+        if (s && r && r.tbf > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, null, input.parks, params.park) });
       });
       if (rows.length === 0 && pRow && pRow.tbf > 0) {
-        rows.push({ row: pRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, pRow.team) });
+        rows.push({ row: pRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, pRow.team, null, input.parks, params.park) });
         debutEstimate = true;
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
@@ -433,6 +468,11 @@ export function buildWorld(input: BuildWorldInput): World {
       if (rows.length) pit.gb = pitGbOf(pit.hr, params);
       const pitPpa = ppaRelOf(input.ppa?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (pitPpa !== undefined) pit.ppaRel = pitPpa;
+      const pitPlate = plateRows(input.plate?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
+      if (pitPlate.length) {
+        const solved = solvedPitPlate(pit, lg, lpOf());
+        pit.plateRes = addPit(measuredPitPlate(pitPlate, solved, params.plate), solved, -1);
+      }
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
       // 시작 불펜 서열: 세이브와 같은 기준 시즌(예측은 직전, 역사 재현은 그 해)의 실제 쓰임
@@ -442,10 +482,10 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = rateBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null), sbPct: params.sbPctByYear[s.year] });
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null, input.parks, params.park), sbPct: params.sbPctByYear[s.year] });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
-        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null), sbPct: params.sbPctByYear[current.year] });
+        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null, input.parks, params.park), sbPct: params.sbPctByYear[current.year] });
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
@@ -455,6 +495,11 @@ export function buildWorld(input: BuildWorldInput): World {
       if (gb !== undefined) bat.gb = gb;
       const batPpa = ppaRelOf(input.ppa?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
       if (batPpa !== undefined) bat.ppaRel = batPpa;
+      const batPlate = plateRows(input.plate?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
+      if (batPlate.length) {
+        const solved = solvedBatPlate(bat, lg, lpOf(), params.plate);
+        bat.plateRes = addBat(measuredBatPlate(batPlate, solved, params.plate), solved, -1);
+      }
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다
@@ -480,7 +525,17 @@ export function buildWorld(input: BuildWorldInput): World {
       const career = careerPos.get(id);
       const played = hh ? hh.playable : career && career.size ? [...career.keys()] : posHist.map((h) => h?.get(id)?.pos ?? null);
       const careerField = career ? [...career.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] : undefined;
-      bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
+      if (input.defense) {
+        // 능력치 v2 수비 (16-3): 시작 연도 전 수비 이닝·평판·수상으로. 화면 주 포지션도 수비 이닝 규칙(12.2)을 따른다 (기록이 없으면 지금 포지션)
+        const v2 = defenseV2({ id, years: fieldYears(defStore!, id, defStart), startYear: defStart, reps: input.defense.rep[id], awards: input.defenseAwards?.[id],
+          age: m.birthYear ? year - m.birthYear : null, speed: bat.speed, listed: homeOf(pos) ?? undefined, league: fieldLeague(input.defense) });
+        bat.def = v2.def;
+        bat.playable = v2.playable;
+        if (v2.emergencyC) bat.emC = true;
+        if (v2.cArm !== undefined) bat.cArm = v2.cArm;
+        if (v2.main.basis !== 'listed' && v2.main.basis !== 'none') pos = v2.main.screen;
+        if (m.real !== false) defSeen.push({ v2, pa: rateBat[0]?.get(id)?.pa ?? 0 });
+      } else bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
         // 주전 출전 근거 타석: 하드힛 이력 선수는 수비 가능 자리 전체 (규정타석 시즌 수가 같아 최근 자리가 주 포지션이 된 선수가 오래 맡은 자리의 근거를 잃지 않게)
         hh ? hh.playable.reduce((a, q) => a + (posPa.get(q) ?? 0), 0) : pos ? posPa.get(pos) ?? 0 : 0, { awards: input.defenseAwards?.[id], year, fieldPos: pos === 'DH' ? careerField ?? (m.pos && m.pos !== 'DH' ? m.pos : undefined) : undefined });
     }
@@ -511,6 +566,9 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  const env = leagueEnvFor(current.league, params, year);
+  const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
+  if (defModel) env.defZero = defModel.zero;
   // 일정 규칙과 개막 홈 구단 (지난 시즌 자료의 순위, 일정 개편 기획안 2.2)
   const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
   const franchises = teams.map((t) => t.franchise);
@@ -522,13 +580,35 @@ export function buildWorld(input: BuildWorldInput): World {
     gamesPerTeam: current.games,
     rules: meta.rules[String(year)],
     league: { ...lg },
-    env: leagueEnvFor(current.league, params, year),
+    env,
     teams,
     players,
+    ...(defModel ? { defPool: defModel.pool } : {}),
     ...(rule ? { schedule: rule } : {}),
     ...(hosts ? { openingHosts: hosts } : {}),
     ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
+}
+
+/** 가상 선수 B를 뽑는 실존 주전: 직전 시즌 이만큼 타석 (16.4 가) */
+const DEF_POOL_PA = 300;
+
+/**
+ * 수비 영점 m (13.6): 실존 선수의 바로 앞 해 자리별 수비 이닝으로 가중한 그 자리 등급 평균. 가상 선수 B 분포: 직전 시즌 300타석 이상 실존 주전의 본 자리 B (오름차순)
+ */
+function defenseModel(seen: { v2: DefenseV2; pa: number }[]): { zero: number; pool: number[] } {
+  let w = 0;
+  let s = 0;
+  const pool: number[] = [];
+  for (const { v2, pa } of seen) {
+    for (const [q, inn] of Object.entries(v2.lastInn) as [keyof DefenseV2['grade'], number][]) {
+      w += inn;
+      s += inn * v2.grade[q];
+    }
+    const home = v2.main.field;
+    if (pa >= DEF_POOL_PA && home && v2.base[home] !== undefined) pool.push(v2.base[home]!);
+  }
+  return { zero: w > 0 ? Math.round((s / w) * 10) / 10 : 50, pool: pool.sort((a, b) => a - b) };
 }
 
 /**

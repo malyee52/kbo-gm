@@ -14,8 +14,9 @@ import { worldFromLeague } from './world';
 import { expansionPerk, teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
+import { useParkData } from './ballparks';
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'> & Partial<Pick<DataStore, 'parks'>>;
 
 /** 1군 연차로 치는 시즌: 100타석 또는 상대 타자 100명 이상 (임시값. 실제 등록일수 자료가 없다) */
 function servedSeason(idx: CareerIndex, id: string, year: number): boolean {
@@ -71,6 +72,8 @@ export function openingTeamMoves(store: Pick<DataStore, 'meta'>, year: number): 
  * 같은 데이터·시드면 같은 결과가 나온다.
  */
 export function createLeague(store: Store, startYear: number, seed: string, params: EngineParams = DEFAULT_PARAMS): CreatedLeague {
+  // 실제 구장 이름·좌석 (parks.json). 자료가 없는 store면 지금 쓰는 표를 그대로 둔다
+  if (store.parks) useParkData(store.parks);
   const recorded = worldForYear(store, startYear, params);
   const ctx = valueContext(recorded);
   const opening = openingForeigners(store, startYear);
@@ -177,6 +180,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     format: 1, seed, startYear, year: startYear,
     teams: recorded.teams.map((t) => ({ name: t.name, franchise: t.franchise })),
     players, lastSeason: null, ledger: [], nextVirtualId: 1,
+    ...(recorded.env.defZero !== undefined ? { defZero: recorded.env.defZero } : {}),
+    ...(recorded.defPool ? { defPool: recorded.defPool } : {}),
   };
   // 시작 다음 해에 1군에 들어오는 창단 구단은 이미 창단해 퓨처스리그에서 뛰고 있다 (예: 2012 시작의 NC).
   // 시작 전 드래프트에서 지명한 선수(나성범 등)는 아래 보충에서 이 구단으로 들어간다

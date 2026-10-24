@@ -47,7 +47,7 @@ export function cellProbs(shape: ChainShape, k: Knobs, len = 1): Float64Array {
  * 칸마다 "여기서 시작하면 끝이 무엇일 확률" (뒤에서부터). 2스트라이크 파울은 제자리라 나머지로 나눈다.
  * 반환: 칸 × [K, W, H, X]
  */
-function endFrom(p: Float64Array): Float64Array {
+export function endFrom(p: Float64Array): Float64Array {
   const e = new Float64Array(48);
   for (let bl = 3; bl >= 0; bl--) {
     for (let st = 2; st >= 0; st--) {

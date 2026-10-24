@@ -107,19 +107,21 @@ describe('난이도 (AI의 잠재력 평가 오차)', () => {
   });
 });
 
+// M7 한 바퀴 시험의 시드 후보 (차례가 고정이어야 같은 자료에서 같은 시드를 고른다). 31부터인 것은 손으로 바꾸던 마지막 값이라서
+const SEED_CANDIDATES = Array.from({ length: 8 }, (_, i) => `m7-loop-${31 + i}`);
+
 describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구단 부임까지 한 바퀴', () => {
   let g: GameSession;
   let firstTeam: number;
-  let seed: string;
   let save: GameSaveV2;
+  let seed = '';
 
   beforeAll(() => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-    // 시드: LG가 우승하면 해고되지 않아 이 묶음이 성립하지 않는다. 엔진이 바뀔 때마다 손으로 시드를 바꾸던 것을
-    // (m7-loop → … → m7-loop-32, 2026-10-08~10-24에 열 번 넘게) 후보 시드를 차례로 돌려 우승하지 못한 첫 판을 쓰게 했다 (2026-10-24 시험 속도 카드).
-    // 지금 엔진에서는 첫 후보(m7-loop-32)가 맞아 한 시즌만 돈다. 후보가 모두 우승이면 시험이 실패한다
-    for (const s of ['m7-loop-32', 'm7-loop-33', 'm7-loop-34', 'm7-loop-35', 'm7-loop-36', 'm7-loop-37']) {
-      seed = s;
+    // 시드는 LG가 우승하지 못하는 판이어야 한다 (우승하면 해고되지 않는다). 자료·엔진이 조금만 바뀌어도 LG가 우승하는 시드가
+    // 달라져 브랜치마다 손으로 바꿔 왔다 (m7-loop → 2 → … → 31, 2026-10-24까지). 이제 후보를 차례로 돌려 LG가 우승하지 않는
+    // 첫 시드를 쓴다: 후보 순서가 고정이라 같은 자료·엔진이면 늘 같은 시드다. 다 우승이면 아래 시험이 시드 목록을 알린다
+    for (seed of SEED_CANDIDATES) {
       g = GameSession.create(store, { year: 2026, teamIdx: lg, seed, difficulty: 'hard' }, FAST);
       firstTeam = g.teamIdx;
       // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
@@ -129,7 +131,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
       g.beginOffseason();
       if (g.league.lastSeason!.postseason!.champion !== firstTeam) break;
     }
-  }, 720_000);
+  }, 120_000 * SEED_CANDIDATES.length);
 
   it('시즌 목표가 정해져 있었고, 포스트시즌을 치러 우승팀이 나온다', () => {
     const ps = g.league.lastSeason!.postseason!;
@@ -141,8 +143,8 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   it('목표를 놓쳐 해고되고, 하위권 구단의 영입 제의를 받는다. 고르기 전에는 오프시즌을 진행할 수 없다', () => {
     const ps = g.league.lastSeason!.postseason!;
-    // 후보 시드가 모두 우승이면 여기서 실패한다 (beforeAll의 후보 목록에 시드를 더한다)
-    expect(ps.champion, '후보 시드 모두 LG가 우승했습니다. 후보를 더하세요').not.toBe(firstTeam);
+    // 후보 시드가 모두 LG 우승이면 이 시험은 성립하지 않는다: 후보(SEED_CANDIDATES)를 늘린다
+    expect(ps.champion, `후보 시드 ${SEED_CANDIDATES[0]} ~ ${SEED_CANDIDATES[SEED_CANDIDATES.length - 1]}에서 모두 LG가 우승했습니다. 후보를 늘리세요`).not.toBe(firstTeam);
     expect(g.owner.trust).toBeLessThan(FIRE_BELOW);
     expect(g.owner.offers!.length).toBeGreaterThan(0);
     expect(g.owner.offers).not.toContain(firstTeam);

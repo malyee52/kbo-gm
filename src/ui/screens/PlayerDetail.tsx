@@ -24,6 +24,7 @@ import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
 import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
+import { realSeasonParkFactor, seasonParkFactor, worldParkFactor } from '../../game/parkView';
 import { currentRuns } from '../../ai/value';
 import { DensityToggle, useShell } from '../shell';
 import { leagueRank } from '../compare';
@@ -139,7 +140,7 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
   const master = store.players.get(p.id);
   const lp = session.leaguePlayer(p.id);
   const cond = useCondition()(p);
-  const pos = p.isPitcher ? `P${p.underhand ? ' · 언더·사이드' : ''}` : [posName(p.pos), ...playablePositions(p.bat?.def).filter((q) => q !== p.pos).slice(0, 2)].join(' · ');
+  const pos = p.isPitcher ? `P${p.underhand ? ' · 언더·사이드' : ''}` : [posName(p.pos), ...playablePositions(p.bat).filter((q) => q !== p.pos).slice(0, 2)].join(' · ');
   const hand = `${p.throws ? HAND[p.throws] : '-'}투${p.bats ? HAND[p.bats] : '-'}타`;
   return (
     <>
@@ -316,7 +317,7 @@ function SummaryTab({ p, full, narrow, onClose }: { p: SimPlayer; full: boolean;
               <Rec label="출루율" v={rate3(obp(b))} rank={b.pa >= RANK_MIN_PA ? lg.bat(obp(b), obp) : undefined} full={full} />
               <Rec label="홈런" v={b.hr} rank={b.pa >= RANK_MIN_PA ? lg.bat(b.hr / b.pa, (l) => l.hr / l.pa) : undefined} full={full} />
               <Rec label="OPS" v={rate3(ops(b))} rank={b.pa >= RANK_MIN_PA ? lg.bat(ops(b), ops) : undefined} full={full} />
-              {full && <Rec label="wRC+" v={Math.round(wrcPlus(b, lg.base))} full={full} />}
+              {full && <Rec label="wRC+" v={Math.round(wrcPlus(b, lg.base, worldParkFactor(session.world, p.teamIdx, lg.base.runsPerPa)))} full={full} />}
             </ul>
           )}
           {recent && <p className="small">최근 10경기: {recent}</p>}
@@ -421,7 +422,8 @@ function useGrowthDelta(p: SimPlayer): number | null {
 
 type BatLike = { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; rbi: number; r: number; bb: number; hbp: number; so: number; sb: number; sf: number };
 type PitLike = { g: number; gs: number; w: number; l: number; sv: number; outs: number; h: number; hr: number; bb: number; so: number; er: number; hld?: number; qs?: number; bsv?: number; bf?: number; hbp?: number; np?: number };
-type RecRow<L> = { key: string; label: string; real: boolean; l: L; lg: LeagueBase | null };
+// pf = 그 시즌 소속 구단의 시즌 구장 계수 (구장효과 기획안 P2, game/parkView.ts). 타격 줄만 쓴다
+type RecRow<L> = { key: string; label: string; real: boolean; l: L; lg: LeagueBase | null; pf?: number };
 
 function batFromRow(r: BatRow): BatLike {
   return { g: r.g, pa: r.pa, ab: r.ab, h: r.h, d: r.d, t: r.t, hr: r.hr, rbi: r.rbi, r: r.r, bb: r.bb ?? 0, hbp: r.hbp ?? 0, so: r.so ?? 0, sb: r.sb ?? 0, sf: r.sf ?? 0 };
@@ -436,7 +438,7 @@ const px = (l: PitLike) => ({ ...l, bf: l.bf ?? 0, hbp: l.hbp ?? 0, r: 0, hld: l
 
 // ---- 세이버 지표 (2026-10-22, 기획안 2.8): 실제 기록도 게임 기록도 같은 식(game/saber.ts)으로 직접 계산한다. 리그 상수는 그 해 리그 기록
 const SABER_TIP = {
-  wrc: 'wRC+: 득점 생산력. 100이 그 해 리그 평균, 120이면 평균보다 20% 더 낸다 (구장 보정 없음)',
+  wrc: 'wRC+: 득점 생산력. 100이 그 해 리그 평균, 120이면 평균보다 20% 더 낸다 (구장 보정: 타자 구장에서 낸 기록은 깎고 투수 구장은 올린다. 칸에 마우스를 올리면 보정 전 → 후)',
   woba: 'wOBA: 볼넷·안타 종류마다 득점 가치를 매긴 출루율 꼴 지표',
   iso: 'ISO: 순장타율 (장타율 - 타율)',
   babip: 'BABIP: 인플레이 타구 타율 (홈런·삼진 제외). 크게 높거나 낮으면 운이 섞였을 수 있다',
@@ -467,7 +469,16 @@ const BAT_COLS: Column<RecRow<BatLike>>[] = [
   { key: 'bb', label: '볼넷', value: (r) => r.l.bb, group: '기본' },
   { key: 'so', label: '삼진', value: (r) => r.l.so, group: '기본', lower: true },
   { key: 'sb', label: '도루', value: (r) => r.l.sb, group: '기본' },
-  { key: 'wrc', label: 'wRC+', title: SABER_TIP.wrc, value: (r) => (r.lg ? fin(Math.round(wrcPlus(bx(r.l), r.lg))) : null), group: '세이버' },
+  {
+    key: 'wrc', label: 'wRC+', title: SABER_TIP.wrc, group: '세이버',
+    value: (r) => (r.lg ? fin(Math.round(wrcPlus(bx(r.l), r.lg, r.pf ?? 1))) : null),
+    cell: (r) => {
+      const w = r.lg ? wrcPlus(bx(r.l), r.lg, r.pf ?? 1) : NaN;
+      if (!Number.isFinite(w)) return '-';
+      const pf = r.pf ?? 1;
+      return <span title={pf !== 1 ? `구장 보정 전 ${Math.round(wrcPlus(bx(r.l), r.lg!))} → 후 ${Math.round(w)} (시즌 구장 계수 ${pf.toFixed(3)})` : undefined}>{Math.round(w)}</span>;
+    },
+  },
   { key: 'woba', label: 'wOBA', title: SABER_TIP.woba, value: (r) => fin(woba(bx(r.l))), cell: (r) => rate3(woba(bx(r.l))), group: '세이버' },
   { key: 'iso', label: 'ISO', title: SABER_TIP.iso, value: (r) => fin(iso(bx(r.l))), cell: (r) => rate3(iso(bx(r.l))), group: '세이버' },
   { key: 'babip', label: 'BABIP', title: SABER_TIP.babip, value: (r) => fin(babip(bx(r.l))), cell: (r) => rate3(babip(bx(r.l))), group: '세이버' },
@@ -523,7 +534,7 @@ function RecordTab({ p, full, store }: { p: SimPlayer; full: boolean; store: Ret
   const pits: RecRow<PitLike>[] = [];
   const s = session.season;
   const live = session.phase === 'season';
-  if (live && s.bat[p.idx].pa > 0) bats.push({ key: `${year}:now`, label: `${year} 이번 시즌`, real: false, l: s.bat[p.idx], lg: lg.base });
+  if (live && s.bat[p.idx].pa > 0) bats.push({ key: `${year}:now`, label: `${year} 이번 시즌`, real: false, l: s.bat[p.idx], lg: lg.base, pf: worldParkFactor(session.world, p.teamIdx, lg.base.runsPerPa) });
   if (live && s.pit[p.idx].bf > 0) pits.push({ key: `${year}:now`, label: `${year} 이번 시즌`, real: false, l: s.pit[p.idx], lg: lg.base });
   // 게임에서 치른 시즌 전부 (최근 먼저. 결산이 끝난 시즌은 history에 있다)
   for (const h of [...(lp?.history ?? [])].reverse()) {
@@ -531,7 +542,8 @@ function RecordTab({ p, full, store }: { p: SimPlayer; full: boolean; store: Ret
     const sab = session.league.seasonSaber?.[String(h.year)] ?? null;
     if (h.bat) {
       const l = decode(emptyBatLine(), h.bat);
-      if (l.pa > 0) bats.push({ key: `${h.year}:${h.team}`, label: `${h.year} ${h.team}`, real: false, l, lg: sab });
+      const pf = sab ? seasonParkFactor(store, session.league, h.team, h.year, { rates: session.world.league, rpa: sab.runsPerPa }) : 1;
+      if (l.pa > 0) bats.push({ key: `${h.year}:${h.team}`, label: `${h.year} ${h.team}`, real: false, l, lg: sab, pf });
     }
     if (h.pit) {
       const l = decode(emptyPitLine(), h.pit);
@@ -543,7 +555,7 @@ function RecordTab({ p, full, store }: { p: SimPlayer; full: boolean; store: Ret
     const ss = store.season(y);
     const pr = ss?.pit.find((r) => r.id === p.id);
     const br = ss?.bat.find((r) => r.id === p.id);
-    if (br && br.pa > 0) bats.push({ key: `${y}:real`, label: `${y} ${br.team}`, real: true, l: batFromRow(br as BatRow), lg: realLeagueBase(ss!.league) });
+    if (br && br.pa > 0) bats.push({ key: `${y}:real`, label: `${y} ${br.team}`, real: true, l: batFromRow(br as BatRow), lg: realLeagueBase(ss!.league), pf: realSeasonParkFactor(store, ss!, br.team) });
     if (pr && pr.outs > 0) pits.push({ key: `${y}:real`, label: `${y} ${pr.team}`, real: true, l: pitFromRow(pr as PitRow), lg: realLeagueBase(ss!.league) });
   }
   const lb = lg.total.bat;
@@ -754,7 +766,7 @@ function DefenseInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const { session, changed, autosave } = useGame();
   const [edit, setEdit] = useState<Record<string, number> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const playable = playablePositions(p.bat?.def);
+  const playable = playablePositions(p.bat);
   const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => [q, defenseGrade(defenseAt(p, q))])));
   const save = () => {
     if (!edit) return;

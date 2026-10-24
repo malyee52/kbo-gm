@@ -22,6 +22,35 @@ export interface BallParams {
   infieldAir: { LD: number; FB: number };
   /** 깊이별·구장 쪽별 담당 자리 가중치 (ground 내야 땅볼, air 내야 공중, outfield 외야) */
   zones: Record<'ground' | 'air' | 'outfield', [ZoneFielders, ZoneFielders, ZoneFielders]>;
+  /** 타구각 갈래 (angle.ts, 능력치 v2 16-2) */
+  angle: AngleParams;
+}
+
+/**
+ * 타구각 갈래 조정값 (angle.ts, docs/능력치v2_기획안.md 10.2·11.3). 위 type·airOut 표는 리그 구간별 결과표의 재료로 그대로 쓴다
+ * (베이즈로 뒤집음). 덩어리 몫·공중 덩어리 가운데·퍼짐은 해마다 그 해 유형 비율에 맞춰 다시 풀고, 여기 값은 그 시작점이다
+ */
+export interface AngleParams {
+  /** 구간 경계 (도): 땅볼 | 라인드라이브 | 홈런 각 | 높은 뜬공 | 내야 뜬공 */
+  cuts: [number, number, number, number];
+  /** 땅볼 덩어리 [가운데, 퍼짐] (고정) */
+  ground: [number, number];
+  /** 공중 덩어리 [가운데, 퍼짐] (풀기 시작점) */
+  air: [number, number];
+  /** 땅볼 덩어리 몫 (풀기 시작점) */
+  groundShare: number;
+  /** 퍼짐 배율 = 1 − contactSpread × 정타 z (정타 z = 정타 로짓 ÷ contactSd), spreadMin~spreadMax로 자른다 */
+  contactSpread: number;
+  contactSd: number;
+  spreadMin: number;
+  spreadMax: number;
+  /** 각도 성향이 뚜렷하면(|θ| ≥ tendencyFull) 퍼짐을 1 − tendencyTighten배로 (그 사이는 선형) */
+  tendencyTighten: number;
+  tendencyFull: number;
+  /** 땅볼 단타(내야안타) 로짓에 더하는 주력 효과: speedGb × (주력 − 0.5) × 2 */
+  speedGb: number;
+  /** 거리(파워) 로짓이 땅볼 밖 2루타·3루타 로짓에 들어가는 배율 (장타 몫) */
+  powerXbh: number;
 }
 /**
  * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
@@ -188,6 +217,54 @@ export interface EraRunning {
   ue?: number;
 }
 
+/**
+ * 구장 제원 회귀 (구장효과 기획안 4.2·6.1·6.2, P4 reports/park-specs-fit.md). log 지수 = a + b × 평균 거리(좌·중·우 평균, m) + 높이 규칙.
+ * P5부터 옛 해 대리값(engine/park.ts: 차이 방식·짐작)이 쓴다. 신구장 펜스(P6)도 같은 값을 쓸 자리
+ */
+export interface ParkSpecFit {
+  /** 홈런 log 지수 [a, b] */
+  hr: [number, number];
+  /** (2루타 + 3루타) log 지수 [a, b] */
+  xb: [number, number];
+  /** 실제 구장 짐작의 당김: 짐작 log 지수 × w (0 = 중립) */
+  w: number;
+  /** 상·하한: 홈런·(2루타 + 3루타) 지수(100 = 리그), 득점 계수 f, 좌타·우타 홈런 지수 */
+  clamp: { hr: [number, number]; xb: [number, number]; f: [number, number]; side: [number, number] };
+  /** 펜스 높이 규칙: 기준 높이(m)보다 1m 높을 때마다 홈런 지수 × (1 + hr), (2루타 + 3루타) × (1 + xb). 낮으면 반대 (log로 대칭) */
+  height: { base: number; hr: number; xb: number };
+  /** 좌우 비대칭: 좌·우 펜스 거리 차 1m당 짧은 쪽으로 당겨 치는 타자(좌타는 우측) 홈런 + perM, 상한 ±max. 반대 손은 같은 폭만큼 내린다 */
+  asym: { perM: number; max: number };
+  /** 신구장 고르기 범위 (m): 좌·우 펜스, 중앙 펜스, 높이 */
+  range: { side: [number, number]; center: [number, number]; height: [number, number] };
+  /**
+   * 게임 안 신구장 단순 규칙 (기획안 6.3, 사용자 결정 2026-10-24 "B"): 고르는 범위의 가장 작은 구장(평균 거리 최소)과 가장 큰 구장의
+   * 홈런·(2루타 + 3루타) 지수(100 = 리그). 그 사이 평균 거리는 log 직선으로 잇고 높이·좌우 규칙과 상·하한을 더한다 (당김 없음)
+   */
+  newPark: { hr: [number, number]; xb: [number, number] };
+}
+
+/** 사슬 능력 하나의 등급 눈금 (능력치 v2 1.7·11.2): 등급 = 50 + 10 × e⁻¹((값 − mid) ÷ half), 볼록 곡선 a(위)·b(아래) */
+export interface PlateAbility {
+  mid: number;
+  half: number;
+  a: number;
+  b: number;
+}
+
+/** 볼카운트 사슬 능력 조정값 (능력치 v2 16-1, plate.ts·tools/fit_plate_estimate.ts) */
+export interface PlateParams {
+  /** 칸마다 [존 비율, 존 안 스윙, 존 밖 스윙, 존 안 맞힘(스윙 중), 존 밖 맞힘, 존 안 파울(맞힘 중), 존 밖 파울, 존 안 루킹 스트라이크(스윙 안 한 공 중), 존 밖 루킹 스트라이크] */
+  split: number[][];
+  /** 구위 1이 존 밖 스윙 로짓을 움직이는 크기 */
+  alpha: number;
+  /** 결과 기록으로 짐작하는 적극성 [상수, 삼진 로짓 차, 볼넷 로짓 차, 파워 차, 컨택 차] */
+  aggFormula: number[];
+  /** 능력별 짐작 쪽으로 당기는 공 수 (존 안·밖 스윙, 맞히기는 스윙, 2S 대처는 2스트라이크 스윙, 끈질김·투구 효율은 맞힘, 제구는 공, 구위는 상대 스윙) */
+  regress: { swIn: number; swOut: number; con: number; two: number; tough: number; ctl: number; stuff: number; eff: number };
+  /** 등급 눈금 */
+  grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -252,13 +329,21 @@ export interface EngineParams {
    * 2026-10-22부터 하드힛 구장 표(2022~2025, 전체·좌타·우타)에 있는 구장은 사건별 배율(meta.parkEvents)을 쓰고, 이 지수는 표에 없는
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
-  park: { hitExp: number; hrExp: number };
+  park: {
+    hitExp: number;
+    hrExp: number;
+    /** 사건별 득점 가치: 그 사건이 1개 더 날 때 느는 득점 (tools/park_run_value.ts). 사건별 배율이 내는 득점 계수를 셀 때만 쓴다 (park.ts runFactorOf) */
+    runValue: { s1: number; d2: number; t3: number; hr: number };
+    specFit: ParkSpecFit;
+  };
   /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (엔진 2 4단계) */
   fatiguePerPitch: number;
   /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
   fatigueMax: number;
   /** 선수별 P/PA(리그 대비 비율)를 1 쪽으로 당기는 가상 타석 수 */
   ppaRegress: number;
+  /** 볼카운트 사슬 능력 (능력치 v2 16-1, plate.ts) */
+  plate: PlateParams;
   /** AI 감독의 투구 수 기준 = 그 시즌 리그 평균 선발·구원의 한계 투구 수 × 이 배율 (manager.ts managerNorms) */
   planScale: { starter: number; relief: number; earlyRelief: number; spread: number };
   /** 볼카운트 사슬이 없는 해결기(B0)일 때 타석당 투구 수 (임시값, 2023~2025 리그 3.9구) */
@@ -505,13 +590,70 @@ export const DEFAULT_PARAMS: EngineParams = {
   platoon: 0.028,
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
-  park: { hitExp: 0.4, hrExp: 1.2 },
+  park: {
+    hitExp: 0.4,
+    hrExp: 1.2,
+    // build_data.py PARK_RUN_VALUE와 같은 값 (tools/park_run_value.ts, 2017·2021·2025 × 16시드 합침, 2026-10-24 구장 개발 8:
+    // s1 0.627±0.013 · d2 0.875±0.055 · t3 0.874±0.178 · hr 1.394±0.112). 3루타는 흔들림이 커서 2루타 값 (임시값, 잰 값과 거의 같다)
+    runValue: { s1: 0.63, d2: 0.88, t3: 0.88, hr: 1.39 },
+    // 자리값 (P4 reports/park-specs-fit.md, 하드힛 구성표 9곳): 평균 거리 식. 한 구장 빼고 맞히기 오차가 중립보다 커서
+    // (홈런 log 0.350 대 0.255, (2루타 + 3루타) 0.132 대 0.088) 오차가 가장 작은 당김은 0 (= 중립)이지만, 사용자 결정 15
+    // (2026-10-24, 기획안 4.3)로 옛 구장마다 다른 맛을 남기려고 C안 짐작을 그대로 쓴다: w 0.5 (임시값, w 0.5의 홈런 오차 0.302).
+    // 범위는 표본 최소~최대 (높이는 0.5m 단위로 2.4 → 2.5)
+    specFit: {
+      hr: [3.2501, -0.0308],
+      xb: [-0.5575, 0.0055],
+      w: 0.5,
+      // 좌우타 홈런 55~149: 하드힛 좌우 표 최소(잠실 좌타)~최대(라팍 우타) (기획안 4.2-5, P5)
+      clamp: { hr: [70, 147], xb: [86, 122], f: [0.886, 1.126], side: [55, 149] },
+      // 임시값 (기획안 6.2): 1m당 홈런 −4%·(2루타 + 3루타) +3%, 기준 3.4m = P4 높이가 있는 7곳 평균. P4 잰 값(−0.090/m·+0.062/m)은 사직 한 곳이 끌어 쓰지 않음
+      height: { base: 3.4, hr: -0.04, xb: 0.03 },
+      // 임시값 (기획안 6.2-3): 좌우 거리가 다른 구장이 하나뿐이라 잴 수 없었다. 좌타·우타 타석 비 대신 같은 폭으로 올리고 내린다
+      asym: { perM: 0.02, max: 0.08 },
+      range: { side: [95, 101], center: [120, 125], height: [2.5, 6] },
+      // 임시값 (사용자 결정 2026-10-24, 기획안 10장 물음 1 = B): 실측 범위 끝(홈런 147·70, 2루타+3루타 86·122)을 고르는 범위 끝에 댄다
+      newPark: { hr: [147, 70], xb: [86, 122] },
+    },
+  },
   // 한계 투구 수를 넘기면 능력이 확 꺾인다: 5구당 약 10% (사용자 결정 2026-10-22, 엔진 1은 타자 1명당 0.012 = 공 1개당 약 0.003)
   fatiguePerPitch: 0.02,
   // 임시값 (2026-10-22 사용자 승인): 30구 넘김에서 멈춘다 (엔진 1은 0.3)
   fatigueMax: 0.6,
   // 임시값: 0·50·150을 재 보아 차이가 표본 흔들림 안이었다 (2025 × 4시즌, 실제 300타자 이상 투수 ±0.10구 안 45~47%). 직전 시즌으로 그 해를 맞히는 한계가 더 크다
   ppaRegress: 50,
+  // 볼카운트 사슬 능력 (능력치 v2 16-1): tools/fit_plate_estimate.ts가 2023~2025 투구 단위 자료(data-src/pbp_derived/count_zone·batter_plate·pitcher_plate)로 낸 측정값
+  // (2026-10-24, 보고 reports/plate-estimate.md). split = 칸마다 리그 [존 비율, 존 안·밖 스윙, 존 안·밖 맞힘, 존 안·밖 파울, 존 안·밖 루킹 스트라이크],
+  // alpha = 구위의 존 밖 유인 (투수 존 밖 스윙 로짓 차를 구위·제구로 회귀한 구위 계수), aggFormula = 2022년 이전 적극성 짐작 식 (R² 0.60),
+  // regress = 해 사이 공분산으로 잰 당김 공 수, grades = 2023~2025 규정타석 타자·200타자 투수 한 시즌 값의 중앙·중간폭과 볼록 a/b (바닥 0.1, 결정 16·21)
+  plate: {
+    split: [
+      [0.52605, 0.39567, 0.1292, 0.83503, 0.52621, 0.45995, 0.55149, 0.94095, 0.05244], // 0-0
+      [0.45533, 0.70033, 0.25007, 0.85344, 0.56133, 0.46617, 0.55849, 0.88082, 0.03063], // 0-1
+      [0.31143, 0.86343, 0.31708, 0.87116, 0.6274, 0.48404, 0.5583, 0.81792, 0.01159], // 0-2
+      [0.55513, 0.56484, 0.20093, 0.8448, 0.55904, 0.46691, 0.59447, 0.9359, 0.05521], // 1-0
+      [0.51361, 0.74698, 0.28159, 0.8484, 0.59138, 0.46527, 0.56235, 0.8921, 0.03605], // 1-1
+      [0.39035, 0.90063, 0.40306, 0.87095, 0.64834, 0.47815, 0.56679, 0.80687, 0.01468], // 1-2
+      [0.58905, 0.48387, 0.16717, 0.86545, 0.60685, 0.45289, 0.58727, 0.94932, 0.06366], // 2-0
+      [0.56457, 0.77218, 0.2967, 0.86443, 0.64246, 0.4673, 0.57484, 0.90408, 0.04206], // 2-1
+      [0.4859, 0.91816, 0.46637, 0.87714, 0.66865, 0.47078, 0.56716, 0.81903, 0.01609], // 2-2
+      [0.59664, 0.06238, 0.01877, 0.87586, 0.62712, 0.42913, 0.56757, 0.96972, 0.08106], // 3-0
+      [0.60046, 0.63811, 0.21884, 0.8908, 0.65989, 0.45027, 0.60433, 0.93127, 0.0567], // 3-1
+      [0.56202, 0.91574, 0.45805, 0.88297, 0.69897, 0.45562, 0.5827, 0.83948, 0.02317], // 3-2
+    ],
+    alpha: 0.209,
+    aggFormula: [-0.0297, 0.0122, -0.5357, 0.3956, 1.3251],
+    regress: { swIn: 73, swOut: 75, con: 41, two: 742, tough: 215, ctl: 311, stuff: 235, eff: 367 },
+    grades: {
+      agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
+      eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
+      con: { mid: 0.2224, half: 0.3851, a: 0.3, b: 0.1 },
+      two: { mid: 0.0143, half: 0.1279, a: 0.1, b: 0.1 },
+      tough: { mid: -0.0389, half: 0.148, a: 0.1, b: 0.25 },
+      ctl: { mid: 0.005, half: 0.1397, a: 0.1, b: 0.1 },
+      stuff: { mid: 0.0005, half: 0.2074, a: 0.1, b: 0.25 },
+      eff: { mid: -0.006, half: 0.1524, a: 0.1, b: 0.1 },
+    },
+  },
   pitchesPerPaDefault: 3.9,
   // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
   // 기준 × 이 값까지 맡긴다 (임시값 (2026-10-22 사용자 승인), 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다
@@ -590,6 +732,22 @@ export const DEFAULT_PARAMS: EngineParams = {
       air: [{ '3B': 0.45, SS: 0.35, C: 0.2 }, { SS: 0.35, '2B': 0.35, P: 0.1, C: 0.2 }, { '1B': 0.45, '2B': 0.35, C: 0.2 }],
       outfield: [{ LF: 0.75, CF: 0.25 }, { CF: 1 }, { RF: 0.75, CF: 0.25 }],
     },
+    // 능력치 v2 16-2 타구각 (기획안 10.2·11.3 결정 14): 구간 경계·두 덩어리 38% N(−12°, 10°) + 62% N(29°, 12°)는 2025년 엔진 표에 맞춘 임시값.
+    // 퍼짐·주력·장타 몫 크기는 모두 임시값 (contactSd 0.14는 2026 시작 월드 가중 타석 300 넘는 타자 131명의 정타 로짓 표준편차 0.138, 측정)
+    angle: {
+      cuts: [10, 25, 35, 50],
+      ground: [-12, 10],
+      air: [29, 12],
+      groundShare: 0.38,
+      contactSpread: 0.1,
+      contactSd: 0.14,
+      spreadMin: 0.8,
+      spreadMax: 1.2,
+      tendencyTighten: 0.1,
+      tendencyFull: 0.8,
+      speedGb: 0.4,
+      powerXbh: 0.5,
+    },
   },
   // 아래 chainShapeByYear 세 해(2023~2025 맞춘 모양)를 칸마다 실제 공 수로 가중 평균. 스트라이크 = 루킹 + 헛스윙 + 번트 헛스윙
   // (+ 2스트라이크 번트 파울), 파울 = 파울 + 2스트라이크 전 번트 파울. 그 해 모양(chainShapeByYear)이 없는 해(2022년 이전, 2026년 이후)에 쓴다 (임시값: 그 시대 카운트 자료 없음.
@@ -656,8 +814,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     ],
   },
   // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.478·0.95. 병살은 2012·2019가 낮고 2023~2025가 높아 다섯 해 가운데로)
-  doublePlay: 0.478,
-  sacFly: 0.95,
+  // 능력치 v2 16-2 타구각 갈래에서 validate 2025·2019·2012 × 100의 병살 +1.2%·희생플라이 −1.4%(세 해 평균 변화)만큼 되돌림 (0.478·0.95 → 0.472·0.964)
+  doublePlay: 0.472,
+  sacFly: 0.964,
   groundOutScores: 0.58,
 
   firstToThirdOnSingle: 0.4,

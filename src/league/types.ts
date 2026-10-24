@@ -159,8 +159,9 @@ export interface Military {
   returnDay?: number;
   /** 복무 형태 (careers.ts ServiceKind): unit = 군 야구단(상무·경찰), active = 현역, reserve = 보충역. 없으면 unit (예전 저장·시작 자료) */
   kind?: 'unit' | 'active' | 'reserve';
-  /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), estimate = 나이·1군 기록 공백으로 짐작 */
-  basis?: 'record' | 'estimate';
+  /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), wiki = 위키백과·나무위키 병역 칸(military.json의 src 'wiki'),
+   *  estimate = 나이·1군 기록 공백으로 짐작 */
+  basis?: 'record' | 'wiki' | 'estimate';
   /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달'). 군 야구단 복무 중이면 '상무'·'경찰' */
   note?: string;
 }
@@ -246,6 +247,10 @@ export interface LeagueState {
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
+  /** 수비 영점 m (능력치 v2 16-3, 13.6): 시작 때 한 번 재고 장기 진행 내내 고정. 없으면 예전 수비 (영점 50) */
+  defZero?: number;
+  /** 가상 선수 수비 근거 몫 B 분포 (16.4 가, World.defPool). 있으면 가상 선수 수비를 v2 길(fielding.ts virtualDefense)로 만든다 */
+  defPool?: number[];
   /** 은퇴한 선수 (M6) */
   retired?: RetiredRecord[];
   // ---- M7 (없으면 기본값. M6 이전 저장 호환)

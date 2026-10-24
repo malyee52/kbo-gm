@@ -294,8 +294,129 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 있으면 월드의 수비를 능력치 v2 식으로 만든다 (src/engine/fielding.ts, 16-3). 없으면 예전 추정 */
+  defense?: DefenseData;
+  /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
+  pitches?: PitchData;
+  /** 선수별 볼카운트 사슬 실측 (plate.json, 능력치 v2 16-1). 없으면 사슬 능력을 결과 기록으로 짐작한다 */
+  plate?: PlateData;
+  /** 실제 구장 제원 기간과 구단 계보별 주 구장 (parks.json, 구장효과 기획안 7.1·7.2). league/ballparks.ts가 구장 이름·좌석·돔·이전 해를 읽는다 (경기 배율은 아직 meta.parkFactors·parkEvents만). 없으면 ballparks.ts의 코드 안 표 */
+  parks?: ParkData;
   /** 연도별 정규시즌 일정 규칙 (schedule.json, data-src/일정규칙.csv, 일정 개편 기획안 2장). 한 해 규칙은 data/schedule.ts의 scheduleRule로 읽는다 */
   schedule?: ScheduleData;
+}
+
+/**
+ * parks.json (tools/build_data.py build_parks ← data-src/구장.csv · 구장_사용.csv, 나무위키 덤프 가공값).
+ * specs: 구장 × 제원 기간. 펜스 거리·높이가 바뀐 해마다 행이 나뉜다. use: 구단 계보 × 구장 × 기간 (제2구장 행은 없다).
+ */
+export interface ParkData {
+  version: number;
+  specs: ParkSpec[];
+  use: ParkUse[];
+}
+
+export interface ParkSpec {
+  /** 구장 ID (이름이 바뀌어도 같은 구장이면 같다) */
+  id: string;
+  /** 그 기간의 이름 */
+  name: string;
+  city: string;
+  from: number;
+  /** null이면 지금까지 */
+  to: number | null;
+  /** 앞 행과 다른 것: 없음 = 좌석·이름·잔디만, 펜스 = 펜스 거리·높이만, 리모델링 = 좌석·지붕·그라운드까지 큰 공사 (결정 14) */
+  change: '없음' | '펜스' | '리모델링';
+  /** 값이 있으면 그 구단 홈 경기에만 쓰는 제원 (실제 역사의 가벽, 잠실 X-존). null이면 그 구장을 쓰는 모든 구단 */
+  franchise: string | null;
+  seats: number | null;
+  /** 펜스 거리 (m): 좌·좌중·중·우중·우. 빈 칸 null */
+  fence: { l: number | null; lc: number | null; c: number | null; rc: number | null; r: number | null };
+  /** 펜스 높이 (m): 좌우·중앙 */
+  height: { lr: number | null; c: number | null };
+  turf: { infield: string | null; outfield: string | null };
+  dome: boolean;
+  source: string;
+  /** '출처 확인' | '미확인' */
+  confirmed: string;
+  note: string;
+}
+
+export interface ParkUse {
+  franchise: string;
+  park: string;
+  from: number;
+  to: number | null;
+  /** 주 = 주 구장, 계획 = 아직 열지 않은 실제 계획 */
+  kind: '주' | '계획';
+  source: string;
+  confirmed: string;
+  note: string;
+}
+
+/**
+ * pitches.json (tools/build_data.py build_pitches ← data-src/구종.csv · 위키_구종.csv).
+ * players: 선수 ID → 연도 → 구종(포심·투심·싱커·커터·슬라이더·스위퍼·커브·체인지업·포크·너클볼) → fields 순 값 (빈 칸 null).
+ * RV/100은 음수가 투수에게 좋다. 원래 숫자는 화면에 내지 않는다 (가공값 원칙, 등급과 스킬 판정 재료).
+ */
+export interface PitchData {
+  version: number;
+  /** 값의 순서: speed(km/h), vmov·hmov(무브 cm), rel(릴리스 높이 cm), drop(낙차 °), usage(사용률 %), n(투구수), rv(RV/100) */
+  fields: string[];
+  from: number;
+  to: number;
+  players: Record<string, Record<string, Record<string, (number | null)[]>>>;
+  prior: PitchPrior;
+  wiki: { names: string[]; players: Record<string, WikiPitcher> };
+}
+
+/** 기획안 15.5의 측정 표 (빌드가 data-src/구종.csv에서 다시 낸다) */
+export interface PitchPrior {
+  /** 구종 수 k → 투수·시즌 수 n과 사용률 순위별 평균 몫 s (%) */
+  share: Record<string, { n: number; s: number[] }>;
+  /** 연도 → 그 해 포심 평균 구속 (투수·시즌 단순 평균) */
+  fbSpeed: Record<string, number>;
+  /** 구종 → [같은 투수·시즌 포심과의 구속 차이 평균, 표준편차, 행 수] */
+  speedDiff: Record<string, [number, number, number]>;
+  rv: {
+    /** 등급 표의 기준 행: 투구수 이만큼 이상 */
+    minN: number;
+    baseRows: Record<string, number>;
+    /** 표가 없는 구종 → 빌릴 구종 (스위퍼 → 슬라이더, 싱커 → 투심) */
+    borrow: Record<string, string>;
+    /** 구종 → med: 연도별 중앙값(그 해 기준 행 30 이상) + all, c: 정렬한 (RV − 중앙값) */
+    tables: Record<string, { med: Record<string, number>; c: number[] }>;
+  };
+}
+
+/** 위키 구종 목록 한 투수: p = [표준 구종, 원문 색인(wiki.names), 주무기 0/1, 시작, 끝(null = 커리어 전체)] (위키 순서), top = 최고 구속 */
+export interface WikiPitcher {
+  p: [string, number, number, number | null, number | null][];
+  top: number | null;
+}
+
+/**
+ * defense.json (tools/build_data.py build_defense ← data-src/수비이닝.csv · 수비평판.csv).
+ * players: 선수 ID → 연도 → 그 해 수비. rep: 선수 ID → 평판 [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산)
+ */
+export interface DefenseData {
+  version: number;
+  /** p 값의 순서: g, gs, outs(이닝 × 3), e, po, a, dp, sb, cs, pb */
+  fields: string[];
+  /** 수비 기록이 있는 해 범위 (2001~2026) */
+  from: number;
+  to: number;
+  players: Record<string, Record<string, DefenseYear>>;
+  rep: Record<string, [string, number, number | null, number | null][]>;
+}
+
+/** 한 선수의 한 해 수비 (여러 구단을 거쳤으면 합친 값) */
+export interface DefenseYear {
+  /** 자리(C·1B·2B·3B·SS·LF·CF·RF) → fields 순 값. 수비 출장이 없으면 없다 */
+  p?: Record<string, number[]>;
+  /** 타석, 수비 없는 타석 (시즌 타석 × 수비 없는 경기 ÷ 시즌 경기의 근사) */
+  pa: number;
+  nd: number;
 }
 
 /** 그 해 안의 날짜 'MM-DD' */
@@ -409,6 +530,16 @@ export interface BallYear {
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
+/**
+ * plate.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → 건수 (tools/build_data.py build_plate ← tools/pbp_plate.py, 2023~).
+ * 타자 [존 안 공, 존 안 스윙, 기대, 존 밖 공, 존 밖 스윙, 기대, 스윙, 맞힘, 기대, 2스트라이크 스윙, 맞힘, 기대, 맞힘, 파울, 기대],
+ * 투수 [공, 존 안 공, 기대, 스윙, 맞힘, 기대, 맞힘, 파울, 기대]. 기대 = 같은 칸·존에서 리그 평균이 냈을 값
+ */
+export interface PlateData {
+  bat: Record<string, Record<string, number[]>>;
+  pit: Record<string, Record<string, number[]>>;
+}
+
 export interface PpaData {
   bat: Record<string, Record<string, [number, number]>>;
   pit: Record<string, Record<string, [number, number]>>;
@@ -465,10 +596,13 @@ export interface ManagerInfo {
 
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
 export interface MilitaryRecord {
-  /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름) */
-  served?: { unit: string; end?: number };
-  /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도 */
+  /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름).
+   *  src가 wiki면 위키 병역 칸: unit '현역'·'보충역'도 있고 kind로 복무 형태를 알린다 (없으면 군 야구단), end는 글에 적힌 마지막 해 */
+  served?: { unit: string; end?: number; kind?: 'active' | 'reserve' };
+  /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도. src가 wiki면 예술체육요원·병역 면제 (해를 모르면 첫 1군 시즌) */
   exempt?: { year: number; event: string };
+  /** 'wiki' = 위 실제 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (2026-10-23) */
+  src?: 'wiki';
 }
 
 /** 파일에 저장된 시즌 형태. 기록 행은 필드 목록 + 배열로 압축돼 있다. */

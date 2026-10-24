@@ -116,7 +116,7 @@ export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}
     lengthFor,
     resolve(r, rng) {
       const ev = drawEvent(r, rng);
-      return { ev, pitches: samplePitches(chainFor(r), END_OF[ev], rng, opts.observe) };
+      return { ev, pitches: samplePitches(r.chain ?? chainFor(r), END_OF[ev], rng, opts.observe) };
     },
     // 번트 타석(희생번트·번트 실패)의 공 수: 리그 모양 사슬에서 맞힘으로 끝나는 경로 (임시값, 번트 타석 투구 수 자료 없음)
     inPlayPitches: (rng) => samplePitches(league, End.X, rng, opts.observe),

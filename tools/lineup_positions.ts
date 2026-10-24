@@ -40,7 +40,7 @@ for (const year of years) {
     refreshActive(ts, g.world, states, 0);
     for (const p of ts.hitters) {
       hitters++;
-      if (playablePositions(p.bat?.def).length === 1) single++;
+      if (playablePositions(p.bat).length === 1) single++;
     }
     for (const { p, slot } of assignSlots(ts.hitters)) {
       if (slot === 'DH') continue;
@@ -53,7 +53,7 @@ for (const year of years) {
       else if (b) offHh++;
       const kind = b ? kindOf(slot, p.pos, real!) : '';
       if (kind) kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
-      if (a || b) odd.push(`| ${ts.team.name} | ${p.name} | ${slot} | ${defenseGrade(defenseAt(p, slot))} | ${p.pos ?? '-'} | ${real ?? '모름'} | ${kind} | ${playablePositions(p.bat?.def).join(' ')} |`);
+      if (a || b) odd.push(`| ${ts.team.name} | ${p.name} | ${slot} | ${defenseGrade(defenseAt(p, slot))} | ${p.pos ?? '-'} | ${real ?? '모름'} | ${kind} | ${playablePositions(p.bat).join(' ')} |`);
     }
   }
   emit(`## ${year}년 개막 라인업`);

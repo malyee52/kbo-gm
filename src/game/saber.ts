@@ -1,5 +1,5 @@
 // 세이버메트릭스 기록: 그 시즌 리그 전체 기록을 기준으로 계산한다 (시뮬레이션 기록 기준).
-// 구장 효과가 없는 엔진이라 wRC+는 구장 보정을 하지 않는다. 고의4구 기록이 없어 볼넷 전체를 쓴다.
+// wRC+는 구장 보정을 한다 (구장효과 기획안 P2): 선수 소속 구단의 시즌 구장 계수 (1 + 홈 구장 득점 계수) / 2를 화면이 넘긴다 (game/parkView.ts). 고의4구 기록이 없어 볼넷 전체를 쓴다.
 
 import { LINEAR_WEIGHTS, type BatLine, type PitLine } from '../engine';
 import { WOBA_SCALE } from '../ai/value';
@@ -83,12 +83,15 @@ export const woba = (b: BatLine) => {
   return ratio(n, d);
 };
 
-/** wRC+: 100 = 리그 평균. (wRAA/PA + 리그 타석당 득점) ÷ 리그 타석당 득점 × 100 */
-export function wrcPlus(b: BatLine, lg: LeagueBase): number {
+/**
+ * wRC+: 100 = 리그 평균. (wRAA/PA + 리그 타석당 득점 + (1 − 시즌 구장 계수) × 리그 타석당 득점) ÷ 리그 타석당 득점 × 100.
+ * pf = 시즌 구장 계수 (1 = 중립, game/parkView.ts seasonParkFactor). 타자 구장(pf > 1)에서 낸 기록은 깎이고 투수 구장은 오른다
+ */
+export function wrcPlus(b: BatLine, lg: LeagueBase, pf = 1): number {
   const w = woba(b);
   if (!Number.isFinite(w) || b.pa === 0 || lg.runsPerPa === 0) return NaN;
   const wraaPerPa = (w - lg.woba) / WOBA_SCALE;
-  return ((wraaPerPa + lg.runsPerPa) / lg.runsPerPa) * 100;
+  return ((wraaPerPa + lg.runsPerPa + (1 - pf) * lg.runsPerPa) / lg.runsPerPa) * 100;
 }
 
 /** wRAA: 리그 평균 타자보다 더 낸 득점 */

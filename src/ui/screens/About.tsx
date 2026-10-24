@@ -39,10 +39,27 @@ export function AboutContent({ league, year }: { league?: LeagueState; year?: nu
             {' '}<A href="https://en.wikipedia.org/wiki/KBO_League">KBO League</A>)와 언론 보도(서울신문, OSEN, 뉴스서울, 뉴시스, 데일리안, 경향신문, 스포츠경향, 매일신문 등)로 확인한 값.
             확인하지 못한 값은 "임시값"으로 두었습니다.
           </li>
-          <li>병역: 2026 선수 프로필 경력의 상무·경찰 복무와 국제대회 금메달 대표팀 명단(위키백과 메달리스트 표, 2026 아시안게임은 언론 보도). 자료에 없는 현역·사회복무는 나이와 1군 기록 공백으로 짐작합니다.</li>
+          <li>
+            병역: 2026 선수 프로필 경력의 상무·경찰 복무와 국제대회 금메달 대표팀 명단(위키백과 메달리스트 표, 2026 아시안게임은 언론 보도).
+            그 밖의 선수는 아래 위키 문서의 병역 칸(현역·사회복무 등)을 쓰고, 그것도 없으면 나이와 1군 기록 공백으로 짐작합니다.
+          </li>
+          <li>
+            선수 인적 사항(생년·투타·세부 포지션·병역)과 시즌 기록의 빈 칸 일부: 선수 문서에서 사실 값만 뽑아 위 자료가 비어 있는 칸만 채웠습니다
+            (기록이 다른 칸은 바꾸지 않았습니다).
+            {' '}<A href="https://www.wikidata.org">위키데이터</A> (<A href="https://creativecommons.org/publicdomain/zero/1.0/deed.ko">CC0 1.0</A>),
+            {' '}<A href="https://ko.wikipedia.org">한국어 위키백과</A> (<A href="https://creativecommons.org/licenses/by-sa/4.0/deed.ko">CC BY-SA 4.0</A>, 저작자는 각 문서의 기여자),
+            {' '}<A href="https://namu.wiki">나무위키</A> (<A href="https://creativecommons.org/licenses/by-nc-sa/2.0/kr/">CC BY-NC-SA 2.0 KR</A>, 저작권은 각 문서 기여자에게 있음).
+            나무위키는 2026년 8월 크롤링본(<A href="https://archive.org/details/namuwiki-data-dump-20260829">archive.org namuwiki-data-dump-20260829</A>)을 썼고,
+            나무위키에서 온 값은 같은 CC BY-NC-SA 2.0 KR 조건입니다. 쓴 문서 제목·주소·판은 저장소의 data-src/wiki/출처.csv에 있습니다.
+          </li>
+          <li>
+            구장 제원(펜스 거리·높이, 좌석, 잔디, 쓴 기간): 나무위키 구장 문서 (<A href="https://creativecommons.org/licenses/by-nc-sa/2.0/kr/">CC BY-NC-SA 2.0 KR</A>,
+            저작권은 각 문서 기여자에게 있음, 위 2026년 8월 크롤링본). 문서 이름은 저장소의 data-src/구장.csv·구장_사용.csv 출처 열에 있습니다.
+          </li>
           <li>감독: 시즌별 개막 감독과 대행을 공개 자료로 정리한 표.</li>
           <li>
-            기록 일부: 하드힛(<A href="https://hardhit.ai">https://hardhit.ai</A>), 비상업적 이용. 2003년 이후 타자 도루·도루실패·병살타 빈 값을 채우는 데 썼습니다.
+            기록 일부: 하드힛(<A href="https://hardhit.ai">https://hardhit.ai</A>), 비상업적 이용. 2003년 이후 타자 도루·도루실패·병살타 빈 값을 채우고,
+            2015년 이후 구단별 구장 효과(파크팩터·구장 구성 지수)를 만드는 데 썼습니다.
           </li>
           <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력, 잠재력은 기록에서 추정한 값입니다.</li>
         </ul>

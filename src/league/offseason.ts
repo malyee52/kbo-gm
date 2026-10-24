@@ -14,7 +14,7 @@ import { envFrom } from './war';
 import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
-  ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, makeDefense, penTrustOf, Rng, traitsOf,
+  ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, penTrustOf, Rng, traitsOf,
   type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
@@ -40,7 +40,7 @@ import { settingsOf } from './difficulty';
 import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, postingFee, returnDecision, sendAbroad } from './overseas';
 import { addArticle } from './articles';
 import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
-import { isFuturesTeam, worldFromLeague } from './world';
+import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
@@ -493,8 +493,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     }
     // 수비 나이 변화 (수비 정보가 없던 저장은 여기서 만든다)
     if (p.bat) {
-      const def = p.bat.def ?? sp.bat?.def ?? makeDefense(p.id, p.pos, [], p.bat.speed, ageIn(p, year));
-      p.bat = { ...p.bat, def: ageDefense(def, ageIn(p, year + 1)) };
+      const made = p.bat.def ?? sp.bat?.def ? undefined : leagueDefense(league, p.id, p.pos, p.bat.speed, ageIn(p, year));
+      const def = p.bat.def ?? sp.bat?.def ?? made!.def!;
+      p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
     }
   }
   // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
@@ -2878,7 +2879,7 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     service: 0, faCount: 0, lastFaYear: null, lastSaves: 0, history: [],
     ...(spec.foreign ? {} : { military: { state: 'pending' as const } }),
   };
-  if (p.bat) p.bat.def = makeDefense(p.id, pos, [], p.bat.speed, spec.age);
+  if (p.bat) Object.assign(p.bat, leagueDefense(league, p.id, pos, p.bat.speed, spec.age));
   // 투구 유형 (2026-10-22): 실존은 자료 그대로, 가상 국내 투수는 실제 비율로. 공유 난수 흐름을 바꾸지 않게 선수별 시드로 정한다.
   // 언더·사이드는 삼진·볼넷을 함께 낮추고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
   const underhand = spec.real ? spec.underhand === true

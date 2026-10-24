@@ -1,8 +1,9 @@
-// 수비 포지션·능력치 (2026-10-13 사용자 "수비 능력치·포지션이 실제와 다르게 작동"): 본 자리가 가장 높고, 수비상 수상자는 정상급,
-// 지명타자도 커리어 수비 자리가 있고, 직접 고치면 경기·저장·재현에 들어간다
+// 수비 포지션·능력치 (2026-10-13 사용자 "수비 능력치·포지션이 실제와 다르게 작동"; 능력치 v2 16-3에서 새 식으로): 본 자리는 수비 가능,
+// 수비상 수상자는 정상급, 지명타자도 수비 본 자리가 있고, 직접 고치면 경기·저장·재현에 들어간다
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, defenseAt, defenseGrade, fieldPosOf, FIELD_POS } from '../src/engine';
+import { fieldYears, homeOf } from '../src/engine/fielding';
+import { DEFAULT_PARAMS, defenseAt, defenseGrade, FIELD_POS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { rookiePosition } from '../src/league/offseason';
 
@@ -17,15 +18,13 @@ beforeAll(() => {
 const hitter = (name: string) => g.world.players.find((p) => p.name === name && !p.isPitcher)!;
 
 describe('수비 포지션·능력치', () => {
-  it('본 자리가 가장 높다 (예전에는 거의 모두 1루가 가장 높았다)', () => {
-    let ok = 0;
-    let n = 0;
+  it('능력치 v2: 본 자리는 늘 수비 가능, 안 해 본 자리는 등급 20 (16-3, 13.2)', () => {
     for (const p of g.world.players.filter((x) => !x.isPitcher && x.pos && x.pos !== 'DH' && x.bat?.def)) {
-      const own = defenseAt(p, fieldPosOf(p.pos));
-      n++;
-      if (FIELD_POS.every((q) => defenseAt(p, q) <= own + 1e-9)) ok++;
+      const home = homeOf(p.pos)!;
+      expect(p.bat!.playable, p.name).toContain(home);
+      const years = fieldYears(store, p.id, 2026);
+      for (const q of FIELD_POS) if (!years.some((y) => (y.inn?.[q] ?? 0) > 0) && !p.bat!.playable!.includes(q)) expect(defenseGrade(defenseAt(p, q)), `${p.name} ${q}`).toBe(20);
     }
-    expect(ok / n).toBeGreaterThan(0.95);
   });
 
   it('KBO 수비상 수상자는 그 자리 정상급 (등급 65 이상)', () => {
@@ -36,11 +35,15 @@ describe('수비 포지션·능력치', () => {
     }
   });
 
-  it('지명타자도 커리어에 맡은 수비 자리가 있다', () => {
-    // 2026-10-22 하드힛 주 포지션 반영: 하드힛 주 포지션에는 지명타자가 없어 강백호도 수비 자리(포수·1루·우익수 이력)로 잡힌다
+  it('지명타자도 수비 본 자리가 있다 (강백호 2026: 화면 DH, 1B·RF 수비 가능, 비상 포수, LF 불가)', () => {
+    // 능력치 v2 (12.2·14.2): 수비 없는 타석 몫 0.76이라 화면 DH, 수비 본 자리는 커리어 최다 1B. 포수 3시즌 202이닝은 비상 포수
     const p = hitter('강백호');
-    expect(p.pos).not.toBe('DH');
-    expect(defenseGrade(defenseAt(p, '1B'))).toBeGreaterThanOrEqual(40);
+    expect(p.pos).toBe('DH');
+    expect(p.bat!.playable).toEqual(expect.arrayContaining(['1B', 'RF']));
+    expect(p.bat!.playable).not.toContain('LF');
+    expect(p.bat!.playable).not.toContain('C');
+    expect(p.bat!.emC).toBe(true);
+    expect(defenseGrade(defenseAt(p, 'C'))).toBeLessThan(30);
   });
 
   it('직접 고치기: 경기에 들어가고 저장·재현이 같다', () => {

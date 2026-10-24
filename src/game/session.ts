@@ -17,7 +17,7 @@ import * as Off from '../league/offseason';
 import type { VoteChoice } from '../ai/vote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
-import { worldFromLeague } from '../league/world';
+import { leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
@@ -33,14 +33,14 @@ import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import { isNoGame, type BoxScore, type CommandChoice, type CommandRequest, type KnownSchedule, type Play, type PlanCancel } from '../engine';
+import { isNoGame, type BoxScore, type CommandChoice, type CommandRequest, type Fence, type KnownSchedule, type Play, type PlanCancel } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense } from '../engine';
+import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import {
@@ -72,7 +72,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame, type SeriesResult,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
-import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
+import { addFanEvent, FAN_LOSS, openWalls, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, recordSideNames, type AllStarRecord } from '../league/allstar';
 import { leagueNews, scheduleNews, scheduleNewsText } from '../league/scheduleNews';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
@@ -226,7 +226,7 @@ export type GameAction =
   | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
-  | { year: number; type: 'stadium'; id: string; size?: ParkSize; dome?: boolean; deal?: 'push' }
+  | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
   | { year: number; type: 'naming'; id: string }
   /** 감독 해임·선임 (managers.ts) */
@@ -391,7 +391,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'> & Partial<Pick<DataStore, 'parks'>>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -1246,9 +1246,15 @@ export class GameSession {
             lp.potential = pot;
             if (!slot.isPitcher) {
               // 주 포지션과 그 자리 기준 수비 (빈 자리 바탕의 수비를 그대로 쓰면 모든 자리가 유격수 기준이 됐다, 2026-10-13 푸홀스 보고)
-              const pos = op.pos === 'IF' ? '2B' : op.pos === 'OF' ? 'RF' : op.pos;
+              // 능력치 v2 (16.4 나): 묶음 포지션은 넓은 쪽 자리를 본 자리로 (IF → SS, OF → CF. 외야수가 CF·코너를 모두 맡게)
+              const v2 = !!this.league.defPool;
+              const pos = op.pos === 'IF' ? (v2 ? 'SS' : '2B') : op.pos === 'OF' ? (v2 ? 'CF' : 'RF') : op.pos;
               lp.pos = pos; slot.pos = pos;
-              if (lp.bat) lp.bat = { ...lp.bat, def: makeDefense(lp.id, pos, pos === 'DH' ? [] : [pos], lp.bat.speed, op.age) };
+              if (lp.bat) {
+                const { emC: _e, cArm: _c, playable: _p, ...rest } = lp.bat;
+                lp.bat = v2 ? { ...rest, ...leagueDefense(this.league, lp.id, pos, lp.bat.speed, op.age) }
+                  : { ...lp.bat, def: makeDefense(lp.id, pos, pos === 'DH' ? [] : [pos], lp.bat.speed, op.age) };
+              }
             }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
@@ -2795,6 +2801,7 @@ export class GameSession {
           delete L.campPlan;
         }
         twoWayNews.push(...openNaming(L, this.teamIdx)); // 구장 명명권 (league/naming.ts)
+        twoWayNews.push(...openWalls(L, this.teamIdx)); // 가벽 조립·해체 비용 (league/stadium.ts)
         // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
         for (const p of L.players) {
           if (!p.outsider) continue;
@@ -2873,7 +2880,7 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
-      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }, this.parkSource()); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
         if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
@@ -3485,8 +3492,13 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
-  orderStadium(id: string, park: { size?: ParkSize; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
-    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
+  /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
+  parkSource() {
+    return { parkFactors: this.store.meta.parkFactors, parkEvents: this.store.meta.parkEvents, parks: this.store.parks };
+  }
+  /** 공사 주문. 신구장·펜스 조정·가벽은 펜스 제원(fence, 구장효과 기획안 6장·6.7·6.8)을 고른다. size는 P6 전 조작 기록 호환용 (예시값 제원으로 읽는다) */
+  orderStadium(id: string, park: { size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
+    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.fence ? { fence: { l: park.fence.l, c: park.fence.c, r: park.fence.r, h: park.fence.h } } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
   }
   setCamp(pick: CampPick) { return this.dispatchOff({ year: this.year, type: 'camp', pick }); }
   /** 구장 명명권 제안 받기 (오프시즌) */
@@ -3670,11 +3682,13 @@ export class GameSession {
   private applyDefenseEdit(id: string, def: Defense): void {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
-    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def } };
+    // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
+    const edited = (p: FieldPos[] | undefined) => (p ? { playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined) } : {});
+    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable) };
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp?.bat) {
-        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def } };
+        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable) };
         if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
       }
     }

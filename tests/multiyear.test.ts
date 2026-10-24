@@ -175,7 +175,9 @@ describe('병역', () => {
 
   it('20대 실존 선수: 실제 자료(상무·경찰)가 없으면 기록이 1~2시즌 비었던 선수를 복무한 것으로 짐작한다', () => {
     const idx = careerIndex(store);
-    const { league } = createLeague(store, 2026, 'mil', NO_PILOT);
+    // 2026년은 20대 국내 선수 거의 모두에게 위키 병역 자료가 있어(2026-10-23) 짐작 경로를 보려면 위키 자료를 뺀다
+    const noWiki = { ...store, military: Object.fromEntries(Object.entries(store.military ?? {}).filter(([, r]) => r.src !== 'wiki')) };
+    const { league } = createLeague(noWiki, 2026, 'mil', NO_PILOT);
     const young = league.players.filter((p) => p.real && !p.foreign && p.birthYear && 2026 - p.birthYear < 29);
     const done = young.filter((p) => p.military?.state === 'done' && p.military.basis === 'estimate');
     const pending = young.filter((p) => p.military?.state === 'pending');
@@ -187,6 +189,20 @@ describe('병역', () => {
     for (const p of done.slice(0, 20)) {
       const years = [...new Set([...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].map((x) => x.year))].filter((y) => y < 2026).sort();
       expect(years.some((y, i) => i > 0 && y - years[i - 1] >= 2), p.name).toBe(true);
+    }
+  });
+
+  it('위키 병역 자료: 실제 자료가 없는 선수만 위키로 정하고, 근거를 wiki로 남긴다', () => {
+    const { league } = createLeague(store, 2026, 'mil-wiki', NO_PILOT);
+    const wiki = league.players.filter((p) => p.military?.basis === 'wiki');
+    expect(wiki.length).toBeGreaterThan(100);
+    for (const p of wiki) expect(store.military?.[p.id]?.src, p.name).toBe('wiki');
+    // 실제 자료(상무·경찰 프로필, 금메달 명단)가 있는 선수에게는 위키 자료를 더하지 않는다
+    for (const r of Object.values(store.military ?? {})) if (r.src === 'wiki') expect(r.served ?? r.exempt).toBeTruthy();
+    // 복무를 마친 위키 선수의 복무 끝 해는 시작 연도 전이다 (전역한 해에 1군 기록이 있으면 그 앞 해로 당긴다)
+    for (const p of wiki.filter((x) => x.military?.state === 'done')) {
+      const end = store.military?.[p.id]?.served?.end;
+      if (end !== undefined) expect(end, p.name).toBeLessThan(2026);
     }
   });
 

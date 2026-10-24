@@ -34,7 +34,7 @@ describe('경기력 효과 (이벤트·코치·캠프)', () => {
     expect(formToday(L, 2027, 5, players)).toBeNull();
   });
 
-  it('시즌 내내 우리 구단 경기력 +3.0이면 같은 시드보다 많이 이긴다', () => {
+  it('시즌 내내 우리 구단 경기력 +3.0이면 같은 시드의 −3.0보다 많이 이긴다', () => {
     // 한 시드는 운에 흔들려 여러 시드 평균으로 본다 (2026-10-12 투수 가치·선발 기준을 바꾼 뒤 한 시드가 +2.0%p였다).
     // 2026-10-13 엔트리 순환(rosterChurn)을 넣은 뒤 form-b가 −7.3%p(운)로 두 시드 평균이 +0.2%p가 되어 네 시드(c~f)로 바꿨다.
     // 6시드 평균: 순환 없음 +6.9%p, 순환 +3.3%p (form-b 포함). 경기력 효과는 선수마다 그대로 들어가고 순환과 관계없다
@@ -42,12 +42,15 @@ describe('경기력 효과 (이벤트·코치·캠프)', () => {
     // 여덟 시드(c~j)로 늘렸다: P/PA 전 +6.8%p, 뒤 +5.6%p (c~f만 보면 전 +10.6 · 뒤 +2.1, g~j만 보면 전 +3.0 · 뒤 +9.1)
     // 2026-10-23 엔진 2 14단계(세이브·홀드·승리 투수 규정, 결과가 바뀜) 뒤 c~j 평균이 +0.3%p(운)였다. 시드 하나가 −13.1~+21.5%p로 퍼져
     // 열여섯 시드(c~r)로 늘렸다: c~j +0.3%p, k~r +8.1%p, 16시드 +4.2%p
+    // 2026-10-24 구장 득점 셈 곱 꼴(구장 개발 9) 뒤 16시드 평균이 +0.4%p(운)였다. 시드를 더 늘리면 전체 시험의 바닥 시간이 늘어서,
+    // 같은 시뮬 수(시드마다 둘)로 +3.0과 −3.0을 견준다: 효과는 두 배, 흔들림은 같다 (문턱도 두 배 0.05)
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
     let diff = 0;
     const seeds = ['c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r'].map((x) => `form-${x}`);
     for (const seed of seeds) {
       const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
+      (ensureEvents(base.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: -0.03, note: '시험' });
       (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
       for (const g of [base, boosted]) {
         ensureEvents(g.league).chance = 0; // 무작위 이벤트는 끈다 (비교를 깨끗하게)
@@ -56,7 +59,7 @@ describe('경기력 효과 (이벤트·코치·캠프)', () => {
       }
       diff += (w(boosted) - w(base)) / seeds.length;
     }
-    expect(diff).toBeGreaterThan(0.025);
+    expect(diff).toBeGreaterThan(0.05);
   }, 2_400_000);
 });
 

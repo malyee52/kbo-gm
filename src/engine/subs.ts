@@ -1,6 +1,6 @@
 // AI 감독 경기 중 교체 (엔진 2 9단계, docs/경기엔진2_기획안.md 3.9): 대타, 대주자, 수비 재배치·대수비.
 // 모두 정해진 규칙이라 난수를 쓰지 않는다. 기준값은 params.sub (임시값)
-import { defenseAt } from './defense';
+import { defenseAt, fitPenalty } from './defense';
 import type { GameState, Side } from './state';
 import { fieldDefense, substitute } from './state';
 import { assignSlots, batRunsVs, type Slot } from './team';
@@ -11,8 +11,10 @@ const SEASON_INNINGS = 144 * 9;
 /** 한 시즌 타석 (타격 런 → 타석 하나 몫) */
 const SEASON_PA = 600;
 
-/** 포수를 맡을 수 있는 선수 (수비 가능 목록 기준, defense.ts playablePositions의 −5런) */
-const canCatch = (p: SimPlayer) => !p.isPitcher && defenseAt(p, 'C') >= -5;
+/** 포수를 맡을 수 있는 선수 (수비 가능 목록 기준: 능력치 v2는 익숙함이 다 찬 정규 포수, 예전 수비는 −5런) */
+const canCatch = (p: SimPlayer) => !p.isPitcher && (p.bat?.playable ? p.bat.playable.includes('C') : defenseAt(p, 'C') >= -5);
+/** 비상 포수 (14.2): 정규 포수가 없을 때만 */
+const emergencyCatcher = (p: SimPlayer) => !p.isPitcher && !!p.bat?.emC;
 
 /** 지금 벤치 (1군 야수 중 라인업에 없고 교체로 빠지지 않은 선수) */
 export function benchOf(side: Side): SimPlayer[] {
@@ -93,7 +95,9 @@ export function aiDefense(st: GameState, fld: Side, bat: Side): void {
     realignSlots(fld);
     const atC = fld.lineup.find((p) => fld.slots.get(p.idx) === 'C');
     if (atC && !canCatch(atC)) {
-      const c = benchOf(fld).filter(canCatch).sort((a, b) => defenseAt(b, 'C') - defenseAt(a, 'C'))[0];
+      const bench = benchOf(fld);
+      const fit = bench.some(canCatch) ? bench.filter(canCatch) : emergencyCatcher(atC) ? [] : bench.filter(emergencyCatcher);
+      const c = fit.sort((a, b) => defenseAt(b, 'C') - defenseAt(a, 'C'))[0];
       if (c) defSub(st, fld, atC, c, 'C');
     }
   }
@@ -106,6 +110,7 @@ export function aiDefense(st: GameState, fld: Side, bat: Side): void {
     const now = defenseAt(p, slot);
     for (const b of bench) {
       if (slot !== 'C' && canCatch(b) && bench.filter(canCatch).length <= 1) continue;
+      if (fitPenalty(b, slot) < 0) continue;
       const gain = defenseAt(b, slot) - now;
       if (gain >= sp.defGain && (!best || gain > best.gain)) best = { out: p, in: b, slot, gain };
     }
@@ -119,17 +124,17 @@ function defSub(st: GameState, side: Side, out: SimPlayer, inP: SimPlayer, slot:
   if (order < 0) return;
   substitute(side, order, inP, 'DEF');
   side.slots.set(inP.idx, slot);
-  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  Object.assign(side, fieldDefense(side.lineup, side.slots, side.defZero));
   st.ctx.bat[inP.idx].g++;
   st.note('DEF', inP.idx, st.fld.pitcher.p.idx, st.bat.runs);
 }
 
 /** 지금 9명의 수비 위치를 수비 런 합이 가장 큰 배정으로 (지명타자 자리 포함) */
 function realignSlots(side: Side): void {
-  const placed = assignSlots(side.lineup, undefined, (p, slot) => defenseAt(p, slot));
+  const placed = assignSlots(side.lineup, undefined, (p, slot) => defenseAt(p, slot) + fitPenalty(p, slot));
   if (placed.length !== side.lineup.length) return;
   side.slots = new Map(placed.map(({ p, slot }) => [p.idx, slot]));
-  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  Object.assign(side, fieldDefense(side.lineup, side.slots, side.defZero));
 }
 
 /**
@@ -141,11 +146,12 @@ export function replaceInjured(st: GameState, side: Side, p: SimPlayer): void {
   if (order < 0) return;
   const slot = side.slots.get(p.idx);
   const bench = benchOf(side);
-  const fit = slot === 'C' && bench.some(canCatch) ? bench.filter(canCatch) : bench.filter((b) => keepsCatcher(side, p, b));
+  const fit = slot === 'C' && bench.some(canCatch) ? bench.filter(canCatch)
+    : slot === 'C' && bench.some(emergencyCatcher) ? bench.filter(emergencyCatcher) : bench.filter((b) => keepsCatcher(side, p, b));
   let best: SimPlayer | null = null;
   let bestScore = -Infinity;
   for (const b of fit.length ? fit : bench) {
-    const score = b.value * 500 + (slot && slot !== 'DH' ? defenseAt(b, slot) : 0);
+    const score = b.value * 500 + (slot && slot !== 'DH' ? defenseAt(b, slot) + fitPenalty(b, slot) : 0);
     if (score > bestScore) { bestScore = score; best = b; }
   }
   if (!best) return;
@@ -153,7 +159,7 @@ export function replaceInjured(st: GameState, side: Side, p: SimPlayer): void {
   substitute(side, order, best, base >= 0 ? 'PR' : 'DEF');
   if (base >= 0) st.bases[base] = { ...st.bases[base]!, p: best };
   else if (slot) side.slots.set(best.idx, slot);
-  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  Object.assign(side, fieldDefense(side.lineup, side.slots, side.defZero));
   st.ctx.bat[best.idx].g++;
   st.note(base >= 0 ? 'PR' : 'DEF', best.idx, st.fld.pitcher.p.idx, st.bat.runs);
 }
