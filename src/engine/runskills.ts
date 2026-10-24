@@ -3,8 +3,10 @@
 // 월드를 만들 때마다 나이로 다시 내므로 커리어 중에도 곡선을 따르고, 저장 칸이 필요 없다 (훈련·성장 몫은 16-4).
 // 손잡이 값은 리그 대비라 월드마다 출장량 가중 평균 등급을 영점으로 뺀다 (applyRunSkills).
 // 도루 스타트·판단은 기록 성공률·시도율(sbPct·sbAtt)에 이미 들어 있어 0으로 둔다 (기록 밖 차이만 담는 손잡이).
+// 어깨(16-3d, 12.6)는 몸 묶음 나이 곡선 + 평판 글의 어깨 낱말 (시작 연도 전 시기만). 포수 도루 저지(cArm)는 따로 기록으로 잰다.
 
 import { normal } from './condition';
+import type { DefenseData } from '../data/types';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
 import type { BatSkill, PitSkill, SimPlayer } from './types';
@@ -26,14 +28,45 @@ export function bodyGrade(age: number | null): number {
   return 51 - 0.6 * (age - 30);
 }
 
-type BatKnob = 'runIQ' | 'bunting' | 'cBlock' | 'cFrame';
+/** 어깨 낱말 시기 무게: 시기 끝 + 3시즌까지 1, 그 뒤 해마다 × 0.7 (수비 평판과 같은 꼴, fielding.ts reputationWeight) */
+const ARM_FULL_YEARS = 3;
+const ARM_DECAY = 0.7;
+
+/**
+ * 평판 글의 어깨 낱말 → −1~1 (defense.json arm: [1 좋음 / −1 나쁨, 시기 시작, 시기 끝], 기획안 12.6·결정 28).
+ * 앞날 평판(시기 시작 ≥ 시작 연도)은 버리고(결정 29: 시작 능력은 직전 자료에서), 시기 없는 평판은 무게 1, 남은 줄은 무게로 평균한다.
+ * 무게가 1보다 작아도 평균이라 오래된 평판 하나만 있으면 그 값을 그대로 쓴다 (나이 곡선이 따로 내린다)
+ */
+export function armWord(entries: readonly (readonly [number, number | null, number | null])[] | undefined, startYear: number): number {
+  let w = 0;
+  let s = 0;
+  for (const [level, from, to] of entries ?? []) {
+    if (from !== null && from >= startYear) continue;
+    const gap = from === null ? 0 : startYear - (to ?? startYear);
+    const x = gap <= ARM_FULL_YEARS ? 1 : ARM_DECAY ** (gap - ARM_FULL_YEARS);
+    w += x;
+    s += x * level;
+  }
+  return w > 0 ? s / w : 0;
+}
+
+/** 어깨 낱말 자료와 시기를 거르는 시작 연도 (applyRunSkills) */
+export interface ArmSource {
+  arm: DefenseData['arm'];
+  startYear: number;
+}
+
+type BatKnob = 'runIQ' | 'bunting' | 'cBlock' | 'cFrame' | 'arm';
 type PitKnob = 'hold' | 'quick';
 
 /** 등급 → 손잡이 값: (등급 − 50) ÷ 10 × 한 칸 폭 */
 const toKnob = (grade: number, scale: number) => ((grade - 50) / 10) * scale;
 
-/** 선수 하나의 손잡이별 등급 (영점을 빼기 전). 가상 선수(real === false)만 분포 몫을 뽑는다 (난수: 선수 ID 시드, 리그 난수를 쓰지 않는다) */
-export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | 'pit'>, params: EngineParams): { bat?: Record<BatKnob, number>; pit?: Record<PitKnob, number> } {
+/**
+ * 선수 하나의 손잡이별 등급 (영점을 빼기 전). 가상 선수(real === false)만 분포 몫을 뽑는다 (난수: 선수 ID 시드, 리그 난수를 쓰지 않는다).
+ * 어깨는 따로 난수 줄기(skill2-arm)라 앞 손잡이 값이 그대로다
+ */
+export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | 'pit'>, params: EngineParams, armSrc?: ArmSource): { bat?: Record<BatKnob, number>; pit?: Record<PitKnob, number> } {
   const sp = params.skill2;
   const rng = p.real === false ? new Rng(`skill2/${p.id}`) : null;
   const luck = () => (rng ? normal(rng) * sp.virtualSd : 0);
@@ -48,6 +81,8 @@ export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | '
       bunting: exp + luck(),
       cBlock: body + luck() + sp.catcherPerRun * c,
       cFrame: exp + luck() + sp.catcherPerRun * c,
+      arm: body + (p.real === false ? normal(new Rng(`skill2-arm/${p.id}`)) * sp.virtualSd : 0)
+        + (armSrc ? sp.armWord * armWord(armSrc.arm?.[p.id], armSrc.startYear) : 0),
     };
   }
   if (p.pit) out.pit = { hold: exp + luck(), quick: body + luck() };
@@ -55,17 +90,18 @@ export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | '
 }
 
 const isCatcher = (b: BatSkill) => !!b.playable?.includes('C');
-const BAT_KNOBS: readonly BatKnob[] = ['runIQ', 'bunting', 'cBlock', 'cFrame'];
+const BAT_KNOBS: readonly BatKnob[] = ['runIQ', 'bunting', 'cBlock', 'cFrame', 'arm'];
 const PIT_KNOBS: readonly PitKnob[] = ['hold', 'quick'];
 
 /**
  * 월드의 모든 선수에게 손잡이를 붙인다 (bat·pit는 새 객체로 바꿔 리그 상태와 같이 쓰는 객체를 건드리지 않는다).
  * 손잡이 값은 리그 대비(기획안 1.1: 0 = 그 해 리그 평균)라, 등급에서 그 월드의 출장량(능력 표본 sample) 가중 평균을 뺀다.
- * 포수 블로킹·프레이밍의 평균은 정규 포수만으로 낸다 (포수 자리에 서는 선수). 돌려주는 값은 빼기 전 가중 평균 등급
+ * 포수 블로킹·프레이밍의 평균은 정규 포수만으로 낸다 (포수 자리에 서는 선수). 돌려주는 값은 빼기 전 가중 평균 등급.
+ * armSrc: 어깨 낱말 자료 (없으면 나이 곡선과 가상 선수 분포만)
  */
-export function applyRunSkills(players: SimPlayer[], params: EngineParams): Record<BatKnob | PitKnob, number> {
+export function applyRunSkills(players: SimPlayer[], params: EngineParams, armSrc?: ArmSource): Record<BatKnob | PitKnob, number> {
   const sc = params.skill2.scale;
-  const grades = players.map((p) => runGradesOf(p, params));
+  const grades = players.map((p) => runGradesOf(p, params, armSrc));
   const zero = {} as Record<BatKnob | PitKnob, number>;
   const mean = (k: BatKnob | PitKnob, pick: (i: number) => { g: number; w: number } | null) => {
     let w = 0;

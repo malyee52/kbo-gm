@@ -54,7 +54,7 @@ export interface AngleParams {
 }
 /**
  * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
- * "어깨" 능력이 없어 외야수의 수비 런을 어깨로도 쓴다 (armPerRun, 추정).
+ * 어깨: v2 수비 선수는 어깨 능력(BatSkill.arm, 16-3d), 예전 수비 선수는 외야수의 수비 런을 어깨로도 쓴다 (armPerRun, 추정).
  */
 export interface PlayParams {
   /** 병살 확률 배율: 땅볼을 받은 자리 */
@@ -73,8 +73,10 @@ export interface PlayParams {
   flyAdvance: [number, number, number];
   /** 단타에 1루 주자가 3루까지 가는 확률 배율: 공이 간 구장 쪽 [좌익, 중견, 우익] */
   firstToThirdSide: [number, number, number];
-  /** 외야수 수비 1런당 주자 추가 진루(희생플라이, 단타 1→3·2→홈, 2루타 1→홈) 확률 감소 (어깨, 추정) */
+  /** 외야수 수비 1런당 주자 추가 진루(희생플라이, 단타 1→3·2→홈, 2루타 1→홈) 확률 감소 (어깨, 추정). 어깨 능력(BatSkill.arm)이 없는 예전 수비 선수만 */
   armPerRun: number;
+  /** 땅볼 병살 확률에 (1 + armDp × 받은 내야수의 어깨)를 곱한다 (능력치 v2 16-3d, 임시값) */
+  armDp: number;
 }
 
 /**
@@ -444,9 +446,10 @@ export interface EngineParams {
   catcherStealPerRun: number;
   /**
    * 주루·작전·포수·투수 짝 능력의 시작값 (능력치 v2 16-3, runskills.ts, 모두 임시값). scale: 등급 10칸이 손잡이 값으로 얼마인지
-   * (runIQ·bunting·cFrame·quick 로짓, cBlock·hold 로그 배율), virtualSd: 가상 선수 분포 표준편차(등급), catcherPerRun: 포수 수비 1런당 블로킹·프레이밍 등급
+   * (runIQ·bunting·cFrame·quick 로짓, cBlock·hold 로그 배율, arm 진루 시도 확률), virtualSd: 가상 선수 분포 표준편차(등급), catcherPerRun: 포수 수비 1런당 블로킹·프레이밍 등급,
+   * armWord: 평판 글의 어깨 낱말(좋음 +1 · 나쁨 −1) 하나가 어깨 등급을 옮기는 크기 (16-3d)
    */
-  skill2: { scale: { runIQ: number; bunting: number; cBlock: number; cFrame: number; hold: number; quick: number }; virtualSd: number; catcherPerRun: number };
+  skill2: { scale: { runIQ: number; bunting: number; cBlock: number; cFrame: number; hold: number; quick: number; arm: number }; virtualSd: number; catcherPerRun: number; armWord: number };
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
   /**
@@ -667,6 +670,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     flyAdvance: [0.08, 0.22, 0.35],
     firstToThirdSide: [0.55, 1, 1.45],
     armPerRun: 0.008,
+    armDp: 1.5,
   },
   ball: {
     // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
@@ -837,7 +841,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
   // 모두 임시값 (자료 없음, 기획안 1.3~1.5·9.5). 크기는 validate 도루·폭투·희생번트 ±1% 안에서 정했다 (16-3c)
-  skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15 }, virtualSd: 8, catcherPerRun: 0.5 },
+  // arm 0.04: 등급 10칸 = 수비 5런, 예전 armPerRun 0.008/런과 같은 크기. armWord 12: 가상 선수 퍼짐(8)의 1.5배 (모두 임시값, 16-3d)
+  skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15, arm: 0.04 }, virtualSd: 8, catcherPerRun: 0.5, armWord: 12 },
   starterRestDays: 5,
   penBlendDays: 100,
 

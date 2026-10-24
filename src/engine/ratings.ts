@@ -556,7 +556,8 @@ export function buildWorld(input: BuildWorldInput): World {
   }
 
   // 능력치 v2 16-3: 주루·작전·포수·투수 짝 시작값 (나이 평균, 리그 영점, runskills.ts)
-  if (input.defense) applyRunSkills(players, params);
+  // 어깨 낱말은 수비 평판과 같은 시작 연도(defStart) 전 시기만 (16-3d)
+  if (input.defense) applyRunSkills(players, params, { arm: input.defense.arm, startYear: defStart });
   const env = leagueEnvFor(current.league, params, year);
   const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
   if (defModel) env.defZero = defModel.zero;

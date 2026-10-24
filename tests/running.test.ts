@@ -29,9 +29,12 @@ describe('주루·작전 (엔진 2 8단계)', () => {
   });
 
   it('번트 타석 투구 수는 HF 희생번트 타석 분포 (평균 1.74구 ±3%), 작전이 실제로 일어난다', () => {
-    const { running, totals } = run(FAST, 'run-a');
-    expect(running.buntPitches / running.bunt).toBeGreaterThan(1.74 * 0.97);
-    expect(running.buntPitches / running.bunt).toBeLessThan(1.74 * 1.03);
+    // 한 시즌 번트 약 420번이면 평균의 표준오차가 약 2.8%라 ±3%가 운에 걸린다 (16-3d 어깨에서 한 시즌 −3.8%). 다섯 시즌을 합쳐 표준오차 약 1.3%로 본다
+    const runs = ['run-a', 'run-b2', 'run-c', 'run-d', 'run-e'].map((seed) => run(FAST, seed));
+    const { running, totals } = runs[0];
+    const pitches = runs.reduce((a, r) => a + r.running.buntPitches, 0) / runs.reduce((a, r) => a + r.running.bunt, 0);
+    expect(pitches).toBeGreaterThan(1.74 * 0.97);
+    expect(pitches).toBeLessThan(1.74 * 1.03);
     for (const k of ['sb3', 'double', 'pickoff', 'pitchout', 'hnr', 'squeeze', 'buntHit', 'buntLeadOut'] as const) expect(running[k]).toBeGreaterThan(0);
     expect(totals.sb).toBe(running.sb2 + running.sb3);
     expect(totals.cs).toBe(running.cs2 + running.cs3);

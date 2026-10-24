@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyRunTally, Season, simulateSeason, worldForYear, type EngineParams, type World } from '../src/engine';
 import { addLogit } from '../src/engine/rules';
-import { bodyGrade, experienceGrade, runGradesOf } from '../src/engine/runskills';
+import { armWord, bodyGrade, experienceGrade, runGradesOf } from '../src/engine/runskills';
 import type { BatSkill, PitSkill, SimPlayer } from '../src/engine/types';
 
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -43,9 +43,9 @@ describe('주루·작전 손잡이 (능력치 v2 16-3)', () => {
   });
 
   it('손잡이를 모두 0으로 둔 월드는 손잡이가 없는 월드와 한 시즌 결과가 같다', () => {
-    const zero = worldWith({ sbStart: 0, sbJudge: 0, runIQ: 0, bunting: 0, cBlock: 0, cFrame: 0 }, { hold: 0, quick: 0 });
+    const zero = worldWith({ sbStart: 0, sbJudge: 0, runIQ: 0, bunting: 0, cBlock: 0, cFrame: 0, arm: 0 }, { hold: 0, quick: 0 });
     const u = undefined;
-    const a = run(worldWith({ sbStart: u, sbJudge: u, runIQ: u, bunting: u, cBlock: u, cFrame: u }, { hold: u, quick: u }));
+    const a = run(worldWith({ sbStart: u, sbJudge: u, runIQ: u, bunting: u, cBlock: u, cFrame: u, arm: u }, { hold: u, quick: u }));
     const b = run(zero);
     expect(b.t).toEqual(a.t);
     expect(b.running).toEqual(a.running);
@@ -96,6 +96,14 @@ describe('주루·작전 손잡이 (능력치 v2 16-3)', () => {
     const sac = (r: ReturnType<typeof run>) => r.running.buntSac / r.running.bunt;
     expect(sac(iq)).toBeGreaterThan(sac(a) + 0.05);
   }, 180_000);
+
+  it('어깨↑ (16-3d) 희생플라이·득점↓, 병살↑', () => {
+    const a = run(base);
+    const strong = run(worldWith({ arm: 0.2 }, {}));
+    expect(strong.t.sf).toBeLessThan(a.t.sf * 0.95);
+    expect(strong.t.gdp).toBeGreaterThan(a.t.gdp * 1.1);
+    expect(strong.t.r).toBeLessThan(a.t.r);
+  }, 180_000);
 });
 
 describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () => {
@@ -141,5 +149,26 @@ describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () =>
     const d = ((a.bat!.cBlock ?? 0) - (b.bat!.cBlock ?? 0)) / sc.cBlock * 10;
     expect(d).toBeCloseTo(DEFAULT_PARAMS.skill2.catcherPerRun * ((a.bat!.def?.C ?? 0) - (b.bat!.def?.C ?? 0)), 6);
     expect(hit.every((p) => p.bat!.sbStart === undefined && p.bat!.sbJudge === undefined)).toBe(true);
+  });
+
+  it('어깨 낱말 (16-3d): 앞날 시기는 버리고, 오래된 시기는 줄여 평균한다', () => {
+    expect(armWord(undefined, 2026)).toBe(0);
+    expect(armWord([[1, null, null]], 2026)).toBe(1);
+    expect(armWord([[1, 2026, 2027]], 2026)).toBe(0);
+    expect(armWord([[-1, 2014, 2025]], 2026)).toBe(-1);
+    // 2018 끝(8년 전, 무게 0.7^5) 좋음 + 통산 나쁨 (무게 1)
+    const w = 0.7 ** 5;
+    expect(armWord([[1, 2010, 2018], [-1, null, null]], 2026)).toBeCloseTo((w - 1) / (w + 1), 12);
+  });
+
+  it('2026 시작 월드: 어깨는 리그 대비 (타자 출장량 가중 평균 0), 어깨 좋음 낱말 선수(구자욱)는 같은 나이 실존 선수보다 armWord만큼 위', () => {
+    const w = worldForYear(store, 2026, FAST);
+    const sp = DEFAULT_PARAMS.skill2;
+    const hit = w.players.filter((p) => p.bat && !p.isPitcher);
+    const tw = hit.reduce((a, p) => a + Math.max(1, p.bat!.sample), 0);
+    expect(hit.reduce((a, p) => a + (p.bat!.arm ?? 0) * Math.max(1, p.bat!.sample), 0) / tw).toBeCloseTo(0, 9);
+    const koo = hit.find((p) => p.id === '62404')!;
+    const peer = hit.find((p) => p.real !== false && p.age === koo.age && !store.defense?.arm?.[p.id])!;
+    expect(((koo.bat!.arm ?? 0) - (peer.bat!.arm ?? 0)) / sp.scale.arm * 10).toBeCloseTo(sp.armWord, 6);
   });
 });

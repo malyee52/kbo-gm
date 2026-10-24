@@ -23,7 +23,7 @@ import { ballD2, ballHrMul, futureDelta, futureValue, zoneBb } from './futureRul
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'schedule'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'schedule' | 'defense'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -162,8 +162,9 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
-  // 능력치 v2 16-3: 주루·작전·포수·투수 짝은 해마다 나이로 다시 낸다 (리그 영점, runskills.ts, 저장하지 않음)
-  if (league.defPool) applyRunSkills(players, params);
+  // 능력치 v2 16-3: 주루·작전·포수·투수 짝은 해마다 나이로 다시 낸다 (리그 영점, runskills.ts, 저장하지 않음).
+  // 어깨 낱말은 게임 시작 연도 전 시기만 (시작 능력 근거, 결정 29. 뒤 시기는 수비 잠재력 몫, 16-4)
+  if (league.defPool) applyRunSkills(players, params, store.defense ? { arm: store.defense.arm, startYear: league.startYear } : undefined);
   if (league.defZero !== undefined) env = { ...env, defZero: league.defZero };
   // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다).
   // 자료 없는 해에 구단 수가 10이 아니면(가상 창단) 규칙을 구단 수에 맞추고 팀당 경기 수도 그것을 따른다

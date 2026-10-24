@@ -7,6 +7,7 @@ import { Ev, type PaRates } from './pa';
 import { DEFAULT_PARAMS } from './params';
 import { errorRateOf, fielderAt, type GameState, type PitcherInGame, type Runner } from './state';
 import type { BatLine, LeagueEnv, SimPlayer } from './types';
+import type { Slot } from './team';
 
 /** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
 const OF_SIDE = ['LF', 'CF', 'RF'] as const;
@@ -433,9 +434,9 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
     }
   }
   const pp = params.play;
-  /** 공이 간 구장 쪽 (0 좌익, 1 중견, 2 우익)과 그쪽 외야수의 어깨 보정 (수비 런으로 추정, + 면 주자가 덜 간다) */
+  /** 공이 간 구장 쪽 (0 좌익, 1 중견, 2 우익)과 그쪽 외야수의 어깨 보정 (+ 면 주자가 덜 간다). 어깨 능력이 없는 예전 수비면 수비 런으로 추정 */
   const side = ball ? ball.zone % 3 : 1;
-  const arm = (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
+  const arm = fld.slotArm[OF_SIDE[side]] ?? (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
   const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
   /** 땅볼 아웃 때 3루 주자가 들어오나 (전진 수비면 덜 들어온다, 엔진 2 10단계) */
@@ -559,7 +560,9 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
             if (!bases[1]) { bases[1] = bases[0]; bases[0] = null; }
           }
         } else if (bases[0] && st.outs < 2) {
-          if (rng.chance(params.doublePlay * (pp.dpSlot[fs] ?? 1) * (1 - pp.dpSpeed * (batter.bat!.speed - 0.5) * 2))) {
+          // 받은 내야수의 어깨 (능력치 v2 16-3d): 병살 × (1 + armDp × 어깨)
+          const dpArm = Math.max(0, 1 + pp.armDp * (fld.slotArm[slot as Slot] ?? 0));
+          if (rng.chance(params.doublePlay * (pp.dpSlot[fs] ?? 1) * (1 - pp.dpSpeed * (batter.bat!.speed - 0.5) * 2) * dpArm)) {
             bl.gdp++; totals.gdp++;
             kind = 'GDP';
             st.out(2);
