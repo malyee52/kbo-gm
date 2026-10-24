@@ -6,7 +6,7 @@ import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { GradeBar, PotCell, usePotentialOf } from '../parts';
 import { seasonWar } from '../../league/awards';
-import { defenseAt, defenseGrade, fieldPosOf, teamRules, type SimPlayer } from '../../engine';
+import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { worldParkFactor } from '../../game/parkView';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
@@ -59,7 +59,8 @@ export function Roster() {
     try { localStorage.setItem(PAGE_KEY, v); } catch { /* 기억하지 못해도 화면은 그대로 */ }
   };
   const year = session.world.year;
-  const rules = teamRules(session.world, session.team);
+  const rules = session.entryRules();
+  const extra = session.season.rosterExtraOn(session.day);
 
   // 다음 경기일 기준으로 엔진이 쓸 1군과 역할
   const view = useMemo(() => {
@@ -141,7 +142,7 @@ export function Roster() {
     <div className="stack tight">
       <section className="row-between wrap">
         <div className="muted small roster-sum">
-          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit}{rules.foreignActive < rules.foreignLimit ? ` (경기 출전 ${rules.foreignActive}명)` : ''} ·{' '}
+          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}{rules.activeSize < rules.rosterSize ? `, 경기 출장 ${rules.activeSize}명` : ''}){extra > 0 ? ` · 엔트리 확대 +${extra}` : ''} · 외국인 {foreign}/{rules.foreignLimit}{rules.foreignActive < rules.foreignLimit ? ` (경기 출전 ${rules.foreignActive}명)` : ''} ·{' '}
           정식 {session.regularCount()}/{ruleOf(session.league, 'orgLimit')}{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}` : ''} ·{' '}
           {view.manual ? '엔트리 직접 관리' : '엔트리 AI 관리'}{view.manual ? (session.plan ? ' · 기용 직접' : ' · 기용 AI 감독') : ''}
         </div>

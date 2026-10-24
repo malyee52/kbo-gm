@@ -93,6 +93,9 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       ...p.rules,
       maxInnings: p.rules.maxInnings + futureDelta(league, 'extra', year),
       rosterSize: p.rules.rosterSize + futureDelta(league, 'roster', year),
+      // 출장 인원은 등록 인원을 따라간다. 엔트리 확대는 9월 1일 +5 (2026년의 후반기 한시 엔트리·8월 25일 앞당김은 아시안게임 때문이라 잇지 않는다)
+      ...(p.rules.activeSize !== undefined ? { activeSize: p.rules.activeSize + futureDelta(league, 'roster', year) } : {}),
+      rosterExtra: '901:5',
       foreignLimit: p.rules.foreignLimit + futureDelta(league, 'foreign', year),
       // 한 경기 출전 외국인 (리그 규칙 1-6): 2026년은 보유와 같아서 보유 한도를 따라간다
       foreignActive: p.rules.foreignActive + futureDelta(league, 'foreign', year),

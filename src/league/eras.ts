@@ -19,14 +19,17 @@ export function faEnabled(offseasonYear: number): boolean {
 
 /**
  * FA 자격에 필요한 1군 연차.
- * - 1999 시즌 뒤 도입 때 고졸 10년·대졸 9년 (출처 확인: 나무위키 KBO FA 제도, data-src/제도연표_보정.csv 26). 2000 시즌 뒤까지 같게 본다.
- *   자료집은 "도입 당시 10년"만 적었다 (대졸 구분 없음)
+ * - 1999 시즌 뒤 도입 때 10년, 대졸 구분 없음 (출처 확인: 나무위키 KBO FA 제도 각주 4 "FA 시행 첫 해인 1999년에는 10 정규시즌이었으나
+ *   2001년부터 9 정규시즌으로 축소", 뉴시스 2020-01-16 "도입 초기 자격 취득 기간은 10시즌이었고, 2001년 9시즌으로 줄었다",
+ *   data-src/제도연표_보정.csv 26). 자료집은 값 없이 "미확인"이다.
+ *   경계: 다른 연도표는 "2012년 FA"(= 2011 시즌 뒤)처럼 다음 해 FA 이름으로 읽지만, 이 각주는 같은 문장에서 첫 FA(1999 시즌 뒤)를
+ *   "1999년"이라 부르므로 시즌 연도로 쓴 것으로 보고 "2001년부터" = 2001 시즌 뒤로 읽는다. 그래서 2000 시즌 뒤까지 10년 (1차 자료 확인 필요)
  * - 2001~2010 시즌 뒤 9년 (대졸도 9년, 조사값. 리그 규칙 변경 1-4 D20)
  * - 2011 시즌 뒤부터 9년·대졸 8년 (자료집 "2012년 FA부터 대졸 8·고졸 9")
  * - 2022년 시즌 뒤부터 8년·대졸 7년 (출처 확인: 자료집)
  */
 export function faServiceNeeded(offseasonYear: number, univ: boolean): number {
-  if (offseasonYear <= 2000) return univ ? 9 : 10;
+  if (offseasonYear <= 2000) return 10;
   if (offseasonYear <= 2010) return 9;
   if (offseasonYear <= 2021) return univ ? 8 : 9;
   return univ ? 7 : 8;

@@ -1,7 +1,8 @@
 // 포스트시즌(가을야구) (M7): 정규시즌 순위 상위 팀의 사다리식 시리즈. 정규시즌 기록에는 남기지 않는다.
 //
 // 2015년 이후 방식 (자료집 "시즌구조"·"제도연표", 출처 확인): 4위 대 5위 와일드카드 → 준플레이오프(3위) → 플레이오프(2위) → 한국시리즈(1위).
-// 시리즈 길이와 와일드카드 1승 어드밴티지는 자료집에서 확인하지 못한 값이라 임시값이다.
+// 시리즈 승수는 해마다 연표(meta.json rules semiWins·poWins, yearRoundRule)를 따르고, 없는 해는 RULES. 와일드카드 1승 어드밴티지는 임시값이다.
+// 1986~1988은 3팀(1위 직행), 1993~1998은 3·4위 승차가 3.5경기 이상이면 준플레이오프를 열지 않는다 (규칙 실제화 2026-10-24).
 // 연장 이닝은 해마다 meta.json rules[연도].postseasonMaxInnings (엔진 2 14단계 연표: 2003·2004 12회, 2008 무제한, 나머지 15회. 2003·2008은 출처 갈림).
 // 한국시리즈 홈경기 2-3-2 방식은 자료집 2025년 비고에 있다 (출처 확인).
 //
@@ -61,6 +62,26 @@ export const TWO_LEAGUE_RULES = {
   ks232: { need: 4, maxGames: 9, highHeadStart: 0, homePattern: [true, true, false, false, false, true, true, true, true] },
 } satisfies Record<string, RoundRule>;
 
+/**
+ * 사다리 해의 시리즈 승수 연표 (규칙 실제화 2026-10-24, YearRules.semiWins·poWins, tools/build_data.py postseason_rules).
+ * 승수가 RULES와 다를 때만 그 해 규칙을 만든다. 홈 배정은 실제 시리즈 장소에서 읽었다 (나무위키 KBO 준플레이오프·플레이오프 구장 표):
+ * 3전 2선승은 1·3차전 상위 팀 홈, 2차전 하위 팀 홈 (2006 한화·2021 삼성), 7전 4선승 플레이오프는 2-3-2 (2008 두산 1·2·6차전).
+ * 1986~1988 3팀 플레이오프(5전 3선승)는 실제로 전기 팀이 1·2차전, 후기 팀이 3~5차전 홈이라 상위 시드를 전기 팀 자리에 둔다 (임시 대응).
+ * 무승부로 더 치르는 경기는 RULES처럼 3전은 1경기, 7전은 2경기를 더 둔다 (임시값)
+ */
+export function yearRoundRule(round: SeriesRound, wins: number | undefined, teams: number): RoundRule | undefined {
+  if (round === 'po' && teams === 3 && (wins ?? 3) === 3) return { need: 3, maxGames: 6, highHeadStart: 0, homePattern: [true, true, false, false, false, true] };
+  if (wins === undefined || wins === RULES[round].need) return undefined;
+  if (wins === 2) return { need: 2, maxGames: 4, highHeadStart: 0, homePattern: [true, false, true, true] };
+  if (wins === 3) return { ...RULES.semi, homePattern: [...RULES.semi.homePattern] };
+  return { need: 4, maxGames: 9, highHeadStart: 0, homePattern: [true, true, false, false, false, true, true, true, true] };
+}
+
+/** 두 팀의 승차 (a가 앞서면 양수) */
+export function gamesBehind(a: Pick<TeamRecord, 'w' | 'l'>, b: Pick<TeamRecord, 'w' | 'l'>): number {
+  return (a.w - b.w + b.l - a.l) / 2;
+}
+
 /** 정규시즌이 끝나고 포스트시즌 첫 경기까지 쉬는 날 (임시값). 규칙 표에 가을야구 시작일이 있는 해(1988 올림픽)는 그날 (그보다 이르면 이 규칙) */
 const REST_BEFORE = 3;
 
@@ -102,7 +123,7 @@ export interface SeriesResult {
   mvp?: SeriesMvp;
   /** 대진(bracket)의 몇 번째 노드인가 (대진이 있는 해만) */
   node?: number;
-  /** 이 시리즈의 규칙 (대진이 있는 해만. 없으면 RULES[round]) */
+  /** 이 시리즈의 규칙 (대진이 있는 해, 승수가 RULES와 다른 사다리 해. 없으면 RULES[round]) */
   rule?: RoundRule;
   /** 다음 경기 날짜 (대진이 있는 해만. 시리즈가 동시에 열린다) */
   nextDay?: number;
@@ -151,6 +172,8 @@ export interface PostseasonResult {
   /** 대진이 있는 해만: seeds마다 "드림 1위" 꼴 */
   seedLabels?: string[];
   bracket?: BracketNode[];
+  /** 승차로 준플레이오프를 열지 않은 해 (PostseasonState.semiSkip) */
+  semiSkip?: PostseasonState['semiSkip'];
   series: SeriesResult[];
   champion: number;
   runnerUp: number;
@@ -177,6 +200,10 @@ export interface PostseasonState {
   seedLabels?: string[];
   /** 대진이 있는 해만: 준플레이오프 판정 근거 (두 리그 각각) */
   semiCheck?: SemiCheck[];
+  /** 사다리 해의 시리즈 규칙이 RULES와 다른 라운드 (그 해 승수 연표, yearRoundRule). 없으면 RULES */
+  roundRules?: Partial<Record<SeriesRound, RoundRule>>;
+  /** 3·4위 승차로 준플레이오프를 열지 않은 해 (1993~1998 규정): 3위·4위와 승차 */
+  semiSkip?: { third: number; fourth: number; gap: number };
 }
 
 /** 진출 팀 수에 따른 라운드 순서 (낮은 라운드부터). 5팀이면 와일드카드부터 */
@@ -199,12 +226,30 @@ export function startPostseason(season: Season, standings: number[], n: number, 
     openBracket(st, season.world, st.day);
     return st;
   }
-  const seeds = standings.slice(0, Math.max(2, Math.min(n, standings.length)));
+  let seeds = standings.slice(0, Math.max(2, Math.min(n, standings.length)));
+  const rules = season.world.rules;
+  // 1993~1998: 3·4위 승차가 semiSkipGap 이상이면 준플레이오프 없이 3위가 플레이오프로 (4위는 탈락, 나무위키 KBO 준플레이오프)
+  let semiSkip: PostseasonState['semiSkip'];
+  if (seeds.length === 4 && rules.semiSkipGap) {
+    const gap = gamesBehind(season.teams[seeds[2]], season.teams[seeds[3]]);
+    if (gap >= rules.semiSkipGap) {
+      semiSkip = { third: seeds[2], fourth: seeds[3], gap };
+      seeds = seeds.slice(0, 3);
+    }
+  }
   const rounds = roundsFor(seeds.length);
   const rngSeed = `${seed}/postseason`;
+  const poWins = semiSkip ? rules.poWinsNoSemi ?? rules.poWins : rules.poWins;
+  const roundRules: Partial<Record<SeriesRound, RoundRule>> = {};
+  for (const r of rounds) {
+    // 준플레이오프를 건너뛴 해는 4팀 해의 규칙 (3팀 규칙은 1986~1988 플레이오프 홈 배정)
+    const rule = yearRoundRule(r, r === 'semi' ? rules.semiWins : r === 'po' ? poWins : undefined, semiSkip ? 4 : seeds.length);
+    if (rule) roundRules[r] = rule;
+  }
   const st: PostseasonState = {
     format: 2, year: season.world.year, seed: rngSeed, seeds, rounds, series: [],
     day: postseasonStartDay(season), done: false,
+    ...(Object.keys(roundRules).length ? { roundRules } : {}), ...(semiSkip ? { semiSkip } : {}),
   };
   openSeries(st, seeds[seeds.length - 1]);
   return st;
@@ -215,7 +260,8 @@ function openSeries(st: PostseasonState, challenger: number): void {
   const i = st.series.length;
   const round = st.rounds[i];
   const high = st.seeds[st.seeds.length - 2 - i];
-  st.series.push({ round, high, low: challenger, winsHigh: RULES[round].highHeadStart, winsLow: 0, winner: -1, games: [] });
+  const rule = st.roundRules?.[round];
+  st.series.push({ round, high, low: challenger, winsHigh: (rule ?? RULES[round]).highHeadStart, winsLow: 0, winner: -1, games: [], ...(rule ? { rule } : {}) });
 }
 
 /**
@@ -344,6 +390,14 @@ export function bracketText(st: BracketView, name: (t: number) => string): strin
 }
 
 /** 준플레이오프 판정 문장 (대진 소식·화면, 기획안 10.5) */
+/** 승차로 준플레이오프를 열지 않은 해의 설명 (1993~1998 규정). 연 해·해당 없는 해는 빈 글 */
+export function semiSkipText(st: Pick<PostseasonState, 'semiSkip'>, name: (t: number) => string, minGap: number): string {
+  const k = st.semiSkip;
+  if (!k) return '';
+  const third = name(k.third);
+  return `3위 ${third}${josa(third, '와과')} 4위 ${name(k.fourth)}의 승차가 ${k.gap}경기라(${minGap}경기 이상이면 생략) 준플레이오프 없이 ${third}${josa(third, '이가')} 플레이오프로 갑니다.`;
+}
+
 export function semiCheckText(st: Pick<PostseasonState, 'semiCheck'>, name: (t: number) => string): string {
   const checks = st.semiCheck ?? [];
   if (!checks.length) return '';
@@ -563,6 +617,7 @@ export function resultOf(st: PostseasonState): PostseasonResult {
   return {
     year: st.year, seeds: st.seeds,
     ...(st.bracket ? { seedLabels: st.seedLabels, bracket: st.bracket } : {}),
+    ...(st.semiSkip ? { semiSkip: st.semiSkip } : {}),
     series: st.series.map(({ nextDay: _n, ...x }) => ({ ...x, games: x.games.map(({ box: _box, plays: _plays, ...g }) => g) })),
     champion: last.winner, runnerUp: last.winner === last.high ? last.low : last.high,
   };

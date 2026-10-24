@@ -262,7 +262,7 @@ export function faYears(age: number): number {
 /** 런을 돈으로 바꾸는 시장 단가 (만 원/런, 임시값). 시장 연봉식의 주전급 기울기 근처 */
 export const WON_PER_RUN = 4500;
 
-/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (1999~2000 고졸 10·대졸 9 출처 확인, 2001~2021 임시값) */
+/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (1999~2000 시즌 뒤 대졸 구분 없이 10 출처 확인, 2001~2021 임시값) */
 export function serviceNeeded(school: School | null, entryYear: number, birthYear: number | null, year = 2022): number {
   const s = school ?? (birthYear && entryYear - birthYear >= 22 ? 'UNIV' : 'HS');
   return faServiceNeeded(year, s === 'UNIV');

@@ -4,18 +4,21 @@ import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import { formatDate } from '../../game/calendar';
 import {
-  currentSeries, nodeSides, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, seedName, semiCheckText, stillAlive,
-  type BracketNode, type SeriesGame, type SeriesResult, type SeriesRound,
+  currentSeries, nodeSides, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, seedName, semiCheckText, semiSkipText, stillAlive,
+  type BracketNode, type RoundRule, type SeriesGame, type SeriesResult, type SeriesRound,
 } from '../../league/postseason';
 import { PlayerLink, TeamName, useGame } from '../context';
 import { BoxView } from '../BoxScore';
 import { useShell } from '../shell';
 
-/** 진출 팀 수에 맞는 대진 설명 (1988년까지 2팀, 2014년까지 4팀, 2015년부터 5팀) */
-function bracketText(n: number): string {
+/**
+ * 진출 팀 수에 맞는 대진 설명 (1985년까지 2팀, 1988년까지 3팀, 2014년까지 4팀, 2015년부터 5팀).
+ * ruleOf: 그 해 라운드 규칙 (시리즈 승수 연표, postseason.ts yearRoundRule). 없으면 RULES
+ */
+function bracketText(n: number, ruleOf: (r: SeriesRound) => RoundRule | undefined): string {
   const rounds = roundsFor(n);
   const desc = (r: SeriesRound, i: number): string => {
-    const rule = RULES[r];
+    const rule = ruleOf(r) ?? RULES[r];
     const high = n - 1 - i; // 이 라운드의 상위 시드 순위 (postseason.ts openSeries와 같은 규칙)
     const len = r === 'wc' ? `${high}위 ${rule.highHeadStart}승 어드밴티지, 최대 ${rule.maxGames}경기` : `${rule.need * 2 - 1}전 ${rule.need}선승`;
     return i === 0 ? `${high}위 대 ${n}위 ${ROUND_LABEL[r]}(${len})` : `${ROUND_LABEL[r]}(${high}위, ${len})`;
@@ -51,6 +54,7 @@ export function Postseason() {
   // 진행 상태가 있으면 그것을 (박스스코어 포함), 없으면 결산 때 남긴 결과를 보여 준다
   const seeds = st?.seeds ?? last!.seeds;
   const series = st?.series ?? last!.series;
+  const semiSkip = st ? st.semiSkip : last?.semiSkip;
   const view = { seeds, seedLabels: st?.seedLabels ?? last?.seedLabels, bracket: st?.bracket ?? last?.bracket, series };
   const bracket = view.bracket;
   const teamName = (t: number) => session.world.teams[t]?.name ?? '';
@@ -126,8 +130,9 @@ export function Postseason() {
           </>
         ) : (
           <p className="muted small">
-            {bracketText(seeds.length)}
-            시리즈 길이·어드밴티지는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다.
+            {semiSkip && <>{semiSkipText({ semiSkip }, teamName, session.world.rules.semiSkipGap ?? 3.5)} </>}
+            {bracketText(seeds.length, (r) => series.find((x) => x.round === r)?.rule ?? st?.roundRules?.[r])}
+            와일드카드 어드밴티지와 무승부 때 더 치르는 경기 수는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다.
           </p>
         )}
       </section>

@@ -57,14 +57,14 @@ describe('알림 계산 (1-2)', () => {
     expect(n.headline).toContain('공인구 반발계수 기준 하향');
   });
 
-  it('2026: 아시아쿼터·엔트리는 게임 값으로, 단순화 문구가 붙는다', () => {
+  it('2026: 아시아쿼터·엔트리(등록·출장)는 게임 값으로', () => {
     const n = news(2026);
     const foreign = n.main.find((l) => l.key === 'foreignLimit')!;
     expect(foreign.before).toBe('3명');
     expect(foreign.after).toBe('4명 (아시아쿼터 1명 포함)');
     const roster = n.main.find((l) => l.key === 'rosterSize')!;
-    expect([roster.before, roster.after]).toEqual(['28명', '29명']);
-    expect(roster.simplified).toContain('등록 인원 모두 출장');
+    expect([roster.before, roster.after]).toEqual(['28명 등록·26명 출장', '29명 등록·27명 출장']);
+    expect(roster.simplified).toBeUndefined();
     expect(n.main.find((l) => l.key === 'salaryCap')).toBeTruthy();
   });
 
@@ -105,9 +105,9 @@ describe('알림 계산 (1-2)', () => {
     expect(news(2022).main.find((l) => l.key === 'faService')?.after).toBe(`고졸 ${faServiceNeeded(2022, false)}·대졸 ${faServiceNeeded(2022, true)}시즌`);
   });
 
-  it('FA 연한 알림이 게임 값과 같다: 2001 시즌 고졸 10·대졸 9 → 9시즌, 2011 시즌 고졸 9·대졸 8 (1-4, 도입 때 대졸 9는 일정 갈래의 제도연표 보정)', () => {
+  it('FA 연한 알림이 게임 값과 같다: 2001 시즌 10 → 9시즌 (대졸 구분 없음), 2011 시즌 고졸 9·대졸 8 (1-4, 제도연표 보정 26)', () => {
     const a = news(2001).main.find((l) => l.key === 'faService')!;
-    expect([a.before, a.after]).toEqual(['고졸 10·대졸 9시즌', '1군 9시즌']);
+    expect([a.before, a.after]).toEqual(['1군 10시즌', '1군 9시즌']);
     const b = news(2011).main.find((l) => l.key === 'faService')!;
     expect([b.before, b.after]).toEqual(['1군 9시즌', '고졸 9·대졸 8시즌']);
   });
