@@ -2,10 +2,11 @@
 // 타석은 공통 규칙(감독 판단 manager.ts, 주루·진루 rules.ts)과 해결기(resolver.ts)로 푼다 (docs/경기엔진2_기획안.md 3.2).
 
 import type { PlateContext } from './pa';
-import type { ParkRates, Rates } from '../data/types';
+import type { Rates } from '../data/types';
 import type { BallTally } from './battedball';
 import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher, maybeOnePoint, tallySaveEntry, wantInfieldIn, wantIntentionalWalk, type PenTally } from './manager';
-import { Ev, NEUTRAL_PARK, paRates, type GamePark, type PaRates } from './pa';
+import { Ev, paRates, type GamePark, type PaRates } from './pa';
+import { gameParkOf } from './park';
 import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
 import type { Rng } from './rng';
@@ -262,15 +263,9 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
-  // 홈 구장 사건별 배율: 실제 구장 표가 있으면 그 배율(meta.parkEvents, 좌타·우타 포함), 없으면 득점 계수 f를 지수로 나눈다.
-  // 게임 안에서 지은 신구장의 홈런 배율(hr)은 곱한다
-  const tp = homeTs.team.park;
-  const run = tp?.run ?? 1;
-  const hit = run ** ctx.params.park.hitExp;
-  const withHr = (x: ParkRates | undefined): ParkRates | undefined => x && { s1: x.s1, d2: x.d2, t3: x.t3, hr: tp!.hr * x.hr };
-  const park: GamePark = !tp ? NEUTRAL_PARK
-    : tp.ev ? { ...withHr(tp.ev)!, L: withHr(tp.ev.L), R: withHr(tp.ev.R) }
-    : { s1: hit, d2: hit, t3: hit, hr: tp.hr * run ** ctx.params.park.hrExp };
+  // 홈 구장 사건별 배율: 실제 구장 표가 있으면 그 배율(좌타·우타 포함), 없으면 득점 계수 f를 지수로 나눈다.
+  // 게임 안에서 지은 신구장의 홈런 배율(hr)은 곱한다 (park.ts)
+  const park: GamePark = gameParkOf(homeTs.team.park, ctx.params.park);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
   const st = new GameState(ctx, home, away, park);
 

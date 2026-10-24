@@ -6,7 +6,7 @@ import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pctRankedFromSeason, pitValue, rankedFromSeason, traitsOf,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, leagueRpa, makeDefense, pickOpeningHosts, pctRankedFromSeason, pitValue, rankedFromSeason, traitsOf,
   type BatSkill, type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
@@ -15,15 +15,16 @@ import { virtualDefense } from '../engine/fielding';
 import { applyRunSkills } from '../engine/runskills';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
-import { homeIsDome, parkEventFactor, parkFactor, parkRunFactor } from './stadium';
+import { homeIsDome, teamParkAt } from './stadium';
 import { homeOnlyUntil } from './careers';
+import { useParkData } from './ballparks';
 import { divisionsFor, expansionPerk } from './eras';
 import { ballD2, ballHrMul, futureDelta, futureValue, zoneBb } from './futureRules';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'schedule' | 'defense' | 'running'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'parks' | 'schedule' | 'defense' | 'running'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -70,6 +71,8 @@ export function applyLeagueRunSkills(players: SimPlayer[], league: LeagueState, 
 }
 
 export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS, opts: WorldOptions = {}): World {
+  // 불러온 게임도 실제 구장 이름·좌석을 자료에서 (create.ts와 같다)
+  if (store.parks) useParkData(store.parks);
   const form = opts.form ?? true;
   const year = league.year;
   const data = store.season(year);
@@ -105,6 +108,10 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const futures = opts.includeFutures ? [] : league.teams.map((_, i) => i).filter((i) => isFuturesTeam(league, i, year));
   const kept = league.teams.length - futures.length;
   if (futures.some((i) => i < kept)) throw new Error('퓨처스 구단이 구단 목록 끝에 있지 않습니다');
+  // 구장 효과의 자료·그 해 리그 구단·리그 비율 (옛 해 평균 1 맞춤, park.ts)
+  const parkSrc = { parkFactors: store.meta.parkFactors, parkEvents: store.meta.parkEvents, parks: store.parks };
+  const parkFrs = league.teams.slice(0, kept).map((t) => t.franchise);
+  const parkLg = data ? leagueRpa(data.league) : { rates: lg, rpa: 0 };
   const teams: SimTeam[] = league.teams.slice(0, kept).map((t, idx) => {
     const med = activeLevel(league, idx, 'medical');
     // 세부 난이도의 부상 빈도는 플레이어 구단에만 (difficulty.ts)
@@ -112,14 +119,12 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     // 스프링캠프 (camp.ts): 체력 훈련·국내 캠프의 시즌 부상 배율
     const camp = campInjury(league, idx, year);
     const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
-    // 구장 특성 (stadium.ts): 게임 안에서 지은 신구장만
-    const park = parkFactor(league.stadiums?.[idx]);
-    const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
-    const ev = run !== 1 ? parkEventFactor(store.meta.parkEvents, t.franchise, year, league.stadiums?.[idx]) : undefined;
+    // 홈 구장 배율 (stadium.ts teamParkAt): 실제 구장 값 + 게임 안에서 지은 신구장
+    const park = teamParkAt(parkSrc, t.franchise, year, league.stadiums?.[idx], parkFrs, parkLg, params.park);
     // 창단 특례 (eras.ts expansionPerk): 1군 첫 두 시즌 엔트리 +1, 외국인 +1 (외국인 제도가 있는 해만)
     const perk = expansionPerk(league, idx, year);
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}),
+      ...(park ? { park } : {}),
       ...(perk ? { rosterBonus: 1, ...(rules.foreignLimit > 0 ? { foreignBonus: 1 } : {}) } : {}),
       ...(homeIsDome(league.stadiums?.[idx], t.franchise, year) ? { dome: true } : {}) };
   });

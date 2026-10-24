@@ -18,7 +18,7 @@ const arg = (name: string): string | undefined => {
 };
 const years = (arg('years') ?? '2023,2025').split(',').map(Number);
 const seeds = (arg('seeds') ?? 'p1,p2,p3,p4').split(',');
-const park = { hitExp: Number(arg('hit') ?? DEFAULT_PARAMS.park.hitExp), hrExp: Number(arg('hr') ?? DEFAULT_PARAMS.park.hrExp) };
+const park = { ...DEFAULT_PARAMS.park, hitExp: Number(arg('hit') ?? DEFAULT_PARAMS.park.hitExp), hrExp: Number(arg('hr') ?? DEFAULT_PARAMS.park.hrExp) };
 const out = arg('out');
 const params = { ...DEFAULT_PARAMS, pilotSeasons: 1, park };
 

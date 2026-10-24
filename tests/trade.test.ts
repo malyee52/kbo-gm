@@ -80,7 +80,10 @@ describe('악용 시나리오: AI가 손해 보는 거래를 거절한다', () =
     const g = newGame();
     const other = teamIdx(g, '롯데');
     const myStar = prime(g, g.team.org)[0];
-    const theirs = byNow(g, g.world.teams[other].org)[6];
+    // 기여 7위부터 첫 거래가 성사되는 첫 선수 (2026-10-24 구장 득점 가치를 다시 잰 뒤 7위 나승엽(24세)은 롯데가 내주지 않아
+    // 고정 순위로는 시나리오가 성립하지 않았다. 시험 대상은 되팔기 거절이다)
+    const theirs = byNow(g, g.world.teams[other].org).slice(6).find((p) => g.evaluateTrade(other, [myStar], [p]).verdict === 'accept');
+    if (!theirs) throw new Error('롯데가 받아 주는 첫 거래 후보가 없다');
     const ev = g.proposeTrade(other, [myStar], [theirs]);
     expect(ev.verdict).toBe('accept');
     const back = g.evaluateTrade(other, [theirs], [myStar]);

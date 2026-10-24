@@ -55,7 +55,8 @@
   data-src/수상.csv · 올스타.csv  골든글러브·MVP·신인왕·한국시리즈 MVP·올스타전 MVP와 올스타전 경기 (awards.json, allstar_history.json).
                                  나무위키 덤프에서 tools/wiki/s6_awards.py가 만든다. 짝 결과는 reports/wiki-awards.md
   data-src/구장.csv · 구장_사용.csv  구장 × 제원 기간(펜스·좌석·잔디·돔)과 구단 계보별 주 구장 (parks.json). 나무위키 구장 문서에서 읽어 적은 값.
-                                 열은 docs/구장효과_기획안.md 7.1·7.2 (plan/park-effects). 이것만 다시 만들려면: build_data.py --history-only
+                                 열은 docs/구장효과_기획안.md 7.1·7.2 (plan/park-effects). 이것만 다시 만들려면: build_data.py --parks-only
+                                 (src/league/ballparks.ts가 구단별 구장 이름·좌석·돔을 읽는다. 경기 배율은 아직 meta.json parkFactors·parkEvents만)
   data-src/수비이닝.csv · 수비평판.csv  KBO 공식 사이트 수비 기록 2001~2026 (사용자 수집, 선수·연도·구단·자리별 G·GS·이닝·E·PO·A·DP·PB·SB·CS)과
                                  나무위키·위키백과 서술의 수비 평판 (등급·시기·문서 제목만) → defense.json. 저장소 밖 원본에서 tools/build_defense.py가 만든다.
                                  이것만 다시 만들려면: build_data.py --defense-only (능력치 v2 16-3a, 판정 함수는 src/engine/fielding.ts)
@@ -392,7 +393,8 @@ def innings_rules(year):
 
 # ---- 수상·구장·올스타전 (awards.json, parks.json, allstar_history.json)
 # 나무위키 덤프에서 뽑은 가공 CSV (tools/wiki/s6_awards.py, data-src/구장.csv·구장_사용.csv). 2026-10-23 빈 자료 결정 4.
-# 게임 코드는 아직 읽지 않는다 (구장 효과·수상 표시는 따로). 선수 구성에 닿지 않아 저장 호환은 그대로.
+# 수상·올스타전은 게임 코드가 아직 읽지 않는다. parks.json은 src/league/ballparks.ts가 구장 이름·좌석·돔·이전 해를 읽는다
+# (구장 효과 P1, 경기 배율은 P5). 선수 구성에 닿지 않아 저장 호환은 그대로.
 
 def read_src_csv(path):
     if not path.exists():
@@ -409,17 +411,12 @@ def num(v):
     return int(f) if f.is_integer() else f
 
 
-def build_history(out_dir):
+def build_parks(out_dir):
+    """data-src/구장.csv · 구장_사용.csv → parks.json (구장효과 기획안 7.1·7.2). 다른 JSON과 독립 (--parks-only)"""
     src = ROOT / 'data-src'
-    awards = [{'award': r['상'], 'year': int(r['연도']), 'part': r['부문'], 'name': r['이름'], 'id': r['선수ID'] or None,
-               'team': r['구단'], 'franchise': r['계보'] or None} for r in read_src_csv(src / '수상.csv')]
-    (out_dir / 'awards.json').write_text(json.dumps({
-        'version': 1, 'source': 'data-src/수상.csv (나무위키 덤프 2026-08-29, tools/wiki/s6_awards.py)',
-        'note': 'id가 null이면 선수 ID와 짝짓지 못한 수상 (reports/wiki-awards.md)', 'awards': awards,
-    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     specs = [{
         'id': r['구장ID'], 'name': r['이름'], 'city': r['도시'], 'from': int(r['시작']), 'to': num(r['끝']),
-        'specChange': r['제원변경'] == '1', 'franchise': r['계보'] or None, 'seats': num(r['좌석']),
+        'change': r['변경'], 'franchise': r['계보'] or None, 'seats': num(r['좌석']),
         'fence': {k: num(r[c]) for k, c in (('l', '좌'), ('lc', '좌중'), ('c', '중'), ('rc', '우중'), ('r', '우'))},
         'height': {'lr': num(r['높이_좌우']), 'c': num(r['높이_중앙'])},
         'turf': {'infield': r['잔디_내야'] or None, 'outfield': r['잔디_외야'] or None}, 'dome': r['돔'] == '1',
@@ -428,10 +425,23 @@ def build_history(out_dir):
     use = [{'franchise': r['계보'], 'park': r['구장ID'], 'from': int(r['시작']), 'to': num(r['끝']), 'kind': r['구분'],
             'source': r['출처'], 'confirmed': r['확인'], 'note': r['비고']} for r in read_src_csv(src / '구장_사용.csv')]
     (out_dir / 'parks.json').write_text(json.dumps({
-        'version': 1, 'source': 'data-src/구장.csv · 구장_사용.csv (나무위키 덤프 2026-08-29)',
-        'note': 'specs: 구장 × 제원 기간 (to null = 지금까지, franchise 값이 있으면 그 구단 홈 경기에만 쓰는 제원). use: 구단 계보별 주 구장',
+        'version': 2, 'source': 'data-src/구장.csv · 구장_사용.csv (나무위키 덤프 2026-08-29. 줄마다 출처 열)',
+        'note': 'specs: 구장 × 제원 기간 (to null = 지금까지, franchise 값이 있으면 그 구단 홈 경기에만 쓰는 제원, '
+                'change = 앞 행과 다른 것: 없음 / 펜스 / 리모델링). use: 구단 계보별 주 구장 (kind 주 / 계획)',
         'specs': specs, 'use': use,
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return specs, use
+
+
+def build_history(out_dir):
+    src = ROOT / 'data-src'
+    awards = [{'award': r['상'], 'year': int(r['연도']), 'part': r['부문'], 'name': r['이름'], 'id': r['선수ID'] or None,
+               'team': r['구단'], 'franchise': r['계보'] or None} for r in read_src_csv(src / '수상.csv')]
+    (out_dir / 'awards.json').write_text(json.dumps({
+        'version': 1, 'source': 'data-src/수상.csv (나무위키 덤프 2026-08-29, tools/wiki/s6_awards.py)',
+        'note': 'id가 null이면 선수 ID와 짝짓지 못한 수상 (reports/wiki-awards.md)', 'awards': awards,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    specs, use = build_parks(out_dir)
     years = {}
     for r in read_src_csv(src / '올스타.csv'):
         y = years.setdefault(int(r['연도']), {'year': int(r['연도']), 'games': [], 'mvp': None})
@@ -1731,10 +1741,11 @@ PARK_SHRINK_GAMES = 144
 # 좌타·우타 표를 전체 표 쪽으로 당기는 정도: (좌우 log 지수 − 전체 log 지수) × 반 경기 / (반 경기 + PARK_SIDE_SHRINK_GAMES) (임시값.
 # 좌우 표는 표본이 전체의 절반쯤이다. 288경기 구장 0.5, 대전 0.2)
 PARK_SIDE_SHRINK_GAMES = 144
-# 사건별 득점 가치: 그 사건이 1개 더 날 때 엔진에서 느는 득점 (tools/park_run_value.ts, 2025년 6시드). 구성 배율이 내는 득점 계수를 셀 때만 쓴다.
+# 사건별 득점 가치: 그 사건이 1개 더 날 때 엔진에서 느는 득점 (tools/park_run_value.ts). 구성 배율이 내는 득점 계수를 셀 때만 쓴다.
 # 흔한 선형 가중치(단타 0.74, 2루타 1.05, 홈런 1.68)를 쓰면 엔진 득점 비가 f보다 1.25배 크게 움직였다 (reports/park-check.md).
-# 3루타는 잰 값(0.47)이 표본이 작아 2루타 값을 쓴다 (임시값)
-PARK_RUN_VALUE = {'s1': 0.61, 'd2': 0.69, 't3': 0.69, 'hr': 1.67}
+# 2026-10-24 지금 엔진(엔진 2·타구각 갈래)에서 다시 잼: 2017·2021·2025 × 16시드 합침 s1 0.627 · d2 0.875 · t3 0.874 · hr 1.394
+# (예전 값 0.61·0.69·0.69·1.67은 엔진 2 전 2025년 6시드). 3루타는 흔들림(±0.18)이 커서 2루타 값을 쓴다 (임시값). 엔진 params.park.runValue와 같다
+PARK_RUN_VALUE = {'s1': 0.63, 'd2': 0.88, 't3': 0.88, 'hr': 1.39}
 # 수준 맞춤에 쓰는 기본 나눔 (엔진 params.park의 hitExp·hrExp와 같다)
 PARK_DEFAULT_EXP = {'s1': 0.4, 'd2': 0.4, 't3': 0.4, 'hr': 1.2}
 
@@ -1786,8 +1797,9 @@ def park_events(parks, league):
                 return {e: math.exp(b[e] + PARK_DEFAULT_EXP[e] * d) for e in b}
 
             def run(d):
+                # 곱 꼴: Π 배율^(득점 가치 × 리그 비율 ÷ 타석당 득점) (엔진 park.ts runFactorOf와 같은 식, 2026-10-24 구장 개발 9)
                 m = mult(d)
-                return 1 + sum(PARK_RUN_VALUE[e] * R[e] * (m[e] - 1) for e in m) / rpa
+                return math.exp(sum(PARK_RUN_VALUE[e] * R[e] * math.log(m[e]) for e in m) / rpa)
 
             lo, hi = -1.0, 1.0
             for _ in range(60):
@@ -1866,6 +1878,11 @@ def main():
     if '--history-only' in sys.argv:
         # 수상·구장·올스타전 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         build_history(OUT)
+        return
+    if '--parks-only' in sys.argv:
+        # 구장 제원·사용 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        specs, use = build_parks(OUT)
+        print(f'구장 제원 {len(specs)}줄 · 사용 {len(use)}줄 → {OUT}')
         return
     if '--defense-only' in sys.argv:
         # 수비 이닝·평판 CSV만 다시 반영한다 (시즌 JSON에서 타석을 읽는다. 다른 JSON과 저장 호환은 그대로)

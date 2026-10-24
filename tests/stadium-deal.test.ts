@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { AI_NEW_AGE, MUNICIPAL, municipalChance, NEW_PARK, orderStadium, stadiumYearEnd } from '../src/league/stadium';
+import { AI_NEW_AGE, FENCE_PRESETS, MUNICIPAL, municipalChance, NEW_PARK, orderStadium, stadiumYearEnd } from '../src/league/stadium';
 import type { LeagueState } from '../src/league/types';
 import { wageIndex } from '../src/league/salary';
 
@@ -64,7 +64,7 @@ describe('AI 신구장', () => {
     delete L.stadiums![t].project;
     L.ledger.push({ year: 2027, from: -1, to: t, amount: 20_000_000, note: '시험 자금', kind: 'other' });
     const news = stadiumYearEnd(L, 2026, (x) => (x === t ? 20_000_000 : 0), 0);
-    expect(L.stadiums![t].project).toMatchObject({ kind: 'new', start: 2027, open: 2030, hr: 1 });
+    expect(L.stadiums![t].project).toMatchObject({ kind: 'new', start: 2027, open: 2030, fence: FENCE_PRESETS.neutral.fence });
     expect(news.some((n) => n.includes('신구장 착공'))).toBe(true);
     // 새 구장(나이가 어린 구장)이면 신구장 대신 리모델링
     const M = copy();

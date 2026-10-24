@@ -5,6 +5,7 @@
 사용법:  python3 tools/validate_data.py [데이터 폴더]
 오류가 있으면 종료 코드 1. 경고는 알려진 공백을 수로 보여 주는 용도이며 실패로 치지 않는다.
 """
+import csv
 import json
 import sys
 from collections import Counter, defaultdict
@@ -20,6 +21,95 @@ warn = warnings.append
 
 def load(p):
     return json.loads(p.read_text(encoding='utf-8'))
+
+
+# 하드힛 구장 구성표(data-src/hardhit_derived/park_components.csv)의 구장 이름 → 구장 ID. 제2구장 포항·울산은 엔진에 없다
+HARDHIT_PARKS = {'잠실': 'jamsil', '대구': 'lionspark', '인천': 'munhak', '부산': 'sajik', '대전': 'ballpark', '수원': 'suwon',
+                 '창원': 'changwon', '광주': 'champions', '고척': 'gocheok'}
+HARDHIT_TEAMS = {'키움': '히어로즈'}
+FENCE_KEYS = ('l', 'lc', 'c', 'rc', 'r')
+
+
+def check_parks(parks, meta):
+    """parks.json (구장효과 기획안 7.4): 범위, 기간 겹침, 변경 열, 계보 행, 구단별 주 구장, 하드힛 구장 이름"""
+    specs, use = parks['specs'], parks['use']
+    ids = {s['id'] for s in specs}
+    fence_of = lambda s: tuple(s['fence'][k] for k in FENCE_KEYS) + (s['height']['lr'], s['height']['c'])
+    for s in specs:
+        for k, v in s['fence'].items():
+            if v is not None and not 85 <= v <= 130:
+                err(f'구장 {s["id"]} {s["from"]}: 펜스 {k} {v}m가 85~130m 밖')
+        for k, v in s['height'].items():
+            if v is not None and not 1 <= v <= 8:
+                err(f'구장 {s["id"]} {s["from"]}: 펜스 높이 {k} {v}m가 1~8m 밖')
+        if s['change'] not in ('없음', '펜스', '리모델링'):
+            err(f'구장 {s["id"]} {s["from"]}: 변경 {s["change"]!r}는 없음 / 펜스 / 리모델링이 아님')
+        if s['change'] == '리모델링' and '리모델링' not in (s['note'] or ''):
+            warn(f'구장 {s["id"]} {s["from"]}: 변경 = 리모델링인데 비고에 근거가 없음')
+    # 구장마다 공용 행(계보 빈 행)은 기간이 겹치지 않고, 변경 = 펜스면 앞 행과 펜스 칸이 다르고 없음이면 같다
+    base = defaultdict(list)
+    for s in specs:
+        if not s['franchise']:
+            base[s['id']].append(s)
+    for pid, ss in base.items():
+        ss.sort(key=lambda s: s['from'])
+        for a, b in zip(ss, ss[1:]):
+            if b['from'] <= (a['to'] or 9999):
+                err(f'구장 {pid}: 제원 기간이 겹침 ({a["from"]}~{a["to"]}, {b["from"]}~)')
+            if b['change'] == '펜스' and fence_of(a) == fence_of(b):
+                err(f'구장 {pid} {b["from"]}: 변경 = 펜스인데 앞 행과 펜스 칸이 같음')
+            if b['change'] == '없음' and fence_of(a) != fence_of(b):
+                err(f'구장 {pid} {b["from"]}: 변경 = 없음인데 앞 행과 펜스 칸이 다름')
+    cover = lambda pid, y: next((s for s in base.get(pid, ()) if s['from'] <= y <= (s['to'] or 9999)), None)
+    # 계보 행(그 구단 홈 경기에만 쓰는 제원)은 같은 구장·같은 해에 공용 행이 있고, 펜스 칸이 공용 행과 달라야 한다
+    for s in specs:
+        if s['franchise']:
+            for y in range(s['from'], (s['to'] or s['from']) + 1):
+                b = cover(s['id'], y)
+                if not b:
+                    err(f'구장 {s["id"]} {y}: 계보 {s["franchise"]} 행만 있고 공용 행이 없음')
+                elif s['change'] == '펜스' and fence_of(b) == fence_of(s):
+                    err(f'구장 {s["id"]} {y}: 계보 {s["franchise"]} 행이 공용 행과 펜스 칸이 같음')
+    spans = defaultdict(list)
+    for u in use:
+        if u['park'] not in ids:
+            err(f'구장 사용 {u["franchise"]}: 구장 표에 없는 구장 {u["park"]}')
+        if u['kind'] not in ('주', '계획'):
+            err(f'구장 사용 {u["franchise"]} {u["park"]}: 구분 {u["kind"]!r}는 주 / 계획이 아님')
+        if u['kind'] == '주':
+            spans[u['franchise']].append((u['from'], u['to'] or 9999, u['park']))
+    for fr, ss in spans.items():
+        ss.sort()
+        for (a1, b1, _), (a2, _, _) in zip(ss, ss[1:]):
+            if a2 <= b1:
+                err(f'구장 사용 {fr}: 주 구장 기간이 겹침 ({a1}~{b1}, {a2}~)')
+    last = max(meta['years'])
+    hardhit = defaultdict(set)  # 구장 ID → 구성표에 나온 계보 (2022~2025 묶음)
+    comp = ROOT / 'data-src' / 'hardhit_derived' / 'park_components.csv'
+    if comp.exists():
+        with comp.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if r['구장'] in HARDHIT_PARKS:
+                    # 팀 칸은 'LG/두산'처럼 여럿이고 키움은 계보 이름(히어로즈)과 다르다
+                    hardhit[HARDHIT_PARKS[r['구장']]].update(HARDHIT_TEAMS.get(x, x) for x in r['팀'].split('/'))
+                elif r['구장'] not in ('포항', '울산'):
+                    err(f'하드힛 구장 구성표: 구장 ID를 모르는 구장 {r["구장"]}')
+    # 실측 구장: 구성표(2022~2025 묶음)의 구장은 묶음 마지막 해 그 구단들의 주 구장이어야 한다 (대전은 2025 볼파크 반 시즌)
+    for pid, frs in hardhit.items():
+        for fr in frs:
+            on = [p for a, b, p in spans.get(fr, ()) if a <= 2025 <= b]
+            if on != [pid]:
+                err(f'하드힛 구장 구성표 {pid}: {fr}의 2025 주 구장이 {on}')
+    for y in meta['years']:
+        for t in load(DATA / 'seasons' / f'{y}.json')['teams']:
+            fr = t['franchise']
+            on = [p for a, b, p in spans.get(fr, ()) if a <= int(y) <= b]
+            if not on:
+                warn(f'구장 사용 {y} {t["name"]}: 주 구장 없음')
+                continue
+            if int(y) <= last and not cover(on[0], int(y)):
+                err(f'구장 {on[0]} {y}: {t["name"]}의 주 구장인데 그 해 제원 행이 없음')
+
 
 
 def main():
@@ -268,30 +358,7 @@ def main():
             if a['id'] and a['id'] not in by_id:
                 err(f'수상 {a["year"]} {a["award"]} {a["name"]}: 없는 선수 ID {a["id"]}')
     if (DATA / 'parks.json').exists():
-        parks = load(DATA / 'parks.json')
-        ids = {s['id'] for s in parks['specs']}
-        for s in parks['specs']:
-            for k, v in s['fence'].items():
-                if v is not None and not 85 <= v <= 130:
-                    err(f'구장 {s["id"]} {s["from"]}: 펜스 {k} {v}m가 85~130m 밖')
-            for k, v in s['height'].items():
-                if v is not None and not 1 <= v <= 8:
-                    err(f'구장 {s["id"]} {s["from"]}: 펜스 높이 {k} {v}m가 1~8m 밖')
-        spans = defaultdict(list)
-        for u in parks['use']:
-            if u['park'] not in ids:
-                err(f'구장 사용 {u["franchise"]}: 구장 표에 없는 구장 {u["park"]}')
-            if u['kind'] == '주':
-                spans[u['franchise']].append((u['from'], u['to'] or 9999))
-        for fr, ss in spans.items():
-            ss.sort()
-            for (a1, b1), (a2, _) in zip(ss, ss[1:]):
-                if a2 <= b1:
-                    err(f'구장 사용 {fr}: 주 구장 기간이 겹침 ({a1}~{b1}, {a2}~)')
-        for y in meta['years']:
-            for t in load(DATA / 'seasons' / f'{y}.json')['teams']:
-                if not any(a <= int(y) <= b for a, b in spans.get(t['franchise'], ())):
-                    warn(f'구장 사용 {y} {t["name"]}: 주 구장 없음')
+        check_parks(load(DATA / 'parks.json'), meta)
 
     # ---- 수비 이닝·평판 (defense.json, 능력치 v2 16-3a: tools/build_defense.py → build_data.py --defense-only)
     if (DATA / 'defense.json').exists():

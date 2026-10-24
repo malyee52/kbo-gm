@@ -219,6 +219,32 @@ export interface EraRunning {
   ue?: number;
 }
 
+/**
+ * 구장 제원 회귀 (구장효과 기획안 4.2·6.1·6.2, P4 reports/park-specs-fit.md). log 지수 = a + b × 평균 거리(좌·중·우 평균, m) + 높이 규칙.
+ * P5부터 옛 해 대리값(engine/park.ts: 차이 방식·짐작)이 쓴다. 신구장 펜스(P6)도 같은 값을 쓸 자리
+ */
+export interface ParkSpecFit {
+  /** 홈런 log 지수 [a, b] */
+  hr: [number, number];
+  /** (2루타 + 3루타) log 지수 [a, b] */
+  xb: [number, number];
+  /** 실제 구장 짐작의 당김: 짐작 log 지수 × w (0 = 중립) */
+  w: number;
+  /** 상·하한: 홈런·(2루타 + 3루타) 지수(100 = 리그), 득점 계수 f, 좌타·우타 홈런 지수 */
+  clamp: { hr: [number, number]; xb: [number, number]; f: [number, number]; side: [number, number] };
+  /** 펜스 높이 규칙: 기준 높이(m)보다 1m 높을 때마다 홈런 지수 × (1 + hr), (2루타 + 3루타) × (1 + xb). 낮으면 반대 (log로 대칭) */
+  height: { base: number; hr: number; xb: number };
+  /** 좌우 비대칭: 좌·우 펜스 거리 차 1m당 짧은 쪽으로 당겨 치는 타자(좌타는 우측) 홈런 + perM, 상한 ±max. 반대 손은 같은 폭만큼 내린다 */
+  asym: { perM: number; max: number };
+  /** 신구장 고르기 범위 (m): 좌·우 펜스, 중앙 펜스, 높이 */
+  range: { side: [number, number]; center: [number, number]; height: [number, number] };
+  /**
+   * 게임 안 신구장 단순 규칙 (기획안 6.3, 사용자 결정 2026-10-24 "B"): 고르는 범위의 가장 작은 구장(평균 거리 최소)과 가장 큰 구장의
+   * 홈런·(2루타 + 3루타) 지수(100 = 리그). 그 사이 평균 거리는 log 직선으로 잇고 높이·좌우 규칙과 상·하한을 더한다 (당김 없음)
+   */
+  newPark: { hr: [number, number]; xb: [number, number] };
+}
+
 /** 사슬 능력 하나의 등급 눈금 (능력치 v2 1.7·11.2): 등급 = 50 + 10 × e⁻¹((값 − mid) ÷ half), 볼록 곡선 a(위)·b(아래) */
 export interface PlateAbility {
   mid: number;
@@ -305,7 +331,13 @@ export interface EngineParams {
    * 2026-10-22부터 하드힛 구장 표(2022~2025, 전체·좌타·우타)에 있는 구장은 사건별 배율(meta.parkEvents)을 쓰고, 이 지수는 표에 없는
    * 예전 구장과 배율의 수준 맞춤(build_data.py park_events)에만 쓴다
    */
-  park: { hitExp: number; hrExp: number };
+  park: {
+    hitExp: number;
+    hrExp: number;
+    /** 사건별 득점 가치: 그 사건이 1개 더 날 때 느는 득점 (tools/park_run_value.ts). 사건별 배율이 내는 득점 계수를 셀 때만 쓴다 (park.ts runFactorOf) */
+    runValue: { s1: number; d2: number; t3: number; hr: number };
+    specFit: ParkSpecFit;
+  };
   /** 투수가 한계 투구 수를 넘긴 뒤 공 1개마다 나빠지는 정도 (엔진 2 4단계) */
   fatiguePerPitch: number;
   /** 경기 안 피로의 최대 (삼진 배율 1 − 이 값, 볼넷·홈런·안타 배율 1 + 이 값) */
@@ -570,7 +602,31 @@ export const DEFAULT_PARAMS: EngineParams = {
   platoon: 0.028,
   homeEdge: 0.013,
   // 임시값: 홈런이 구장에 더 민감하다고 보고 정한 지수 (구장별 득점 비가 f를 따라가는지는 아직 재지 않았다)
-  park: { hitExp: 0.4, hrExp: 1.2 },
+  park: {
+    hitExp: 0.4,
+    hrExp: 1.2,
+    // build_data.py PARK_RUN_VALUE와 같은 값 (tools/park_run_value.ts, 2017·2021·2025 × 16시드 합침, 2026-10-24 구장 개발 8:
+    // s1 0.627±0.013 · d2 0.875±0.055 · t3 0.874±0.178 · hr 1.394±0.112). 3루타는 흔들림이 커서 2루타 값 (임시값, 잰 값과 거의 같다)
+    runValue: { s1: 0.63, d2: 0.88, t3: 0.88, hr: 1.39 },
+    // 자리값 (P4 reports/park-specs-fit.md, 하드힛 구성표 9곳): 평균 거리 식. 한 구장 빼고 맞히기 오차가 중립보다 커서
+    // (홈런 log 0.350 대 0.255, (2루타 + 3루타) 0.132 대 0.088) 오차가 가장 작은 당김은 0 (= 중립)이지만, 사용자 결정 15
+    // (2026-10-24, 기획안 4.3)로 옛 구장마다 다른 맛을 남기려고 C안 짐작을 그대로 쓴다: w 0.5 (임시값, w 0.5의 홈런 오차 0.302).
+    // 범위는 표본 최소~최대 (높이는 0.5m 단위로 2.4 → 2.5)
+    specFit: {
+      hr: [3.2501, -0.0308],
+      xb: [-0.5575, 0.0055],
+      w: 0.5,
+      // 좌우타 홈런 55~149: 하드힛 좌우 표 최소(잠실 좌타)~최대(라팍 우타) (기획안 4.2-5, P5)
+      clamp: { hr: [70, 147], xb: [86, 122], f: [0.886, 1.126], side: [55, 149] },
+      // 임시값 (기획안 6.2): 1m당 홈런 −4%·(2루타 + 3루타) +3%, 기준 3.4m = P4 높이가 있는 7곳 평균. P4 잰 값(−0.090/m·+0.062/m)은 사직 한 곳이 끌어 쓰지 않음
+      height: { base: 3.4, hr: -0.04, xb: 0.03 },
+      // 임시값 (기획안 6.2-3): 좌우 거리가 다른 구장이 하나뿐이라 잴 수 없었다. 좌타·우타 타석 비 대신 같은 폭으로 올리고 내린다
+      asym: { perM: 0.02, max: 0.08 },
+      range: { side: [95, 101], center: [120, 125], height: [2.5, 6] },
+      // 임시값 (사용자 결정 2026-10-24, 기획안 10장 물음 1 = B): 실측 범위 끝(홈런 147·70, 2루타+3루타 86·122)을 고르는 범위 끝에 댄다
+      newPark: { hr: [147, 70], xb: [86, 122] },
+    },
+  },
   // 한계 투구 수를 넘기면 능력이 확 꺾인다: 5구당 약 10% (사용자 결정 2026-10-22, 엔진 1은 타자 1명당 0.012 = 공 1개당 약 0.003)
   fatiguePerPitch: 0.02,
   // 임시값 (2026-10-22 사용자 승인): 30구 넘김에서 멈춘다 (엔진 1은 0.3)
