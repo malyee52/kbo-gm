@@ -242,7 +242,8 @@ export function startPostseason(season: Season, standings: number[], n: number, 
   const poWins = semiSkip ? rules.poWinsNoSemi ?? rules.poWins : rules.poWins;
   const roundRules: Partial<Record<SeriesRound, RoundRule>> = {};
   for (const r of rounds) {
-    const rule = yearRoundRule(r, r === 'semi' ? rules.semiWins : r === 'po' ? poWins : undefined, seeds.length);
+    // 준플레이오프를 건너뛴 해는 4팀 해의 규칙 (3팀 규칙은 1986~1988 플레이오프 홈 배정)
+    const rule = yearRoundRule(r, r === 'semi' ? rules.semiWins : r === 'po' ? poWins : undefined, semiSkip ? 4 : seeds.length);
     if (rule) roundRules[r] = rule;
   }
   const st: PostseasonState = {
