@@ -13,7 +13,11 @@ describe('연장 규정', () => {
     expect(world.rules.maxInnings).toBe(0);
     const s = Season.start(world, FAST, 'extra-2008');
     s.runToEnd();
-    expect(s.totals.ties).toBe(0);
+    // 연장에서 나는 무승부는 없다. 강우 콜드 동점(일정 개편 10단계, 5~8회에서 멈춤)은 연장 규정과 상관없이 무승부라 뺀다
+    // (2026-10-24 구장 득점 가치를 다시 잰 뒤 이 시드에서 5회 강우 콜드 1-1이 하나 났다)
+    const rainTies = s.log.filter((g) => g.rain === 'cold' && g.homeRuns === g.awayRuns).length;
+    expect(s.totals.ties).toBe(rainTies);
+    expect(s.log.filter((g) => g.homeRuns === g.awayRuns && g.rain !== 'cold')).toHaveLength(0);
     expect(s.log.some((g) => g.innings > 12)).toBe(true);
   }, 120_000);
 
