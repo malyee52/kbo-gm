@@ -880,7 +880,7 @@ function overseasOffseason(league: LeagueState, off: OffseasonState, store: Stor
     if (p.foreign) p.abroad!.returnYear = FOREIGN_NEVER_RETURNS;
     log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (${league.teams[from].name}, 이적료 ${(fee / 10000).toFixed(0)}억 원)`, false, true);
     addArticle(league, { year, day: -1, kind: 'overseas', franchise: league.teams[from].franchise, title: `${p.name}, 해외 진출`,
-      body: `${league.teams[from].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+      body: `${league.teams[from].name} ${p.name}${josa(p.name, '이가')} 포스팅으로 해외 무대에 도전한다.` });
   }
 }
 
@@ -906,7 +906,7 @@ export function answerPosting(league: LeagueState, off: OffseasonState, id: stri
   if (fe) fe.status = 'left';
   log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (이적료 ${(req.fee / 10000).toFixed(0)}억 원)`, true, true);
   addArticle(league, { year: off.year, day: -1, kind: 'overseas', franchise: league.teams[off.userTeam].franchise, title: `${p.name}, 해외 진출`,
-    body: `${league.teams[off.userTeam].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+    body: `${league.teams[off.userTeam].name} ${p.name}${josa(p.name, '이가')} 포스팅으로 해외 무대에 도전한다.` });
   return { ok: true, message: `${p.name}을(를) 해외로 보냈습니다 (이적료 ${(req.fee / 10000).toFixed(0)}억 원).` };
 }
 
