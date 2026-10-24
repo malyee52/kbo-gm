@@ -222,17 +222,21 @@ describe('가벽 (6.8, P6c)', () => {
 });
 
 describe('실제 미래 구장과 2027년 뒤 (4.5, P7)', () => {
-  it('2027년 뒤는 같은 구장-기간 실측 해의 기간 평균, 잠실 돔(제원 미확정)은 2031·2032·2033 배율이 같다', () => {
+  it('2027년 뒤는 같은 구장-기간 실측 해의 기간 평균을 해마다 구단 평균 1로 나눈 값, 잠실 돔(제원 미확정)은 2031·2032·2033 배율이 같다', () => {
     const L = copy();
     const nc = idx(L, 'NC');
-    // 창원 2019~ 기간: 실측 f의 기하 평균
-    const fs = Object.keys(store.meta.parkFactors!).map(Number).filter((y) => y >= 2019).map((y) => store.meta.parkFactors![String(y)].NC);
     const v = park(L, nc, 2027);
     expect(v.basis).toBe('mean');
-    expect(v.park!.run).toBeCloseTo(Math.exp(fs.reduce((s, f) => s + Math.log(f), 0) / fs.length), 12);
     expect(park(L, nc, 2040)).toEqual(v);
-    // 펜스 조정의 조정 전 값과 같다 (원래 펜스로 되돌리면 이 값)
-    expect(v.park!.ev).toEqual(fenceBaseOf(src, 'NC', 2027, FENCE_PRESETS.neutral.fence, PP).base);
+    // 사건별·득점 계수 모두 구단 평균 1 (기간 평균만이면 2027 득점 계수 평균 1.0065)
+    const all = L.teams.map((_, t) => park(L, t, 2027).park!);
+    for (const k of ['s1', 'd2', 't3', 'hr'] as const) expect(all.reduce((a, x) => a + x.ev![k], 0) / all.length).toBeCloseTo(1, 12);
+    expect(all.reduce((a, x) => a + x.run!, 0) / all.length).toBeCloseTo(1, 12);
+    // 펜스 조정의 조정 전 값(창원 2019~ 실측 기간 평균)을 같은 해 사건별 평균으로 나눈 값: 구단끼리의 비는 기간 평균 그대로
+    const b = fenceBaseOf(src, 'NC', 2027, FENCE_PRESETS.neutral.fence, PP).base;
+    const b2 = fenceBaseOf(src, 'SSG', 2027, FENCE_PRESETS.neutral.fence, PP).base;
+    const v2 = park(L, idx(L, 'SSG'), 2027).park!.ev!;
+    for (const k of ['s1', 'd2', 't3', 'hr'] as const) expect(v.park!.ev![k] / v2[k]).toBeCloseTo(b[k] / b2[k], 12);
     for (const fr of ['LG', '두산']) {
       const t = idx(L, fr);
       const y31 = park(L, t, 2031);
@@ -253,7 +257,10 @@ describe('실제 미래 구장과 2027년 뒤 (4.5, P7)', () => {
     const v = park(L, lg, 2032, sure);
     expect(v.basis).toBe('guess');
     const g = guessLogs(dome, PP)!;
-    expect(v.park!.ev!.hr).toBeCloseTo(Math.exp(PP.specFit.w * g.hr), 12);
+    // 짐작 × 당김을 그 해 평균 1로 나눈 값: 다른 구단(창원 실측 기간 평균)과의 비가 나누기 전 비와 같다
+    const nc = park(L, idx(L, 'NC'), 2032, sure).park!.ev!;
+    const ncBase = fenceBaseOf(sure, 'NC', 2032, FENCE_PRESETS.neutral.fence, PP).base;
+    expect(v.park!.ev!.hr / nc.hr).toBeCloseTo(Math.exp(PP.specFit.w * g.hr) / ncBase.hr, 12);
     expect(park(L, idx(L, '두산'), 2032, sure).park!.ev).toEqual(v.park!.ev);
     // 확정 전(지금 자료)은 가벽이 이어진다
     expect(park(L, lg, 2032).basis).toBe('wall');

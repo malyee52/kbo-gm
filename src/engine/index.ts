@@ -34,7 +34,7 @@ export {
 export { eraPitching, leagueQuality, type EraPitching } from './eras';
 export {
   applyDiff, confirmedPlannedPark, fenceBaseOf, fenceOfRow, fenceParkEvents, fenceSpecOf, fenceValid, gameParkOf, guessLogs, historyWallAt, homeParkId, mainParkId, parkIndexOf,
-  realParkLater, realParkNoOwn, realParkYear, runFactorOf, PARK_COMPONENT_YEARS,
+  realParkNoOwn, realParkYear, runFactorOf, PARK_COMPONENT_YEARS,
   type Fence, type FenceBase, type GuessLogs, type ParkIndex, type ParkLeagueRates, type ParkSource, type RealParkBasis, type RealParkValue,
 } from './park';
 export { dateOfDay, postseasonMaxInnings, regularMaxInnings, winPctBy, winPctRuleOf, POSTSEASON_INNINGS_DEFAULT, type GameDayInfo, type WinPctRule } from './records';

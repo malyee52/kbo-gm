@@ -10,7 +10,7 @@
 import type { ParkEvents, ParkSpec } from '../data/types';
 import {
   applyDiff, DEFAULT_PARAMS, fenceBaseOf, fenceOfRow, fenceParkEvents, fenceSpecOf, fenceValid, gameParkOf, guessLogs, historyWallAt, homeParkId,
-  realParkLater, realParkNoOwn, realParkYear, Rng, type EngineParams, type Fence, type ParkLeagueRates, type ParkSource, type RealParkBasis, type SimTeam,
+  realParkNoOwn, realParkYear, Rng, type EngineParams, type Fence, type ParkLeagueRates, type ParkSource, type RealParkBasis, type SimTeam,
 } from '../engine';
 import { realParkAt, realParkOpening, realParkRename, realParkSpec } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
@@ -126,7 +126,7 @@ export type TeamParkBasis = RealParkBasis | 'built' | 'fence' | 'wall' | 'none';
 /**
  * 그 해 그 구단 홈 구장의 경기 배율 (world.ts SimTeam.park, 구장 화면·세이버 보정이 같은 값을 읽는다).
  * 고르는 순서 (구장효과 기획안 6.8.4): 게임 안 가벽 → 펜스 조정 → 게임 안 신구장 → 실제 구장 값 (engine/park.ts: 2015~ 실측, 그 전은 차이 방식·짐작,
- * 마지막 실측 해 뒤는 실측 기간 평균·확정된 미래 구장 짐작 realParkLater) → 1. 게임 안 공사 값은 그 해 개막 전에 끝난 공사(done)에서 찾는다.
+ * 마지막 실측 해 뒤는 실측 기간 평균·확정된 미래 구장 짐작, 해마다 평균 1) → 1. 게임 안 공사 값은 그 해 개막 전에 끝난 공사(done)에서 찾는다.
  * franchises·lg = 그 해 리그 구단 계보와 리그 비율 (옛 해 평균 1 맞춤과 득점 계수에 쓴다). 중립이면 park가 undefined
  */
 export function teamParkInfo(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
@@ -135,9 +135,7 @@ export function teamParkInfo(src: ParkSource, franchise: string, year: number, s
   if (w.wall) return { park: { hr: 1, ev: w.wall }, basis: 'wall' };
   if (w.fence) return { park: { hr: 1, ev: w.fence }, basis: 'fence' };
   if (w.built) return { park: w.built.park, basis: 'built' };
-  const last = Math.max(...Object.keys(src.parkFactors ?? {}).map(Number));
-  const v = year > last ? realParkLater(src, franchise, year, lg, pp)
-    : w.touched ? realParkNoOwn(src, year, franchise, franchises, lg, pp)
+  const v = w.touched ? realParkNoOwn(src, year, franchise, franchises, lg, pp)
     : realParkYear(src, year, franchises, lg, pp).get(franchise);
   const hr = parkFactor(s).hr;
   const run = v?.run ?? 1;
