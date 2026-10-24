@@ -105,6 +105,13 @@ export interface LeaguePlayer {
    * 없으면 0으로 본다 (가상 판정)
    */
   drive?: number;
+  /**
+   * 갈래 천장 P_c (능력치 v2 16-4a, league/branches.ts): 종합 천장(potential)을 갈래로 나눈 능력 비율. 리그를 만들 때(실존 선수는 고점 시즌 모양)
+   * 또는 첫 성장 판정 때 만들고, 종합 천장이 바뀌면 같은 모양으로 다시 맞춘다. 숨은 값 (화면·AI 가치·알림에 안 씀)
+   */
+  ceil?: import('./branches').BranchCeiling;
+  /** 시기 τ (해, 숨은 값, 16-4a): 성장이 몰리는 나이를 당기거나 민다. 없으면 시드로 다시 뽑는다 (branches.ts timingOf) */
+  timing?: number;
   /** 스카우트 평가 잠재력 (가상 신인만. 실제 잠재력 대신 화면과 AI 지명에 쓴다) */
   scoutPotential?: number;
   /** 직전 기록이 없어 그 해 기록으로 능력을 추정한 선수 (첫 시즌만) */

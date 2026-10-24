@@ -22,6 +22,7 @@ import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, t
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
+import { ceilingFor, growBranches, timingOf } from './branches';
 import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
@@ -501,8 +502,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const share = young && futOpp > 0 ? Math.max(firstTeam, firstTeam + FUTURES_WEIGHT * futOpp + DEVELOP_SHARE[dev]) : firstTeam;
     const form = young ? futuresForm(fl) : 0;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
     const grown = developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
-      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential) + FUT_FORM_RUNS * form, dev);
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2) + FUT_FORM_RUNS * form, dev);
     if (Math.abs(form) >= 0.5) {
       const g = growth.get(p.id)!;
       g.tags = [...(g.tags ?? []), form > 0 ? '퓨처스 활약' : '퓨처스 부진'];
@@ -510,7 +512,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
     // 천장(잠재력 v2)은 넘지 않는다: 터지는 해·운·퓨처스 활약·육성·코치 몫까지 더한 뒤 자른다 (기획안 17.2, Q3)
     const next = capAtCeiling(coachGrowth(league, team, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE), runs, p.potential) - eff.runsDrop;
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
     // 등급(20~80)의 기준 집단이 "표본이 충분한 선수"라서, 가상 선수도 뛰면 기준 집단에 들어가야 한다
@@ -539,9 +541,11 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
   for (const p of league.players) {
     if (!isAbroad(p)) continue;
-    const next = capAtCeiling(growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 1,
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential), runsAt(p, year), p.potential);
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
+    const next = capAtCeiling(growthRuns(age, runsAt(p, year), p.potential, 1, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2), runsAt(p, year), p.potential);
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
   // 복무 중인 선수 (careers.ts): 군 야구단(상무·경찰)은 퓨처스리그에서 뛰는 것으로 보고 출전 기회 40%로 성장 판정 (임시값).
   // 현역·보충역(공익·사회복무)은 경기에 못 나가 자라지 않고 해마다 SERVICE_DECAY만큼 감각이 떨어진다
@@ -549,11 +553,13 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (!isServing(p) || p.team < 0) continue;
     const kind = p.military!.kind ?? 'unit';
     growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runsAt(p, year), after: 0, tags: [`복무 중 (${serviceName(p.military)})`] });
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
     const next = kind === 'unit'
-      ? capAtCeiling(growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 0.4,
-        new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential), runsAt(p, year), p.potential)
+      ? capAtCeiling(growthRuns(age, runsAt(p, year), p.potential, 0.4, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+        agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2), runsAt(p, year), p.potential)
       : runsAt(p, year) - SERVICE_DECAY[kind];
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
   // 퓨처스 구단(창단 뒤 1군 진입 전) 선수: 시즌 월드에 없어 퓨처스리그 성적(extras)으로 성장 판정. 나이와 상관없이 퓨처스가 주 무대다
   for (const p of league.players) {
@@ -563,9 +569,11 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const dev = activeLevel(league, p.team, 'develop');
     const fl = futById.get(p.id);
     const share = fl ? FUTURES_WEIGHT * futuresOpportunity(fl) + DEVELOP_SHARE[dev] : FUTURES_SHARE + DEVELOP_SHARE[dev];
-    const next = capAtCeiling(developed(ageIn(p, year + 1), runs, growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runs, p.potential, share,
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential) + FUT_FORM_RUNS * futuresForm(fl), dev), runs, p.potential);
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
+    const next = capAtCeiling(developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2) + FUT_FORM_RUNS * futuresForm(fl), dev), runs, p.potential);
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
   const divisions = season.divisionStandings();
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0), ...(divisions ? { divisions } : {}) };
@@ -2719,6 +2727,22 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
 function scoutView(league: LeagueState, potential: number, rng: Rng): number {
   const n = SCOUT_NOISE[activeLevel(league, league.owner?.team ?? -1, 'scout')];
   return Math.round(potential + rng.range(-n, n));
+}
+
+/** 시기 τ (16-4a): 리그를 만들 때 정한 값, 없으면 시드로 (branches.ts) */
+function timingFor(league: LeagueState, p: LeaguePlayer, params: EngineParams): number {
+  return p.timing ?? timingOf(league.seed, p.id, false, params);
+}
+
+/**
+ * 갈래 성장 (16-4a, branches.ts): 성장 판정이 정한 새 종합 런(next)을 갈래별 나이 곡선과 갈래 천장까지 남은 거리 방향으로 싣는다.
+ * 갈래 천장이 없거나 종합 천장이 바뀌었으면 여기서 (다시) 만든다
+ */
+function growInBranches(league: LeagueState, p: LeaguePlayer, next: number, ctx: ValueContext, year: number, age: number, breakout: boolean | undefined,
+                        params: EngineParams): void {
+  p.ceil = ceilingFor(p, ctx, year, league.seed, params);
+  Object.assign(p, growBranches({ ...p }, p.ceil, next, ctx, year,
+    { age, timing: timingFor(league, p, params), stream: `${league.seed}/growth2/${year}/${p.id}`, breakout }, params));
 }
 
 /** 육성 투자: 25세 이하 선수가 오를 때 오름폭을 늘린다 */

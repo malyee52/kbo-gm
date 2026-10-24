@@ -102,7 +102,9 @@ export function careerIndex(store: Pick<DataStore, 'meta' | 'season'>): CareerIn
  * 런으로 바꾸고 가장 높은 값을 쓴다. 기록이 없으면 null.
  */
 export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'parks'>>, ctx: ValueContext,
-                             params: EngineParams = DEFAULT_PARAMS, before = Infinity): number | null {
+                             params: EngineParams = DEFAULT_PARAMS, before = Infinity,
+                             out?: { peak?: BatSkill | PitSkill; seasons?: (BatSkill | PitSkill)[] }): number | null {
+  // out: 고점 시즌 능력과 출전이 충분했던 시즌들의 능력 (갈래 천장 모양, 16-4a branches.ts peakShape)
   // before: 이 해 전 시즌만 본다 (잠재력 v2, 기획안 18.1: 시작 연도 실존 선수의 고정 판단·바닥은 시작 연도 전 기록뿐)
   // 2026-10-12 사용자 "실제로 높았던 선수들의 잠재력이 실제보다 낮다": 예전에는 한 시즌씩 따로 능력을 뽑아(한 시즌 표본이라
   // 평균 쪽으로 크게 당겨진다) 좋은 두 시즌을 평균했다. 이제는 게임이 능력을 매기는 방식 그대로(그 시즌과 앞 두 시즌을
@@ -115,7 +117,10 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
   const qNow = leagueQuality(ctx.world.year);
   const qRatio = (y: number) => leagueQuality(y) / qNow;
   let best: number | null = null;
-  const take = (r: number) => { if (best === null || r > best) best = r; };
+  const take = (r: number, skill: BatSkill | PitSkill) => {
+    if (out) (out.seasons ??= []).push(skill);
+    if (best === null || r > best) { best = r; if (out) out.peak = skill; }
+  };
   if (p.isPitcher) {
     const list = idx.pit.get(p.id) ?? [];
     const at = new Map(list.map((x) => [x.year, x.row]));
@@ -129,7 +134,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
         return r && s && r.tbf > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, null, store.parks, params.park) }] : [];
       });
       const skill = pitSkillFrom(rows, meta.priors.pitcher, seasonRegress(params));
-      take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0) * qRatio(year));
+      take(runsOf({ ...p, bat: null, pit: skill, birthYear: null }, ctx, 0) * qRatio(year), skill);
     }
   } else {
     const list = idx.bat.get(p.id) ?? [];
@@ -142,7 +147,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
         return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats, store.parks, params.park), sbPct: params.sbPctByYear[s.year] }] : [];
       });
       const skill = batSkillFrom(rows, meta.priors.batter, seasonRegress(params));
-      take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year));
+      take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year), skill);
     }
   }
   return best;
@@ -168,18 +173,26 @@ const GROWTH_NOISE = 3;
  * share: 지난 시즌 출전 기회 (0~1, 주전 출전량 대비). 27세 이하는 기회가 적으면 덜 자란다.
  * aging: 하락 나이(DECLINE_START_AGE) 이후 노화 하락에 곱하는 배율 (숨겨진 특수능력 '늦게 지는 꽃'. 보통 1)
  * drive: 숨은 성장 성향 d (잠재력 v2, league/potential.ts driveScale). 자라는 몫에만 곱한다 (노화·하락에는 안 씀)
+ * timing: 시기 τ (해, 16-4a, branches.ts timingOf). 양수(대기만성)는 24세 전에 덜 크고 뒤에 더 크며, 음수는 반대. 27세 문턱(기회·터지는 해·한 해 상한)도 τ만큼 민다
+ * out: 터지는 해였는지 (갈래 성장이 그 해 한 갈래를 크게 키운다, branches.ts growBranches)
  * 반환값: 새 능력 기여 (런). 천장에서 자르는 것(capAtCeiling)은 부르는 쪽이 코치·육성 몫까지 더한 뒤에 한다
  */
 export function growthRuns(age: number, runs: number, potential: number, share: number, rng: Rng, isPitcher = false, aging = 1, drive?: number,
-                           pp: EngineParams['potential'] = DEFAULT_PARAMS.potential): number {
+                           pp: EngineParams['potential'] = DEFAULT_PARAMS.potential, timing = 0, out?: { breakout?: boolean },
+                           g2: EngineParams['growth2'] = DEFAULT_PARAMS.growth2): number {
   // 출전 기회가 적으면 덜 자라지만(27세 이하), 격차가 크면 그래도 한 해 상한 가까이는 큰다: 기회를 곱한 뒤 상한을 씌운다
+  const ga = age - timing;
   let d = expectedGrowth(age, runs, potential, isPitcher, false);
-  if (age <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
+  if (ga <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
   if (d > 0) d *= driveScale(drive, pp);
-  if (d > 0) d = Math.min(d, growthCap(age));
+  if (d > 0 && timing) d *= Math.max(0.5, Math.min(1.5, Math.exp(g2.tauSlope * timing * (age - g2.tauPivot) / 4)));
+  if (d > 0) d = Math.min(d, growthCap(ga));
   // 터지는 해: 27세 이하가 잠재력과 격차가 크면 가끔 상한을 넘어 격차의 40%까지 한 번에 큰다 (난수는 늘 같은 수만큼 쓴다)
   const breakout = rng.chance(BREAKOUT_CHANCE);
-  if (breakout && age <= 27 && potential - runs > 0) d = Math.max(d, (potential - runs) * 0.4);
+  if (breakout && ga <= 27 && potential - runs > 0) {
+    d = Math.max(d, (potential - runs) * 0.4);
+    if (out) out.breakout = true;
+  }
   if (age >= DECLINE_START_AGE && d < 0) d *= aging;
   // 균등 분포 둘의 합으로 가운데가 두꺼운 운을 만든다
   const noise = (rng.next() + rng.next() - 1) * GROWTH_NOISE * 1.7;

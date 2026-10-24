@@ -487,6 +487,20 @@ export interface EngineParams {
     virtualSd: number; catcherPerRun: number; armWord: number; runIqPull: number; buntPull: number;
   };
   /**
+   * 갈래 성장 (능력치 v2 16-4a, 기획안 2.3·2.4·17.2, league/branches.ts, 모두 임시값). 한 해 변화의 크기(런)는 성장 판정(growthRuns)이 정하고,
+   * 이 값은 그 변화를 갈래(타 so·bb·s1·d2·t3·hr, 투 so·bb·hr·hit)에 나눠 싣는 모양만 정한다.
+   * bat·pit: 갈래별 한 해 로그 변화 (다음 시즌 나이 ≤22 · 23~26 · 27~30 · 31~34 · 35+, tools/fit_aging_components.ts 측정값, 생존 편향 있음),
+   * floor: 곡선이 0인 갈래도 움직이는 바닥 (그 칸 가장 큰 변화에 곱함), room: 천장까지 남은 로그 거리가 이보다 작으면 그 갈래 성장이 줄어든다,
+   * yearSd: 해마다 갈래 무게 운 exp(yearSd z), ceilSd: 천장 갈래 엇갈림 exp(ceilSd z), peakPull: 실존 천장 모양을 고점 시즌에서 갈래별 커리어 최고 쪽으로 당기는 몫,
+   * tauSpan: 시기 τ 폭 (해, 삼각 분포), tauSlope·tauPivot: 성장 속도 × exp(tauSlope × τ × (나이 − tauPivot) ÷ 4) (0.5~1.5, 대기만성은 pivot 뒤에 더 큼),
+   * breakout: 터지는 해에 고른 갈래 무게 배율
+   */
+  growth2: {
+    bat: Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number[]>;
+    pit: Record<'so' | 'bb' | 'hr' | 'hit', number[]>;
+    floor: number; room: number; yearSd: number; ceilSd: number; peakPull: number; tauSpan: number; tauSlope: number; tauPivot: number; breakout: number;
+  };
+  /**
    * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
    * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
    * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
@@ -920,6 +934,12 @@ export const DEFAULT_PARAMS: EngineParams = {
   // runIqPull 80·buntPull 30: 2023~2025 선수 사이 퍼짐을 적률로 나눈 값(추가 진루 약 35~40 기회, W·V 공 대비 희생번트 약 17 사건)의 두 배쯤 (강하게 당김, 임시값)
   //   buntPull을 줄이면 덜 당겨 퍼짐이 커진다 (15면 2026 번트 등급 표준편차 6.9 → 9.8). 발 빠른 타자 쏠림은 기습 번트 몫을 빼서 다룬다 (16-3e, runskills.ts measuredBunting)
   skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15, arm: 0.04 }, virtualSd: 8, catcherPerRun: 0.5, armWord: 12, runIqPull: 80, buntPull: 30 },
+  // 갈래 성장 (16-4a): 모양은 tools/fit_aging_components.ts (reports/aging-fit.txt 1990년 이후 델타 표), 나머지는 모두 임시값
+  growth2: {
+    bat: { so: [-0.084, -0.046, -0.015, 0.008, 0.014], bb: [0.059, 0.033, 0.012, 0.001, -0.02], s1: [-0.005, 0.004, -0.001, -0.018, -0.013], d2: [-0.007, -0.014, -0.022, -0.021, -0.043], t3: [-0.057, -0.078, -0.061, -0.038, 0.006], hr: [0.084, -0.005, -0.025, -0.053, -0.092] },
+    pit: { so: [-0.015, -0.025, -0.032, -0.046, -0.049], bb: [-0.009, -0.032, -0.004, 0.004, 0.015], hr: [-0.05, 0.049, 0.038, 0.051, 0.054], hit: [0.005, 0.015, 0.016, 0.02, 0.012] },
+    floor: 0.25, room: 0.15, yearSd: 0.35, ceilSd: 0.3, peakPull: 0.5, tauSpan: 2, tauSlope: 0.5, tauPivot: 24, breakout: 4,
+  },
   // 잠재력 v2 (기획안 17.3·17.4·18.2~18.5, 사용자 2026-10-24 확정 꼴): 폭 두 배(Q2 ③), 고정 2승·극단 8승(Q7·Q3), 고정 폭 ½(Q8 ③), k ¼(Q10 ②).
   // 크기(바닥 47·44·41, 4런, 성장 성향 0.25·0.85·0.15, c 0.75·0.9·0.5, 0.28)는 모두 임시값이고 16-5에서 맞춘다
   potential: {
