@@ -572,6 +572,30 @@ export function defenseV2(ev: DefenseEvidence): DefenseV2 {
   return out;
 }
 
+/**
+ * 게임 안 시즌 이력 한 줄 → FieldYear (능력치 v2 16-3b, 15.2). inn: 1군 자리별 이닝(SeasonLine.def), fut: 퓨처스 이닝(SeasonLine.fdef).
+ * 지명타자 판정(12.2)의 수비 없는 타석은 기록이 없어 타석 − 1군 수비 이닝 ÷ 1.94(타석당 수비 이닝)로 어림한다
+ */
+export function gameFieldYear(year: number, inn: readonly number[] | undefined, fut: readonly number[] | undefined, pa: number): FieldYear {
+  const toPos = (xs: readonly number[] | undefined) => {
+    const o: Partial<Record<FieldPos, number>> = {};
+    FIELD_POS.forEach((p, k) => { if (xs?.[k]) o[p] = xs[k]; });
+    return o;
+  };
+  const total = (inn ?? []).reduce((a, b) => a + b, 0);
+  return { year, inn: toPos(inn), ...(fut ? { fut: toPos(fut) } : {}), pa, noDefPa: Math.max(0, Math.round(pa - total / PA_TO_INN)) };
+}
+
+/**
+ * 결산 때 수비 가능 자리와 비상 포수만 다시 본다 (16-3b, 클사장 결정: 등급 오름은 16-4). years = 시작 전 수비 기록 + 게임 안 이력,
+ * startYear = 다음 시즌. 판정은 시작 때와 같은 식 (mainPosition·familiarity·emergencyCatcher)
+ */
+export function refreshPlayable(years: FieldYear[], startYear: number, listed?: FieldPos): { playable: FieldPos[]; emergencyC: boolean } {
+  const opts: FieldOptions = { listed };
+  const main = mainPosition(years, startYear, opts);
+  return { playable: playable(years, startYear, main, opts), emergencyC: emergencyCatcher(years, startYear, main, opts) };
+}
+
 /** 등록 포지션 표기 → v2 본 자리. 묶음은 넓은 쪽 (16.4 나: IF → SS, OF → CF), DH·투수·모름은 없음 */
 export function homeOf(pos: string | null | undefined): FieldPos | null {
   if (isPos(pos)) return pos;

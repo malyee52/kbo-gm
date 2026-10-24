@@ -92,6 +92,8 @@ export interface GameContext {
   command?: GameCommand | null;
   /** 수비수별 실책 수 (선수 색인). 없으면 남기지 않는다 */
   errors?: number[];
+  /** 수비수별 자리 아웃 수 (선수 색인 × 8 + FIELD_POS 순서 C…RF, 능력치 v2 12.9). 없으면 세지 않는다 */
+  defOuts?: Int32Array;
   /** 인플레이 타구 집계 (검증 도구용, battedball.ts). 없으면 세지 않는다. 난수를 쓰지 않아 결과는 같다 */
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */

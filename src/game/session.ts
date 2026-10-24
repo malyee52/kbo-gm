@@ -3329,12 +3329,15 @@ export class GameSession {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
     // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
-    const edited = (p: FieldPos[] | undefined) => (p ? { playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined) } : {});
-    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable) };
+    const edited = (p: FieldPos[] | undefined, was: FieldPos[] | undefined) => (p ? {
+      playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined),
+      defEdit: FIELD_POS.filter((q) => was?.includes(q) || def[q] !== undefined),
+    } : {});
+    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable, lp.bat.defEdit) };
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp?.bat) {
-        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable) };
+        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable, sp.bat.defEdit) };
         if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
       }
     }

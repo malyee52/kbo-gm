@@ -197,6 +197,10 @@ export interface SeasonLine {
   /** 가을야구 성적: postseason.ts PS_BAT_KEYS / PS_PIT_KEYS 순서 (2026-10-12부터) */
   pbat?: number[];
   ppit?: number[];
+  /** 1군 자리별 수비 이닝 (C / 1B / 2B / 3B / SS / LF / CF / RF, 대수비 포함, 반올림 정수. 능력치 v2 12.9·15.2, 2026-10-24부터) */
+  def?: number[];
+  /** 퓨처스(2군) 자리별 수비 이닝 (def와 같은 꼴, 모형이 정한 값. 능력치 v2 15.2) */
+  fdef?: number[];
 }
 
 export interface LeagueTeam {

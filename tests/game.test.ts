@@ -40,6 +40,7 @@ describe('하루 단위 진행과 저장 (엔진)', () => {
     expect(s.bat).toEqual(ref.bat);
     expect(s.pit).toEqual(ref.pit);
     expect(s.totals).toEqual(ref.totals);
+    expect(Array.from(s.defOuts)).toEqual(Array.from(ref.defOuts));
     expect(s.log).toEqual(ref.log);
     expect([...s.boxes.entries()]).toEqual([...ref.boxes.entries()]);
   });

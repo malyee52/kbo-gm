@@ -2,7 +2,7 @@
 // 점수·아웃·중계 기록을 남기는 기본 동작도 여기에 둔다 (docs/경기엔진2_기획안.md 3.2).
 
 import type { GameContext, Play, PlayKind } from './game';
-import { defenseAt } from './defense';
+import { defenseAt, FIELD_POS } from './defense';
 import { CATCHER_ARM_FLOOR } from './fielding';
 import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
@@ -258,6 +258,13 @@ export class GameState {
     pg.outs += n;
     pg.line.outs += n;
     this.ctx.totals.outs += n;
+    const d = this.ctx.defOuts;
+    if (d) {
+      for (const [idx, slot] of this.fld.slots) {
+        const k = FIELD_POS.indexOf(slot as (typeof FIELD_POS)[number]);
+        if (k >= 0) d[idx * 8 + k] += n;
+      }
+    }
   }
 
   /** 주자 한 명 득점. batterLine이 있으면 타점 */

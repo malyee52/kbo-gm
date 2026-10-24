@@ -6,8 +6,12 @@
 // 필요할 때 계산하므로(재정 seasonFlows처럼) 저장할 것이 없고, 며칠씩 나눠 진행해도 결과가 같다.
 // 창단 뒤 1군 진입 전 퓨처스 구단은 시즌 월드에 없어 따로 받는다 (extra: 모든 선수가 2군, 경기 수는 리그 평균).
 // 오프시즌 성장 판정은 이 성적의 출전량(기회)과 시즌 운(활약·부진)을 쓴다 (futuresGrowth, 2026-10-12).
+// 2군 수비 이닝 (능력치 v2 15.2, 16-3b): 야수는 본 자리로 나간다 (수비 자리 훈련 9.10은 16-4). 이닝 = 2군 출장 경기 × FUT_INN_PER_G,
+// 구단·자리 합이 2군 경기 × 9를 넘으면 그 자리 모두를 같은 비율로 줄인다 (난수 없음). 결산 때 수비 가능 판정(fielding.ts)이 1군 이닝과 같은 무게로 센다.
 
 import { DEFAULT_PARAMS, isStarterSkill, Rng, type EngineParams, type Season, type SimPlayer, type World } from '../engine';
+import { FIELD_POS, type FieldPos } from '../engine/defense';
+import { homeOf } from '../engine/fielding';
 import type { DataStore } from '../data/types';
 import type { LeagueState } from './types';
 import { isFuturesTeam, worldFromLeague } from './world';
@@ -30,11 +34,14 @@ const ROT = 5;
 const RELIEF_APPS = 0.4;
 const RELIEVERS = 8;
 const PIT_REST_APPS = 0.08;
+/** 2군 출장 경기당 수비 이닝 (임시값, 15.2: 1군 주전 한 시즌 1,150이닝 ÷ 약 135경기, 대수비·교체 몫을 뺀 값) */
+export const FUT_INN_PER_G = 8.5;
 
 export interface FuturesBat { g: number; pa: number; ab: number; h: number; d: number; t: number; hr: number; bb: number; so: number }
 export interface FuturesPit { g: number; gs: number; outs: number; bf: number; h: number; hr: number; bb: number; so: number; r: number; er: number }
 /** form: 시즌 운 (−1 부진 ~ +1 활약). 능력에서 기대한 만큼보다 잘했나 */
-export interface FuturesLine { idx: number; teamIdx: number; bat?: FuturesBat; pit?: FuturesPit; form: number; starter?: boolean }
+/** def: 2군 자리별 수비 이닝 (FIELD_POS 순서 C…RF, 정수, 15.2) */
+export interface FuturesLine { idx: number; teamIdx: number; bat?: FuturesBat; pit?: FuturesPit; form: number; starter?: boolean; def?: number[] }
 export interface FuturesTeam { team: number; g: number; w: number; l: number; rs: number; ra: number }
 
 /** 시즌 기록(SeasonLine.fbat·fpit)에 남기는 퓨처스 성적의 키 순서 */
@@ -42,9 +49,10 @@ export const FUT_BAT_KEYS = ['g', 'pa', 'ab', 'h', 'd', 't', 'hr', 'bb', 'so'] a
 export const FUT_PIT_KEYS = ['g', 'gs', 'outs', 'bf', 'h', 'hr', 'bb', 'so', 'r', 'er'] as const;
 
 /** 퓨처스 줄을 시즌 기록용 배열로 (출전이 없으면 빈 객체). 소수점은 반올림해 정수로 남긴다 */
-export function futuresRecord(l: FuturesLine | undefined): { fbat?: number[]; fpit?: number[] } {
+export function futuresRecord(l: FuturesLine | undefined): { fbat?: number[]; fpit?: number[]; fdef?: number[] } {
   if (!l) return {};
   return {
+    ...(l.def?.some((v) => v > 0) ? { fdef: [...l.def] } : {}),
     ...(l.bat && l.bat.pa > 0 ? { fbat: FUT_BAT_KEYS.map((k) => Math.round(l.bat![k])) } : {}),
     ...(l.pit && l.pit.bf > 0 ? { fpit: FUT_PIT_KEYS.map((k) => Math.round(l.pit![k])) } : {}),
   };
@@ -54,6 +62,43 @@ export function futuresRecord(l: FuturesLine | undefined): { fbat?: number[]; fp
 export function futuresFromRecord(fbat?: number[], fpit?: number[]): Pick<FuturesLine, 'bat' | 'pit'> {
   const dec = <K extends string>(keys: readonly K[], arr: number[]) => Object.fromEntries(keys.map((k, i) => [k, arr[i] ?? 0])) as Record<K, number>;
   return { ...(fbat ? { bat: dec(FUT_BAT_KEYS, fbat) } : {}), ...(fpit ? { pit: dec(FUT_PIT_KEYS, fpit) } : {}) };
+}
+
+/**
+ * 2군 자리 (15.2): 본 자리. 화면 DH면 수비 가능 자리 가운데 등급이 가장 높은 곳, 없으면 수비하지 않는다.
+ * 수비 가능 목록이 없는 예전 수비 선수는 등록 포지션의 본 자리
+ */
+function futuresSlot(p: SimPlayer): FieldPos | null {
+  const home = homeOf(p.pos);
+  if (home) return home;
+  const list = p.bat?.playable ?? [];
+  let best: FieldPos | null = null;
+  for (const q of list) if (!best || (p.bat?.def?.[q] ?? -99) > (p.bat?.def?.[best] ?? -99)) best = q;
+  return best;
+}
+
+/** 2군 자리별 수비 이닝 (15.2): 요구 이닝 = 출장 경기 × FUT_INN_PER_G, 구단·자리 합이 2군 경기 × 9를 넘으면 같은 비율로 줄인 뒤 반올림 */
+function futuresInnings(rows: { p: SimPlayer; g: number; team: number }[], futGames: Map<number, number>): Map<number, number[]> {
+  const want = new Map<string, { idx: number; inn: number }[]>();
+  for (const { p, g, team } of rows) {
+    const slot = futuresSlot(p);
+    if (!slot || g <= 0) continue;
+    const key = `${team}/${slot}`;
+    (want.get(key) ?? want.set(key, []).get(key)!).push({ idx: p.idx, inn: g * FUT_INN_PER_G });
+  }
+  const out = new Map<number, number[]>();
+  for (const [key, list] of want) {
+    const [team, slot] = key.split('/');
+    const cap = (futGames.get(Number(team)) ?? 0) * 9;
+    const sum = list.reduce((a, x) => a + x.inn, 0);
+    const scale = sum > cap ? cap / sum : 1;
+    const k = FIELD_POS.indexOf(slot as FieldPos);
+    for (const x of list) {
+      const a = out.get(x.idx) ?? out.set(x.idx, new Array(8).fill(0)).get(x.idx)!;
+      a[k] = Math.round(x.inn * scale);
+    }
+  }
+  return out;
 }
 
 /** 지금까지 그 선수가 결장한 날 수 (시즌 시작 결장 + 결장 기록) */
@@ -99,7 +144,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
   ];
 
   // 1) 출전량: 야수 타석, 투수 상대 타자 (구단 2군 안의 순위로)
-  const batPA = new Map<number, { p: SimPlayer; pa: number; g: number }>();
+  const batPA = new Map<number, { p: SimPlayer; pa: number; g: number; team: number }>();
   const pitBF = new Map<number, { p: SimPlayer; bf: number; apps: number; st: boolean }>();
   const futGames = new Map<number, number>();
   for (const team of units) {
@@ -113,7 +158,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
       const n = games(p);
       const paPer = HIT_PA[i] ?? HIT_PA_REST;
       const pa = Math.round(n * paPer);
-      if (pa >= 1) batPA.set(p.idx, { p, pa, g: Math.round(n * Math.min(1, paPer / 4)) });
+      if (pa >= 1) batPA.set(p.idx, { p, pa, g: Math.round(n * Math.min(1, paPer / 4)), team: team.team });
     });
     const pitchers = team.org.filter((p) => p.isPitcher && p.pit && !reg.has(p.idx));
     const starters = pitchers.filter((p) => isStarterSkill(p.pit)).sort((a, b) => a.value - b.value || a.idx - b.idx).slice(0, ROT);
@@ -127,6 +172,8 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
       if (bf >= 1) pitBF.set(p.idx, { p, bf, apps, st });
     }
   }
+
+  const fieldInn = futuresInnings([...batPA.values()], futGames);
 
   // 2) 2군 선수 평균 능력 (출전량 가중)
   const KB = ['so', 'bb', 'hbp', 'hr', 's1', 'd2', 't3'] as const;
@@ -155,7 +202,8 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
     const s1 = Math.round(pa * rate('s1') * luck);
     const h = s1 + d + t + hr;
     const ab = Math.max(h, pa - bb - hbp);
-    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, bat: { g, pa, ab, h, d, t, hr, bb: bb + hbp, so: Math.min(so, ab - h) }, form: (u - 0.5) * 2 });
+    lines.set(p.idx, { idx: p.idx, teamIdx: p.teamIdx, bat: { g, pa, ab, h, d, t, hr, bb: bb + hbp, so: Math.min(so, ab - h) }, form: (u - 0.5) * 2,
+      ...(fieldInn.has(p.idx) ? { def: fieldInn.get(p.idx)! } : {}) });
     const r = rs.get(p.teamIdx) ?? { runs: 0, pa: 0 };
     r.runs += baseRuns(h, d, t, hr, bb + hbp, ab);
     r.pa += pa;

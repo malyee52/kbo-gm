@@ -15,8 +15,10 @@ import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
   ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, penTrustOf, Rng, traitsOf,
-  type EngineParams, type Season, type SimPlayer, type World,
+  type BatSkill, type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
+import { FIELD_POS } from '../engine/defense';
+import { fieldYears, gameFieldYear, homeOf, refreshPlayable } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
@@ -49,7 +51,7 @@ import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
 import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits' | 'defense'>;
 
 export type Stage = 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
 export const STAGES: Stage[] = ['fa', 'comp', 'second', 'foreign', 'draft', 'salary', 'release', 'ready'];
@@ -316,6 +318,29 @@ function log(off: OffseasonState, stage: LogStage, text: string, mine: boolean, 
  * userEnlist: 플레이어가 고른 우리 구단 입대 명단 (없으면 AI 규칙. careers.ts normalizeEnlist로 규칙에 맞춘다)
  * userApply: 그중 군 야구단(상무·경찰)에 지원하는 선수 (없으면 지원할 수 있는 선수 모두, normalizeApply)
  */
+/**
+ * 결산 때 수비 가능·비상 포수 다시 보기 (능력치 v2 16-3b, 15.2): 시작 전 수비 기록(defense.json) + 게임 안 이력의 자리별 이닝(def·fdef)으로
+ * 다음 시즌 기준 판정. 등급(def)은 그대로 둔다 (오름은 16-4). 수비 고치기로 연 자리(defEdit)는 남긴다
+ */
+function refreshedPlayable(league: LeagueState, store: Store, p: LeaguePlayer, nextYear: number): Pick<BatSkill, 'playable' | 'emC'> {
+  const paAt = BAT_PA_AT;
+  const years = [
+    ...(store.defense ? fieldYears(store, p.id, league.startYear) : []),
+    ...p.history.filter((h) => h.year >= league.startYear && (h.def || h.fdef)).map((h) => gameFieldYear(h.year, h.def, h.fdef, h.bat?.[paAt] ?? 0)),
+  ];
+  const r = refreshPlayable(years, nextYear, homeOf(p.pos) ?? undefined);
+  const keep = p.bat?.defEdit ?? [];
+  const list = FIELD_POS.filter((q) => r.playable.includes(q) || keep.includes(q));
+  return { playable: list, ...(r.emergencyC && !list.includes('C') ? { emC: true as const } : {}) };
+}
+const BAT_PA_AT = Object.keys(emptyBatLine()).indexOf('pa');
+
+/** 그 시즌 1군 자리별 수비 이닝 (C…RF, 반올림 정수, 능력치 v2 12.9). 수비를 안 했으면 빈 칸 */
+function defenseInnings(season: Season, idx: number): { def?: number[] } {
+  const inn = Array.from(season.defOuts.subarray(idx * 8, idx * 8 + 8), (o) => Math.round(o / 3));
+  return inn.some((v) => v > 0) ? { def: inn } : {};
+}
+
 export function beginOffseason(league: LeagueState, world: World, season: Season, store: Store, userTeam: number,
                                params: EngineParams = DEFAULT_PARAMS, userEnlist?: string[], userApply?: string[]): OffseasonState {
   const year = league.year;
@@ -384,6 +409,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       ...(b.pa > 0 ? { bat: batKeys.map((k) => b[k]) } : {}),
       ...(pt.bf > 0 ? { pit: pitKeys.map((k) => pt[k]) } : {}),
       ...futuresRecord(futById.get(sp.id)),
+      ...defenseInnings(season, sp.idx),
     });
     p.lastSaves = pt.sv;
     const trust = penTrustOf(pt.g - pt.gs, pt.sv, pt.hld, null);
@@ -450,6 +476,10 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       const made = p.bat.def ?? sp.bat?.def ? undefined : leagueDefense(league, p.id, p.pos, p.bat.speed, ageIn(p, year));
       const def = p.bat.def ?? sp.bat?.def ?? made!.def!;
       p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
+      if (p.bat.playable) {
+        const { emC: _was, ...rest } = p.bat;
+        p.bat = { ...rest, ...refreshedPlayable(league, store, p, year + 1) };
+      }
     }
   }
   // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
