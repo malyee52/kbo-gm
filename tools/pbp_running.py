@@ -19,7 +19,7 @@
     번트 실패가 인플레이(뜬공·선행 주자 아웃)로 끝나면 자료에 번트 표시가 없어 셀 수 없다. 그래서 "W·V 공 대비 희생번트"를 번트 수행의 대리값으로 쓴다.
     기습 번트는 공 하나하나로는 가를 수 없다 (인플레이 번트 표시·타구 표시 없음, 카운트 분포도 희생번트와 같다).
     그래서 그 타자의 주자 없을 때 W·V 비율(공당, 주자가 없으면 희생번트가 없으니 모두 기습 번트) × 희생번트 상황 공 수를 기습 번트 몫으로 보고,
-    그 시즌 wv보다 크지 않게 자른다 (16-3e. 주자가 있을 때도 같은 비율로 기습 번트를 댄다고 보는 가정, 임시)
+    그 시즌 wv보다 크지 않게 자른다 (16-3e. 16-4부터 선수 비율은 리그 비율 쪽으로 반 당긴다 WVH_PULL. 주자가 있을 때도 같은 비율로 기습 번트를 댄다고 보는 가정, 임시)
 같은 입력이면 같은 결과가 나온다 (정렬 고정).
 출처: slothman3878, "KBO Play-by-Play 2023-2026 (v0)" (Hugging Face, CC BY 4.0).
 """
@@ -35,6 +35,8 @@ RAW = Path(sys.argv[sys.argv.index('--raw') + 1]) if '--raw' in sys.argv else RO
 OUT = ROOT / 'data-src' / 'pbp_derived'
 YEARS = [2023, 2024, 2025, 2026]
 PARTIAL = {2026}
+# 기습 번트 몫을 낼 때 선수의 주자 없을 때 W·V 비율을 리그 비율 쪽으로 당기는 몫 (16-4, 임시값: 박민우 +22 같은 끝값을 줄이려고 반)
+WVH_PULL = 0.5
 KEY = ['game_pk', 'at_bat_number']
 COLS = KEY + ['game_date', 'pitch_number', 'pitch_result', 'events', 'batter', 'outs_when_up', 'post_outs',
               'on_1b', 'on_2b', 'on_3b', 'post_on_1b', 'post_on_2b', 'post_on_3b']
@@ -109,11 +111,14 @@ def main():
         n0 = thrown[empty].groupby('batter').size()
         sh = last[last.events == 'sac_bunt'].groupby('batter').size()
         wvh_sum = 0.0
+        # 리그 주자 없을 때 W·V 비율 (공당). 선수 비율은 이쪽으로 WVH_PULL만큼 당긴다 (16-4: 표본이 작은 선수의 끝값을 줄임)
+        lg0 = float(wv0.sum()) / float(n0.sum()) if n0.sum() else 0.0
         for c in sorted(set(wv.index) | set(sh.index)):
             if c in link:
                 w_ = int(wv.get(c, 0))
-                # 기습 번트 몫: 주자 없을 때 W·V 비율 × 희생번트 상황 공 수, 그 시즌 W·V 공보다 크지 않게
-                wvh = min(w_, wv0.get(c, 0) / n0[c] * n_sac.get(c, 0)) if n0.get(c, 0) else 0.0
+                # 기습 번트 몫: 주자 없을 때 W·V 비율(리그 쪽으로 반 당김) × 희생번트 상황 공 수, 그 시즌 W·V 공보다 크지 않게
+                rate0 = (1 - WVH_PULL) * wv0.get(c, 0) / n0[c] + WVH_PULL * lg0 if n0.get(c, 0) else 0.0
+                wvh = min(w_, rate0 * n_sac.get(c, 0))
                 wvh_sum += wvh
                 bunt_rows.append([year, int(year in PARTIAL), link[c], int(sh.get(c, 0)), w_, round(wvh, 3)])
         print(f'{year}: 추가 진루 기회 {len(ch)} (성공 {(ch.res == 1).mean():.3f}, 주루사 {(ch.res == 2).mean():.3f}), '
