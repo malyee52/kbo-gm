@@ -604,6 +604,8 @@ dialog.cast { width: min(760px, calc(100vw / var(--z) - 32px)); }
 .cast-now .outs { display: flex; gap: 5px; }
 .cast-now .outs i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-strong); transition: background 0.25s ease; }
 .cast-now .outs i.on { background: var(--loss); border-color: var(--loss); }
+.cast-now .pitch-count strong { font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.cast-now .pitch-seq { color: var(--muted); }
 .cast-line { font-size: 17px; font-weight: 700; }
 .cast-line.kind-HR { color: var(--team); font-size: 20px; }
 .cast-result { font-size: 16px; margin-top: 6px !important; }

@@ -3,6 +3,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type CommandChoice, type CommandRequest } from '../src/engine';
+import { pitchCounts, pitchList, pitchNote } from '../src/game/highlights';
 import { GameSession, type PreviewMode } from '../src/game/session';
 import { NO_STOPS } from '../src/game/stops';
 
@@ -42,9 +43,18 @@ describe('공 사이 지휘 (A 해결기)', () => {
     const g = gameDay('cmd-pitch');
     let changed: { pit: number; count: [number, number] } | null = null;
     let stole: number | null = null;
+    let counted = 0;
     const pv = play(g, 'pitch', (r) => {
+      // 수비 타석 물음에는 라인업 순서대로 수비 자리 (대수비 화면)
+      if (r.step === 'field') expect(r.fieldSlots?.length).toBe(r.lineup.length);
       if (r.step !== 'pitch') return {};
       expect(r.count).toBeDefined();
+      // 화면의 공 목록 카운트(game/highlights.ts)가 엔진 카운트와 같다
+      if (r.seq) {
+        expect(pitchCounts(r.seq).at(-1)!.after).toEqual(r.count);
+        expect(pitchList(r.seq)).toHaveLength(r.seq.length);
+        counted++;
+      }
       if (r.side === 'field' && !changed && r.inn >= 4 && r.count![1] >= 1 && r.bullpen.length) {
         changed = { pit: r.bullpen[0], count: r.count! };
         return { pitcher: r.bullpen[0] };
@@ -56,6 +66,11 @@ describe('공 사이 지휘 (A 해결기)', () => {
       return {};
     });
     expect(changed).not.toBeNull();
+    expect(counted).toBeGreaterThan(50);
+    // 최근 장면 문구: A로 끝낸 타석마다 "N구, B-S에서 …"
+    const paPlays = pv.plays.filter((p) => p.seq);
+    expect(paPlays.length).toBeGreaterThan(50);
+    for (const p of paPlays) expect(pitchNote(p)).toMatch(new RegExp(`^${p.seq!.length}구, [0-3]-[0-2]에서 `));
     const c = changed!;
     const at = pv.plays.findIndex((p) => p.kind === 'PC' && p.pit === c.pit);
     expect(at).toBeGreaterThanOrEqual(0);

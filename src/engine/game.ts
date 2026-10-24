@@ -16,7 +16,7 @@ import type { Rng } from './rng';
 import { abortPlateAppearance, addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, orderedSteal, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
 import { earnsSave, fieldDefense, fielderAt, fieldSlots, GameState, isSaveSituation, substitute, tyingRunNear, type GameSub, type PitcherInGame, type Side } from './state';
 import { aiDefense, aiLateDefense, orderedDefSub, pickPinchHitter, pickPinchRunner, replaceInjured } from './subs';
-import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type TeamSeason } from './team';
+import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type Slot, type TeamSeason } from './team';
 import { drawInjury, hitterAgeFactor, injuryProneness, type AbsenceKind, type InjuryCause, type InjuryPart } from './injury';
 import { injuryScale } from './traits';
 import { isNoGame } from './weather';
@@ -187,6 +187,8 @@ export interface CommandRequest {
   bullpen: number[];
   /** 우리 수비 물음(field): 대수비로 쓸 수 있는 벤치 야수 */
   fieldBench?: number[];
+  /** 우리 수비 물음(field): 라인업 순서대로 수비 자리 (대수비 화면용, 지명타자는 'DH') */
+  fieldSlots?: Slot[];
   /** 지금까지의 중계 기록 */
   plays: Play[];
   /** 더블헤더 2차전이면 2 (지휘자가 같은 날 두 경기를 가린다, GameContext.dh). 그 밖에는 없다 */
@@ -380,7 +382,8 @@ function ask(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'] 
     lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
     bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
     bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
-    ...(side === 'field' && step === 'field' ? { fieldBench: fld.ts.hitters.filter((p) => !p.isPitcher && !fld.lineup.includes(p) && !fld.removed.has(p.idx)).map((p) => p.idx) } : {}),
+    ...(side === 'field' && step === 'field' ? { fieldBench: fld.ts.hitters.filter((p) => !p.isPitcher && !fld.lineup.includes(p) && !fld.removed.has(p.idx)).map((p) => p.idx),
+      fieldSlots: fld.lineup.map((p) => fld.slots.get(p.idx) ?? 'DH') } : {}),
     plays: plays ? plays.slice() : [],
     ...(ctx.dh === 2 ? { dh: 2 as const } : {}),
   });
