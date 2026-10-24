@@ -534,6 +534,7 @@ export function buildWorld(input: BuildWorldInput): World {
           age: m.birthYear ? year - m.birthYear : null, speed: bat.speed, listed: homeOf(pos) ?? undefined, league: fieldLeague(input.defense) });
         bat.def = v2.def;
         bat.playable = v2.playable;
+        if (Object.keys(v2.talent).length) bat.defTalent = v2.talent;
         if (v2.emergencyC) bat.emC = true;
         if (v2.cArm !== undefined) bat.cArm = v2.cArm;
         if (v2.main.basis !== 'listed' && v2.main.basis !== 'none') pos = v2.main.screen;

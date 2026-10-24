@@ -42,6 +42,8 @@ export interface BatSkill {
   playable?: FieldPos[];
   /** 비상 포수 (14.2): 포수 수비 가능은 아니지만 직전 3시즌 포수 150이닝 이상. 정규 포수가 없을 때만 포수로 쓴다 */
   emC?: true;
+  /** 익숙함이 다 차지 않은 자리의 수비 재능 T (등급 단위, 능력치 v2 16-4). 결산 때 익숙함 u가 바뀐 만큼 T × Δu로 등급을 옮긴다 (fielding.ts familiarityShift) */
+  defTalent?: Partial<Record<FieldPos, number>>;
   /** 수비 고치기(16.4 다)로 수비 가능이 된 자리. 결산 때 수비 가능을 다시 볼 때도 남긴다 (16-3b) */
   defEdit?: FieldPos[];
   /** 포수 도루 저지 (런, 한 시즌당, 16-3). 없으면 포수 자리에서 수비 가능 포수 0 · 아니면 바닥 (state.ts fieldDefense) */

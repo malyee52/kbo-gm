@@ -200,8 +200,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
  * 수비 기록 없이 만드는 선수의 수비 (가상 선수·자유 모드 선수·수비 정보 없는 저장). v2 리그(defPool 있음)면 본 자리 + 유사 포지션만 수비 가능,
  * 근거 몫은 시작 연도 실존 주전 분포에서 뽑는다 (능력치 v2 16.4 가). 아니면 예전 추정 (makeDefense)
  */
-export function leagueDefense(league: Pick<LeagueState, 'defPool'>, id: string, pos: string | null, speed: number, age: number | null): Partial<Pick<BatSkill, 'def' | 'playable'>> {
+export function leagueDefense(league: Pick<LeagueState, 'defPool'>, id: string, pos: string | null, speed: number, age: number | null): Partial<Pick<BatSkill, 'def' | 'playable' | 'defTalent'>> {
   if (!league.defPool) return { def: makeDefense(id, pos, [], speed, age) };
   const v = virtualDefense(id, pos, speed, age, league.defPool);
-  return { def: v.def, playable: v.playable };
+  return { def: v.def, playable: v.playable, ...(Object.keys(v.talent).length ? { defTalent: v.talent } : {}) };
 }

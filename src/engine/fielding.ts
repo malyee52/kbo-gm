@@ -504,6 +504,8 @@ export interface DefenseV2 {
   grade: Record<FieldPos, number>;
   /** 수비 가능 자리 (u = 1). 비상 포수는 여기에 넣지 않고 emergencyC로 */
   playable: FieldPos[];
+  /** 익숙함이 다 차지 않은(u < 1) 자리의 재능 T = 20 + K (등급 단위). 결산 때 u가 바뀐 만큼 T × Δu로 등급을 옮긴다 (familiarityShift, 16-4) */
+  talent: Partial<Record<FieldPos, number>>;
   emergencyC: boolean;
   main: MainPosition;
   /** 자리별 근거 몫 B (등급 단위, 수비상 바닥·자름 뒤) */
@@ -547,6 +549,7 @@ export function defenseV2(ev: DefenseEvidence): DefenseV2 {
   const grade = {} as Record<FieldPos, number>;
   const base: Partial<Record<FieldPos, number>> = {};
   const playableList: FieldPos[] = [];
+  const talent: Partial<Record<FieldPos, number>> = {};
   let uC = 0;
   for (const p of FIELD_POS) {
     const u = familiarity(years, startYear, p, main, opts);
@@ -558,9 +561,10 @@ export function defenseV2(ev: DefenseEvidence): DefenseV2 {
     const k = b + 2 * (ageRuns(ev.age) + speedRuns(ev.speed, p) + luck) - similarLoss(years, startYear, p, main, opts);
     grade[p] = clip(round1(20 + (20 + k) * u), 20, 80);
     if (u >= 1) playableList.push(p);
+    else talent[p] = round1(20 + k);
   }
   const emergencyC = emergencyCatcher(years, startYear, main, opts);
-  const out: DefenseV2 = { def: toDef(grade), grade, playable: playableList, emergencyC, main, base, lastInn: {} };
+  const out: DefenseV2 = { def: toDef(grade), grade, playable: playableList, talent, emergencyC, main, base, lastInn: {} };
   if (ev.league && uC > 0) out.cArm = round1(uC * catcherArm(years, startYear, ev.league) + (1 - uC) * CATCHER_ARM_FLOOR);
   for (const y of years) {
     if (y.year !== startYear - 1) continue;
@@ -587,6 +591,26 @@ export function gameFieldYear(year: number, inn: readonly number[] | undefined, 
 }
 
 /**
+ * 결산 때 등급 오름·내림 (능력치 v2 16-4, 13.1): 등급 = 20 + T × u라, 익숙함 u가 바뀐 자리는 재능 T × Δu만큼 등급을 옮긴다.
+ * years = 시작 전 수비 기록 + 게임 안 이력 (막 끝난 시즌 year까지), Δu = u(year + 1 기준) − u(year 기준).
+ * talent에 있는 자리(시작 때 u < 1)만 옮기고, 본 자리 등 다 찬 자리와 나이 몫(ageDefense)은 그대로. 최근성으로 u가 줄면 내려간다. 등급은 20~80
+ */
+export function familiarityShift(years: FieldYear[], year: number, listed: FieldPos | undefined, talent: Partial<Record<FieldPos, number>>, def: Defense): Defense {
+  const opts: FieldOptions = { listed };
+  const mainBefore = mainPosition(years, year, opts);
+  const mainAfter = mainPosition(years, year + 1, opts);
+  let out: Defense | null = null;
+  for (const [p, t] of Object.entries(talent) as [FieldPos, number][]) {
+    if (def[p] === undefined) continue;
+    const du = familiarity(years, year + 1, p, mainAfter, opts) - familiarity(years, year, p, mainBefore, opts);
+    if (Math.abs(du) < 1e-9) continue;
+    const grade = clip(50 + 2 * def[p]! + t * du, 20, 80);
+    (out ??= { ...def })[p] = round1((grade - 50) / 2);
+  }
+  return out ?? def;
+}
+
+/**
  * 결산 때 수비 가능 자리와 비상 포수만 다시 본다 (16-3b, 클사장 결정: 등급 오름은 16-4). years = 시작 전 수비 기록 + 게임 안 이력,
  * startYear = 다음 시즌. 판정은 시작 때와 같은 식 (mainPosition·familiarity·emergencyCatcher)
  */
@@ -609,7 +633,7 @@ export function homeOf(pos: string | null | undefined): FieldPos | null {
  * 본 자리와 그 유사 포지션만 수비 가능 (이닝 0이라 유사 손해 전부), 나머지 20. 근거 몫 B는 그 시작 연도 실존 주전의 B 분포
  * (pool, 오름차순)에서 분위로 뽑는다 (시드 defense/<id>, 결정 22와 같은 방법). 나이·주력 몫은 이 선수 값으로. pool이 없으면 B = 0 (40 근처)
  */
-export function virtualDefense(id: string, pos: string | null, speed: number, age: number | null, pool?: readonly number[]): Pick<DefenseV2, 'def' | 'grade' | 'playable'> {
+export function virtualDefense(id: string, pos: string | null, speed: number, age: number | null, pool?: readonly number[]): Pick<DefenseV2, 'def' | 'grade' | 'playable' | 'talent'> {
   const home = homeOf(pos);
   const rng = new Rng(`defense/${id}`);
   const q = rng.next();
@@ -617,14 +641,17 @@ export function virtualDefense(id: string, pos: string | null, speed: number, ag
   const luck = luckOf(rng);
   const grade = {} as Record<FieldPos, number>;
   const playableList: FieldPos[] = [];
+  const talent: Partial<Record<FieldPos, number>> = {};
   for (const p of FIELD_POS) {
     if (!home || (p !== home && !SIMILAR[home]?.includes(p))) {
       grade[p] = 20;
+      // 해 보지 않은 자리의 재능 (실존 선수 defenseV2와 같은 K, 결산 때 익숙함이 늘면 오른다)
+      talent[p] = round1(40 + b + 2 * (ageRuns(age) + speedRuns(speed, p) + luck));
       continue;
     }
     const loss = p === home ? 0 : 2 * moveLoss(home, p);
     grade[p] = clip(round1(40 + b + 2 * (ageRuns(age) + speedRuns(speed, p) + luck) - loss), 20, 80);
     playableList.push(p);
   }
-  return { def: toDef(grade), grade, playable: playableList };
+  return { def: toDef(grade), grade, playable: playableList, talent };
 }

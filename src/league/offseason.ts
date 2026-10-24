@@ -18,7 +18,7 @@ import {
   type BatSkill, type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
 import { FIELD_POS } from '../engine/defense';
-import { fieldYears, gameFieldYear, homeOf, refreshPlayable } from '../engine/fielding';
+import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
@@ -365,16 +365,19 @@ function ruleSignalOf(league: LeagueState, season: Season): RuleSignal {
  * userEnlist: 플레이어가 고른 우리 구단 입대 명단 (없으면 AI 규칙. careers.ts normalizeEnlist로 규칙에 맞춘다)
  * userApply: 그중 군 야구단(상무·경찰)에 지원하는 선수 (없으면 지원할 수 있는 선수 모두, normalizeApply)
  */
-/**
- * 결산 때 수비 가능·비상 포수 다시 보기 (능력치 v2 16-3b, 15.2): 시작 전 수비 기록(defense.json) + 게임 안 이력의 자리별 이닝(def·fdef)으로
- * 다음 시즌 기준 판정. 등급(def)은 그대로 둔다 (오름은 16-4). 수비 고치기로 연 자리(defEdit)는 남긴다
- */
-function refreshedPlayable(league: LeagueState, store: Store, p: LeaguePlayer, nextYear: number): Pick<BatSkill, 'playable' | 'emC'> {
-  const paAt = BAT_PA_AT;
-  const years = [
+/** 한 선수의 수비 경험: 시작 전 수비 기록(defense.json) + 게임 안 이력의 자리별 이닝(def·fdef) (15.2) */
+function playerFieldYears(league: LeagueState, store: Store, p: LeaguePlayer): FieldYear[] {
+  return [
     ...(store.defense ? fieldYears(store, p.id, league.startYear) : []),
-    ...p.history.filter((h) => h.year >= league.startYear && (h.def || h.fdef)).map((h) => gameFieldYear(h.year, h.def, h.fdef, h.bat?.[paAt] ?? 0)),
+    ...p.history.filter((h) => h.year >= league.startYear && (h.def || h.fdef)).map((h) => gameFieldYear(h.year, h.def, h.fdef, h.bat?.[BAT_PA_AT] ?? 0)),
   ];
+}
+
+/**
+ * 결산 때 수비 가능·비상 포수 다시 보기 (능력치 v2 16-3b, 15.2): 수비 경험으로 다음 시즌 기준 판정.
+ * 등급 오름·내림은 familiarityShift (16-4). 수비 고치기로 연 자리(defEdit)는 남긴다
+ */
+function refreshedPlayable(years: FieldYear[], p: LeaguePlayer, nextYear: number): Pick<BatSkill, 'playable' | 'emC'> {
   const r = refreshPlayable(years, nextYear, homeOf(p.pos) ?? undefined);
   const keep = p.bat?.defEdit ?? [];
   const list = FIELD_POS.filter((q) => r.playable.includes(q) || keep.includes(q));
@@ -523,10 +526,13 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (p.bat) {
       const made = p.bat.def ?? sp.bat?.def ? undefined : leagueDefense(league, p.id, p.pos, p.bat.speed, ageIn(p, year));
       const def = p.bat.def ?? sp.bat?.def ?? made!.def!;
-      p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
+      p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable, ...(made.defTalent ? { defTalent: made.defTalent } : {}) } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
       if (p.bat.playable) {
         const { emC: _was, ...rest } = p.bat;
-        p.bat = { ...rest, ...refreshedPlayable(league, store, p, year + 1) };
+        const years = playerFieldYears(league, store, p);
+        // 익숙함이 늘어난 자리는 등급도 오른다 (16-4, 등급 = 20 + T × u)
+        const shifted = rest.defTalent && rest.def ? familiarityShift(years, year, homeOf(p.pos) ?? undefined, rest.defTalent, rest.def) : rest.def;
+        p.bat = { ...rest, def: shifted, ...refreshedPlayable(years, p, year + 1) };
       }
     }
   }

@@ -94,7 +94,7 @@ describe('결산 때 이력에 남긴다 (2026 시작)', () => {
     for (const [key, a] of sum) expect(a.inn, key).toBeLessThanOrEqual((games.get(key.split('/')[0]) ?? 0) * 9 + a.n);
   });
 
-  it('결산 뒤 수비 가능: 그 해 포수 아닌 자리를 450이닝 넘게 맡은 야수는 그 자리가 수비 가능이다 (16-3b, 등급은 그대로)', () => {
+  it('결산 뒤 수비 가능: 그 해 포수 아닌 자리를 450이닝 넘게 맡은 야수는 그 자리가 수비 가능이고 등급도 20보다 높다 (16-3b, 등급 오름 16-4)', () => {
     let n = 0;
     for (const p of g.league.players) {
       const h = p.history.find((x) => x.year === 2026 && x.def);
@@ -103,6 +103,7 @@ describe('결산 때 이력에 남긴다 (2026 시작)', () => {
         if (q === 'C' || h.def![k] < 450) return;
         n++;
         expect(p.bat!.playable, `${p.name} ${q} ${h.def![k]}이닝`).toContain(q);
+        expect(p.bat!.def?.[q] ?? 0, `${p.name} ${q} 등급`).toBeGreaterThan(-15);
       });
     }
     expect(n).toBeGreaterThan(60);
