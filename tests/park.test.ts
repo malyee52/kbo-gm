@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, fenceParkEvents, fenceValid, Season, worldForYear, type EngineParams } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { DOME, FENCE_PRESETS, NEW_PARK, orderStadium, parkFactor, stadiumFill, stadiumYearEnd } from '../src/league/stadium';
+import { DOME, FENCE_PRESETS, NEW_PARK, orderStadium, parkFactor, stadiumFill, stadiumYearEnd, teamParkAt } from '../src/league/stadium';
 import { createLeague } from '../src/league/create';
 import { worldFromLeague } from '../src/league/world';
 
@@ -43,7 +43,11 @@ describe('구장 특성', () => {
     expect(L.stadiums![0]).toMatchObject({ fence, park: p.park, dome: true, opened: p.open });
     expect(L.stadiums![0].hr).toBeUndefined();
     expect(stadiumFill(L.stadiums![0], p.open + 5)).toBeCloseTo(((L.stadiums![0].quality - 50) / 50) * 0.06 + DOME.fill, 5);
-    expect(worldFromLeague(L, store, DEFAULT_PARAMS).teams[0].park).toEqual({ hr: 1, ev: p.park });
+    // 개장 시즌부터 (그 해 개막 전에 끝난 공사의 값, 구장효과 기획안 6.7.5). 리그는 아직 결산 해라 개장 시즌 값을 직접 본다
+    const src = { parkFactors: store.meta.parkFactors, parkEvents: store.meta.parkEvents, parks: store.parks };
+    const lg = { rates: { s1: 0, d2: 0, t3: 0, hr: 0 }, rpa: 0 };
+    expect(teamParkAt(src, L.teams[0].franchise, p.open, L.stadiums![0], L.teams.map((t) => t.franchise), lg)).toEqual({ hr: 1, ev: p.park });
+    expect(teamParkAt(src, L.teams[0].franchise, p.open - 1, L.stadiums![0], L.teams.map((t) => t.franchise), lg)?.ev).not.toEqual(p.park);
     expect(g.orderStadium('new-1', { size: 'huge' as never }).ok).toBe(false);
   }, 300_000);
 

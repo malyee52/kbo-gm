@@ -67,7 +67,7 @@ import {
   type PostseasonResult, type PostseasonState, type SeriesGame,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
-import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
+import { addFanEvent, FAN_LOSS, openWalls, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
 import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
@@ -352,7 +352,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers'> & Partial<Pick<DataStore, 'parks'>>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -2489,6 +2489,7 @@ export class GameSession {
           delete L.campPlan;
         }
         twoWayNews.push(...openNaming(L, this.teamIdx)); // 구장 명명권 (league/naming.ts)
+        twoWayNews.push(...openWalls(L, this.teamIdx)); // 가벽 조립·해체 비용 (league/stadium.ts)
         // 예전 저장 정정: 리그 밖에서 데려온 선수가 잘못 입대했으면 돌려보내고, 외국 이름이면 외국인으로 (2026-10-13 사용자 보고)
         for (const p of L.players) {
           if (!p.outsider) continue;
@@ -2559,7 +2560,7 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
-      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }, this.parkSource()); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
         if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
@@ -3137,7 +3138,11 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
-  /** 공사 주문. 신구장은 펜스 제원(fence, 구장효과 기획안 6장)을 고른다. size는 P6 전 조작 기록 호환용 (예시값 제원으로 읽는다) */
+  /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
+  parkSource() {
+    return { parkFactors: this.store.meta.parkFactors, parkEvents: this.store.meta.parkEvents, parks: this.store.parks };
+  }
+  /** 공사 주문. 신구장·펜스 조정·가벽은 펜스 제원(fence, 구장효과 기획안 6장·6.7·6.8)을 고른다. size는 P6 전 조작 기록 호환용 (예시값 제원으로 읽는다) */
   orderStadium(id: string, park: { size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
     return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.fence ? { fence: { l: park.fence.l, c: park.fence.c, r: park.fence.r, h: park.fence.h } } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
   }

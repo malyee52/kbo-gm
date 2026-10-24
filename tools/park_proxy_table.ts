@@ -12,7 +12,7 @@ const arg = (name: string): string | undefined => {
 const store = loadDataStore();
 const years = (arg('years') ?? '1982,1985,1986,1991,1995,2000,2003,2008,2009,2010,2013,2014,2015,2019,2022').split(',').map(Number);
 const out = arg('out');
-const LABEL = { measured: '실측', back: '실측 거꾸로', diff: '차이 방식', guess: '짐작', none: '중립' } as const;
+const LABEL = { measured: '실측', mean: '실측 기간 평균', back: '실측 거꾸로', diff: '차이 방식', guess: '짐작', none: '중립' } as const;
 const src = { parkFactors: store.meta.parkFactors, parkEvents: store.meta.parkEvents, parks: store.parks };
 const ix = (x: number | undefined) => (x === undefined ? '-' : String(Math.round(x * 100)));
 

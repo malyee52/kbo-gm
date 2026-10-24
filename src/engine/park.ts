@@ -13,7 +13,8 @@
 //  ⑤ 제원이 비었음: 1 (중립)
 //  ⑧ 그 구단 홈 경기에만 쓰는 제원 행(잠실 X-존, 계보 열): ②와 같은 차이 방식을 그 구단 값에만 (결정 13)
 //  옛 해(②~⑤·⑧)는 해마다 사건별로 구단 평균이 1이 되게 나눈다 (리그 평균 득점은 그대로). 실측 해는 f가 이미 구단 평균 1이다.
-//  마지막 실측 해 뒤(2027~)는 stadium.ts가 마지막 실측 값을 이어 쓴다 (P7에서 바뀜).
+//  마지막 실측 해 뒤(2027~)는 realParkLater (기획안 4.5, P7): 쓰던 구장의 실측 기간 평균, 확정 제원이 있는 실제 새 구장은 짐작 × 당김.
+//  게임 안 펜스 공사(펜스 조정·가벽, 기획안 6.7·6.8)의 바탕은 fenceBaseOf (조정 전 값 = 실측 기간 평균).
 
 import type { Meta, ParkData, ParkEvents, ParkRates, ParkSpec, Rates } from '../data/types';
 import { NEUTRAL_PARK, type GamePark } from './pa';
@@ -62,8 +63,8 @@ export function parkIndexOf(tp: SimTeam['park'] | undefined, p: ParkParams, rate
 
 // ---- 실제 구장 값 (기획안 4.3)
 
-/** 실제 구장 값의 근거: 실측 / 실측을 옛 해에 거꾸로(제원 같음) / 실측 × 펜스 차이(차이 방식) / 제원 짐작 */
-export type RealParkBasis = 'measured' | 'back' | 'diff' | 'guess';
+/** 실제 구장 값의 근거: 실측 / 실측 기간 평균(마지막 실측 해 뒤) / 실측을 옛 해에 거꾸로(제원 같음) / 실측 × 펜스 차이(차이 방식) / 제원 짐작 */
+export type RealParkBasis = 'measured' | 'mean' | 'back' | 'diff' | 'guess';
 
 export interface RealParkValue {
   /** 득점 계수 f (실측 해는 하드힛 f, 옛 해는 사건별 배율로 센 값) */
@@ -206,14 +207,15 @@ function guessed(g: GuessLogs, p: ParkParams): ParkEvents {
 }
 
 /** 옛 해(실측 전) 한 계보의 값 (평균 1 맞춤 전). 중립이면 undefined */
-function proxyOf(src: ParkSource, parks: ParkData, franchise: string, year: number, p: ParkParams): { ev: ParkEvents; basis: RealParkBasis } | undefined {
+function proxyOf(src: ParkSource, parks: ParkData, franchise: string, year: number, p: ParkParams,
+                 noOwn = false): { ev: ParkEvents; basis: RealParkBasis } | undefined {
   const id = mainParkId(parks, franchise, year);
   if (!id) return undefined;
   const rows = parkRows(parks, id);
   const i = rows.findIndex((r) => covers(r, year));
   if (i < 0) return undefined;
-  // 그 구단 홈 경기에만 쓰는 제원 행(⑧ 실제 역사의 가벽)이 있으면 그 행이 그 해 제원
-  const own = parks.specs.find((r) => r.id === id && r.franchise === franchise && covers(r, year)) ?? rows[i];
+  // 그 구단 홈 경기에만 쓰는 제원 행(⑧ 실제 역사의 가벽)이 있으면 그 행이 그 해 제원 (noOwn: 게임 안에서 가벽을 세우거나 걷은 구단은 따르지 않음)
+  const own = (noOwn ? undefined : ownRow(parks, id, franchise, year)) ?? rows[i];
   // 실측 기간 행: 그 해 행부터 뒤로 '리모델링' 없이 이어진 행 가운데 그 계보 실측 해가 있는 첫 행
   const years = measuredYearsAt(src, parks, franchise, id);
   let j = -1;
@@ -232,11 +234,16 @@ function proxyOf(src: ParkSource, parks: ParkData, franchise: string, year: numb
   return g ? { ev: guessed(g, p), basis: 'guess' } : undefined;
 }
 
+/** 그 구단 홈 경기에만 쓰는 제원 행 (⑧ 실제 역사의 가벽, 잠실 X-존) */
+function ownRow(parks: ParkData, id: string, franchise: string, year: number): ParkSpec | undefined {
+  return parks.specs.find((r) => r.id === id && r.franchise === franchise && covers(r, year));
+}
+
 const yearCache = new WeakMap<object, Map<ParkData | null, Map<string, Map<string, RealParkValue>>>>();
 
 /**
  * 그 해 실제 구장 값 (계보 → 값). franchises = 그 해 리그 구단 계보 (옛 해 평균 1 맞춤에 쓴다).
- * 중립(1)인 계보는 넣지 않는다. 마지막 실측 해 뒤는 비어 있다 (stadium.ts가 마지막 실측 값을 이어 쓴다).
+ * 중립(1)인 계보는 넣지 않는다. 마지막 실측 해 뒤는 비어 있다 (realParkLater).
  * 같은 자료·해·구단 목록·조정값이면 한 번만 센다 (능력 산출이 선수 시즌마다 부른다). 돌려준 Map은 고치지 않는다
  */
 export function realParkYear(src: ParkSource, year: number, franchises: string[], lg: ParkLeagueRates, p: ParkParams): Map<string, RealParkValue> {
@@ -261,23 +268,186 @@ function computeYear(src: ParkSource, year: number, frs: string[], lg: ParkLeagu
     }
     return out;
   }
+  const raw = proxyYear(src, year, frs, p);
+  if (!raw) return out;
+  const mean = yearMean(raw);
+  for (const [fr, v] of raw) out.set(fr, normalized(v, mean, lg, p));
+  return out;
+}
+
+/** 옛 해 구단마다 값 (평균 1 맞춤 전). 옛 해가 아니거나 제원 자료가 없으면 undefined */
+function proxyYear(src: ParkSource, year: number, frs: string[], p: ParkParams): Map<string, { ev: ParkEvents; basis: RealParkBasis }> | undefined {
   const parks = src.parks;
   const measuredYears = Object.keys(src.parkFactors ?? {}).map(Number);
-  if (!parks || !measuredYears.length || year > Math.min(...measuredYears)) return out;
+  if (!parks || !measuredYears.length || year > Math.min(...measuredYears)) return undefined;
   const raw = new Map<string, { ev: ParkEvents; basis: RealParkBasis }>();
   for (const fr of frs) {
     const v = proxyOf(src, parks, fr, year, p);
     if (v) raw.set(fr, v);
   }
-  // 해마다 사건별 구단 평균 1: 값이 있는 구단끼리 평균 1로 나눈다 (중립 구단은 1 그대로라 리그 전체 평균도 1)
+  return raw;
+}
+
+/** 해마다 사건별 구단 평균 1: 값이 있는 구단끼리 평균 1로 나눈다 (중립 구단은 1 그대로라 리그 전체 평균도 1) */
+function yearMean(raw: Map<string, { ev: ParkEvents }>): ParkRates {
   const mean = { s1: 0, d2: 0, t3: 0, hr: 0 };
   for (const k of EVENTS) mean[k] = [...raw.values()].reduce((a, v) => a + v.ev[k], 0) / Math.max(1, raw.size);
+  return mean;
+}
+
+function normalized(v: { ev: ParkEvents; basis: RealParkBasis }, mean: ParkRates, lg: ParkLeagueRates, p: ParkParams): RealParkValue {
   const norm = (x: ParkRates): ParkRates => ({ s1: x.s1 / mean.s1, d2: x.d2 / mean.d2, t3: x.t3 / mean.t3, hr: x.hr / mean.hr });
-  for (const [fr, v] of raw) {
-    const ev: ParkEvents = { ...norm(v.ev), ...(v.ev.L ? { L: norm(v.ev.L) } : {}), ...(v.ev.R ? { R: norm(v.ev.R) } : {}) };
-    out.set(fr, { run: runFactorOf(ev, lg.rates, lg.rpa, p), ev, basis: v.basis });
+  const ev: ParkEvents = { ...norm(v.ev), ...(v.ev.L ? { L: norm(v.ev.L) } : {}), ...(v.ev.R ? { R: norm(v.ev.R) } : {}) };
+  return { run: runFactorOf(ev, lg.rates, lg.rpa, p), ev, basis: v.basis };
+}
+
+/**
+ * 그 구단 홈 경기에만 쓰는 실제 역사 제원 행(⑧ X-존)을 따르지 않는 그 해 값 (기획안 6.8.9: 게임 안에서 가벽을 세우거나 걷은 구단).
+ * 평균 1 맞춤은 역사대로 센 그 해 평균을 그대로 쓴다 (다른 구단 값은 바뀌지 않는다). 그런 행이 없으면 realParkYear와 같다
+ */
+export function realParkNoOwn(src: ParkSource, year: number, franchise: string, franchises: string[], lg: ParkLeagueRates, p: ParkParams): RealParkValue | undefined {
+  const same = realParkYear(src, year, franchises, lg, p).get(franchise);
+  const parks = src.parks;
+  const id = parks && mainParkId(parks, franchise, year);
+  if (!parks || !id || !ownRow(parks, id, franchise, year)) return same;
+  const raw = proxyYear(src, year, [...new Set(franchises)].sort(), p);
+  const v = raw && proxyOf(src, parks, franchise, year, p, true);
+  return raw && v ? normalized(v, yearMean(raw), lg, p) : undefined;
+}
+
+// ---- 마지막 실측 해 뒤 (기획안 4.5, 결정 8, P7)
+
+/** 펜스 거리 셋이 다 있고 출처 확인된 제원 행 (실제 미래 구장이 '확정'인가) */
+const confirmedSpec = (r: ParkSpec | undefined) => !!r && r.confirmed === '출처 확인' && r.fence.l != null && r.fence.c != null && r.fence.r != null;
+
+/** 그 해 그 계보가 옮겨 가는 확정된 실제 계획 구장 (구장_사용.csv 구분 = 계획, 그 해 제원 행이 확정). 없으면 undefined */
+export function confirmedPlannedPark(parks: ParkData, franchise: string, year: number): { id: string; from: number; row: ParkSpec } | undefined {
+  let best: ParkData['use'][number] | undefined;
+  for (const u of parks.use) {
+    if (u.kind === '계획' && u.franchise === franchise && u.from <= year && year <= (u.to ?? Infinity) && (!best || u.from > best.from)) best = u;
   }
-  return out;
+  if (!best) return undefined;
+  const row = parkRows(parks, best.park).find((r) => covers(r, year));
+  return row && confirmedSpec(row) ? { id: best.park, from: best.from, row } : undefined;
+}
+
+/** 그 해 경기에 쓰는 구장 ID: 확정된 계획 구장, 아니면 주 구장 (확정 전 계획 구장은 쓰던 구장 그대로, 결정 8) */
+export function homeParkId(parks: ParkData, franchise: string, year: number): string | undefined {
+  return confirmedPlannedPark(parks, franchise, year)?.id ?? mainParkId(parks, franchise, year);
+}
+
+/** 그 해 그 구단 홈 경기에만 쓰는 실제 역사의 가벽 행 (잠실 X-존 2009~2010 LG). 없으면 undefined */
+export function historyWallAt(parks: ParkData, franchise: string, year: number): ParkSpec | undefined {
+  const id = mainParkId(parks, franchise, year);
+  return id ? ownRow(parks, id, franchise, year) : undefined;
+}
+
+/** 그 해를 덮는 공용 제원 행의 색인 (없으면 그 해 앞의 마지막 행, 그것도 없으면 −1) */
+function rowAt(rows: ParkSpec[], year: number): number {
+  const i = rows.findIndex((r) => covers(r, year));
+  if (i >= 0) return i;
+  let j = -1;
+  rows.forEach((r, k) => { if (r.from <= year) j = k; });
+  return j;
+}
+
+/** 그 계보가 쓴 구장-기간(행 i가 속한 펜스 기간)의 실측 해 기간 평균: 득점 계수 f의 기하 평균과 사건별 배율 (기획안 4.1) */
+function periodMean(src: ParkSource, parks: ParkData, franchise: string, id: string, rows: ParkSpec[], i: number,
+                    p: ParkParams): { f: number; ev: ParkEvents; shape: boolean } | undefined {
+  const [a, b] = fencePeriod(rows, i);
+  const list = measuredYearsAt(src, parks, franchise, id).filter((y) => y >= a && y <= b).map((y) => measuredAt(src, franchise, y, p)!);
+  if (!list.length) return undefined;
+  const f = Math.exp(list.reduce((s, m) => s + Math.log(m.f), 0) / list.length);
+  return { f, ev: geoMean(list.map((m) => m.ev)), shape: list.some((m) => m.shape) };
+}
+
+/**
+ * 마지막 실측 해 뒤 그 해 실제 구장 값 (기획안 4.5, P7). 쓰던 구장이면 그 구장-기간의 실측 기간 평균 (한 해의 운이 앞으로 계속 박히지 않게, 4.1).
+ * 확정 제원이 있는 실제 새 구장이면 그 제원 짐작 × 당김 w (4.4). 확정 전 계획 구장(잠실 돔 2032)은 쓰던 구장 값 그대로 (결정 8).
+ * 제원 자료가 없으면 마지막 실측 해 값. 중립이면 undefined
+ */
+export function realParkLater(src: ParkSource, franchise: string, year: number, lg: ParkLeagueRates, p: ParkParams): RealParkValue | undefined {
+  const table = src.parkFactors ?? {};
+  const last = Math.max(...Object.keys(table).map(Number));
+  const parks = src.parks;
+  if (!parks) {
+    const f = table[String(last)]?.[franchise];
+    const ev = src.parkEvents?.[String(last)]?.[franchise];
+    return f === undefined ? undefined : { run: f, ...(ev ? { ev } : {}), basis: 'measured' };
+  }
+  const planned = confirmedPlannedPark(parks, franchise, year);
+  if (planned) {
+    const g = guessLogs(planned.row, p);
+    if (!g) return undefined;
+    const ev = guessed(g, p);
+    return { run: runFactorOf(ev, lg.rates, lg.rpa, p), ev, basis: 'guess' };
+  }
+  const id = mainParkId(parks, franchise, year);
+  if (!id) return undefined;
+  const rows = parkRows(parks, id);
+  const i = rowAt(rows, year);
+  const m = i >= 0 ? periodMean(src, parks, franchise, id, rows, i, p) : undefined;
+  return m ? { run: m.f, ...(m.shape ? { ev: m.ev } : {}), basis: 'mean' } : undefined;
+}
+
+// ---- 게임 안 펜스 공사의 바탕 (기획안 6.7.2·6.8.4, 결정 11)
+
+/** 펜스 공사 바탕: 조정 뒤 값 = applyDiff(base, 새 제원 짐작, ref). row = 지금 펜스 제원 행 (없으면 중립 예시값 제원으로 본다) */
+export interface FenceBase {
+  base: ParkEvents;
+  ref: GuessLogs;
+  row?: ParkSpec;
+}
+
+/** 제원 행 → 펜스 (높이는 0.1m 단위 정수, 좌우·중앙 평균. 높이가 비면 회귀식 기준 높이). 거리가 비면 null */
+export function fenceOfRow(row: Pick<ParkSpec, 'fence' | 'height'>, p: ParkParams): Fence | null {
+  const { l, c, r } = row.fence;
+  if (l == null || c == null || r == null) return null;
+  const hs = [row.height.lr, row.height.c].filter((h): h is number => h != null);
+  const h = hs.length ? hs.reduce((a, b) => a + b, 0) / hs.length : p.specFit.height.base;
+  return { l, c, r, h: Math.round(h * 10) };
+}
+
+/** 고른 펜스 → 짐작에 넣을 제원. 지금 행과 같은 칸은 행 값 그대로 (그대로 둔 칸은 차이 방식에서 정확히 지워진다) */
+export function fenceSpecOf(f: Fence, row: Pick<ParkSpec, 'fence' | 'height'> | undefined, p: ParkParams): Pick<ParkSpec, 'fence' | 'height'> {
+  const cur = row ? fenceOfRow(row, p) : null;
+  if (!row || !cur) return { fence: { l: f.l, lc: null, c: f.c, rc: null, r: f.r }, height: { lr: f.h / 10, c: f.h / 10 } };
+  return {
+    fence: { ...row.fence, l: f.l === cur.l ? row.fence.l : f.l, c: f.c === cur.c ? row.fence.c : f.c, r: f.r === cur.r ? row.fence.r : f.r },
+    height: f.h === cur.h ? row.height : { lr: f.h / 10, c: f.h / 10 },
+  };
+}
+
+const ONES: ParkRates = { s1: 1, d2: 1, t3: 1, hr: 1 };
+
+/**
+ * 그 해 그 계보 실제 구장의 펜스 공사 바탕 (기획안 6.7.2): 조정 전 값 = 그 구장-기간의 실측 기간 평균(4.1), ref = 그 실측 기간 행 제원 짐작.
+ * 실측이 닿지 않는 옛 구장은 그 해 제원 짐작 × 당김(③④)이 조정 전 값, ref = 그 제원 짐작. 제원이 없으면 1에서 중립 예시값(neutral) 제원.
+ * 그 구단 홈 경기에만 쓰는 실제 역사 행(X-존)은 보지 않는다 (가벽은 원래 펜스 앞에 세운다)
+ */
+export function fenceBaseOf(src: ParkSource, franchise: string, year: number, neutral: Fence, p: ParkParams): FenceBase {
+  const plain = (row?: ParkSpec): FenceBase => ({
+    base: { ...ONES, L: { ...ONES }, R: { ...ONES } }, ref: guessLogs(fenceSpecOf(neutral, undefined, p), p)!, ...(row ? { row } : {}),
+  });
+  const parks = src.parks;
+  const id = parks && homeParkId(parks, franchise, year);
+  if (!parks || !id) return plain();
+  const rows = parkRows(parks, id);
+  const i = rowAt(rows, year);
+  if (i < 0) return plain();
+  const g = guessLogs(rows[i], p);
+  if (!g) return plain(rows[i]);
+  // 실측 기간 행: 그 해 행부터 뒤로 '리모델링' 없이 이어진 행 가운데 그 계보 실측 해가 있는 첫 행 (proxyOf와 같다)
+  const years = measuredYearsAt(src, parks, franchise, id);
+  for (let k = i; k < rows.length; k++) {
+    if (k > i && rows[k].change === '리모델링') break;
+    if (!years.some((y) => covers(rows[k], y))) continue;
+    const m = periodMean(src, parks, franchise, id, rows, k, p);
+    const ref = guessLogs(rows[k], p);
+    if (m && ref) return { base: m.ev, ref, row: rows[i] };
+    break;
+  }
+  return { base: guessed(g, p), ref: g, row: rows[i] };
 }
 
 // ---- 게임 안 신구장 (기획안 6장, 결정 7, 단순 규칙 6.3)

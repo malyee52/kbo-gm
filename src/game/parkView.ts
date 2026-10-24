@@ -10,15 +10,18 @@ import { isFuturesTeam } from '../league/world';
 /** 지수의 근거 (실측은 2015~ 하드힛 파크팩터, 그 전은 구장 제원으로 거꾸로 쓰거나 짐작, 기획안 4.3) */
 export const PARK_BASIS_LABEL: Record<TeamParkBasis, string> = {
   measured: '실측',
+  mean: '실측 기간 평균',
   back: '실측 (옛 해에 그대로)',
   diff: '실측 × 펜스 차이 짐작',
   guess: '제원으로 짐작',
   built: '신구장',
+  fence: '펜스 조정 (짐작)',
+  wall: '가벽 (짐작)',
   none: '자료 없음(중립)',
 };
 
 /** 짐작이 섞인 근거 (화면에서 흐리게, 툴팁 "제원으로 짐작한 값") */
-export const isGuessBasis = (b: TeamParkBasis) => b === 'diff' || b === 'guess';
+export const isGuessBasis = (b: TeamParkBasis) => b === 'diff' || b === 'guess' || b === 'fence' || b === 'wall';
 
 export interface TeamParkView {
   index: ParkIndex;
