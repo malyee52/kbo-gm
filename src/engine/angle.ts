@@ -221,6 +221,37 @@ export function ballMix(lb: LeagueBall, theta: number, k: number, a: BallShift |
   return mixWith(lb, theta === 0 && k === 1 ? lb.pz : bandProbs(lb.mix, lb.cuts, theta, k), a, b, mod);
 }
 
+const PARK_LOGITS = new WeakMap<object, { lb: LeagueBall; m: number[] }>();
+const PARK_ZERO: readonly number[] = [0, 0, 0, 0, 0];
+
+/**
+ * 구장 항 (구장효과 기획안 5.1, P8): 결과 로짓 [아웃 0, 단타, 2루타, 3루타, 홈런]에 더할 값.
+ * 배율의 log를 그대로 더하면 아웃과 나눠 갖는 몫 때문에 효과가 눌린다 (2025 SSG 홈런 1.326 → 1.274). 그래서 리그 평균 매치업
+ * (θ 0, 퍼짐 1, 손잡이 없음)의 맞힌 공당 결과가 리그 값 × 배율이 되게 고정점으로 푼다 (섞은 평균이 지금 배율과 같다).
+ * 같은 배율 객체(경기마다 gameParkOf가 만든 값)와 리그 표면 담아 둔 값을 쓴다. 난수를 쓰지 않는다
+ */
+export function parkLogits(lb: LeagueBall, pk: { s1: number; d2: number; t3: number; hr: number }): readonly number[] {
+  if (pk.s1 === 1 && pk.d2 === 1 && pk.t3 === 1 && pk.hr === 1) return PARK_ZERO;
+  const hit = PARK_LOGITS.get(pk);
+  if (hit && hit.lb === lb) return hit.m;
+  const want = [1, pk.s1, pk.d2, pk.t3, pk.hr];
+  const base = mixWith(lb, lb.pz, null, null, null).q;
+  const m = want.map((x, o) => (o === O_OUT ? 0 : Math.log(x)));
+  for (let it = 0; it < 50; it++) {
+    const q = mixWith(lb, lb.pz, null, null, m).q;
+    let err = 0;
+    for (let o = 1; o < NO; o++) {
+      if (!(q[o] > 0)) continue;
+      const d = Math.log((base[o] * want[o]) / q[o]);
+      m[o] += d;
+      err = Math.max(err, Math.abs(d));
+    }
+    if (err < 1e-12) break;
+  }
+  PARK_LOGITS.set(pk, { lb, m });
+  return m;
+}
+
 /**
  * 한쪽 손잡이 [정타, 거리, 2루타 나머지, 3루타 나머지]로 구간별 로짓 더하기를 만든다.
  * 정타: 단타·2루타·3루타 (gbContact가 false면 땅볼 구간 제외 — 투수의 타구 억제는 라인·뜬공 안타만, 9.1·10.2). 거리: 홈런 각의 홈런,

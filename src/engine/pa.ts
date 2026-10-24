@@ -10,7 +10,7 @@ import { chainShapeFor, type BodyParams, type EngineParams } from './params';
 import { currentBody } from './team';
 import { conditionOf } from './condition';
 import { expectedPitches, type SolvedChain } from './chain';
-import { batBallSide, ballMix, clampRate, leagueBall, pitBallSide, thetaOf, type BallMix, type BallSide, type LeagueBall } from './angle';
+import { batBallSide, ballMix, clampRate, leagueBall, parkLogits, pitBallSide, thetaOf, type BallMix, type BallSide, type LeagueBall } from './angle';
 import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
 
 /** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
@@ -209,11 +209,13 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const ch = plateChain(pl.lp, batPlateOf(pl, b), pitPlateOf(pl, pg.p), shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]));
   const X = ch.e[3];
   // 능력치 v2 16-2: 맞힌 공 X 뒤 결과는 타구 갈래(angle.ts)에서. 각도 성향 θ = 타자 + 투수, 퍼짐은 타자 컨택, 구간별 결과 로짓에 양쪽 손잡이를 더한다.
-  // 환경 맞춤·좌우·홈·특수능력·컨디션·구장·피로의 예전 배율은 결과 로짓에 로그로 더한다 (환경 맞춤은 시범 시즌으로 다시 맞춰진다)
+  // 환경 맞춤·좌우·홈·특수능력·컨디션·피로의 예전 배율은 결과 로짓에 로그로 더한다 (환경 맞춤은 시범 시즌으로 다시 맞춰진다)
   const bside = batBallOf(pl, b, gbOdds);
   const pside = pitBallOf(pl, pg.p, gbOdds);
+  // 구장 항은 리그 평균 매치업에서 사건별 배율이 그대로 나오게 푼 로짓 (angle.ts parkLogits, 구장효과 P8)
   const m = up * worse;
-  const mod = [0, Math.log(cal.s1 * m * pk.s1), Math.log(cal.d2 * m * pk.d2), Math.log(cal.t3 * m * pk.t3), Math.log(cal.hr * m * pk.hr)];
+  const pm = parkLogits(pl.ball!.lb, pk);
+  const mod = [0, Math.log(cal.s1 * m) + pm[1], Math.log(cal.d2 * m) + pm[2], Math.log(cal.t3 * m) + pm[3], Math.log(cal.hr * m) + pm[4]];
   const ball = ballMix(pl.ball!.lb, bside.theta + pside.theta, bside.k, bside.shift, pside.shift, mod);
   if (bs.pull) ball.pull = bs.pull;
   const q = ball.q;

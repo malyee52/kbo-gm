@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, worldForYear } from '../src/engine';
 import {
-  Band, bandProbs, ballMix, batBallSide, batTarget, buildShift, leagueBall, O_HR, O_OUT, perContact, pitBallSide, pitTarget, resultTypes,
+  Band, bandProbs, ballMix, batBallSide, batTarget, buildShift, leagueBall, O_HR, O_OUT, parkLogits, perContact, pitBallSide, pitTarget, resultTypes,
 } from '../src/engine/angle';
 import { leagueEnvFor } from '../src/engine/ratings';
 
@@ -119,5 +119,22 @@ describe('실존 선수 시작값 = 지금 안타 종류 비율', () => {
       n++;
     }
     expect(n).toBeGreaterThan(200);
+  });
+});
+
+describe('구장 항 (구장효과 P8, parkLogits)', () => {
+  it.each([2025, 2012, 1990])('%i년: 리그 평균 매치업의 맞힌 공당 결과가 리그 값 × 구장 배율 (log를 그대로 더하면 눌린다)', (year) => {
+    const lg = store.season(year)!.league.rates;
+    const lb = leagueBall(lg, P);
+    const base = ballMix(lb, 0, 1, null, null, null).q;
+    const pk = { s1: 0.99, d2: 0.93, t3: 0.77, hr: 1.33 };
+    const q = ballMix(lb, 0, 1, null, null, [...parkLogits(lb, pk)]).q;
+    const want = [pk.s1, pk.d2, pk.t3, pk.hr];
+    for (let o = 1; o < 5; o++) expect(q[o] / base[o]).toBeCloseTo(want[o - 1], 9);
+    const raw = ballMix(lb, 0, 1, null, null, [0, ...want.map(Math.log)]).q;
+    expect(raw[O_HR] / base[O_HR]).toBeLessThan(pk.hr - 0.03);
+    // 중립 구장은 0, 같은 배율 객체는 담아 둔 값
+    expect([...parkLogits(lb, { s1: 1, d2: 1, t3: 1, hr: 1 })]).toEqual([0, 0, 0, 0, 0]);
+    expect(parkLogits(lb, pk)).toBe(parkLogits(lb, pk));
   });
 });
