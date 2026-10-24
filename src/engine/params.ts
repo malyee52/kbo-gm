@@ -22,6 +22,35 @@ export interface BallParams {
   infieldAir: { LD: number; FB: number };
   /** 깊이별·구장 쪽별 담당 자리 가중치 (ground 내야 땅볼, air 내야 공중, outfield 외야) */
   zones: Record<'ground' | 'air' | 'outfield', [ZoneFielders, ZoneFielders, ZoneFielders]>;
+  /** 타구각 갈래 (angle.ts, 능력치 v2 16-2) */
+  angle: AngleParams;
+}
+
+/**
+ * 타구각 갈래 조정값 (angle.ts, docs/능력치v2_기획안.md 10.2·11.3). 위 type·airOut 표는 리그 구간별 결과표의 재료로 그대로 쓴다
+ * (베이즈로 뒤집음). 덩어리 몫·공중 덩어리 가운데·퍼짐은 해마다 그 해 유형 비율에 맞춰 다시 풀고, 여기 값은 그 시작점이다
+ */
+export interface AngleParams {
+  /** 구간 경계 (도): 땅볼 | 라인드라이브 | 홈런 각 | 높은 뜬공 | 내야 뜬공 */
+  cuts: [number, number, number, number];
+  /** 땅볼 덩어리 [가운데, 퍼짐] (고정) */
+  ground: [number, number];
+  /** 공중 덩어리 [가운데, 퍼짐] (풀기 시작점) */
+  air: [number, number];
+  /** 땅볼 덩어리 몫 (풀기 시작점) */
+  groundShare: number;
+  /** 퍼짐 배율 = 1 − contactSpread × 정타 z (정타 z = 정타 로짓 ÷ contactSd), spreadMin~spreadMax로 자른다 */
+  contactSpread: number;
+  contactSd: number;
+  spreadMin: number;
+  spreadMax: number;
+  /** 각도 성향이 뚜렷하면(|θ| ≥ tendencyFull) 퍼짐을 1 − tendencyTighten배로 (그 사이는 선형) */
+  tendencyTighten: number;
+  tendencyFull: number;
+  /** 땅볼 단타(내야안타) 로짓에 더하는 주력 효과: speedGb × (주력 − 0.5) × 2 */
+  speedGb: number;
+  /** 거리(파워) 로짓이 땅볼 밖 2루타·3루타 로짓에 들어가는 배율 (장타 몫) */
+  powerXbh: number;
 }
 /**
  * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
@@ -214,6 +243,28 @@ export interface ParkSpecFit {
   newPark: { hr: [number, number]; xb: [number, number] };
 }
 
+/** 사슬 능력 하나의 등급 눈금 (능력치 v2 1.7·11.2): 등급 = 50 + 10 × e⁻¹((값 − mid) ÷ half), 볼록 곡선 a(위)·b(아래) */
+export interface PlateAbility {
+  mid: number;
+  half: number;
+  a: number;
+  b: number;
+}
+
+/** 볼카운트 사슬 능력 조정값 (능력치 v2 16-1, plate.ts·tools/fit_plate_estimate.ts) */
+export interface PlateParams {
+  /** 칸마다 [존 비율, 존 안 스윙, 존 밖 스윙, 존 안 맞힘(스윙 중), 존 밖 맞힘, 존 안 파울(맞힘 중), 존 밖 파울, 존 안 루킹 스트라이크(스윙 안 한 공 중), 존 밖 루킹 스트라이크] */
+  split: number[][];
+  /** 구위 1이 존 밖 스윙 로짓을 움직이는 크기 */
+  alpha: number;
+  /** 결과 기록으로 짐작하는 적극성 [상수, 삼진 로짓 차, 볼넷 로짓 차, 파워 차, 컨택 차] */
+  aggFormula: number[];
+  /** 능력별 짐작 쪽으로 당기는 공 수 (존 안·밖 스윙, 맞히기는 스윙, 2S 대처는 2스트라이크 스윙, 끈질김·투구 효율은 맞힘, 제구는 공, 구위는 상대 스윙) */
+  regress: { swIn: number; swOut: number; con: number; two: number; tough: number; ctl: number; stuff: number; eff: number };
+  /** 등급 눈금 */
+  grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
+}
+
 export interface EngineParams {
   // ---- 능력 산출 (ratings.ts)
   /** 직전 1·2·3시즌 가중치 (기획서: 5:4:3) */
@@ -291,6 +342,8 @@ export interface EngineParams {
   fatigueMax: number;
   /** 선수별 P/PA(리그 대비 비율)를 1 쪽으로 당기는 가상 타석 수 */
   ppaRegress: number;
+  /** 볼카운트 사슬 능력 (능력치 v2 16-1, plate.ts) */
+  plate: PlateParams;
   /** AI 감독의 투구 수 기준 = 그 시즌 리그 평균 선발·구원의 한계 투구 수 × 이 배율 (manager.ts managerNorms) */
   planScale: { starter: number; relief: number; earlyRelief: number; spread: number };
   /** 볼카운트 사슬이 없는 해결기(B0)일 때 타석당 투구 수 (임시값, 2023~2025 리그 3.9구) */
@@ -377,9 +430,14 @@ export interface EngineParams {
   /**
    * 시간 제한 흉내 (엔진 2 14단계 물음 1, 2026-10-23 사용자 결정): 경기 시각이 없어 시간 제한(1982~2002 야간 경기 개시 4시간, 2004 4시간)을
    * 그대로 넣을 수 없어서, 그 해 정규시즌 경기는 from회 끝에 동점이면 이닝마다 확률 end로 끝나 무승부가 된다 (game.ts, 경기 난수의 'time' 줄기).
-   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌에는 쓰지 않는다
+   * 연도 → 값. 없는 해는 시간 제한 없음. 포스트시즌은 timeLimitPostseason에 있는 해만 같은 값을 쓴다
    */
   timeLimit?: Record<number, { from: number; end: number }>;
+  /**
+   * 포스트시즌에도 시간 제한 흉내를 쓰는 해 (2026-10-24 사용자 결정: 원문으로 확인된 해만). 그 해 timeLimit 값(정규시즌과 같은 시작 회·확률)을 쓴다.
+   * 없는 해의 포스트시즌은 시간 제한 없음
+   */
+  timeLimitPostseason?: number[];
 
   // ---- 선수 기용
   /**
@@ -562,6 +620,39 @@ export const DEFAULT_PARAMS: EngineParams = {
   fatigueMax: 0.6,
   // 임시값: 0·50·150을 재 보아 차이가 표본 흔들림 안이었다 (2025 × 4시즌, 실제 300타자 이상 투수 ±0.10구 안 45~47%). 직전 시즌으로 그 해를 맞히는 한계가 더 크다
   ppaRegress: 50,
+  // 볼카운트 사슬 능력 (능력치 v2 16-1): tools/fit_plate_estimate.ts가 2023~2025 투구 단위 자료(data-src/pbp_derived/count_zone·batter_plate·pitcher_plate)로 낸 측정값
+  // (2026-10-24, 보고 reports/plate-estimate.md). split = 칸마다 리그 [존 비율, 존 안·밖 스윙, 존 안·밖 맞힘, 존 안·밖 파울, 존 안·밖 루킹 스트라이크],
+  // alpha = 구위의 존 밖 유인 (투수 존 밖 스윙 로짓 차를 구위·제구로 회귀한 구위 계수), aggFormula = 2022년 이전 적극성 짐작 식 (R² 0.60),
+  // regress = 해 사이 공분산으로 잰 당김 공 수, grades = 2023~2025 규정타석 타자·200타자 투수 한 시즌 값의 중앙·중간폭과 볼록 a/b (바닥 0.1, 결정 16·21)
+  plate: {
+    split: [
+      [0.52605, 0.39567, 0.1292, 0.83503, 0.52621, 0.45995, 0.55149, 0.94095, 0.05244], // 0-0
+      [0.45533, 0.70033, 0.25007, 0.85344, 0.56133, 0.46617, 0.55849, 0.88082, 0.03063], // 0-1
+      [0.31143, 0.86343, 0.31708, 0.87116, 0.6274, 0.48404, 0.5583, 0.81792, 0.01159], // 0-2
+      [0.55513, 0.56484, 0.20093, 0.8448, 0.55904, 0.46691, 0.59447, 0.9359, 0.05521], // 1-0
+      [0.51361, 0.74698, 0.28159, 0.8484, 0.59138, 0.46527, 0.56235, 0.8921, 0.03605], // 1-1
+      [0.39035, 0.90063, 0.40306, 0.87095, 0.64834, 0.47815, 0.56679, 0.80687, 0.01468], // 1-2
+      [0.58905, 0.48387, 0.16717, 0.86545, 0.60685, 0.45289, 0.58727, 0.94932, 0.06366], // 2-0
+      [0.56457, 0.77218, 0.2967, 0.86443, 0.64246, 0.4673, 0.57484, 0.90408, 0.04206], // 2-1
+      [0.4859, 0.91816, 0.46637, 0.87714, 0.66865, 0.47078, 0.56716, 0.81903, 0.01609], // 2-2
+      [0.59664, 0.06238, 0.01877, 0.87586, 0.62712, 0.42913, 0.56757, 0.96972, 0.08106], // 3-0
+      [0.60046, 0.63811, 0.21884, 0.8908, 0.65989, 0.45027, 0.60433, 0.93127, 0.0567], // 3-1
+      [0.56202, 0.91574, 0.45805, 0.88297, 0.69897, 0.45562, 0.5827, 0.83948, 0.02317], // 3-2
+    ],
+    alpha: 0.209,
+    aggFormula: [-0.0297, 0.0122, -0.5357, 0.3956, 1.3251],
+    regress: { swIn: 73, swOut: 75, con: 41, two: 742, tough: 215, ctl: 311, stuff: 235, eff: 367 },
+    grades: {
+      agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
+      eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
+      con: { mid: 0.2224, half: 0.3851, a: 0.3, b: 0.1 },
+      two: { mid: 0.0143, half: 0.1279, a: 0.1, b: 0.1 },
+      tough: { mid: -0.0389, half: 0.148, a: 0.1, b: 0.25 },
+      ctl: { mid: 0.005, half: 0.1397, a: 0.1, b: 0.1 },
+      stuff: { mid: 0.0005, half: 0.2074, a: 0.1, b: 0.25 },
+      eff: { mid: -0.006, half: 0.1524, a: 0.1, b: 0.1 },
+    },
+  },
   pitchesPerPaDefault: 3.9,
   // starter·relief: 2025 선발 투구 수 86.1구·100구 이상 18.6%, 구원 등판당 16.8구에 맞춘 값. earlyRelief: 5회 이전에 나온 구원은
   // 기준 × 이 값까지 맡긴다 (임시값 (2026-10-22 사용자 승인), 롱릴리프). spread: 경기마다 감독 판단이 기준의 ±이 비율 안에서 흔들린다
@@ -640,6 +731,22 @@ export const DEFAULT_PARAMS: EngineParams = {
       air: [{ '3B': 0.45, SS: 0.35, C: 0.2 }, { SS: 0.35, '2B': 0.35, P: 0.1, C: 0.2 }, { '1B': 0.45, '2B': 0.35, C: 0.2 }],
       outfield: [{ LF: 0.75, CF: 0.25 }, { CF: 1 }, { RF: 0.75, CF: 0.25 }],
     },
+    // 능력치 v2 16-2 타구각 (기획안 10.2·11.3 결정 14): 구간 경계·두 덩어리 38% N(−12°, 10°) + 62% N(29°, 12°)는 2025년 엔진 표에 맞춘 임시값.
+    // 퍼짐·주력·장타 몫 크기는 모두 임시값 (contactSd 0.14는 2026 시작 월드 가중 타석 300 넘는 타자 131명의 정타 로짓 표준편차 0.138, 측정)
+    angle: {
+      cuts: [10, 25, 35, 50],
+      ground: [-12, 10],
+      air: [29, 12],
+      groundShare: 0.38,
+      contactSpread: 0.1,
+      contactSd: 0.14,
+      spreadMin: 0.8,
+      spreadMax: 1.2,
+      tendencyTighten: 0.1,
+      tendencyFull: 0.8,
+      speedGb: 0.4,
+      powerXbh: 0.5,
+    },
   },
   // 아래 chainShapeByYear 세 해(2023~2025 맞춘 모양)를 칸마다 실제 공 수로 가중 평균. 스트라이크 = 루킹 + 헛스윙 + 번트 헛스윙
   // (+ 2스트라이크 번트 파울), 파울 = 파울 + 2스트라이크 전 번트 파울. 그 해 모양(chainShapeByYear)이 없는 해(2022년 이전, 2026년 이후)에 쓴다 (임시값: 그 시대 카운트 자료 없음.
@@ -706,8 +813,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     ],
   },
   // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.478·0.95. 병살은 2012·2019가 낮고 2023~2025가 높아 다섯 해 가운데로)
-  doublePlay: 0.478,
-  sacFly: 0.95,
+  // 능력치 v2 16-2 타구각 갈래에서 validate 2025·2019·2012 × 100의 병살 +1.2%·희생플라이 −1.4%(세 해 평균 변화)만큼 되돌림 (0.478·0.95 → 0.472·0.964)
+  doublePlay: 0.472,
+  sacFly: 0.964,
   groundOutScores: 0.58,
 
   firstToThirdOnSingle: 0.4,
@@ -730,8 +838,18 @@ export const DEFAULT_PARAMS: EngineParams = {
     { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
     { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
   ],
-  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts로 그 해 실제 무승부 비율에 맞춘 값
-  timeLimit: {},
+  // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts --seasons 40으로 그 해 실제 무승부 비율에 맞춘 값 (2026-10-23).
+  // 시작 회는 12회, 12회 끝 동점 비율이 실제 무승부보다 적으면 한 회씩 앞당겼다 (사용자 결정 전 임시). 1982는 실제 무승부 0이라 넣지 않는다
+  timeLimit: {
+    1983: { from: 12, end: 0.98 }, 1984: { from: 11, end: 0.35 }, 1985: { from: 12, end: 0.512 }, 1986: { from: 10, end: 0.392 },
+    1987: { from: 10, end: 0.386 }, 1988: { from: 11, end: 0.459 }, 1989: { from: 10, end: 0.399 }, 1990: { from: 11, end: 0.845 },
+    1991: { from: 11, end: 0.755 }, 1992: { from: 11, end: 0.572 }, 1993: { from: 10, end: 0.405 }, 1994: { from: 11, end: 0.369 },
+    1995: { from: 10, end: 0.376 }, 1996: { from: 10, end: 0.377 }, 1997: { from: 11, end: 0.869 }, 1998: { from: 11, end: 0.434 },
+    1999: { from: 10, end: 0.544 }, 2000: { from: 10, end: 0.366 }, 2001: { from: 10, end: 0.54 }, 2002: { from: 10, end: 0.396 },
+    2004: { from: 10, end: 0.911 },
+  },
+  // 출처: 나무위키, 2004 포스트시즌 4시간 제한. 다른 해는 원문이 확인되면 더한다
+  timeLimitPostseason: [2004],
 
   restChance: 0.6,
   catcherRestChance: 0.6,

@@ -81,10 +81,11 @@ describe('하드힛 포지션 (포지션 2안)', () => {
     expect(hardhitPositions(seasons(rows), 2005, [1, 0.7, 0.5], { shortPa: 100 }).get('p')!.main).toBe('1B');
   });
 
-  it('실제 자료: 강백호 2026 시작 1B, 박석민 2005 시작 3B', () => {
+  it('실제 자료: 강백호 2026 시작 DH (능력치 v2 12.2: 수비 없는 타석 몫 0.76, 수비 본 자리 1B), 박석민 2005 시작 1B (2004년 32타석이 1루뿐이라 직전 3시즌 최다 자리, 기획안 10.4 5·14.4)', () => {
     const d = loadDataStore();
     const kang = worldForYear(d, 2026).players.find((p) => p.id === '68050')!;
-    expect(kang.pos).toBe('1B');
-    expect(worldForYear(d, 2005).players.find((p) => p.id === '74465')!.pos).toBe('3B');
+    expect(kang.pos).toBe('DH');
+    expect(kang.bat!.playable).toContain('1B');
+    expect(worldForYear(d, 2005).players.find((p) => p.id === '74465')!.pos).toBe('1B');
   });
 });

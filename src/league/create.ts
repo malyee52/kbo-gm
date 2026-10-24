@@ -149,6 +149,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     format: 1, seed, startYear, year: startYear,
     teams: recorded.teams.map((t) => ({ name: t.name, franchise: t.franchise })),
     players, lastSeason: null, ledger: [], nextVirtualId: 1,
+    ...(recorded.env.defZero !== undefined ? { defZero: recorded.env.defZero } : {}),
+    ...(recorded.defPool ? { defPool: recorded.defPool } : {}),
   };
   // 시작 다음 해에 1군에 들어오는 창단 구단은 이미 창단해 퓨처스리그에서 뛰고 있다 (예: 2012 시작의 NC).
   // 시작 전 드래프트에서 지명한 선수(나성범 등)는 아래 보충에서 이 구단으로 들어간다

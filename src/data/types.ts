@@ -285,10 +285,12 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
-  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 판정 함수 src/engine/fielding.ts만 읽는다 (엔진·리그 생성에는 16-3에서 잇는다). 없으면 판정하지 않는다 */
+  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 있으면 월드의 수비를 능력치 v2 식으로 만든다 (src/engine/fielding.ts, 16-3). 없으면 예전 추정 */
   defense?: DefenseData;
   /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
   pitches?: PitchData;
+  /** 선수별 볼카운트 사슬 실측 (plate.json, 능력치 v2 16-1). 없으면 사슬 능력을 결과 기록으로 짐작한다 */
+  plate?: PlateData;
   /** 실제 구장 제원 기간과 구단 계보별 주 구장 (parks.json, 구장효과 기획안 7.1·7.2). league/ballparks.ts가 구장 이름·좌석·돔·이전 해를 읽는다 (경기 배율은 아직 meta.parkFactors·parkEvents만). 없으면 ballparks.ts의 코드 안 표 */
   parks?: ParkData;
 }
@@ -407,6 +409,16 @@ export interface DefenseYear {
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
+/**
+ * plate.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → 건수 (tools/build_data.py build_plate ← tools/pbp_plate.py, 2023~).
+ * 타자 [존 안 공, 존 안 스윙, 기대, 존 밖 공, 존 밖 스윙, 기대, 스윙, 맞힘, 기대, 2스트라이크 스윙, 맞힘, 기대, 맞힘, 파울, 기대],
+ * 투수 [공, 존 안 공, 기대, 스윙, 맞힘, 기대, 맞힘, 파울, 기대]. 기대 = 같은 칸·존에서 리그 평균이 냈을 값
+ */
+export interface PlateData {
+  bat: Record<string, Record<string, number[]>>;
+  pit: Record<string, Record<string, number[]>>;
+}
+
 export interface PpaData {
   bat: Record<string, Record<string, [number, number]>>;
   pit: Record<string, Record<string, [number, number]>>;

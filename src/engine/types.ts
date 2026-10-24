@@ -1,5 +1,6 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
-import type { Defense } from './defense';
+import type { Defense, FieldPos } from './defense';
+import type { BatPlate, PitPlate } from './plate';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -25,8 +26,23 @@ export interface BatSkill {
   gb?: number;
   /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
   ppaRel?: number;
-  /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
+  /**
+   * 볼카운트 사슬 실측 몫 (능력치 v2 16-1, plate.ts): 실측 능력 − 결과 기록으로 푼 능력. 시즌마다 사슬 능력 = 그때 결과 비율로 푼 값 + 이 몫이라
+   * 시작 때는 실측 그대로이고, 성장으로 비율이 바뀌면 그만큼 따라간다. 실측이 없으면 undefined (푼 값 그대로)
+   */
+  plateRes?: BatPlate;
+  /** 당겨치기 성향 (로짓, 0 = 리그 방향 비율, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  pull?: number;
+  /** 좌우 상성 크기 배율 (1 = 리그 params.platoon, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  platoon?: number;
+  /** 포지션별 수비 런 (defense.ts). 능력치 v2(16-3)는 (등급 − 50) ÷ 2 (fielding.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
+  /** 수비 가능 자리 (능력치 v2 16-3: 익숙함이 다 찬 자리, fielding.ts). 없으면 예전 문턱 (defense.ts playablePositions) */
+  playable?: FieldPos[];
+  /** 비상 포수 (14.2): 포수 수비 가능은 아니지만 직전 3시즌 포수 150이닝 이상. 정규 포수가 없을 때만 포수로 쓴다 */
+  emC?: true;
+  /** 포수 도루 저지 (런, 한 시즌당, 16-3). 없으면 포수 자리에서 수비 가능 포수 0 · 아니면 바닥 (state.ts fieldDefense) */
+  cArm?: number;
 }
 
 /** 투수 능력: 상대 타석 결과별 리그 대비 비율 (1.00 = 리그 평균, 삼진은 클수록 좋고 나머지는 작을수록 좋다) */
@@ -49,6 +65,10 @@ export interface PitSkill {
   gb?: number;
   /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
   ppaRel?: number;
+  /** 볼카운트 사슬 실측 몫 (BatSkill.plateRes와 같은 뜻) */
+  plateRes?: PitPlate;
+  /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
+  platoon?: number;
 }
 
 export interface SimPlayer {
@@ -135,6 +155,8 @@ export interface World {
   env: LeagueEnv;
   teams: SimTeam[];
   players: SimPlayer[];
+  /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
+  defPool?: number[];
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */
@@ -153,6 +175,8 @@ export interface LeagueEnv {
   gbOdds?: number;
   /** 그 해 리그 도루 성공률 (엔진 2 9단계 앞, 도루 실패 2025 +11.5% 고침). 시즌 시작 때 선수 성공률 평균과의 차를 모든 도루에 더한다 (GameCtx.sbShift). 없으면 0 */
   sbPct?: number;
+  /** 수비 영점 m (능력치 v2 16-3, 13.6): 시작 연도 리그 수비 이닝 가중 평균 등급. 엔진 수비 런 = (등급 − m) ÷ 2. 없으면 50 (예전과 같다) */
+  defZero?: number;
 }
 
 export interface BatLine {

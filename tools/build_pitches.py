@@ -16,7 +16,10 @@ visualbaseball 짝 맞추기 (선수 ID 열이 없다):
     두 묶음을 PA·투구수 합으로 사람에게 준다 (ok-stats, 아래 build_visual 설명). 그것으로 못 정하면 두 사람의 다른 해 구종
     구성과 견준다 (ok-stats-arsenal). 그래도 못 정하면 못 맞춘 행으로 남긴다.
   - 시즌 중 이적한 투수는 구종 데이터에 같은 값이 두 팀 이름으로 실린다 (ars-dup-traded, 하나로 합친다).
-  - 게임 자료에 없는 투수 (2016~2025 김상수 1988년생, 2021~2022 박웅)는 no-pitcher로 남는다.
+  - 이름을 바꾼 투수는 원본이 옛 이름으로 싣기도 한다 (김태혁 76430 = 옛 김상수, 2016~2025). 지금 이름으로 그 해 투수가
+    없을 때만 옛 이름으로 찾는다 (ok-old-name…). 옛 이름은 data-src/pbp_derived/player_link.csv(중계 이름 ≠ 게임 이름)와
+    지명 원본의 '지금 이름 (옛 이름)' 표기(drafts.json에 붙은 pid로 사람을 잇는다)에서 모은다 (load_old_names).
+  - 게임 자료에 없는 투수 (2021~2022 박웅)는 no-pitcher로 남는다.
   - 구종 데이터 파일은 같은 시즌의 같은 이름 투수 둘을 한 사람처럼 합쳐 두 팀에 같은 행을 싣는다 (사용률 합 약 200%).
     그런 묶음(사용률 합이 100 ± 1.5 밖이거나 같은 구종이 두 번)은 구속·무브·사용률을 쓰지 않는다 (merged).
   - 못 맞춘 행과 합쳐진 묶음은 reports/pitches-unmatched.md에 남긴다.
@@ -45,6 +48,8 @@ RAW_WIKI = RAW / '정리' / '구종' / '위키_구종.csv'
 OUT_PITCH = ROOT / 'data-src' / '구종.csv'
 OUT_WIKI = ROOT / 'data-src' / '위키_구종.csv'
 REPORT = ROOT / 'reports' / 'pitches-unmatched.md'
+PLAYER_LINK = ROOT / 'data-src' / 'pbp_derived' / 'player_link.csv'
+DRAFT_RAW = ROOT / 'data-src' / 'baseballchart' / 'kbo_draft_1982-2027.csv'
 
 SOURCE = 'visualbaseball.com 구종 자료, 사용자 수집 2026-10, 가공'
 PITCH_TYPES = ('포심', '투심', '싱커', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼')
@@ -87,8 +92,38 @@ def load_game():
     return players, fr_of, pit
 
 
-def match_group(year, team, name, players, fr_of, pit):
-    """(시즌·팀·이름) → (선수 ID 목록, 사유). 같은 팀 동명이인이면 ID 둘과 'split'"""
+def load_old_names(players):
+    """옛 이름 → 선수 ID 집합. 중계 자료 짝(player_link.csv에서 이름이 다른 행)과 지명 원본의 '지금 이름 (옛 이름)' 표기에서"""
+    old = defaultdict(set)
+    if PLAYER_LINK.exists():
+        for r in read_raw(PLAYER_LINK):
+            pid = r['game_id']
+            if r['name_same'] == '0' and pid in players and r['pbp_name'] != players[pid]['name']:
+                old[r['pbp_name']].add(pid)
+    drafts = DATA / 'drafts.json'
+    if DRAFT_RAW.exists() and drafts.exists():
+        # 지명 원본 행 → drafts.json의 같은 행(지금 이름·구단·전체 순위·통산 경기)에 붙은 pid
+        pid_of = defaultdict(set)
+        for rows in json.loads(drafts.read_text(encoding='utf-8'))['years'].values():
+            for d in rows:
+                if d.get('pid'):
+                    pid_of[(d['name'], d['team'], d['overall'], d['games'])].add(d['pid'])
+        for r in read_raw(DRAFT_RAW):
+            m = re.fullmatch(r'(.+?)\s*\((.+)\)', r['선수'].strip())
+            if not m:
+                continue
+            overall = re.search(r'(\d+)순위', r['자리'] or '')
+            ids = pid_of.get((m.group(1), r['지명 구단'].strip(), int(overall.group(1)) if overall else None, int(r['통산 경기'] or 0)), set())
+            if len(ids) == 1:
+                for o in m.group(2).split('/'):  # '류재원/유재원'
+                    if o.strip():
+                        old[o.strip()] |= ids
+    return old
+
+
+def match_group(year, team, name, players, fr_of, pit, old_names):
+    """(시즌·팀·이름) → (선수 ID 목록, 사유). 같은 팀 동명이인이면 ID 둘과 'split'.
+    지금 이름으로 그 해 투수가 없을 때만 옛 이름으로 찾는다 (사유 'ok-old-name…')"""
     fr = fr_of.get((team, year), team)
     cands = pit[year].get(name, {})
     on_team = [pid for pid, frs in cands.items() if fr in frs]
@@ -100,10 +135,24 @@ def match_group(year, team, name, players, fr_of, pit):
         return list(cands), 'ok-team-differs'
     if cands:
         return [], f'ambiguous({len(cands)})'
+    olds = {pid: pit[year][players[pid]['name']][pid] for pid in old_names.get(name, ())
+            if pid in pit[year].get(players[pid]['name'], {})}
+    on_team = [pid for pid, frs in olds.items() if fr in frs]
+    if len(on_team) == 1:
+        return on_team, 'ok-old-name'
+    if len(olds) == 1 and not on_team:
+        return list(olds), 'ok-old-name-team-differs'
+    if olds:
+        return [], f'ambiguous-old-name({len(olds)})'
     alive = [p['id'] for p in players.values() if p['name'] == name and p.get('kind') == 'P'
              and (p.get('first') or 0) <= year <= (p.get('last') or 0) + 1]
     if len(alive) == 1:
         return alive, 'ok-no-season'
+    if not alive:
+        alive = [pid for pid in old_names.get(name, ()) if players[pid].get('kind') == 'P'
+                 and (players[pid].get('first') or 0) <= year <= (players[pid].get('last') or 0) + 1]
+        if len(alive) == 1:
+            return alive, 'ok-old-name-no-season'
     return [], 'no-pitcher' if not alive else f'ambiguous({len(alive)})'
 
 
@@ -112,7 +161,7 @@ def read_raw(path):
         return list(csv.DictReader(f))
 
 
-def build_visual(players, fr_of, pit):
+def build_visual(players, fr_of, pit, old_names):
     ars_raw, rv_raw = read_raw(RAW_ARS), read_raw(RAW_RV)
     unmatched, merged = [], []
     why = Counter()
@@ -124,7 +173,7 @@ def build_visual(players, fr_of, pit):
     rv_rows = []  # (선수 ID, 연도, 팀, 구종, 투구수, RV/100, 사유)
     splits = []
     for (y, team, name), rows in rv_groups.items():
-        ids, reason = match_group(y, team, name, players, fr_of, pit)
+        ids, reason = match_group(y, team, name, players, fr_of, pit, old_names)
         if reason == 'split':
             splits.append(((y, team, name), rows, ids))
             continue
@@ -145,7 +194,7 @@ def build_visual(players, fr_of, pit):
         pa_sum[(int(r['season']), r['팀'], strip_name(r['선수']))] += int(r['PA'])
         n_sum[(int(r['season']), r['팀'], strip_name(r['선수']))] += int(r['투구수'])
     for (y, team, name), pa in pa_sum.items():
-        ids, reason = match_group(y, team, name, players, fr_of, pit)
+        ids, reason = match_group(y, team, name, players, fr_of, pit, old_names)
         bf = pit[y][name][ids[0]].get(fr_of.get((team, y), team), 0) if reason == 'ok' else 0
         if bf >= 100 and pa > 0:
             logs[y].append(math.log(pa / bf))
@@ -248,7 +297,7 @@ def build_visual(players, fr_of, pit):
             usage[m.group(1)] = float(m.group(2))
         types = [r['구종'] for r in rows]
         total = sum(usage.values())
-        ids, reason = match_group(y, team, name, players, fr_of, pit)
+        ids, reason = match_group(y, team, name, players, fr_of, pit, old_names)
         if dup or len(set(types)) < len(types) or abs(total - 100) > 1.5 or reason == 'split':
             merged.append((y, team, name, round(total, 1), len(rows)))
             why['ars-merged'] += len(rows)
@@ -344,7 +393,7 @@ def write_report(unmatched, merged, why, n_ars, n_rv, out):
 
 def main():
     players, fr_of, pit = load_game()
-    out, unmatched, merged, why, n_ars, n_rv = build_visual(players, fr_of, pit)
+    out, unmatched, merged, why, n_ars, n_rv = build_visual(players, fr_of, pit, load_old_names(players))
     write_csv(OUT_PITCH, out, ['출처', '선수ID', '이름', '연도', '구단', '구종', '구속', '수직무브', '수평무브', '릴리스높이', '낙차', '사용률', '투구수', 'RV100', '짝근거'])
     write_report(unmatched, merged, why, n_ars, n_rv, out)
     print(f'구종 {len(out):,}행 (선수 {len({r["선수ID"] for r in out}):,}명) → {OUT_PITCH}')

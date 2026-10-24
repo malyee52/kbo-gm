@@ -1,6 +1,7 @@
 // 한 경기 시뮬레이션: 경기 상태(state.ts)를 만들고 반 이닝·타석을 차례로 진행한다.
 // 타석은 공통 규칙(감독 판단 manager.ts, 주루·진루 rules.ts)과 해결기(resolver.ts)로 푼다 (docs/경기엔진2_기획안.md 3.2).
 
+import type { PlateContext } from './pa';
 import type { Rates } from '../data/types';
 import type { BallTally } from './battedball';
 import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher, maybeOnePoint, tallySaveEntry, wantInfieldIn, wantIntentionalWalk, type PenTally } from './manager';
@@ -108,6 +109,8 @@ export interface GameContext {
   injuries?: GameInjury[];
   /** 선수별 실제 한계 투구 수 배율 (선수 색인, 기획안 4.6, Season이 리그 시드로 만든다). 없으면 1 */
   realLimitScale?: Float32Array;
+  /** 볼카운트 사슬 능력 (능력치 v2 16-1, Season이 만든다). 있으면 삼진·볼넷·사구와 투구 수를 칸 함수로 낸다. 없으면 예전 길 (결과 비율 → 손잡이 풀기) */
+  plate?: PlateContext;
 }
 
 /** 경기 중 부상 한 건 (엔진 2 11단계). 다음 날부터 days일 결장 */
@@ -232,9 +235,10 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
     const slots = fieldSlots(ts, lineup);
-    const fd = fieldDefense(lineup, slots);
+    const defZero = ctx.env.defZero !== undefined ? (ctx.env.defZero - 50) / 2 : 0;
+    const fd = fieldDefense(lineup, slots, defZero);
     return {
-      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [],
+      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, defZero, removed: new Set(), slots, subs: [],
       starters: lineup.map((p) => ({ p, slot: slots.get(p.idx) })),
     };
   };

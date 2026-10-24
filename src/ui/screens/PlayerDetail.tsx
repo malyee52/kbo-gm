@@ -259,7 +259,7 @@ function DefenseInfo({ p }: { p: SimPlayer }) {
   const { session, changed, autosave } = useGame();
   const [edit, setEdit] = useState<Record<string, number> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const playable = playablePositions(p.bat?.def);
+  const playable = playablePositions(p.bat);
   const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => [q, defenseGrade(defenseAt(p, q))])));
   const save = () => {
     if (!edit) return;

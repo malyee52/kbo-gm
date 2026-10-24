@@ -6,7 +6,7 @@ import { GameSession } from '../src/game/session';
 import { freeAction, freeContext, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
 import { currentRuns } from '../src/ai/value';
 import { cashOf } from '../src/league/finance';
-import { defenseAt } from '../src/engine';
+import { defenseAt, defenseGrade } from '../src/engine';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -97,7 +97,7 @@ describe('자유 모드', () => {
     const sp = g.world.players.find((p) => p.name === '선동열')!;
     expect(gradeOfRuns(currentRuns(sp, g.values), 2000)).toBeGreaterThanOrEqual(70);
     expect(g.registered().some((p) => p.idx === sp.idx)).toBe(true);
-    g.advance(30);
+    g.advance(40); // 30일이면 세이브 기회가 적은 해에 등판 5번에 걸린다 (16-3 수비 v2 뒤)
     expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
     expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
   }, 300_000);
@@ -111,7 +111,7 @@ describe('자유 모드', () => {
     expect(sp.pos).toBe('3B');
     expect(defenseAt(sp, 'SS')).toBeLessThan(defenseAt(sp, '3B') - 5);
     expect(defenseAt(sp, 'CF')).toBeLessThan(defenseAt(sp, '3B') - 5);
-    expect(defenseAt(sp, 'C')).toBeLessThan(-30);
+    expect(defenseGrade(defenseAt(sp, 'C'))).toBe(20); // 능력치 v2: 안 해 본 자리는 등급 20 (16.4)
   }, 120_000);
 
   it('만든 선수의 국적·병역: 외국 이름은 외국인, 28세 이상 국내 선수는 병역 마침, 리그 밖 선수는 입대하지 않는다', () => {
@@ -138,8 +138,8 @@ describe('자유 모드', () => {
   }, 600_000);
 
   it('입단 예약·단장 노트: 2000년에 후원한 그레인키(1983년생)는 만 17세 이후 정한 해 개막 때 실제로 들어온다', () => {
-    // 시드: 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 엔진이 바뀌어 해고되면 시드를 바꾼다 (2026-10-21 첫 시즌 밸런스 때 pipe → pipe-2, 같은 날 입대 규칙(상무 정원·현역) 때 pipe-3, 2026-10-22 하드힛 투구손 채움 때 pipe-4, 같은 날 구장 효과 때 pipe-5, 엔진 2 6단계 타구 모형 2 때 pipe-6)
-    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-6', fantasy: { free: true } }, FAST);
+    // 시드: 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 엔진이 바뀌어 해고되면 시드를 바꾼다 (2026-10-21 첫 시즌 밸런스 때 pipe → pipe-2, 같은 날 입대 규칙(상무 정원·현역) 때 pipe-3, 2026-10-22 하드힛 투구손 채움 때 pipe-4, 같은 날 구장 효과 때 pipe-5, 엔진 2 6단계 타구 모형 2 때 pipe-6, 15단계 시간 제한 흉내 값 때 pipe-7, 능력치 v2 16-2 타구각 때 pipe-10 (pipe-8·9는 2001 뒤 FA 단계에서 멈춤))
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-10', fantasy: { free: true } }, FAST);
     const team = g.league.teams[0].name;
     const { ops, dropped } = resolveOps(g, [
       { op: 'future', name: '잭 그레인키', team, pos: 'P', role: 'SP', birthYear: 1983, joinYear: 2002, now: 50, potential: 75 },

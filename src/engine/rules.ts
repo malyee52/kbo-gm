@@ -74,7 +74,7 @@ export function stealOne(st: GameState, from: 0 | 1, pct: number): boolean {
 export function stealPct(st: GameState, r: Runner, third: boolean, extra = 0): number {
   const { params } = st.ctx;
   const run = params.run;
-  return r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherDef * params.catcherStealPerRun
+  return r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherArm * params.catcherStealPerRun
     + (third ? run.thirdPct : st.fld.pitcher.p.throws === 'L' ? run.leftyPct : run.rightyPct) + extra;
 }
 

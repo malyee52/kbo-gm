@@ -111,10 +111,28 @@ export function defenseGrade(runs: number): number {
   return Math.max(20, Math.min(80, Math.round(50 + runs * 2)));
 }
 
-/** 맡길 만한 포지션: 등급 40 이상 (그 자리 평균보다 5런 넘게 나쁘지 않음) */
-export function playablePositions(def: Defense | undefined): FieldPos[] {
+/**
+ * 맡길 만한 포지션 (등급 높은 순). 능력치 v2(bat.playable 있음)는 수비 가능 = 익숙함이 다 찬 자리 (16-3, 비상 포수는 빼고).
+ * 예전 수비는 등급 40 이상 (그 자리 평균보다 5런 넘게 나쁘지 않음)
+ */
+export function playablePositions(bat: Pick<BatSkill, 'def' | 'playable'> | null | undefined): FieldPos[] {
+  const def = bat?.def;
   if (!def) return [];
-  return FIELD_POS.filter((q) => (def[q] ?? -99) >= -5).sort((a, b) => (def[b] ?? 0) - (def[a] ?? 0));
+  const list = bat.playable ?? FIELD_POS.filter((q) => (def[q] ?? -99) >= -5);
+  return [...list].sort((a, b) => (def[b] ?? 0) - (def[a] ?? 0));
+}
+
+/** 라인업 배정 벌점 (런, 능력치 v2 16-3): 수비 가능이 아닌 자리 (그 자리를 맡을 선수가 없을 때만 등급 최고를 쓴다, 11.1 메모) */
+export const UNFIT_RUNS = 1000;
+/** 비상 포수 벌점 (런, 14.2 1): 수비 가능 포수가 하나도 없을 때만 포수로 (수비 가능이 아닌 선수보다는 먼저) */
+export const EMERGENCY_C_RUNS = 500;
+
+/** 그 자리 배정 벌점 (0 또는 음수). DH·예전 수비(playable 없음)는 0 */
+export function fitPenalty(p: Pick<SimPlayer, 'isPitcher'> & { bat: Pick<BatSkill, 'playable' | 'emC'> | null }, slot: string): number {
+  if (slot === 'DH' || p.isPitcher) return 0;
+  const pl = p.bat?.playable;
+  if (!pl || pl.includes(slot as FieldPos)) return 0;
+  return slot === 'C' && p.bat!.emC ? -EMERGENCY_C_RUNS : -UNFIT_RUNS;
 }
 
 /** 수비 나이 변화 (오프시즌, 임시값): 25세 이하는 조금 늘고 기량 하락 나이(DECLINE_START_AGE, 32세)부터 해마다 0.4런씩 준다 (2026-10-12 하락 나이를 당기며 0.5 → 0.4) */
