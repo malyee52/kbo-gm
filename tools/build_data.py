@@ -902,6 +902,30 @@ def build_ppa():
     return sum(len(v) for v in out['bat'].values()), sum(len(v) for v in out['pit'].values())
 
 
+def build_running():
+    """선수별 추가 진루·번트 → public/data/running.json (능력치 v2 16-3d, 주루 판단·번트 수행 실측 시작값).
+    {bat: {선수 ID: {연도: [기회, 성공, 주루사, 리그 기대 성공, 희생번트, W·V 공]}}, lg: {연도: [희생번트, W·V 공]}}.
+    가공 CSV는 tools/pbp_running.py (data-src/pbp_derived/runner_adv.csv·batter_bunt.csv, 투구 단위 자료 2023~)."""
+    bat = defaultdict(dict)
+    lg = defaultdict(lambda: [0, 0])
+    with (PBP_DERIVED / 'runner_adv.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            bat[r['id']][r['year']] = [int(r['opp']), int(r['ext']), int(r['outs']), float(r['exp']), 0, 0]
+    with (PBP_DERIVED / 'batter_bunt.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            row = bat[r['id']].setdefault(r['year'], [0, 0, 0, 0.0, 0, 0])
+            row[4], row[5] = int(r['sh']), int(r['wv'])
+            lg[r['year']][0] += int(r['sh'])
+            lg[r['year']][1] += int(r['wv'])
+    (OUT / 'running.json').write_text(json.dumps({
+        'version': 1,
+        'note': '선수별 추가 진루 [기회, 성공, 주루사, 리그 기대 성공]과 번트 [희생번트, 번트 파울·헛스윙 공]. 투구 단위 자료(slothman3878 '
+                'KBO Play-by-Play v0, CC BY 4.0) 2023~, 2026은 7월 26일까지. tools/pbp_running.py → tools/build_data.py build_running',
+        'bat': bat, 'lg': lg,
+    }, ensure_ascii=False, separators=(',', ':'), sort_keys=True), encoding='utf-8')
+    return len(bat)
+
+
 def build_plate():
     """선수별 볼카운트 사슬 실측 → public/data/plate.json (능력치 v2 16-1, 엔진 src/engine/plate.ts·ratings.ts plateResidual).
     {bat|pit: {선수 ID: {연도: [건수...]}}}. 타자 [존 안 공, 존 안 스윙, 기대, 존 밖 공, 존 밖 스윙, 기대, 스윙, 맞힘, 기대,
@@ -1814,6 +1838,10 @@ def main():
         # 선수별 P/PA만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
         print('선수별 P/PA 타자 %d·투수 %d 시즌' % build_ppa())
         return
+    if '--running-only' in sys.argv:
+        # 선수별 추가 진루·번트만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
+        print('선수별 추가 진루·번트 %d명' % build_running())
+        return
     if '--plate-only' in sys.argv:
         # 선수별 볼카운트 사슬 실측만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
         print('선수별 사슬 실측 타자 %d·투수 %d 시즌' % build_plate())
@@ -2112,6 +2140,7 @@ def main():
     build_homes()
     build_schedule()
     build_ppa()
+    build_running()
     build_plate()
     build_history(OUT)
     build_defense(OUT)

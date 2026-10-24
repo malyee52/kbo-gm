@@ -4,9 +4,11 @@
 // 손잡이 값은 리그 대비라 월드마다 출장량 가중 평균 등급을 영점으로 뺀다 (applyRunSkills).
 // 도루 스타트·판단은 기록 성공률·시도율(sbPct·sbAtt)에 이미 들어 있어 0으로 둔다 (기록 밖 차이만 담는 손잡이).
 // 어깨(16-3d, 12.6)는 몸 묶음 나이 곡선 + 평판 글의 어깨 낱말 (시작 연도 전 시기만). 포수 도루 저지(cArm)는 따로 기록으로 잰다.
+// 주루 판단·번트 수행(16-3d, 7.2 결정 3)은 투구 단위 자료(running.json, 2023~)가 직전 3시즌에 있으면 나이 평균 + 실측 몫(강하게 당김).
 
 import { normal } from './condition';
-import type { DefenseData } from '../data/types';
+import type { DefenseData, RunningData } from '../data/types';
+import { runnerSpeedAdj } from './rules';
 import type { EngineParams } from './params';
 import { Rng } from './rng';
 import type { BatSkill, PitSkill, SimPlayer } from './types';
@@ -50,9 +52,57 @@ export function armWord(entries: readonly (readonly [number, number | null, numb
   return w > 0 ? s / w : 0;
 }
 
-/** 어깨 낱말 자료와 시기를 거르는 시작 연도 (applyRunSkills) */
-export interface ArmSource {
-  arm: DefenseData['arm'];
+/** 실측 창: 시작 연도 직전 3시즌 (능력 산출과 같은 창) */
+const MEASURE_YEARS = 3;
+const logit = (p: number) => Math.log(p / (1 - p));
+
+type RunRows = RunningData['bat'][string] | undefined;
+
+/**
+ * 주루 판단 실측 몫 (로짓, runIQ 단위): 직전 3시즌 추가 진루 성공 − 리그 기대 − 엔진 주력 몫(runnerSpeedAdj)을 기회당으로,
+ * 그 칸 리그 성공률 p로 로짓 기울기(p(1 − p))를 나누고 기회 ÷ (기회 + pull)로 당긴다. 자료가 없으면 0
+ */
+export function measuredRunIQ(rows: RunRows, startYear: number, speed: number, pull: number): number {
+  let opp = 0;
+  let ext = 0;
+  let exp = 0;
+  for (let y = startYear - MEASURE_YEARS; y < startYear; y++) {
+    const r = rows?.[String(y)];
+    if (!r) continue;
+    opp += r[0];
+    ext += r[1];
+    exp += r[3];
+  }
+  if (!opp) return 0;
+  const p = Math.min(0.95, Math.max(0.05, exp / opp));
+  const resid = (ext - exp) / opp - runnerSpeedAdj(speed);
+  return (opp / (opp + pull)) * resid / (p * (1 - p));
+}
+
+/**
+ * 번트 수행 실측 몫 (로짓, bunting 단위): 직전 3시즌 "희생번트 ÷ (희생번트 + 번트 파울·헛스윙 공)"을 리그 값 쪽으로 pull 사건만큼 당긴
+ * 베타 평균의 로짓 − 리그 로짓. 번트 실패가 인플레이로 끝난 것은 자료에서 셀 수 없어 이 비율을 대리값으로 쓴다. 자료가 없으면 0
+ */
+export function measuredBunting(rows: RunRows, lg: RunningData['lg'] | undefined, startYear: number, pull: number): number {
+  let sh = 0;
+  let wv = 0;
+  let lsh = 0;
+  let lwv = 0;
+  for (let y = startYear - MEASURE_YEARS; y < startYear; y++) {
+    const r = rows?.[String(y)];
+    if (r) { sh += r[4]; wv += r[5]; }
+    const l = lg?.[String(y)];
+    if (l) { lsh += l[0]; lwv += l[1]; }
+  }
+  if (!(sh + wv) || !(lsh && lwv)) return 0;
+  const L = lsh / (lsh + lwv);
+  return logit((sh + pull * L) / (sh + wv + pull)) - logit(L);
+}
+
+/** 어깨 낱말·추가 진루·번트 자료와 시기를 거르는 시작 연도 (applyRunSkills) */
+export interface RunSource {
+  arm?: DefenseData['arm'];
+  running?: RunningData;
   startYear: number;
 }
 
@@ -66,7 +116,7 @@ const toKnob = (grade: number, scale: number) => ((grade - 50) / 10) * scale;
  * 선수 하나의 손잡이별 등급 (영점을 빼기 전). 가상 선수(real === false)만 분포 몫을 뽑는다 (난수: 선수 ID 시드, 리그 난수를 쓰지 않는다).
  * 어깨는 따로 난수 줄기(skill2-arm)라 앞 손잡이 값이 그대로다
  */
-export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | 'pit'>, params: EngineParams, armSrc?: ArmSource): { bat?: Record<BatKnob, number>; pit?: Record<PitKnob, number> } {
+export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | 'pit'>, params: EngineParams, src?: RunSource): { bat?: Record<BatKnob, number>; pit?: Record<PitKnob, number> } {
   const sp = params.skill2;
   const rng = p.real === false ? new Rng(`skill2/${p.id}`) : null;
   const luck = () => (rng ? normal(rng) * sp.virtualSd : 0);
@@ -76,13 +126,17 @@ export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | '
   if (p.bat) {
     // 정규 포수만 포수 수비 런으로 옮긴다 (런 = (등급 − 50) ÷ 2, 임시값 catcherPerRun 등급/런)
     const c = isCatcher(p.bat) ? p.bat.def?.C ?? 0 : 0;
+    // 실측 몫 (로짓) → 등급: ÷ 한 칸 폭 × 10
+    const rows = src?.running?.bat[p.id];
+    const iq = rows ? measuredRunIQ(rows, src!.startYear, p.bat.speed, sp.runIqPull) / sp.scale.runIQ * 10 : 0;
+    const bunt = rows ? measuredBunting(rows, src!.running!.lg, src!.startYear, sp.buntPull) / sp.scale.bunting * 10 : 0;
     out.bat = {
-      runIQ: exp + luck(),
-      bunting: exp + luck(),
+      runIQ: exp + luck() + iq,
+      bunting: exp + luck() + bunt,
       cBlock: body + luck() + sp.catcherPerRun * c,
       cFrame: exp + luck() + sp.catcherPerRun * c,
       arm: body + (p.real === false ? normal(new Rng(`skill2-arm/${p.id}`)) * sp.virtualSd : 0)
-        + (armSrc ? sp.armWord * armWord(armSrc.arm?.[p.id], armSrc.startYear) : 0),
+        + (src?.arm ? sp.armWord * armWord(src.arm[p.id], src.startYear) : 0),
     };
   }
   if (p.pit) out.pit = { hold: exp + luck(), quick: body + luck() };
@@ -97,11 +151,11 @@ const PIT_KNOBS: readonly PitKnob[] = ['hold', 'quick'];
  * 월드의 모든 선수에게 손잡이를 붙인다 (bat·pit는 새 객체로 바꿔 리그 상태와 같이 쓰는 객체를 건드리지 않는다).
  * 손잡이 값은 리그 대비(기획안 1.1: 0 = 그 해 리그 평균)라, 등급에서 그 월드의 출장량(능력 표본 sample) 가중 평균을 뺀다.
  * 포수 블로킹·프레이밍의 평균은 정규 포수만으로 낸다 (포수 자리에 서는 선수). 돌려주는 값은 빼기 전 가중 평균 등급.
- * armSrc: 어깨 낱말 자료 (없으면 나이 곡선과 가상 선수 분포만)
+ * src: 어깨 낱말·추가 진루·번트 자료 (없으면 나이 곡선과 가상 선수 분포만)
  */
-export function applyRunSkills(players: SimPlayer[], params: EngineParams, armSrc?: ArmSource): Record<BatKnob | PitKnob, number> {
+export function applyRunSkills(players: SimPlayer[], params: EngineParams, src?: RunSource): Record<BatKnob | PitKnob, number> {
   const sc = params.skill2.scale;
-  const grades = players.map((p) => runGradesOf(p, params, armSrc));
+  const grades = players.map((p) => runGradesOf(p, params, src));
   const zero = {} as Record<BatKnob | PitKnob, number>;
   const mean = (k: BatKnob | PitKnob, pick: (i: number) => { g: number; w: number } | null) => {
     let w = 0;

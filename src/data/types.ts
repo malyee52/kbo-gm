@@ -294,6 +294,8 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 선수별 추가 진루·번트 (running.json, 능력치 v2 16-3d). 없으면 주루 판단·번트 수행은 나이 평균에서 시작 */
+  running?: RunningData;
   /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 있으면 월드의 수비를 능력치 v2 식으로 만든다 (src/engine/fielding.ts, 16-3). 없으면 예전 추정 */
   defense?: DefenseData;
   /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
@@ -479,6 +481,16 @@ export interface BallYear {
   note?: string;
   status: RuleStatus;
   source?: string;
+}
+
+/**
+ * running.json (능력치 v2 16-3d, tools/build_data.py build_running ← tools/pbp_running.py, 투구 단위 자료 2023~):
+ * bat: 선수 ID → 연도 → [추가 진루 기회, 성공, 주루사, 리그 기대 성공(기회 종류 × 아웃 칸 리그 성공률 합), 희생번트, 번트 파울·헛스윙 공], lg: 연도 → [희생번트, W·V 공]
+ */
+export interface RunningData {
+  version: number;
+  bat: Record<string, Record<string, [number, number, number, number, number, number]>>;
+  lg: Record<string, [number, number]>;
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */

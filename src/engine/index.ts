@@ -38,7 +38,7 @@ export { planForWorld, pickOpeningHosts, rankedFromSeason, pctRankedFromSeason, 
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule' | 'running'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -55,6 +55,7 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     ppa: store.ppa,
     plate: store.plate,
     defense: store.defense,
+    running: store.running,
     schedule: store.schedule,
   });
 }

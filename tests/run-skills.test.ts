@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyRunTally, Season, simulateSeason, worldForYear, type EngineParams, type World } from '../src/engine';
 import { addLogit } from '../src/engine/rules';
-import { armWord, bodyGrade, experienceGrade, runGradesOf } from '../src/engine/runskills';
+import { armWord, bodyGrade, experienceGrade, measuredBunting, measuredRunIQ, runGradesOf } from '../src/engine/runskills';
 import type { BatSkill, PitSkill, SimPlayer } from '../src/engine/types';
 
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -159,6 +159,22 @@ describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () =>
     // 2018 끝(8년 전, 무게 0.7^5) 좋음 + 통산 나쁨 (무게 1)
     const w = 0.7 ** 5;
     expect(armWord([[1, 2010, 2018], [-1, null, null]], 2026)).toBeCloseTo((w - 1) / (w + 1), 12);
+  });
+
+  it('주루 판단·번트 실측 (16-3d): 직전 3시즌만, 주력 몫을 빼고, 표본만큼 당긴다', () => {
+    // [기회, 성공, 주루사, 리그 기대, 희생번트, W·V 공]
+    const rows = { '2022': [100, 90, 0, 50, 0, 0], '2023': [40, 25, 1, 20, 6, 2], '2025': [40, 25, 1, 20, 4, 2], '2026': [100, 0, 0, 50, 0, 50] } as Record<string, [number, number, number, number, number, number]>;
+    // 2023·2025만: 기회 80, 성공 50, 기대 40 → 기회당 +0.125, p 0.5 → 로짓 0.5, 당김 80 ÷ (80 + 80)
+    expect(measuredRunIQ(rows, 2026, 0.5, 80)).toBeCloseTo(0.25, 12);
+    // 주력 0.9면 엔진 주력 몫 (0.4 × 0.3) = 0.12를 빼고 0.005만 남는다
+    expect(measuredRunIQ(rows, 2026, 0.9, 80)).toBeCloseTo(0.5 * (0.125 - 0.12) / 0.25, 12);
+    expect(measuredRunIQ(undefined, 2026, 0.5, 80)).toBe(0);
+    expect(measuredRunIQ(rows, 2022, 0.5, 80)).toBe(0);
+    // 번트: 희생번트 10 · W·V 4, 리그 1:1 (L 0.5) → (10 + 15) ÷ (14 + 30)
+    const lg = { '2023': [100, 100], '2024': [50, 50], '2025': [100, 100] } as Record<string, [number, number]>;
+    const post = 25 / 44;
+    expect(measuredBunting(rows, lg, 2026, 30)).toBeCloseTo(Math.log(post / (1 - post)), 12);
+    expect(measuredBunting(rows, undefined, 2026, 30)).toBe(0);
   });
 
   it('2026 시작 월드: 어깨는 리그 대비 (타자 출장량 가중 평균 0), 어깨 좋음 낱말 선수(구자욱)는 같은 나이 실존 선수보다 armWord만큼 위', () => {

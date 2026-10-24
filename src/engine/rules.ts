@@ -23,6 +23,9 @@ export function addLogit(p: number, x: number): number {
   return 1 / (1 + (1 - q) / q * Math.exp(-x));
 }
 
+/** 추가 진루 시도 확률에 더하는 주력 몫 (확률): (주력 − 0.5) × 0.3. 주루 판단 실측 시작값(runskills.ts)이 이 몫을 빼고 잰다 */
+export const runnerSpeedAdj = (speed: number) => (speed - 0.5) * 0.3;
+
 /** 실책·포일로 모든 주자가 n 베이스 더 간다 (타점 없음). 더 간 주자는 비자책으로 본다 (기록원 재구성의 근사, 엔진 2 7단계) */
 function errorAdvance(st: GameState, n: number): void {
   const b = st.bases;
@@ -438,7 +441,7 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   const side = ball ? ball.zone % 3 : 1;
   const arm = fld.slotArm[OF_SIDE[side]] ?? (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
-  const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
+  const speedAdj = (r: Runner) => runnerSpeedAdj(r.p.bat!.speed);
   /** 땅볼 아웃 때 3루 주자가 들어오나 (전진 수비면 덜 들어온다, 엔진 2 10단계) */
   const gbScores = (r: Runner): boolean => {
     if (!st.infieldIn) return rng.chance(params.groundOutScores + speedAdj(r));
