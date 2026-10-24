@@ -50,11 +50,11 @@ export const ARSENAL_PARAMS = {
   /** 등급 1σ(10점)당 로그 배율: 헛스윙 +, 루킹 +, 볼 −, 안타 −, 홈런 − (구종 사이 나눔에만) */
   grade: { s: 0.18, c: 0.06, b: -0.06, hit: -0.06, hr: -0.1 },
   /** 겨눈 코스에 실제로 들어가는 몫 (리그 평균 제구) */
-  aimHit: 0.55,
+  aimHit: 0.45,
   /** 제구 로짓 1당 겨눈 코스 몫 로짓 */
   aimCtl: 1,
   /** 예측 손해: 쏠림 1당 로그 배율 (루킹·헛스윙 −, 안타 +), 쏠림을 줄이는 가짜 공 수 (tools/pitch_balance.ts로 맞춤) */
-  read: { lambda: 1.2, n0: 8 },
+  read: { lambda: 2.5, n0: 8 },
 };
 
 const PITCH_SET = new Set<string>(PITCH_TYPES);
