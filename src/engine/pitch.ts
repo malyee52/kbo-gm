@@ -2,10 +2,11 @@
 // 한 공 = 칸의 [볼, 스트라이크, 파울, 맞힘, 사구] 확률에서 난수 한 번. 스트라이크는 칸 함수(plate.ts)의 루킹·헛스윙 몫으로 나눠 보여 주지만
 // 다섯 결과의 확률은 사슬 그대로라, 한 매치업 안에서 (끝 결과, 투구 수)의 분포가 B(사슬을 계산으로 접은 것)와 식으로 같다.
 // 맞힘 뒤 결과(홈런·안타·아웃)는 B와 같은 확률표의 조건부 몫(resolver.ts drawInPlay)이다.
-// 구종·코스는 칸만 열어 둔다 (3.4.1): 공 모양의 type·zone은 비우고, 투수 능력의 arsenal이 있으면 칸마다 구종 비율로 섞는다.
+// 구종·코스(20단계)는 arsenal.ts: 공 결과는 이 사슬 그대로 뽑고, 구종·코스는 결과에 맞춰 따로 붙이거나(지시 없음) 지시한 구종·코스의 결과 비율로 뽑는다.
 
-import { End, endFrom, type SolvedChain } from './chain';
-import { plateCells, plateSteps, type BatPlate, type LeaguePlate, type PitPlate, type PlateShift } from './plate';
+import { End, type SolvedChain } from './chain';
+import { plateSteps, type BatPlate, type LeaguePlate, type PitPlate, type PlateShift } from './plate';
+import type { PitchZone } from './arsenal';
 import type { Rng } from './rng';
 
 /**
@@ -14,81 +15,31 @@ import type { Rng } from './rng';
  */
 export type PitchCode = 'B' | 'C' | 'S' | 'T' | 'F' | 'X' | 'H' | 'I';
 
-/** 공 하나 (기획안 3.4.1). 구종·코스는 1단계에서 비운다 */
+/** 공 하나 (기획안 3.4.1) */
 export interface Pitch {
   /** 던지기 전 카운트 [볼, 스트라이크] */
   count: [number, number];
-  /** 구종 (비움 = "평균 구종" 하나, 20단계) */
+  /** 구종 (arsenal.ts PITCH_TYPES, 20단계) */
   type?: string;
-  /** 코스 (비움, 20단계) */
-  zone?: number;
+  /** 코스 (arsenal.ts PitchZone, 20단계) */
+  zone?: PitchZone;
   result: PitchCode;
   /** 이 투수의 경기 투구 수 (던진 뒤) */
   pitches: number;
 }
 
-/**
- * 투수 구종 하나 (자리만, 20-1단계에서 채운다): 비율과 구종별 사슬 능력 차(로짓, 투수 능력에 더한다).
- * hr·gb(장타 억제·땅볼 성향 배율)는 타구 갈래에 넣을 자리로, 아직 쓰지 않는다.
- * 넣을 때는 구종을 섞은 평균이 그 투수의 지금 능력과 같아지게 정한다 (기획안 3.4.1)
- */
-export interface ArsenalPitch {
-  type: string;
-  share: number;
-  ctl?: number;
-  stuff?: number;
-  eff?: number;
-  hr?: number;
-  gb?: number;
-}
-
 const cellOf = (b: number, s: number) => b * 3 + s;
-
-/** 구종 하나의 투수 사슬 능력 (투수 능력 + 구종 차) */
-function withPitch(p: PitPlate, a: ArsenalPitch): PitPlate {
-  return { ctl: p.ctl + (a.ctl ?? 0), stuff: p.stuff + (a.stuff ?? 0), eff: p.eff + (a.eff ?? 0) };
-}
-
-/**
- * 칸 함수 사슬 (구종 비율로 섞은 칸). 구종이 없으면 plate.ts plateChain과 같은 계산 그대로 (기획안 3.4.1: 구종 칸이 비었을 때 사슬이 3단계 사슬과 같음).
- * 섞은 칸도 칸마다 확률표 하나라 B는 같은 사슬을 접는다
- */
-export function arsenalChain(lp: LeaguePlate, b: BatPlate, p: PitPlate, sh: PlateShift, arsenal?: readonly ArsenalPitch[]): SolvedChain {
-  const pr = mixedCells(lp, b, p, sh, arsenal);
-  return { knobs: [1, 1, 1], p: pr, e: endFrom(pr) };
-}
-
-function mixedCells(lp: LeaguePlate, b: BatPlate, p: PitPlate, sh: PlateShift, arsenal?: readonly ArsenalPitch[]): Float64Array {
-  const list = arsenal?.filter((a) => a.share > 0) ?? [];
-  if (!list.length) return plateCells(lp, b, p, sh);
-  const total = list.reduce((s, a) => s + a.share, 0);
-  const out = new Float64Array(60);
-  for (const a of list) {
-    const c = plateCells(lp, b, withPitch(p, a), sh);
-    const w = a.share / total;
-    for (let i = 0; i < 60; i++) out[i] += w * c[i];
-  }
-  return out;
-}
 
 /**
  * 칸마다 스트라이크 가운데 루킹 몫 (화면용: 루킹 ↔ 헛스윙만 가른다, 다섯 결과의 확률은 그대로).
  * 칸 함수의 단계 확률(plate.ts plateSteps)로: 루킹 = 존 안 안 휘두름 × 존 안 판정 + 존 밖 안 휘두름 × 존 밖 판정, 헛스윙 = 휘둘러 못 맞힘
  */
-export function calledShare(lp: LeaguePlate, b: BatPlate, p: PitPlate, sh: PlateShift, arsenal?: readonly ArsenalPitch[]): Float64Array {
-  const list = arsenal?.filter((a) => a.share > 0) ?? [];
-  const types = list.length ? list : [{ type: '', share: 1 }];
-  const total = types.reduce((s, a) => s + a.share, 0);
+export function calledShare(lp: LeaguePlate, b: BatPlate, p: PitPlate, sh: PlateShift): Float64Array {
   const out = new Float64Array(12);
   for (let c = 0; c < 12; c++) {
-    let called = 0;
-    let swung = 0;
-    for (const a of types) {
-      const w = a.share / total;
-      const t = plateSteps(lp, c, b, withPitch(p, a), sh);
-      called += w * ((t.zone * (1 - t.swingIn)) * t.calledIn + ((1 - t.zone) * (1 - t.swingOut)) * t.calledOut);
-      swung += w * (t.zone * t.swingIn * (1 - t.contactIn) + (1 - t.zone) * t.swingOut * (1 - t.contactOut));
-    }
+    const t = plateSteps(lp, c, b, p, sh);
+    const called = (t.zone * (1 - t.swingIn)) * t.calledIn + ((1 - t.zone) * (1 - t.swingOut)) * t.calledOut;
+    const swung = t.zone * t.swingIn * (1 - t.contactIn) + (1 - t.zone) * t.swingOut * (1 - t.contactOut);
     out[c] = called + swung > 0 ? called / (called + swung) : 0;
   }
   return out;
@@ -118,6 +69,9 @@ export interface Count {
   s: number;
   /** 이 타석에 던진 공 (기호) */
   seq: string;
+  /** 공마다 구종·코스 (A 해결기가 채운다, 엔진 2 20단계) */
+  pt?: string[];
+  pz?: string[];
 }
 
 export const newCount = (): Count => ({ b: 0, s: 0, seq: '' });

@@ -1,4 +1,4 @@
-// A 해결기 (투구 단위, 엔진 2 17단계, docs/경기엔진2_기획안.md 3.4·3.6): 구종 칸이 비면 사슬이 그대로, 공 하나씩 돌린 타석의 분포가
+// A 해결기 (투구 단위, 엔진 2 17단계, docs/경기엔진2_기획안.md 3.4·3.6): 구종(20단계)은 tests/arsenal.test.ts. 공 하나씩 돌린 타석의 분포가
 // 사슬(B가 계산으로 접는 것)과 같고, A로 치른 시즌은 같은 시드면 같은 결과다. 큰 표본 동등성은 tools/engine_ab.ts.
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
@@ -6,34 +6,13 @@ import { DEFAULT_PARAMS, Rng, Season, worldForYear } from '../src/engine';
 import { End, expectedPitches } from '../src/engine/chain';
 import { chainShapeFor } from '../src/engine/params';
 import { leaguePlateFor, plateChain, plateSteps, ZERO_BAT, ZERO_PIT, type BatPlate, type PitPlate } from '../src/engine/plate';
-import { applyPitch, arsenalChain, calledShare, drawPitch, newCount, playOut } from '../src/engine/pitch';
+import { applyPitch, calledShare, drawPitch, newCount, playOut } from '../src/engine/pitch';
 
 const store = loadDataStore();
 const lp = leaguePlateFor(chainShapeFor(DEFAULT_PARAMS, 2025), store.season(2025)!.league.rates, DEFAULT_PARAMS.plate);
 const SHIFT = { con: 0.1, eye: -0.05, hbp: 1.2 };
 const BAT: BatPlate = { agg: 0.2, eye: -0.3, con: 0.4, two: 0.1, tough: 0.2 };
 const PIT: PitPlate = { ctl: 0.3, stuff: -0.2, eff: 0.1 };
-
-describe('구종 자리 (기획안 3.4.1)', () => {
-  it('구종 칸이 비었으면 사슬이 칸 함수 사슬(3단계 사슬)과 똑같다', () => {
-    const base = plateChain(lp, BAT, PIT, SHIFT);
-    for (const arsenal of [undefined, [], [{ type: '직구', share: 0 }]]) {
-      const ch = arsenalChain(lp, BAT, PIT, SHIFT, arsenal);
-      expect(Array.from(ch.p)).toEqual(Array.from(base.p));
-      expect(Array.from(ch.e)).toEqual(Array.from(base.e));
-    }
-  });
-
-  it('차이가 없는 구종들을 섞으면 사슬이 그대로이고, 차이가 있으면 칸마다 구종 비율로 섞은 값이다', () => {
-    const base = plateChain(lp, BAT, PIT, SHIFT);
-    const same = arsenalChain(lp, BAT, PIT, SHIFT, [{ type: '직구', share: 0.6 }, { type: '슬라이더', share: 0.4 }]);
-    for (let i = 0; i < 60; i++) expect(same.p[i]).toBeCloseTo(base.p[i], 14);
-    const fast = plateChain(lp, BAT, { ...PIT, stuff: PIT.stuff + 0.5 }, SHIFT);
-    const slow = plateChain(lp, BAT, { ...PIT, ctl: PIT.ctl - 0.4 }, SHIFT);
-    const mix = arsenalChain(lp, BAT, PIT, SHIFT, [{ type: '직구', share: 3, stuff: 0.5 }, { type: '커브', share: 1, ctl: -0.4 }]);
-    for (let i = 0; i < 60; i++) expect(mix.p[i]).toBeCloseTo(0.75 * fast.p[i] + 0.25 * slow.p[i], 14);
-  });
-});
 
 describe('A 해결기: 공 하나', () => {
   it('공 하나의 다섯 결과 비율이 칸 확률과 같고, 스트라이크는 칸 함수의 루킹 몫대로 나뉜다', () => {

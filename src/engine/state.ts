@@ -6,6 +6,8 @@ import { defenseAt } from './defense';
 import { CATCHER_ARM_FLOOR } from './fielding';
 import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
+import type { AimMemory } from './arsenal';
+import type { Rng } from './rng';
 import { assignSlots, type Slot, type TeamSeason } from './team';
 import type { BatLine, PitLine, PitSkill, SimPlayer } from './types';
 
@@ -26,6 +28,8 @@ export interface PitcherInGame {
   injChecked: number;
   /** 경기 중 다쳤다: 다음 타석 전에 바꾼다 */
   injured?: boolean;
+  /** 이 등판에서 플레이어가 지시한 공 (구종·코스 쏠림, 예측 손해, arsenal.ts, 엔진 2 20-4단계). 지시한 적이 없으면 없다 */
+  aim?: AimMemory;
   /** AI 감독이 보는 한계 투구 수: 보이는 체력 × 타석당 기대 투구 수 (그날의 몸 상태는 모른다), 감독 성향(hook)·시대 상한을 넣은 값. 교체 판단에 쓴다 */
   plan: number;
   isStarter: boolean;
@@ -211,6 +215,8 @@ export class GameState {
   cmdHandoff = -1;
   /** 이번 타석 인플레이 타구를 맡은 수비 자리 (없으면 null). 경기 중 수비 부상에 쓴다 (엔진 2 11단계) */
   ballSlot: Slot | 'P' | null = null;
+  /** 구종·코스를 붙이는 난수 줄기 (A 해결기, 엔진 2 20단계): 경기 줄기와 따로라 지시 없는 공의 결과는 구종을 넣기 전과 같다. 처음 쓸 때 만든다 */
+  pitchRng: Rng | null = null;
 
   inning = 0;
   bat!: Side;
@@ -297,7 +303,7 @@ export class GameState {
   }
 
   /** 중계 기록 한 줄 (ctx.plays가 있을 때만). r0: 플레이 전 공격 팀 점수 */
-  note(kind: PlayKind, who: number, pit: number, r0: number, extra?: Pick<Play, 'seq' | 'np'>): void {
+  note(kind: PlayKind, who: number, pit: number, r0: number, extra?: Pick<Play, 'seq' | 'np' | 'pt' | 'pz'>): void {
     const plays = this.ctx.plays;
     if (!plays) return;
     const play: Play = {

@@ -71,7 +71,11 @@ export function canonical(x: unknown): string {
       const proto = Object.getPrototypeOf(o);
       if (proto !== Object.prototype && proto !== null) throw new Uncacheable(`class ${proto?.constructor?.name}`);
       out.push('{');
-      for (const k of Object.keys(o)) { out.push(JSON.stringify(k), ':'); walk((o as Record<string, unknown>)[k]); out.push(','); }
+      for (const k of Object.keys(o)) {
+        // 투수 구종(World.arsenals, 엔진 2 20단계)은 A 해결기만 쓰고 맞춤(B)에 닿지 않는다
+        if (k === 'arsenals') continue;
+        out.push(JSON.stringify(k), ':'); walk((o as Record<string, unknown>)[k]); out.push(',');
+      }
       out.push('}');
     }
     seen.delete(o);

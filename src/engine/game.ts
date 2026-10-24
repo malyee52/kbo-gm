@@ -10,7 +10,9 @@ import { gameParkOf } from './park';
 import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
 import { End, foldFrom, type SolvedChain } from './chain';
-import { applyPitch, drawPitch, newCount, type Count } from './pitch';
+import { applyPitch, drawPitch, newCount, type Count, type PitchCode } from './pitch';
+import { aimedOutcome, aiType, drawOutcome, labelPitch, newAim, O, pitchJoint, rememberAim, type ArsenalPitch, type PitchJoint, type PitchZone } from './arsenal';
+import { arsenalFor } from '../data/pitches';
 import type { Situation } from './traits';
 import type { Rng } from './rng';
 import { abortPlateAppearance, addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, orderedSteal, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
@@ -122,6 +124,8 @@ export interface GameContext {
   realLimitScale?: Float32Array;
   /** 볼카운트 사슬 능력 (능력치 v2 16-1, Season이 만든다). 있으면 삼진·볼넷·사구와 투구 수를 칸 함수로 낸다. 없으면 예전 길 (결과 비율 → 손잡이 풀기) */
   plate?: PlateContext;
+  /** 투수 구종 (엔진 2 20-1단계, World.arsenals). A 해결기만 쓴다. 없거나 답이 없으면 선수 ID로 정한 리그 평균 꼴 (data/pitches.ts arsenalFor) */
+  arsenal?: (p: SimPlayer) => ArsenalPitch[] | undefined;
   /**
    * 경기 중 비 (일정 개편 기획안 4.7, 8장 10단계): 이 회(말 공격까지)를 마치고 멈춘다. 5~8회면 강우 콜드(그때 점수로 끝, 기록은 남는다),
    * 1~4회면 노게임(기록·집계를 경기 전으로 되돌리고 피로·부상만 남긴다). 없으면 끝까지 치른다.
@@ -195,6 +199,11 @@ export interface CommandRequest {
   /** 공 사이 물음(pitch)의 카운트 [볼, 스트라이크]와 이 타석에 던진 공 기호 (pitch.ts PitchCode) */
   count?: [number, number];
   seq?: string;
+  /** 공 사이 물음: 이 타석에 던진 공의 구종·코스 (seq와 같은 순서, 고의4구 공·히트앤드런 공은 빈 낱말, 엔진 2 20단계) */
+  pt?: string[];
+  pz?: string[];
+  /** 우리 수비의 공 사이 물음: 지금 투수의 구종 (비율 높은 순, 구종·코스 지시 칸, 20-3단계) */
+  arsenal?: ArsenalPitch[];
   /** 우리 라인업 (타순) */
   lineup: number[];
   /** 우리 공격: 대타·대주자로 쓸 수 있는 선수 */
@@ -218,7 +227,7 @@ export interface CommandRequest {
  * 타격 작전(bat, 도루가 끝난 뒤): ph 대타(지금 타자 대신, −1 = 대타 없음), pr 대주자, tactic swing 강공(번트 없음)·bunt 희생번트.
  * 수비(field): pitcher 투수 교체, keep 지금 투수 유지(자동 교체 안 함), walk 고의4구(false = 승부), infield 전진 수비(in)·정상(back),
  * pitchout 피치아웃(false = 안 함), def 대수비(out 대신 in, null = 대수비 없음).
- * 공 사이(pitch, A 해결기): 공격은 pr·steal go(앞 주자 도루)·hnr, 수비는 pitcher·walk.
+ * 공 사이(pitch, A 해결기): 공격은 pr·steal go(앞 주자 도루)·hnr, 수비는 pitcher·walk·pitch(구종·코스).
  * (2026-10-12 사용자: 도루는 타석과 별개이고 도루 뒤에 번트도 할 수 있다 → 주자 작전과 타격 작전을 나눴다)
  */
 export interface CommandChoice {
@@ -233,6 +242,8 @@ export interface CommandChoice {
   infield?: 'in' | 'back';
   pitchout?: boolean;
   def?: { out: number; in: number } | null;
+  /** 공 사이(pitch) 수비: 이 공의 구종·코스 지시 (엔진 2 20-3단계). 항목마다 없으면 AI 포수 (구종은 볼 배합, 코스는 구종대로) */
+  pitch?: { type?: string; zone?: PitchZone };
 }
 
 /**
@@ -262,6 +273,9 @@ export interface Play {
   /** A 해결기로 끝낸 타석의 공 기호 (pitch.ts PitchCode, 첫 공부터)와 그 뒤 투수의 경기 투구 수 */
   seq?: string;
   np?: number;
+  /** 그 공들의 구종·코스 (seq와 같은 순서, 빈 낱말 = 없음. 엔진 2 20단계) */
+  pt?: string[];
+  pz?: string[];
 }
 
 export interface GameResult {
@@ -434,7 +448,8 @@ function commandRequest(st: GameState, side: 'bat' | 'field', step: CommandReque
     n, side, step, inn: st.inning, top: !bat.isHome, outs: st.outs, bases: st.baseIdx(),
     away: st.away.runs, home: st.home.runs, batter: bat.lineup[spot].idx, onDeck: bat.lineup[(spot + 1) % 9].idx,
     pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs, pitcherPitches: fld.pitcher.pitches,
-    ...(cnt ? { count: [cnt.b, cnt.s] as [number, number], seq: cnt.seq } : {}),
+    ...(cnt ? { count: [cnt.b, cnt.s] as [number, number], seq: cnt.seq, pt: [...(cnt.pt ?? [])], pz: [...(cnt.pz ?? [])] } : {}),
+    ...(cnt && side === 'field' ? { arsenal: [...arsenalOf(ctx, fld.pitcher.p)].sort((a, b) => b.share - a.share) } : {}),
     lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
     bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
     bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
@@ -574,7 +589,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     let mound = pg;
     let intentional = walk;
     let runnerGoing = false;
-    let extra: Pick<Play, 'seq' | 'np'> | undefined;
+    let extra: Pick<Play, 'seq' | 'np' | 'pt' | 'pz'> | undefined;
     if (walk) ev = Ev.BB;
     else {
       rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park);
@@ -585,7 +600,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
         if (out === 'end') break;
         if (out === 'walkoff') return true;
         ({ ev, pg: mound, rates, intentional, going: runnerGoing } = out);
-        if (!out.folded) extra = { seq: out.seq, np: mound.pitches };
+        if (!out.folded) extra = { seq: out.seq, np: mound.pitches, pt: out.pt, pz: out.pz };
       } else {
         const res = resolver.resolve(rates, ctx.rng);
         ev = res.ev;
@@ -672,6 +687,9 @@ interface PitchOutcome {
   /** 히트앤드런으로 1루 주자가 뛰었다 */
   going: boolean;
   seq: string;
+  /** 공마다 구종·코스 (seq와 같은 순서) */
+  pt: string[];
+  pz: string[];
   /** 타석 중간에 B로 넘겨 남은 공을 계산으로 접었다 (공 기호가 모자라 중계에 남기지 않는다) */
   folded?: true;
 }
@@ -691,7 +709,15 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
   let rates = rates0;
   let chain = chain0;
   const cnt = newCount();
-  const done = (ev: Ev, extra: Partial<PitchOutcome> = {}): PitchOutcome => ({ ev, pg, rates, intentional: false, going: false, seq: cnt.seq, ...extra });
+  cnt.pt = [];
+  cnt.pz = [];
+  // 구종 결합표 (엔진 2 20단계): 이 타석 사슬 칸을 구종별로 나눈 것. 투수가 바뀌면 다시
+  let joint: PitchJoint | null = null;
+  const jointOf = () => (joint ??= pitchJoint(chain.p, rates.called, inPlayOf(rates), arsenalOf(ctx, pg.p)));
+  const prng = () => (st.pitchRng ??= ctx.rng.fork('pitch'));
+  const label = (type = '', zone = '') => { cnt.pt!.push(type); cnt.pz!.push(zone); };
+  let aim: { type?: string; zone?: PitchZone } | undefined;
+  const done = (ev: Ev, extra: Partial<PitchOutcome> = {}): PitchOutcome => ({ ev, pg, rates, intentional: false, going: false, seq: cnt.seq, pt: cnt.pt!, pz: cnt.pz!, ...extra });
   for (;;) {
     if (asks) {
       const side = bat.ts.team.idx === cmd!.team ? 'bat' : 'field';
@@ -716,6 +742,7 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
           pg.line.bf++;
           rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park);
           chain = rates.chain ?? ctx.resolver?.chainFor?.(rates) ?? chain;
+          joint = null;
         }
         if (c.walk) {
           // 공 사이 고의4구: 자동 고의4구 시대는 공 없이, 그 전은 남은 볼을 던진다 (폭투·포일 가능)
@@ -723,6 +750,7 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
             const n = 4 - cnt.b;
             if (manualIntentionalWalk(st, pg, n)) { abortPlateAppearance(st, bl, pg); return 'walkoff'; }
             cnt.seq += 'I'.repeat(n);
+            for (let i = 0; i < n; i++) label();
           }
           return done(Ev.BB, { intentional: true, rates: null });
         }
@@ -739,21 +767,46 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
           if (u < sw[0]) {
             if (ctx.running) ctx.running.hnrMiss++;
             cnt.seq += 'S';
+            label();
             if (stealOne(st, 0, stealPct(st, st.bases[0]!, false, run.hnrMissPct))) { abortPlateAppearance(st, bl, pg); return 'end'; }
             if (++cnt.s === 3) return done(Ev.SO);
           } else if (u < sw[0] + sw[1]) {
             if (ctx.running) ctx.running.hnrFoul++;
             applyPitch(cnt, 'F');
+            label();
           } else {
             if (ctx.running) ctx.running.hnrInPlay++;
             cnt.seq += 'X';
+            label();
             return done(drawInPlay(rates, ctx.rng), { going: st.bases[0] !== null });
           }
           continue;
         }
+        aim = c.pitch && (c.pitch.type || c.pitch.zone) ? c.pitch : undefined;
       }
     }
-    const code = drawPitch(chain, cnt.b, cnt.s, ctx.rng, rates.called);
+    const cell = cnt.b * 3 + cnt.s;
+    let code: PitchCode;
+    let hit: Ev | undefined;
+    if (aim) {
+      // 구종·코스 지시 (엔진 2 20-3·20-4단계): 고른 구종(없으면 AI 배합)의 결과 비율 × 코스 × 예측 손해에서 난수 한 번. 맞힘이면 결과까지
+      const j = jointOf();
+      const want = aim.type;
+      const type = want && j.arsenal.some((a) => a.type === want) ? want : aiType(j, cell, prng());
+      const mem = (pg.aim ??= newAim());
+      const o = drawOutcome(aimedOutcome(j, cell, type, aim.zone, rates.pitPlate?.ctl ?? 0, mem), ctx.rng);
+      rememberAim(mem, type, aim.zone);
+      code = CODE_OF[o];
+      if (code === 'X') hit = EV_OF[o];
+      label(type, aim.zone ?? '');
+      aim = undefined;
+    } else {
+      code = drawPitch(chain, cnt.b, cnt.s, ctx.rng, rates.called);
+      // 지시 없는 공 (20-2단계): 결과는 위 그대로, 구종·코스는 그 결과가 났을 때의 조건부로 따로 줄기에서
+      if (code === 'X') hit = drawInPlay(rates, ctx.rng);
+      const l = labelPitch(jointOf(), cell, outsOf(code, hit), prng());
+      label(l.type, l.zone);
+    }
     addPitches(ctx, pg, 1);
     const end = applyPitch(cnt, code);
     if (end === null) {
@@ -763,7 +816,36 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
     if (end === End.K) return done(Ev.SO);
     if (end === End.W) return done(Ev.BB);
     if (end === End.H) return done(Ev.HBP);
-    return done(drawInPlay(rates, ctx.rng));
+    return done(hit!);
+  }
+}
+
+/** 투수 구종 (엔진 2 20-1단계): 월드가 준 것, 없으면 선수 ID로 정한 리그 평균 꼴 */
+function arsenalOf(ctx: GameContext, p: SimPlayer): ArsenalPitch[] {
+  return ctx.arsenal?.(p) ?? arsenalFor(undefined, p.id, 0);
+}
+
+/** 맞힌 공 뒤 결과 비율 [단타, 2루타, 3루타, 홈런, 아웃] (resolver.ts drawInPlay와 같은 몫) */
+function inPlayOf(r: PaRates): number[] {
+  const x = 1 / r.scale - r.so - r.bb - r.hbp;
+  const q = [r.s1 / x, r.d2 / x, r.t3 / x, r.hr / x];
+  return [...q, Math.max(0, 1 - q[0] - q[1] - q[2] - q[3])];
+}
+
+/** 결합표 결과 칸 → 공 기호, 맞힘 결과 */
+const CODE_OF: PitchCode[] = ['B', 'C', 'S', 'F', 'H', 'X', 'X', 'X', 'X', 'X'];
+const EV_OF: Partial<Record<number, Ev>> = { [O.X1]: Ev.S1, [O.X2]: Ev.D2, [O.X3]: Ev.T3, [O.HR]: Ev.HR, [O.OUT]: Ev.OUT };
+
+/** 공 기호(와 맞힘 결과) → 결합표 결과 칸 */
+function outsOf(code: PitchCode, hit: Ev | undefined): number[] {
+  switch (code) {
+    case 'B': return [O.B];
+    case 'C': return [O.C];
+    case 'S': return [O.S];
+    case 'T': return [O.C, O.S];
+    case 'F': return [O.F];
+    case 'H': return [O.H];
+    default: return [hit === Ev.S1 ? O.X1 : hit === Ev.D2 ? O.X2 : hit === Ev.T3 ? O.X3 : hit === Ev.HR ? O.HR : O.OUT];
   }
 }
 

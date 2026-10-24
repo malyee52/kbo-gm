@@ -409,6 +409,8 @@ export class Season {
       autoIbb: world.year >= AUTO_IBB_YEAR,
       // 볼카운트 사슬 능력 (능력치 v2 16-1). 투구 수를 세지 않는 해결기(B0)도 삼진·볼넷은 같은 사슬에서
       plate: plateContext(world.players, world.league, params, world.year),
+      // 투수 구종 (엔진 2 20-1단계): A 해결기만 쓴다
+      ...(world.arsenals ? { arsenal: (p: SimPlayer) => world.arsenals![p.id] } : {}),
     };
     this.ctx.planNorms = managerNorms(world.players, this.ctx);
     // 도루 실패 기록이 없는 해(params.sbPctByYear)는 그 표의 리그 성공률에 맞춘다 (엔진 2 13단계. 2002년처럼 몇 행만 있는 해도 표가 앞선다)
