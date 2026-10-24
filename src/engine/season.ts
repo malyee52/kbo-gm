@@ -1050,7 +1050,7 @@ function calibrateRun(world: World, params: EngineParams, rng: Rng): Rates {
   return cal;
 }
 
-export function simulateSeason(world: World, params: EngineParams, seed: string | number, opts: SeasonOptions = {}): SeasonResult {
+export function simulateSeason(world: World, params: EngineParams, seed: string | number, opts: SeasonOptions & Pick<SeasonInit, 'engine'> = {}): SeasonResult {
   const s = Season.start(world, params, seed, opts);
   s.runToEnd();
   return s.result();

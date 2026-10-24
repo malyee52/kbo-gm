@@ -25,6 +25,8 @@ const years = (arg('years') ?? '2025').split(',').map(Number);
 const nSeasons = Number(arg('seasons') ?? 300);
 const params: EngineParams = { ...DEFAULT_PARAMS, ...(arg('params') ? JSON.parse(arg('params')!) : {}) };
 const outPath = arg('out');
+/** --engine A: 모든 경기를 A 해결기(공 단위)로 (엔진 2 17단계 A 리그 검증). 환경 맞춤은 B 그대로 (기획안 3.6.1) */
+const engine = arg('engine') === 'A' ? 'A' as const : undefined;
 /** actual이면 선수별 출전 가능 기간을 그 해 실제 출전량에 맞춘다 */
 const usage = arg('usage') ?? 'random';
 
@@ -134,7 +136,7 @@ function simMetrics(world: World, n: number, seedBase: string): { mean: Metrics;
   const rows: Metrics[] = [];
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
-    const r = simulateSeason(world, params, `${seedBase}-${i}`, { cal });
+    const r = simulateSeason(world, params, `${seedBase}-${i}`, { cal, ...(engine ? { engine } : {}) });
     const T = r.totals;
     const teamGames = T.games * 2;
     const decided = T.games - T.ties;
@@ -170,7 +172,7 @@ const say = (s = '') => {
 
 say(`# 엔진 검증 결과`);
 say();
-say(`시즌당 ${nSeasons}회 반복. 차이는 (시뮬 − 실제) ÷ 실제.`);
+say(`시즌당 ${nSeasons}회 반복. 차이는 (시뮬 − 실제) ÷ 실제.${engine ? ' 모든 경기 A 해결기 (공 단위).' : ''}`);
 say();
 const summary: { year: number; diffs: Record<string, number> }[] = [];
 for (const year of years) {
