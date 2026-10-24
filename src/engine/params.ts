@@ -385,7 +385,7 @@ export interface EngineParams {
    * 선수별 성향(BatSkill.gb·PitSkill.gb)은 이 값의 승산에 곱한다
    */
   groundBallShare: number;
-  /** 그 해 리그의 아웃 타구 땅볼 몫 (임시값, 출처 미확인: data-src/batted_ball_derived/batted_ball.csv gb_share_of_gb_fb) */
+  /** 그 해 리그의 아웃 타구 땅볼 몫 (임시값, 출처 미확인 참고값: data-src/batted_ball_derived/batted_ball.csv gb_share_of_gb_fb) */
   groundBallShareByYear: Record<number, number>;
   /**
    * 도루 실패 기록이 없는 해(1982~2002, 자료집 선수 행에 cs가 비었다)의 리그 도루 성공률 (엔진 2 13단계).
@@ -695,7 +695,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     setup: 2,
   },
   outOnAdvance: 0.11,
-  // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
+  // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인 참고값). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
   groundBallShare: 0.52,
   sbPctByYear: {
     1982: 0.692, 1983: 0.587, 1984: 0.607, 1985: 0.603, 1986: 0.581, 1987: 0.615, 1988: 0.651, 1989: 0.644,
@@ -720,7 +720,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     armPerRun: 0.008,
   },
   ball: {
-    // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
+    // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인 참고값: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
     dir: [0.49, 0.2, 0.31],
     // 아래는 모두 임시값 (자료 없음. 라인드라이브·안타의 유형 분포는 자료에 없다, batted_ball_derived/README.md)
     type: { S1: [0.38, 0.44, 0.18, 0], D2: [0.06, 0.46, 0.48, 0], T3: [0, 0.3, 0.7, 0] },

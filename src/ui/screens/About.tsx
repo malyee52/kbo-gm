@@ -27,7 +27,7 @@ export function AboutContent({ league, year }: { league?: LeagueState; year?: nu
           <li>
             선수·시즌 기록: <A href="https://github.com/PsyproLEE/KBO_statics">PsyproLEE/KBO_statics</A> (KBO 공식 사이트 koreabaseball.com 기록 수집, 2026-10-08 받음),
             보조 자료 <A href="https://github.com/jpark-spec/dot-707-kbo-draft">jpark-spec/dot-707-kbo-draft</A> (원출처: Kaggle KBO Player Dataset, KBO 공식 기록).
-            두 저장소 모두 라이선스 표시가 없어 권리를 확인하지 못했습니다. 2026 시즌은 정규시즌 끝나기 전 스냅샷입니다.
+            두 저장소 모두 라이선스 표시가 없어 권리를 확인하지 못했습니다. 2026 시즌은 2026-10-12판(팀별 143~144경기)입니다.
           </li>
           <li>
             신인 지명 1982~2027: <A href="https://baseballchart.kr/draft">baseballchart.kr</A> (나무위키 「(연도) KBO 신인 드래프트」·「육성선수」 문서 정리).
@@ -56,13 +56,40 @@ export function AboutContent({ league, year }: { league?: LeagueState; year?: nu
             구장 제원(펜스 거리·높이, 좌석, 잔디, 쓴 기간): 나무위키 구장 문서 (<A href="https://creativecommons.org/licenses/by-nc-sa/2.0/kr/">CC BY-NC-SA 2.0 KR</A>,
             저작권은 각 문서 기여자에게 있음, 위 2026년 8월 크롤링본). 문서 이름은 저장소의 data-src/구장.csv·구장_사용.csv 출처 열에 있습니다.
           </li>
-          <li>감독: 시즌별 개막 감독과 대행을 공개 자료로 정리한 표.</li>
           <li>
-            기록 일부: 하드힛(<A href="https://hardhit.ai">https://hardhit.ai</A>), 비상업적 이용. 2003년 이후 타자 도루·도루실패·병살타 빈 값을 채우고,
-            2015년 이후 구단별 구장 효과(파크팩터·구장 구성 지수)를 만드는 데 썼습니다.
+            수상(골든글러브·MVP·신인왕·한국시리즈 MVP·올스타전 MVP)과 올스타전 경기 기록: 나무위키 수상·올스타전 문서
+            (<A href="https://creativecommons.org/licenses/by-nc-sa/2.0/kr/">CC BY-NC-SA 2.0 KR</A>, 저작권은 각 문서 기여자에게 있음, 위 2026년 8월 크롤링본).
+            문서 이름은 저장소의 data-src/수상.csv·올스타.csv 출처 열에 있습니다.
           </li>
-          <li>2026 외국인 개막 명단·아시아쿼터, 수비 능력, 잠재력은 기록에서 추정한 값입니다.</li>
+          <li>감독: 시즌별 개막 감독과 대행을 KBO 기록과 위키백과 감독 목록으로 정리한 표 (이름만 쓰고 성향은 중립값).</li>
+          <li>
+            투구 단위 리그 집계: slothman3878, <A href="https://huggingface.co/datasets/slothman3878/kbo_playbyplay">"KBO Play-by-Play 2023-2026 (v0)"</A> (Hugging Face,
+            {' '}<A href="https://creativecommons.org/licenses/by/4.0/deed.ko">CC BY 4.0</A>)를 가공. KBO·네이버와 무관한 비공식 자료입니다 (네이버 스포츠 문자중계에서 만든 구조화 자료).
+            볼카운트·투구 수·구원 운용 맞춤과 선수별 타석당 투구 수에 썼습니다.
+          </li>
+          <li>
+            1982~2002 리그 도루 성공률: 구 스탯티즈 기록 기반, FM코리아 게시 자료 "KBO 타자 기록 DB (1982-2024)"에서 계산한 값만 씁니다 (원본은 올리지 않음).
+            이용 조건은 아직 확인하지 못했습니다. WAR 눈금은 스탯티즈 WAR 세 시즌 값에 맞췄습니다.
+          </li>
+          <li>
+            투수 구종(2016~2026 구속·무브·사용률 등): <A href="https://visualbaseball.com">visualbaseball.com</A> 구종 자료(사용자 수집)를 가공.
+            구종 목록이 없는 투수는 위 위키 문서의 구종 서술(구종 이름·주무기·최고 구속)로 채웠습니다. 이용 조건은 아직 확인하지 못했습니다.
+          </li>
+          <li>
+            수비 기록(2001~2026 자리별 경기·수비 이닝·실책 등): KBO 공식 사이트 수비 기록(사용자 수집)을 가공. 이용 조건은 아직 확인하지 못했습니다.
+            수비 평판은 위 위키 문서 서술에서 등급·시기만 뽑았습니다.
+          </li>
+          <li>
+            기록 일부: 하드힛(<A href="https://hardhit.ai">https://hardhit.ai</A>), 비상업적 이용. 원본은 공개하지 않고 가공값만 씁니다.
+            2003년 이후 타자 도루·도루실패·병살타 빈 값, 2015년 이후 구단별 구장 효과(파크팩터·구장 구성 지수), 포지션·투구손, 2015~2022 선수별 타석당 투구 수를 만드는 데 썼습니다.
+          </li>
+          <li>타구 유형·방향 리그 비율(2010~2026): 출처 미확인 참고값입니다 (원 출처를 확인하지 못했습니다). 리그 연도별 비율만 엔진 목표값으로 씁니다.</li>
+          <li>
+            2026 외국인 개막 명단·아시아쿼터: 나무위키 「2026 KBO 리그」 계약표(<A href="https://creativecommons.org/licenses/by-nc-sa/2.0/kr/">CC BY-NC-SA 2.0 KR</A>, 위 크롤링본)의 개막 명단·국적.
+            수비 능력과 잠재력은 기록에서 추정한 값입니다.
+          </li>
         </ul>
+        <p className="small muted">자료별 출처·라이선스·쓰는 곳은 저장소의 DATA_LICENSES.md에 모아 두었습니다.</p>
       </section>
 
       <section className="panel">
