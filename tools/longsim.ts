@@ -23,6 +23,7 @@ import { realSpread, sdOf, SPREAD_HEAD, spreadLine } from './real_spread';
 import { countVotes, meritExcess, voteParts, type RuleVoteRecord } from '../src/ai/vote';
 import { asSim } from '../src/league/growth';
 import { agendaChange, agendaLabel, voteFacts } from '../src/league/ruleVote';
+import { installCalCache } from './calCache';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -262,6 +263,7 @@ function voteSection(rows: YearMetrics[]): string {
 }
 
 async function main(): Promise<void> {
+  installCalCache(); // 환경 맞춤 디스크 캐시 (tools/calCache.ts): 같은 코드·시드로 다시 돌리면 해마다 예비 시즌을 건너뛴다
   const start = Number(arg('start') ?? 2026);
   const n = Number(arg('seasons') ?? 20);
   const seeds = (arg('seeds') ?? 'longsim').split(',');
