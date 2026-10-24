@@ -257,6 +257,8 @@ describe('게임 저장·불러오기와 재현', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'bad' }, FAST);
     const s = g.toSave();
     expect(() => GameSession.load(store, { ...s, teamName: '없는팀' }, FAST)).toThrow(/구단/);
-    expect(() => GameSession.load(store, { ...s, format: 99 as 2 }, FAST)).toThrow(/형식/);
+    expect(() => GameSession.load(store, { ...s, format: 99 as 3 }, FAST)).toThrow(/형식/);
+    // 잠재력 v2(16-4) 전 세션 형식 2는 불러오지 않는다 (옛 저장 호환 안 함, 사용자 2026-10-24)
+    expect(() => GameSession.load(store, { ...s, format: 2 as 3 }, FAST)).toThrow(/형식 2/);
   });
 });

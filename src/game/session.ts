@@ -311,10 +311,14 @@ export interface GameSaveV1 {
   actions: GameAction[];
 }
 
-/** 형식 2: M5부터. 리그 상태와 단계(시즌·오프시즌)를 담는다 */
+/**
+ * 형식 2: M5부터. 리그 상태와 단계(시즌·오프시즌)를 담는다.
+ * 형식 3 (능력치 v2 16-4, 잠재력 v2): 리그 상태의 선수가 숨은 천장(potential, 새 규칙으로 뽑힘)과 숨은 성장 성향(drive)을 담는다.
+ * 저장에서 그대로 읽고 다시 뽑지 않는다. 형식 2는 불러오지 않는다 (사용자 2026-10-24 "옛날 저장파일 신경쓰지마"). 타입 이름은 예전 그대로
+ */
 export interface GameSaveV2 {
   app: 'kbo-gm';
-  format: 2;
+  format: 3;
   /** 지금 시즌 (오프시즌이면 막 끝난 시즌) */
   year: number;
   teamIdx: number;
@@ -747,7 +751,8 @@ export class GameSession {
   static load(store: Store, save: GameSave, params: EngineParams = DEFAULT_PARAMS): GameSession {
     if (save?.app !== 'kbo-gm') throw new Error('KBO 단장 게임의 저장 파일이 아닙니다');
     if (save.format === 1) return GameSession.loadV1(store, save, params);
-    if (save.format !== 2) throw new Error(`지원하지 않는 저장 형식입니다 (${String((save as { format: unknown }).format)})`);
+    if ((save as { format: unknown }).format === 2) throw new Error('잠재력 규칙이 바뀌기 전 저장(형식 2)은 불러올 수 없습니다');
+    if (save.format !== 3) throw new Error(`지원하지 않는 저장 형식입니다 (${String((save as { format: unknown }).format)})`);
     if (!save.league.teams[save.teamIdx] || save.league.teams[save.teamIdx].name !== save.teamName) {
       throw new Error('저장한 구단을 찾을 수 없습니다');
     }
@@ -3829,7 +3834,7 @@ export class GameSession {
   toSave(): GameSaveV2 {
     const base = {
       app: 'kbo-gm' as const,
-      format: 2 as const,
+      format: 3 as const,
       year: this.year,
       teamIdx: this.teamIdx,
       teamName: this.league.teams[this.teamIdx].name,

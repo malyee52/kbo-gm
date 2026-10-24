@@ -7,7 +7,8 @@ import { initialMilitary } from './careers';
 import { makeDraftee, openMarket, POST_FA_RESERVE, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
-import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
+import { careerIndex, growthRoom, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
+import { bestSeasonWar, draftIndex, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, realCeiling, recentSample } from './potential';
 import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
@@ -87,7 +88,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const teamOf = new Map(recorded.teams.map((t, i) => [t.name, i]));
   const startTeam = (p: SimPlayer): number => teamOf.get(moves.get(p.id) ?? '') ?? p.teamIdx;
   const idx = careerIndex(store);
-  const lastDataYear = Math.max(...store.meta.years);
+  const drafts = draftIndex(store);
+  const pp = params.potential;
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
   for (const c of store.contracts ?? []) (contractsById.get(c.id) ?? contractsById.set(c.id, []).get(c.id)!).push(c);
 
@@ -107,12 +109,31 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     const m = store.players.get(p.id)!;
     const asia = p.foreign && (opening?.get(p.id) ?? m.asia ?? false);
     const ten = tenure0(p);
-    const now = currentRuns(p, ctx);
-    const peak = realPeakRuns(p, idx, store, ctx, params);
-    // 성장 여유분은 자료가 끝나는 해(마지막 시즌) 나이로 본다 (2026-10-12 사용자: 잠재력 = 실제로 보여 준 고점).
-    // 전성기가 이미 기록에 있는 선수(예: 2010년 김광현)는 고점이 곧 잠재력이고, 마지막 시즌에도 젊어 앞날을 모르는 선수만 여유분을 받는다
-    const roomAge = p.age === null ? null : p.age + (lastDataYear - startYear);
-    const potential = potentialOf(now, peak, roomAge, seed, p.id);
+    let now = currentRuns(p, ctx);
+    // 잠재력 v2 (기획안 17·18장, league/potential.ts): 시작 연도 국내 신인은 지명 신인과 같은 생성기 (Q11 ①: 그 해 기록으로 매기지 않는다.
+    // 신규 외국인만 그 해 기록 예외로 남는다). 나머지 실존 선수는 시작 연도 전 기록으로 고정·극단·범위를 가린다
+    const rookie = !p.foreign && m.entryYear >= startYear;
+    let potential: number;
+    let drive: number;
+    let skill: Pick<SimPlayer, 'bat' | 'pit'> = p;
+    if (rookie) {
+      const info = drafts.get(p.id) ?? { rank: Infinity, univ: m.school === 'UNIV', entryYear: startYear, kind: '' };
+      const center = drafteeCenter({ ...info, entryYear: startYear }, realPeakRuns(p, idx, store, ctx, params), pp);
+      const age = p.age ?? 19;
+      const { path, years } = entryPathOf(m.school ?? (info.univ ? 'UNIV' : null), age, 19);
+      now = Math.max(-15, center - entryGap(growthRoom(18), years, path, pp) * new Rng(`${seed}/start/${p.id}`).range(0.7, 1.3));
+      skill = skillForRuns({ ...p, birthYear: m.birthYear ?? null }, now, ctx, startYear);
+      potential = drafteeCeiling(p.id, center, now, age + 1, startYear, seed, pp);
+      drive = driveOf(seed, p.id, false, pp);
+    } else {
+      // 성장 여유분은 시작 연도 나이로 본다 (17.3 ①. 예전에는 자료 마지막 해 나이라 옛 시작판의 젊은 선수가 실제 고점에 묶였다)
+      const c = realCeiling({
+        id: p.id, now, peakBefore: realPeakRuns(p, idx, store, ctx, params, startYear), bestWar: bestSeasonWar(p, idx, store, startYear),
+        age: p.age, sample: recentSample(p, idx, startYear), year: startYear, room: growthRoom(p.age ?? 28), draft: drafts.get(p.id),
+      }, seed, pp);
+      potential = c.potential;
+      drive = driveOf(seed, p.id, c.kind === 'extreme', pp);
+    }
 
     // 계약 기록: 시작 연도 이전에 시작한 것만 (그 뒤 계약은 미래 정보)
     const rows = (contractsById.get(p.id) ?? []).filter((c) => c.first <= startYear).sort((a, b) => a.first - b.first);
@@ -148,7 +169,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
       foreign: p.foreign, asia, birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
-      bat: withoutRunSkills(p.bat), pit: withoutRunSkills(p.pit), potential, estimated: p.debutEstimate, team: startTeam(p), contract,
+      bat: withoutRunSkills(skill.bat), pit: withoutRunSkills(skill.pit), potential, drive, estimated: p.debutEstimate && !rookie, team: startTeam(p), contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), ...(p.underhand ? { underhand: true } : {}), history: [], ...(ten ? { tenure0: ten } : {}),
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };
@@ -202,6 +223,14 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const market = openMarket(league, store, params);
   ensureAlts(league, startYear); // 시장 선수까지 모두
   const world = opening || added || special.size || futures || market || perks ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  // 지금 능력은 천장을 넘지 않는다 (잠재력 v2 17.2): 공백·해외 선수처럼 다른 해 월드에서 온 선수는 시작 월드에서 다시 잰 능력이
+  // toLeague 때와 조금 다를 수 있어, 마지막 월드 기준으로 천장을 지금 능력 아래로 두지 않는다
+  const finalCtx = world === recorded ? ctx : valueContext(world);
+  const simById = new Map(world.players.map((x) => [x.id, x]));
+  for (const p of league.players) {
+    const sp = simById.get(p.id);
+    if (sp) p.potential = Math.max(p.potential, currentRuns(sp, finalCtx));
+  }
   return { league, world };
 }
 

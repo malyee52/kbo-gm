@@ -486,6 +486,21 @@ export interface EngineParams {
     scale: { runIQ: number; bunting: number; cBlock: number; cFrame: number; hold: number; quick: number; arm: number };
     virtualSd: number; catcherPerRun: number; armWord: number; runIqPull: number; buntPull: number;
   };
+  /**
+   * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
+   * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
+   * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
+   * ageFloor: 범위 선수 중심 바닥(등급, ≤21·22~24·25~27), rankDecay: 지명 순위 바닥이 입단 뒤 해마다 줄어드는 런, rankPull: 실제 커리어 고점 당김 k,
+   * driveSpeed·reachBase·reachDrive: 성장 속도 × (1 + driveSpeed d) × (reachBase + reachDrive d),
+   * eduRate: 입단 전 한 해 성장 몫(2군 나이 비율 × 기회), eduPath: 입단 전 경로 배율 c
+   */
+  potential: {
+    width: [number, number, number, number, number]; sampleFull: number; sampleExtra: number;
+    fixWar: number; extremeWar: number; fixedWidth: number; extremeDrive: number;
+    ageFloor: [number, number, number]; rankDecay: number; rankPull: number;
+    driveSpeed: number; reachBase: number; reachDrive: number;
+    eduRate: number; eduPath: { univ: number; abroad: number; other: number };
+  };
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
   /**
@@ -905,6 +920,15 @@ export const DEFAULT_PARAMS: EngineParams = {
   // runIqPull 80·buntPull 30: 2023~2025 선수 사이 퍼짐을 적률로 나눈 값(추가 진루 약 35~40 기회, W·V 공 대비 희생번트 약 17 사건)의 두 배쯤 (강하게 당김, 임시값)
   //   buntPull을 줄이면 덜 당겨 퍼짐이 커진다 (15면 2026 번트 등급 표준편차 6.9 → 9.8). 발 빠른 타자 쏠림은 기습 번트 몫을 빼서 다룬다 (16-3e, runskills.ts measuredBunting)
   skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15, arm: 0.04 }, virtualSd: 8, catcherPerRun: 0.5, armWord: 12, runIqPull: 80, buntPull: 30 },
+  // 잠재력 v2 (기획안 17.3·17.4·18.2~18.5, 사용자 2026-10-24 확정 꼴): 폭 두 배(Q2 ③), 고정 2승·극단 8승(Q7·Q3), 고정 폭 ½(Q8 ③), k ¼(Q10 ②).
+  // 크기(바닥 47·44·41, 4런, 성장 성향 0.25·0.85·0.15, c 0.75·0.9·0.5, 0.28)는 모두 임시값이고 16-5에서 맞춘다
+  potential: {
+    width: [14, 10, 6, 3, 0], sampleFull: 1500, sampleExtra: 0.5,
+    fixWar: 2, extremeWar: 8, fixedWidth: 0.5, extremeDrive: 0.25,
+    ageFloor: [47, 44, 41], rankDecay: 4, rankPull: 0.25,
+    driveSpeed: 0.25, reachBase: 0.85, reachDrive: 0.15,
+    eduRate: 0.28, eduPath: { univ: 0.75, abroad: 0.9, other: 0.5 },
+  },
   starterRestDays: 5,
   penBlendDays: 100,
 
