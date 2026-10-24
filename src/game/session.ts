@@ -17,7 +17,7 @@ import * as Off from '../league/offseason';
 import type { VoteChoice } from '../ai/vote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
-import { leagueDefense, worldFromLeague } from '../league/world';
+import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
@@ -1318,6 +1318,9 @@ export class GameSession {
         }
       }
     }
+    // 능력치 v2 16-3: 손잡이(주루 판단·번트·어깨 등)는 리그 상태에 없고 월드를 만들 때 리그 영점과 함께 낸다. syncSim이 리그 값으로 bat를 바꾸면 손잡이가 빠지고,
+    // 만든 선수(가상·나이)·바뀐 능력(표본)은 영점도 바꾼다. 불러온 판(월드를 새로 만듦)과 같게 시즌 월드 전체에 다시 낸다
+    if (season && L.defPool && ops.some((op) => op.op === 'create' || op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
     this.valueCtx = null;
   }
 

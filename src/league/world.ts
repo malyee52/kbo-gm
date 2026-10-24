@@ -64,6 +64,11 @@ export function isFuturesTeam(league: Pick<LeagueState, 'expansions'>, team: num
  * 리그 상태 → 그 해 월드. 무소속과 복무 중인 선수는 빠진다.
  * 슬럼프는 능력을 그 시즌만 옮기고, 넘어온 부상·병역 복귀는 개막부터의 결장(startAbsent)이 된다.
  */
+/** 리그 상태의 월드 선수에게 주루·작전·포수·투수 짝·어깨 손잡이를 다시 낸다 (월드를 만들 때, 그리고 시즌 중 자유 모드 조작 뒤 불러온 판과 같게) */
+export function applyLeagueRunSkills(players: SimPlayer[], league: LeagueState, store: Store, params: EngineParams): void {
+  applyRunSkills(players, params, { arm: store.defense?.arm, running: store.running, startYear: league.startYear });
+}
+
 export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS, opts: WorldOptions = {}): World {
   const form = opts.form ?? true;
   const year = league.year;
@@ -164,7 +169,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   }
   // 능력치 v2 16-3: 주루·작전·포수·투수 짝은 해마다 나이로 다시 낸다 (리그 영점, runskills.ts, 저장하지 않음).
   // 어깨 낱말·추가 진루·번트 실측은 게임 시작 연도 전 시기만 (시작 능력 근거, 결정 29. 뒤는 게임 안 성장 몫, 16-4)
-  if (league.defPool) applyRunSkills(players, params, { arm: store.defense?.arm, running: store.running, startYear: league.startYear });
+  if (league.defPool) applyLeagueRunSkills(players, league, store, params);
   if (league.defZero !== undefined) env = { ...env, defZero: league.defZero };
   // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다).
   // 자료 없는 해에 구단 수가 10이 아니면(가상 창단) 규칙을 구단 수에 맞추고 팀당 경기 수도 그것을 따른다
