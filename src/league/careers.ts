@@ -320,11 +320,14 @@ export function isReserveGrade(seed: string, id: string, entry: number): boolean
   return new Rng(`${seed}/military-grade/${id}`).next() < reserveShare(entry);
 }
 
+/** military.json 위키 병역의 군 야구단 밖 복무 (현역·보충역을 가르지 않는다, 2026-10-24 사용자 M9 Q5) */
+export const SERVICE_UNIT_GENERIC = '복무';
+
 /** 복무 형태 이름 (알림·화면). 실존 선수에게도 형태와 기간만 쓴다 */
 export function serviceName(m: Military | undefined): string {
   if (!m) return '';
   if (m.state === 'homeOnly') return '방위병';
-  if (m.kind === 'active') return '현역';
+  if (m.kind === 'active') return m.note === SERVICE_UNIT_GENERIC ? '군 복무' : '현역';
   if (m.kind === 'reserve') {
     const entry = (m.enlisted ?? 9999) + 1;
     return entry <= HOME_ONLY_LAST_ENTRY ? '방위병' : entry <= 2013 ? '공익근무' : '사회복무';

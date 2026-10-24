@@ -10,7 +10,7 @@ import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import { Rng } from '../engine';
 import type { ValueContext } from '../ai/value';
 import { growthRoom, skillForRuns, type CareerIndex } from './growth';
-import { initialMilitary } from './careers';
+import { initialMilitary, SERVICE_UNIT_GENERIC } from './careers';
 import { makeDraftee, matchDraftee, type LeagueView } from './offseason';
 import { minSalary } from './salary';
 import type { LeaguePlayer, LeagueState, Military } from './types';
@@ -94,6 +94,7 @@ export function servingAt(store: Pick<DataStore, 'military'>, id: string, year: 
   const rec = store.military?.[id];
   const s = rec?.served;
   if (!s?.end || s.end < year || s.end > year + 1) return null;
+  // unit '복무' = 위키 병역 칸의 현역·보충역 (배포 파일이 둘을 가르지 않는다) → 현역 규칙. 그 밖의 unit은 군 야구단
   return { state: 'serving', enlisted: year - 1, returnYear: s.end + 1, basis: rec?.src === 'wiki' ? 'wiki' : 'record', note: s.unit,
-           ...(s.kind ? { kind: s.kind } : {}) };
+           ...(s.unit === SERVICE_UNIT_GENERIC ? { kind: 'active' as const } : {}) };
 }

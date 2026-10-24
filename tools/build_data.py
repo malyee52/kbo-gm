@@ -1105,7 +1105,7 @@ def build_military(profiles, out_dir):
         'version': 1,
         'note': '실제 병역 자료. served = 2026 프로필 경력의 상무·경찰(end = 1군 공백으로 본 복무 끝 해, 추정), '
                 'exempt = 국제대회 금메달 대표팀(병역_면제명단.csv, year = 대회 연도). '
-                'src = wiki 는 위 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (served.kind active = 현역, reserve = 보충역). '
+                'src = wiki 는 위 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (served.unit 복무 = 군 야구단 밖 복무, 현역·보충역을 가르지 않는다). '
                 '여기 없는 선수는 자료가 없는 것이다.',
         'players': dict(sorted(table.items())),
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
@@ -1301,7 +1301,8 @@ def write_wiki_report(players_n, records, record_n, mil, special, fixes=((), ())
 def wiki_military(table, players, seen):
     """실제 병역 자료가 없는 국내 선수에게 위키 병역 칸을 더한다 (table을 고친다). 더한 수와 읽지 못한 글 목록을 돌려준다.
     - 면제(예술체육요원·병역면제·전시근로역): exempt.year = 글 속 해, 없으면 첫 1군 시즌 (임시값: 언제 면제됐는지 모름)
-    - 상무·경찰·성무: served.unit, 현역·보충역(공익·사회복무·방위·산업기능요원): served.unit '현역'·'보충역' + kind.
+    - 상무·경찰·성무: served.unit, 현역·보충역(공익·사회복무·방위·산업기능요원): served.unit '복무' (둘을 가르지 않는다.
+      보충역은 신체 등급과 이어질 수 있어 배포 파일에 남기지 않는다, 2026-10-24 사용자 M9 Q5). 게임은 '복무'를 현역 규칙으로 본다.
       end = 글 속 마지막 해 (없으면 모름). 미필·불명은 넣지 않는다"""
     prof = wiki_profile()
     added, skip = 0, []
@@ -1325,14 +1326,13 @@ def wiki_military(table, players, seen):
             event = '예술체육요원' if '요원' in text else '병역 면제'
             table[p['id']] = {'src': 'wiki', 'exempt': {'year': year, 'event': event}}
         else:
-            unit = {'active': '현역', 'reserve': '보충역'}.get(kind, kind)
+            unit = '복무' if kind in ('active', 'reserve') else kind
             # end는 실제 자료와 같은 뜻(복무로 빠진 마지막 시즌)으로 맞춘다: 전역한 해에 1군 기록이 있으면(시즌 중 전역, 방위병) 그 앞 해로.
             # 그대로 두면 그 해 시작 게임에서 '시작 뒤 복무'로 잡혀 다시 입대한다
             end = max(years) if years else None
             while end and end in seen.get(p['id'], {}) and end > min(years):
                 end -= 1
-            served = {'unit': unit, **({'end': end} if end else {}),
-                      **({'kind': kind} if kind in ('active', 'reserve') else {})}
+            served = {'unit': unit, **({'end': end} if end else {})}
             table[p['id']] = {'src': 'wiki', 'served': served}
         added += 1
     return added, skip
