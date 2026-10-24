@@ -36,7 +36,8 @@ describe('구장 특성', () => {
   it('엔진: 홈 구장 홈런 배율이 크면 그 구장 경기에서 홈런이 늘어난다 (구장 효과 없는 월드와 비교)', () => {
     const hr = (park: number) => {
       let n = 0;
-      for (const seed of ['pk-a', 'pk-b']) {
+      // 시드 하나의 비율이 1.08~1.29로 퍼져 두 시드(pk-a·pk-b)로는 운에 걸렸다 (2026-10-24 번트 실측 뒤 1.113). 여덟 시드 평균 1.196
+      for (const seed of ['pk-a', 'pk-b', 'pk-c', 'pk-d', 'pk-e', 'pk-f', 'pk-g', 'pk-h']) {
         const w = worldForYear(store, 2025);
         if (park !== 1) for (const t of w.teams.slice(0, 3)) t.park = { hr: park };
         const s = Season.start(w, NO_PILOT, seed);
