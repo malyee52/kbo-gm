@@ -257,9 +257,13 @@ export function bracketFor(order: number[], tables: DivisionTable[], teams: Team
   return { seeds, seedLabels, bracket, semiCheck };
 }
 
-/** 그 해 홈 구장이 잠실인 구단 (실제 구장 역사, 기획안 10.5 서울 구단 판정) */
+/**
+ * 그 해 홈 구장이 잠실인 구단 (실제 구장 역사, 기획안 10.5 서울 구단 판정). 구장 자료(parks.json)가 있으면 구장 ID로 본다
+ * (자료의 이름은 "서울종합운동장 야구장"이라 이름에 '잠실'이 없다), 없으면 코드 안 표의 이름
+ */
 export function isSeoulTeam(world: Pick<World, 'teams' | 'year'>, team: number): boolean {
-  return !!realParkAt(world.teams[team].franchise, world.year)?.name.includes('잠실');
+  const p = realParkAt(world.teams[team].franchise, world.year);
+  return !!p && (p.parkId ? p.parkId.startsWith('jamsil') : p.name.includes('잠실'));
 }
 
 /** 대진에서 양쪽 자리가 정해졌고 아직 열지 않은 시리즈를 모두 연다. day: 앞 시리즈가 없는 노드의 첫 경기 날 */
