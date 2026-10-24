@@ -1,6 +1,7 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense, FieldPos } from './defense';
 import type { BatPlate, PitPlate } from './plate';
+import type { ArsenalPitch } from './arsenal';
 import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
@@ -171,6 +172,8 @@ export interface World {
   prevStandings?: number[];
   /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
   defPool?: number[];
+  /** 투수 구종 (엔진 2 20-1단계, data/pitches.ts arsenalFor): 선수 ID → 구종. 월드를 만들 때 자료에서 내고 저장하지 않는다. 없는 선수는 선수 ID로 정한 리그 평균 꼴 */
+  arsenals?: Record<string, ArsenalPitch[]>;
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */

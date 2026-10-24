@@ -604,6 +604,8 @@ dialog.cast { width: min(760px, calc(100vw / var(--z) - 32px)); }
 .cast-now .outs { display: flex; gap: 5px; }
 .cast-now .outs i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-strong); transition: background 0.25s ease; }
 .cast-now .outs i.on { background: var(--loss); border-color: var(--loss); }
+.cast-now .pitch-count strong { font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.cast-now .pitch-seq { color: var(--muted); }
 .cast-line { font-size: 17px; font-weight: 700; }
 .cast-line.kind-HR { color: var(--team); font-size: 20px; }
 .cast-result { font-size: 16px; margin-top: 6px !important; }
@@ -653,23 +655,91 @@ tr.moved td { animation: row-flash 1.4s ease-out; }
   .confetti { display: none; }
 }
 
-/* ---- 직접 지휘 (CommandView.tsx) */
-dialog.command { width: min(860px, calc(100vw / var(--z) - 32px)); }
-.command-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 10px 16px; margin: 8px 0; align-items: start; }
-/* fieldset은 기본 최소 너비가 내용 너비라 긴 선택 상자가 옆 칸을 침범한다 */
-.command-panel fieldset { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.command-panel legend { padding: 0 4px; font-weight: 700; }
-.command-panel .check { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.command-panel > .check { grid-column: 1 / -1; }
-.command-panel select { display: block; width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
-.command-panel .pr-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.command-panel .pr-row > span { overflow-wrap: anywhere; }
+/* ---- 수동 경기 화면 (CommandView.tsx, UI 2단계 2.2.2): 점수판 위 고정, 중계 | 작전, 아래 조작 */
+dialog.command { width: min(1080px, calc(100vw / var(--z) - 32px)); }
 dialog.command .dialog-body > header { flex-wrap: wrap; }
 dialog.command .dialog-body > header > div { min-width: 0; flex: 1 1 280px; }
 dialog.command .dialog-body > header h2 { font-size: 18px; overflow-wrap: anywhere; }
 .cast-field > * { min-width: 0; }
 .cast-now p { overflow-wrap: anywhere; }
 .cast-controls button { flex: 0 0 auto; }
+.cmd-head-actions { flex-wrap: wrap; justify-content: flex-end; }
+.cmd-finish { position: relative; }
+.cmd-finish-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 280px; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); }
+.cmd-finish-pop > button { text-align: left; }
+.cmd-finish-pop p { margin: 0; }
+.cmd-board { position: sticky; top: 74px; z-index: 1; margin: 0 -22px 8px; padding: 8px 22px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.cmd-score { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 18px; }
+.cmd-score strong { font-family: var(--font-num); font-size: 28px; line-height: 1; }
+.cmd-team { font-weight: 700; }
+.cmd-team.me { color: var(--team); }
+.cmd-inn { margin-left: auto; font-weight: 700; font-size: 16px; }
+.cmd-state { display: grid; grid-template-columns: 96px auto minmax(0, 1fr); gap: 14px; align-items: center; margin-top: 6px; }
+.cmd-diamond .diamond { width: 96px; }
+.cmd-bso { display: flex; flex-direction: column; gap: 4px; font-variant-numeric: tabular-nums; }
+.cmd-bso span { display: flex; align-items: center; gap: 5px; }
+.cmd-bso b { width: 14px; font-size: 13px; color: var(--muted); }
+.cmd-bso i { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line-strong); transition: background 0.2s ease; }
+.cmd-bso i.on.ball { background: var(--win); border-color: var(--win); }
+.cmd-bso i.on.strike { background: var(--night-accent); border-color: var(--night-accent); }
+.cmd-bso i.on.out { background: var(--loss); border-color: var(--loss); }
+.cmd-who p { margin: 2px 0; overflow-wrap: anywhere; }
+.cmd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 16px; align-items: start; margin-top: 8px; }
+.cmd-grid h3 { margin: 0 0 6px; font-size: 15px; }
+.cmd-feed { max-height: 380px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px 10px; background: var(--panel-2); }
+.cmd-feed ol { margin: 0; padding-left: 0; list-style: none; }
+.cmd-feed li { padding: 2px 0; }
+.cmd-half { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); font-weight: 800; color: var(--muted); }
+.cmd-half:first-child { margin-top: 0; border-top: 0; }
+.cmd-pitch { display: flex; justify-content: space-between; gap: 8px; padding-left: 12px !important; color: var(--muted); }
+.cmd-pitch.now { color: var(--fg); }
+.cmd-pa { font-weight: 700; }
+.cmd-pa.scored, .cmd-pa.kind-HR { color: var(--team); }
+.cmd-pa.kind-PC, .cmd-pa.kind-PH, .cmd-pa.kind-PR, .cmd-pa.kind-DEF { font-weight: 600; color: var(--muted); }
+.cmd-note { color: var(--team); font-weight: 600; padding-left: 12px !important; }
+.cmd-now { padding-top: 4px !important; }
+.cmd-ops { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cmd-ops p { margin: 0; }
+.ops-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.ops-row .seg.small { margin: 0; }
+.ops-label { width: 64px; flex: 0 0 64px; font-weight: 700; font-size: 13px; }
+.ops-note { flex-basis: 100%; padding-left: 74px; }
+.ops-open { padding: 4px 10px; min-height: 28px; font-size: 13px; }
+.ops-row > .scroll { flex-basis: 100%; max-height: 220px; overflow-y: auto; }
+.ops-row select { max-width: 100%; min-width: 0; }
+table.cand-table { width: 100%; }
+table.cand-table tr.pick { cursor: pointer; }
+table.cand-table tr.pick:hover td, table.cand-table tr.pick:focus td { background: var(--hover); }
+.cmd-controls { position: sticky; bottom: -22px; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px -22px -22px; padding: 10px 22px; background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow-dock); }
+.cmd-speed { display: inline-flex; align-items: center; gap: 6px; }
+.cmd-skip { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.cmd-controls .mobile-ops { display: none; }
+.match-live { margin: 10px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--warn-bg); color: var(--warn-fg); }
+/* 위기 끼어들기 창 (CrisisDialog.tsx, 2.2.3) */
+dialog.crisis-dialog { width: min(460px, calc(100vw / var(--z) - 32px)); }
+.crisis-line { font-size: 16px; font-weight: 700; margin: 8px 0 4px; }
+dialog.crisis-dialog .actions { margin: 12px 0 8px; }
+@media (max-width: 768px) {
+  /* 휴대폰은 창 머리를 고정하지 않고 점수판을 맨 위에 고정한다 (dialog-body 옆 여백 14px) */
+  dialog.command .dialog-body > header { position: static; }
+  .cmd-board { top: 0; margin: 0 -14px 8px; padding: 8px 14px 10px; }
+  .cmd-controls { margin: 12px -14px -22px; padding: 8px 14px; }
+  .cmd-state { grid-template-columns: 64px auto; }
+  .cmd-diamond .diamond { width: 64px; }
+  .cmd-who { grid-column: 1 / -1; }
+  .cmd-score strong { font-size: 24px; }
+  .cmd-grid { grid-template-columns: minmax(0, 1fr); }
+  .cmd-feed { max-height: 42vh; }
+  /* 작전 판은 '작전' 단추로 아래에서 올라온다 */
+  .cmd-ops:not(.open) { display: none; }
+  .cmd-ops.open:not(.note) { position: sticky; bottom: 96px; z-index: 2; max-height: 55vh; overflow-y: auto; background: var(--panel); box-shadow: var(--shadow-lg); }
+  .cmd-controls .mobile-ops { display: inline-flex; }
+  .cmd-skip { margin-left: 0; }
+  .ops-note { padding-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cmd-bso i { transition: none; }
+}
 
 table.mini { font-size: 14px; }
 table.mini td { padding: 7px 8px; border-bottom: 0; }

@@ -158,12 +158,12 @@ export type PitchObserver = (c: number, kind: number) => void;
 
 /**
  * 끝이 end로 정해진 타석의 공 경로를 뽑아 공 수를 돌려준다 (조건부 사슬: 다음 칸으로 갈 확률 × 그 칸에서 end로 끝날 확률).
- * 칸마다 난수 한 번
+ * 칸마다 난수 한 번. b0·s0: 시작 카운트 (A → B 넘기기에서 타석 중간부터 접을 때, 엔진 2 18단계). 돌려주는 공 수는 그 뒤 공만
  */
-export function samplePitches(ch: SolvedChain, end: End, rng: Rng, observe?: PitchObserver): number {
+export function samplePitches(ch: SolvedChain, end: End, rng: Rng, observe?: PitchObserver, b0 = 0, s0 = 0): number {
   const { p, e } = ch;
-  let bl = 0;
-  let st = 0;
+  let bl = b0;
+  let st = s0;
   let n = 0;
   for (;;) {
     const c = cell(bl, st);
@@ -199,4 +199,19 @@ export function samplePitches(ch: SolvedChain, end: End, rng: Rng, observe?: Pit
     }
     if (n > 60) return n; // 파울이 끝없이 이어지는 일은 없지만 안전장치
   }
+}
+
+/**
+ * 카운트 (b, s)에서 시작한 남은 타석을 계산으로 접는다 (A → B 넘기기, 엔진 2 18단계, 기획안 3.8): 그 칸의 끝 확률로 끝을 뽑고
+ * (난수 한 번) 끝이 정해진 공 경로로 남은 공 수를 뽑는다. 0-0이면 B 해결기와 같은 분포다
+ */
+export function foldFrom(ch: SolvedChain, b: number, s: number, rng: Rng): { end: End; pitches: number } {
+  const r = cell(b, s) * 4;
+  const e = ch.e;
+  let u = rng.next() * (e[r] + e[r + 1] + e[r + 2] + e[r + 3]);
+  let end = End.X;
+  for (const k of [End.K, End.W, End.H]) {
+    if ((u -= e[r + k]) < 0) { end = k; break; }
+  }
+  return { end, pitches: samplePitches(ch, end, rng, undefined, b, s) };
 }

@@ -53,6 +53,16 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     });
   }
 
+  // 진행 중인 경기 (UI 2단계 2.2.2): 지휘하던 경기 창을 닫았다. 끝까지 지휘하거나 감독에게 맡기기 전에는 진행·선수단 조작이 막힌다 (session.gameLock)
+  if (s.gameLock) {
+    const v = s.pendingScore();
+    const at = v ? (v.over ? `경기 끝 ${v.awayRuns}:${v.homeRuns}` : `${v.inn}회${v.top ? '초' : '말'} ${v.awayRuns}:${v.homeRuns}`) : '';
+    out.push({
+      key: 'live-game', kind: '시즌', group: '브리핑', title: `진행 중인 경기${at ? ` (${at})` : ''}`,
+      why: '지휘하던 경기가 저장돼 있습니다. 홈의 다음 경기 카드에서 이어서 지휘하거나 감독에게 맡겨 끝내야 진행·선수단 조작을 할 수 있습니다.', go: 'home', blocking: true,
+    });
+  }
+
   // 해고 뒤 영입 제의 (구단 현황의 제의 고르기)
   if (s.owner.offers?.length) {
     out.push({

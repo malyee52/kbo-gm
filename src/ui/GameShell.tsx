@@ -49,6 +49,7 @@ import { Rules } from './screens/Rules';
 import { AdvanceSummary, takeSnapshot, type AdvanceSnapshot } from './AdvanceSummary';
 import { GameCast } from './GameCast';
 import { CommandView } from './CommandView';
+import { CrisisDialog } from './CrisisDialog';
 import { Celebration } from './Motion';
 import { achievements, type Achievement } from '../game/celebrate';
 import type { CastGame, CommandPreview } from '../game/session';
@@ -179,9 +180,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
    * full(시즌 끝까지): 완전 자동. 무엇이 생겨도 멈추지 않고 이벤트는 첫 번째 선택지로 처리한다.
    * 아니면 멈춤 설정(stops)대로 멈춘다.
    */
-  const advance = async (days: number, label: string, full = false) => {
+  const advance = async (days: number, label: string, full = false, override?: StopRules) => {
     if (busy || session.done) return;
-    const rules = full ? NO_STOPS : stops;
+    const rules = override ?? (full ? NO_STOPS : stops);
     setProgressOpen(false);
     setBusy(label);
     await nextFrame();
@@ -205,7 +206,8 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     setBusy(null);
     void autoFantasyEvent();
     const rest = attention.filter((x) => x.kind !== 'crisis');
-    if (session.crisis) setCmd(session.crisis);
+    // 위기에서 멈췄으면 끼어들기 창: 맡기면 이번 진행의 남은 날을 이어 간다 (더 묻지 않기면 위기 멈춤을 끄고)
+    if (session.crisis) setCrisisAsk({ resume: (quiet) => void advance(left, label, full, quiet ? { ...rules, crisis: false } : rules) });
     else if (snap || rest.length) setSummary({ snap: snap ?? takeSnapshotAfter(), attention: rest });
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
@@ -300,8 +302,24 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (fresh.length) setParty((p) => [...p, ...fresh]);
   }, [version, session]);
   const endParty = useCallback(() => setParty([]), []);
-  // 직접 지휘 (CommandView): 진행 설정의 "직접 지휘", 또는 자동 진행이 위기에서 멈췄을 때
+  // 직접 지휘 (CommandView): 진행 설정의 "직접 지휘", 위기 끼어들기 창에서 "직접 지휘", 홈·결정함의 "이어서 지휘"
   const [cmd, setCmd] = useState<CommandPreview | null>(null);
+  // 위기 끼어들기 창 (CrisisDialog, UI 2단계 2.2.3): 맡겼을 때 이어 갈 진행 (quiet = 이번 진행 동안 더 묻지 않기)
+  const [crisisAsk, setCrisisAsk] = useState<{ resume: (quiet: boolean) => void } | null>(null);
+  const crisisCommand = () => { setCrisisAsk(null); if (session.crisis) setCmd(session.crisis); };
+  const crisisDecline = (quiet: boolean) => {
+    const ask = crisisAsk;
+    setCrisisAsk(null);
+    session.crisisDecline();
+    changed();
+    ask?.resume(quiet);
+  };
+  /** 진행 중인 지휘 경기를 다시 연다 (경기 중 창을 닫은 뒤 "이어서 지휘") */
+  const resumeCommand = () => { if (!busy && session.commandInProgress) setCmd(session.commandOpen()); };
+  // 진행 중인 지휘 경기가 저장에 있으면 (경기 중 저장, 엔진 2 18단계) 열자마자 그 물음에서 이어 간다
+  useEffect(() => {
+    if (session.commandInProgress) setCmd(session.commandResume());
+  }, [session]);
   // 진행 중이 아닐 때 바뀐 것이 있으면 1.5초 뒤 자동 저장 (창을 바로 닫아도 트레이드·엔트리 변경이 남는다)
   useEffect(() => {
     if (busy || cmd || !dirty.current) return; // 직접 지휘 중에는 경기가 끝난 뒤 저장한다
@@ -319,7 +337,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       while (session.postseasonRunning && !session.ourPostseasonGameNext) session.advancePostseason(1);
       changed();
       setBusy(null);
-      if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+      if (session.canCommand) setCmd(session.commandOpen());
       else go('postseason');
       return;
     }
@@ -333,16 +351,16 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     autoAnswer(stops);
     changed();
     setBusy(null);
-    if (session.crisis) { setCmd(session.crisis); return; }
+    if (session.crisis) { setCrisisAsk({ resume: () => void startCommand() }); return; }
     if (attention.length) { setSummary({ snap: takeSnapshotAfter(), attention }); return; }
-    if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+    if (session.canCommand) setCmd(session.commandOpen());
   };
   const endCommand = async (done: boolean) => {
     setCmd(null);
     session.crisis = null;
     changed();
-    if (!done) return;
     await autosave();
+    if (!done) return;
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
     else if (session.postseasonRunning) go('postseason');
   };
@@ -378,33 +396,36 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (!casting) go('postseason');
   };
 
-  const advanceNextGame = async () => {
+  const advanceNextGame = async (override?: StopRules) => {
     if (busy || session.done) return;
     setProgressOpen(false);
     setBusy('진행 중');
     await nextFrame();
     const before = session.ourGames().length;
     const head = headOf(session);
-    session.advanceToNextGameDay(stops);
+    const rules = override ?? stops;
+    session.advanceToNextGameDay(rules);
     const attention = [...session.attention];
-    autoAnswer(stops);
+    autoAnswer(rules);
     changed();
     await autosave();
     setBusy(null);
-    if (session.crisis) setCmd(session.crisis);
+    if (session.crisis) setCrisisAsk({ resume: (quiet) => void advanceNextGame(quiet ? { ...rules, crisis: false } : rules) });
     else if (attention.length) setSummary({ snap: takeSnapshotAfter(), attention });
     else castAfter(before, head);
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
 
-  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave, command: () => void startCommand() };
+  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave, command: () => void (session.commandInProgress ? resumeCommand() : startCommand()) };
   const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
   const { when, left, rec: head } = (cast && castHead) || headOf(session);
   const lastPlace = off ? lastSeasonPlace(session.league, session.teamIdx) : null;
   const pending = !!session.pendingEvent;
   const seasonRunning = !off && !session.done;
-  const advanceDisabled = !!busy || pending || (!seasonRunning && !session.postseasonRunning);
+  // 한 번 진행한 지휘 경기가 있으면 진행을 막는다 (결정함 '진행 중인 경기', 끝까지 지휘하거나 감독에게 맡긴 뒤)
+  const live = !!session.gameLock;
+  const advanceDisabled = !!busy || pending || live || (!seasonRunning && !session.postseasonRunning);
   const list = useMemo(() => decisions(session, acked), [session, version, acked]); // eslint-disable-line react-hooks/exhaustive-deps
   const ack = (key: string, sig: string) => {
     const next = { ...acked, [key]: sig };
@@ -430,10 +451,13 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   };
   const block = blockOf(session, screen);
 
-  const saveText = saveError ? '저장 실패' : busy ? '진행 중' : savedAt ? `자동 저장 ${savedAt.getHours()}:${String(savedAt.getMinutes()).padStart(2, '0')}` : '불러옴';
+  const saveText = saveError ? '저장 실패' : busy ? '진행 중'
+    : savedAt ? `${session.commandInProgress ? '경기 중 자동 저장' : '자동 저장'} ${savedAt.getHours()}:${String(savedAt.getMinutes()).padStart(2, '0')}` : '불러옴';
 
   // 주 진행 단추: 시즌 중 '다음 경기', 가을야구 '다음 경기', 시즌 끝·오프시즌은 그 단계 화면으로
-  const primary = seasonRunning || session.postseasonRunning
+  const primary = live
+    ? { label: '이어서 지휘', act: resumeCommand, disabled: !!busy || !!cmd, title: '진행 중인 경기를 끝까지 지휘하거나 감독에게 맡겨야 다음으로 진행합니다' }
+    : seasonRunning || session.postseasonRunning
     ? { label: '다음 경기', act: advanceNext, disabled: advanceDisabled, title: session.postseasonRunning ? '가을야구 한 경기' : '휴식일은 건너뛰고 다음 경기일까지' }
     : off
       ? screen === 'offseason' && screenPrimary
@@ -556,6 +580,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 )}
                 {cast && !session.pendingEvent && <GameCast key={cast.key} game={cast} onClose={closeCast} live />}
                 {cmd && !session.pendingEvent && <CommandView start={cmd} onDone={() => void endCommand(true)} onCancel={() => void endCommand(false)} />}
+                {crisisAsk && session.crisis?.req && !cmd && <CrisisDialog crisis={session.crisis} onCommand={crisisCommand} onDecline={crisisDecline} />}
                 {party.length > 0 && !cast && !cmd && !summary && !session.pendingEvent && <Celebration items={party} onDone={endParty} />}
                 {tabs && (
                   <div className="seg screen-tabs" role="tablist" aria-label={`${curItem!.label} 화면`}>

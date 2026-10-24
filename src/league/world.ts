@@ -5,6 +5,7 @@
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
+import { arsenalsOf } from '../data/pitches';
 import {
   batValue, DEFAULT_PARAMS, leagueEnvFor, leagueRpa, makeDefense, pickOpeningHosts, pctRankedFromSeason, pitValue, rankedFromSeason, traitsOf,
   type BatSkill, type EngineParams, type SimPlayer, type SimTeam, type World,
@@ -23,7 +24,7 @@ import { ballD2, ballHrMul, futureDelta, futureValue, zoneBb } from './futureRul
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'parks' | 'schedule'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'parks' | 'schedule' | 'pitches'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -184,6 +185,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     year, gamesPerTeam: games, rules, league: lg, env, teams, players,
     ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}), ...(divisions ? { divisions, prevStandings: prevStandings! } : {}),
     ...(league.defPool ? { defPool: league.defPool } : {}),
+    // 투수 구종 (엔진 2 20-1단계): 그 해 전 실측 → 위키 → 선수 ID로 정한 리그 평균 꼴. 저장하지 않는다
+    arsenals: arsenalsOf(players, store.pitches, year),
   };
 }
 

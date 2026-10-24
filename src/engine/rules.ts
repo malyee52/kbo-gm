@@ -161,6 +161,24 @@ export function steals(st: GameState, steal: 'go' | 'hold' | undefined, pitchout
   return stealOne(st, 1, stealPct(st, r2, true));
 }
 
+/**
+ * 플레이어가 지시한 도루 (A 해결기 공 사이, 엔진 2 17단계): 앞 주자가 빈 다음 베이스로. 1루(2루 빔) → 2루 도루, 2루(3루 빔, 1루 빔) → 3루 도루,
+ * 1·2루(3루 빔) → 이중 도루 (steals와 같은 처리). 뛸 주자가 없으면 아무것도 안 한다. 도루 실패로 이닝이 끝나면 true
+ */
+export function orderedSteal(st: GameState): boolean {
+  const { bases, ctx } = st;
+  const [r1, r2, r3] = bases;
+  if (r1 && !r2) return stealOne(st, 0, stealPct(st, r1, false));
+  if (r2 && !r3 && !r1) return stealOne(st, 1, stealPct(st, r2, true));
+  if (r1 && r2 && !r3) {
+    if (ctx.running) ctx.running.double++;
+    if (stealOne(st, 1, stealPct(st, r2, true))) return true;
+    if (!bases[2]) { bases[1] = r1; bases[0] = null; return false; }
+    return stealOne(st, 0, 1);
+  }
+  return false;
+}
+
 /** 타석당 폭투·포일·보크 확률 (주자가 있을 때): 그 해 리그 값 × 투수 제구(볼넷 배율, 나쁠수록 잦다, 엔진 2 8단계) × 포수 수비 */
 function wildPitchChance(st: GameState): number {
   const { fld, ctx } = st;
@@ -209,11 +227,11 @@ export function ibbWildPitchChance(st: GameState): number {
  * 수동 고의4구 (자동 고의4구 도입 전, eras.ts AUTO_IBB_YEAR): 공 4개를 실제로 던지고 공마다 주자가 있으면 폭투·포일을 판정한다
  * (폭투면 주자가 한 베이스씩 가고 남은 공은 그대로 던진다). 볼넷 기록은 부른 쪽이 남긴다. 끝내기면 true
  */
-export function manualIntentionalWalk(st: GameState, pg: PitcherInGame): boolean {
+export function manualIntentionalWalk(st: GameState, pg: PitcherInGame, balls = 4): boolean {
   const { bases, ctx } = st;
   const t = ctx.pen;
   if (t) t.ibbManual++;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < balls; i++) {
     addPitches(ctx, pg, 1);
     if ((bases[0] || bases[1] || bases[2]) && ctx.rng.chance(ibbWildPitchChance(st))) {
       if (t) t.ibbWp++;
@@ -223,7 +241,7 @@ export function manualIntentionalWalk(st: GameState, pg: PitcherInGame): boolean
       }
     }
   }
-  if (t) t.ibbPitches += 4;
+  if (t) t.ibbPitches += balls;
   return false;
 }
 
@@ -239,6 +257,19 @@ export function beginPlateAppearance(st: GameState): { batter: SimPlayer; bl: Ba
   pg.bf++;
   pg.line.bf++;
   return { batter, bl, pg };
+}
+
+/**
+ * 시작한 타석을 없던 일로 (A 해결기 공 사이 도루 실패로 이닝이 끝났을 때, 엔진 2 17단계): 타순·타석·상대 타자 수를 되돌린다.
+ * 던진 공은 그대로 센다. 타자는 다음 이닝 첫 타자로 다시 나온다
+ */
+export function abortPlateAppearance(st: GameState, bl: BatLine, pg: PitcherInGame): void {
+  const { bat, ctx } = st;
+  bat.spot = (bat.spot + 8) % 9;
+  bl.pa--;
+  ctx.totals.pa--;
+  pg.bf--;
+  pg.line.bf--;
 }
 
 /** 번트 타석의 투구 수 (HF 투구 자료 희생번트 타석 분포, params.bunt.pitches) */
