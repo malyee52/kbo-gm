@@ -115,6 +115,9 @@ export interface Side {
   catcherDef: number;
   /** 포수의 도루 저지 (런, 능력치 v2 16-3 BatSkill.cArm). 예전 수비(cArm·playable 없음)면 포수 수비 런과 같다 */
   catcherArm: number;
+  /** 포수의 블로킹·프레이밍 (능력치 v2 16-3 BatSkill.cBlock·cFrame, 없으면 0 = 리그 평균) */
+  catcherBlock: number;
+  catcherFrame: number;
   /** 수비 영점 (런 = (m − 50) ÷ 2, LeagueEnv.defZero). 자리별 수비 런에서 뺀다 */
   defZero: number;
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
@@ -149,10 +152,14 @@ export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.ex
  * 수비 배치에서 자리별 수비 런, 포수 수비 런·도루 저지. zero: 수비 영점 (런, Side.defZero) — 리그 평균 수비가 0이 되게 뺀다 (능력치 v2 13.6).
  * 포수 도루 저지는 v2 선수면 cArm (없으면 수비 가능 포수 0, 아니면 바닥 CATCHER_ARM_FLOOR), 예전 수비면 포수 수비 런
  */
-export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero = 0): { slotDef: Partial<Record<Slot, number>>; catcherDef: number; catcherArm: number } {
+export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero = 0): {
+  slotDef: Partial<Record<Slot, number>>; catcherDef: number; catcherArm: number; catcherBlock: number; catcherFrame: number;
+} {
   const slotDef: Partial<Record<Slot, number>> = {};
   let catcherDef = 0;
   let catcherArm = 0;
+  let catcherBlock = 0;
+  let catcherFrame = 0;
   for (const p of lineup) {
     const slot = slots.get(p.idx);
     if (!slot) continue;
@@ -162,9 +169,11 @@ export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero
       catcherDef = r;
       const b = p.bat;
       catcherArm = b?.cArm ?? (b?.playable ? (b.playable.includes('C') ? 0 : CATCHER_ARM_FLOOR) : r);
+      catcherBlock = b?.cBlock ?? 0;
+      catcherFrame = b?.cFrame ?? 0;
     }
   }
-  return { slotDef, catcherDef, catcherArm };
+  return { slotDef, catcherDef, catcherArm, catcherBlock, catcherFrame };
 }
 
 /** 그 자리를 맡은 수비수의 선수 색인 (투수는 지금 마운드의 투수). 없으면 −1 */

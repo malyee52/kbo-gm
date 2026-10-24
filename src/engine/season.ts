@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, injuryProneness, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { AUTO_IBB_YEAR, eraEnv, eraPitching, withEraRunning } from './eras';
+import { ABS_YEAR, AUTO_IBB_YEAR, eraEnv, eraPitching, withEraRunning } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -346,6 +346,7 @@ export class Season {
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
       errors: this.errors, defOuts: this.defOuts, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
       autoIbb: world.year >= AUTO_IBB_YEAR,
+      framing: world.year < ABS_YEAR,
       // 볼카운트 사슬 능력 (능력치 v2 16-1). 투구 수를 세지 않는 해결기(B0)도 삼진·볼넷은 같은 사슬에서
       plate: plateContext(world.players, world.league, params, world.year),
     };

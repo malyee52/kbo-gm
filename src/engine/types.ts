@@ -45,6 +45,21 @@ export interface BatSkill {
   defEdit?: FieldPos[];
   /** 포수 도루 저지 (런, 한 시즌당, 16-3). 없으면 포수 자리에서 수비 가능 포수 0 · 아니면 바닥 (state.ts fieldDefense) */
   cArm?: number;
+  /**
+   * 주루·작전·포수 손잡이 (능력치 v2 16-3, 기획안 1.3·1.4). 모두 리그 대비 값이고 없거나 0이면 리그 평균 (앞 단계와 같은 결과).
+   * 도루 스타트: 도루 성공 확률 로짓에 더한다 (투수 퀵모션과 로짓 덧셈). 기록 성공률(sbPct)에 이미 든 몫 밖의 차이
+   */
+  sbStart?: number;
+  /** 도루 판단: 도루 시도 확률에 exp(값)을 곱한다 (투수 견제와 덧셈). 기록 시도율(sbAtt)에 이미 든 몫 밖의 차이 */
+  sbJudge?: number;
+  /** 주루 판단: 추가 진루 시도 확률 로짓에 더하고 주루사 확률 로짓에서 뺀다 (주력과 따로) */
+  runIQ?: number;
+  /** 번트·작전 수행: 번트 실패 몫(선행 주자 아웃·뜬공·병살, 스퀴즈 실패)에 exp(−값)을 곱한다 */
+  bunting?: number;
+  /** 포수 블로킹: 포수일 때 폭투·포일 확률에 exp(−값)을 곱한다 */
+  cBlock?: number;
+  /** 포수 프레이밍: 포수일 때 스윙 안 한 공의 스트라이크 판정 로짓에 더한다 (자동 판정 전 해만, params.skill2.absYear) */
+  cFrame?: number;
 }
 
 /** 투수 능력: 상대 타석 결과별 리그 대비 비율 (1.00 = 리그 평균, 삼진은 클수록 좋고 나머지는 작을수록 좋다) */
@@ -71,6 +86,10 @@ export interface PitSkill {
   plateRes?: PitPlate;
   /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
   platoon?: number;
+  /** 견제 (능력치 v2 16-3, 기획안 1.5): 1루 주자의 도루 시도 확률에 exp(−값), 견제사 확률에 exp(값). 없거나 0이면 리그 평균 */
+  hold?: number;
+  /** 퀵모션: 도루 성공 확률 로짓에서 뺀다 (주자 도루 스타트와 로짓 덧셈). 없거나 0이면 리그 평균 */
+  quick?: number;
 }
 
 export interface SimPlayer {

@@ -102,6 +102,8 @@ export interface GameContext {
   pen?: PenTally;
   /** 고의4구를 공 없이 하나 (자동 고의4구, eras.ts AUTO_IBB_YEAR 이후). false면 공 4개를 실제로 던진다. 없으면 자동 */
   autoIbb?: boolean;
+  /** 포수 프레이밍이 작동하나 (자동 볼 판정 전 해, eras.ts ABS_YEAR, 능력치 v2 16-3). 없으면 작동 안 함 */
+  framing?: boolean;
   /** 좌우 4칸 집계 (엔진 2 9단계 점검 도구만): 'LL'(좌타·좌투) 'LR' 'RL' 'RR' → 타석 결과 수. 양타는 투수 반대 손. 없으면 세지 않는다 */
   splits?: Record<string, Partial<Record<PlayKind, number>>>;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
@@ -407,7 +409,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     if (going && !tactic && !walk && !hitter) {
       const rates = paRates(batter, pg, bat.isHome, ctx, {
         runnersOn: true, scoring: false, late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
-      }, st.park);
+      }, st.park, ctx.framing ? fld.catcherFrame : 0);
       addPitches(ctx, pg, 1);
       const r0 = bat.runs;
       const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
@@ -438,7 +440,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     else {
       rates = paRates(batter, pg, bat.isHome, ctx, {
         runnersOn: !st.basesEmpty, scoring: !!(st.bases[1] || st.bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
-      }, st.park);
+      }, st.park, ctx.framing ? fld.catcherFrame : 0);
       const res = resolver.resolve(rates, ctx.rng);
       ev = res.ev;
       addPitches(ctx, pg, res.pitches);

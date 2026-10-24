@@ -11,7 +11,7 @@ import { currentBody } from './team';
 import { conditionOf } from './condition';
 import { expectedPitches, type SolvedChain } from './chain';
 import { batBallSide, ballMix, clampRate, leagueBall, pitBallSide, thetaOf, type BallMix, type BallSide, type LeagueBall } from './angle';
-import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
+import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, type PlateShift, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
 
 /** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
 export function tiredPenalty(body: number, bp: BodyParams): number {
@@ -158,8 +158,15 @@ export function condToday(ctx: Pick<GameContext, 'states' | 'condEvent'>, idx: n
   return conditionOf(ctx.states.cond[idx], ctx.condEvent ? ctx.condEvent[idx] : 0);
 }
 
+/** 포수 프레이밍 (능력치 v2 16-3, frame: 로짓, 0이면 sh 그대로) */
+function frameShift(sh: PlateShift, frame: number): PlateShift {
+  if (frame) sh.frame = frame;
+  return sh;
+}
+
 /** 타석 결과 확률. 수비는 여기서 보지 않는다: 인플레이 타구를 맡은 수비수가 안타 ↔ 아웃을 바꾼다 (battedball.ts, 엔진 2 5단계) */
-export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, state: PaState = NO_STATE, park = NEUTRAL_PARK): PaRates {
+export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, state: PaState = NO_STATE, park = NEUTRAL_PARK,
+  frame = 0): PaRates {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
@@ -206,7 +213,7 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   // (리그 평균 매치업에서 같은 배율이 되는 크기, 기획안 1.9 4·5), 사구는 배율로
   const mK = cal.so * down * (1 - fat);
   const mW = cal.bb * up * worse;
-  const ch = plateChain(pl.lp, batPlateOf(pl, b), pitPlateOf(pl, pg.p), shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]));
+  const ch = plateChain(pl.lp, batPlateOf(pl, b), pitPlateOf(pl, pg.p), frameShift(shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]), frame));
   const X = ch.e[3];
   // 능력치 v2 16-2: 맞힌 공 X 뒤 결과는 타구 갈래(angle.ts)에서. 각도 성향 θ = 타자 + 투수, 퍼짐은 타자 컨택, 구간별 결과 로짓에 양쪽 손잡이를 더한다.
   // 환경 맞춤·좌우·홈·특수능력·컨디션·구장·피로의 예전 배율은 결과 로짓에 로그로 더한다 (환경 맞춤은 시범 시즌으로 다시 맞춰진다)
