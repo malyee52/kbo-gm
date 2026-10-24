@@ -3,6 +3,7 @@
 import type { DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
+import { marketReputation } from './scout';
 import { initialMilitary } from './careers';
 import { makeDraftee, openMarket, POST_FA_RESERVE, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
@@ -154,7 +155,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
 
     let contract: Contract;
     // 아시아쿼터도 아시아쿼터 연봉 식으로 (2026-10-22 사용자 보고: 웰스가 일반 외국인 재계약 식으로 100만 달러를 넘게 받았다)
-    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(now, false, asia), until: startYear };
+    // 외국인 연봉은 진짜 능력이 아니라 시장 평판 (scout.ts, 기획안 19.4)
+    if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(marketReputation(seed, p.id, now, startYear), false, asia), until: startYear };
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
@@ -170,7 +172,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     const realPay = p.foreign ? realForeign.get(p.id) : undefined;
     if (realPay) contract = { kind: 'foreign', salary: realPay.salary, ...(realPay.bonus ? { bonus: realPay.bonus } : {}), until: startYear };
     else if (p.foreign && ![...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].some((r) => r.year < startYear)) {
-      contract = { kind: 'foreign', salary: foreignSalary(now, true, asia), until: startYear };
+      contract = { kind: 'foreign', salary: foreignSalary(marketReputation(seed, p.id, now, startYear), true, asia), until: startYear };
     }
 
     return {
@@ -201,7 +203,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       lp.market = startYear;
       const from = arrival(p.id);
       if (from > 0) lp.marketFrom = from;
-      lp.contract = { kind: 'foreign', salary: foreignSalary(currentRuns(p, ctx), true, lp.asia), until: startYear };
+      lp.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(seed, p.id, currentRuns(p, ctx), startYear), true, lp.asia), until: startYear };
       players.push(lp);
     }
   }

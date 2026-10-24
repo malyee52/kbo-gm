@@ -1,9 +1,9 @@
 // 스카우트 추측과 드래프트 보드 (능력치 v2 기획안 17.7·17.8·19.2·19.3). 리그를 만들지 않는 가벼운 시험.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { gradeRuns } from '../src/league/potential';
+import { gradeRuns, runsPerGrade } from '../src/league/potential';
 import {
-  aiDifficultyScale, boardTier, branchSigma, ceilingSigma, CEIL_SIGMA, draftBoard, gapPhrase, guessProspect, guessView, relationScale, sampleScale, scoutZ,
+  aiDifficultyScale, boardTier, foreignSigma, marketReputation, branchSigma, ceilingSigma, CEIL_SIGMA, draftBoard, gapPhrase, guessProspect, guessView, relationScale, sampleScale, scoutZ,
 } from '../src/league/scout';
 import { INVEST_COST, investCost, type InvestKind } from '../src/league/finance';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
@@ -167,5 +167,31 @@ describe('숨은 값은 스카우트가 보지 않는다 (17.4 ②, 19.2)', () =
     const off = readFileSync('src/league/offseason.ts', 'utf8');
     const fn = off.slice(off.indexOf('function bestProspect'), off.indexOf('function makePick'));
     expect(fn).not.toMatch(/aiPotential|\.potential\b|scoutPotential/);
+  });
+});
+
+describe('외국인 (19.4): 시장 평판 몸값, AI는 추측으로', () => {
+  it('시장 평판은 선수마다 고정, 모든 구단 공통이고 진짜 능력 둘레에 퍼진다 (σ 6등급)', () => {
+    expect(marketReputation('s', 'f1', 30, YEAR)).toBe(marketReputation('s', 'f1', 30, YEAR));
+    const errs = Array.from({ length: 2000 }, (_, i) => (marketReputation('s', `f${i}`, 30, YEAR) - 30) / runsPerGrade(YEAR));
+    const sd = Math.sqrt(errs.reduce((s, e) => s + e * e, 0) / errs.length);
+    expect(sd).toBeGreaterThan(5.4);
+    expect(sd).toBeLessThan(6.6);
+  });
+
+  it('요구 연봉은 진짜 잠재·능력이 아니라 평판으로, AI 외국인 영입·시즌 중 교체는 구단 추측으로 (소스 검사)', () => {
+    const strip = (s: string) => s.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const f of ['src/league/offseason.ts', 'src/league/create.ts', 'src/league/market.ts']) {
+      const src = strip(readFileSync(f, 'utf8'));
+      for (const m of src.matchAll(/foreignSalary\(([^,]+(?:\([^)]*\))?[^,]*),/g)) expect(m[1], f).toMatch(/marketReputation|fxRep/);
+    }
+    const off = strip(readFileSync('src/league/offseason.ts', 'utf8'));
+    const picks = off.slice(off.indexOf('function aiForeignPicks'), off.indexOf('function runForeignUntilUser'));
+    expect(picks).toMatch(/aiSeenForeign/);
+    expect(picks).not.toMatch(/signingGain\(view, team, view\.sim\.get/);
+    const mk = strip(readFileSync('src/league/market.ts', 'utf8'));
+    const day = mk.slice(mk.indexOf('export function aiMarketDay'));
+    expect(day).toMatch(/guessRuns/);
+    expect(foreignSigma(fakeLeague(), { team: 3, user: false })).toBeCloseTo(6 * 2.5 * 0.8 * 0.49);
   });
 });

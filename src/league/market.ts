@@ -14,6 +14,7 @@
 // 결산 뒤 자금이 0 근처인 구단이 많아 다음 해부터 교체가 거의 없어졌다 (2026-10-12 측정: 0~2명)
 
 import { currentRuns, type ValueContext } from '../ai/value';
+import { foreignSigma, guessRuns } from './scout';
 import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
@@ -303,9 +304,12 @@ export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in:
     const cands = world.players.filter((p) => p.teamIdx === -1 && p.foreign && isMarketForeign(p, lpById.get(p.id), world.year)
       && !!lpById.get(p.id)?.asia === asia && p.isPitcher === target.out.isPitcher && availableDay(lpById.get(p.id), season.schedule.length) <= day);
     if (!cands.length) continue;
-    const runs = (p: SimPlayer) => currentRuns(p, ctx.values);
-    const pick = cands.reduce((a, b) => (runs(b) > runs(a) || (runs(b) === runs(a) && b.id < a.id) ? b : a));
-    if (target.why === 'slump' && runs(pick) < runs(target.out) + AI_SWAP_GAIN) continue;
+    // 후보는 그 구단의 추측으로 본다 (진짜 + z × σ, scout.ts, 기획안 19.4). 자기 외국인은 진짜 능력 (오래 지켜봄)
+    const who = { team: t, user: false };
+    const sigma = foreignSigma(ctx.league, who);
+    const seen = (p: SimPlayer) => guessRuns(ctx.league, who, p.id, currentRuns(p, ctx.values), sigma, world.year);
+    const pick = cands.reduce((a, b) => (seen(b) > seen(a) || (seen(b) === seen(a) && b.id < a.id) ? b : a));
+    if (target.why === 'slump' && seen(pick) < currentRuns(target.out, ctx.values) + AI_SWAP_GAIN) continue;
     releasePlayer(ctx, target.out, t);
     signPlayer(ctx, pick, t);
     out.push({ team: t, out: target.out, in: pick, why: target.why });

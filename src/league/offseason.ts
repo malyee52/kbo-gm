@@ -21,8 +21,8 @@ import { FIELD_POS } from '../engine/defense';
 import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
-import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, skillForRuns, type CareerIndex } from './growth';
-import { draftBoard, type BoardRow } from './scout';
+import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex } from './growth';
+import { draftBoard, foreignSigma, guessRuns, marketReputation, type BoardRow } from './scout';
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
@@ -1707,8 +1707,13 @@ const isForeignOf = (p: LeaguePlayer, t: number) => p.team === t && p.foreign;
 function toPool(league: LeagueState, view: LeagueView, p: LeaguePlayer): void {
   p.team = -1;
   // 계약금은 지난 계약 것이라 지운다
-  p.contract = { kind: p.contract.kind, salary: foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), true, p.asia, league, view.year), until: p.contract.until };
+  p.contract = { kind: p.contract.kind, salary: foreignSalary(fxRep(league, view, p), true, p.asia, league, view.year), until: p.contract.until };
 }
+/** 외국인 시장 평판 (런, scout.ts): 요구 연봉은 진짜 능력이 아니라 이것으로 (기획안 19.4) */
+function fxRep(league: LeagueState, view: LeagueView, p: LeaguePlayer): number {
+  return marketReputation(league.seed, p.id, currentRuns(view.sim.get(p.id)!, view.ctx), view.year);
+}
+
 /** 계약 기간이 이번 오프시즌에 끝나는 외국인 */
 const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.until <= year;
 
@@ -1718,7 +1723,7 @@ function foreignKeepAdvice(view: LeagueView, p: LeaguePlayer, year: number): boo
 
 /** 재계약 연봉: 원래 받을 금액과 3명 총액 상한의 남은 몫 중 작은 쪽 (아시아쿼터는 상한 없음, 임시 규칙) */
 function resignForeignSalary(league: LeagueState, view: LeagueView, p: LeaguePlayer, room: number): number {
-  const want = foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), false, p.asia, league, view.year);
+  const want = foreignSalary(fxRep(league, view, p), false, p.asia, league, view.year);
   return p.asia ? want : Math.min(want, Math.max(0, room));
 }
 
@@ -1805,7 +1810,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
       // 아시아쿼터 0~16런. 예전 값은 일반 6~36런(평균 21)이라 보통 주전에 그쳤다
       runs: asia ? 4 + rng.range(-4, 12) : 30 + rng.range(-10, 16),
     }, year);
-    p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia, league, year + 1), until: year + 1 };
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year + 1), year + 1), true, asia, league, year + 1), until: year + 1 };
     p.scoutPotential = scoutView(league, p.potential, rng);
     p.transferFee = transferFeeUsd(p.contract.salary);
     pool.push(p.id);
@@ -1898,15 +1903,29 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
   log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(foreignContractTotal(p.contract) / 10000)}만 달러${fee ? `, 이적료 ${Math.round(fee / 10000)}만 달러` : ''}${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
 }
 
+/**
+ * AI 구단이 보는 외국인 후보 (기획안 17.8·19.4): 진짜 능력 대신 그 구단의 추측(진짜 + z × σ, 프로 스카우트 단계·난이도·관찰 기간)만큼
+ * 능력을 옮긴 모습. 계약은 진짜 선수로 한다
+ */
+function aiSeenForeign(league: LeagueState, view: LeagueView, team: number, sim: SimPlayer): SimPlayer {
+  const who = { team, user: false };
+  const now = currentRuns(sim, view.ctx);
+  const target = guessRuns(league, who, sim.id, now, foreignSigma(league, who), view.year);
+  const d = shiftForRuns({ ...sim, birthYear: sim.age === null ? null : view.year - sim.age }, target, view.ctx, view.year);
+  return { ...sim, bat: sim.bat && shiftBat(sim.bat, d), pit: sim.pit && shiftPit(sim.pit, d) };
+}
+
 function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, view: LeagueView): void {
   const tendency = tendencyFor(league, view, team);
+  const seen = new Map<string, SimPlayer>();
   for (let guard = 0; guard < 4; guard++) {
     let best: LeaguePlayer | null = null;
     let bestGain = 0;
     for (const id of off.foreign!.pool) {
       const p = league.players.find((x) => x.id === id)!;
       if (!canSignForeign(league, off, team, p).ok) continue;
-      const gain = signingGain(view, team, view.sim.get(id)!, 2, tendency, false);
+      if (!seen.has(id)) seen.set(id, aiSeenForeign(league, view, team, view.sim.get(id)!));
+      const gain = signingGain(view, team, seen.get(id)!, 2, tendency, false);
       if (gain > bestGain) {
         bestGain = gain;
         best = p;
@@ -2734,7 +2753,7 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
       foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(9),
       runs: asia ? 2 + rng.range(-4, 10) : 26 + rng.range(-10, 12),
     }, year - 1);
-    p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia, league, year), until: year };
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year), year), true, asia, league, year), until: year };
     p.scoutPotential = scoutView(league, p.potential, rng);
     p.market = year;
   }

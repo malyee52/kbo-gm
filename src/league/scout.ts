@@ -205,3 +205,29 @@ export function draftBoard(
     id: r.p.id, rank: i + 1, tier: boardTier(i + 1, o.teams, o.slots), note: prospectNote(r.p, r.g, r.ageNext), value: r.value,
   }));
 }
+
+// ---- 외국인 (19.4): 시장 평판 몸값, 관찰 폭
+
+/** 외국인 몸값을 정하는 시장 평판의 오차 (등급, 모든 구단 공통, 19.4, 임시값). 시드 `${시드}/fx-rep/${ID}` */
+export const FX_REP_SIGMA = 6;
+/** 관찰 배율: 지켜본 4주마다 σ × 0.7 (19.4) */
+export const FX_WATCH_DECAY = 0.7;
+/** 파견(19.4 관찰 명단) 전까지 외국인 후보는 이만큼(4주 단위) 지켜본 것으로 본다 (임시값, 파견이 생기면 실제 지켜본 기간으로) */
+export const FX_DEFAULT_WATCH = 2;
+
+/**
+ * 외국인 시장 평판 (런): 진짜 지금 능력 + 모든 구단이 같이 보는 오차. 요구 연봉은 이것으로 정한다 (예전에는 진짜 잠재라 "비싼 후보 = 좋은 후보"로 읽혔다)
+ */
+export function marketReputation(seed: string, id: string, trueRuns: number, year: number): number {
+  return trueRuns + gauss(new Rng(`${seed}/fx-rep/${id}`)) * FX_REP_SIGMA * runsPerGrade(year);
+}
+
+/** 외국인 후보의 지금 능력 추측 폭 σ (등급): 기록 없는 선수의 잘 드러나는 갈래 × 프로 스카우트 배율 × 관찰 배율 */
+export function foreignSigma(league: LeagueState, who: Observer, watch = FX_DEFAULT_WATCH): number {
+  return branchSigma(league, who, 'clear', { sample: null, seasonsWithUs: null, scout: 'pro' }) * FX_WATCH_DECAY ** watch;
+}
+
+/** 추측 지금 능력 (런): 진짜 + z × σ (z는 그 선수의 'now' 줄기) */
+export function guessRuns(league: LeagueState, who: Observer, id: string, trueRuns: number, sigma: number, year: number): number {
+  return trueRuns + scoutZ(league.seed, who, id, 'now') * sigma * runsPerGrade(year);
+}
