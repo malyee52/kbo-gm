@@ -9,8 +9,8 @@ export { DECLINE_START_AGE, DEFAULT_PARAMS, isStarterSkill, STARTER_SHARE, type 
 export { Rng } from './rng';
 export { buildWorld, hardhitPositions, batValue, pitValue, batSkillFrom, pitSkillFrom, seasonPark, leagueRpa, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress, penTrustOf } from './ratings';
 export {
-  simulateSeason, calibrate, winPct, rankTeams, rankWithTiebreak, rosterFingerprint, Season, OLD_SCHEDULE_SAVE, SEASON_SAVE_FORMAT, packSchedule, unpackSchedule,
-  type DivisionTable, type SeasonPlan, type SavedSchedule, type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
+  simulateSeason, calibrate, setCalibrationCache, winPct, rankTeams, rankWithTiebreak, rosterFingerprint, Season, OLD_SCHEDULE_SAVE, SEASON_SAVE_FORMAT, packSchedule, unpackSchedule,
+  type CalibrationCache, type DivisionTable, type SeasonPlan, type SavedSchedule, type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
   MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, teamRules, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,

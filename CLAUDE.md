@@ -20,14 +20,19 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 자동 테스트 (Vitest, 876개, 전체 약 22분). PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
+npm test           # 전체 시험 (Vitest, 880개). 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
+                   # 환경 맞춤 디스크 캐시(node_modules/.cache/kbo-cal, tools/calCache.ts): 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다
+                   # (결과 같음. 혼자 돌린 PC에서 캐시 없음 1019초 → 찬 캐시 438초, 작업자 8개면 약 +30%). 끄기 KBO_CAL_CACHE=0
+                   # 작업자 기본 8개 (약 3.8GB, vite.config.ts). KBO_TEST_FORKS=<수>, 0이면 vitest 기본(코어 수 − 1)
+npm run test:fast  # 빠른 묶음 (tests/heavy.json의 무거운 66개 파일을 뺀 351개, 약 1~2분). 카드 중에는 이것 + 고친 곳과 관련된 무거운 파일만
+                   # 목록 다시 만들기: npx vitest run --reporter=json --outputFile=reports/test-times.json && npx tsx tools/test_split.ts reports/test-times.json --over 60
 npm run typecheck
 npm run build
 npm run data       # data-src/ 엑셀 → public/data/ JSON 변환 후 검사 (Python 3 + openpyxl 필요)
                    # 이 PC는 python3가 MS 스토어 껍데기라 안 된다: python tools/build_data.py && python tools/validate_data.py
                    # 하드힛 가공값(무시 목록)이 없는 PC에서 돌리면 하드힛으로 채운 값이 빠진다. 데이터는 하드힛 백업이 있는 PC에서만 다시 만든다
 python tools/build_data.py --rules-only     # 연도별 규칙(meta.json rules)과 규칙 변경(rule_changes.json)만. --schedule-only 일정 규칙, --ppa-only 선수별 P/PA, --homes-only 연고지
-npm run validate -- --years 2025 --seasons 1000   # 엔진 검증
+npm run validate -- --years 2025 --seasons 1000   # 엔진 검증 (validate·park_check·longsim도 같은 맞춤 캐시를 쓴다)
 python3 tools/fit_regression.py                    # 능력 산출 회귀 상수 다시 맞추기
 npx tsx tools/longsim.ts --seasons 20 --seeds a,b --out reports/longsim-20.md   # 장기 진행 점검 (모든 구단 AI). FA·캡·미래 규칙·단장 회의 열. 50시즌은 시드 하나에 약 10~18분 (--vote-dump <파일>)
 npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 나이 보정 효과 측정
@@ -90,13 +95,15 @@ npx tsx tools/salary_diag.ts --seed a --at 0,10  # 연봉 진단
 - 세션은 같은 날 가을야구 경기(양대 리그 해의 두 플레이오프)를 함께 치른다 (`advancePostseason`이 그날 경기 수를 돌려줌). 같은 날 경기 사이에 조작이 끼면 재현이 날짜 단위라 어긋나기 때문.
 - 더블헤더 날은 1차전 묶음 → 2차전 묶음으로 치른다. 2차전 라인업 난수는 그 경기 줄기(`gameRng(day, g).fork('lineup')`)에서 쓴다 (하루 난수를 경기 결과에 따라 밀지 않게). 그날 최대 이닝(2021 후반기 9회, 2020 더블헤더·월요일 9회)은 `Season.maxInningsOn(day, 더블헤더)`가 그 시즌 일정의 개막일로 센다.
 - 새 화면을 만들면 `src/ui/menu.ts`의 MENU에 자리를 정하고, 열 수 없는 때가 있으면 `blockOf`에 사유와 열리는 때를 적는다 (숨기지 않는다). 처리해야 하는 일이 생기는 기능이면 `decisions.ts`에 넣는다. 엔트리·기용을 바꾸는 새 화면은 `session.checkBoard`/`applyBoard`로 묶음을 검사·적용한다.
-- 엔진을 바꿀 때 운으로 깨지기 쉬운 시험: `owner` M7 한 바퀴(LG 우승 판이면 시드 교체), `fantasy-free` 그레인키 입단, `second-draft` 2025, `events-impact` 경기력, `articles` 순위 기사. 시드 이력은 각 테스트 주석에 있다.
+- 엔진을 바꿀 때 운으로 깨지기 쉬운 시험: `second-draft` 2025, `events-impact` 경기력(16시드 평균, 전체 시험의 바닥 시간), `articles` 순위 기사. 시드 이력은 각 테스트 주석에 있다. `owner` M7 한 바퀴는 후보 시드 중 LG가 우승하지 못한 첫 판을 쓰고, `fantasy-free` 그레인키·`history` 최다 홈런은 운과 관계없게 고쳤다 (2026-10-24).
 - 트레이드는 `Season.transfer`로 월드의 소속을 직접 바꾸고 저장에 이적 기록을 남긴다. 한 월드를 두 시즌이 같이 쓰지 않는다.
 - AI 판단을 바꾸면 `docs/trade-exploits.md` 시나리오 테스트(`tests/trade.test.ts`)를 돌린다.
 - 저장 후 이어서 돌린 결과, 화면 조회(`refresh`)를 끼운 결과가 끊김 없이 돌린 결과와 같아야 한다 (`tests/game.test.ts`). 엔진 진행 순서를 바꿀 때 이 테스트가 깨지지 않게 한다.
 - 화면 스타일은 `src/ui/base.css`(색·글꼴 토큰, 입력·버튼·표 공통)와 `src/ui/game.css`(게임 화면 부품)에 모은다. 색은 토큰만 쓰고 직접 값을 넣지 않는다. 구단 색은 `.shell`의 `--team` 변수(선수 창·구단 카드는 `--team`·`--c` 인라인 변수)로 내려오고, 라이트·다크는 `prefers-color-scheme`으로 모두 지원한다. 글꼴 Pretendard는 `index.html`에서 CDN으로 받고 없으면 시스템 글꼴로 대신한다.
 - **난수는 `Rng`만 쓴다.** `Math.random()`, 현재 시각 등 시드로 재현되지 않는 값을 엔진에 넣지 않는다. 같은 시드는 같은 결과를 내야 한다 (테스트로 확인 중).
-- 엔진을 고치면 `npm test`와 `npm run validate -- --years 2025,2019,2012 --seasons 100`으로 리그 평균이 틀어지지 않았는지 확인한다. 기준은 `docs/engine.md` 4장.
+- 엔진을 고치면 `npm test`와 `npm run validate -- --years 2025,2019,2012 --seasons 100`으로 리그 평균이 틀어지지 않았는지 확인한다 (병합 준비·PR 전. 카드 중에는 아래 "시험 돌리는 단계"). 기준은 `docs/engine.md` 4장.
+- **시험 돌리는 단계** (2026-10-24 클사장 결정, 시험 속도 카드): 카드 중에는 `npm run test:fast` + 고친 곳과 관련된 무거운 시험 파일(`npx vitest run tests/<파일>`)만, validate는 `--seasons 20`으로 먼저 본다. 전체 `npm test`와 validate 100시즌은 병합 준비·PR 전에 돌린다. 무거운 명령은 `bash C:/Users/ararp/kbo-gm-raw/heavy2.sh <명령>`으로 줄을 세운다 (자리 최대 3개, 하나가 돌고 있으면 남은 메모리가 7GB 이상일 때만 다음 자리. `HEAVY_SLOTS`·`HEAVY_NEED_GB`, 옛 판 `heavy2.sh.bak`).
+- 운에 따라 성립하지 않는 시험은 시드를 손으로 바꾸지 말고, 후보 시드 중 조건이 맞는 첫 시드를 쓰게 하거나(owner M7 해고 묶음) 시험 대상이 아닌 운을 막는다(fantasy-free 그레인키: 결산 앞 신뢰도 100).
 - 조정값은 `params.ts`에 모은다. 근거 없이 정한 값은 주석에 "임시값"이라고 적는다.
 - 확인하지 못한 사실은 확인한 것처럼 쓰지 않는다. 제도·연혁은 자료집 엑셀의 "제도연표" 시트에서 확인 상태를 본다 (위키로 확인한 값은 `data-src/제도연표_보정.csv`, 연장·무승부·승률 연표는 `meta.json` rules의 `…Source` 칸, `'disputed'` = 출처가 갈려 다수 설).
 - 사용자는 게임 QA를 공부하고 있다. 테스트 케이스와 재현 가능한 버그 보고에 도움이 되는 구조(시드, 검증 스크립트, 자동 테스트)를 유지한다.

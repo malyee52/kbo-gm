@@ -138,8 +138,9 @@ describe('자유 모드', () => {
   }, 600_000);
 
   it('입단 예약·단장 노트: 2000년에 후원한 그레인키(1983년생)는 만 17세 이후 정한 해 개막 때 실제로 들어온다', () => {
-    // 시드: 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 엔진이 바뀌어 해고되면 시드를 바꾼다 (2026-10-21 첫 시즌 밸런스 때 pipe → pipe-2, 같은 날 입대 규칙(상무 정원·현역) 때 pipe-3, 2026-10-22 하드힛 투구손 채움 때 pipe-4, 같은 날 구장 효과 때 pipe-5, 엔진 2 6단계 타구 모형 2 때 pipe-6, 15단계 시간 제한 흉내 값 때 pipe-7, 능력치 v2 16-2 타구각 때 pipe-10 (pipe-8·9는 2001 뒤 FA 단계에서 멈춤), 2026-10-24 구장 효과 P8 때 pipe-11 (pipe-10은 2001 뒤 해고))
-    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-11', fantasy: { free: true } }, FAST);
+    // 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 예전에는 엔진이 바뀌어 해고될 때마다 시드를 바꿨다 (pipe → … → pipe-7, 2026-10-21~10-23).
+    // 2026-10-24 시험 속도 카드: 결산 앞에서 신뢰도를 100으로 올려 해고를 막는다 (이 시험은 해고가 아니라 입단 예약을 본다)
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-7', fantasy: { free: true } }, FAST);
     const team = g.league.teams[0].name;
     const { ops, dropped } = resolveOps(g, [
       { op: 'future', name: '잭 그레인키', team, pos: 'P', role: 'SP', birthYear: 1983, joinYear: 2002, now: 50, potential: 75 },
@@ -154,6 +155,7 @@ describe('자유 모드', () => {
     expect(freeContext(g, store)).toContain('[입단 예약]');
     for (let y = 2000; y < 2002; y++) {
       g.advance(100000);
+      g.owner.trust = 100;
       g.beginOffseason();
       for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
         const st = g.offseason!.stage;

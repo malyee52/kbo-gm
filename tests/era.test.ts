@@ -189,5 +189,5 @@ describe('M8 완료 기준: 1982년 시작 → 2026년까지 자동 진행', () 
     expect(Math.min(...seenFa)).toBeGreaterThanOrEqual(1999);
     expect(seenFa.length).toBeGreaterThan(0);
     expect(Math.min(...seenForeign)).toBe(1998);
-  }, 600_000);
+  }, 1_200_000); // 45시즌: 다른 작업과 겹친 PC에서 597초(한도 600초)까지 걸려 늘렸다 (2026-10-24)
 });

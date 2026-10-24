@@ -996,6 +996,31 @@ export class Season {
  * 능력치는 리그 평균 대비 값이라, 누가 얼마나 뛰느냐에 따라 리그 합계가 목표에서 조금씩 벗어나기 때문이다.
  */
 export function calibrate(world: World, params: EngineParams, rng: Rng): Rates {
+  const hit = calCache?.get(world, params, rng.seed);
+  if (hit) return { ...hit };
+  const cal = calibrateRun(world, params, rng);
+  calCache?.set(world, params, rng.seed, cal);
+  return cal;
+}
+
+/**
+ * 환경 맞춤 결과 보관소. 시험과 검증 도구가 디스크 캐시를 끼운다 (tools/calCache.ts). 화면은 끼우지 않는다.
+ * 맞춤은 월드·조정값·난수 시드만 읽고(예비 시즌은 월드를 바꾸지 않는다) 결과가 결정적이라, 같은 입력이면 저장한 값을 돌려줘도 된다.
+ * 키에 엔진 코드까지 넣는 것은 보관소 몫이다.
+ */
+export interface CalibrationCache {
+  get(world: World, params: EngineParams, seed: string): Rates | undefined;
+  set(world: World, params: EngineParams, seed: string, cal: Rates): void;
+}
+
+let calCache: CalibrationCache | undefined;
+
+/** 환경 맞춤 보관소를 끼우거나(undefined면) 뺀다 */
+export function setCalibrationCache(cache: CalibrationCache | undefined): void {
+  calCache = cache;
+}
+
+function calibrateRun(world: World, params: EngineParams, rng: Rng): Rates {
   const cal = { ...UNIT };
   const keys = Object.keys(cal) as (keyof Rates)[];
   for (let round = 0; round < 2; round++) {

@@ -11,6 +11,10 @@ import { dirname } from 'node:path';
 import { loadDataStore } from '../src/data/loadNode';
 import type { SeasonData } from '../src/data/types';
 import { calibrate, DEFAULT_PARAMS, Rng, simulateSeason, winPct, worldForYear, type EngineParams, type World } from '../src/engine';
+import { installCalCache } from './calCache';
+
+// 환경 맞춤 디스크 캐시: 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다 (결과는 같다. 끄기 KBO_CAL_CACHE=0)
+installCalCache();
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
