@@ -39,7 +39,7 @@ describe('펜스 조정 공사 (6.7, P6b)', () => {
     const st = fenceWorkState(L, nc, 2026, src);
     expect(st.kind).toBe('fence');
     expect(st.now).toEqual({ l: 101, c: 122, r: 101, h: 33 });
-    expect(stadiumOptions(st).map((o) => o.id)).toEqual(['remodel', 'new-0', 'new-1', 'fence']);
+    expect(stadiumOptions(1, st).map((o) => o.id)).toEqual(['remodel', 'new-0', 'new-1', 'fence']);
     const before = hr(L, nc, 2027);
     const fence = { l: 99, c: 120, r: 99, h: 33 };
     const r = orderStadium(L, nc, 2026, 'fence', 1e9, { fence }, src);
@@ -112,7 +112,7 @@ describe('가벽 (6.8, P6c)', () => {
     const ds = idx(L, '두산');
     const st = fenceWorkState(L, lg, 2026, src);
     expect(st).toMatchObject({ kind: 'wall', partner: ds, now: { l: 100, c: 125, r: 100, h: 26 } });
-    expect(stadiumOptions(st).map((o) => o.id)).toEqual(['remodel', 'new-0', 'new-1', 'wall']);
+    expect(stadiumOptions(1, st).map((o) => o.id)).toEqual(['remodel', 'new-0', 'new-1', 'wall']);
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 101, c: 121, r: 100, h: 25 } }, src).message).toBe('가벽은 원래 펜스보다 안쪽에만 세울 수 있습니다.');
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 100, c: 125, r: 100, h: 25 } }, src).message).toBe('줄어드는 펜스 거리가 없습니다.');
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 100, c: 121, r: 100, h: 26 } }, src).message).toBe('고를 수 없는 펜스 제원입니다.');
@@ -135,7 +135,7 @@ describe('가벽 (6.8, P6c)', () => {
     openWalls(L, lg);
     expect(L.ledger.slice(n)).toEqual([{ year: 2027, from: lg, to: -1, amount: WALL.yearly, note: `${L.teams[lg].name} 가벽 조립·해체`, kind: 'stadium' }]);
     // 철거는 간격과 상관없이, 다음 시즌부터 원래 펜스(실측 값). 다시 세우는 것은 간격 뒤
-    expect(stadiumOptions(fenceWorkState(L, lg, 2027, src)).map((o) => o.id)).toContain('wall-off');
+    expect(stadiumOptions(1, fenceWorkState(L, lg, 2027, src)).map((o) => o.id)).toContain('wall-off');
     expect(orderStadium(L, lg, 2027, 'wall-off', 0, {}, src).ok).toBe(true);
     expect(park(L, lg, 2028)).toEqual(park(base, lg, 2028));
     expect(L.stadiums![lg].wall).toBeUndefined();
@@ -176,7 +176,7 @@ describe('가벽 (6.8, P6c)', () => {
     const ds = idx(L, '두산');
     const st = fenceWorkState(L, lg, 2008, src);
     expect(st.history?.franchise).toBe('LG');
-    expect(stadiumOptions(st).map((o) => o.id)).toContain('wall-off');
+    expect(stadiumOptions(1, st).map((o) => o.id)).toContain('wall-off');
     expect(fenceWorkState(L, ds, 2008, src).history).toBeUndefined();
     const ratio = (y: number) => hr(L, lg, y) / hr(L, ds, y);
     const r08 = ratio(2008);

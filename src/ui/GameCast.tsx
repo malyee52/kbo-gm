@@ -1,13 +1,21 @@
-// 경기 중계 화면 (2026-10-12 사용자 요청 "애니메이션"): 엔진이 남긴 중계 기록을 한 장면씩 보여 준다.
-// 스코어보드는 이닝마다 채워지고, 다이아몬드에 주자·아웃, 아래에 문자 중계. 속도 조절·건너뛰기.
+// 경기 결과 창 (2026-10-23 UI 2단계 U2-3, 기획안 2.2.1): 머리(날짜·시각·구장·차전) + 라인스코어(R·H·E·B) + 승·패·세 투수(이닝·투구 수),
+// 탭 셋: 요점(하이라이트·오늘의 선수·다음 선발) / 박스스코어 / 문자 중계.
+// 문자 중계 탭은 예전 중계 화면 (2026-10-12 사용자 요청 "애니메이션"): 엔진이 남긴 중계 기록을 한 장면씩 보여 준다.
+// "다음 경기는 중계로 보기"로 열면(live) 문자 중계 탭에서 처음부터 흘러가고, 그동안 라인스코어는 그 장면까지만 보인다.
+// 다른 탭을 누르면 중계를 끝까지 넘긴다 (결과가 보이는 탭이라). 일정·결과 등에서 다시 열면 요점 탭에서 결과부터 보인다.
 // 경기는 이미 끝난 결과를 다시 보여 주는 것이라 게임 결과에 영향이 없다.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Play } from '../engine';
-import { formatDate } from '../game/calendar';
+import type { GameLog, Play } from '../engine';
+import { formatDate, gameTime, shortDate } from '../game/calendar';
 import { highlights, inningLabel, lineScoreUpTo, playText } from '../game/highlights';
+import { lastOutings, meetingNumber, outingText, pitchSummary, playerOfGame } from '../game/boxscore';
 import type { CastGame } from '../game/session';
-import { useGame } from './context';
+import { stadiumName } from '../league/naming';
+import { PlayerLink, TeamName, useGame } from './context';
+import { BoxTables, LineScore } from './BoxScore';
+import { useShell } from './shell';
 import { teamVars } from './teams';
+import { CondTag, useCondition } from './parts';
 import { gameStory, storyOf } from '../fantasy/gameday';
 import { loadAiSettings } from '../fantasy/settings';
 
@@ -74,15 +82,25 @@ function GameStory({ game, moments }: { game: CastGame; moments: string[] }) {
   );
 }
 
-export function GameCast({ game, onClose }: { game: CastGame; onClose: () => void }) {
+type Tab = 'sum' | 'box' | 'cast';
+const TAB_LABEL: Record<Tab, string> = { sum: '요점', box: '박스스코어', cast: '문자 중계' };
+
+/** live: 경기 진행 직후 "중계로 보기" (문자 중계 탭에서 처음부터 흘러간다) */
+export function GameCast({ game, onClose, live = false }: { game: CastGame; onClose: () => void; live?: boolean }) {
   const { session } = useGame();
+  const { density } = useShell();
+  const full = density === 'full';
   const ref = useRef<HTMLDialogElement>(null);
   const plays = useMemo(() => game.plays ?? [], [game]);
-  const [step, setStep] = useState(() => (reducedMotion() ? plays.length : 0));
+  const startLive = live && plays.length > 0 && !reducedMotion();
+  const [tab, setTabState] = useState<Tab>(startLive ? 'cast' : 'sum');
+  const [step, setStep] = useState(() => (startLive ? 0 : plays.length));
   const [speed, setSpeedState] = useState(loadSpeed);
   const [paused, setPaused] = useState(false);
   const setSpeed = (v: number) => { setSpeedState(v); try { localStorage.setItem(SPEED_KEY, String(v)); } catch { /* 저장 막힘 */ } };
   const done = step >= plays.length;
+  // 결과가 보이는 탭으로 가면 중계를 끝까지 넘긴다
+  const setTab = (t: Tab) => { setTabState(t); if (t !== 'cast') setStep(plays.length); };
 
   useEffect(() => {
     const d = ref.current;
@@ -98,93 +116,157 @@ export function GameCast({ game, onClose }: { game: CastGame; onClose: () => voi
   const name = (idx: number) => world.players[idx]?.name ?? '?';
   const teamName = (t: number) => session.teamInfo(t).name;
   const cur = plays[step - 1];
-  const ls = done ? (game.box?.lineScore ?? lineScoreUpTo(plays, step)) : lineScoreUpTo(plays, step);
-  const innings = Math.max(9, ls.away.length, ls.home.length);
-  const awayRuns = done ? game.awayRuns : cur?.away ?? 0;
-  const homeRuns = done ? game.homeRuns : cur?.home ?? 0;
   const me = session.teamIdx;
   const feed = plays.slice(0, step).map((p, i) => ({ p, i })).reverse();
-  const moments = done ? highlights(plays, name, game.home === me ? 'home' : 'away') : [];
+  const moments = done && plays.length ? highlights(plays, name, game.home === me ? 'home' : 'away') : [];
   const close = () => { ref.current?.close(); onClose(); };
   const result = game.homeRuns === game.awayRuns ? '무승부' : (game.homeRuns > game.awayRuns) === (game.home === me) ? '승리' : '패배';
+  // 정규시즌 경기는 로그에서 승·패·세 투수와 차전. 가을야구는 시리즈 이름
+  const log: GameLog | undefined = game.logIdx !== undefined && game.year === world.year ? session.season.log[game.logIdx] : undefined;
+  const meet = log ? meetingNumber(session.season.log, game.logIdx!) : null;
+  const park = stadiumName(session.league, game.home, game.year);
+  const decisionLog = log ?? { ...game, win: null, loss: null, save: null };
+  const tabs: Tab[] = plays.length ? ['sum', 'box', 'cast'] : ['sum', 'box'];
 
   return (
-    <dialog ref={ref} className="player cast tv" onClose={onClose} style={teamVars(session.team.franchise, session.team.name)}>
+    <dialog ref={ref} className="player cast tv" onClose={onClose} style={teamVars(session.team.franchise, session.team.name)} aria-labelledby="game-title">
       <div className="dialog-body">
         <header className="row-between">
           <div>
-            <h2>{teamName(game.away)} <span className="muted">@</span> {teamName(game.home)}</h2>
-            <p className="muted small">{game.label ? `${game.label} · ` : ''}{formatDate(game.year, game.day)}</p>
+            <h2 id="game-title">{teamName(game.away)} <span className="muted">@</span> {teamName(game.home)}</h2>
+            <p className="muted small">
+              {game.label ? `${game.label} · ` : ''}{formatDate(game.year, game.day)}{!game.label && ` ${gameTime(game.year, game.day)}`}
+              {park && ` · ${park}`}{meet !== null && ` · ${meet}차전`}
+            </p>
           </div>
           <button type="button" className="ghost" onClick={close}>닫기</button>
         </header>
 
-        {plays.length === 0 ? <p className="muted">이 경기의 중계 기록이 없습니다 (불러온 게임의 지난 경기이거나 오래된 경기입니다).</p> : (
-          <>
-            <div className="scroll">
-              <table className="linescore cast-score">
-                <thead><tr><th className="l">팀</th>{Array.from({ length: innings }, (_, i) => <th key={i} className={cur && !done && cur.inn === i + 1 ? 'now' : ''}>{i + 1}</th>)}<th>R</th></tr></thead>
-                <tbody>
-                  {(['away', 'home'] as const).map((side) => {
-                    const arr = ls[side];
-                    const t = side === 'away' ? game.away : game.home;
-                    return (
-                      <tr key={side} className={t === me ? 'me' : ''}>
-                        <td className="l">{teamName(t)}</td>
-                        {Array.from({ length: innings }, (_, i) => <td key={i} className={arr[i] > 0 ? 'scored' : ''}>{arr[i] === undefined ? '' : arr[i] < 0 ? 'X' : arr[i]}</td>)}
-                        <td><strong key={side === 'away' ? awayRuns : homeRuns} className="pop">{side === 'away' ? awayRuns : homeRuns}</strong></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        <LineScore log={game} box={done ? game.box : undefined}
+          ls={done ? (game.box ? undefined : lineScoreUpTo(plays, plays.length)) : lineScoreUpTo(plays, step)}
+          runs={done ? undefined : { away: cur?.away ?? 0, home: cur?.home ?? 0 }} now={!done ? cur?.inn : undefined} />
+        {done && <Decisions game={game} log={log} />}
 
-            <div className="cast-field">
-              <Diamond play={cur} />
-              <div className="cast-now">
-                {cur ? (
-                  <>
-                    <p className="muted small">{inningLabel(cur)} · {Math.min(3, cur.outs)}아웃</p>
-                    <p className="outs" aria-hidden>{[0, 1, 2].map((i) => <i key={i} className={i < cur.outs ? 'on' : ''} />)}</p>
-                    <p key={step} className={`cast-line pop kind-${cur.kind}`}>{playText(cur, name)}</p>
-                    {cur.kind !== 'PC' && cur.kind !== 'WP' && <p className="muted small">투수 {name(cur.pit)}</p>}
-                  </>
-                ) : <p className="muted">경기 시작</p>}
-                {done && <p className={`cast-result ${result === '승리' ? 'up' : result === '패배' ? 'down' : ''}`}><strong>경기 끝 · {result}</strong></p>}
+        <div className="seg small game-tabs" role="tablist" aria-label="경기 결과">
+          {tabs.map((t) => (
+            <button key={t} type="button" role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{TAB_LABEL[t]}</button>
+          ))}
+        </div>
+
+        <div role="tabpanel">
+          {tab === 'sum' && (
+            <>
+              <p className={`cast-result ${result === '승리' ? 'up' : result === '패배' ? 'down' : ''}`}><strong>{game.home === me || game.away === me ? result : '경기 끝'}</strong></p>
+              {moments.length > 0 && (
+                <section>
+                  <h3>결정적 장면</h3>
+                  <ul className="plain small">{moments.map((m, k) => <li key={k} className={`moment tag-${m.tag}`}>{m.text}</li>)}</ul>
+                </section>
+              )}
+              {game.box && <PlayerOfGameLine log={decisionLog} game={game} />}
+              <NextUp game={game} />
+              {!game.box && !plays.length && <p className="muted small">이 경기의 박스스코어와 중계 기록이 없습니다 (불러온 게임의 지난 경기이거나 오래된 경기입니다).</p>}
+              {session.fantasy && plays.length > 0 && <GameStory game={game} moments={moments.map((m) => m.text)} />}
+            </>
+          )}
+
+          {tab === 'box' && (game.box
+            ? <BoxTables log={decisionLog} box={game.box} full={full} />
+            : <p className="muted small">이 경기의 박스스코어가 없습니다.</p>)}
+
+          {tab === 'cast' && (
+            <>
+              <div className="cast-field">
+                <Diamond play={cur} />
+                <div className="cast-now">
+                  {cur ? (
+                    <>
+                      <p className="muted small">{inningLabel(cur)} · {Math.min(3, cur.outs)}아웃</p>
+                      <p className="outs" aria-hidden>{[0, 1, 2].map((i) => <i key={i} className={i < cur.outs ? 'on' : ''} />)}</p>
+                      <p key={step} className={`cast-line pop kind-${cur.kind}`}>{playText(cur, name)}</p>
+                      {cur.kind !== 'PC' && cur.kind !== 'WP' && <p className="muted small">투수 {name(cur.pit)}</p>}
+                    </>
+                  ) : <p className="muted">경기 시작</p>}
+                  {done && <p className={`cast-result ${result === '승리' ? 'up' : result === '패배' ? 'down' : ''}`}><strong>경기 끝 · {result}</strong></p>}
+                </div>
               </div>
-            </div>
 
-            <div className="actions cast-controls">
-              {!done && <button type="button" className="ghost" onClick={() => setPaused((x) => !x)}>{paused ? '이어 보기' : '멈춤'}</button>}
-              <span className="seg" role="group" aria-label="중계 속도">
-                {SPEEDS.map((s, i) => <button key={s.label} type="button" className={speed === i ? 'on' : ''} aria-pressed={speed === i} onClick={() => setSpeed(i)}>{s.label}</button>)}
-              </span>
-              {!done && <button type="button" onClick={() => setStep(plays.length)}>결과 바로 보기</button>}
-              {done && <button type="button" className="ghost" onClick={() => { setStep(0); setPaused(false); }}>처음부터</button>}
-            </div>
+              <div className="actions cast-controls">
+                {!done && <button type="button" className="ghost" onClick={() => setPaused((x) => !x)}>{paused ? '이어 보기' : '멈춤'}</button>}
+                <span className="seg" role="group" aria-label="중계 속도">
+                  {SPEEDS.map((s, i) => <button key={s.label} type="button" className={speed === i ? 'on' : ''} aria-pressed={speed === i} onClick={() => setSpeed(i)}>{s.label}</button>)}
+                </span>
+                {!done && <button type="button" onClick={() => setStep(plays.length)}>결과 바로 보기</button>}
+                {done && <button type="button" className="ghost" onClick={() => { setStep(0); setPaused(false); }}>처음부터</button>}
+              </div>
 
-            {moments.length > 0 && (
-              <section>
-                <h3>하이라이트</h3>
-                <ul className="plain small">{moments.map((m, k) => <li key={k} className={`moment tag-${m.tag}`}>{m.text}</li>)}</ul>
-              </section>
-            )}
-            {done && session.fantasy && <GameStory game={game} moments={moments.map((m) => m.text)} />}
-
-            <section>
-              <h3>문자 중계</h3>
-              <ol className="cast-feed small" reversed>
+              <ol className="cast-feed small" reversed aria-label="문자 중계">
                 {feed.map(({ p, i }) => (
                   <li key={i} className={`${p.runs > 0 ? 'scored' : ''} kind-${p.kind}`}>
                     <span className="muted">{inningLabel(p)}</span> {playText(p, name)}{p.runs > 0 && <span className="muted"> · {p.away}:{p.home}</span>}
                   </li>
                 ))}
               </ol>
-            </section>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </dialog>
+  );
+}
+
+/** 승·패·세 투수 (이닝·투구 수·실점). 가을야구는 로그가 없어 보이지 않는다 */
+function Decisions({ game, log }: { game: CastGame; log: GameLog | undefined }) {
+  const { session } = useGame();
+  if (!log || !game.box) return null;
+  const all = [...game.box.away.pitchers, ...game.box.home.pitchers];
+  const item = (label: string, idx: number | null) => {
+    if (idx === null) return null;
+    const p = all.find((x) => x.idx === idx);
+    return <span key={label}>{label} <PlayerLink p={session.world.players[idx]} />{p && <span className="muted"> ({pitchSummary(p)})</span>}</span>;
+  };
+  const list = [item('승', log.win), item('패', log.loss), item('세', log.save)].filter(Boolean);
+  if (!list.length) return null;
+  return <p className="small decisions">{list}</p>;
+}
+
+/** 오늘의 선수: 이긴 팀에서 경기 기여가 가장 큰 선수 (game/boxscore.ts playerOfGame, 임시값) */
+function PlayerOfGameLine({ log, game }: { log: Pick<GameLog, 'home' | 'away' | 'homeRuns' | 'awayRuns' | 'win' | 'save'>; game: CastGame }) {
+  const { session } = useGame();
+  const pog = playerOfGame(log, game.box!);
+  if (!pog) return null;
+  return (
+    <section>
+      <h3>오늘의 선수</h3>
+      <p className="small"><PlayerLink p={session.world.players[pog.idx]} /> <span className="muted">(<TeamName idx={pog.team} />)</span> {pog.line}</p>
+    </section>
+  );
+}
+
+/** 우리 선수의 다음 일: 이 경기가 우리 마지막 경기이고 시즌이 남았으면 다음 경기와 선발 예정 (지난 등판 투구 수·휴식) */
+function NextUp({ game }: { game: CastGame }) {
+  const { session } = useGame();
+  const condOf = useCondition();
+  const me = session.teamIdx;
+  if (session.phase !== 'season' || session.done || game.label || game.year !== session.world.year) return null;
+  const s = session.season;
+  let last = s.log.length - 1;
+  while (last >= 0 && s.log[last].home !== me && s.log[last].away !== me) last--;
+  if (last !== game.logIdx) return null;
+  const next = session.nextGame();
+  if (!next) return null;
+  const sp = session.probableStarter(me);
+  const o = sp ? lastOutings(s, me, next.day).get(sp.idx) : undefined;
+  const home = next.home === me;
+  return (
+    <section>
+      <h3>다음 경기</h3>
+      <p className="small">
+        {shortDate(session.world.year, next.day)} {home ? 'vs' : '@'} {session.teamInfo(home ? next.away : next.home).name}
+        {sp && <> · 선발 예정 <PlayerLink p={sp} />{o && <span className="muted"> (지난 등판 {outingText(o, session.world.year)})</span>}</>}
+        {/* 컨디션은 지금 날의 값만 볼 수 있어 다음 경기가 오늘일 때만 */}
+        {sp && next.day === s.day && <> <CondTag text={condOf(sp)} label /></>}
+      </p>
+    </section>
   );
 }

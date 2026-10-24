@@ -1,6 +1,7 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense, FieldPos } from './defense';
 import type { BatPlate, PitPlate } from './plate';
+import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -142,6 +143,11 @@ export interface SimTeam {
    * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
    */
   park?: { hr: number; run?: number; ev?: ParkEvents };
+  /** 창단 특례 (league/eras.ts expansionPerk): 1군 엔트리·외국인 1군 한도에 더하는 인원. 없으면 0 */
+  rosterBonus?: number;
+  foreignBonus?: number;
+  /** 홈 구장이 돔: 우천 취소·경기 중 비가 없다 (engine/weather.ts). 리그 상태 월드만 붙인다 (league/stadium.ts homeIsDome) */
+  dome?: boolean;
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */
@@ -155,6 +161,14 @@ export interface World {
   env: LeagueEnv;
   teams: SimTeam[];
   players: SimPlayer[];
+  /** 그 해 정규시즌 일정 규칙 (schedule.json, 일정 개편 기획안 2장). 없으면 기본 개막일에 하루 한 경기씩 편다 (engine/schedule.ts planForWorld) */
+  schedule?: YearScheduleRule;
+  /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 5팀, 기획안 2.2). 없으면 시드로 */
+  openingHosts?: number[];
+  /** 양대 리그 나눔 (1999·2000 드림·매직, 일정 개편 기획안 10.2). 없으면 단일 리그. 엔진은 받은 묶음만 쓰고 저장하지 않는다 */
+  divisions?: Divisions;
+  /** 전년도 정규시즌 순위 (구단 색인, 1위부터). 양대 리그 해의 동률 규칙 ③에만 쓴다 (기획안 10.4). 나눔이 없는 해에는 붙이지 않는다 */
+  prevStandings?: number[];
   /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
   defPool?: number[];
 }

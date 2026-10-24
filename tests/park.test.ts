@@ -6,6 +6,7 @@ import { GameSession } from '../src/game/session';
 import { DOME, FENCE_PRESETS, NEW_PARK, orderStadium, parkFactor, stadiumFill, stadiumYearEnd, teamParkAt } from '../src/league/stadium';
 import { createLeague } from '../src/league/create';
 import { worldFromLeague } from '../src/league/world';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const NO_PILOT: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
@@ -28,7 +29,7 @@ describe('구장 특성', () => {
     expect(r.ok).toBe(true);
     expect(r.message).toContain('좌 96 · 중 121 · 우 99m, 높이 3m');
     const p = L.stadiums![0].project!;
-    expect(p).toMatchObject({ kind: 'new', fence, dome: true, cost: Math.round(NEW_PARK.options[0].cost * DOME.cost) });
+    expect(p).toMatchObject({ kind: 'new', fence, dome: true, cost: Math.round(Math.round(NEW_PARK.options[0].cost * wageIndex(2027)) * DOME.cost) });
     expect(p.hr).toBeUndefined();
     expect(p.park).toEqual(fenceParkEvents(fence, DEFAULT_PARAMS.park).ev);
     // 개장 전에는 실제 구장 효과 그대로 (신구장 홈런 배율 없음)

@@ -14,6 +14,7 @@ import {
 } from '../engine';
 import { realParkAt, realParkOpening, realParkRename, realParkSpec } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
+import { wageIndex } from './salary';
 
 // ---- 구장
 
@@ -142,6 +143,16 @@ export function teamParkInfo(src: ParkSource, franchise: string, year: number, s
   return { park: hr !== 1 || run !== 1 ? { hr, ...(run !== 1 ? { run } : {}), ...(v?.ev ? { ev: v.ev } : {}) } : undefined, basis: v ? v.basis : 'none' };
 }
 
+/**
+ * 그 해 홈 구장이 돔인가 (우천 취소 없음, engine/weather.ts). 게임 안에서 옮긴 구장(opened)은 그 구장의 dome,
+ * 아직 옮기지 않았으면 그 해 실제 구장 (새 게임의 구장 상태에는 돔이 붙어 있지 않다: 2016~ 시작 고척)
+ */
+export function homeIsDome(s: StadiumState | undefined, franchise: string, year: number): boolean {
+  if (s?.dome) return true;
+  if (s?.opened !== undefined) return false;
+  return !!realParkAt(franchise, year)?.dome;
+}
+
 export function teamParkAt(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
                            lg: ParkLeagueRates, pp: EngineParams['park'] = DEFAULT_PARAMS.park): SimTeam['park'] {
   return teamParkInfo(src, franchise, year, s, franchises, lg, pp).park;
@@ -239,15 +250,16 @@ export interface StadiumOption {
 }
 
 /**
- * 고를 수 있는 공사 (화면·주문 검사). at = 그 구단 펜스 공사 상황이면 화면에 보일 것만:
+ * 고를 수 있는 공사 (화면·주문 검사). wage = 착공하는 해의 연봉 상승 지수 (salary.ts wageIndex, 리모델링·신구장 공사비가 해마다 그만큼 오른다,
+ * 2026-10-22 사용자 결정. 펜스 조정·가벽 비용은 그대로). at = 그 구단 펜스 공사 상황이면 화면에 보일 것만:
  * 혼자 쓰는 구장은 펜스 조정, 함께 쓰는 구장은 가벽 설치, 가벽이 서 있으면(실제 역사의 가벽 포함) 가벽 철거 (6.7.5·6.8.7). 빼면 모두
  */
-export function stadiumOptions(at?: Pick<FenceWorkState, 'kind' | 'wall' | 'history'>): StadiumOption[] {
+export function stadiumOptions(wage = 1, at?: Pick<FenceWorkState, 'kind' | 'wall' | 'history'>): StadiumOption[] {
   const same = (now: number) => now;
   return [
-    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: REMODEL.cost, years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
+    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: Math.round(REMODEL.cost * wage), years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
     ...NEW_PARK.options.map((o, i) => ({
-      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: o.cost, years: NEW_PARK.years, capacity: () => o.capacity,
+      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: Math.round(o.cost * wage), years: NEW_PARK.years, capacity: () => o.capacity,
     })),
     ...(!at || at.kind === 'fence' ? [{ id: 'fence', kind: 'fence' as const, label: '펜스 조정', cost: FENCE_WORK.cost, years: 0, capacity: same }] : []),
     ...(!at || at.kind === 'wall' ? [{ id: 'wall', kind: 'wall' as const, label: at?.wall ? '가벽 제원 바꾸기' : '가벽 설치', cost: WALL.install, years: 0, capacity: same }] : []),
@@ -262,7 +274,7 @@ export function stadiumOptions(at?: Pick<FenceWorkState, 'kind' | 'wall' | 'hist
 export function orderStadium(league: LeagueState, team: number, offYear: number, id: string, cash: number,
                              park: { size?: ParkSize; fence?: Fence; dome?: boolean; deal?: StadiumDeal } = {}, src?: ParkSource): { ok: boolean; message: string } {
   const s = league.stadiums?.[team];
-  const opt = stadiumOptions().find((o) => o.id === id);
+  const opt = stadiumOptions(wageIndex(offYear + 1, league)).find((o) => o.id === id);
   if (!s || !opt) return { ok: false, message: '없는 공사입니다.' };
   // 펜스 조정·가벽: 리모델링과 같은 오프시즌에도 할 수 있고, 신구장 공사가 잡혀 있으면 못 한다 (6.7.1)
   if (opt.kind === 'fence' || opt.kind === 'wall') return orderFenceWork(league, team, offYear, id, cash, park.fence, src);
@@ -372,15 +384,18 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
     // AI 신구장: 오래되고 낡은 구장, 자금이 넉넉하면 (지자체 표준 분담, 중립 구장. 연고 시장이 크면 큰 구장)
     const age = year + 1 - (s.opened ?? realParkAt(league.teams[t].franchise, year)?.from ?? league.startYear);
     const bigMarket = (league.fans?.[t]?.level ?? 50) >= 60;
+    const wage = wageIndex(year + 1, league);
     const opt = NEW_PARK.options[bigMarket ? 1 : 0];
-    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= opt.cost * 1.5
+    const newCost = Math.round(opt.cost * wage);
+    const remodelCost = Math.round(REMODEL.cost * wage);
+    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= newCost * 1.5
         && !realParkOpening(league.teams[t].franchise, year + 1 + NEW_PARK.years)) {
-      startProject(league, t, year, 'new', NEW_PARK.years, opt.cost, opt.capacity, { fence: FENCE_PRESETS.neutral.fence, dome: false });
+      startProject(league, t, year, 'new', NEW_PARK.years, newCost, opt.capacity, { fence: FENCE_PRESETS.neutral.fence, dome: false });
       out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
       continue;
     }
-    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= REMODEL.cost * 1.5) {
-      startProject(league, t, year, 'remodel', REMODEL.years, REMODEL.cost, s.capacity + REMODEL.capacity);
+    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= remodelCost * 1.5) {
+      startProject(league, t, year, 'remodel', REMODEL.years, remodelCost, s.capacity + REMODEL.capacity);
       out.push(`${league.teams[t].name}, ${year + 1} 시즌 구장 리모델링`);
     }
   }

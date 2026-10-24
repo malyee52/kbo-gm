@@ -4,14 +4,14 @@ import type { DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
 import { initialMilitary } from './careers';
-import { makeDraftee, openMarket, takenNames } from './offseason';
+import { makeDraftee, openMarket, POST_FA_RESERVE, takenNames } from './offseason';
 import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { careerIndex, potentialOf, realPeakRuns, type CareerIndex } from './growth';
-import { foreignSalary, marketSalary, MIN_SALARY, ORG_LIMIT, reserveTarget } from './salary';
+import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
-import { teamChangesFor } from './eras';
+import { expansionPerk, teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
 import { useParkData } from './ballparks';
@@ -40,12 +40,30 @@ export interface CreatedLeague {
   world: World;
 }
 
+/** 시작 연도 개막 외국인의 실제 계약 (선수 id → 연봉·계약금, 달러). 외국인_개막명단.csv에 금액이 있는 선수만 */
+export function openingContracts(store: Pick<DataStore, 'meta'>, year: number): Map<string, { salary: number; bonus: number }> {
+  const m = new Map<string, { salary: number; bonus: number }>();
+  for (const list of Object.values(store.meta.foreignOpening?.[String(year)] ?? {})) {
+    for (const x of list) if (x.salary !== undefined) m.set(x.id, { salary: x.salary, bonus: x.bonus ?? 0 });
+  }
+  return m;
+}
+
 /** 시작 연도의 외국인 개막 명단 (선수 id → 아시아쿼터 여부). 명단이 없는 해는 null (기록에 있는 외국인을 모두 넣는다) */
 export function openingForeigners(store: Pick<DataStore, 'meta'>, year: number): Map<string, boolean> | null {
   const teams = store.meta.foreignOpening?.[String(year)];
   if (!teams) return null;
   const m = new Map<string, boolean>();
   for (const list of Object.values(teams)) for (const x of list) m.set(x.id, x.asia);
+  return m;
+}
+
+/** 개막 구단이 그 해 기록 소속과 다른 외국인 (시즌 중 이적, 선수 id → 개막 구단 이름). 이 선수들은 개막 구단에서 시작한다 */
+export function openingTeamMoves(store: Pick<DataStore, 'meta'>, year: number): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const [team, list] of Object.entries(store.meta.foreignOpening?.[String(year)] ?? {})) {
+    for (const x of list) if (x.recordTeam && x.recordTeam !== team) m.set(x.id, team);
+  }
   return m;
 }
 
@@ -63,6 +81,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   // 특별 엔트리(은퇴식 등으로 하루 등록된 선수, 예: 2026 박병호)는 현역이 아니라서 뺀다
   const special = new Set(store.meta.specialEntries?.[String(startYear)] ?? []);
   const startPlayers = recorded.players.filter((p) => (!p.foreign || !opening || opening.has(p.id)) && !special.has(p.id));
+  // 시즌 중 이적한 개막 외국인은 기록 소속이 아니라 개막 구단에서 시작한다
+  const moves = openingTeamMoves(store, startYear);
+  const teamOf = new Map(recorded.teams.map((t, i) => [t.name, i]));
+  const startTeam = (p: SimPlayer): number => teamOf.get(moves.get(p.id) ?? '') ?? p.teamIdx;
   const idx = careerIndex(store);
   const lastDataYear = Math.max(...store.meta.years);
   const contractsById = new Map<string, NonNullable<Store['contracts']>>();
@@ -70,7 +92,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
 
   /** 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤, stadium.ts) */
   const tenure0 = (p: SimPlayer): { franchise: string; seasons: number } | null => {
-    const franchise = recorded.teams[p.teamIdx]?.franchise;
+    const franchise = recorded.teams[startTeam(p)]?.franchise;
     if (!franchise) return null;
     const years = new Set<number>();
     for (const { year, row } of [...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])]) {
@@ -79,6 +101,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     return years.size ? { franchise, seasons: years.size } : null;
   };
 
+  const realForeign = openingContracts(store, startYear);
   const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
     const asia = p.foreign && (opening?.get(p.id) ?? m.asia ?? false);
@@ -105,18 +128,26 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     else if (active) {
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
-        salary: Math.max(MIN_SALARY, Math.round((active.guaranteed * 10000) / active.years)),
+        salary: Math.max(minSalary(startYear), Math.round((active.guaranteed * 10000) / active.years)),
         until: active.first + active.years - 1,
       };
-    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: MIN_SALARY, until: startYear };
-    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(MIN_SALARY, Math.round(marketSalary(now) * 0.8)), until: startYear };
-    else contract = { kind: 'reserve', salary: reserveTarget(now, service), until: startYear };
+    } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: minSalary(startYear), until: startYear };
+    // FA를 다녀왔지만 계약 자료가 없는 선수: 보류 연봉 협상과 같은 하한 (offseason.ts POST_FA_RESERVE. 2026-10-22 시장 연봉의 0.8 → 0.5)
+    else if (faRows.length) contract = { kind: 'reserve', salary: Math.max(reserveTarget(now, service, 1, minSalary(startYear)), Math.round(marketSalary(now, 1, minSalary(startYear)) * POST_FA_RESERVE)), until: startYear };
+    else contract = { kind: 'reserve', salary: reserveTarget(now, service, 1, minSalary(startYear)), until: startYear };
+    // 실제 계약 금액이 있는 외국인은 그대로 (연봉 + 계약금, 사용자 조사 2026-10-22). 시작 연도 전 KBO 기록이 없으면 신규 계약 식 (개인 상한 100만 달러)
+    // 생성식 계약은 연봉·계약금을 나누지 않고 합친 금액 하나다 (규칙 알림 5차 결정 6, 2026-10-23). 계약금은 실제 자료가 있는 선수만
+    const realPay = p.foreign ? realForeign.get(p.id) : undefined;
+    if (realPay) contract = { kind: 'foreign', salary: realPay.salary, ...(realPay.bonus ? { bonus: realPay.bonus } : {}), until: startYear };
+    else if (p.foreign && ![...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].some((r) => r.year < startYear)) {
+      contract = { kind: 'foreign', salary: foreignSalary(now, true, asia), until: startYear };
+    }
 
     return {
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
       foreign: p.foreign, asia, birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
-      bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
+      bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: startTeam(p), contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), ...(p.underhand ? { underhand: true } : {}), history: [], ...(ten ? { tenure0: ten } : {}),
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };
@@ -166,9 +197,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   for (const p of league.players) if (twoWayIds.has(p.id)) p.twoWayTalent = true;
   ensureFinance(league);
   for (const e of league.expansions ?? []) addExpansionCapital(league, e.team, startYear);
+  const perks = addPerkTeams(league, store, startYear);
   const market = openMarket(league, store, params);
   ensureAlts(league, startYear); // 시장 선수까지 모두
-  const world = opening || added || special.size || futures || market ? worldFromLeague(structuredClone(league), store, params) : recorded;
+  const world = opening || added || special.size || futures || market || perks ? worldFromLeague(structuredClone(league), store, params) : recorded;
   return { league, world };
 }
 
@@ -183,7 +215,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
   const have = new Set(league.players.map((p) => `${p.team}/${p.name}`));
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][] };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
   const rng = new Rng(`${seed}/rookies/${startYear}`);
   const taken = takenNames(league, store);
   const all = store.drafts![String(startYear)];
@@ -325,7 +357,7 @@ function addAbsentVeterans(league: LeagueState, store: Store, startYear: number,
 function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex): number {
   const list = lateDebutDraftees(store, league, startYear);
   if (!list.length) return 0;
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][] };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
   const taken = takenNames(league, store);
   let n = 0;
   for (const x of list) {
@@ -352,6 +384,23 @@ function trimToOrgLimit(league: LeagueState, recordedIds: Set<string>): void {
       .slice(0, over).map((p) => p.id));
     league.players = league.players.filter((p) => !drop.has(p.id));
   }
+}
+
+/**
+ * 시작 연도에 창단 특례 기간(1군 첫 두 시즌, eras.ts expansionPerk)인 구단을 창단 구단 목록에 넣는다 (예: 2015 시작의 kt).
+ * 창단 자본금·특별 지명은 이미 지난 일이라 주지 않는다. 넣은 수를 돌려준다
+ */
+function addPerkTeams(league: LeagueState, store: Store, startYear: number): number {
+  const successors = new Set(Object.values(store.meta.successors));
+  let n = 0;
+  league.teams.forEach((t, team) => {
+    if (successors.has(t.franchise) || league.expansions?.some((e) => e.team === team)) return;
+    const firstYear = Math.min(...(store.meta.franchises[t.franchise] ?? []).map((x) => x.from));
+    if (!expansionPerk({ expansions: [{ team, firstYear }] }, team, startYear)) return;
+    (league.expansions ??= []).push({ team, firstYear });
+    n++;
+  });
+  return n;
 }
 
 /** 시작 다음 해에 1군에 들어오는 창단 구단을 퓨처스 구단으로 넣는다. 넣은 수를 돌려준다 */

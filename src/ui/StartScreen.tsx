@@ -7,7 +7,7 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, isAutoSlot, listSaves, readSaveFile, type SaveRecord } from '../game/storage';
+import { deleteSave, isAutoSlot, listSaves, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { isSeasonDone, whenText } from './saving';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
@@ -57,12 +57,19 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   }, [store, year]);
 
   const refreshSaves = () => listSaves().then(setSaves, () => setSaves([]));
+  // 불러올 수 없는 예전 형식 저장은 지우고 한 번 알린다 (지운 뒤에는 남은 칸이 없어 다시 뜨지 않는다)
+  const [purged, setPurged] = useState(false);
   // 가장 최근에 저장한 게임 (이어 하기)
   const latest = saves?.length ? [...saves].sort((x, y) => y.savedAt.localeCompare(x.savedAt))[0] : null;
-  useEffect(() => { void refreshSaves(); }, []);
+  useEffect(() => {
+    void purgeOutdatedSaves().then((n) => { if (n) setPurged(true); }, () => undefined).finally(() => void refreshSaves());
+  }, []);
 
   const current = loadedYear === year ? store.season(year) : undefined;
   const prev = store.season(year - 1);
+  // 시즌 자료의 league 칸이 두 가지인 해 = 드림·매직 양대 리그 (1999·2000, 일정 개편 기획안 10.6)
+  const twoLeagues = (d: typeof prev) => !!d && d.teams.every((t) => t.league) && new Set(d.teams.map((t) => t.league)).size === 2;
+  const prevSplit = twoLeagues(prev);
 
   const start = async () => {
     if (teamIdx === null || !seed.trim()) return;
@@ -131,6 +138,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p className="note" role="status">{busy}</p>}
+      {purged && <p className="note" role="status">{OUTDATED_NOTICE}</p>}
 
       {/* 2026-10-12 UI 개편: 타이틀 화면처럼 큰 메뉴에서 시작한다 (이어 하기 · 새 게임 · 도전 시나리오 · 불러오기). 고르면 그 화면, '처음으로'로 돌아온다 */}
       {startTab === 'menu' ? (
@@ -236,6 +244,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </div>
         )}
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
+        {twoLeagues(current) && <p className="note small">{year}년은 드림·매직 양대 리그입니다. 각 리그 1·2위가 가을야구에 나가고, 한 리그 3위 승률이 다른 리그 2위보다 높으면 둘이 준플레이오프를 치릅니다.</p>}
         {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
         {store.meta.inProgress.includes(year) && (
           <p className="note small">{year}년 선수단은 시즌 중 자료(정규시즌 종료 전 스냅샷)로 만듭니다. 능력은 직전 3시즌 기록에서 뽑습니다.</p>
@@ -251,6 +260,10 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           <div className="team-grid start-teams" role="radiogroup" aria-label="구단" style={{ ['--cols' as string]: String(Math.ceil(current.teams.length / 2)) }}>
             {current.teams.map((t, i) => {
               const last = prev?.teams.find((x) => x.franchise === t.franchise);
+              // 지난해가 양대 리그 해(1999·2000)면 리그 안 승률 순 ("1999년 드림 2위"). 자료 rank는 가을야구를 반영한 리그별 최종 순위라 쓰지 않는다
+              const lastText = !last ? `${year}년 첫 시즌` : prevSplit && last.league
+                ? `${year - 1}년 ${last.league} ${prev!.teams.filter((x) => x.league === last.league).sort((a, b) => b.pct - a.pct || b.w - a.w).indexOf(last) + 1}위`
+                : `${year - 1}년 ${last.rank}위`;
               return (
                 <button
                   key={t.name}
@@ -263,7 +276,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                   disabled={!!busy}
                 >
                   <strong>{t.name}</strong>
-                  <span className="muted small">{last ? `${year - 1}년 ${last.rank}위` : `${year}년 첫 시즌`}</span>
+                  <span className="muted small">{lastText}</span>
                 </button>
               );
             })}

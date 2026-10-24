@@ -14,63 +14,52 @@ import { managerNorms } from './manager';
 import { sbShiftOf } from './rules';
 import { openCondition, stepCondition } from './condition';
 import { condToday, plateContext } from './pa';
-import { dateOfDay, rankTeams, regularMaxInnings, winPctBy, winPctRuleOf } from './records';
+import { dateOfDay, rankTeams, regularMaxInnings, winPctBy, winPctRuleOf, type WinPctRule } from './records';
 import { Rng } from './rng';
-import { CHURN_DAYS, currentBody, currentOveruse, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
+import { planForWorld, type PlanCancel, type PlanGame, type SchedulePlan } from './schedule';
+import { knownSchedule, type KnownSchedule } from './weather';
+import { CHURN_DAYS, currentBody, currentOveruse, gameSide, lineupForeignCap, newPlayerStates, refreshActive, slumpingPitchers, todaysLineup, todaysStarter, unitHash, type DepthPlan, type PlayerStates, type TeamSeason } from './team';
 import { emptyBatLine, emptyPitLine, emptyTeamRecord, type BatLine, type PitLine, type SimPlayer, type TeamRecord, type World } from './types';
 
-export interface ScheduledGame {
-  home: number;
-  away: number;
+/** 그날 치르는 경기 한 건 (engine/schedule.ts PlanGame) */
+export type ScheduledGame = PlanGame;
+
+/** 시즌이 쓰는 일정 (일정 개편 기획안 3.4). 시즌 저장에 그대로 들어간다 */
+export type SeasonPlan = Pick<SchedulePlan, 'opening' | 'days' | 'planned' | 'cancels' | 'remainingFrom' | 'held'>;
+
+/** 저장한 일정. 경기는 [홈, 원정, 더블헤더 차전, 경기 중 비 회] (없는 값은 0, 뒤쪽 0은 줄인다) */
+export interface SavedSchedule {
+  opening: string;
+  days: number[][][];
+  planned: number[][][];
+  cancels: PlanCancel[];
+  remainingFrom: number;
+  /** 옮긴 날을 잔여 경기 발표 때 알리는 취소 (cancels 색인) */
+  held?: number[];
 }
 
-/**
- * 일정 생성. 원형 대진(라운드 로빈)을 필요한 만큼 반복한다.
- * 반환값은 날짜별 경기 목록이며, 6일 경기 뒤 하루는 빈 날(휴식일)이다.
- */
-export function generateSchedule(nTeams: number, gamesPerTeam: number, rng: Rng): ScheduledGame[][] {
-  const ring: number[] = Array.from({ length: nTeams }, (_, i) => i);
-  if (nTeams % 2 === 1) ring.push(-1); // 홀수 구단이면 하루씩 쉬는 팀이 생긴다
-  const m = ring.length;
-  const played = new Array<number>(nTeams).fill(0);
-  const flip = Array.from({ length: nTeams }, () => new Array<boolean>(nTeams).fill(false));
-  const days: ScheduledGame[][] = [];
-  let gameDays = 0;
-  let guard = 0;
+function packGame(g: PlanGame): number[] {
+  const a = [g.home, g.away, g.dh ?? 0, g.rainInning ?? 0];
+  while (a.length > 2 && a[a.length - 1] === 0) a.pop();
+  return a;
+}
 
-  while (played.some((g) => g < gamesPerTeam) && guard++ < 10000) {
-    // 한 바퀴(모든 팀이 서로 한 번씩) 분량의 라운드를 만들고 순서를 섞는다
-    const rounds: [number, number][][] = [];
-    for (let r = 0; r < m - 1; r++) {
-      const pairs: [number, number][] = [];
-      for (let i = 0; i < m / 2; i++) {
-        const a = ring[i];
-        const b = ring[m - 1 - i];
-        if (a >= 0 && b >= 0) pairs.push([a, b]);
-      }
-      rounds.push(pairs);
-      ring.splice(1, 0, ring.pop()!);
-    }
-    rng.shuffle(rounds);
-    for (const pairs of rounds) {
-      const day: ScheduledGame[] = [];
-      for (const [a, b] of pairs) {
-        if (played[a] >= gamesPerTeam || played[b] >= gamesPerTeam) continue;
-        // 같은 상대와는 홈·원정을 번갈아
-        const lo = Math.min(a, b);
-        const hi = Math.max(a, b);
-        const homeIsLo = !flip[lo][hi];
-        flip[lo][hi] = homeIsLo;
-        day.push(homeIsLo ? { home: lo, away: hi } : { home: hi, away: lo });
-        played[a]++;
-        played[b]++;
-      }
-      if (day.length === 0) continue;
-      days.push(day);
-      if (++gameDays % 6 === 0) days.push([]);
-    }
-  }
-  return days;
+function unpackGame(a: number[]): PlanGame {
+  return { home: a[0], away: a[1], ...(a[2] ? { dh: a[2] as 1 | 2 } : {}), ...(a[3] ? { rainInning: a[3] } : {}) };
+}
+
+export function packSchedule(p: SeasonPlan): SavedSchedule {
+  return {
+    opening: p.opening, days: p.days.map((d) => d.map(packGame)), planned: p.planned.map((d) => d.map(packGame)),
+    cancels: p.cancels.map((c) => [...c] as PlanCancel), remainingFrom: p.remainingFrom, held: [...p.held],
+  };
+}
+
+export function unpackSchedule(s: SavedSchedule): SeasonPlan {
+  return {
+    opening: s.opening, days: s.days.map((d) => d.map(unpackGame)), planned: s.planned.map((d) => d.map(unpackGame)),
+    cancels: s.cancels.map((c) => [...c] as PlanCancel), remainingFrom: s.remainingFrom, held: [...(s.held ?? [])],
+  };
 }
 
 /** 시범 경기 한쪽 (Season.playExhibition): 야수 9명 이상, 투수 첫 번째가 선발 */
@@ -110,6 +99,10 @@ export interface GameLog {
   win: number | null;
   loss: number | null;
   save: number | null;
+  /** 더블헤더 몇 차전 (일정 개편 9단계). 더블헤더가 아니면 없다 */
+  dh?: 1 | 2;
+  /** 경기 중 비로 멈춘 경기 (일정 개편 10단계): 강우 콜드(innings = 멈춘 회). 노게임은 log에 없고 Season.noGames에만 */
+  rain?: 'cold' | 'nogame';
 }
 
 export interface BoxBatter {
@@ -118,6 +111,8 @@ export interface BoxBatter {
   sub?: 'PH' | 'PR' | 'DEF';
   /** 타순 (1~9). 교체 타자는 바꾼 선수의 타순 */
   order?: number;
+  /** 선발 타자의 오늘 수비 자리 (C 1B … DH, 2026-10-23 U2-3. 교체 타자·예전 박스스코어에는 없다) */
+  pos?: string;
   ab: number;
   r: number;
   h: number;
@@ -125,6 +120,10 @@ export interface BoxBatter {
   hr: number;
   bb: number;
   so: number;
+  /** 2루타·3루타·도루 (2026-10-23 UI 2단계 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  d?: number;
+  t?: number;
+  sb?: number;
 }
 
 export interface BoxPitcher {
@@ -139,11 +138,16 @@ export interface BoxPitcher {
   hr: number;
   /** 투구 수 (엔진 2) */
   np: number;
+  /** 홀드·블론 세이브 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  hld?: number;
+  bsv?: number;
 }
 
 export interface BoxSide {
   batters: BoxBatter[];
   pitchers: BoxPitcher[];
+  /** 이 팀 수비 실책 (2026-10-23 U2-3. 예전 박스스코어·가을야구에는 없다) */
+  e?: number;
 }
 
 /** 박스스코어. 타자는 타순, 투수는 등판 순 */
@@ -164,18 +168,65 @@ export const PLAYS_KEEP = 32;
 // 승률·순위는 그 해 무승부 처리를 따른다 (엔진 2 14단계, records.ts)
 export { winPct, rankTeams } from './records';
 
+/** 리그 하나의 순위 (Season.divisionStandings). teams는 1위부터 */
+export interface DivisionTable {
+  name: string;
+  teams: number[];
+}
+
+/**
+ * 양대 리그 해(1999·2000)의 순위 (일정 개편 기획안 10.4). ids를 승률 순으로 놓고, 승률이 같은 구단끼리는
+ * ① 그 구단들 사이 상대 전적 다승 → ② 그 구단들 사이 맞대결 득점 → ③ 전년도 순위(prev에 없으면 뒤, 그다음 색인).
+ * 셋 이상이 같으면 묶음 전체의 맞대결로 한 번에 가린다 (갈린 뒤 남은 구단끼리 다시 세지 않는다, 임시 규칙).
+ * 상대 전적·득점은 경기 기록(log)에서 센다. 난수를 쓰지 않는다
+ */
+export function rankWithTiebreak(ids: number[], teams: TeamRecord[], log: readonly GameLog[], prev: readonly number[] = [], rule: WinPctRule = 'wl'): number[] {
+  const pct = (t: number) => winPctBy(teams[t], rule);
+  const byPct = [...ids].sort((x, y) => pct(y) - pct(x) || x - y);
+  const prevAt = (t: number) => { const k = prev.indexOf(t); return k >= 0 ? k : prev.length + t; };
+  const out: number[] = [];
+  for (let i = 0; i < byPct.length;) {
+    let j = i + 1;
+    while (j < byPct.length && pct(byPct[j]) === pct(byPct[i])) j++;
+    const group = byPct.slice(i, j);
+    if (group.length > 1) {
+      const inGroup = new Set(group);
+      const wins = new Map(group.map((t) => [t, 0]));
+      const runs = new Map(group.map((t) => [t, 0]));
+      for (const g of log) {
+        if (!inGroup.has(g.home) || !inGroup.has(g.away)) continue;
+        runs.set(g.home, runs.get(g.home)! + g.homeRuns);
+        runs.set(g.away, runs.get(g.away)! + g.awayRuns);
+        if (g.homeRuns > g.awayRuns) wins.set(g.home, wins.get(g.home)! + 1);
+        else if (g.awayRuns > g.homeRuns) wins.set(g.away, wins.get(g.away)! + 1);
+      }
+      group.sort((x, y) => wins.get(y)! - wins.get(x)! || runs.get(y)! - runs.get(x)! || prevAt(x) - prevAt(y));
+    }
+    out.push(...group);
+    i = j;
+  }
+  return out;
+}
+
 interface FixedAbsence {
   p: number;
   team: number;
   until: number;
 }
 
+/** 시즌 저장 형식 2(일정 개편 전)를 거절하는 문구 (일정 개편 기획안 6.1) */
+export const OLD_SCHEDULE_SAVE = '일정 개편 이전 저장이라 쓸 수 없습니다 (정규시즌 일정이 바뀌어 이어 할 수 없음)';
+/** 지금 시즌 저장 형식. 이보다 낮은 저장은 불러오지 않는다 (브라우저 정리 기준, game/storage.ts) */
+export const SEASON_SAVE_FORMAT = 3;
+
 /** 진행 중 시즌의 저장 형태 (JSON으로 그대로 쓸 수 있다) */
 export interface SeasonSave {
   /** 수비수별 실책 (예전 저장에는 없다) */
   errors?: number[];
-  /** 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1(엔진 1)은 불러오지 않는다 */
-  format: 2;
+  /** 3: 일정 개편 (연전 일정을 저장에 넣음, 2026-10-23). 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1·2는 불러오지 않는다 */
+  format: 3;
+  /** 이 시즌의 일정 (일정 개편 기획안 6.1). 불러올 때 다시 만들지 않고 이것을 쓴다 */
+  schedule: SavedSchedule;
   seed: string;
   year: number;
   /** 월드의 선수 구성 지문. 데이터가 바뀌면 선수 색인이 어긋나므로 불러오기를 막는다 */
@@ -244,6 +295,8 @@ export interface SeasonInit {
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계). 저장하지 않는다 */
   running?: RunTally;
+  /** 일정을 밖에서 줄 때 (저장에서 불러오기). 없으면 월드와 시드로 만든다 (engine/schedule.ts planForWorld) */
+  plan?: SeasonPlan;
   /** 좌우 4칸 타석 결과 집계 (검증 도구용, 엔진 2 9단계). 저장하지 않는다 */
   splits?: GameContext['splits'];
   /** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계). 저장하지 않는다 */
@@ -260,7 +313,9 @@ export class Season {
   readonly params: EngineParams;
   readonly seed: string;
   readonly cal: Rates;
-  /** 날짜별 경기. 빈 배열은 휴식일 */
+  /** 이 시즌의 일정 (개막일, 날짜별 경기, 발표한 일정, 우천 취소). 시즌 중에 바뀌지 않는다 */
+  readonly plan: SeasonPlan;
+  /** 날짜별 경기 (plan.days). 빈 배열은 경기 없는 날 (월요일·쉬는 기간) */
   readonly schedule: ScheduledGame[][];
   /** 다음에 치를 날짜 (일정 색인) */
   day = 0;
@@ -273,6 +328,11 @@ export class Season {
   readonly totals: LeagueCounters;
   readonly teamSeasons: TeamSeason[];
   readonly log: GameLog[] = [];
+  /**
+   * 노게임이 된 경기 (일정 개편 10단계): 순위·기록에 넣지 않고 다시 치른다 (일정의 cancels). 저장하지 않는다:
+   * 그날 직접 지휘 미리보기가 점수·중계를 보여 줄 때만 쓴다. 일정 쪽 사실(어느 경기가 몇 회 노게임인지)은 plan에 있다
+   */
+  readonly noGames: (GameLog & { plays?: Play[] })[] = [];
   /** 경기 로그 색인 → 박스스코어 */
   readonly boxes = new Map<number, BoxScore>();
   /** 박스스코어 구단 경기의 중계 기록 (경기 로그 색인 → 기록). 저장하지 않고 최근 PLAYS_KEEP경기만 메모리에 둔다 */
@@ -331,7 +391,8 @@ export class Season {
     this.teamSeasons = world.teams.map((team) => ({
       team, hitters: [], rotation: [], bullpen: [], closer: null, nextReturnDay: 0, dirty: true, manual: null, callUps: [],
     }));
-    this.schedule = generateSchedule(world.teams.length, world.gamesPerTeam, rng.fork('schedule'));
+    this.plan = init.plan ?? planForWorld(world, rng);
+    this.schedule = this.plan.days;
     this.dayRng = rng.fork('days');
     this.injRoot = rng.fork('inj');
     this.gamesRoot = rng.fork('games');
@@ -388,9 +449,19 @@ export class Season {
     return this.day >= this.schedule.length;
   }
 
-  /** 순위 (그 해 승률의 무승부 처리, records.ts) */
+  /** 통합 순위 (승률 순 팀 색인, 그 해 승률의 무승부 처리 records.ts). 양대 리그 해는 동률 규칙(rankWithTiebreak)으로, 다른 해는 rankTeams */
   standings(): number[] {
-    return rankTeams(this.teams, winPctRuleOf(this.world.rules));
+    const rule = winPctRuleOf(this.world.rules);
+    if (!this.world.divisions) return rankTeams(this.teams, rule);
+    return rankWithTiebreak(this.teams.map((_, i) => i), this.teams, this.log, this.world.prevStandings, rule);
+  }
+
+  /** 리그별 순위 (양대 리그 해, 기획안 10.4). 단일 리그 해는 null */
+  divisionStandings(): DivisionTable[] | null {
+    const d = this.world.divisions;
+    if (!d) return null;
+    const rule = winPctRuleOf(this.world.rules);
+    return d.names.map((name, k) => ({ name, teams: rankWithTiebreak(d.teams[k], this.teams, this.log, this.world.prevStandings, rule) }));
   }
 
   /** 그 해 승률 방식으로 낸 승률 (화면용) */
@@ -398,13 +469,21 @@ export class Season {
     return winPctBy(t, winPctRuleOf(this.world.rules));
   }
 
-  /** 그날 정규시즌 경기의 최대 이닝 (records.ts regularMaxInnings, 0 = 무제한) */
-  maxInningsOn(day: number): number {
-    const d = dateOfDay(this.world.year, day);
-    return regularMaxInnings(this.world.rules, { md: d.month * 100 + d.date, weekday: d.weekday });
+  /** 그날 정규시즌 경기의 최대 이닝 (records.ts regularMaxInnings, 0 = 무제한). 날짜는 이 시즌 일정의 개막일로 센다 */
+  maxInningsOn(day: number, doubleheader = false): number {
+    const d = dateOfDay(this.world.year, day, this.plan.opening);
+    return regularMaxInnings(this.world.rules, { md: d.month * 100 + d.date, weekday: d.weekday, doubleheader });
   }
 
   /** 플레이어의 기용표를 바꾼다. null이면 AI 감독에게 맡긴다. 직접 정한 1군(manual)일 때만 쓰인다 */
+  /**
+   * day날 아침에 알려진 일정 (기획안 4.5). 화면은 앞날 일정을 이것으로만 본다:
+   * 지난 날은 실제 일정, day부터는 발표 일정 + day까지의 우천 취소·순연 (+ 발표 뒤 잔여 경기). 앞날의 취소와 경기 중 비 회는 없다
+   */
+  knownSchedule(day = this.day): KnownSchedule {
+    return knownSchedule(this.plan, day);
+  }
+
   setPlan(teamIdx: number, plan: DepthPlan | null): void {
     const ts = this.teamSeasons[teamIdx];
     ts.plan = plan ? { starters: { ...plan.starters }, rotation: [...plan.rotation], closer: plan.closer, ...(plan.order ? { order: [...plan.order] } : {}), ...(plan.pen ? { pen: { ...plan.pen } } : {}) } : null;
@@ -475,6 +554,24 @@ export class Season {
     return ts;
   }
 
+  /**
+   * 이 날짜 기준으로 1군을 짜 보기만 한다 (teamSeasons·부진 투수 캐시를 바꾸지 않는다).
+   * 마지막으로 짠 명단·홈원정처럼 저장에 없는 상태에 기대지 않아, 저장·불러오기와 화면 조회(refresh)를 끼워도 같은 답을 낸다.
+   * 퓨처스(2군) 명단을 정할 때 쓴다 (league/futures.ts registeredOf)
+   */
+  activeAt(teamIdx: number, day = this.day): TeamSeason {
+    const src = this.teamSeasons[teamIdx];
+    const ts: TeamSeason = {
+      ...src, hitters: [], rotation: [], bullpen: [], closer: null, callUps: [], dirty: true, away: undefined, field: undefined, lineupCache: undefined,
+    };
+    const rule = this.params.churnSlump;
+    const cycle = Math.floor(day / CHURN_DAYS);
+    const slump = !rule || !(this.params.rosterChurn ?? 0) ? null
+      : cycle === this.slumpCycle && this.slump ? this.slump : slumpingPitchers(this.world, this.pit, rule);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, slump);
+    return ts;
+  }
+
   /** 하루를 진행한다. 끝난 시즌이면 아무것도 하지 않는다 */
   simulateDay(): void {
     if (this.done) return;
@@ -496,12 +593,13 @@ export class Season {
     if (games.length) {
       const ip = params.injury;
       const ou = ip.overuse;
-      const len = this.schedule.length;
+      const perTeam = world.gamesPerTeam;
       for (const ts of season) {
+        const played = this.teams[ts.team.idx].g;
         for (const p of ts.team.org) {
           const active = p.isPitcher ? states.streak[p.idx] > 0 && day - states.fatigueDay[p.idx] <= 7 : day - states.bodyDay[p.idx] <= 3;
           if (p.availability !== undefined || states.absentUntil[p.idx] > day) continue;
-          const base = injuryChance(p, this.pit[p.idx], day, len, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1)
+          const base = injuryChance(p, this.pit[p.idx], played, perTeam, ip) * injuryScale(p, params.traits) * (ts.team.injuryRate ?? 1)
             * injuryProneness(p) * (active ? ip.inGame.preShare : 1);
           const extra = ou.on && p.isPitcher ? base * ou.injury * currentOveruse(states, p.idx, day, ou) : 0;
           const r = this.injRoot.fork(`${day}/${p.idx}`);
@@ -526,41 +624,58 @@ export class Season {
       }
     }
     for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
-    for (const g of games) {
-      for (const ts of [season[g.home], season[g.away]]) {
-        for (const p of ts.hitters) this.activeDays[p.idx]++;
-        for (const p of ts.rotation) this.activeDays[p.idx]++;
-        for (const p of ts.bullpen) this.activeDays[p.idx]++;
-      }
+    // 1군 연차는 경기가 있는 날을 하루로 센다 (더블헤더 날도 하루)
+    for (const t of new Set(games.flatMap((g) => [g.home, g.away]))) {
+      const ts = season[t];
+      for (const p of ts.hitters) this.activeDays[p.idx]++;
+      for (const p of ts.rotation) this.activeDays[p.idx]++;
+      for (const p of ts.bullpen) this.activeDays[p.idx]++;
     }
 
-    // 연장 한도는 그날 날짜로 (2021 후반기 9회 등, records.ts). 직접 지휘 경기도 같다
-    const maxInnings = this.maxInningsOn(day);
-    for (const g of games) {
+    // 연장 한도는 그날 날짜로 (2021 후반기 9회, 2020 더블헤더·월요일 9회 등, records.ts). 직접 지휘 경기도 같다
+    // 더블헤더 날은 1차전 묶음을 모두 치른 뒤 2차전 묶음 (일정 개편 기획안 4.6). 2차전 전에 두 팀 엔트리를 다시 짠다:
+    // 1차전 부상(경기 중 부상은 다음 날부터가 아니라 그날 2차전부터 빠진다)·피로를 본다. 1차전 선발은 lastStartDay가 오늘이라 2차전에 못 나오고,
+    // 같은 날 두 번 던진 투수·뛴 야수의 피로는 회복 없이 쌓인다 (fatigueDay·bodyDay가 같은 날)
+    const second = games.filter((g) => g.dh === 2);
+    const order = second.length ? [...games.filter((g) => g.dh !== 2), ...second] : games;
+    for (const g of order) {
+      if (g === second[0]) {
+        for (const x of second) for (const t of [x.home, x.away]) refreshActive(season[t], world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day));
+      }
       const h = season[g.home];
       const a = season[g.away];
-      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계)
+      // 선발 투수를 먼저 정한다 (난수를 쓰지 않는다): 라인업이 상대 선발의 손을 본다 (플래툰, 엔진 2 9단계).
+      // 외국인 출전 한도(리그 규칙 1-6)에서도 선발이 먼저 자리를 쓴다
       // AI 감독은 보이는 컨디션을 라인업·선발 고르기에 쓴다 (엔진 2 12단계, 반영 정도는 감독 성향 tactics.cond)
       const cond = (p: SimPlayer) => condToday(ctx, p.idx);
       const homeStarter = todaysStarter(h, states, day, params, cond);
       const awayStarter = todaysStarter(a, states, day, params, cond);
       // 야수 휴식은 경기 전 피로로 (엔진 2 11단계)
       const tired = (p: SimPlayer) => currentBody(states, p.idx, day, params.body);
-      const homeLineup = todaysLineup(h, world.league, params, dayRng, awayStarter.throws, tired, cond);
-      const awayLineup = todaysLineup(a, world.league, params, dayRng, homeStarter.throws, tired, cond);
+      // 2차전 라인업(주전 휴식)은 그 경기 줄기에서 갈라 쓴다: 1차전 결과(피로·부상)에 따라 뽑는 횟수가 달라져도
+      // 그날 뒤에 오는 다른 경기의 하루 난수(dayRng)를 밀지 않는다 (tests/engine2-rng.test.ts)
+      const lineupRng = g.dh === 2 ? this.gameRng(day, g).fork('lineup') : dayRng;
+      const homeLineup = todaysLineup(h, world.league, params, lineupRng, awayStarter.throws, tired, cond, lineupForeignCap(h, world, homeStarter));
+      const awayLineup = todaysLineup(a, world.league, params, lineupRng, homeStarter.throws, tired, cond, lineupForeignCap(a, world, awayStarter));
       const wantBox = this.boxTeams.has(g.home) || this.boxTeams.has(g.away);
       const pitBefore = wantBox ? this.snapshotPitchers([h, a]) : null;
       // 경기 전 타격 기록: 선발 라인업과 벤치(대타·대주자로 나올 수 있는 1군 야수) 모두
       const batBefore = wantBox ? new Map([...homeLineup, ...awayLineup, ...h.hitters, ...a.hitters].map((p) => [p.idx, { ...this.bat[p.idx] }])) : null;
+      // 경기 전 실책 수 (박스스코어 E): 이 경기에 나올 수 있는 선수 전부
+      const errBefore = wantBox ? new Map([...batBefore!.keys(), ...pitBefore!.keys()].map((i) => [i, this.errors[i]])) : null;
       ctx.plays = wantBox ? [] : null;
       ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
-      ctx.maxInnings = maxInnings;
-      const res = simulateGame(h, a, homeLineup, awayLineup, homeStarter, awayStarter, ctx);
+      ctx.maxInnings = this.maxInningsOn(day, g.dh !== undefined);
+      ctx.dh = g.dh;
+      ctx.rainInning = g.rainInning;
+      const res = simulateGame(gameSide(h, world, homeStarter, homeLineup), gameSide(a, world, awayStarter, awayLineup), homeLineup, awayLineup, homeStarter, awayStarter, ctx);
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
+      ctx.dh = undefined;
+      ctx.rainInning = undefined;
       // 경기 중 부상 (엔진 2 11단계): 다음 날부터 결장. 구단 의료 투자의 기간 배율은 경기 전 부상과 같다
       for (const inj of ctx.injuries) {
         const ts = season[world.players[inj.idx].teamIdx];
@@ -570,6 +685,14 @@ export class Season {
         }, ts);
       }
       ctx.injuries = undefined;
+      // 노게임: 피로·부상만 남고 순위·기록·경기 기록(log)에는 없다. 다시 치르는 경기는 개막 때 일정에 들어가 있다 (weather.ts)
+      if (res.rain === 'nogame') {
+        this.noGames.push({
+          day, home: g.home, away: g.away, homeRuns: res.homeRuns, awayRuns: res.awayRuns, innings: res.innings,
+          win: null, loss: null, save: null, ...(g.dh ? { dh: g.dh } : {}), rain: 'nogame', ...(plays ? { plays } : {}),
+        });
+        continue;
+      }
       const ht = this.teams[g.home];
       const at = this.teams[g.away];
       ht.g++; at.g++;
@@ -580,7 +703,7 @@ export class Season {
       else { ht.t++; at.t++; ht.homeT++; }
       this.log.push({
         day, home: g.home, away: g.away, homeRuns: res.homeRuns, awayRuns: res.awayRuns, innings: res.innings,
-        win: res.win, loss: res.loss, save: res.save,
+        win: res.win, loss: res.loss, save: res.save, ...(g.dh ? { dh: g.dh } : {}), ...(res.rain ? { rain: res.rain } : {}),
       });
       if (pitBefore && batBefore) {
         const line = (idx: number): BoxBatter => {
@@ -588,12 +711,13 @@ export class Season {
           const was = batBefore.get(idx)!;
           return {
             idx, ab: now.ab - was.ab, r: now.r - was.r, h: now.h - was.h, rbi: now.rbi - was.rbi, hr: now.hr - was.hr,
-            bb: now.bb - was.bb, so: now.so - was.so,
+            bb: now.bb - was.bb, so: now.so - was.so, d: now.d - was.d, t: now.t - was.t, sb: now.sb - was.sb,
           };
         };
         // 타순대로, 교체로 들어온 타자는 그 타순의 선수 바로 아래에
-        const boxBat = (lineup: SimPlayer[], subs: GameSub[]): BoxBatter[] => lineup.flatMap((p, i) => [
-          { ...line(p.idx), order: i + 1 },
+        // 선발 타자의 수비 자리는 오늘 라인업 배정(ts.field)
+        const boxBat = (lineup: SimPlayer[], subs: GameSub[], field?: Map<number, string>): BoxBatter[] => lineup.flatMap((p, i) => [
+          { ...line(p.idx), order: i + 1, ...(field?.has(p.idx) ? { pos: field.get(p.idx) } : {}) },
           ...subs.filter((s) => s.order === i && batBefore.has(s.idx)).map((s) => ({ ...line(s.idx), order: i + 1, sub: s.kind })),
         ]);
         const boxPit = (staff: number[]): BoxPitcher[] => staff.map((idx) => {
@@ -601,17 +725,29 @@ export class Season {
           const was = pitBefore.get(idx)!;
           return {
             idx, outs: now.outs - was.outs, bf: now.bf - was.bf, h: now.h - was.h, r: now.r - was.r, er: now.er - was.er,
-            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np,
+            bb: now.bb - was.bb, so: now.so - was.so, hr: now.hr - was.hr, np: now.np - was.np, hld: now.hld - was.hld, bsv: now.bsv - was.bsv,
           };
         });
+        /** 이 팀 선수(타자·투수)의 이 경기 실책 합 */
+        const sideErrors = (s: BoxSide): number => {
+          const ids = new Set([...s.batters.map((b) => b.idx), ...s.pitchers.map((q) => q.idx)]);
+          let e = 0;
+          for (const i of ids) e += this.errors[i] - (errBefore!.get(i) ?? this.errors[i]);
+          return e;
+        };
+        const side = (lineup: SimPlayer[], subs: GameSub[], staff: number[], field?: Map<number, string>): BoxSide => {
+          const s: BoxSide = { batters: boxBat(lineup, subs, field), pitchers: boxPit(staff) };
+          s.e = sideErrors(s);
+          return s;
+        };
         if (plays) {
           this.plays.set(this.log.length - 1, plays);
           for (const k of this.plays.keys()) if (this.plays.size > PLAYS_KEEP) this.plays.delete(k);
         }
         this.boxes.set(this.log.length - 1, {
           lineScore: res.lineScore,
-          home: { batters: boxBat(homeLineup, res.homeSubs), pitchers: boxPit(res.homeStaff) },
-          away: { batters: boxBat(awayLineup, res.awaySubs), pitchers: boxPit(res.awayStaff) },
+          home: side(homeLineup, res.homeSubs, res.homeStaff, h.field),
+          away: side(awayLineup, res.awaySubs, res.awayStaff, a.field),
         });
       }
     }
@@ -623,7 +759,8 @@ export class Season {
    * 한 경기의 난수 소비가 그날 다른 경기나 다음 날 경기에 영향을 주지 않고, 저장에 경기 난수 위치가 필요 없다
    */
   gameRng(day: number, g: ScheduledGame): Rng {
-    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}`);
+    // 더블헤더 2차전은 /2를 붙인다 (1차전과 한 경기 날의 키는 그대로, 일정 개편 기획안 1장)
+    return this.gamesRoot.fork(`g/${day}/${g.home}-${g.away}${g.dh === 2 ? '/2' : ''}`);
   }
 
   /** 그 선수를 until 전날까지 쉬게 한다 (무작위 이벤트의 휴식 처방). 부상 기록에는 남기지 않는다 */
@@ -708,10 +845,10 @@ export class Season {
     refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day));
     const cond = (p: SimPlayer) => condToday(ctx, p.idx);
     const hs = todaysStarter(h, this.states, day, params, cond);
-    const as = todaysStarter(a, this.states, day, params, cond);
-    const hl = todaysLineup(h, this.world.league, params, rng, as.throws, undefined, cond);
-    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond);
-    const result = simulateGame(h, a, hl, al, hs, as, ctx);
+    const aws = todaysStarter(a, this.states, day, params, cond);
+    const hl = todaysLineup(h, this.world.league, params, rng, aws.throws, undefined, cond, lineupForeignCap(h, this.world, hs));
+    const al = todaysLineup(a, this.world.league, params, rng, hs.throws, undefined, cond, lineupForeignCap(a, this.world, aws));
+    const result = simulateGame(gameSide(h, this.world, hs, hl), gameSide(a, this.world, aws, al), hl, al, hs, aws, ctx);
     return { result, home: hl, away: al, ...(plays ? { plays } : {}) };
   }
 
@@ -762,7 +899,8 @@ export class Season {
   toSave(): SeasonSave {
     const st = this.states;
     return {
-      format: 2,
+      format: 3,
+      schedule: packSchedule(this.plan),
       seed: this.seed,
       year: this.world.year,
       roster: this.baseRoster,
@@ -801,13 +939,14 @@ export class Season {
   /** 저장한 위치에서 시즌을 다시 연다. world는 저장할 때와 같은 데이터·연도로 만든 것이어야 한다 */
   static restore(world: World, params: EngineParams, save: SeasonSave): Season {
     if ((save.format as number) === 1) throw new Error('엔진 2 이전 저장이라 쓸 수 없습니다 (경기 엔진이 바뀌어 이어 할 수 없음)');
-    if (save.format !== 2) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
+    if ((save.format as number) === 2) throw new Error(OLD_SCHEDULE_SAVE);
+    if (save.format !== 3) throw new Error(`알 수 없는 저장 형식입니다 (${String(save.format)})`);
     if (save.year !== world.year) throw new Error(`저장한 연도(${save.year})와 월드 연도(${world.year})가 다릅니다`);
     if (save.roster !== rosterFingerprint(world)) {
       throw new Error('게임 데이터가 저장할 때와 달라 이 저장을 이어갈 수 없습니다 (선수 구성이 바뀜)');
     }
     const root = new Rng(save.seed);
-    const s = new Season(world, params, root, save.cal, { boxTeams: save.boxTeams, hiddenSeed: save.hiddenSeed });
+    const s = new Season(world, params, root, save.cal, { boxTeams: save.boxTeams, plan: unpackSchedule(save.schedule), hiddenSeed: save.hiddenSeed });
     for (const [d, idx, to] of save.transfers ?? []) {
       s.day = d;
       s.transfer(idx, to);

@@ -4,6 +4,7 @@ import { MILITARY_LAST_AGE, MILITARY_MIN_AGE, serviceName, serviceTerms, UNIT_MA
 import type { LeaguePlayer } from '../../league/types';
 import { Grade, PlayerLink, Pos, useGame } from '../context';
 import { runsGrade } from '../grades';
+import { PotCell, usePotentialOf } from '../parts';
 
 /** 병역 상태의 근거 (실제 자료 / 짐작 / 게임 신인) */
 function basisText(p: LeaguePlayer): string {
@@ -17,6 +18,7 @@ function basisText(p: LeaguePlayer): string {
 
 export function EnlistPanel() {
   const { session, changed, autosave } = useGame();
+  const potOf = usePotentialOf();
   const year = session.year;
   const lp = new Map(session.league.players.map((p) => [p.id, p]));
   const sim = new Map(session.world.players.map((p) => [p.id, p]));
@@ -121,7 +123,7 @@ export function EnlistPanel() {
                     <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
                     <td>{c.age}</td>
                     <td><Grade v={runsGrade(c.runs, session.year)} /></td>
-                    <td><Grade v={runsGrade(p.scoutPotential ?? p.potential, session.year)} /></td>
+                    <td><PotCell v={potOf(p, c.age)} /></td>
                     <td className="l small">{tags || '-'}</td>
                     <td className="l small muted">{basisText(p)}</td>
                   </tr>

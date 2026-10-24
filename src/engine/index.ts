@@ -9,11 +9,11 @@ export { DECLINE_START_AGE, DEFAULT_PARAMS, isStarterSkill, STARTER_SHARE, type 
 export { Rng } from './rng';
 export { buildWorld, hardhitPositions, batValue, pitValue, batSkillFrom, pitSkillFrom, seasonPark, leagueRpa, leagueEnvFor, LINEAR_WEIGHTS, seasonRegress, penTrustOf } from './ratings';
 export {
-  simulateSeason, calibrate, generateSchedule, winPct, rankTeams, rosterFingerprint, Season,
-  type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
+  simulateSeason, calibrate, winPct, rankTeams, rankWithTiebreak, rosterFingerprint, Season, OLD_SCHEDULE_SAVE, SEASON_SAVE_FORMAT, packSchedule, unpackSchedule,
+  type DivisionTable, type SeasonPlan, type SavedSchedule, type SeasonResult, type SeasonSave, type ExhibitionSide, type GameLog, type BoxScore, type BoxSide, type BoxBatter, type BoxPitcher, type ScheduledGame,
 } from './season';
 export {
-  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,
+  MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, teamRules, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
 export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
@@ -38,10 +38,12 @@ export {
   type Fence, type FenceBase, type GuessLogs, type ParkIndex, type ParkLeagueRates, type ParkSource, type RealParkBasis, type RealParkValue,
 } from './park';
 export { dateOfDay, postseasonMaxInnings, regularMaxInnings, winPctBy, winPctRuleOf, POSTSEASON_INNINGS_DEFAULT, type GameDayInfo, type WinPctRule } from './records';
+export { isNoGame, knownSchedule, OFFICIAL_INNINGS, type KnownSchedule } from './weather';
+export { planForWorld, pickOpeningHosts, rankedFromSeason, pctRankedFromSeason, OPENING_HOSTS_FROM, type SchedulePlan, type PlanGame, type PlanCancel } from './schedule';
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense'> & Partial<Pick<DataStore, 'parks'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule'> & Partial<Pick<DataStore, 'parks'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -56,6 +58,7 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     career: store.meta.years.filter((y) => y < year).map((y) => store.season(y)).filter((s): s is SeasonData => !!s),
     defenseAwards: store.defenseAwards,
     ppa: store.ppa,
+    schedule: store.schedule,
     plate: store.plate,
     defense: store.defense,
     parks: store.parks,

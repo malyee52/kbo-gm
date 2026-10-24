@@ -8,8 +8,10 @@
 import type { BatRow, Hand, Meta, ParkData, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { realParkYear } from './park';
 import { makeDefense } from './defense';
-import type { DefenseAward, DefenseData, PlateData, PpaData } from '../data/types';
+import type { DefenseAward, DefenseData, PlateData, PpaData, ScheduleData } from '../data/types';
+import { divisionsOf, scheduleRule } from '../data/schedule';
 import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
+import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
@@ -294,6 +296,8 @@ export interface BuildWorldInput {
   defense?: DefenseData;
   /** 실제 구장 제원 (parks.json). 있으면 2015년 이전 구장 효과를 차이 방식·짐작으로 넣는다 (park.ts). 없으면 그 해들은 중립 */
   parks?: ParkData;
+  /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
+  schedule?: ScheduleData;
 }
 
 /**
@@ -565,6 +569,12 @@ export function buildWorld(input: BuildWorldInput): World {
   const env = leagueEnvFor(current.league, params, year);
   const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
   if (defModel) env.defZero = defModel.zero;
+  // 일정 규칙과 개막 홈 구단 (지난 시즌 자료의 순위, 일정 개편 기획안 2.2)
+  const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
+  const franchises = teams.map((t) => t.franchise);
+  const hosts = pickOpeningHosts(year, rankedFromSeason(history[0], franchises), franchises);
+  // 양대 리그 나눔 (1999·2000, 그 해 시즌 자료의 league 칸)
+  const divisions = divisionsOf(current, franchises);
   return {
     year,
     gamesPerTeam: current.games,
@@ -574,6 +584,9 @@ export function buildWorld(input: BuildWorldInput): World {
     teams,
     players,
     ...(defModel ? { defPool: defModel.pool } : {}),
+    ...(rule ? { schedule: rule } : {}),
+    ...(hosts ? { openingHosts: hosts } : {}),
+    ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
 }
 

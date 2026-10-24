@@ -14,7 +14,7 @@ import type { Manager, ManagerChange } from './managers';
 import type { AiTradeRecord, GmStyle } from './gm';
 import type { AbroadState } from './overseas';
 import type { DifficultySettings } from './difficulty';
-import type { BatSkill, PitSkill, TeamRecord } from '../engine';
+import type { BatSkill, DivisionTable, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
 import type { PostseasonResult } from './postseason';
@@ -41,6 +41,11 @@ export interface Contract {
   until: number;
   /** FA 계약금으로 미리 낸 한 해 몫 (만 원). 월말 연봉에서 빠진다 (finance.ts, 샐러리캡 계산은 salary 그대로) */
   prepaid?: number;
+  /**
+   * 외국인 계약금 (달러). 그 계약 시즌에 연봉과 함께 나가고, 외국인 금액 상한은 연봉 + 계약금으로 본다 (salary.ts foreignContractTotal,
+   * 사용자 조사 2026-10-22). 지금은 실제 계약 자료(외국인_개막명단.csv)가 있는 선수만 있다 (생성식 계약은 연봉에 다 넣는다)
+   */
+  bonus?: number;
 }
 
 export interface LeaguePlayer {
@@ -228,7 +233,9 @@ export interface LeagueState {
   teams: LeagueTeam[];
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
+  /** hr: 리그 전체 홈런 ("달라지는 규칙"의 지난 시즌 한 줄, 2026-10-22부터. 예전 저장에는 없다) */
+  /** divisions: 양대 리그 해(1999·2000)의 리그별 최종 순위 (Season.divisionStandings, 2026-10-23 추가. 예전 저장·단일 리그 해에는 없다) */
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; divisions?: DivisionTable[]; postseason?: PostseasonResult; hr?: number } | null;
   /** 구장 (stadium.ts, 구단 색인) */
   stadiums?: import('./stadium').StadiumState[];
   /** 팬 만족도 (stadium.ts, 구단 색인) */
@@ -259,6 +266,18 @@ export interface LeagueState {
   owner?: OwnerState;
   /** 구단별 샐러리캡 연속 초과 횟수 */
   capStrikes?: number[];
+  /**
+   * 플레이어가 고른 프랜차이즈 예외 선수 id (구단 색인, salary.ts franchiseTag). 없거나 자격이 없어지면 연봉 최고 자격 선수를 자동 지정한다.
+   * 2026-10-22부터, 예전 저장에는 없다 (모두 자동 지정)
+   */
+  franchiseTags?: (string | null)[];
+  /** 미래 규칙 변경 ② (2028~, league/futureRules.ts): 바뀐 기록과 결산 때 남긴 신호. 2026-10-22부터, 예전 저장에는 없다 (변경 없음) */
+  ruleShifts?: import('./futureRules').RuleShift[];
+  ruleSignals?: import('./futureRules').RuleSignal[];
+  /** 구단 투표 단장 회의 기록 (가결·부결 모두, ai/vote.ts·league/ruleVote.ts). 2026-10-23부터, 예전 저장에는 없다 */
+  ruleVotes?: import('../ai/vote').RuleVoteRecord[];
+  /** 구단별 샐러리캡 하한(2027~) 연속 미달 횟수 (owner.ts applyFloorSanctions). 예전 저장에는 없다 */
+  floorStrikes?: number[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
   /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */
@@ -321,6 +340,9 @@ export interface LeagueState {
   reputation?: import('./reputation').RepState;
   /** 플레이어가 고른 다음 시즌 캠프 (year = 그 시즌) */
   campPlan?: { year: number; pick: import('./camp').CampPick };
-  /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
+  /**
+   * 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권, 1군 첫 두 시즌 창단 특례 (eras.ts expansionPerk).
+   * 시작 때 이미 1군인 구단도 특례 기간이 남았으면 넣는다 (create.ts, 2026-10-23)
+   */
   expansions?: { team: number; firstYear: number }[];
 }

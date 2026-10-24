@@ -13,6 +13,7 @@
 
 import type { DataStore, ManagerInfo } from '../data/types';
 import type { LeagueState } from './types';
+import { wageIndex } from './salary';
 import { Rng } from '../engine/rng';
 
 export interface Manager {
@@ -171,8 +172,9 @@ export function lastDataYear(store: Pick<DataStore, 'managers'>): number {
   return Math.max(0, ...Object.keys(store.managers?.seasons ?? {}).map(Number));
 }
 
-function makeManager(store: Pick<DataStore, 'managers'>, name: string, year: number, years = MANAGER_YEARS): Manager {
-  return { name, since: year, until: year + years - 1, salary: managerSalary(infoOf(store, name)) };
+/** 연봉은 계약이 시작되는 해(year)의 연봉 상승 지수(salary.ts wageIndex)만큼 (2026-10-22 사용자 결정) */
+function makeManager(league: Pick<LeagueState, 'ruleShifts'>, store: Pick<DataStore, 'managers'>, name: string, year: number, years = MANAGER_YEARS): Manager {
+  return { name, since: year, until: year + years - 1, salary: Math.round((managerSalary(infoOf(store, name)) * wageIndex(year, league)) / 1000) * 1000 };
 }
 
 const employed = (league: LeagueState) => new Set((league.managers ?? []).filter(Boolean).map((m) => m!.name));
@@ -206,7 +208,7 @@ export function ensureManagers(league: LeagueState, store: Pick<DataStore, 'mana
     while (real === name && realOpening(store, league.teams[t].franchise, since - 1) === name) since--;
     // 계약은 맡기 시작한 해부터 MANAGER_YEARS년 단위로 이어진 것으로 본다 (실제 계약 기간 자료가 없다)
     const left = MANAGER_YEARS - ((league.year - since) % MANAGER_YEARS);
-    league.managers[t] = { ...makeManager(store, name, league.year, left), since };
+    league.managers[t] = { ...makeManager(league, store, name, league.year, left), since };
   }
 }
 
@@ -235,7 +237,7 @@ export function fireManager(league: LeagueState, team: number, offYear: number):
 export function hireManager(league: LeagueState, store: Pick<DataStore, 'managers'>, team: number, offYear: number, name: string): { ok: boolean; message: string } {
   if (managerOf(league, team) && !managerOf(league, team)!.interim) return { ok: false, message: '먼저 지금 감독을 해임해야 합니다.' };
   if (!candidates(league, store, offYear + 1).includes(name)) return { ok: false, message: '고용할 수 없는 후보입니다.' };
-  league.managers![team] = makeManager(store, name, offYear + 1);
+  league.managers![team] = makeManager(league, store, name, offYear + 1);
   record(league, { year: offYear + 1, team, from: null, to: name, reason: '선임' });
   return { ok: true, message: `${name} 감독 선임: ${offYear + 1}~${offYear + MANAGER_YEARS} 시즌, 연봉 ${(league.managers![team]!.salary / 10000).toFixed(1)}억 원.` };
 }
@@ -267,11 +269,11 @@ export function changeManagerInSeason(league: LeagueState, store: Pick<DataStore
   }
   league.managers ??= [];
   if (name === null) {
-    league.managers[team] = { name: INTERIM_NAME, since: year, until: year, salary: INTERIM_SALARY, interim: true };
+    league.managers[team] = { name: INTERIM_NAME, since: year, until: year, salary: Math.round((INTERIM_SALARY * wageIndex(year, league)) / 1000) * 1000, interim: true };
     record(league, { year, team, from: null, to: INTERIM_NAME, reason: '감독 대행' });
     return { ok: true, message: `${note}수석코치가 시즌 끝까지 감독 대행을 맡습니다. 정식 감독은 오프시즌에 고르세요.` };
   }
-  league.managers[team] = makeManager(store, name, year);
+  league.managers[team] = makeManager(league, store, name, year);
   record(league, { year, team, from: null, to: name, reason: '시즌 중 선임' });
   return { ok: true, message: `${note}${name} 감독 선임: ${year}~${year + MANAGER_YEARS - 1} 시즌, 연봉 ${(league.managers[team]!.salary / 10000).toFixed(1)}억 원.` };
 }
@@ -280,16 +282,18 @@ export function changeManagerInSeason(league: LeagueState, store: Pick<DataStore
  * 개막 때 감독 정리 (session 'open', closeOffseason 뒤 league.year = 새 시즌). 바뀐 일을 문장으로 돌려준다.
  * - 우리 구단: 계약이 끝났으면 같은 조건으로 재계약, 비어 있으면 첫 후보로 채운다.
  * - AI 구단: 자료가 있는 해는 실제 개막 감독. 아니면 계약 만료·성적으로 재계약하거나 바꾼다.
- * standings: 지난 시즌 순위 (구단 색인, 1위부터). postseasonTeams: 지난 시즌 가을야구 팀 수
+ * standings: 지난 시즌 순위 (구단 색인, 1위부터). postseasonTeams: 지난 시즌 가을야구 팀 수.
+ * postseason: 양대 리그 해(1999·2000)만, 지난 시즌 실제 가을야구 진출 구단. 주면 "가을야구"는 이것으로, 꼴찌·상위 절반은 통합 순위 그대로 (일정 개편 기획안 10.6)
  */
-export function openManagers(league: LeagueState, store: Pick<DataStore, 'managers' | 'meta'>, userTeam: number, standings: number[], postseasonTeams: number): string[] {
+export function openManagers(league: LeagueState, store: Pick<DataStore, 'managers' | 'meta'>, userTeam: number, standings: number[], postseasonTeams: number,
+                             postseason?: readonly number[]): string[] {
   if (!store.managers) return [];
   const year = league.year;
   league.managers ??= [];
   const out: string[] = [];
   const set = (t: number, name: string, reason: string) => {
     const prev = league.managers![t];
-    league.managers![t] = makeManager(store, name, year);
+    league.managers![t] = makeManager(league, store, name, year);
     record(league, { year, team: t, from: prev?.name ?? null, to: name, reason });
     out.push(`${league.teams[t].name} ${name} 감독 ${reason === '선임' ? '선임' : reason}`);
   };
@@ -321,7 +325,7 @@ export function openManagers(league: LeagueState, store: Pick<DataStore, 'manage
     if (!cur) continue;
     const r = rank(t);
     const last = r >= 0 && r === standings.length - 1;
-    const good = r >= 0 && r < postseasonTeams;
+    const good = postseason ? postseason.includes(t) : r >= 0 && r < postseasonTeams;
     // 실제 감독이 우리 구단에 있어 데려올 수 없으면 지금 감독을 그대로 둔다
     if (real !== null) continue;
     let why = '';

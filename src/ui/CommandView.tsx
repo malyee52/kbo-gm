@@ -11,6 +11,7 @@ import type { CommandPreview } from '../game/session';
 import { fixed2, ops, rate3 } from '../game/stats';
 import { Diamond } from './GameCast';
 import { useGame } from './context';
+import { CondTag, useCondition } from './parts';
 import { teamVars } from './teams';
 
 type Tactic = '' | 'swing' | 'bunt';
@@ -39,6 +40,10 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const s = session.season;
   const W = session.world;
   const name = (i: number) => W.players[i]?.name ?? '?';
+  // 오늘 컨디션 낱말 (복사본이 아닌 실제 시즌의 오늘 값. 숫자 없음)
+  const condOf = useCondition();
+  const cond = (i: number) => (W.players[i] ? condOf(W.players[i]) : null);
+  const condOpt = (i: number) => { const c = cond(i); return c ? ` · 컨디션 ${c.split(' · ')[0]}` : ''; };
   const teamName = (t: number) => session.teamInfo(t).name;
   const me = session.teamIdx;
   const req: CommandRequest | null = pv.req;
@@ -78,10 +83,10 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     return c;
   };
   // 미리보기는 하루 경기만 돌려 10ms 안팎이라 바로 계산한다
-  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode));
+  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode, pv.dh));
   const commit = () => {
     setBusy(true);
-    session.commitCommand(pv.choices);
+    session.commitCommand(pv.choices, pv.dh);
     onDone();
   };
   const cancel = () => { ref.current?.close(); onCancel(); };
@@ -91,6 +96,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const canBunt = !!req && req.outs < 2 && req.bases.some((b) => b >= 0);
   const recent = plays.slice(-8).reverse();
   const date = formatDate(W.year, s.day);
+  // 더블헤더 날은 몇 차전인지 (지휘하지 않은 차전은 감독이 맡는다)
+  const dhLabel = pv.dh ? ' · 더블헤더 2차전' : session.ourGamesToday().length > 1 ? ' · 더블헤더 1차전' : '';
 
   return (
     <dialog ref={ref} className="player cast command tv" onClose={onCancel} style={teamVars(session.team.franchise, session.team.name)}>
@@ -98,11 +105,11 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
         <header className="row-between">
           <div>
             <h2>직접 지휘 · {teamName(pv.away)} <span className="muted">@</span> {teamName(pv.home)}</h2>
-            <p className="muted small">{date} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
+            <p className="muted small">{date}{dhLabel} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
           </div>
           <span className="inline">
             {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 바로 확정합니다"
-              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto').choices); onDone(); }}>나머지 자동으로 확정</button>}
+              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto', pv.dh).choices, pv.dh); onDone(); }}>나머지 자동으로 확정</button>}
             <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>
           </span>
         </header>
@@ -132,9 +139,9 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
               <div className="cast-now">
                 <p><strong>{inningLabel(req)} · {req.outs}아웃</strong> <span className="muted small">{req.step === 'run' ? '우리 공격 · 주자 작전 (투구 전)' : req.step === 'bat' ? '우리 공격 · 타격 작전' : '우리 수비'}</span></p>
                 <p className="outs" aria-hidden>{[0, 1, 2].map((i) => <i key={i} className={i < req.outs ? 'on' : ''} />)}</p>
-                <p>타자 <strong>{name(req.batter)}</strong> <span className="muted small">{batLine(req.batter)}</span></p>
+                <p>타자 <strong>{name(req.batter)}</strong> <span className="muted small">{batLine(req.batter)}</span> <CondTag text={cond(req.batter)} label /></p>
                 <p className="small muted">다음 타자 {name(req.onDeck)}</p>
-                <p>투수 <strong>{name(req.pitcher)}</strong> <span className="muted small">{pitLine(req.pitcher)} · 오늘 타자 {req.pitcherBf}명 {req.pitcherRuns}실점</span></p>
+                <p>투수 <strong>{name(req.pitcher)}</strong> <span className="muted small">{pitLine(req.pitcher)} · 오늘 타자 {req.pitcherBf}명 {req.pitcherRuns}실점</span> <CondTag text={cond(req.pitcher)} label /></p>
                 {req.bases.some((b) => b >= 0) && <p className="small">주자: {req.bases.map((b, k) => (b >= 0 ? `${k + 1}루 ${name(b)}` : '')).filter(Boolean).join(', ')}</p>}
               </div>
             </div>
@@ -165,7 +172,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                         <legend>대타 <span className="muted small">{name(req.batter)} 대신</span></legend>
                         <select value={ph} onChange={(e) => setPh(e.target.value)} disabled={!req.bench.length}>
                           <option value="">그대로</option>
-                          {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}</option>)}
+                          {benchOpts(ph).map((i) => <option key={i} value={i}>{name(i)} — {batLine(i)}{condOpt(i)}</option>)}
                         </select>
                       </fieldset>
                     </>
@@ -178,7 +185,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                           <span>{k + 1}루 {name(b)} 대신</span>
                           <select value={pr[k]} onChange={(e) => setPr((x) => { const y = ['', '', ''] as [string, string, string]; y[k] = e.target.value; return x[k] === e.target.value ? x : y; })} disabled={!req.bench.length}>
                             <option value="">그대로</option>
-                            {benchOpts(pr[k]).map((i) => <option key={i} value={i}>{name(i)} — 도루 {s.bat[i].sb}</option>)}
+                            {benchOpts(pr[k]).map((i) => <option key={i} value={i}>{name(i)} — 도루 {s.bat[i].sb}{condOpt(i)}</option>)}
                           </select>
                         </label>
                       ))}
@@ -193,7 +200,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
                     <select value={pitcher} onChange={(e) => setPitcher(e.target.value)}>
                       <option value="">자동 (감독이 판단)</option>
                       <option value="keep">{name(req.pitcher)} 계속</option>
-                      {req.bullpen.map((i) => <option key={i} value={i}>교체: {name(i)} — {pitLine(i)}</option>)}
+                      {req.bullpen.map((i) => <option key={i} value={i}>교체: {name(i)} — {pitLine(i)}{condOpt(i)}</option>)}
                     </select>
                   </fieldset>
                   <label className="check"><input type="checkbox" checked={walk} onChange={(e) => setWalk(e.target.checked)} /> 고의4구로 {name(req.batter)} 내보내기</label>
@@ -210,7 +217,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           </>
         ) : (
           <div className="note">
-            <p><strong>경기 끝: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
+            {pv.rain && <p className="small">비로 경기가 중단됐습니다 ({pv.rain.inning}회 {pv.rain.kind === 'cold' ? '강우 콜드' : '노게임'}).{pv.rain.kind === 'nogame' ? ' 정식 경기(5회)가 되기 전이라 기록은 남지 않고 다른 날 다시 치릅니다.' : ''}</p>}
+            <p><strong>{pv.rain?.kind === 'nogame' ? '노게임' : '경기 끝'}: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
             <p className="small muted">확정하면 이 결과로 오늘 경기가 진행됩니다. 그만두면 오늘은 그대로 남습니다.</p>
             <div className="actions"><button type="button" onClick={commit} disabled={busy}>경기 확정</button></div>
           </div>

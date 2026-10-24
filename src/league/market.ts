@@ -17,9 +17,9 @@ import { currentRuns, type ValueContext } from '../ai/value';
 import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
-import { foreignRule } from './eras';
+import { foreignMixOk, foreignRule, teamForeignRule } from './eras';
 import { payOf, paydays } from './finance';
-import { MIN_SALARY, WON_PER_RUN } from './salary';
+import { minSalary, wageIndex, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { ruleDate, ruleOf } from './rules';
 
@@ -159,20 +159,26 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
   }
   if (!p.dev && regularCount(ctx.world, team) >= ruleOf(ctx.league, 'orgLimit')) return `정식 선수 정원(${ruleOf(ctx.league, 'orgLimit')}명)이 차 있습니다. 먼저 방출하세요.`;
   if (p.foreign) {
-    const rule = foreignRule(ctx.meta, year, ctx.league);
+    // 창단 특례 구단은 1명 더 (eras.ts teamForeignRule)
+    const rule = teamForeignRule(foreignRule(ctx.meta, year, ctx.league), ctx.league, team, year);
     const held = foreignHeld(ctx.world, team, lp);
     const asia = !!lp.get(p.id)?.asia;
     if (asia ? held.asia >= rule.asia : held.regular >= rule.regular) {
       return `외국인 ${asia ? '아시아쿼터' : '선수'} 보유 한도(${asia ? rule.asia : rule.regular}명)가 차 있습니다. 먼저 외국인 선수를 방출하세요.`;
+    }
+    // 구성 제한 (2014~2019, eras.ts foreignMixOk): 보유 자리를 모두 투수 또는 모두 타자로 채울 수 없다
+    const same = ctx.world.teams[team].org.filter((x) => x.foreign && !lp.get(x.id)?.asia && x.isPitcher === p.isPitcher).length;
+    if (!asia && !foreignMixOk(year, rule.regular, same)) {
+      return `${year}년에는 외국인 ${rule.regular}명을 모두 ${p.isPitcher ? '투수' : '타자'}로 채울 수 없습니다 (${p.isPitcher ? '투수' : '타자'}는 ${rule.regular - 1}명까지).`;
     }
     if (foreignSwapsUsed(ctx, team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체는 한 시즌 ${ruleOf(ctx.league, 'foreignSwaps')}번까지입니다.`;
   }
   return null;
 }
 
-/** 영입할 때의 계약 연봉 (외국인 후보는 후보의 요구액(달러), 자유계약 국내 선수는 최저 연봉) */
-export function signSalary(p: SimPlayer, lp: LeaguePlayer | undefined): number {
-  return p.foreign && lp ? lp.contract.salary : MIN_SALARY;
+/** 영입할 때의 계약 연봉 (외국인 후보는 후보의 요구액(달러), 자유계약 국내 선수는 그 해 최저 연봉) */
+export function signSalary(p: SimPlayer, lp: LeaguePlayer | undefined, year: number, league?: Pick<LeagueState, 'ruleShifts'>): number {
+  return p.foreign && lp ? lp.contract.salary : minSalary(year, league);
 }
 
 /**
@@ -186,7 +192,7 @@ export function releasePlayer(ctx: MarketCtx, p: SimPlayer, team: number): numbe
   let claimer = -1;
   if (!p.foreign && !p.dev) {
     const runs = currentRuns(p, ctx.values);
-    const worth = runs >= CLAIM_MIN_RUNS && runs * WON_PER_RUN >= CLAIM_PAY_SHARE * lp.contract.salary;
+    const worth = runs >= CLAIM_MIN_RUNS && runs * WON_PER_RUN * wageIndex(year, league) >= CLAIM_PAY_SHARE * lp.contract.salary;
     if (worth) {
       for (const t of [...season.standings()].reverse()) {
         if (t === team || t === ctx.userTeam || regularCount(world, t) >= ruleOf(ctx.league, 'orgLimit')) continue;
@@ -217,7 +223,7 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): void {
   const year = world.year;
   const lp = league.players.find((x) => x.id === p.id)!;
   if (!(p.foreign && lp.market === year)) {
-    const cost = Math.round(MIN_SALARY * remainingShare(year, season.schedule.length, season.day));
+    const cost = Math.round(minSalary(year, league) * remainingShare(year, season.schedule.length, season.day));
     if (cost > 0) league.ledger.push({ year, from: team, to: -1, amount: cost, note: `${p.name} 영입 연봉 (남은 기간)`, kind: 'release' });
   }
   season.transfer(p.idx, team);
@@ -241,7 +247,7 @@ export function settleMarketContracts(league: LeagueState, year: number): void {
   for (const m of movesOf(league, year)) {
     const p = byId.get(m.id);
     if (!p) continue;
-    if (m.kind === 'sign' && !(p.foreign && p.market === year)) p.contract = { kind: 'reserve', salary: MIN_SALARY, until: year };
+    if (m.kind === 'sign' && !(p.foreign && p.market === year)) p.contract = { kind: 'reserve', salary: minSalary(year, league), until: year };
   }
 }
 

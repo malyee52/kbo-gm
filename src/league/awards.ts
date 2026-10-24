@@ -199,7 +199,7 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   // ---- 골든글러브: 부문별 종합 가치 1위 (외야 3명). 수비수는 그 자리에서 팀 경기의 절반 이상, 지명타자는 규정타석의 2/3 이상, 투수는 규정이닝 또는 20세이브
   // 지명타자 부문: 주 포지션이 지명타자인 선수와 시즌 끝 1군 최적 배정에서 지명타자 자리에 서는 선수 (경기별 수비 자리는 기록하지 않는다).
   // 하드힛 주 포지션(2026-10-22)에는 지명타자가 없어서, 지명타자를 주로 맡는 타자도 주 포지션은 수비 자리다. 이 선수들은 수비 부문에서 뺀다
-  const teamDh = new Set(season.teamSeasons.flatMap((ts) => assignSlots(ts.hitters).filter((x) => x.slot === 'DH').map((x) => x.p.idx)));
+  const teamDh = new Set(season.teamSeasons.flatMap((_, t) => assignSlots(season.activeAt(t).hitters).filter((x) => x.slot === 'DH').map((x) => x.p.idx)));
   const isDh = (c: Cand) => mainPos(c.sp) === 'DH' || teamDh.has(c.sp.idx);
   const goldenGlove: SeasonAwards['goldenGlove'] = [];
   for (const pos of GG_ORDER) {

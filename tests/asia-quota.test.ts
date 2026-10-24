@@ -5,7 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import * as Off from '../src/league/offseason';
-import { ASIA_NEW_CAP } from '../src/league/salary';
+import { ASIA_NEW_CAP, foreignContractTotal } from '../src/league/salary';
 import { foreignTag } from '../src/ui/foreignTag';
 
 let store: DataStore;
@@ -61,6 +61,9 @@ describe('오프시즌 외국인 단계: 웰스 + 일반 외국인 2명 (2026-10
       if (g.offseason!.stage === 'comp') g.autoComp();
       g.nextStage();
     }
+    // 2026 개막 명단이 나무위키 계약표로 바뀌어 LG 일반 외국인이 3명(오스틴·톨허스트·치리노스)이 됐다.
+    // 사용자 재현(웰스 + 일반 2명)을 맞추려고 치리노스는 재계약하지 않는다
+    if (g.offseason!.foreign!.keep['55146']) expect(g.setForeignKeep('55146', false).ok).toBe(true);
   }, 120_000);
   const wells = () => g.league.players.find((p) => p.id === '55348')!;
   const regularPool = () => g.offseason!.foreign!.pool.map((id) => g.leaguePlayer(id)!).filter((p) => !p.asia).sort((a, b) => a.contract.salary - b.contract.salary);
@@ -74,18 +77,30 @@ describe('오프시즌 외국인 단계: 웰스 + 일반 외국인 2명 (2026-10
     const kept = g.league.players.filter((p) => keep[p.id] && p.team === lg);
     expect(s.asia).toBe(kept.filter((p) => p.asia).length);
     expect(s.regular).toBe(kept.filter((p) => !p.asia).length);
-    expect(s.regularPay).toBe(kept.filter((p) => !p.asia).reduce((a, p) => a + p.contract.salary, 0));
+    expect(s.regularPay).toBe(kept.filter((p) => !p.asia).reduce((a, p) => a + foreignContractTotal(p.contract), 0));
   });
 
-  it('막히면 총액 상한 문구에 지금 총액과 요구액이 나온다 (권고대로 오스틴·톨허스트를 남기면 일반 후보가 모두 막힌다)', () => {
+  it('오스틴·톨허스트를 남겨도 재계약 몫(규칙 알림 2-7) 덕에 일반 후보가 막히지 않는다. 막히면 문구에 지금 총액·요구액·재계약 몫이 나온다', () => {
+    // 2026-10-22 사용자 재현 때는 총액 상한이 고정 400만 달러라 모두 막혔다. 재계약 외국인마다 상한이 늘어난 뒤로는 열린다
     const off = g.offseason!;
     const s = Off.foreignSlots(g.league, lg, off);
-    const c = regularPool()[0];
-    const check = Off.canSignForeign(g.league, off, lg, c);
     expect(s.regular).toBeLessThan(3); // 일반 자리는 남아 있다
-    expect(s.regularPay + c.contract.salary).toBeGreaterThan(4_000_000);
+    expect(s.resignRoom).toBeGreaterThan(0);
+    for (const c of regularPool()) {
+      const room = s.regularPay + foreignContractTotal(c.contract) <= s.cap;
+      expect(Off.canSignForeign(g.league, off, lg, c).ok, c.name).toBe(room);
+    }
+    // 남긴 선수의 몸값이 커서 총액이 넘치는 경우 (불러온 사본에서 금액만 키운다)
+    const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
+    const kept = h.league.players.find((p) => h.offseason!.foreign!.keep[p.id] && p.team === lg && !p.asia)!;
+    kept.contract.salary += 2_000_000;
+    const hs = Off.foreignSlots(h.league, lg, h.offseason!);
+    const c = h.offseason!.foreign!.pool.map((id) => h.leaguePlayer(id)!).filter((p) => !p.asia).sort((a, b) => a.contract.salary - b.contract.salary)[0];
+    expect(hs.regularPay + foreignContractTotal(c.contract)).toBeGreaterThan(hs.cap);
+    const check = Off.canSignForeign(h.league, h.offseason!, lg, c);
     expect(check.ok).toBe(false);
     expect(check.message).toContain('총액 상한');
+    expect(check.message).toContain('재계약 몫');
     expect(check.message).toContain('요구액');
   });
 
