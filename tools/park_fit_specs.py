@@ -35,7 +35,7 @@ def arg(name, default=None):
 OUT = Path(arg('out', ROOT / 'reports' / 'park-specs-fit.md'))
 PM.PBP = Path(arg('pbp', PM.PBP))
 # 사건별 득점 가치 (tools/build_data.py PARK_RUN_VALUE와 같다, tools/park_run_value.ts)
-RUN_VALUE = {'s1': 0.61, 'd2': 0.69, 't3': 0.69, 'hr': 1.67}
+RUN_VALUE = {'s1': 0.63, 'd2': 0.88, 't3': 0.88, 'hr': 1.39}  # 2026-10-24 다시 잰 값 (보고서의 f 견주기 절에만 쓴다)
 W_STEPS = [round(0.1 * i, 1) for i in range(11)]
 
 
