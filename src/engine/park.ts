@@ -35,13 +35,15 @@ export function gameParkOf(tp: SimTeam['park'] | undefined, p: ParkParams): Game
 }
 
 /**
- * 사건별 배율이 내는 득점 계수: 1 + Σ 득점 가치 × 리그 비율 × (배율 − 1) ÷ 타석당 득점 (build_data.py park_events와 같은 식).
+ * 사건별 배율이 내는 득점 계수: Π 배율^(득점 가치 × 리그 비율 ÷ 타석당 득점) (build_data.py park_events와 같은 식).
+ * 작은 변화에서는 선형 1 + Σ 득점 가치 × 리그 비율 × (배율 − 1) ÷ 타석당 득점과 같다. 잠실(홈런 0.7대)·SSG(1.3대)처럼 크게
+ * 벗어난 배율에서 엔진 득점이 선형보다 덜 움직여 곱 꼴로 바꿨다 (2026-10-24 구장 개발 8 묶음 진단: 6개 구장 묶음 중 4개에서 시뮬에 더 가까움).
  * rates는 그 해 리그 타석 결과 비율, rpa는 타석당 득점
  */
 export function runFactorOf(m: ParkRates, rates: Pick<Rates, 's1' | 'd2' | 't3' | 'hr'>, rpa: number, p: ParkParams): number {
   if (!(rpa > 0)) return 1;
   const v = p.runValue;
-  return 1 + (v.s1 * rates.s1 * (m.s1 - 1) + v.d2 * rates.d2 * (m.d2 - 1) + v.t3 * rates.t3 * (m.t3 - 1) + v.hr * rates.hr * (m.hr - 1)) / rpa;
+  return Math.exp((v.s1 * rates.s1 * Math.log(m.s1) + v.d2 * rates.d2 * Math.log(m.d2) + v.t3 * rates.t3 * Math.log(m.t3) + v.hr * rates.hr * Math.log(m.hr)) / rpa);
 }
 
 /** 화면용 구장 지수 (배율, 1 = 리그 평균): 득점 계수와 사건별 배율, 좌타·우타 홈런 */

@@ -1768,8 +1768,9 @@ def park_events(parks, league):
                 return {e: math.exp(b[e] + PARK_DEFAULT_EXP[e] * d) for e in b}
 
             def run(d):
+                # 곱 꼴: Π 배율^(득점 가치 × 리그 비율 ÷ 타석당 득점) (엔진 park.ts runFactorOf와 같은 식, 2026-10-24 구장 개발 9)
                 m = mult(d)
-                return 1 + sum(PARK_RUN_VALUE[e] * R[e] * (m[e] - 1) for e in m) / rpa
+                return math.exp(sum(PARK_RUN_VALUE[e] * R[e] * math.log(m[e]) for e in m) / rpa)
 
             lo, hi = -1.0, 1.0
             for _ in range(60):

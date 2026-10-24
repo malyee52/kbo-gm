@@ -2,7 +2,7 @@
 // 실측 해의 구성표 모양 경계(사직 2015~2021), 잠실 X-존(2009~2010 LG 홈 경기만), 엔진·능력 산출·리그 월드가 같은 값을 쓰는지
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, leagueRpa, realParkYear, seasonPark, worldForYear, type RealParkValue } from '../src/engine';
+import { DEFAULT_PARAMS, leagueRpa, realParkYear, runFactorOf, seasonPark, worldForYear, type RealParkValue } from '../src/engine';
 import { createLeague } from '../src/league/create';
 import { worldFromLeague } from '../src/league/world';
 
@@ -16,6 +16,36 @@ function year(y: number, withParks = true): Map<string, RealParkValue> {
   const s = store.season(y)!;
   return realParkYear(withParks ? src() : { ...src(), parks: undefined }, y, s.teams.map((t) => t.franchise), leagueRpa(s.league), P);
 }
+
+describe('득점 계수 곱 꼴 (runFactorOf, 2026-10-24 구장 개발 9)', () => {
+  it('작은 변화에서는 예전 선형 식(1 + Σ 가치 × 비율 × (배율 − 1) ÷ 타석당 득점)과 같고, 큰 배율에서는 덜 움직인다', () => {
+    const lg = leagueRpa(store.season(2025)!.league);
+    const v = P.runValue;
+    const linear = (m: Record<'s1' | 'd2' | 't3' | 'hr', number>) =>
+      1 + (['s1', 'd2', 't3', 'hr'] as const).reduce((a, k) => a + v[k] * lg.rates[k] * (m[k] - 1), 0) / lg.rpa;
+    expect(runFactorOf({ s1: 1, d2: 1, t3: 1, hr: 1 }, lg.rates, lg.rpa, P)).toBe(1);
+    for (const e of [0.01, -0.01]) {
+      const m = { s1: 1 + e, d2: 1 - e / 2, t3: 1 + e, hr: 1 + 2 * e };
+      const f = runFactorOf(m, lg.rates, lg.rpa, P);
+      expect(Math.abs(f - linear(m))).toBeLessThan(2e-4);
+      expect(Math.abs(f - 1)).toBeGreaterThan(5e-3);
+    }
+    // 잠실·SSG 크기의 홈런 배율: 곱 꼴은 줄 때 더 줄고 늘 때 덜 는다 (로그는 오목하다, 묶음 진단의 시뮬 방향)
+    const low = { s1: 1, d2: 1, t3: 1, hr: 0.75 }, high = { s1: 1, d2: 1, t3: 1, hr: 1.37 };
+    expect(runFactorOf(low, lg.rates, lg.rpa, P)).toBeLessThan(linear(low));
+    expect(runFactorOf(high, lg.rates, lg.rpa, P)).toBeLessThan(linear(high));
+  });
+
+  it('실측 해 사건별 배율(build_data.py park_events)로 센 득점 계수가 그 해 f와 같다 (파이썬·엔진이 같은 식)', () => {
+    for (const y of ['2016', '2019', '2023', '2025']) {
+      const lg = leagueRpa(store.season(Number(y))!.league);
+      const ev = store.meta.parkEvents![y];
+      for (const [fr, m] of Object.entries(ev)) {
+        expect(Math.abs(runFactorOf(m, lg.rates, lg.rpa, P) - store.meta.parkFactors![y][fr]), `${y} ${fr}`).toBeLessThan(0.004);
+      }
+    }
+  });
+});
 
 describe('옛 해 구장 효과 (P5)', () => {
   it('실측 해는 그 해 f 그대로, 사직은 2022 펜스 변경 앞(2015~2021)만 구성표 모양 대신 지수 규칙', () => {
