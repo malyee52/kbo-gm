@@ -105,9 +105,9 @@ describe('알림 계산 (1-2)', () => {
     expect(news(2022).main.find((l) => l.key === 'faService')?.after).toBe(`고졸 ${faServiceNeeded(2022, false)}·대졸 ${faServiceNeeded(2022, true)}시즌`);
   });
 
-  it('FA 연한 알림이 게임 값과 같다: 2001 시즌 10 → 9시즌, 2011 시즌 고졸 9·대졸 8 (1-4)', () => {
+  it('FA 연한 알림이 게임 값과 같다: 2001 시즌 고졸 10·대졸 9 → 9시즌, 2011 시즌 고졸 9·대졸 8 (1-4, 도입 때 대졸 9는 일정 갈래의 제도연표 보정)', () => {
     const a = news(2001).main.find((l) => l.key === 'faService')!;
-    expect([a.before, a.after]).toEqual(['1군 10시즌', '1군 9시즌']);
+    expect([a.before, a.after]).toEqual(['고졸 10·대졸 9시즌', '1군 9시즌']);
     const b = news(2011).main.find((l) => l.key === 'faService')!;
     expect([b.before, b.after]).toEqual(['1군 9시즌', '고졸 9·대졸 8시즌']);
   });

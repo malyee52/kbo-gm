@@ -15,15 +15,22 @@ beforeAll(() => {
   store = loadDataStore();
 });
 
-/** 한 시즌을 돌리며 날마다 구단별로 경기에 나온 외국인 수(타석 또는 상대 타자가 늘어난 선수)와 1군 외국인 수를 모은다 */
+/**
+ * 한 시즌을 돌리며 날마다 구단별로 경기에 나온 외국인 수(타석 또는 상대 타자가 늘어난 선수)와 1군 외국인 수를 모은다.
+ * 더블헤더 날(그 구단 경기가 둘)은 두 경기를 합쳐 세면 한도를 넘을 수 있어 뺀다 (일정 개편)
+ */
 function foreignPerGame(world: World, seed: string): { team: number; played: number; active: number; limit: number }[] {
   const season = Season.start(world, FAST, seed);
   const foreign = world.players.filter((p) => p.foreign);
   const out: { team: number; played: number; active: number; limit: number }[] = [];
   while (!season.done) {
     const before = new Map(foreign.map((p) => [p.idx, season.bat[p.idx].pa + season.pit[p.idx].bf]));
+    const day = season.day;
+    const logFrom = season.log.length;
     season.simulateDay();
+    const today = season.log.slice(logFrom).filter((g) => g.day === day);
     for (const ts of season.teamSeasons) {
+      if (today.filter((g) => g.home === ts.team.idx || g.away === ts.team.idx).length > 1) continue;
       const mine = foreign.filter((p) => p.teamIdx === ts.team.idx);
       const played = mine.filter((p) => season.bat[p.idx].pa + season.pit[p.idx].bf > before.get(p.idx)!).length;
       if (played === 0) continue;

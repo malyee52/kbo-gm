@@ -20,7 +20,9 @@ const L = { rules: {}, ruleShifts: [] } as unknown as LeagueState;
 describe('계단식 규정 인상 (임시값: 4년마다)', () => {
   it('최저 연봉은 2030년에 처음 오르고 다음 인상(2034년)까지 그대로, 100만 원 단위', () => {
     expect(MIN_SALARY_STEP_YEARS).toBe(4);
-    for (const y of [1990, 2026, 2027, 2029]) expect(minSalary(y, L)).toBe(MIN_SALARY);
+    for (const y of [2026, 2027, 2029]) expect(minSalary(y, L)).toBe(MIN_SALARY);
+    // 2026년까지는 그 해 명목 최저 연봉 ÷ 물가 계수 (일정 갈래 연도표, 1990 명목 840만 = 내부 6,000만)
+    expect(minSalary(1990, L)).toBe(6000);
     expect(ruleStepYear(2029)).toBeNull();
     expect(ruleStepYear(2030)).toBe(2030);
     expect(ruleStepYear(2033)).toBe(2030);

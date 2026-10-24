@@ -101,11 +101,13 @@ describe('관심 명단: 저장 파일에 담고 조작 기록에는 넣지 않�
       const st = g.offseason!.stage;
       if (st === 'draft') g.autoDraft();
       if (st === 'comp') g.autoComp();
+      if (st === 'release') g.autoRelease();
       g.nextStage();
     }
     // 정원 정리에서 육성선수로 데려갔으면 남고, 아니면 개막 때 빠진다
     const signed = (g.league.players.find((p) => p.id === ghost.id)?.team ?? -1) >= 0;
-    expect(g.openNextSeason().ok).toBe(true);
+    const open = g.openNextSeason();
+    expect(open.ok, open.message).toBe(true);
     const left = new Set(g.watch.map((w) => w.id));
     expect(left.has(top)).toBe(true);
     expect(left.has(ghost.id)).toBe(signed);

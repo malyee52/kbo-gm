@@ -61,6 +61,9 @@ describe('오프시즌 외국인 단계: 웰스 + 일반 외국인 2명 (2026-10
       if (g.offseason!.stage === 'comp') g.autoComp();
       g.nextStage();
     }
+    // 2026 개막 명단이 나무위키 계약표로 바뀌어 LG 일반 외국인이 3명(오스틴·톨허스트·치리노스)이 됐다.
+    // 사용자 재현(웰스 + 일반 2명)을 맞추려고 치리노스는 재계약하지 않는다
+    if (g.offseason!.foreign!.keep['55146']) expect(g.setForeignKeep('55146', false).ok).toBe(true);
   }, 120_000);
   const wells = () => g.league.players.find((p) => p.id === '55348')!;
   const regularPool = () => g.offseason!.foreign!.pool.map((id) => g.leaguePlayer(id)!).filter((p) => !p.asia).sort((a, b) => a.contract.salary - b.contract.salary);
