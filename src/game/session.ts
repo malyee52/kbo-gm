@@ -43,6 +43,7 @@ import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
+import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
 import {
   aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
@@ -260,6 +261,9 @@ export type GameAction =
   | { year: number; type: 'def-edit-off'; id: string; def: Defense }
   /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
   | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
+  /** 집중 훈련 걸기·바꾸기·풀기 (16-4c, league/training.ts). plan null이면 풂. 시즌 중 'train'(그날부터 기간 비례), 오프시즌 'train-off'(다음 개막부터) */
+  | { year?: number; day: number; type: 'train'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
+  | { year: number; type: 'train-off'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
   | { year: number; type: 'two-way-off'; id: string; on: boolean }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
@@ -867,6 +871,7 @@ export class GameSession {
     else if (a.type === 'settings') this.applySettings(a.s);
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
+    else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -956,7 +961,7 @@ export class GameSession {
   /** 지금까지의 퓨처스리그(2군) 성적과 순위 (league/futures.ts, 필요할 때 계산). AI 구단 1군은 지금 명단을 읽기만 한다 */
   futures(): ReturnType<typeof futuresSeason> {
     const off = this.phase === 'offseason';
-    const r = futuresSeason(this.world, this.season, this.league.seed, (t) => registeredOf(this.season, t), off ? [] : this.futuresExtras());
+    const r = futuresSeason(this.world, this.season, this.league.seed, (t) => registeredOf(this.season, t), off ? [] : this.futuresExtras(), off ? undefined : futuresTrainSlots(this.league));
     // 오프시즌: 결산 때 남긴 순위 (창단 퓨처스 구단 포함. 결산 뒤 리그 상태가 바뀌어 다시 계산하지 않는다)
     const last = this.league.lastFutures;
     return off && last?.year === this.year ? { ...r, teams: last.teams } : r;
@@ -2909,6 +2914,7 @@ export class GameSession {
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
+      case 'train-off': res = setTrainingRule(L, this.teamIdx, a.id, a.plan, 0); break;
       case 'ai-off': this.applyFantasy(a.entry); break;
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
@@ -3590,6 +3596,26 @@ export class GameSession {
       return { ok: true, message: on ? `${lp.name}을(를) 이도류로 씁니다.` : `${lp.name}은(는) 본업만 맡습니다.` };
     }
     return this.dispatchOff({ year: this.year, type: 'two-way-off', id, on });
+  }
+
+  /**
+   * 집중 훈련 (16-4c, league/training.ts): 우리 구단 12명까지. 시즌 중에 걸면 그날부터 기간 비례, 오프시즌에 걸면 다음 시즌 개막부터.
+   * plan null이면 푼다
+   */
+  setTraining(id: string, plan: { drill?: string; pos?: FieldPos } | null): { ok: boolean; message: string } {
+    const probe = structuredClone(this.league.training ?? {});
+    const r = setTrainingRule({ ...this.league, training: probe }, this.teamIdx, id, plan, 0);
+    if (!r.ok) return r;
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'train', id, plan });
+      return r;
+    }
+    return this.dispatchOff({ year: this.year, type: 'train-off', id, plan });
+  }
+
+  /** 우리 구단 집중 훈련 명단 */
+  training(): { id: string; drill?: string; pos?: FieldPos; since: number }[] {
+    return teamTraining(this.league, this.teamIdx).map(([p, t]) => ({ id: p.id, ...(t.drill ? { drill: t.drill } : {}), ...(t.pos ? { pos: t.pos } : {}), since: t.since }));
   }
 
   private applyTwoWay(id: string, on: boolean): void {

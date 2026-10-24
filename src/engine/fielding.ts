@@ -595,14 +595,17 @@ export function gameFieldYear(year: number, inn: readonly number[] | undefined, 
  * years = 시작 전 수비 기록 + 게임 안 이력 (막 끝난 시즌 year까지), Δu = u(year + 1 기준) − u(year 기준).
  * talent에 있는 자리(시작 때 u < 1)만 옮기고, 본 자리 등 다 찬 자리와 나이 몫(ageDefense)은 그대로. 최근성으로 u가 줄면 내려간다. 등급은 20~80
  */
-export function familiarityShift(years: FieldYear[], year: number, listed: FieldPos | undefined, talent: Partial<Record<FieldPos, number>>, def: Defense): Defense {
-  const opts: FieldOptions = { listed };
+export function familiarityShift(years: FieldYear[], year: number, listed: FieldPos | undefined, talent: Partial<Record<FieldPos, number>>, def: Defense,
+                                 trainBefore?: Partial<Record<FieldPos, number>>, trainAfter?: Partial<Record<FieldPos, number>>): Defense {
+  // train: 수비 자리 훈련 익힘 m (16-4c, league/training.ts). 이번 결산 전·후
+  const opts: FieldOptions = { listed, ...(trainBefore ? { train: trainBefore } : {}) };
+  const optsAfter: FieldOptions = { listed, ...(trainAfter ? { train: trainAfter } : {}) };
   const mainBefore = mainPosition(years, year, opts);
-  const mainAfter = mainPosition(years, year + 1, opts);
+  const mainAfter = mainPosition(years, year + 1, optsAfter);
   let out: Defense | null = null;
   for (const [p, t] of Object.entries(talent) as [FieldPos, number][]) {
     if (def[p] === undefined) continue;
-    const du = familiarity(years, year + 1, p, mainAfter, opts) - familiarity(years, year, p, mainBefore, opts);
+    const du = familiarity(years, year + 1, p, mainAfter, optsAfter) - familiarity(years, year, p, mainBefore, opts);
     if (Math.abs(du) < 1e-9) continue;
     const grade = clip(50 + 2 * def[p]! + t * du, 20, 80);
     (out ??= { ...def })[p] = round1((grade - 50) / 2);
@@ -614,8 +617,8 @@ export function familiarityShift(years: FieldYear[], year: number, listed: Field
  * 결산 때 수비 가능 자리와 비상 포수만 다시 본다 (16-3b, 클사장 결정: 등급 오름은 16-4). years = 시작 전 수비 기록 + 게임 안 이력,
  * startYear = 다음 시즌. 판정은 시작 때와 같은 식 (mainPosition·familiarity·emergencyCatcher)
  */
-export function refreshPlayable(years: FieldYear[], startYear: number, listed?: FieldPos): { playable: FieldPos[]; emergencyC: boolean } {
-  const opts: FieldOptions = { listed };
+export function refreshPlayable(years: FieldYear[], startYear: number, listed?: FieldPos, train?: Partial<Record<FieldPos, number>>): { playable: FieldPos[]; emergencyC: boolean } {
+  const opts: FieldOptions = { listed, ...(train ? { train } : {}) };
   const main = mainPosition(years, startYear, opts);
   return { playable: playable(years, startYear, main, opts), emergencyC: emergencyCatcher(years, startYear, main, opts) };
 }

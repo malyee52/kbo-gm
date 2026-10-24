@@ -105,6 +105,9 @@ export interface RunSource {
   arm?: DefenseData['arm'];
   running?: RunningData;
   startYear: number;
+  /** 훈련으로 쌓은 등급 (능력치 v2 16-4c, league/training.ts): 선수 ID → 손잡이별 등급. 그 나이 평균 + drillCap까지만 더한다 */
+  drill?: Map<string, Partial<Record<'runIQ' | 'bunting' | 'cBlock' | 'cFrame' | 'hold' | 'quick', number>>>;
+  drillCap?: number;
 }
 
 type BatKnob = 'runIQ' | 'bunting' | 'cBlock' | 'cFrame' | 'arm';
@@ -141,6 +144,22 @@ export function runGradesOf(p: Pick<SimPlayer, 'id' | 'age' | 'real' | 'bat' | '
     };
   }
   if (p.pit) out.pit = { hold: exp + luck(), quick: body + luck() };
+  // 훈련 몫 (16-4c): 더한 값이 그 나이 평균 + 상한을 넘지 않게 (이미 넘는 선수는 그대로)
+  const drill = src?.drill?.get(p.id);
+  if (drill) {
+    const cap = src!.drillCap ?? 15;
+    const add = (g: number, k: keyof typeof drill, mean: number) => (drill[k] ? Math.max(g, Math.min(g + drill[k]!, mean + cap)) : g);
+    if (out.bat) {
+      out.bat.runIQ = add(out.bat.runIQ, 'runIQ', exp);
+      out.bat.bunting = add(out.bat.bunting, 'bunting', exp);
+      out.bat.cBlock = add(out.bat.cBlock, 'cBlock', body);
+      out.bat.cFrame = add(out.bat.cFrame, 'cFrame', exp);
+    }
+    if (out.pit) {
+      out.pit.hold = add(out.pit.hold, 'hold', exp);
+      out.pit.quick = add(out.pit.quick, 'quick', body);
+    }
+  }
   return out;
 }
 

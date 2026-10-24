@@ -78,13 +78,21 @@ function futuresSlot(p: SimPlayer): FieldPos | null {
 }
 
 /** 2군 자리별 수비 이닝 (15.2): 요구 이닝 = 출장 경기 × FUT_INN_PER_G, 구단·자리 합이 2군 경기 × 9를 넘으면 같은 비율로 줄인 뒤 반올림 */
-function futuresInnings(rows: { p: SimPlayer; g: number; team: number }[], futGames: Map<number, number>): Map<number, number[]> {
+function futuresInnings(rows: { p: SimPlayer; g: number; team: number }[], futGames: Map<number, number>,
+                        train?: Map<string, { pos: FieldPos; frac: number }>): Map<number, number[]> {
   const want = new Map<string, { idx: number; inn: number }[]>();
+  const put = (team: number, slot: FieldPos, idx: number, inn: number) => {
+    const key = `${team}/${slot}`;
+    (want.get(key) ?? want.set(key, []).get(key)!).push({ idx, inn });
+  };
   for (const { p, g, team } of rows) {
     const slot = futuresSlot(p);
-    if (!slot || g <= 0) continue;
-    const key = `${team}/${slot}`;
-    (want.get(key) ?? want.set(key, []).get(key)!).push({ idx: p.idx, inn: g * FUT_INN_PER_G });
+    if (g <= 0) continue;
+    // 수비 자리 훈련 (16-4c): 훈련을 건 기간 몫만큼 훈련 자리에서 뛴다 (본 자리가 없는 DH도)
+    const t = train?.get(p.id);
+    const tf = t && t.pos !== slot ? t.frac : 0;
+    if (tf > 0) put(team, t!.pos, p.idx, g * FUT_INN_PER_G * tf);
+    if (slot && tf < 1) put(team, slot, p.idx, g * FUT_INN_PER_G * (1 - tf));
   }
   const out = new Map<number, number[]>();
   for (const [key, list] of want) {
@@ -95,7 +103,7 @@ function futuresInnings(rows: { p: SimPlayer; g: number; team: number }[], futGa
     const k = FIELD_POS.indexOf(slot as FieldPos);
     for (const x of list) {
       const a = out.get(x.idx) ?? out.set(x.idx, new Array(8).fill(0)).get(x.idx)!;
-      a[k] = Math.round(x.inn * scale);
+      a[k] += Math.round(x.inn * scale);
     }
   }
   return out;
@@ -133,9 +141,10 @@ export interface FuturesExtra {
 }
 
 export function futuresSeason(world: World, season: Season, seed: string, registered: (team: number) => Set<number>,
-                              extra: FuturesExtra[] = []): { lines: Map<number, FuturesLine>; teams: FuturesTeam[] } {
+                              extra: FuturesExtra[] = [], trainSlots?: Map<string, { pos: FieldPos; since: number }>): { lines: Map<number, FuturesLine>; teams: FuturesTeam[] } {
   const lg = world.league;
   const today = Math.min(season.day, season.schedule.length);
+  const train = trainSlots && new Map([...trainSlots].map(([id, t]) => [id, { pos: t.pos, frac: today > 0 ? Math.max(0, Math.min(1, (today - t.since) / today)) : 0 }]));
   const rng = (p: SimPlayer) => new Rng(`${seed}/futures/${world.year}/${p.id}`);
   const avgG = world.teams.length ? world.teams.reduce((x, t) => x + season.teams[t.idx].g, 0) / world.teams.length : 0;
   const units = [
@@ -173,7 +182,7 @@ export function futuresSeason(world: World, season: Season, seed: string, regist
     }
   }
 
-  const fieldInn = futuresInnings([...batPA.values()], futGames);
+  const fieldInn = futuresInnings([...batPA.values()], futGames, train);
 
   // 2) 2군 선수 평균 능력 (출전량 가중)
   const KB = ['so', 'bb', 'hbp', 'hr', 's1', 'd2', 't3'] as const;

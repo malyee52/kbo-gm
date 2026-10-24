@@ -23,6 +23,7 @@ import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
 import { ceilingFor, growBranches, timingOf } from './branches';
+import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
 import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
@@ -379,7 +380,7 @@ function playerFieldYears(league: LeagueState, store: Store, p: LeaguePlayer): F
  * 등급 오름·내림은 familiarityShift (16-4). 수비 고치기로 연 자리(defEdit)는 남긴다
  */
 function refreshedPlayable(years: FieldYear[], p: LeaguePlayer, nextYear: number): Pick<BatSkill, 'playable' | 'emC'> {
-  const r = refreshPlayable(years, nextYear, homeOf(p.pos) ?? undefined);
+  const r = refreshPlayable(years, nextYear, homeOf(p.pos) ?? undefined, p.drillPos);
   const keep = p.bat?.defEdit ?? [];
   const list = FIELD_POS.filter((q) => r.playable.includes(q) || keep.includes(q));
   return { playable: list, ...(r.emergencyC && !list.includes('C') ? { emC: true as const } : {}) };
@@ -421,7 +422,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
 
   // 퓨처스리그 성적 (futures.ts): 2군 선수의 출전 기회와 활약을 성장 판정에 쓴다. 시즌 마지막 1군 명단 기준
   const extras = futuresExtras(league, store, world, params);
-  const fut = futuresSeason(world, season, league.seed, (t) => registeredOf(season, t), extras);
+  const fut = futuresSeason(world, season, league.seed, (t) => registeredOf(season, t), extras, futuresTrainSlots(league));
+  // 집중 훈련 명단 (16-4c): 우리 구단은 걸어 둔 것, AI 구단은 규칙 (training.ts)
+  const trainPlans = trainingPlans(league, userTeam, year);
   const futById = new Map<string, ReturnType<typeof fut.lines.get>>();
   for (const sp of world.players) futById.set(sp.id, fut.lines.get(sp.idx));
   for (const e of extras) for (const sp of e.org) futById.set(sp.id, fut.lines.get(sp.idx));
@@ -512,7 +515,12 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
     // 천장(잠재력 v2)은 넘지 않는다: 터지는 해·운·퓨처스 활약·육성·코치 몫까지 더한 뒤 자른다 (기획안 17.2, Q3)
     const next = capAtCeiling(coachGrowth(league, team, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE), runs, p.potential) - eff.runsDrop;
-    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
+    // 집중 훈련 (16-4c, training.ts): 갈래 집중은 성장 방향에, 자라지 않는 능력·수비 자리는 따로 쌓는다 (시즌 중에 걸었으면 기간 몫)
+    const plan = trainPlans.get(p.id);
+    const frac = plan ? trainingFrac(plan, seasonDays) : 0;
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params, focusOf(plan, frac));
+    const trainBefore = p.drillPos ? { ...p.drillPos } : undefined;
+    if (plan) applyDrill(p, plan, frac, ageIn(p, year + 1), homeOf(p.pos));
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
     // 등급(20~80)의 기준 집단이 "표본이 충분한 선수"라서, 가상 선수도 뛰면 기준 집단에 들어가야 한다
@@ -533,7 +541,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
         const { emC: _was, ...rest } = p.bat;
         const years = playerFieldYears(league, store, p);
         // 익숙함이 늘어난 자리는 등급도 오른다 (16-4, 등급 = 20 + T × u)
-        const shifted = rest.defTalent && rest.def ? familiarityShift(years, year, homeOf(p.pos) ?? undefined, rest.defTalent, rest.def) : rest.def;
+        const shifted = rest.defTalent && rest.def ? familiarityShift(years, year, homeOf(p.pos) ?? undefined, rest.defTalent, rest.def, trainBefore, p.drillPos) : rest.def;
         p.bat = { ...rest, def: shifted, ...refreshedPlayable(years, p, year + 1) };
       }
     }
@@ -575,6 +583,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2) + FUT_FORM_RUNS * futuresForm(fl), dev), runs, p.potential);
     growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
+  rollTraining(league);
   const divisions = season.divisionStandings();
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0), ...(divisions ? { divisions } : {}) };
   // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 정한다.
@@ -2739,10 +2748,10 @@ function timingFor(league: LeagueState, p: LeaguePlayer, params: EngineParams): 
  * 갈래 천장이 없거나 종합 천장이 바뀌었으면 여기서 (다시) 만든다
  */
 function growInBranches(league: LeagueState, p: LeaguePlayer, next: number, ctx: ValueContext, year: number, age: number, breakout: boolean | undefined,
-                        params: EngineParams): void {
+                        params: EngineParams, focus?: { branch: string; up: number; down: number }): void {
   p.ceil = ceilingFor(p, ctx, year, league.seed, params);
   Object.assign(p, growBranches({ ...p }, p.ceil, next, ctx, year,
-    { age, timing: timingFor(league, p, params), stream: `${league.seed}/growth2/${year}/${p.id}`, breakout }, params));
+    { age, timing: timingFor(league, p, params), stream: `${league.seed}/growth2/${year}/${p.id}`, breakout, ...(focus ? { focus } : {}) }, params));
 }
 
 /** 육성 투자: 25세 이하 선수가 오를 때 오름폭을 늘린다 */

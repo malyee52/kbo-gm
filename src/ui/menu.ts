@@ -38,7 +38,7 @@ export const MENU: MenuItem[] = [
   // 전력에 들어가면 기용 보드가 먼저 (2026-10-23 사용자 결정), 1·2군 명단은 그다음
   one('lineup', '전력', '기용 보드', 'lineup'),
   one('roster', '전력', '선수 명단', 'roster'),
-  one('growth', '전력', '성장', 'growth'),
+  { key: 'growth', group: '전력', label: '성장·훈련', tabs: [{ screen: 'growth', label: '성장' }, { screen: 'training', label: '훈련' }] },
   one('enlist', '전력', '입대', 'enlist'),
 
   one('search', '영입', '선수 검색', 'search'),

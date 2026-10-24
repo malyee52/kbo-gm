@@ -110,6 +110,10 @@ export interface LeaguePlayer {
    * 또는 첫 성장 판정 때 만들고, 종합 천장이 바뀌면 같은 모양으로 다시 맞춘다. 숨은 값 (화면·AI 가치·알림에 안 씀)
    */
   ceil?: import('./branches').BranchCeiling;
+  /** 훈련으로 쌓은 자라지 않는 능력 등급 (16-4c, league/training.ts). 월드를 만들 때 그 나이 평균 + 15까지 더한다 */
+  drill?: Partial<Record<import('./training').DrillKnob, number>>;
+  /** 수비 자리 훈련 익힘 m (0~1, 16-4c). 0.5 이상이면 그 자리 익숙함이 다 찬다 (engine/fielding.ts familiarity train) */
+  drillPos?: Partial<Record<import('../engine').FieldPos, number>>;
   /** 시기 τ (해, 숨은 값, 16-4a): 성장이 몰리는 나이를 당기거나 민다. 없으면 시드로 다시 뽑는다 (branches.ts timingOf) */
   timing?: number;
   /** 스카우트 평가 잠재력 (가상 신인만. 실제 잠재력 대신 화면과 AI 지명에 쓴다) */
@@ -364,4 +368,6 @@ export interface LeagueState {
    * 시작 때 이미 1군인 구단도 특례 기간이 남았으면 넣는다 (create.ts, 2026-10-23)
    */
   expansions?: { team: number; firstYear: number }[];
+  /** 집중 훈련 (16-4c, league/training.ts): 선수 ID → 훈련. 플레이어 구단만 담는다 (AI 구단은 결산 때 규칙으로 정함) */
+  training?: Record<string, import('./training').TrainingPlan>;
 }

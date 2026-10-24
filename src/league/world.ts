@@ -2,6 +2,7 @@
 // 자료가 있는 해(2026년까지)는 그 해 리그 평균·환경을 쓰고, 그 뒤는 마지막 5시즌 평균을 쓴다 (기획서 11장).
 // 시작 연도의 월드는 worldForYear와 선수 순서·능력이 같아야 한다 (저장 호환, 같은 시드 같은 결과).
 
+import { KNOB_CAP } from './training';
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
@@ -67,7 +68,8 @@ export function isFuturesTeam(league: Pick<LeagueState, 'expansions'>, team: num
  */
 /** 리그 상태의 월드 선수에게 주루·작전·포수·투수 짝·어깨 손잡이를 다시 낸다 (월드를 만들 때, 그리고 시즌 중 자유 모드 조작 뒤 불러온 판과 같게) */
 export function applyLeagueRunSkills(players: SimPlayer[], league: LeagueState, store: Store, params: EngineParams): void {
-  applyRunSkills(players, params, { arm: store.defense?.arm, running: store.running, startYear: league.startYear });
+  const drill = new Map(league.players.filter((p) => p.drill).map((p) => [p.id, p.drill!]));
+  applyRunSkills(players, params, { arm: store.defense?.arm, running: store.running, startYear: league.startYear, ...(drill.size ? { drill, drillCap: KNOB_CAP } : {}) });
 }
 
 export function worldFromLeague(league: LeagueState, store: Store, params: EngineParams = DEFAULT_PARAMS, opts: WorldOptions = {}): World {
