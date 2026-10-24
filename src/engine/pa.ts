@@ -12,7 +12,7 @@ import { conditionOf } from './condition';
 import { expectedPitches, type SolvedChain } from './chain';
 import { batBallSide, ballMix, clampRate, leagueBall, parkLogits, pitBallSide, thetaOf, type BallMix, type BallSide, type LeagueBall } from './angle';
 import { calledShare } from './pitch';
-import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
+import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, type PlateShift, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
 
 /** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
 export function tiredPenalty(body: number, bp: BodyParams): number {
@@ -163,8 +163,15 @@ export function condToday(ctx: Pick<GameContext, 'states' | 'condEvent'>, idx: n
   return conditionOf(ctx.states.cond[idx], ctx.condEvent ? ctx.condEvent[idx] : 0);
 }
 
+/** 포수 프레이밍 (능력치 v2 16-3, frame: 로짓, 0이면 sh 그대로) */
+function frameShift(sh: PlateShift, frame: number): PlateShift {
+  if (frame) sh.frame = frame;
+  return sh;
+}
+
 /** 타석 결과 확률. 수비는 여기서 보지 않는다: 인플레이 타구를 맡은 수비수가 안타 ↔ 아웃을 바꾼다 (battedball.ts, 엔진 2 5단계) */
-export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, state: PaState = NO_STATE, park = NEUTRAL_PARK): PaRates {
+export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, state: PaState = NO_STATE, park = NEUTRAL_PARK,
+  frame = 0): PaRates {
   const { league: lg, cal, params } = ctx;
   const bs = b.bat!;
   const ps = pg.skill;
@@ -214,7 +221,7 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   // 구종(20단계)은 사슬을 바꾸지 않는다: A 해결기가 이 사슬 칸을 구종별로 나눈다 (arsenal.ts pitchJoint)
   const bp = batPlateOf(pl, b);
   const pp = pitPlateOf(pl, pg.p);
-  const sh = shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]);
+  const sh = frameShift(shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]), frame);
   const ch = plateChain(pl.lp, bp, pp, sh);
   const X = ch.e[3];
   // 능력치 v2 16-2: 맞힌 공 X 뒤 결과는 타구 갈래(angle.ts)에서. 각도 성향 θ = 타자 + 투수, 퍼짐은 타자 컨택, 구간별 결과 로짓에 양쪽 손잡이를 더한다.

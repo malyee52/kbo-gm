@@ -63,7 +63,9 @@ describe('자유 모드 여러 시즌', () => {
       g.advance(12);
       // 시즌 중: 다른 구단 에이스 데려오기, 가상 유망주 만들기, 능력 바꾸기, 규정, 지명권, 입단 예약
       const rival = g.league.teams.findIndex((t, i) => i !== g.teamIdx && t.name === (s % 2 ? '삼성' : 'KIA'));
-      const ace = g.world.teams[rival].org.filter((p) => p.isPitcher && !p.foreign).sort((a, b) => b.value - a.value)[0];
+      // 이름으로 찾으므로 같은 구단에 같은 이름이 둘이면(2027 삼성 이승민 · 신인 이승민) 이름 조작이 빠진다: 이름이 하나뿐인 선수 중에서 고른다 (2026-10-24)
+      const sameName = (n: string) => g.world.teams[rival].org.filter((q) => q.name === n).length;
+      const ace = g.world.teams[rival].org.filter((p) => p.isPitcher && !p.foreign && sameName(p.name) === 1).sort((a, b) => b.value - a.value)[0];
       const name = NAMES[s];
       created.push(name);
       apply(`${year} 시즌 중`, [

@@ -24,6 +24,8 @@ import { Market } from './screens/Market';
 import { Search } from './screens/Search';
 import { TeamView } from './screens/TeamView';
 import { Watch } from './screens/Watch';
+import { Training } from './screens/Training';
+import { Scout } from './screens/Scout';
 import { Find } from './screens/Find';
 import { AllStar } from './screens/AllStar';
 import { Fantasy } from './screens/Fantasy';
@@ -612,6 +614,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'standings' && <Standings />}
                 {screen === 'team' && <TeamView team={screenArg} />}
                 {screen === 'watch' && <Watch />}
+                {screen === 'training' && <Training />}
+                {screen === 'scout-amateur' && <Scout tab="amateur" />}
+                {screen === 'scout-pro' && <Scout tab="pro" />}
+                {screen === 'scout-fx' && <Scout tab="fx" />}
                 {screen === 'find' && <Find key={searchKey} initialText={searchText.trim()} />}
                 {screen === 'leaders' && <Leaders />}
                 {screen === 'trade' && <Trade />}

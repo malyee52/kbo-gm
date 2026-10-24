@@ -54,7 +54,7 @@ export interface AngleParams {
 }
 /**
  * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
- * "어깨" 능력이 없어 외야수의 수비 런을 어깨로도 쓴다 (armPerRun, 추정).
+ * 어깨: v2 수비 선수는 어깨 능력(BatSkill.arm, 16-3d), 예전 수비 선수는 외야수의 수비 런을 어깨로도 쓴다 (armPerRun, 추정).
  */
 export interface PlayParams {
   /** 병살 확률 배율: 땅볼을 받은 자리 */
@@ -73,8 +73,10 @@ export interface PlayParams {
   flyAdvance: [number, number, number];
   /** 단타에 1루 주자가 3루까지 가는 확률 배율: 공이 간 구장 쪽 [좌익, 중견, 우익] */
   firstToThirdSide: [number, number, number];
-  /** 외야수 수비 1런당 주자 추가 진루(희생플라이, 단타 1→3·2→홈, 2루타 1→홈) 확률 감소 (어깨, 추정) */
+  /** 외야수 수비 1런당 주자 추가 진루(희생플라이, 단타 1→3·2→홈, 2루타 1→홈) 확률 감소 (어깨, 추정). 어깨 능력(BatSkill.arm)이 없는 예전 수비 선수만 */
   armPerRun: number;
+  /** 땅볼 병살 확률에 (1 + armDp × 받은 내야수의 어깨)를 곱한다 (능력치 v2 16-3d, 임시값) */
+  armDp: number;
 }
 
 /**
@@ -474,6 +476,45 @@ export interface EngineParams {
   catcherWildPitchPerRun: number;
   /** 포수 수비 1런당 상대 도루 성공률이 줄어드는 값 (임시값) */
   catcherStealPerRun: number;
+  /**
+   * 주루·작전·포수·투수 짝 능력의 시작값 (능력치 v2 16-3, runskills.ts, 모두 임시값). scale: 등급 10칸이 손잡이 값으로 얼마인지
+   * (runIQ·bunting·cFrame·quick 로짓, cBlock·hold 로그 배율, arm 진루 시도 확률), virtualSd: 가상 선수 분포 표준편차(등급), catcherPerRun: 포수 수비 1런당 블로킹·프레이밍 등급,
+   * armWord: 평판 글의 어깨 낱말(좋음 +1 · 나쁨 −1) 하나가 어깨 등급을 옮기는 크기 (16-3d),
+   * runIqPull·buntPull: 주루 판단·번트 수행 실측(running.json)을 나이 평균 쪽으로 당기는 가상 표본 (추가 진루 기회·번트 사건 수, 16-3d)
+   */
+  skill2: {
+    scale: { runIQ: number; bunting: number; cBlock: number; cFrame: number; hold: number; quick: number; arm: number };
+    virtualSd: number; catcherPerRun: number; armWord: number; runIqPull: number; buntPull: number;
+  };
+  /**
+   * 갈래 성장 (능력치 v2 16-4a, 기획안 2.3·2.4·17.2, league/branches.ts, 모두 임시값). 한 해 변화의 크기(런)는 성장 판정(growthRuns)이 정하고,
+   * 이 값은 그 변화를 갈래(타 so·bb·s1·d2·t3·hr, 투 so·bb·hr·hit)에 나눠 싣는 모양만 정한다.
+   * bat·pit: 갈래별 한 해 로그 변화 (다음 시즌 나이 ≤22 · 23~26 · 27~30 · 31~34 · 35+, tools/fit_aging_components.ts 측정값, 생존 편향 있음),
+   * floor: 곡선이 0인 갈래도 움직이는 바닥 (그 칸 가장 큰 변화에 곱함), room: 천장까지 남은 로그 거리가 이보다 작으면 그 갈래 성장이 줄어든다,
+   * yearSd: 해마다 갈래 무게 운 exp(yearSd z), ceilSd: 천장 갈래 엇갈림 exp(ceilSd z), peakPull: 실존 천장 모양을 고점 시즌에서 갈래별 커리어 최고 쪽으로 당기는 몫,
+   * tauSpan: 시기 τ 폭 (해, 삼각 분포), tauSlope·tauPivot: 성장 속도 × exp(tauSlope × τ × (나이 − tauPivot) ÷ 4) (0.5~1.5, 대기만성은 pivot 뒤에 더 큼),
+   * breakout: 터지는 해에 고른 갈래 무게 배율
+   */
+  growth2: {
+    bat: Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number[]>;
+    pit: Record<'so' | 'bb' | 'hr' | 'hit', number[]>;
+    floor: number; room: number; yearSd: number; ceilSd: number; peakPull: number; tauSpan: number; tauSlope: number; tauPivot: number; breakout: number;
+  };
+  /**
+   * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
+   * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
+   * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
+   * ageFloor: 범위 선수 중심 바닥(등급, ≤21·22~24·25~27), rankDecay: 지명 순위 바닥이 입단 뒤 해마다 줄어드는 런, rankPull: 실제 커리어 고점 당김 k,
+   * driveSpeed·reachBase·reachDrive: 성장 속도 × (1 + driveSpeed d) × (reachBase + reachDrive d),
+   * eduRate: 입단 전 한 해 성장 몫(2군 나이 비율 × 기회), eduPath: 입단 전 경로 배율 c
+   */
+  potential: {
+    width: [number, number, number, number, number]; sampleFull: number; sampleExtra: number;
+    fixWar: number; extremeWar: number; fixedWidth: number; extremeDrive: number;
+    ageFloor: [number, number, number]; rankDecay: number; rankPull: number;
+    driveSpeed: number; reachBase: number; reachDrive: number;
+    eduRate: number; eduPath: { univ: number; abroad: number; other: number };
+  };
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
   /**
@@ -718,6 +759,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     flyAdvance: [0.08, 0.22, 0.35],
     firstToThirdSide: [0.55, 1, 1.45],
     armPerRun: 0.008,
+    armDp: 1.5,
   },
   ball: {
     // 당겨:가운데:밀어 = 2023~2025 리그 49:20:31 (임시값, 출처 미확인 참고값: data-src/batted_ball_derived/, 엑셀 원 출처를 모른다)
@@ -828,16 +870,18 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 2012·2019 병살·희생플라이·도루를 맞춘 값. 실책(err)은 근거가 있다: 2001~2026은 사용자 수비 기록(리그 실책 합)이 비자책 비율에 비례하고,
   // 2000년 이전은 기사의 경기당 실책(1984 1.7개, 1990년대 1.5개대, OSEN 2023-04-18 등, docs/temp-values.md)이 그 비례식(1985 2.3개)보다 적다.
   // 추가 진루(adv) 1985 0.8은 근거 없이 득점을 맞춘 값이다
-  // ue (엔진 2 14단계): 비자책 채우기를 끄고(unearnedRunScale 0) tools/validate_engine.ts 10시즌으로 잰 경기 안 비자책 몫 (측정값, 다른 조정값이 바뀌면 다시 잰다)
+  // ue (엔진 2 14단계): 비자책 채우기를 끄고(unearnedRunScale 0) tools/validate_engine.ts 10시즌으로 잰 경기 안 비자책 몫 (측정값, 다른 조정값이 바뀌면 다시 잰다).
+  // 능력치 v2 16-3b (2026-10-24): 수비 v2와 실책 기울기 0.016(state.ts ERROR_PER_RUN)으로 20시즌씩 다시 잼. 2012·2025는 validate 100시즌의
+  // 남은 차이(+1.9%·+1.5%)만큼 0.0015 더함 (측정 0.052·0.059)
   eraRunning: [
-    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71, ue: 0.083 },
-    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79, ue: 0.071 },
-    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83, ue: 0.070 },
-    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1, ue: 0.058 },
-    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1, ue: 0.054 },
-    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1, ue: 0.062 },
-    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
-    { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
+    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71, ue: 0.080 },
+    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79, ue: 0.069 },
+    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83, ue: 0.068 },
+    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1, ue: 0.060 },
+    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1, ue: 0.0535 },
+    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1, ue: 0.060 },
+    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.067 },
+    { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.0605 },
   ],
   // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts --seasons 40으로 그 해 실제 무승부 비율에 맞춘 값 (2026-10-23).
   // 시작 회는 12회, 12회 끝 동점 비율이 실제 무승부보다 적으면 한 회씩 앞당겼다 (사용자 결정 전 임시). 1982는 실제 무승부 0이라 넣지 않는다
@@ -885,6 +929,26 @@ export const DEFAULT_PARAMS: EngineParams = {
   defenseHitPerRun: 1 / 880,
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
+  // 모두 임시값 (자료 없음, 기획안 1.3~1.5·9.5). 크기는 validate 도루·폭투·희생번트 ±1% 안에서 정했다 (16-3c)
+  // arm 0.04: 등급 10칸 = 수비 5런, 예전 armPerRun 0.008/런과 같은 크기. armWord 12: 가상 선수 퍼짐(8)의 1.5배 (모두 임시값, 16-3d)
+  // runIqPull 80·buntPull 30: 2023~2025 선수 사이 퍼짐을 적률로 나눈 값(추가 진루 약 35~40 기회, W·V 공 대비 희생번트 약 17 사건)의 두 배쯤 (강하게 당김, 임시값)
+  //   buntPull을 줄이면 덜 당겨 퍼짐이 커진다 (15면 2026 번트 등급 표준편차 6.9 → 9.8). 발 빠른 타자 쏠림은 기습 번트 몫을 빼서 다룬다 (16-3e, runskills.ts measuredBunting)
+  skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15, arm: 0.04 }, virtualSd: 8, catcherPerRun: 0.5, armWord: 12, runIqPull: 80, buntPull: 30 },
+  // 갈래 성장 (16-4a): 모양은 tools/fit_aging_components.ts (reports/aging-fit.txt 1990년 이후 델타 표), 나머지는 모두 임시값
+  growth2: {
+    bat: { so: [-0.084, -0.046, -0.015, 0.008, 0.014], bb: [0.059, 0.033, 0.012, 0.001, -0.02], s1: [-0.005, 0.004, -0.001, -0.018, -0.013], d2: [-0.007, -0.014, -0.022, -0.021, -0.043], t3: [-0.057, -0.078, -0.061, -0.038, 0.006], hr: [0.084, -0.005, -0.025, -0.053, -0.092] },
+    pit: { so: [-0.015, -0.025, -0.032, -0.046, -0.049], bb: [-0.009, -0.032, -0.004, 0.004, 0.015], hr: [-0.05, 0.049, 0.038, 0.051, 0.054], hit: [0.005, 0.015, 0.016, 0.02, 0.012] },
+    floor: 0.25, room: 0.15, yearSd: 0.35, ceilSd: 0.3, peakPull: 0.5, tauSpan: 2, tauSlope: 0.5, tauPivot: 24, breakout: 4,
+  },
+  // 잠재력 v2 (기획안 17.3·17.4·18.2~18.5, 사용자 2026-10-24 확정 꼴): 폭 두 배(Q2 ③), 고정 2승·극단 8승(Q7·Q3), 고정 폭 ½(Q8 ③), k ¼(Q10 ②).
+  // 크기(바닥 47·44·41, 4런, 성장 성향 0.25·0.85·0.15, c 0.75·0.9·0.5, 0.28)는 모두 임시값이고 16-5에서 맞춘다
+  potential: {
+    width: [14, 10, 6, 3, 0], sampleFull: 1500, sampleExtra: 0.5,
+    fixWar: 2, extremeWar: 8, fixedWidth: 0.5, extremeDrive: 0.25,
+    ageFloor: [47, 44, 41], rankDecay: 4, rankPull: 0.25,
+    driveSpeed: 0.25, reachBase: 0.85, reachDrive: 0.15,
+    eduRate: 0.28, eduPath: { univ: 0.75, abroad: 0.9, other: 0.5 },
+  },
   starterRestDays: 5,
   penBlendDays: 100,
 

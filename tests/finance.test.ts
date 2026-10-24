@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
+import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
 
@@ -121,7 +121,7 @@ describe('투자 4종', () => {
   it('의료 투자: 같은 시드에서 부상 확률·결장 기간이 줄어 부상 결장 일수가 줄어든다', () => {
     const run = (level: number) => {
       const g = GameSession.create(store, opts('inv-med'), FAST);
-      for (const f of g.league.finance!) f.active = { scout: 1, develop: 1, medical: level, marketing: 1 };
+      for (const f of g.league.finance!) f.active = { scout: 1, scoutPro: 1, develop: 1, medical: level, marketing: 1 };
       const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST); // 월드를 투자 단계로 다시 만든다
       h.advance(100000);
       return h.season.absences.filter((a) => a.kind !== 'event').reduce((s, a) => s + (a.until - a.day), 0);
@@ -130,21 +130,6 @@ describe('투자 4종', () => {
     expect(run(3)).toBeLessThan(run(0));
   });
 
-  it('스카우트: 우리 구단 단계가 높을수록 드래프트 후보 잠재력 평가 오차가 작다', () => {
-    const err = (level: number) => {
-      const g = GameSession.create(store, opts('inv-scout'), FAST);
-      g.league.finance![lg].active!.scout = level;
-      g.advance(100000);
-      g.beginOffseason();
-      let guard = 0;
-      while (g.offseason!.stage !== 'draft' && guard++ < 30) { if (g.offseason!.stage === 'comp') g.autoComp(); g.nextStage(); }
-      const d = g.offseason!.draft!;
-      const ps = [...d.pool, ...d.picks.map((x) => x.id)].map((id) => g.leaguePlayer(id)!);
-      return Math.max(...ps.map((p) => Math.abs((p.scoutPotential ?? p.potential) - p.potential)));
-    };
-    expect(err(3)).toBeLessThanOrEqual(SCOUT_NOISE[3] + 0.5);
-    expect(err(0)).toBeGreaterThan(SCOUT_NOISE[3] + 0.5);
-  });
 });
 
 describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', () => {
@@ -198,6 +183,9 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     let guard = 0;
     while (h.offseason!.stage !== 'foreign' && guard++ < 10) { if (h.offseason!.stage === 'comp') h.autoComp(); h.nextStage(); }
     const off = h.offseason!;
+    // 새 후보는 관찰 명단에 있어야 계약할 수 있다 (league/scoutfx.ts): 모두 올려 둔다
+    const st = h.league.scoutFx!.teams[lg];
+    for (const id of off.foreign!.pool) if (h.leaguePlayer(id)!.fx && !st.list.some((e) => e.id === id)) st.list.push({ id, at: -1, weeks: 0 });
     const cand = off.foreign!.pool.map((id) => h.leaguePlayer(id)!).find((p) => p.transferFee && Off.canSignForeign(h.league, off, lg, p).ok);
     if (!cand) return; // 우리 차례가 아니거나 자리가 없으면 넘어간다
     const before = cashOf(h.league, lg);

@@ -7,7 +7,7 @@ import type { BallTally } from './battedball';
 import { emptyLeagueCounters, simulateGame, type GameCommand, type GameContext, type GameResult, type GameSub, type LeagueCounters, type Play, type RunTally } from './game';
 import { drawInjury, injuryChance, injuryProneness, pickEvent, type Absence } from './injury';
 import { injuryScale } from './traits';
-import { AUTO_IBB_YEAR, eraEnv, eraPitching, withEraRunning } from './eras';
+import { ABS_YEAR, AUTO_IBB_YEAR, eraEnv, eraPitching, withEraRunning } from './eras';
 import { chainShapeFor, type EngineParams } from './params';
 import { chainResolver, type PaResolver } from './resolver';
 import { managerNorms } from './manager';
@@ -223,6 +223,8 @@ export const SEASON_SAVE_FORMAT = 3;
 export interface SeasonSave {
   /** 수비수별 실책 (예전 저장에는 없다) */
   errors?: number[];
+  /** 수비수별 자리 아웃 수 (선수 색인 × 8 + C…RF, 능력치 v2 12.9. 예전 저장에는 없다) */
+  defOuts?: number[];
   /** 3: 일정 개편 (연전 일정을 저장에 넣음, 2026-10-23). 2: 엔진 2 (경기마다 따로 난수 줄기, 2026-10-22). 1·2는 불러오지 않는다 */
   format: 3;
   /** 이 시즌의 일정 (일정 개편 기획안 6.1). 불러올 때 다시 만들지 않고 이것을 쓴다 */
@@ -326,6 +328,8 @@ export class Season {
   readonly pit: PitLine[];
   /** 수비수별 실책 (선수 색인, 정규시즌. 2026-10-13) */
   readonly errors: number[];
+  /** 수비수별 자리 아웃 수 (선수 색인 × 8 + FIELD_POS 순서 C…RF, 정규시즌. 능력치 v2 12.9) */
+  readonly defOuts: Int32Array;
   readonly teams: TeamRecord[];
   readonly totals: LeagueCounters;
   readonly teamSeasons: TeamSeason[];
@@ -389,6 +393,7 @@ export class Season {
     this.bat = Array.from({ length: n }, emptyBatLine);
     this.pit = Array.from({ length: n }, emptyPitLine);
     this.errors = new Array(n).fill(0);
+    this.defOuts = new Int32Array(n * 8);
     this.teams = world.teams.map(emptyTeamRecord);
     this.totals = emptyLeagueCounters();
     this.boxTeams = new Set(init.boxTeams ?? []);
@@ -405,8 +410,9 @@ export class Season {
     this.ctx = {
       league: world.league, env: eraEnv(world, baseParams), cal, params, maxInnings: world.rules.maxInnings, timeLimit: params.timeLimit?.[world.year], day: 0, rng: this.gamesRoot,
       states: this.states, bat: this.bat, pit: this.pit, totals: this.totals, startLimitScale: eraPitching(world.year).limitScale,
-      errors: this.errors, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
+      errors: this.errors, defOuts: this.defOuts, resolver: init.resolver ?? chainResolver(chainShapeFor(params, world.year)), balls: init.balls, running: init.running, splits: init.splits, pen: init.pen,
       autoIbb: world.year >= AUTO_IBB_YEAR,
+      framing: world.year < ABS_YEAR,
       // 볼카운트 사슬 능력 (능력치 v2 16-1). 투구 수를 세지 않는 해결기(B0)도 삼진·볼넷은 같은 사슬에서
       plate: plateContext(world.players, world.league, params, world.year),
       // 투수 구종 (엔진 2 20-1단계): A 해결기만 쓴다
@@ -858,7 +864,7 @@ export class Season {
     // 시간 제한 흉내는 timeLimitPostseason에 있는 해만 (정규시즌과 같은 값, 경기 난수의 'time' 줄기)
     const year = this.world.year;
     const timeLimit = params.timeLimitPostseason?.includes(year) ? params.timeLimit?.[year] : undefined;
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit, plays, command: cmd, injuries: undefined,
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, defOuts: undefined, postseason: true, timeLimit, plays, command: cmd, injuries: undefined,
       engine: cmd || this.engineAll ? 'A' : undefined };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
@@ -886,7 +892,7 @@ export class Season {
     const params = { ...this.params, restChance: 0, catcherRestChance: 0 };
     const ctx: GameContext = {
       ...this.ctx, params, rng, bat, pit, totals: emptyLeagueCounters(), states: newPlayerStates(n),
-      plays: null, command: null, form: undefined, errors: undefined, balls: undefined, running: undefined, postseason: false, injuries: undefined,
+      plays: null, command: null, form: undefined, errors: undefined, defOuts: undefined, balls: undefined, running: undefined, postseason: false, injuries: undefined,
     };
     const side = (s: ExhibitionSide, idx: number): TeamSeason => ({
       team: { idx, name: s.name, franchise: s.name, org: [...s.hitters, ...s.pitchers] },
@@ -938,6 +944,7 @@ export class Season {
       bat: this.bat.map((b) => BAT_KEYS.map((k) => b[k])),
       pit: this.pit.map((p) => PIT_KEYS.map((k) => p[k])),
       errors: [...this.errors],
+      defOuts: Array.from(this.defOuts),
       teams: this.teams.map((t) => ({ ...t })),
       totals: { ...this.totals },
       log: this.log.map((g) => ({ ...g })),
@@ -998,6 +1005,7 @@ export class Season {
     save.bat.forEach((row, i) => BAT_KEYS.forEach((k, j) => { s.bat[i][k] = row[j]; }));
     save.pit.forEach((row, i) => PIT_KEYS.forEach((k, j) => { s.pit[i][k] = row[j] ?? 0; })); // 예전 저장에는 뒤에 붙인 항목(홀드)이 없다
     save.errors?.forEach((v, i) => { if (i < s.errors.length) s.errors[i] = v; }); // 예전 저장에는 없다 (0)
+    if (save.defOuts) s.defOuts.set(save.defOuts.slice(0, s.defOuts.length)); // 예전 저장에는 없다 (0)
     save.teams.forEach((t, i) => Object.assign(s.teams[i], t));
     Object.assign(s.totals, save.totals);
     s.log.push(...save.log.map((g) => ({ ...g })));

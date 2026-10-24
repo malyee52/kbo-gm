@@ -74,6 +74,8 @@ export interface LeaguePlayer {
   reserve?: number;
   /** 시장에 나오는 때 (시즌의 몫 0~1). 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 (create.ts, market.ts) */
   marketFrom?: number;
+  /** 파견으로만 찾을 수 있는 가상 외국인 후보: 지역과 시장에 머무는 주 (scoutfx.ts, 기획안 19.4). 관찰 명단에 있는 구단만 보고 계약한다 */
+  fx?: import('./scoutfx').FxWindow;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */
   noTradeYear?: number;
   id: string;
@@ -95,10 +97,27 @@ export interface LeaguePlayer {
   /** 지금 능력 (리그 대비 비율). 성장 판정 때 바뀐다 */
   bat: BatSkill | null;
   pit: PitSkill | null;
-  /** 잠재력: 전성기에 도달할 수 있는 한 시즌 기여 (대체 선수 대비 런, 주전 출전 기준) */
+  /**
+   * 잠재력(숨은 천장 PA): 전성기에 도달할 수 있는 한 시즌 기여 (대체 선수 대비 런, 주전 출전 기준). 리그를 만들 때·입단 때 한 번 뽑고(league/potential.ts)
+   * 지금 능력은 이 위로 자라지 않는다 (능력치 v2 기획안 17.2)
+   */
   potential: number;
-  /** 스카우트 평가 잠재력 (가상 신인만. 실제 잠재력 대신 화면과 AI 지명에 쓴다) */
-  scoutPotential?: number;
+  /**
+   * 숨은 성장 성향 d (−1~1, 기획안 17.4 ②): 성장 속도와 천장 도달 몫에만 쓴다. 화면·알림·기사·AI 가치 어디에도 쓰지 않는다.
+   * 없으면 0으로 본다 (가상 판정)
+   */
+  drive?: number;
+  /**
+   * 갈래 천장 P_c (능력치 v2 16-4a, league/branches.ts): 종합 천장(potential)을 갈래로 나눈 능력 비율. 리그를 만들 때(실존 선수는 고점 시즌 모양)
+   * 또는 첫 성장 판정 때 만들고, 종합 천장이 바뀌면 같은 모양으로 다시 맞춘다. 숨은 값 (화면·AI 가치·알림에 안 씀)
+   */
+  ceil?: import('./branches').BranchCeiling;
+  /** 훈련으로 쌓은 자라지 않는 능력 등급 (16-4c, league/training.ts). 월드를 만들 때 그 나이 평균 + 15까지 더한다 */
+  drill?: Partial<Record<import('./training').DrillKnob, number>>;
+  /** 수비 자리 훈련 익힘 m (0~1, 16-4c). 0.5 이상이면 그 자리 익숙함이 다 찬다 (engine/fielding.ts familiarity train) */
+  drillPos?: Partial<Record<import('../engine').FieldPos, number>>;
+  /** 시기 τ (해, 숨은 값, 16-4a): 성장이 몰리는 나이를 당기거나 민다. 없으면 시드로 다시 뽑는다 (branches.ts timingOf) */
+  timing?: number;
   /** 직전 기록이 없어 그 해 기록으로 능력을 추정한 선수 (첫 시즌만) */
   estimated: boolean;
   /** 소속 구단 색인. -1 = 무소속 (방출, 미계약 FA) */
@@ -202,6 +221,10 @@ export interface SeasonLine {
   /** 가을야구 성적: postseason.ts PS_BAT_KEYS / PS_PIT_KEYS 순서 (2026-10-12부터) */
   pbat?: number[];
   ppit?: number[];
+  /** 1군 자리별 수비 이닝 (C / 1B / 2B / 3B / SS / LF / CF / RF, 대수비 포함, 반올림 정수. 능력치 v2 12.9·15.2, 2026-10-24부터) */
+  def?: number[];
+  /** 퓨처스(2군) 자리별 수비 이닝 (def와 같은 꼴, 모형이 정한 값. 능력치 v2 15.2) */
+  fdef?: number[];
 }
 
 export interface LeagueTeam {
@@ -320,6 +343,8 @@ export interface LeagueState {
   aiTrades?: AiTradeRecord[];
   /** 시즌 중 방출·영입 (market.ts) */
   marketMoves?: import('./market').MarketMove[];
+  /** 외국인 스카우트 파견·관찰 명단 (그 시기 것만, scoutfx.ts) */
+  scoutFx?: import('./scoutfx').ScoutFxState;
   /**
    * 이벤트(AI 구단의 트레이드 제안)를 받아들여 이뤄진 우리 트레이드 (선수 ID). 조작 기록에는 'event'로만 남아
    * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)
@@ -345,4 +370,6 @@ export interface LeagueState {
    * 시작 때 이미 1군인 구단도 특례 기간이 남았으면 넣는다 (create.ts, 2026-10-23)
    */
   expansions?: { team: number; firstYear: number }[];
+  /** 집중 훈련 (16-4c, league/training.ts): 선수 ID → 훈련. 플레이어 구단만 담는다 (AI 구단은 결산 때 규칙으로 정함) */
+  training?: Record<string, import('./training').TrainingPlan>;
 }

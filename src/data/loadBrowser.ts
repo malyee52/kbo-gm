@@ -1,6 +1,6 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
 import { setCalendarSchedule } from './schedule';
-import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RunningData, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -19,7 +19,7 @@ export interface BrowserStore extends DataStore {
 
 export async function loadBrowserStore(): Promise<BrowserStore> {
   // 신인 지명(drafts.json)은 오프시즌 드래프트와 새 게임에 필요해서 처음부터 불러온다 (약 640KB, 압축 전송)
-  const [meta, pl, dr, tr, mil, mgr, dfa, rc, homes, ppa, schedule, defense, pitches, plate, parks] = await Promise.all([
+  const [meta, pl, dr, tr, mil, mgr, dfa, rc, homes, ppa, schedule, defense, pitches, plate, parks, running] = await Promise.all([
     get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json'), get<{ years: Record<string, DraftRow[]> }>('drafts.json'),
     // 숨겨진 특수능력 표. 파일이 없어도 게임은 돌아간다 (아무도 능력이 없는 것으로)
     get<{ traits: Record<string, string[]> }>('traits.json').then((t) => t.traits, () => undefined),
@@ -45,6 +45,8 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     get<PlateData>('plate.json').catch(() => undefined),
     // 실제 구장 제원·구단별 주 구장 (약 20KB). 없으면 ballparks.ts의 코드 안 표
     get<ParkData>('parks.json').catch(() => undefined),
+    // 선수별 추가 진루·번트 (약 30KB, 능력치 v2 16-3d). 없으면 주루 판단·번트 수행은 나이 평균에서 시작
+    get<RunningData>('running.json').catch(() => undefined),
   ]);
   const seasons = new Map<number, SeasonData>();
   const load = async (years: number[]) => {
@@ -71,6 +73,7 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     pitches,
     plate,
     parks,
+    running,
     async ensureYear(year) {
       await load([year, year - 1, year - 2, year - 3]);
     },

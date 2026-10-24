@@ -12,7 +12,8 @@ import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
 import { recentLines } from '../recent';
 import { lastOutings, outingText, type Outing } from '../../game/boxscore';
 import { futuresText } from './Roster';
-import { CondTag, CONDITION_HELP, useCondition } from '../parts';
+import { CondTag, CONDITION_HELP, GuessGrade, useCondition, useSeen } from '../parts';
+import { guessMid } from '../../league/scout';
 
 type Tab = 'hit' | 'pit' | 'entry';
 type PenRole = 'SU' | 'LR' | 'RP' | 'MOP';
@@ -61,7 +62,8 @@ function prune(d: Draft, players: SimPlayer[]): void {
 }
 
 export function LineupBoard() {
-  const { session, grades, changed, version, openPlayer } = useGame();
+  const { session, changed, version, openPlayer } = useGame();
+  const seen = useSeen();
   const [tab, setTab] = useState<Tab>('hit');
   const [target, setTarget] = useState<Target | null>(null);
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
@@ -252,11 +254,16 @@ export function LineupBoard() {
     }
     return { text: '출전 가능', out: false, cond: condOf(p) };
   };
-  const bg = (p: SimPlayer) => grades.batters.get(p.id);
-  const pg = (p: SimPlayer) => grades.pitchers.get(p.id);
-  const defAt = (p: SimPlayer, s: Slot) => (s === 'DH' ? null : defenseGrade(defenseAt(p, s)));
+  // 갈래 등급은 우리 스카우트 팀의 추측 가운데값 (능력치 v2 17.6)
+  const gm = (p: SimPlayer, k: string): number | null => { const v = seen.grade(p.id, k); return v ? guessMid(v) : null; };
+  const bg = (p: SimPlayer) => (p.isPitcher || gm(p, 'contact') === null ? undefined
+    : { contact: gm(p, 'contact')!, power: gm(p, 'power')!, eye: gm(p, 'eye')!, speed: gm(p, 'speed')! });
+  const pg = (p: SimPlayer) => (!p.isPitcher || gm(p, 'stuff') === null ? undefined
+    : { stuff: gm(p, 'stuff')!, control: gm(p, 'control')!, hrSuppression: gm(p, 'hrSuppression')!, stamina: gm(p, 'stamina'), reliefStamina: gm(p, 'reliefStamina') });
+  const defView = (p: SimPlayer, s: Slot) => (s === 'DH' ? null : seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, s))));
+  const defAt = (p: SimPlayer, s: Slot) => { const v = defView(p, s); return v ? guessMid(v) : null; };
 
-  /** 추천 점수: 보이는 능력 등급만 쓴다 */
+  /** 추천 점수: 보이는 능력 등급(스카우트 추측)만 쓴다 */
   const score = (p: SimPlayer, t: Target): number => {
     if (t.kind === 'slot') {
       const g = bg(p);
@@ -558,7 +565,8 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
   defAt: (p: SimPlayer, s: Slot) => number | null; editable: boolean;
   onPick: (p: SimPlayer) => void; onClear: () => void; onClose: () => void;
 }) {
-  const { session, grades, openPlayer } = useGame();
+  const { session, openPlayer } = useGame();
+  const seen = useSeen();
   const ref = useRef<HTMLElement>(null);
   const pit = target.kind !== 'slot';
   useEffect(() => {
@@ -612,8 +620,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
             <tbody key={title}>
               <tr className="group-row"><th className="l" colSpan={8}>{title}</th></tr>
               {list.map(({ p, st }) => {
-                const bgs = grades.batters.get(p.id);
-                const pgs = grades.pitchers.get(p.id);
+                const gv = (k: string) => <GuessGrade v={seen.grade(p.id, k)} />;
                 return (
                   <tr key={p.idx} className={best?.p.idx === p.idx ? 'rec' : undefined}>
                     <td>
@@ -629,10 +636,10 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
                     </td>
                     <td className="l small">{nowText(p)}{st.out && <><br /><span className="status out">{st.text}</span></>}{st.cond && <><br /><CondTag text={st.cond} /></>}</td>
                     {pit ? (
-                      <><td><Grade v={pgs?.stuff} /></td><td><Grade v={pgs?.control} /></td><td><Grade v={pgs?.hrSuppression} /></td>
-                        <td><Grade v={target.kind === 'pen' && target.role === 'LR' ? pgs?.reliefStamina : pgs?.stamina} /></td></>
+                      <><td>{gv('stuff')}</td><td>{gv('control')}</td><td>{gv('hrSuppression')}</td>
+                        <td>{gv(target.kind === 'pen' && target.role === 'LR' ? 'reliefStamina' : 'stamina')}</td></>
                     ) : (
-                      <>{target.slot !== 'DH' && <td><Grade v={defAt(p, target.slot)} /></td>}<td><Grade v={bgs?.contact} /></td><td><Grade v={bgs?.power} /></td><td><Grade v={bgs?.eye} /></td></>
+                      <>{target.slot !== 'DH' && <td><GuessGrade v={seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, target.slot)))} /></td>}<td>{gv('contact')}</td><td>{gv('power')}</td><td>{gv('eye')}</td></>
                     )}
                   </tr>
                 );
@@ -654,7 +661,7 @@ function EntryLists({ d, curReg, toggle, statusOf, nowText, recent, fut, editabl
   const [kind, setKind] = useState<'all' | 'hit' | 'pit'>('all');
   const org = session.team.org.filter((p) => kind === 'all' || (kind === 'pit') === p.isPitcher);
   const sortKey = (p: SimPlayer) => (p.isPitcher ? 1 : 0);
-  const col = (first: boolean) => org.filter((p) => d.entry.has(p.idx) === first).sort((a, b) => sortKey(a) - sortKey(b) || b.value - a.value || a.idx - b.idx);
+  const col = (first: boolean) => org.filter((p) => d.entry.has(p.idx) === first).sort((a, b) => sortKey(a) - sortKey(b) || a.name.localeCompare(b.name, 'ko') || a.idx - b.idx);
   return (
     <section className="card" aria-label="엔트리">
       <div className="card-top">

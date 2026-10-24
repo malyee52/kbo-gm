@@ -101,6 +101,8 @@ export interface GameContext {
   command?: GameCommand | null;
   /** 수비수별 실책 수 (선수 색인). 없으면 남기지 않는다 */
   errors?: number[];
+  /** 수비수별 자리 아웃 수 (선수 색인 × 8 + FIELD_POS 순서 C…RF, 능력치 v2 12.9). 없으면 세지 않는다 */
+  defOuts?: Int32Array;
   /** 인플레이 타구 집계 (검증 도구용, battedball.ts). 없으면 세지 않는다. 난수를 쓰지 않아 결과는 같다 */
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */
@@ -109,6 +111,8 @@ export interface GameContext {
   pen?: PenTally;
   /** 고의4구를 공 없이 하나 (자동 고의4구, eras.ts AUTO_IBB_YEAR 이후). false면 공 4개를 실제로 던진다. 없으면 자동 */
   autoIbb?: boolean;
+  /** 포수 프레이밍이 작동하나 (자동 볼 판정 전 해, eras.ts ABS_YEAR, 능력치 v2 16-3). 없으면 작동 안 함 */
+  framing?: boolean;
   /** 좌우 4칸 집계 (엔진 2 9단계 점검 도구만): 'LL'(좌타·좌투) 'LR' 'RL' 'RR' → 타석 결과 수. 양타는 투수 반대 손. 없으면 세지 않는다 */
   splits?: Record<string, Partial<Record<PlayKind, number>>>;
   /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
@@ -377,6 +381,8 @@ interface RecordSnapshot {
   pit: PitLine[];
   totals: LeagueCounters;
   errors?: number[];
+  /** 자리별 수비 아웃 (능력치 v2 16-3b ctx.defOuts) */
+  defOuts?: Int32Array;
   tallies: Partial<Pick<GameContext, 'balls' | 'running' | 'pen' | 'splits'>>;
 }
 
@@ -387,7 +393,7 @@ function snapshotRecords(ctx: GameContext): RecordSnapshot {
   for (const k of TALLIES) if (ctx[k]) (tallies as Record<string, unknown>)[k] = structuredClone(ctx[k]);
   return {
     bat: ctx.bat.map((l) => ({ ...l })), pit: ctx.pit.map((l) => ({ ...l })), totals: { ...ctx.totals },
-    ...(ctx.errors ? { errors: ctx.errors.slice() } : {}), tallies,
+    ...(ctx.errors ? { errors: ctx.errors.slice() } : {}), ...(ctx.defOuts ? { defOuts: ctx.defOuts.slice() } : {}), tallies,
   };
 }
 
@@ -405,6 +411,7 @@ function restoreRecords(ctx: GameContext, s: RecordSnapshot): void {
     ctx.errors.length = s.errors.length;
     s.errors.forEach((v, i) => { ctx.errors![i] = v; });
   }
+  if (ctx.defOuts && s.defOuts) ctx.defOuts.set(s.defOuts);
   for (const k of TALLIES) if (ctx[k] && s.tallies[k]) restoreInto(ctx[k]!, s.tallies[k]!);
 }
 
@@ -559,7 +566,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     const sit = { runnersOn: !st.basesEmpty, scoring: !!(st.bases[1] || st.bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2 };
     // 히트앤드런 첫 공 인플레이: 그 공으로 타석이 끝난다 (그 사이 지휘로 대타·번트·고의4구를 골랐으면 작전은 풀린다)
     if (going && !tactic && !walk && !hitter) {
-      const rates = paRates(batter, pg, bat.isHome, ctx, { ...sit, runnersOn: true, scoring: false }, st.park);
+      const rates = paRates(batter, pg, bat.isHome, ctx, { ...sit, runnersOn: true, scoring: false }, st.park, ctx.framing ? fld.catcherFrame : 0);
       addPitches(ctx, pg, 1);
       const r0 = bat.runs;
       const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
@@ -592,7 +599,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     let extra: Pick<Play, 'seq' | 'np' | 'pt' | 'pz'> | undefined;
     if (walk) ev = Ev.BB;
     else {
-      rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park);
+      rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park, ctx.framing ? fld.catcherFrame : 0);
       const chain = ctx.engine === 'A' ? rates.chain ?? resolver.chainFor?.(rates) : undefined;
       if (chain) {
         // A 해결기 (엔진 2 17단계): 공 하나씩. 지휘하는 경기는 공 사이에 묻는다
@@ -740,7 +747,7 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
           pg = fld.pitcher;
           pg.bf++;
           pg.line.bf++;
-          rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park);
+          rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park, ctx.framing ? fld.catcherFrame : 0);
           chain = rates.chain ?? ctx.resolver?.chainFor?.(rates) ?? chain;
           joint = null;
         }

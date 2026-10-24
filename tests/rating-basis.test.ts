@@ -33,7 +33,7 @@ describe('능력치 기준', () => {
     expect(b.reproInfo().opts.ratingBasis).toBeUndefined();
   }, 120_000);
 
-  it('잠재력은 실제로 보여 준 고점: 하락기(2012)에 시작해도 김광현의 잠재력은 그대로, 전성기(2010) 시작에는 고점 위 여유분이 붙지 않는다', () => {
+  it('잠재력은 보여 준 고점 아래로 안 간다: 하락기(2012)에 시작해도 김광현의 잠재력은 고점 수준, 전성기(2010) 시작에는 지금 능력이 바닥', () => {
     const at = (y: number) => {
       const g = GameSession.create(store, { year: y, teamIdx: 0, seed: 'kkh', ratingBasis: 'season' }, FAST);
       const lp = g.league.players.find((x) => x.name === '김광현' && x.isPitcher && x.team >= 0)!;
@@ -42,10 +42,11 @@ describe('능력치 기준', () => {
     };
     const prime = at(2010);
     const slump = at(2012);
-    // 2010년은 그 시즌이 곧 고점: 잠재력 = 지금 능력 (예전에는 22세라 여유분 +24×운이 붙어 실제 고점의 1.7배였다)
-    expect(prime.pot).toBeCloseTo(prime.now, 3);
-    // 2012년(부진한 해) 시작: 지금 능력은 낮아도 잠재력은 고점 수준 (시작 연도 리그 환경에 따라 런 값만 조금 다르다)
+    // 잠재력 v2 (기획안 18.2): 시작 연도 전 기록만 보고 고정 선수는 max(지금, 보여 준 고점, 기준 + 나이 폭 ½ × z).
+    // 2010년(22세) 시작은 앞날 기록을 보지 않으므로 지금 능력 위로 나이 여유분이 붙을 수 있다 (예전 v1은 실제 고점에 묶었다)
+    expect(prime.pot).toBeGreaterThanOrEqual(prime.now - 1e-6);
+    // 2012년(부진한 해) 시작: 지금 능력은 낮아도 잠재력은 2010년에 보여 준 고점 수준 (시작 연도 리그 환경에 따라 런 값만 조금 다르다)
     expect(slump.now).toBeLessThan(prime.now - 20);
-    expect(slump.pot).toBeGreaterThan(prime.pot * 0.85);
+    expect(slump.pot).toBeGreaterThan(prime.now * 0.85);
   }, 240_000);
 });

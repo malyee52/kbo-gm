@@ -7,7 +7,6 @@
 // 같은 상태를 쓴다 (비교 칸 공유).
 import { useSyncExternalStore } from 'react';
 import { MIN_ORG_CATCHERS, MIN_ORG_HITTERS, MIN_ORG_PITCHERS, type TradeEvaluation, type TradeVerdict } from '../ai/trade';
-import { currentRuns } from '../ai/value';
 import { FIELD_POS, isStarterSkill, type SimPlayer } from '../engine';
 import type { GameSession, PickSwap } from '../game/session';
 import { parsePick, type DraftPick } from '../league/picks';
@@ -139,8 +138,9 @@ export const SLOTS = [...FIELD_POS, 'DH', 'SP', 'RP'] as const;
 /** 투수 자리 등급은 상위 몇 명의 평균인가 (임시값) */
 const PIT_DEPTH_N = 5;
 
+/** 화면 요약용 등급: 우리 스카우트 팀의 추측 기여를 20~80으로 (진짜 종합은 보이지 않는다, 능력치 v2 17.6) */
 export function overall(s: GameSession, p: SimPlayer): number {
-  return runsGrade(currentRuns(p, s.values), s.world.year);
+  return runsGrade(s.seenRuns(p.id), s.world.year);
 }
 
 /** 자리 등급: 야수는 그 자리 최고 종합, SP/RP는 상위 5명 평균. 그 자리 선수가 없으면 null */

@@ -41,6 +41,12 @@ export function eraPitching(year: number): EraPitching {
 /** 자동 고의4구 (공 없이) 도입 해: 2018년 (조사값, docs/경기엔진2_기획안.md 3.10.1). 그 전은 공 4개를 실제로 던지는 수동 고의4구 */
 export const AUTO_IBB_YEAR = 2018;
 
+/**
+ * 자동 볼 판정(ABS) 도입 해 (능력치 v2 기획안 7.2 결정 2: 포수 프레이밍은 이 해 전에만 작동). 2024는 임시값 —
+ * 자료집 "제도연표" 시트에 행이 없어 확인하지 못했다 (기획안 8장)
+ */
+export const ABS_YEAR = 2024;
+
 const NO_ERA_RUNNING: EraRunning = { year: 0, dp: 1, sf: 1, steal: 1, adv: 1, err: 1 };
 
 /** 그 해의 주루·병살·희생플라이·도루 배율 (params.eraRunning 기준 해 사이는 선으로 잇는다, 비어 있으면 모두 1) */

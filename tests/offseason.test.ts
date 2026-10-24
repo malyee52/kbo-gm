@@ -1,7 +1,7 @@
 // M5 오프시즌: 리그 상태, 잠재력·성장, FA, 외국인, 드래프트, 연봉, 정원, 2027 개막까지.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, worldForYear } from '../src/engine';
+import { DEFAULT_PARAMS, Rng, worldForYear } from '../src/engine';
 import { GameSession, type GameSave } from '../src/game/session';
 import { isServing } from '../src/league/careers';
 import { createLeague, openingForeigners, openingTeamMoves } from '../src/league/create';
@@ -10,6 +10,7 @@ import {
   ASIA_NEW_CAP, COMPENSATION, FA_COMP, faEligible, faGrade, foreignContractTotal, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, foreignTeamCap, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
 } from '../src/league/salary';
 import { careerIndex } from '../src/league/growth';
+import { ageWidth, draftIndex, gradeRuns, rankCenterRuns, runsPerGrade, sampleScale, triangular } from '../src/league/potential';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
 
 let store: DataStore;
@@ -70,7 +71,10 @@ describe('리그 상태 만들기', () => {
     const teamOf = new Map(ref.teams.map((t) => [t.name, t.idx]));
     expect(moves.get('54944')).toBe('NC');
     expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${moves.has(p.id) ? teamOf.get(moves.get(p.id)!) : p.teamIdx}`));
-    expect(recorded.map((p) => p.value)).toEqual(kept.map((p) => p.value));
+    // 능력도 같다. 다만 시작 연도 국내 신인은 그 해 기록 대신 지명 신인 생성기로 매긴다 (잠재력 v2 Q11 ①, create.ts)
+    const rookie = (id: string) => { const m = store.players.get(id)!; return !m.foreign && m.entryYear >= 2026; };
+    expect(recorded.filter((p) => !rookie(p.id)).map((p) => p.value)).toEqual(kept.filter((p) => !rookie(p.id)).map((p) => p.value));
+    expect(recorded.filter((p) => rookie(p.id)).length).toBeGreaterThan(0);
     expect(ref.players.length - recorded.length).toBeGreaterThan(20);
   });
 
@@ -309,12 +313,19 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     const ryu = h.leaguePlayer('76715')!; // 류현진: 실제 선수 id
     expect(ryu.name).toBe('류현진');
     expect(ryu.birthYear).toBe(1987);
-    expect(ryu.potential).toBeGreaterThan(40); // 실제 전성기 기여 (지명 순번으로 만들면 10런 안팎이었다)
-    // 1군에 오르지 못한 과거 지명자는 낮은 잠재력
+    // 잠재력 v2 (기획안 18.3): 천장 = 지명 순위 표 중심 + ¼ × (실제 커리어 고점 − 표 중심) + 입단 나이 폭 × z.
+    // 천장은 판마다 뽑히므로 같은 z로 중심을 거꾸로 구해 본다 (천장이 지금 능력에 붙은 판은 뺀다)
+    const zOf = (p: LeaguePlayer) => triangular(new Rng(`ryu/pa/${p.id}`));
+    const centerOf = (p: LeaguePlayer) => p.potential - ageWidth(2006 - p.birthYear! + 1) * sampleScale(0) * runsPerGrade(2006) * zOf(p);
+    const info = draftIndex(store).get('76715')!;
+    expect(info.entryYear).toBe(2006);
+    expect(centerOf(ryu)).toBeGreaterThan(rankCenterRuns(info) + 3); // 실제 전성기 쪽으로 당겨짐
+    // 1군에 오르지 못한 과거 지명자는 당기지 않는다: 중심이 순위 표 값 그대로 (z ≥ 0이면 천장이 지금 능력에 붙지 않는다)
+    const table = [44, 45, 46, 47, 50, 51, 53].map((g) => gradeRuns(g, 2006));
     const ids = [...h.offseason!.draft!.pool, ...h.offseason!.draft!.picks.map((x) => x.id)];
-    const never = ids.map((id) => h.leaguePlayer(id)!).filter((p) => p.id.startsWith('d2006-'));
+    const never = ids.map((id) => h.leaguePlayer(id)!).filter((p) => p.id.startsWith('d2006-') && zOf(p) >= 0);
     expect(never.length).toBeGreaterThan(0);
-    for (const p of never) expect(p.potential).toBeLessThanOrEqual(0);
+    for (const p of never) expect(Math.min(...table.map((t) => Math.abs(centerOf(p) - t))), p.name).toBeLessThan(1e-6);
   }, 60_000);
 
   it('지명 포지션과 실제 커리어가 다른 선수는 실제 커리어를 따른다 (이대호·나성범 야수, 김재윤 투수)', () => {

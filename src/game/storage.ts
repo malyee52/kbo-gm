@@ -89,11 +89,12 @@ export async function listSaves(): Promise<SaveRecord[]> {
 }
 
 /** 예전 저장을 지운 뒤 한 번 보여 주는 문구 (일정 개편 기획안 6.1) */
-export const OUTDATED_NOTICE = '정규시즌 일정이 바뀌어 예전 저장을 지웠습니다';
+export const OUTDATED_NOTICE = '게임 규칙(정규시즌 일정·잠재력)이 바뀌어 예전 저장을 지웠습니다';
 
-/** 시즌 저장 형식이 지금(SEASON_SAVE_FORMAT)보다 낮아 불러올 수 없는 저장인가 (엔진 2·일정 개편 이전) */
+/** 불러올 수 없는 저장인가: 시즌 저장 형식이 지금(SEASON_SAVE_FORMAT)보다 낮거나(엔진 2·일정 개편 이전), 세션 형식 2(잠재력 v2 이전) */
 export function isOutdatedSave(data: GameSave | undefined): boolean {
   const f = (data as { season?: { format?: unknown } } | undefined)?.season?.format;
+  if ((data as { format?: unknown } | undefined)?.format === 2) return true;
   return typeof f !== 'number' || f < SEASON_SAVE_FORMAT;
 }
 

@@ -4,10 +4,12 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
+import { GUESS_SET, guessMid, guessRuns, seenFor, seenGrade, seenPhrase, seenSigma, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
+import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, computeGrades, type DisplayGrades, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackageWhy, tendencyOf, type PackageResult, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -17,13 +19,13 @@ import * as Off from '../league/offseason';
 import type { VoteChoice } from '../ai/vote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
-import { leagueDefense, worldFromLeague } from '../league/world';
+import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
-import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, type RankPlace } from './rank';
+import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, strengthTier, type RankPlace, type StrengthTier } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
@@ -43,8 +45,9 @@ import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
+import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
 import {
-  aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
+  aiMarketDay, fxSendInSeason, fxSeasonOpen, scoutFxDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
 } from '../league/market';
 import {
@@ -352,6 +355,15 @@ export type GameAction =
   | { year: number; type: 'def-edit-off'; id: string; def: Defense }
   /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
   | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
+  /** 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4): 시즌 중 'fx-send'(4주, 주마다 발견), 오프시즌 'fx-send-off'(외국인 단계, 4주를 바로).
+   *  'fx-drop'·'fx-drop-off': 관찰 명단에서 빼기 */
+  | { year: number; day: number; type: 'fx-send'; region: FxRegion }
+  | { year: number; day: number; type: 'fx-drop'; id: string }
+  | { year: number; type: 'fx-send-off'; region: FxRegion }
+  | { year: number; type: 'fx-drop-off'; id: string }
+  /** 집중 훈련 걸기·바꾸기·풀기 (16-4c, league/training.ts). plan null이면 풂. 시즌 중 'train'(그날부터 기간 비례), 오프시즌 'train-off'(다음 개막부터) */
+  | { year?: number; day: number; type: 'train'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
+  | { year: number; type: 'train-off'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
   | { year: number; type: 'two-way-off'; id: string; on: boolean }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
   | { year: number; type: 'release'; id: string }
@@ -403,10 +415,14 @@ export interface GameSaveV1 {
   actions: GameAction[];
 }
 
-/** 형식 2: M5부터. 리그 상태와 단계(시즌·오프시즌)를 담는다 */
+/**
+ * 형식 2: M5부터. 리그 상태와 단계(시즌·오프시즌)를 담는다.
+ * 형식 3 (능력치 v2 16-4, 잠재력 v2): 리그 상태의 선수가 숨은 천장(potential, 새 규칙으로 뽑힘)과 숨은 성장 성향(drive)을 담는다.
+ * 저장에서 그대로 읽고 다시 뽑지 않는다. 형식 2는 불러오지 않는다 (사용자 2026-10-24 "옛날 저장파일 신경쓰지마"). 타입 이름은 예전 그대로
+ */
 export interface GameSaveV2 {
   app: 'kbo-gm';
-  format: 2;
+  format: 3;
   /** 지금 시즌 (오프시즌이면 막 끝난 시즌) */
   year: number;
   teamIdx: number;
@@ -494,6 +510,9 @@ function seasonSeed(league: LeagueState): string {
   return league.year === league.startYear ? league.seed : `${league.seed}/${league.year}`;
 }
 
+/** 전력 전망에서 추측 어긋남을 더하는 구단별 핵심 선수 수 (타자 9 + 선발 5 + 구원 6, 임시값) */
+const OUTLOOK_CORE = 20;
+
 export class GameSession {
   readonly store: Store;
   readonly params: EngineParams;
@@ -525,6 +544,7 @@ export class GameSession {
   private valueCtx: ValueContext | null = null;
   /** 오프시즌 화면용 가치 계산 (조작할 때마다 다시 만든다) */
   private viewCache: { version: number; view: Off.LeagueView } | null = null;
+  private offGradeCache: { view: Off.LeagueView; grades: DisplayGrades } | null = null;
   private offVersion = 0;
   /** 이번 시즌 "달라지는 규칙" (메모리에만, 자료·연도·규칙 값으로 다시 계산한다) */
   private ruleCache: RuleNews | null = null;
@@ -967,7 +987,8 @@ export class GameSession {
   static load(store: Store, save: GameSave, params: EngineParams = DEFAULT_PARAMS): GameSession {
     if (save?.app !== 'kbo-gm') throw new Error('KBO 단장 게임의 저장 파일이 아닙니다');
     if (save.format === 1) return GameSession.loadV1(store, save, params);
-    if (save.format !== 2) throw new Error(`지원하지 않는 저장 형식입니다 (${String((save as { format: unknown }).format)})`);
+    if ((save as { format: unknown }).format === 2) throw new Error('잠재력 규칙이 바뀌기 전 저장(형식 2)은 불러올 수 없습니다');
+    if (save.format !== 3) throw new Error(`지원하지 않는 저장 형식입니다 (${String((save as { format: unknown }).format)})`);
     if (!save.league.teams[save.teamIdx] || save.league.teams[save.teamIdx].name !== save.teamName) {
       throw new Error('저장한 구단을 찾을 수 없습니다');
     }
@@ -1087,6 +1108,9 @@ export class GameSession {
     else if (a.type === 'settings') this.applySettings(a.s);
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
+    else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
+    else if (a.type === 'fx-send') fxSendInSeason(this.marketCtx, this.teamIdx, a.region);
+    else if (a.type === 'fx-drop') fxDrop(this.league, this.teamIdx, a.id);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -1184,7 +1208,7 @@ export class GameSession {
   /** 지금까지의 퓨처스리그(2군) 성적과 순위 (league/futures.ts, 필요할 때 계산). AI 구단 1군은 지금 명단을 읽기만 한다 */
   futures(): ReturnType<typeof futuresSeason> {
     const off = this.phase === 'offseason';
-    const r = futuresSeason(this.world, this.season, this.league.seed, (t) => registeredOf(this.season, t), off ? [] : this.futuresExtras());
+    const r = futuresSeason(this.world, this.season, this.league.seed, (t) => registeredOf(this.season, t), off ? [] : this.futuresExtras(), off ? undefined : futuresTrainSlots(this.league));
     // 오프시즌: 결산 때 남긴 순위 (창단 퓨처스 구단 포함. 결산 뒤 리그 상태가 바뀌어 다시 계산하지 않는다)
     const last = this.league.lastFutures;
     return off && last?.year === this.year ? { ...r, teams: last.teams } : r;
@@ -1339,7 +1363,7 @@ export class GameSession {
   private applySign(id: string): void {
     const p = this.world.players.find((x) => x.id === id);
     if (!p || p.teamIdx !== -1) return;
-    signPlayer(this.marketCtx, p, this.teamIdx);
+    this.fxNews(signPlayer(this.marketCtx, p, this.teamIdx));
     this.valueCtx = null;
     const lp = this.leaguePlayer(id);
     this.addNews(this.day, 'entry', p.foreign && lp
@@ -1351,11 +1375,165 @@ export class GameSession {
   private aiMarket(): void {
     for (const m of aiMarketDay(this.marketCtx)) {
       this.valueCtx = null;
+      this.fxNews(m.fx);
       const t = this.world.teams[m.team];
       const body = `${t.name}, 외국인 ${josa(m.out.name, '을', '를')} 내보내고 ${josa(m.in.name, '을', '를')} 영입했다${m.why === 'injury' ? ' (부상 대체)' : ''}.`;
       this.addNews(this.season.day, 'trade', `[외국인 교체] ${body}`);
       addArticle(this.league, { year: this.world.year, day: this.season.day, kind: 'trade', franchise: t.franchise, title: `${t.name} 외국인 교체`, body });
     }
+  }
+
+  // ---- 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4)
+
+  private fxNews(news: FxNews[]): void {
+    for (const n of news) if (n.team === this.teamIdx) this.addNews(this.phase === 'season' ? this.season.day : -1, 'entry', n.text);
+  }
+
+  /** 우리 구단 파견·관찰 명단 (지금 시기 것. 없으면 빈 상태) */
+  get scoutFx(): FxTeam {
+    const s = this.league.scoutFx;
+    const year = this.phase === 'season' ? this.world.year : (this.offseason?.year ?? this.league.year) + 1;
+    const off = this.phase !== 'season';
+    return s && s.year === year && s.off === off ? s.teams[this.teamIdx] ?? { out: [], list: [], sent: 0 } : { out: [], list: [], sent: 0 };
+  }
+
+  /** 파견할 수 없는 이유 (없으면 null) */
+  fxSendBlock(region: FxRegion): string | null {
+    const off = this.phase !== 'season';
+    const open = off ? this.offseason?.stage === 'foreign' : fxSeasonOpen(this.marketCtx);
+    const why = fxSendBlock(this.league, this.teamIdx, region, { off, open, asiaRule: true });
+    if (why) return why;
+    if (!off && !ruleOf(this.league, 'foreignSwaps')) return '외국인 선수 제도가 없는 해입니다.';
+    return null;
+  }
+
+  /** 스카우트 팀을 보낸다 (3억, 시즌 중 4주 / 오프시즌 외국인 단계에서 바로) */
+  sendScout(region: FxRegion): { ok: boolean; message: string } {
+    const why = this.fxSendBlock(region);
+    if (why) return { ok: false, message: why };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'fx-send', region });
+      return { ok: true, message: `${regionName(region)}에 스카우트 팀을 보냈습니다 (4주, ${FX_COST / 10000}억 원).` };
+    }
+    return this.dispatchOff({ year: this.year, type: 'fx-send-off', region });
+  }
+
+  /** 관찰 명단에서 뺀다 */
+  dropScouted(id: string): { ok: boolean; message: string } {
+    if (!this.scoutFx.list.some((e) => e.id === id) && this.scoutFx.wait?.id !== id) return { ok: false, message: '관찰 명단에 없는 후보입니다.' };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'fx-drop', id });
+      return { ok: true, message: '' };
+    }
+    return this.dispatchOff({ year: this.year, type: 'fx-drop-off', id });
+  }
+
+  /** 화면 추측용 선수 정보 (scout.ts Seen): 표본, 우리 구단에서 보낸 시즌 수, 신인 여부 */
+  seenOf(id: string): Seen {
+    const lp = this.leaguePlayer(id);
+    const sim = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : this.offView().sim.get(id);
+    const sample = sim?.bat?.sample ?? sim?.pit?.sample ?? 0;
+    const mine = this.phase === 'season' ? sim?.teamIdx === this.teamIdx : lp?.team === this.teamIdx;
+    return seenFor(this.league, this.teamIdx, id, lp, sample, mine);
+  }
+
+  /** 우리 스카우트 팀이 보는 화면 갈래 등급 (key = contact·power·stuff 등, grade = 진짜 화면 등급) */
+  guessGrade(id: string, key: string, grade: number): GuessView {
+    return seenGrade(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), key, grade);
+  }
+
+  /** 지금 화면 기준 진짜 갈래 등급 (시즌 중 월드, 오프시즌 다음 시즌 보기). guessSet에 넘기는 용도, 화면 밖(LLM 글 등)에서 쓴다 */
+  currentGrades(): DisplayGrades {
+    return this.phase === 'season' ? computeGrades(this.world) : this.offGrades();
+  }
+
+  /** 오프시즌 화면의 진짜 갈래 등급 (다음 시즌 기준 보기, 무소속·새 후보 포함). 화면은 guessSet으로만 거친다 */
+  offGrades(): DisplayGrades {
+    const v = this.offView();
+    if (this.offGradeCache?.view !== v) this.offGradeCache = { view: v, grades: computeGrades({ ...(v.world ?? this.world), players: [...v.sim.values()] }) };
+    return this.offGradeCache.grades;
+  }
+
+  /**
+   * 목록 칸의 갈래 추측 셋 (17.6): 타자 컨택·파워·선구, 투수 구위·제구·체력. grades는 진짜 화면 등급
+   * (시즌 중 GameShell의 computeGrades(world), 오프시즌 offGrades()). 등급이 없는 선수(기록 없는 새 후보 등)는 null
+   */
+  guessSet(id: string, grades: DisplayGrades): GuessSet | null {
+    const lp = this.leaguePlayer(id);
+    const b = grades.batters.get(id);
+    const pt = grades.pitchers.get(id);
+    const pitcher = pt && (!b || (lp?.isPitcher ?? true)) ? true : false;
+    const g: Record<string, number | null> | undefined = pitcher ? { ...pt!, stamina: pt!.stamina ?? pt!.reliefStamina } : b ? { ...b } : undefined;
+    if (!g) return null;
+    const seen = this.seenOf(id);
+    const who = { team: this.teamIdx, user: true };
+    const items = (pitcher ? GUESS_SET.pit : GUESS_SET.bat).map((d) => ({ ...d, view: seenGrade(this.league, who, seen, d.key, g[d.key] ?? 50) }));
+    return { pitcher, items, sort: Math.round(items.reduce((a, it) => a + guessMid(it.view), 0) / items.length) };
+  }
+
+  /**
+   * 플레이어가 보는 구단별 전력 전망 (17.6, 시즌 중): 각 구단의 진짜 전력에 그 구단 핵심 선수(추측 기여 상위 OUTLOOK_CORE명)의
+   * 추측 어긋남(guessRuns − 진짜)을 더해 순위를 매기고 세 단계로. 우리 구단은 폭이 좁아 거의 맞고, 다른 구단은 오차가 섞인다.
+   * 내부 판단(구단주 목표·AI 성향)은 진짜 teamStrength를 그대로 쓴다
+   */
+  strengthOutlook(): StrengthTier[] {
+    const who = { team: this.teamIdx, user: true };
+    const year = this.world.year;
+    const str = this.world.teams.map((t) => {
+      const shifts = t.org.map((p) => {
+        const r = currentRuns(p, this.values);
+        return guessRuns(this.league, who, p.id, r, this.guessSigma(p.id), year) - r;
+      });
+      const order = t.org.map((p, i) => ({ g: currentRuns(p, this.values) + shifts[i], d: shifts[i] })).sort((a, b) => b.g - a.g);
+      return teamStrength(t.org, this.values, 0) + order.slice(0, OUTLOOK_CORE).reduce((a, x) => a + x.d, 0);
+    });
+    const n = str.length;
+    return str.map((v, i) => strengthTier(1 + str.filter((w, j) => w > v || (w === v && j < i)).length, n));
+  }
+
+  /**
+   * 우리 스카우트 팀이 보는 한 시즌 기여 (런, 추측: 진짜 + z × σ). 자리 등급·약한 자리 같은 화면 요약은 진짜 기여 대신 이것을 쓴다.
+   * 시즌 중은 지금 시즌, 오프시즌은 다음 시즌 기준
+   */
+  seenRuns(id: string): number {
+    const off = this.phase !== 'season';
+    const sim = off ? null : this.world.players.find((p) => p.id === id);
+    const r = off ? this.nextRuns(id) : sim ? currentRuns(sim, this.values) : 0;
+    return guessRuns(this.league, { team: this.teamIdx, user: true }, id, r, this.guessSigma(id), this.world.year + (off ? 1 : 0));
+  }
+
+  /** 투타 겸업 반대쪽 지금 능력의 추측 (기록 표본이 없다고 보고 덜 드러나는 갈래 폭으로, z는 본업과 따로) */
+  guessAltGrade(id: string, grade: number): GuessView {
+    return seenGrade(this.league, { team: this.teamIdx, user: true }, { ...this.seenOf(id), sample: 0 }, 'alt', grade);
+  }
+
+  /** 우리 스카우트 팀의 지금 능력 추측 폭 (등급, 잘 드러나는 갈래) */
+  guessSigma(id: string): number {
+    return seenSigma(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), 'clear');
+  }
+
+  /** 스카우트 보고 문구 (천장까지 격차 4단계, 틀릴 수 있다. 32세부터 없음) */
+  scoutPhrase(id: string): string | null {
+    const a = this.scoutArgs(id);
+    return a && seenPhrase(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), a.now, a.potential, a.ageNext, a.year);
+  }
+
+  /** 우리 스카우트 가치 (런, 추측 지금 + 추측 격차 × 나이 몫, 드래프트 보드 꼴). 이벤트가 고르는 유망주 순서 (진짜 잠재 대신) */
+  seenValue(id: string): number {
+    const a = this.scoutArgs(id);
+    return a ? seenValue(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), a.now, a.potential, a.ageNext, a.year) : 0;
+  }
+
+  /** 스카우트 보고·가치의 재료: 진짜 지금 기여(시즌 중 지금 시즌, 오프시즌 다음 시즌), 천장, 다음 시즌 나이, 등급 눈금의 해 */
+  private scoutArgs(id: string): { now: number; potential: number; ageNext: number; year: number } | null {
+    const lp = this.leaguePlayer(id);
+    if (!lp) return null;
+    const off = this.phase !== 'season';
+    const year = this.world.year + (off ? 1 : 0);
+    const sim = off ? null : this.world.players.find((p) => p.id === id);
+    const now = off ? this.nextRuns(id) : sim ? currentRuns(sim, this.values) : 0;
+    const ageNext = lp.birthYear ? year + (off ? 0 : 1) - lp.birthYear : 25;
+    return { now, potential: lp.potential, ageNext, year };
   }
 
   // ---- 판타지 모드 (src/fantasy, docs/fantasy-mode.md)
@@ -1555,6 +1733,9 @@ export class GameSession {
         }
       }
     }
+    // 능력치 v2 16-3: 손잡이(주루 판단·번트·어깨 등)는 리그 상태에 없고 월드를 만들 때 리그 영점과 함께 낸다. syncSim이 리그 값으로 bat를 바꾸면 손잡이가 빠지고,
+    // 만든 선수(가상·나이)·바뀐 능력(표본)은 영점도 바꾼다. 불러온 판(월드를 새로 만듦)과 같게 시즌 월드 전체에 다시 낸다
+    if (season && L.defPool && ops.some((op) => op.op === 'create' || op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
     this.valueCtx = null;
   }
 
@@ -2156,6 +2337,7 @@ export class GameSession {
       this.dailyArticles();
       this.aiTradeDay();
       this.aiMarket();
+      this.fxNews(scoutFxDay(this.marketCtx));
       this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
@@ -2212,6 +2394,7 @@ export class GameSession {
       addTrust: (d) => { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + d)); },
       addFill: (fill, days, note) => { ensureEvents(L).buffs.push({ team, year, from: day, until: day + days, fill, note }); },
       addFans: (delta, note) => addFanEvent(L, team, year, day, delta, note),
+      seenValue: (p) => this.seenValue(p.id),
       addPotential: (id, delta) => { const p = L.players.find((x) => x.id === id && x.team === team); if (p) p.potential += delta; },
       // ---- 경기에 영향을 주는 도구
       players: this.team.org.map((p) => {
@@ -3148,6 +3331,9 @@ export class GameSession {
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
+      case 'train-off': res = setTrainingRule(L, this.teamIdx, a.id, a.plan, 0); break;
+      case 'fx-send-off': res = Off.sendFxOff(L, off, a.region); break;
+      case 'fx-drop-off': res = fxDrop(L, this.teamIdx, a.id) ? { ok: true, message: '' } : { ok: false, message: '관찰 명단에 없는 후보입니다.' }; break;
       case 'ai-off': this.applyFantasy(a.entry); break;
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
@@ -3212,7 +3398,9 @@ export class GameSession {
     const rank = 1 + str.filter((v, i) => (!pool || pool.includes(i)) && (v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx))).length;
     const kind = pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams);
     o.goal = { year: this.year, kind, projectedRank: rank, ...(pool ? { projectedLeague: div!.names[k] } : {}) };
-    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${pool ? `${div!.names[k]} ` : ''}${rank}위). 신뢰도 ${o.trust}.` });
+    // 소식에는 순위 숫자 대신 세 단계 (능력치 v2 17.6: 진짜 전력 순위가 드러나지 않게)
+    const tier = strengthTier(rank, pool ? pool.length : str.length);
+    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (구단주 전망 ${pool ? `${div!.names[k]} ` : ''}${tier}). 신뢰도 ${o.trust}.` });
   }
 
   /** 시즌 평가: 목표 달성, 신뢰도, 업적. 신뢰도가 바닥나면 해고되고 하위권 구단의 영입 제의를 받는다 */
@@ -3726,6 +3914,10 @@ export class GameSession {
   signForeign(id: string) { return this.dispatchOff({ year: this.year, type: 'foreign-sign', id }); }
   draft(id: string | null) { return this.dispatchOff({ year: this.year, type: 'draft', id }); }
   autoDraft() { return this.dispatchOff({ year: this.year, type: 'draft-auto' }); }
+  /** 우리 스카우트 팀의 드래프트 보드 (드래프트 단계만, 기획안 19.2). 조작이 아니라 늘 다시 셈한다 */
+  draftBoard(): Off.BoardRow[] {
+    return this.offseason?.draft ? Off.boardFor(this.league, this.offseason, this.teamIdx, true) : [];
+  }
   setSalaryOffer(id: string, amount: number) { return this.dispatchOff({ year: this.year, type: 'salary-offer', id, amount }); }
   setProtect(fa: string, ids: string[]) { return this.dispatchOff({ year: this.year, type: 'comp-protect', fa, ids }); }
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
@@ -3835,6 +4027,26 @@ export class GameSession {
     return this.dispatchOff({ year: this.year, type: 'two-way-off', id, on });
   }
 
+  /**
+   * 집중 훈련 (16-4c, league/training.ts): 우리 구단 12명까지. 시즌 중에 걸면 그날부터 기간 비례, 오프시즌에 걸면 다음 시즌 개막부터.
+   * plan null이면 푼다
+   */
+  setTraining(id: string, plan: { drill?: string; pos?: FieldPos } | null): { ok: boolean; message: string } {
+    const probe = structuredClone(this.league.training ?? {});
+    const r = setTrainingRule({ ...this.league, training: probe }, this.teamIdx, id, plan, 0);
+    if (!r.ok) return r;
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'train', id, plan });
+      return r;
+    }
+    return this.dispatchOff({ year: this.year, type: 'train-off', id, plan });
+  }
+
+  /** 우리 구단 집중 훈련 명단 */
+  training(): { id: string; drill?: string; pos?: FieldPos; since: number }[] {
+    return teamTraining(this.league, this.teamIdx).map(([p, t]) => ({ id: p.id, ...(t.drill ? { drill: t.drill } : {}), ...(t.pos ? { pos: t.pos } : {}), since: t.since }));
+  }
+
   private applyTwoWay(id: string, on: boolean): void {
     const lp = this.leaguePlayer(id);
     if (!lp) return;
@@ -3934,12 +4146,15 @@ export class GameSession {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
     // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
-    const edited = (p: FieldPos[] | undefined) => (p ? { playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined) } : {});
-    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable) };
+    const edited = (p: FieldPos[] | undefined, was: FieldPos[] | undefined) => (p ? {
+      playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined),
+      defEdit: FIELD_POS.filter((q) => was?.includes(q) || def[q] !== undefined),
+    } : {});
+    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable, lp.bat.defEdit) };
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp?.bat) {
-        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable) };
+        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable, sp.bat.defEdit) };
         if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
       }
     }
@@ -4075,7 +4290,7 @@ export class GameSession {
   toSave(): GameSaveV2 {
     const base = {
       app: 'kbo-gm' as const,
-      format: 2 as const,
+      format: 3 as const,
       year: this.year,
       teamIdx: this.teamIdx,
       teamName: this.league.teams[this.teamIdx].name,

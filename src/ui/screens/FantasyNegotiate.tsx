@@ -2,7 +2,6 @@
 import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
 import { isStarterSkill } from '../../engine';
-import { currentRuns } from '../../ai/value';
 import { TENDENCY_LABEL } from '../../ai/trade';
 import type { DraftPick } from '../../league/picks';
 import { GM_STYLE_LABEL, gmStyle } from '../../league/gm';
@@ -14,15 +13,17 @@ import { loadAiSettings } from '../../fantasy/settings';
 import { GmPreviewCard, useGmJudge } from './GmPreview';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { useGame, posName } from '../context';
-import { runsGrade } from '../grades';
+import { rankText } from '../../game/rank';
+import { guessSetText } from '../../league/scout';
+import { useSeen } from '../parts';
 
-function playerLine(session: ReturnType<typeof useGame>['session'], p: SimPlayer): string {
+/** LLM에 넘기는 선수 한 줄: 플레이어가 보는 것(스카우트 추측·기록)만 (능력치 v2 17.6, 진짜 능력·잠재 숫자를 흘리지 않게) */
+function playerLine(session: ReturnType<typeof useGame>['session'], seen: ReturnType<typeof useSeen>, p: SimPlayer): string {
   const b = session.season.bat[p.idx];
   const q = session.season.pit[p.idx];
   const role = p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos);
-  const grade = runsGrade(currentRuns(p, session.values), session.year);
   const rec = p.isPitcher ? (q.bf ? `${ipText(q.outs)}이닝 평균자책 ${fixed2(era(q))}` : '기록 없음') : (b.pa ? `${b.pa}타석 타율 ${rate3(avg(b))} OPS ${rate3(ops(b))}` : '기록 없음');
-  return `${p.name}${p.real === false ? '(가상)' : '(실존)'} ${role} ${p.age ?? '?'}세, 능력 ${grade}, 올해 ${rec}`;
+  return `${p.name}${p.real === false ? '(가상)' : '(실존)'} ${role} ${p.age ?? '?'}세, 능력 추측 ${guessSetText(seen.set(p.id))}, 올해 ${rec}`;
 }
 
 /** 트레이드 설득: 지금 고른 제안으로 상대 운영팀장과 이야기한다. 결과 호감이 트레이드 평가에 더해진다 */
@@ -30,6 +31,7 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
   team: number; give: SimPlayer[]; get: SimPlayer[]; cash: number; picks: { give: DraftPick[]; get: DraftPick[] }; pickLabel: (p: DraftPick) => string;
 }) {
   const { session, changed, autosave } = useGame();
+  const seen = useSeen();
   const [arg, setArg] = useState('');
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<{ text: string; error?: boolean } | null>(null);
@@ -54,14 +56,15 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
       const gap = Math.max(0, ev.detail.need - ev.detail.gain);
       const verdict = ev.verdict === 'accept' ? 'accept' : ev.verdict === 'reject-value' ? (gap <= 6 ? 'short' : 'far') : 'invalid';
       const lines = [
-        `우리(상대 구단)가 받는 것: ${give.map((p) => playerLine(session, p)).join(' / ') || '선수 없음'}`,
-        `우리가 내주는 것: ${get.map((p) => playerLine(session, p)).join(' / ') || '선수 없음'}`,
+        `우리(상대 구단)가 받는 것: ${give.map((p) => playerLine(session, seen, p)).join(' / ') || '선수 없음'}`,
+        `우리가 내주는 것: ${get.map((p) => playerLine(session, seen, p)).join(' / ') || '선수 없음'}`,
         cash ? `현금: ${cash > 0 ? `단장 쪽이 ${(cash / 10000).toFixed(1)}억 원을 준다` : `우리가 ${(-cash / 10000).toFixed(1)}억 원을 준다`}` : '',
         picks.give.length ? `받는 지명권: ${picks.give.map(pickLabel).join(', ')}` : '',
         picks.get.length ? `내주는 지명권: ${picks.get.map(pickLabel).join(', ')}` : '',
       ].filter(Boolean).join('\n');
-      const sit = session.situation(team);
-      const tendency = `${TENDENCY_LABEL[session.tendency(team)]}, ${sit.rank}위, 단장 성향 ${GM_STYLE_LABEL[gmStyle(session.league, team)]}`;
+      // 시즌 초반(20경기 전)은 진짜 전력 순위 대신 우리 스카우트 팀의 전망 세 단계 (능력치 v2 17.6)
+      const where = session.season.teams[team].g < 20 ? `전망 ${session.strengthOutlook()[team]}` : rankText(session, team);
+      const tendency = `${TENDENCY_LABEL[session.tendency(team)]}, ${where}, 단장 성향 ${GM_STYLE_LABEL[gmStyle(session.league, team)]}`;
       const e = await tradeTalk(session, loadAiSettings(), { team, proposal: lines, verdict, gap, tendency, argument: arg.trim() });
       session.addFantasy(e);
       const runs = e.effects?.[0]?.type === 'tradeGoodwill' ? e.effects[0].runs : 0;

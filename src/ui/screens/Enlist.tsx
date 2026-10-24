@@ -2,9 +2,8 @@
 import { isStarterSkill } from '../../engine';
 import { MILITARY_LAST_AGE, MILITARY_MIN_AGE, serviceName, serviceTerms, UNIT_MAX_AGE } from '../../league/careers';
 import type { LeaguePlayer } from '../../league/types';
-import { Grade, PlayerLink, Pos, useGame } from '../context';
-import { runsGrade } from '../grades';
-import { PotCell, usePotentialOf } from '../parts';
+import { PlayerLink, Pos, useGame } from '../context';
+import { GuessCell, useSeen } from '../parts';
 
 /** 병역 상태의 근거 (실제 자료 / 짐작 / 게임 신인) */
 function basisText(p: LeaguePlayer): string {
@@ -18,7 +17,7 @@ function basisText(p: LeaguePlayer): string {
 
 export function EnlistPanel() {
   const { session, changed, autosave } = useGame();
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const year = session.year;
   const lp = new Map(session.league.players.map((p) => [p.id, p]));
   const sim = new Map(session.world.players.map((p) => [p.id, p]));
@@ -100,7 +99,7 @@ export function EnlistPanel() {
         <div className="scroll">
           <table>
             <thead>
-              <tr><th className="l">입대</th><th className="l">선수</th><th>자리</th><th>다음 시즌 나이</th><th>현재</th><th>잠재</th><th className="l">구분</th><th className="l">병역 근거</th></tr>
+              <tr><th className="l">입대</th><th className="l">선수</th><th>자리</th><th>다음 시즌 나이</th><th>능력 추측</th><th className="l">스카우트 보고</th><th className="l">구분</th><th className="l">병역 근거</th></tr>
             </thead>
             <tbody>
               {cands.map((c) => {
@@ -122,8 +121,8 @@ export function EnlistPanel() {
                     <td className="l">{sp ? <PlayerLink p={sp} /> : p.name}</td>
                     <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
                     <td>{c.age}</td>
-                    <td><Grade v={runsGrade(c.runs, session.year)} /></td>
-                    <td><PotCell v={potOf(p, c.age)} /></td>
+                    <td><GuessCell g={seen.set(c.id)} /></td>
+                    <td className="l small">{session.scoutPhrase(c.id) ?? '-'}</td>
                     <td className="l small">{tags || '-'}</td>
                     <td className="l small muted">{basisText(p)}</td>
                   </tr>

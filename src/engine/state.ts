@@ -2,7 +2,7 @@
 // 점수·아웃·중계 기록을 남기는 기본 동작도 여기에 둔다 (docs/경기엔진2_기획안.md 3.2).
 
 import type { CommandMode, GameCommand, GameContext, Play, PlayKind } from './game';
-import { defenseAt } from './defense';
+import { defenseAt, FIELD_POS } from './defense';
 import { CATCHER_ARM_FLOOR } from './fielding';
 import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
@@ -119,6 +119,11 @@ export interface Side {
   catcherDef: number;
   /** 포수의 도루 저지 (런, 능력치 v2 16-3 BatSkill.cArm). 예전 수비(cArm·playable 없음)면 포수 수비 런과 같다 */
   catcherArm: number;
+  /** 포수의 블로킹·프레이밍 (능력치 v2 16-3 BatSkill.cBlock·cFrame, 없으면 0 = 리그 평균) */
+  catcherBlock: number;
+  catcherFrame: number;
+  /** 자리별 어깨 (BatSkill.arm, 능력치 v2 16-3d). v2 수비 선수만 담고, 없는 자리는 rules.ts가 예전처럼 외야 수비 런으로 어림한다 */
+  slotArm: Partial<Record<Slot, number>>;
   /** 수비 영점 (런 = (m − 50) ÷ 2, LeagueEnv.defZero). 자리별 수비 런에서 뺀다 */
   defZero: number;
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
@@ -143,30 +148,40 @@ export function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slo
 
 /**
  * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율". 엔진 2 7단계부터 실책은 타구를 맡은 수비수가 이 실책률로 한다 (rules.ts, params.error).
- * 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
-const ERROR_PER_RUN = 0.045;
+ * 수비 1런당 실책률 변화 (지수): +10런이면 0.85배, −10런이면 1.17배.
+ * 능력치 v2 16-3b (2026-10-24)에서 0.045(임시값) → 0.016: tools/error_slope.ts가 2010~2025 아홉 해 시작 월드의 v2 수비 런으로 그 해 실제 실책을
+ * 가른 기울기가 0.016 ± 0.002였다 (수비 가능이 아닌 자리 r 평균 −11~−14에서 실제 실책 1.3~1.6배, 0.045면 1.65~1.9배). 0.045일 때 2025 실책 출루 +11% */
+const ERROR_PER_RUN = 0.016;
 export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
 
 /**
  * 수비 배치에서 자리별 수비 런, 포수 수비 런·도루 저지. zero: 수비 영점 (런, Side.defZero) — 리그 평균 수비가 0이 되게 뺀다 (능력치 v2 13.6).
  * 포수 도루 저지는 v2 선수면 cArm (없으면 수비 가능 포수 0, 아니면 바닥 CATCHER_ARM_FLOOR), 예전 수비면 포수 수비 런
  */
-export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero = 0): { slotDef: Partial<Record<Slot, number>>; catcherDef: number; catcherArm: number } {
+export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero = 0): {
+  slotDef: Partial<Record<Slot, number>>; catcherDef: number; catcherArm: number; catcherBlock: number; catcherFrame: number; slotArm: Partial<Record<Slot, number>>;
+} {
   const slotDef: Partial<Record<Slot, number>> = {};
+  const slotArm: Partial<Record<Slot, number>> = {};
   let catcherDef = 0;
   let catcherArm = 0;
+  let catcherBlock = 0;
+  let catcherFrame = 0;
   for (const p of lineup) {
     const slot = slots.get(p.idx);
     if (!slot) continue;
     const r = defenseAt(p, slot) - (slot === 'DH' ? 0 : zero);
     slotDef[slot] = r;
+    if (p.bat?.playable && slot !== 'DH') slotArm[slot] = p.bat.arm ?? 0;
     if (slot === 'C') {
       catcherDef = r;
       const b = p.bat;
       catcherArm = b?.cArm ?? (b?.playable ? (b.playable.includes('C') ? 0 : CATCHER_ARM_FLOOR) : r);
+      catcherBlock = b?.cBlock ?? 0;
+      catcherFrame = b?.cFrame ?? 0;
     }
   }
-  return { slotDef, catcherDef, catcherArm };
+  return { slotDef, catcherDef, catcherArm, catcherBlock, catcherFrame, slotArm };
 }
 
 /** 그 자리를 맡은 수비수의 선수 색인 (투수는 지금 마운드의 투수). 없으면 −1 */
@@ -266,6 +281,13 @@ export class GameState {
     pg.outs += n;
     pg.line.outs += n;
     this.ctx.totals.outs += n;
+    const d = this.ctx.defOuts;
+    if (d) {
+      for (const [idx, slot] of this.fld.slots) {
+        const k = FIELD_POS.indexOf(slot as (typeof FIELD_POS)[number]);
+        if (k >= 0) d[idx * 8 + k] += n;
+      }
+    }
   }
 
   /** 주자 한 명 득점. batterLine이 있으면 타점 */

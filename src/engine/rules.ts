@@ -7,10 +7,24 @@ import { Ev, type PaRates } from './pa';
 import { DEFAULT_PARAMS } from './params';
 import { errorRateOf, fielderAt, type GameState, type PitcherInGame, type Runner } from './state';
 import type { BatLine, LeagueEnv, SimPlayer } from './types';
+import type { Slot } from './team';
 
 /** 구장 쪽 [좌익선 쪽, 가운데, 우익선 쪽]의 외야수 */
 const OF_SIDE = ['LF', 'CF', 'RF'] as const;
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 0.98 ? 0.98 : x);
+
+/**
+ * 확률 p의 로짓에 x를 더한다 (능력치 v2 16-3 주루·작전 손잡이). x가 0이면 p를 그대로 돌려줘 앞 단계와 같은 결과가 된다.
+ * p는 덧셈 보정으로 0~1 밖일 수 있어 먼저 (0.001, 0.999)로 자른다
+ */
+export function addLogit(p: number, x: number): number {
+  if (!x) return p;
+  const q = p < 0.001 ? 0.001 : p > 0.999 ? 0.999 : p;
+  return 1 / (1 + (1 - q) / q * Math.exp(-x));
+}
+
+/** 추가 진루 시도 확률에 더하는 주력 몫 (확률): (주력 − 0.5) × 0.3. 주루 판단 실측 시작값(runskills.ts)이 이 몫을 빼고 잰다 */
+export const runnerSpeedAdj = (speed: number) => (speed - 0.5) * 0.3;
 
 /** 실책·포일로 모든 주자가 n 베이스 더 간다 (타점 없음). 더 간 주자는 비자책으로 본다 (기록원 재구성의 근사, 엔진 2 7단계) */
 function errorAdvance(st: GameState, n: number): void {
@@ -74,8 +88,16 @@ export function stealOne(st: GameState, from: 0 | 1, pct: number): boolean {
 export function stealPct(st: GameState, r: Runner, third: boolean, extra = 0): number {
   const { params } = st.ctx;
   const run = params.run;
-  return r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherArm * params.catcherStealPerRun
+  const p = r.p.bat!.sbPct + (st.ctx.sbShift ?? 0) - st.fld.catcherArm * params.catcherStealPerRun
     + (third ? run.thirdPct : st.fld.pitcher.p.throws === 'L' ? run.leftyPct : run.rightyPct) + extra;
+  // 능력치 v2 16-3: 주자 도루 스타트 − 투수 퀵모션 (로짓 덧셈, 둘 다 0이면 그대로)
+  return addLogit(p, (r.p.bat!.sbStart ?? 0) - (st.fld.pitcher.skill.quick ?? 0));
+}
+
+/** 도루 시도 배율 (능력치 v2 16-3): 주자 도루 판단 − 투수 견제를 exp로. 둘 다 0이면 1 */
+function attemptMul(r: Runner, pg: PitcherInGame): number {
+  const x = (r.p.bat!.sbJudge ?? 0) - (pg.skill.hold ?? 0);
+  return x ? Math.exp(x) : 1;
 }
 
 /**
@@ -105,7 +127,8 @@ export function pickoff(st: GameState): boolean {
   const r1 = bases[0];
   if (!r1 || bases[1]) return false;
   const lefty = fld.pitcher.p.throws === 'L';
-  if (!ctx.rng.chance(run.pickoff * Math.min(3, r1.p.bat!.sbAtt / 0.05) * (lefty ? run.leftyPickoff : 1))) return false;
+  const hold = fld.pitcher.skill.hold;
+  if (!ctx.rng.chance(run.pickoff * Math.min(3, r1.p.bat!.sbAtt / 0.05) * (lefty ? run.leftyPickoff : 1) * (hold ? Math.exp(hold) : 1))) return false;
   bases[0] = null;
   ctx.totals.outsOnBases++;
   if (ctx.running) ctx.running.pickoff++;
@@ -139,7 +162,7 @@ export function steals(st: GameState, steal: 'go' | 'hold' | undefined, pitchout
   const r2 = bases[1];
   if (r1 && !r2) {
     const lefty = fld.pitcher.p.throws === 'L';
-    if (steal === 'go' || (steal === undefined && rng.chance(r1.p.bat!.sbAtt * params.stealScale * tac * (lefty ? run.leftyAttempt : 1)))) {
+    if (steal === 'go' || (steal === undefined && rng.chance(r1.p.bat!.sbAtt * params.stealScale * tac * (lefty ? run.leftyAttempt : 1) * attemptMul(r1, fld.pitcher)))) {
       if (pitchout && ctx.running) ctx.running.pitchoutRun++;
       const end = stealOne(st, 0, stealPct(st, r1, false, out));
       if (pitchout && ctx.running && !bases[1]) ctx.running.pitchoutCaught++;
@@ -147,7 +170,7 @@ export function steals(st: GameState, steal: 'go' | 'hold' | undefined, pitchout
     }
     return false;
   }
-  if (steal !== undefined || !r2 || bases[2] || !rng.chance(r2.p.bat!.sbAtt * params.stealScale * tac * run.thirdShare)) return false;
+  if (steal !== undefined || !r2 || bases[2] || !rng.chance(r2.p.bat!.sbAtt * params.stealScale * tac * run.thirdShare * attemptMul(r2, fld.pitcher))) return false;
   if (r1) {
     // 1·2루: 이중 도루만 (2루 주자 혼자 3루로 뛰면 1루 주자가 묶인다). 포수는 3루로 던진다: 선행 주자가 잡혀도 1루 주자는 2루에
     if (!rng.chance(run.double)) return false;
@@ -183,7 +206,8 @@ export function orderedSteal(st: GameState): boolean {
 function wildPitchChance(st: GameState): number {
   const { fld, ctx } = st;
   const control = Math.min(2.5, Math.max(0.4, (fld.pitcher.p.pit?.bb ?? 1) ** ctx.params.run.wildPitchControl));
-  return ctx.env.wildPitch * control * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun);
+  // 능력치 v2 16-3: 포수 블로킹 (0이면 그대로)
+  return ctx.env.wildPitch * control * Math.max(0.3, 1 - fld.catcherDef * ctx.params.catcherWildPitchPerRun) * (fld.catcherBlock ? Math.exp(-fld.catcherBlock) : 1);
 }
 
 /** 폭투·포일 한 번 일어난 뒤: 주자 전원 한 베이스. 끝내기면 true */
@@ -297,7 +321,10 @@ function advanceAll(st: GameState, rbi: BatLine | null): void {
 function bunt(st: GameState, batter: SimPlayer, bl: BatLine, pg: PitcherInGame): boolean {
   const { bases, bat, ctx } = st;
   const { rng, totals } = ctx;
-  const b = ctx.params.bunt;
+  const b0 = ctx.params.bunt;
+  // 능력치 v2 16-3: 번트·작전 수행이 실패 몫을 줄이고 늘린다 (0이면 params.bunt 그대로)
+  const sk = batter.bat!.bunting;
+  const b = sk ? buntShares(b0, Math.exp(-sk)) : b0;
   const run = ctx.running;
   const r0 = bat.runs;
   const me: Runner = { p: batter, resp: pg, earned: true };
@@ -374,6 +401,11 @@ function bunt(st: GameState, batter: SimPlayer, bl: BatLine, pg: PitcherInGame):
   return st.walkOff();
 }
 
+/** 번트 실패 몫(선행 주자 아웃·뜬공·병살, 스퀴즈 홈 아웃·병살)에 m을 곱한 결과 몫 */
+function buntShares(b: typeof DEFAULT_PARAMS.bunt, m: number): typeof DEFAULT_PARAMS.bunt {
+  return { ...b, leadOut: b.leadOut * m, popOut: b.popOut * m, dp: b.dp * m, squeezeOut: b.squeezeOut * m, squeezeDp: b.squeezeDp * m };
+}
+
 /** 지휘한 번트 (2아웃 전, 주자가 있을 때). 3루 주자가 있으면 스퀴즈. 끝내기면 true */
 export function orderedBunt(st: GameState, batter: SimPlayer, bl: BatLine, pg: PitcherInGame): boolean {
   return bunt(st, batter, bl, pg);
@@ -436,11 +468,11 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
     }
   }
   const pp = params.play;
-  /** 공이 간 구장 쪽 (0 좌익, 1 중견, 2 우익)과 그쪽 외야수의 어깨 보정 (수비 런으로 추정, + 면 주자가 덜 간다) */
+  /** 공이 간 구장 쪽 (0 좌익, 1 중견, 2 우익)과 그쪽 외야수의 어깨 보정 (+ 면 주자가 덜 간다). 어깨 능력이 없는 예전 수비면 수비 런으로 추정 */
   const side = ball ? ball.zone % 3 : 1;
-  const arm = (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
+  const arm = fld.slotArm[OF_SIDE[side]] ?? (fld.slotDef[OF_SIDE[side]] ?? 0) * pp.armPerRun;
   let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (intentional ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
-  const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
+  const speedAdj = (r: Runner) => runnerSpeedAdj(r.p.bat!.speed);
   /** 땅볼 아웃 때 3루 주자가 들어오나 (전진 수비면 덜 들어온다, 엔진 2 10단계) */
   const gbScores = (r: Runner): boolean => {
     if (!st.infieldIn) return rng.chance(params.groundOutScores + speedAdj(r));
@@ -451,8 +483,8 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
   const twoOut = st.outs === 2 ? params.twoOutBonus : 0;
   const hnrExtra = going ? params.run.hnrExtra : 0;
   /** 추가 진루 시도: 성공이면 true, 주루사면 아웃을 올리고 false */
-  const tryAdvance = (): boolean => {
-    if (!rng.chance(params.outOnAdvance)) return true;
+  const tryAdvance = (r: Runner): boolean => {
+    if (!rng.chance(addLogit(params.outOnAdvance, -(r.p.bat!.runIQ ?? 0)))) return true;
     totals.outsOnBases++;
     st.out(1);
     return false;
@@ -501,8 +533,8 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
       const f = bases[0];
       if (f) {
         bases[0] = null;
-        if (rng.chance(params.firstToHomeOnDouble + twoOut + hnrExtra + speedAdj(f) - arm)) {
-          if (tryAdvance()) st.score(f, bl);
+        if (rng.chance(addLogit(params.firstToHomeOnDouble + twoOut + hnrExtra + speedAdj(f) - arm, f.p.bat!.runIQ ?? 0))) {
+          if (tryAdvance(f)) st.score(f, bl);
         } else bases[2] = f;
       }
       bases[1] = me;
@@ -514,15 +546,15 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
       const s = bases[1];
       if (s) {
         bases[1] = null;
-        if (rng.chance(params.secondToHomeOnSingle + twoOut + speedAdj(s) - arm)) {
-          if (tryAdvance()) st.score(s, bl);
+        if (rng.chance(addLogit(params.secondToHomeOnSingle + twoOut + speedAdj(s) - arm, s.p.bat!.runIQ ?? 0))) {
+          if (tryAdvance(s)) st.score(s, bl);
         } else bases[2] = s;
       }
       const f = bases[0];
       if (f) {
         bases[0] = null;
-        if (!bases[2] && st.outs < 3 && rng.chance(params.firstToThirdOnSingle * pp.firstToThirdSide[side] + twoOut * 0.5 + hnrExtra + speedAdj(f) - arm)) {
-          if (tryAdvance()) bases[2] = f;
+        if (!bases[2] && st.outs < 3 && rng.chance(addLogit(params.firstToThirdOnSingle * pp.firstToThirdSide[side] + twoOut * 0.5 + hnrExtra + speedAdj(f) - arm, f.p.bat!.runIQ ?? 0))) {
+          if (tryAdvance(f)) bases[2] = f;
         } else bases[1] = f;
       }
       bases[0] = me;
@@ -562,7 +594,9 @@ export function applyPlateAppearance(st: GameState, ev: Ev, batter: SimPlayer, b
             if (!bases[1]) { bases[1] = bases[0]; bases[0] = null; }
           }
         } else if (bases[0] && st.outs < 2) {
-          if (rng.chance(params.doublePlay * (pp.dpSlot[fs] ?? 1) * (1 - pp.dpSpeed * (batter.bat!.speed - 0.5) * 2))) {
+          // 받은 내야수의 어깨 (능력치 v2 16-3d): 병살 × (1 + armDp × 어깨)
+          const dpArm = Math.max(0, 1 + pp.armDp * (fld.slotArm[slot as Slot] ?? 0));
+          if (rng.chance(params.doublePlay * (pp.dpSlot[fs] ?? 1) * (1 - pp.dpSpeed * (batter.bat!.speed - 0.5) * 2) * dpArm)) {
             bl.gdp++; totals.gdp++;
             kind = 'GDP';
             st.out(2);

@@ -1,15 +1,14 @@
 // 선수 시장 (시즌 중 방출·영입, league/market.ts): 외국인 교체 후보와 자유계약 선수 영입, 우리 선수 웨이버 공시, 리그의 이동 기록.
 import { useState } from 'react';
 import { isStarterSkill, type SimPlayer } from '../../engine';
-import { currentRuns } from '../../ai/value';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { foreignRule } from '../../league/eras';
 import { availableDay, foreignHeld, foreignSwapsUsed, movesOf, releaseCost } from '../../league/market';
 import { dollarText } from '../../league/salary';
 import { ConfirmButton } from '../ConfirmButton';
-import { Grade, PlayerLink, posName, TeamName, useGame, useWon } from '../context';
-import { runsGrade } from '../grades';
+import { PlayerLink, posName, TeamName, useGame, useWon } from '../context';
+import { GuessCell, useSeen } from '../parts';
 import { ruleDate, ruleOf } from '../../league/rules';
 
 type Kind = 'foreign' | 'free';
@@ -20,7 +19,6 @@ export function Market() {
   const [kind, setKind] = useState<Kind>('foreign');
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const year = session.world.year;
-  const ctx = session.values;
   const lp = new Map(session.league.players.map((p) => [p.id, p]));
   const market = session.marketPlayers();
   const rule = foreignRule(store.meta, year, session.league);
@@ -30,7 +28,10 @@ export function Market() {
   const open = session.phase === 'season' && !session.done && session.day <= deadline;
   const regular = session.regularCount();
 
-  const runs = (p: SimPlayer) => currentRuns(p, ctx);
+  // 정렬은 능력 추측 가운데값 평균 (진짜 기여 순은 보이지 않는다, 능력치 v2 17.6)
+  const seen = useSeen();
+  const guessOf = new Map(market.map((p) => [p.idx, seen.set(p.id)]));
+  const runs = (p: SimPlayer) => guessOf.get(p.idx)?.sort ?? 0;
   /** 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 시장에 나온다 */
   const from = (p: SimPlayer) => availableDay(lp.get(p.id), session.season.schedule.length);
   const list = market
@@ -85,7 +86,7 @@ export function Market() {
         ) : (
           <div className="scroll flat">
             <table>
-              <thead><tr><th className="l">이름</th><th>자리</th><th>나이</th><th>현재</th><th className="l">올해</th><th className="l">{kind === 'free' ? '전 소속' : '구분'}</th><th>연봉</th><th /></tr></thead>
+              <thead><tr><th className="l">이름</th><th>자리</th><th>나이</th><th>능력 추측</th><th className="l">올해</th><th className="l">{kind === 'free' ? '전 소속' : '구분'}</th><th>연봉</th><th /></tr></thead>
               <tbody>
                 {list.map((p) => {
                   const why = session.signBlock(p);
@@ -94,7 +95,7 @@ export function Market() {
                       <td className="l"><PlayerLink p={p} /></td>
                       <td>{role(p)}</td>
                       <td>{p.age ?? '-'}</td>
-                      <td><Grade v={runsGrade(runs(p), year)} /></td>
+                      <td><GuessCell g={guessOf.get(p.idx)} /></td>
                       <td className="l small">{line(p)}</td>
                       <td className="l small">{kind === 'free' && p.formerTeam !== undefined ? <TeamName idx={p.formerTeam} /> : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'}{from(p) > session.day && <span className="muted"> · {shortDate(year, from(p))}부터</span>}</td>
                       <td className="small">{salary(p)}</td>

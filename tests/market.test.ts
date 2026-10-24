@@ -12,12 +12,20 @@ const roundTrip = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 beforeAll(() => { store = loadDataStore(); }, 120_000);
 
 const lgOf = () => store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+/** 파견 후보(가상 외국인, league/scoutfx.ts)를 우리 관찰 명단에 모두 올린다 (조작 기록 밖이라 재현 시험에서는 쓰지 않는다) */
+const watchAll = (g: GameSession) => {
+  const t = g.league.scoutFx!.teams[g.teamIdx];
+  for (const p of g.league.players) if (p.fx && !t.list.some((e) => e.id === p.id)) t.list.push({ id: p.id, at: 0, weeks: 0 });
+};
 
 describe('시즌 중 시장', () => {
-  it('2026 시작: 실제 시즌 중 교체 외국인과 가상 후보가 소속 없이 시장에 있다', () => {
+  it('2026 시작: 실제 시즌 중 교체 외국인과 가상 후보가 소속 없이 시장에 있다 (가상 후보는 관찰 명단에 올라야 보인다)', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'mk-open' }, FAST);
+    expect(g.marketPlayers().filter((p) => !p.id.startsWith('v')).length).toBeGreaterThan(3); // 실제 교체 외국인 (시장 소식, 모두가 본다)
+    expect(g.marketPlayers().some((p) => p.id.startsWith('v'))).toBe(false);
+    expect(g.league.players.filter((p) => p.fx && p.market === 2026).length).toBeGreaterThanOrEqual(8);
+    watchAll(g);
     const m = g.marketPlayers();
-    expect(m.filter((p) => !p.id.startsWith('v')).length).toBeGreaterThan(3); // 실제 교체 외국인
     expect(m.filter((p) => p.id.startsWith('v')).length).toBeGreaterThanOrEqual(8);
     expect(m.every((p) => p.foreign && p.teamIdx === -1)).toBe(true);
     for (const t of g.world.teams) expect(t.org.some((p) => p.teamIdx === -1)).toBe(false);
@@ -30,6 +38,7 @@ describe('시즌 중 시장', () => {
   it('외국인 교체: 방출 → 시장 후보 영입, 보유 한도와 교체 2회 한도, 마감', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'mk-swap' }, FAST);
     g.advance(30);
+    watchAll(g);
     // 가상 후보 (실제 교체 외국인은 실제로 들어온 무렵부터 나온다, 아래 따로)
     const cand = () => g.marketPlayers().filter((p) => p.foreign && !g.leaguePlayer(p.id)!.asia && p.id.startsWith('v'));
     // 보유 한도가 차 있으면 영입할 수 없다
@@ -80,10 +89,13 @@ describe('시즌 중 시장', () => {
 
   it('저장·불러오기와 조작 기록 재실행이 같은 상태를 만든다 (방출·영입·AI 외국인 교체 포함)', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'mk-replay' }, FAST);
-    g.advance(25);
+    // 파견 둘 (조작 기록에 남는다): 이 시드는 4주 뒤 북미·중남미 일반 외국인 후보가 명단에 있다
+    expect(g.sendScout('na').ok).toBe(true);
+    expect(g.sendScout('latam').ok).toBe(true);
+    g.advance(29);
     const out = g.team.org.find((p) => p.foreign && !g.leaguePlayer(p.id)!.asia)!;
     g.releaseInSeason(out);
-    g.signInSeason(g.marketPlayers().find((p) => p.foreign && !g.leaguePlayer(p.id)!.asia && p.id.startsWith('v'))!);
+    expect(g.signInSeason(g.marketPlayers().find((p) => p.foreign && !g.leaguePlayer(p.id)!.asia && p.id.startsWith('v'))!).ok).toBe(true);
     g.advance(60);
     const h = GameSession.load(store, roundTrip(g.toSave()), FAST);
     // 불러온 쪽은 JSON을 거쳐 -0이 0이 되므로 양쪽 다 JSON으로 견준다

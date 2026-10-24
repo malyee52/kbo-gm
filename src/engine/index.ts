@@ -47,7 +47,7 @@ export { planForWorld, pickOpeningHosts, rankedFromSeason, pctRankedFromSeason, 
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule'> & Partial<Pick<DataStore, 'parks' | 'pitches'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule' | 'running'> & Partial<Pick<DataStore, 'parks' | 'pitches'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   const world = buildWorld({
@@ -66,6 +66,7 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     plate: store.plate,
     defense: store.defense,
     parks: store.parks,
+    running: store.running,
   });
   // 투수 구종 (엔진 2 20-1단계, A 해결기만 쓴다)
   world.arsenals = arsenalsOf(world.players, store.pitches, year);

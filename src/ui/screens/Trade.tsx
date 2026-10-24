@@ -9,9 +9,7 @@ import { formatDate, shortDate } from '../../game/calendar';
 import { rankText } from '../../game/rank';
 import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, obp, ops, rate3, whip } from '../../game/stats';
-import { Grade, PlayerLink, Pos, TeamLink, TeamName, useGame, usePriceIndex, useWon } from '../context';
-import { currentRuns } from '../../ai/value';
-import { runsGrade } from '../grades';
+import { PlayerLink, Pos, TeamLink, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { teamColor } from '../teams';
 import { parsePick, pickId, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../../league/picks';
 import { GM_STYLE_LABEL, GM_STYLE_NOTE, gmStyle } from '../../league/gm';
@@ -19,12 +17,13 @@ import { dollarText } from '../../league/salary';
 import { TradeTalk } from './FantasyNegotiate';
 import { ruleOf } from '../../league/rules';
 import { ConfirmButton } from '../ConfirmButton';
-import { DataTable, PotCell, potentialSortValue, usePotentialOf, VsLeague } from '../parts';
+import { DataTable, GuessCell, GuessGrade, guessColumn, useSeen, VsLeague } from '../parts';
+import { guessMid, type GuessSet, type GuessView } from '../../league/scout';
 import type { Column } from '../table';
 import { useShell } from '../shell';
 import { useLeague } from './PlayerDetail';
 import {
-  addToCompare, addToDraft, agreementStatus, COMPARE_MAX, confirmAgreement, deskOf, draftKey, draftParts, draftText, editDraft, isEmptyDraft, ourStarter, overall,
+  addToCompare, addToDraft, agreementStatus, COMPARE_MAX, confirmAgreement, deskOf, draftKey, draftParts, draftText, editDraft, isEmptyDraft, ourStarter,
   pruneDraft, noPackageNote, REASON_TEXT, removeFromCompare, sendDraft, slotOf, SLOTS, STEPS, tradeBlockReason, tradeImpact, updateDesk, useDesk, VERDICT_SHORT, weakSlots,
   type DeskState, type Step, type TradeDraft,
 } from '../tradeDesk';
@@ -96,7 +95,7 @@ function sentToday(s: ReturnType<typeof useGame>['session'], d: DeskState) {
 
 // ---- ① 후보 보드
 
-interface Cand { p: SimPlayer; slot: string; ov: number; pot: ReturnType<ReturnType<typeof usePotentialOf>>; salary: number | null; until: number | null; status: string; block: string | null }
+interface Cand { p: SimPlayer; slot: string; guess: GuessSet | null; salary: number | null; until: number | null; status: string; block: string | null }
 
 const AGE_OPTS = [0, 23, 25, 27, 30, 33];
 
@@ -106,7 +105,7 @@ function Candidates() {
   const won = useWon();
   const { density } = useShell();
   const full = density === 'full';
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const year = session.world.year;
   const [team, setTeam] = useState(-1);
   const [slot, setSlot] = useState('all');
@@ -122,7 +121,7 @@ function Candidates() {
     const lp = session.leaguePlayer(p.id);
     const back = session.returnDay(p);
     return {
-      p, slot: slotOf(p), ov: overall(session, p), pot: lp ? potOf(lp, p.age) : null,
+      p, slot: slotOf(p), guess: seen.set(p.id),
       salary: lp ? lp.contract.salary : null, until: lp ? lp.contract.until : null,
       status: p.dev ? '육성' : back !== null ? `결장 · ${back >= session.season.schedule.length ? '시즌 아웃' : `${shortDate(year, back)} 복귀`}` : '출전 가능',
       block: tradeBlockReason(session, p),
@@ -158,8 +157,7 @@ function Candidates() {
       cell: (c) => <><TeamLink idx={c.p.teamIdx} /> <span className="tag" title="상대 구단 성향">{TENDENCY_LABEL[tendency.get(c.p.teamIdx)!]}</span></> },
     { key: 'slot', label: '자리', brief: true, value: (c) => SLOTS.indexOf(c.slot as typeof SLOTS[number]), cell: (c) => (c.p.isPitcher ? c.slot : <Pos pos={c.slot} />) },
     { key: 'age', label: '나이', brief: true, lower: true, value: (c) => c.p.age },
-    { key: 'ov', label: '종합', brief: true, value: (c) => c.ov, cell: (c) => <Grade v={c.ov} /> },
-    { key: 'pot', label: '잠재', brief: true, title: '27세 이하 범위(스카우트 짐작), 28~30세 숫자, 31세 이상 숨김', value: (c) => potentialSortValue(c.pot), cell: (c) => <PotCell v={c.pot} /> },
+    guessColumn<Cand>((c) => c.guess),
     { key: 'sal', label: '연봉', brief: true, value: (c) => c.salary, cell: (c) => (c.salary === null ? '-' : c.p.foreign ? dollarText(c.salary) : won(c.salary)) },
     { key: 'until', label: '계약', brief: true, title: '계약 마지막 해', value: (c) => c.until },
     { key: 'st', label: '상태', brief: true, text: true, value: (c) => c.block ?? c.status, cell: (c) => (c.block ? <span className="muted small" title={c.block}>{c.p.foreign ? '외국인 · 불가' : '트레이드 불가'}</span> : <span className="small">{c.status}</span>) },
@@ -211,11 +209,11 @@ function Candidates() {
 interface CmpRow { label: string; v: (p: SimPlayer) => { node: ReactNode; n?: number | null }; lower?: boolean; full?: boolean }
 
 function Compare() {
-  const { session, grades } = useGame();
+  const { session } = useGame();
   const desk = useDesk(session);
   const won = useWon();
   const lg = useLeague();
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const { density } = useShell();
   const full = density === 'full';
   const narrow = useNarrow();
@@ -229,26 +227,25 @@ function Compare() {
   const cols = narrow || !showStarter ? ps : [...ps, showStarter];
   const anyBat = cols.some((p) => !p.isPitcher);
   const anyPit = cols.some((p) => p.isPitcher);
-  const bg = (p: SimPlayer) => grades.batters.get(p.id);
-  const pg = (p: SimPlayer) => grades.pitchers.get(p.id);
-  const g = (n: number | null | undefined) => ({ node: <Grade v={n} />, n: n ?? null });
+  // 갈래 칸은 우리 스카우트 팀의 추측 (능력치 v2 17.6), 비교값은 가운데값
+  const gv = (v: GuessView | null) => ({ node: <GuessGrade v={v} />, n: v ? guessMid(v) : null });
+  const gk = (p: SimPlayer, key: string) => gv(seen.grade(p.id, key));
   const none = { node: <span className="muted">—</span>, n: null };
   const s = session.season;
   const rows: CmpRow[] = ([
-    { label: '종합', v: (p) => g(overall(session, p)) },
-    { label: '잠재', v: (p) => { const lp = session.leaguePlayer(p.id); const v = lp ? potOf(lp, p.age) : null; return { node: <PotCell v={v} />, n: potentialSortValue(v) }; } },
+    { label: '스카우트 보고', v: (p) => { const t = session.scoutPhrase(p.id); return t ? { node: <span className="small">{t}</span> } : none; } },
     ...(anyBat ? [
-      { label: '컨택', v: (p: SimPlayer) => (p.isPitcher ? none : g(bg(p)?.contact)) },
-      { label: '파워', v: (p: SimPlayer) => (p.isPitcher ? none : g(bg(p)?.power)) },
-      { label: '선구안', v: (p: SimPlayer) => (p.isPitcher ? none : g(bg(p)?.eye)) },
-      { label: '주력', v: (p: SimPlayer) => (p.isPitcher ? none : g(bg(p)?.speed)), full: true },
+      { label: '컨택', v: (p: SimPlayer) => (p.isPitcher ? none : gk(p, 'contact')) },
+      { label: '파워', v: (p: SimPlayer) => (p.isPitcher ? none : gk(p, 'power')) },
+      { label: '선구안', v: (p: SimPlayer) => (p.isPitcher ? none : gk(p, 'eye')) },
+      { label: '주력', v: (p: SimPlayer) => (p.isPitcher ? none : gk(p, 'speed')), full: true },
     ] : []),
     ...(anyPit ? [
-      { label: '구위', v: (p: SimPlayer) => (p.isPitcher ? g(pg(p)?.stuff) : none) },
-      { label: '제구', v: (p: SimPlayer) => (p.isPitcher ? g(pg(p)?.control) : none) },
-      { label: '장타 억제', v: (p: SimPlayer) => (p.isPitcher ? g(pg(p)?.hrSuppression) : none) },
-      { label: '선발 체력', v: (p: SimPlayer) => (p.isPitcher ? g(pg(p)?.stamina) : none), full: true },
-      { label: '구원 체력', v: (p: SimPlayer) => (p.isPitcher ? g(pg(p)?.reliefStamina) : none), full: true },
+      { label: '구위', v: (p: SimPlayer) => (p.isPitcher ? gk(p, 'stuff') : none) },
+      { label: '제구', v: (p: SimPlayer) => (p.isPitcher ? gk(p, 'control') : none) },
+      { label: '장타 억제', v: (p: SimPlayer) => (p.isPitcher ? gk(p, 'hrSuppression') : none) },
+      { label: '선발 체력', v: (p: SimPlayer) => (p.isPitcher ? gk(p, 'stamina') : none), full: true },
+      { label: '구원 체력', v: (p: SimPlayer) => (p.isPitcher ? gk(p, 'reliefStamina') : none), full: true },
     ] : []),
     { label: `${session.world.year} 기록`, v: (p) => {
       if (p.isPitcher) {
@@ -269,8 +266,8 @@ function Compare() {
       if (p.isPitcher) return none;
       const pos = (p === showStarter ? slot : p.pos) as FieldPos;
       if (!FIELD_POS.includes(pos)) return { node: <span className="muted small">{p.pos ?? 'DH'}</span>, n: null };
-      const d = defenseGrade(defenseAt(p, pos));
-      return { node: <>{pos} <Grade v={d} /></>, n: d };
+      const d = seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, pos)));
+      return { node: <>{pos} <GuessGrade v={d} /></>, n: d ? guessMid(d) : null };
     } }] : []),
     { label: '계약', v: (p) => { const c = session.leaguePlayer(p.id)?.contract; return c ? { node: <span className="small">{c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</span> } : none; } },
     { label: '상태', v: (p) => {
@@ -291,7 +288,7 @@ function Compare() {
   return (
     <section className="stack tight">
       {narrow && showStarter && (
-        <p className="small cmp-starter">우리 {slot} 주전: <PlayerLink p={showStarter} /> 종합 <Grade v={overall(session, showStarter)} /></p>
+        <p className="small cmp-starter">우리 {slot} 주전: <PlayerLink p={showStarter} /> <GuessCell g={seen.set(showStarter.id)} /></p>
       )}
       <div className="scroll cmp-scroll">
         <table className="cmp">
@@ -348,12 +345,14 @@ function Offer() {
   const [cashText, setCashText] = useState(() => (draft.cash ? String(Math.round((draft.cash * px) / 1000) / 10) : '0'));
   const max = ruleOf(session.league, 'maxPerSide');
   const info = useMemo(
-    () => new Map(others.map((t) => {
-      const sit = session.situation(t.idx);
-      const early = session.season.teams[t.idx].g < 20;
-      // 양대 리그 해(1999·2000)는 리그 순위 ("드림 2위", game/rank.ts). 전력 순위는 통합
-      return [t.idx, { tendency: session.tendency(t.idx), rank: early ? `전력 ${sit.rank}위` : rankText(session, t.idx) }];
-    })),
+    () => {
+      // 시즌 초반(20경기 전)은 우리 스카우트 팀의 전력 전망 세 단계 (능력치 v2 17.6), 그 뒤는 리그 순위 ("드림 2위", game/rank.ts)
+      const outlook = session.strengthOutlook();
+      return new Map(others.map((t) => {
+        const early = session.season.teams[t.idx].g < 20;
+        return [t.idx, { tendency: session.tendency(t.idx), rank: early ? `전망 ${outlook[t.idx]}` : rankText(session, t.idx) }];
+      }));
+    },
     [session, version], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const { give, get } = draftParts(session, draft);
@@ -482,18 +481,17 @@ function TradeTalkBox({ draft }: { draft: TradeDraft }) {
   return <TradeTalk team={draft.team} give={x.give} get={x.get} cash={draft.cash} picks={x.picks} pickLabel={(k) => session.pickLabel(k)} />;
 }
 
-/** 선수 한 줄: 이름 · 자리 · 나이 · 종합/잠재 · 연봉·계약 */
+/** 선수 한 줄: 이름 · 자리 · 나이 · 능력 추측 · 연봉·계약 */
 function DealLine({ p }: { p: SimPlayer }) {
   const { session } = useGame();
   const won = useWon();
-  const potOf = usePotentialOf();
-  const lp = session.leaguePlayer(p.id);
-  const c = lp?.contract;
+  const seen = useSeen();
+  const c = session.leaguePlayer(p.id)?.contract;
   return (
     <>
       <PlayerLink p={p} />{' '}
       <span className="muted small">{p.isPitcher ? slotOf(p) : p.pos ?? '-'} · {p.age ?? '-'}세</span>{' '}
-      <Grade v={overall(session, p)} />/<PotCell v={lp ? potOf(lp, p.age) : null} />{' '}
+      <GuessCell g={seen.set(p.id)} />{' '}
       {c && <span className="muted small">{c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</span>}
     </>
   );
@@ -713,9 +711,11 @@ function ShopPanel({ open }: { open: boolean }) {
   const [want, setWant] = useState<ShopWant>('any');
   const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
-  const ctx = session.values;
+  const seen = useSeen();
+  // 정렬은 능력 추측 가운데값 평균 (진짜 기여 순은 보이지 않는다, 능력치 v2 17.6)
+  const guessOf = new Map(session.team.org.map((p) => [p.idx, seen.set(p.id)]));
   const mine = session.team.org.filter((p) => !p.foreign && !session.leaguePlayer(p.id)?.dev)
-    .sort((a, b) => currentRuns(b, ctx) - currentRuns(a, ctx) || a.idx - b.idx);
+    .sort((a, b) => (guessOf.get(b.idx)?.sort ?? 0) - (guessOf.get(a.idx)?.sort ?? 0) || a.idx - b.idx);
   const pick = (p: SimPlayer) => {
     const next = new Set(sel);
     if (next.has(p.idx)) next.delete(p.idx);
@@ -746,7 +746,7 @@ function ShopPanel({ open }: { open: boolean }) {
       setMsg({ text: `${session.world.teams[o.team].name}: "${ev.message}" (그사이 조건이 바뀌었습니다)` });
     }
   };
-  const grade = (p: SimPlayer) => <Grade v={runsGrade(currentRuns(p, ctx), session.year)} />;
+  const grade = (p: SimPlayer) => <GuessCell g={guessOf.get(p.idx)} />;
   const salary = (p: SimPlayer) => { const lp = session.leaguePlayer(p.id); return lp ? won(lp.contract.salary) : '-'; };
   const line = (p: SimPlayer) => {
     const b = session.season.bat[p.idx];
@@ -776,7 +776,7 @@ function ShopPanel({ open }: { open: boolean }) {
         </div>
         <div className="scroll flat shop-list">
           <table>
-            <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th>현재</th><th className="l">올해</th><th>연봉</th></tr></thead>
+            <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th>능력 추측</th><th className="l">올해</th><th>연봉</th></tr></thead>
             <tbody>
               {mine.map((p) => (
                 <tr key={p.idx} className={`pick${sel.has(p.idx) ? ' sel' : ''}`} onClick={(e) => { if (!(e.target as HTMLElement).closest('button')) pick(p); }}>
@@ -815,12 +815,14 @@ function ShopPanel({ open }: { open: boolean }) {
 function PickList({ title, org, selected, onToggle, disabled, showEntry = false }: {
   title: string; org: SimPlayer[]; selected: number[]; onToggle: (p: SimPlayer) => void; disabled: boolean; showEntry?: boolean;
 }) {
-  const { session, grades } = useGame();
+  const { session } = useGame();
+  const seen = useSeen();
   const [kind, setKind] = useState<Kind>('all');
   const registered = new Set(session.registered().map((p) => p.idx));
+  const guessOf = new Map(org.map((p) => [p.idx, seen.set(p.id)]));
   const rows = org
     .filter((p) => kind === 'all' || (kind === 'pit') === p.isPitcher)
-    .sort((a, b) => Number(a.isPitcher) - Number(b.isPitcher) || (a.isPitcher ? a.value - b.value : b.value - a.value) || a.idx - b.idx);
+    .sort((a, b) => Number(a.isPitcher) - Number(b.isPitcher) || (guessOf.get(b.idx)?.sort ?? 0) - (guessOf.get(a.idx)?.sort ?? 0) || a.idx - b.idx);
   return (
     <section>
       <div className="row-between">
@@ -835,22 +837,17 @@ function PickList({ title, org, selected, onToggle, disabled, showEntry = false 
       </div>
       <div className="scroll pick">
         <table>
-          <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th title="야수: 컨택·파워·선구안·주력 / 투수: 구위·제구·장타 억제·체력">능력</th><th>기록</th>{showEntry && <th>군</th>}</tr></thead>
+          <thead><tr><th /><th className="l">이름</th><th>자리</th><th>나이</th><th title="우리 스카우트 팀의 추측. 야수: 컨택·파워·선구 / 투수: 구위·제구·체력">능력 추측</th><th>기록</th>{showEntry && <th>군</th>}</tr></thead>
           <tbody>
             {rows.map((p) => {
               const on = selected.includes(p.idx);
               let stat: string;
-              let gs: (number | null | undefined)[];
               if (p.isPitcher) {
                 const s = session.season.pit[p.idx];
                 stat = s.outs ? `${ipText(s.outs)}이닝 ${fixed2(era(s))}` : '-';
-                const g = grades.pitchers.get(p.id);
-                gs = [g?.stuff, g?.control, g?.hrSuppression, g?.stamina];
               } else {
                 const b = session.season.bat[p.idx];
                 stat = b.pa ? `${rate3(avg(b))} ${b.hr}홈런 OPS ${rate3(ops(b))}` : '-';
-                const g = grades.batters.get(p.id);
-                gs = [g?.contact, g?.power, g?.eye, g?.speed];
               }
               return (
                 <tr key={p.idx} className={on ? 'me' : ''}>
@@ -858,7 +855,7 @@ function PickList({ title, org, selected, onToggle, disabled, showEntry = false 
                   <td className="l"><PlayerLink p={p} /></td>
                   <td>{p.isPitcher ? (isStarterSkill(p.pit) ? 'SP' : 'RP') : <Pos pos={p.pos} />}</td>
                   <td>{p.age ?? '-'}</td>
-                  <td className="grades-inline">{gs.map((v, i) => <Grade key={i} v={v} />)}</td>
+                  <td><GuessCell g={guessOf.get(p.idx)} /></td>
                   <td className="small">{stat}</td>
                   {showEntry && <td className="small">{registered.has(p.idx) ? '1군' : '2군'}</td>}
                 </tr>
