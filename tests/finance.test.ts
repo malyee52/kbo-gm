@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
+import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
 
@@ -130,21 +130,6 @@ describe('투자 4종', () => {
     expect(run(3)).toBeLessThan(run(0));
   });
 
-  it('스카우트: 우리 구단 단계가 높을수록 드래프트 후보 잠재력 평가 오차가 작다', () => {
-    const err = (level: number) => {
-      const g = GameSession.create(store, opts('inv-scout'), FAST);
-      g.league.finance![lg].active!.scout = level;
-      g.advance(100000);
-      g.beginOffseason();
-      let guard = 0;
-      while (g.offseason!.stage !== 'draft' && guard++ < 30) { if (g.offseason!.stage === 'comp') g.autoComp(); g.nextStage(); }
-      const d = g.offseason!.draft!;
-      const ps = [...d.pool, ...d.picks.map((x) => x.id)].map((id) => g.leaguePlayer(id)!);
-      return Math.max(...ps.map((p) => Math.abs((p.scoutPotential ?? p.potential) - p.potential)));
-    };
-    expect(err(3)).toBeLessThanOrEqual(SCOUT_NOISE[3] + 0.5);
-    expect(err(0)).toBeGreaterThan(SCOUT_NOISE[3] + 0.5);
-  });
 });
 
 describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', () => {

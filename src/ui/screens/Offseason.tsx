@@ -16,8 +16,8 @@ import {
 import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
-import { runsGrade } from '../grades';
-import { DataTable, PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import { DataTable, GuessCell, guessColumn, useSeen } from '../parts';
+import { phraseRank } from '../../league/scout';
 import type { Column } from '../table';
 import { ruleOf } from '../../league/rules';
 import { WatchStar } from './Watch';
@@ -33,22 +33,20 @@ import { agendaChange, agendaLabel } from '../../league/ruleVote';
 import { voteResultText } from '../../league/ruleNews';
 import { REJECT_COOLDOWN, type RuleShift } from '../../league/futureRules';
 
-/** 오프시즌 화면에서 쓰는 선수 한 줄 정보 */
+/**
+ * 오프시즌 화면에서 쓰는 선수 한 줄 정보. 능력은 우리 스카우트 팀의 갈래 추측 셋(다음 시즌 기준), 앞날은 스카우트 보고 문구
+ * (능력치 v2 17.6: 종합·잠재는 어떤 꼴로도 보이지 않는다)
+ */
 function useInfo() {
   const { session } = useGame();
   const next = session.year + 1;
-  const potOf = usePotentialOf();
-  return (p: LeaguePlayer) => {
-    const age = p.birthYear ? next - p.birthYear : null;
-    return {
-      age,
-      role: p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos),
-      now: runsGrade(session.nextRuns(p.id), session.year),
-      // 잠재 표시는 선수 상세와 같은 규칙 (UI 2단계 결정 5): 27세 이하 범위, 28~30세 숫자, 31세 이상 숨김
-      // (31세 이상은 잠재력이 전성기 상한이라 뜻이 없다, 2026-10-09 전수조사 M5)
-      pot: potOf(p, age),
-    };
-  };
+  const seen = useSeen();
+  return (p: LeaguePlayer) => ({
+    age: p.birthYear ? next - p.birthYear : null,
+    role: p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos),
+    guess: seen.set(p.id),
+    note: session.scoutPhrase(p.id),
+  });
 }
 
 export function Offseason() {
@@ -537,12 +535,13 @@ const useFull = () => useShell().density === 'full';
 function nameCol<R extends PRow>(extra?: (r: R) => ReactNode): Column<R> {
   return { key: 'name', label: '선수', text: true, fixed: true, value: (r) => r.p.name, cell: (r) => <>{r.p.name}{extra?.(r)}</> };
 }
-function baseCols<R extends PRow>(potLabel = '잠재'): Column<R>[] {
+function baseCols<R extends PRow>(): Column<R>[] {
   return [
     { key: 'role', label: '자리', brief: true, value: (r) => r.i.role },
     { key: 'age', label: '나이', brief: true, value: (r) => r.i.age },
-    { key: 'now', label: '종합', brief: true, title: '다음 시즌 예상 기여를 20~80으로 (50 = 리그 평균 주전)', value: (r) => r.i.now },
-    { key: 'pot', label: potLabel, brief: true, value: (r) => potentialSortValue(r.i.pot), cell: (r) => <PotCell v={r.i.pot} /> },
+    guessColumn<R>((r) => r.i.guess, { title: '우리 스카우트 팀의 다음 시즌 추측: 타자 컨택·파워·선구, 투수 구위·제구·체력. 정렬은 가운데값 평균' }),
+    { key: 'note', label: '스카우트 보고', brief: true, text: true, title: '앞으로 클 여지에 대한 스카우트 평 (틀릴 수 있다, 32세부터 없음). 정렬은 평의 단계',
+      value: (r) => phraseRank(r.i.note), cell: (r) => <span className="small">{r.i.note ?? '-'}</span> },
   ];
 }
 function payCol<R extends PRow>(won: (man: number) => string, label = '연봉', brief = true): Column<R> {
@@ -607,7 +606,7 @@ function CompPanel({ act }: { act: Act }) {
       {mineOut.map((c) => {
         const rec = recs[c.fa];
         const rows = Off.compCandidates(session.league, off, c)
-          .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
+          .map((p) => ({ p, i: info(p), runs: session.seenRuns(p.id) }))
           .sort((a, b) => b.runs - a.runs);
         const cols: Column<(typeof rows)[number]>[] = [
           nameCol((r) => (r.p.id === rec ? <span className="tag" title="자동 선택과 같은 기준 (보호 밖 최고 가치)">추천</span> : null)),
@@ -661,7 +660,7 @@ function ProtectEditor({ c, act }: { c: Off.CompCase; act: Act }) {
   const limit = FA_COMP[c.grade].protect!;
   const prot = new Set(c.protect);
   const rows = Off.protectPool(session.league, off, c)
-    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
+    .map((p) => ({ p, i: info(p), runs: session.seenRuns(p.id) }))
     .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs);
   const auto = session.league.players.filter((p) => p.team === c.to && Off.autoProtected(off, p)).length;
   const toggle = (id: string) => {
@@ -713,13 +712,13 @@ function ProtectDraftPanel({ d, act }: { d: Off.ProtectDraft; act: Act }) {
   const takesPart = Off.protectDraftTeams(L, off, d).includes(me);
   const prot = new Set(d.protect[String(me)] ?? []);
   const pool = takesPart ? Off.protectDraftPool(L, off, d, me)
-    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
+    .map((p) => ({ p, i: info(p), runs: session.seenRuns(p.id) }))
     .sort((a, b) => Number(prot.has(b.p.id)) - Number(prot.has(a.p.id)) || b.runs - a.runs) : [];
   const toggle = (id: string) => act(session.setDraftProtect(d.kind, prot.has(id) ? [...prot].filter((x) => x !== id) : [...prot, id]));
   const picker = d.kind === 'second' || d.team === me;
   const wish = new Set(d.wish);
   const cands = picker ? Off.protectDraftCandidates(L, off, d, me)
-    .map((p) => ({ p, i: info(p), runs: session.nextRuns(p.id) }))
+    .map((p) => ({ p, i: info(p), runs: session.seenRuns(p.id) }))
     .sort((a, b) => Number(wish.has(b.p.id)) - Number(wish.has(a.p.id)) || b.runs - a.runs) : [];
   const toggleWish = (id: string) => act(session.setDraftWish(d.kind, wish.has(id) ? d.wish.filter((x) => x !== id) : [...d.wish, id]));
   const rule = d.kind === 'second' ? Off.secondRule(off.year) : null;
@@ -875,7 +874,7 @@ function FaPanel({ act }: { act: Act }) {
       </div>
       <DataTable id="off-fa" label="FA 시장" cols={cols} rows={rows} rowKey={(r) => r.e.id} full={full} searchText={byName}
         rowClass={(r) => (r.e.from === session.teamIdx ? 'me' : undefined)} empty="이번 오프시즌 FA가 없습니다." />
-      <p className="muted small">종합·잠재는 한 시즌 기여를 20~80으로 바꾼 값입니다 (50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
+      <p className="muted small">능력은 우리 스카우트 팀의 다음 시즌 추측이라 범위로 보입니다 (20~80, 50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
     </section>
   );
 }
@@ -900,7 +899,7 @@ function ForeignPanel({ act }: { act: Act }) {
   const keepCols: Column<(typeof expiringMine)[number]>[] = [
     nameCol(),
     { key: 'kind', label: '구분', brief: true, value: (r) => (r.p.asia ? '아시아쿼터' : '일반') },
-    ...baseCols().filter((c) => c.key !== 'pot'),
+    ...baseCols().filter((c) => c.key !== 'note'),
     { key: 'pay', label: '지난 연봉', brief: true, value: (r) => foreignContractTotal(r.p.contract), cell: (r) => dollarText(foreignContractTotal(r.p.contract)) },
     {
       key: 'keep', label: '결정', text: true, fixed: true, value: (r) => Number(f.keep[r.p.id]),
@@ -970,14 +969,18 @@ function DraftPanel({ act }: { act: Act }) {
   const total = draftTotal(off);
   const done = d.pick >= total || d.pool.length === 0;
   const onClock = !done && draftTeamAt(off, d.pick) === session.teamIdx;
-  const pool = d.pool.map((id) => players.get(id)!).sort((a, b) => (b.scoutPotential ?? 0) - (a.scoutPotential ?? 0) || a.id.localeCompare(b.id))
-    .map((p) => ({ p, i: info(p) }));
+  // 우리 스카우트 팀의 드래프트 보드 순서 (능력치 v2 19.2): 추천 순위·묶음·한 줄 보고
+  const board = new Map(session.draftBoard().map((b) => [b.id, b]));
+  const pool = d.pool.map((id) => players.get(id)!).map((p) => ({ p, i: info(p), b: board.get(p.id) }))
+    .sort((a, b) => (a.b?.rank ?? 9999) - (b.b?.rank ?? 9999) || a.p.id.localeCompare(b.p.id));
   const mine = d.picks.filter((p) => p.team === session.teamIdx);
   const cols: Column<(typeof pool)[number]>[] = [
     nameCol((r) => <> <WatchStar id={r.p.id} name={r.p.name} small bare /></>),
-    ...baseCols('잠재(평가)').slice(0, 2),
+    { key: 'rank', label: '추천', brief: true, title: '우리 스카우트 팀의 보드 순위', value: (r) => r.b?.rank ?? null },
+    ...baseCols().slice(0, 2),
     { key: 'school', label: '학력', brief: true, value: (r) => (r.p.school === 'UNIV' ? '대졸' : '고졸') },
-    ...baseCols('잠재(평가)').slice(2),
+    { key: 'tier', label: '묶음', brief: true, text: true, value: (r) => r.b?.rank ?? null, cell: (r) => r.b?.tier ?? '-' },
+    { key: 'report', label: '스카우트 보고', brief: true, text: true, value: (r) => r.b?.note ?? null, cell: (r) => <span className="small">{r.b?.note || '-'}</span> },
     { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={!onClock} onClick={() => act(session.draft(r.p.id))}>지명</button> },
   ];
 
@@ -991,7 +994,7 @@ function DraftPanel({ act }: { act: Act }) {
             : `지명 진행 중 (${d.pick + 1}/${total})`}
         </p>
         <p className="muted small">
-          잠재는 스카우트 평가라 실제와 다를 수 있습니다. 모든 구단이 같은 평가를 봅니다.{' '}
+          우리 스카우트 팀의 평가입니다 (영입 › 스카우트에서 아마추어 스카우트를 늘리면 더 정확해집니다). 실제와 다를 수 있고, 다른 구단은 저마다 다른 보드로 지명합니다.{' '}
           {[...d.pool, ...d.picks.map((x) => x.id)].some((id) => players.get(id)?.real)
             ? `후보는 ${off.year + 1}년 입단 실제 신인 지명 선수입니다 (출처: baseballchart.kr, 나무위키 신인 드래프트 문서 정리, CC BY-NC-SA 2.0 KR). 지명은 게임 속 순위로 다시 하므로 실제 구단과 다를 수 있고, 아직 프로 기록이 없어 능력은 실제 지명 순번으로 가늠한 추정값입니다.`
             : '지명 선수는 모두 가상 선수입니다.'}
@@ -1015,7 +1018,7 @@ function DraftPanel({ act }: { act: Act }) {
                 {mine.map((pk) => {
                   const p = players.get(pk.id)!;
                   const i = info(p);
-                  return <tr key={pk.id}><td>{pickShort(pk.round)}</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td>잠재 <PotCell v={i.pot} /></td></tr>;
+                  return <tr key={pk.id}><td>{pickShort(pk.round)}</td><td className="l">{p.name}</td><td>{i.role}</td><td>{p.school === 'UNIV' ? '대졸' : '고졸'}</td><td className="l small">{i.note ?? '-'}</td></tr>;
                 })}
               </tbody>
             </table>
@@ -1040,9 +1043,9 @@ function ExtensionPanel({ act }: { act: Act }) {
   const [open, setOpen] = useState(false);
   const [years, setYears] = useState<Record<string, number>>({});
   const rows = useMemo(() => (open ? session.extensionOffers() : []), [session, version, open]);
-  // 보이는 잠재(스카우트 짐작) 순. 실제 잠재로 늘어놓으면 순서로 정답이 드러난다
-  const potKey = (p: LeaguePlayer) => potentialSortValue(info(p).pot) ?? -1;
-  const sorted = [...rows].sort((a, b) => potKey(b.p) - potKey(a.p) || a.p.id.localeCompare(b.p.id)).slice(0, 25);
+  // 보이는 것(스카우트 보고 단계 → 추측 기여) 순. 진짜 잠재·기여로 늘어놓으면 순서로 정답이 드러난다
+  const key = (p: LeaguePlayer) => phraseRank(info(p).note) * 1000 + session.seenRuns(p.id);
+  const sorted = [...rows].sort((a, b) => key(b.p) - key(a.p) || a.p.id.localeCompare(b.p.id)).slice(0, 25);
   return (
     <section className="panel">
       <div className="row-between">
@@ -1056,7 +1059,7 @@ function ExtensionPanel({ act }: { act: Act }) {
       {open && (
         <div className="scroll">
           <table>
-            <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>FA까지</th><th>지금 연봉</th><th>기간</th><th>요구 연봉</th><th /></tr></thead>
+            <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th>능력 추측</th><th className="l">스카우트 보고</th><th>FA까지</th><th>지금 연봉</th><th>기간</th><th>요구 연봉</th><th /></tr></thead>
             <tbody>
               {sorted.map(({ p, toFa, demands }) => {
                 const i = info(p);
@@ -1064,7 +1067,7 @@ function ExtensionPanel({ act }: { act: Act }) {
                 const d = demands.find((x) => x.years === y)!;
                 return (
                   <tr key={p.id}>
-                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td><PotCell v={i.pot} /></td>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td><GuessCell g={i.guess} /></td><td className="l small">{i.note ?? '-'}</td>
                     <td>{toFa}시즌</td><td className="small">{won(p.contract.salary)}</td>
                     <td>
                       <select value={y} onChange={(e) => setYears({ ...years, [p.id]: Number(e.target.value) })} aria-label={`${p.name} 계약 기간`}>
@@ -1175,7 +1178,7 @@ function SalaryPanel({ act }: { act: Act }) {
   const rows = ids.map((id) => { const p = players.get(id)!; return { p, i: info(p), id }; });
   const cols: Column<(typeof rows)[number]>[] = [
     nameCol(),
-    ...baseCols().filter((c) => c.key !== 'pot'),
+    ...baseCols().filter((c) => c.key !== 'note'),
     { key: 'service', label: '1군 연차', title: 'FA까지 세는 1군 등록 연차', value: (r) => r.p.service ?? null, cell: (r) => `${r.p.service ?? 0}년` },
     payCol(won, '지난 연봉'),
     { key: 'demand', label: '요구액', brief: true, value: (r) => s.demands[r.id], cell: (r) => won(s.demands[r.id]) },
@@ -1232,11 +1235,13 @@ function ReleasePanel({ act }: { act: Act }) {
     ...session.league.players.filter((p) => p.team === session.teamIdx && p.military?.state !== 'serving' && !p.dev && !ranked.includes(p)),
   ];
   const devs = session.league.players.filter((p) => p.team === session.teamIdx && p.dev);
-  const devPool = session.devPool().sort((a, b) => (b.scoutPotential ?? b.potential) - (a.scoutPotential ?? a.potential) || a.id.localeCompare(b.id));
+  // 육성 후보는 스카우트 보고 단계 → 추측 기여 순 (진짜 잠재로 늘어놓지 않는다)
+  const devKey = (p: LeaguePlayer) => phraseRank(session.scoutPhrase(p.id)) * 1000 + session.seenRuns(p.id);
+  const devPool = session.devPool().sort((a, b) => devKey(b) - devKey(a) || a.id.localeCompare(b.id));
   const ageOf = (p: (typeof mine)[number]) => (p.birthYear ? session.offseason!.year + 1 - p.birthYear : 99);
   const canDev = (p: (typeof mine)[number]) => !p.foreign && ageOf(p) <= ruleOf(session.league, 'devMaxAge') && p.contract.kind !== 'fa' && devs.length < ruleOf(session.league, 'devLimit');
   const over = mine.length - ruleOf(session.league, 'orgLimit');
-  const claimable = session.claimable().sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id) || a.id.localeCompare(b.id));
+  const claimable = session.claimable().sort((a, b) => session.seenRuns(b.id) - session.seenRuns(a.id) || a.id.localeCompare(b.id));
   const mineRows = mine.map((p, order) => ({ p, i: info(p), order }));
   const mineCols: Column<(typeof mineRows)[number]>[] = [
     nameCol(({ p }) => (
@@ -1260,7 +1265,7 @@ function ReleasePanel({ act }: { act: Act }) {
   ];
   const devRows = devPool.slice(0, 40).map((p) => ({ p, i: info(p) }));
   const devCols: Column<(typeof devRows)[number]>[] = [
-    nameCol(virtualTag), ...baseCols('잠재(평가)'),
+    nameCol(virtualTag), ...baseCols(),
     { key: 'act', label: '', fixed: true, value: () => null, cell: (r) => <button type="button" className="small-btn" disabled={devs.length >= ruleOf(session.league, 'devLimit')} onClick={() => act(session.signDev(r.p.id))}>육성 영입</button> },
   ];
   const claimRows = claimable.map((p) => ({ p, i: info(p), from: session.offseason!.released!.find((r) => r.id === p.id)!.from }));
@@ -1298,7 +1303,7 @@ function ReleasePanel({ act }: { act: Act }) {
                 const i = info(p);
                 return (
                   <tr key={p.id}>
-                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td>{i.now}</td><td>잠재 <PotCell v={i.pot} /></td>
+                    <td className="l">{p.name}</td><td>{i.role}</td><td>{i.age ?? '-'}</td><td><GuessCell g={i.guess} /></td><td className="l small">{i.note ?? '-'}</td>
                     <td><button type="button" className="small-btn" disabled={mine.length >= ruleOf(session.league, 'orgLimit')} title={mine.length >= ruleOf(session.league, 'orgLimit') ? '정원이 차 있습니다' : undefined} onClick={() => act(session.promoteDevOff(p.id))}>정식 등록</button></td>
                   </tr>
                 );
@@ -1313,7 +1318,7 @@ function ReleasePanel({ act }: { act: Act }) {
           <div className="pick-table">
             <DataTable id="off-dev-pool" label="육성선수 후보" cols={devCols} rows={devRows} rowKey={(r) => r.p.id} full={full} searchText={byName} />
           </div>
-          <p className="muted small">단계를 마감하면 AI 구단이 남은 선수 가운데 잠재력이 높은 선수를 육성선수로 데려갑니다.</p>
+          <p className="muted small">단계를 마감하면 AI 구단이 남은 선수 가운데 자기 평가가 높은 선수를 육성선수로 데려갑니다. 후보는 우리 스카우트 평가 순서입니다.</p>
         </div>
       )}
       <div className="panel">

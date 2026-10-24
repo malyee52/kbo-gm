@@ -16,8 +16,7 @@ import { sanitizeEffects, type FantasyEffect } from './effects';
 import type { FantasyEntry } from './types';
 import { duePromises, parseDue, promisesContext, type PromiseDraft, type PromiseSettle } from './promises';
 import type { DataStore } from '../data/types';
-import { currentRuns } from '../ai/value';
-import { asSim } from '../league/growth';
+import { guessSetText } from '../league/scout';
 import { changedRules, clampRule, foreignPostingOn, ruleDate, ruleOf, RULE_DEFS, type RuleKey } from '../league/rules';
 import { ownedPicks, pickOwner, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../league/picks';
 import { foreignCap, salaryCap, teamCapPayroll } from '../league/salary';
@@ -116,13 +115,11 @@ due는 "2026-08-15", "시즌 끝", "오프시즌", "다음 시즌", "30일 뒤" 
 
 function rosterTable(g: GameSession, team: number, n: number): string {
   const year = g.phase === 'season' ? g.world.year : g.year + 1;
-  const ctx = g.values;
+  // 플레이어가 보는 것(우리 스카우트 팀의 추측)만 넘긴다 (능력치 v2 17.6: LLM이 진짜 능력·잠재 숫자를 흘리지 않게)
+  const grades = g.currentGrades();
   const lp = g.league.players.filter((p) => teamOfNow(g, p) === team);
-  const rows = lp.map((p) => {
-    const runs = currentRuns(asSim(p, ctx.world.league, year), ctx);
-    return { p, runs };
-  }).sort((a, b) => b.runs - a.runs).slice(0, n);
-  return rows.map(({ p, runs }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
+  const rows = lp.map((p) => ({ p, runs: g.seenRuns(p.id) })).sort((a, b) => b.runs - a.runs).slice(0, n);
+  return rows.map(({ p }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력 추측(${guessSetText(g.guessSet(p.id, grades))}) 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
 }
 
 /** 지금 소속 (시즌 중에는 월드, 오프시즌에는 리그) */

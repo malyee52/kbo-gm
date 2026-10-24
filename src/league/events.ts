@@ -257,7 +257,7 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `해외 구단이 교류 연수를 제안했습니다. 육성 파트는 ${v.name} 선수를 추천합니다. 비용은 ${eok(num(v, 'cost'))}입니다.`,
     choices: [
       { label: '보내지 않는다', note: () => '변화 없음', apply: () => '연수 제안을 사양했습니다.' },
-      { label: '보낸다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 잠재력 +2~4`,
+      { label: '보낸다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 성장 여지가 넓어진다`,
         apply: (c, v, rng) => {
           c.addCash(-num(v, 'cost'), '유망주 해외 연수');
           const p = c.league.players.find((x) => x.id === v.id);
@@ -339,7 +339,7 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `스카우트 팀이 ${v.name} 선수에게 전담 코치를 붙이면 크게 성장할 수 있다고 보고했습니다. 비용은 ${eok(num(v, 'cost'))}입니다.`,
     choices: [
       { label: '지켜본다', note: () => '변화 없음', apply: () => '지금은 지켜보기로 했습니다.' },
-      { label: '전담 코치를 붙인다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 잠재력 +2`,
+      { label: '전담 코치를 붙인다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 성장 여지가 조금 넓어진다`,
         apply: (c, v) => { c.addCash(-num(v, 'cost'), '유망주 전담 코치'); const p = c.league.players.find((x) => x.id === v.id); if (p) p.potential += 2; return `${v.name} 선수에게 전담 코치를 붙였습니다.`; } },
     ],
   },
@@ -471,7 +471,7 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `코칭스태프가 베테랑 선수들과 ${v.an}·${v.bn} 선수를 묶어 멘토링 조를 짜자고 합니다. 베테랑들의 훈련 시간이 줄어듭니다.`,
     choices: [
       { label: '하지 않는다', note: () => '변화 없음', apply: () => '지금 체제를 유지합니다.' },
-      { label: '멘토링 조를 짠다', note: (_c, v) => `${v.an}·${v.bn} 잠재력 +1, 10일 동안 팀 경기력 −0.5`,
+      { label: '멘토링 조를 짠다', note: (_c, v) => `${v.an}·${v.bn} 성장 여지가 조금 넓어진다, 10일 동안 팀 경기력 −0.5`,
         apply: (c, v) => {
           for (const id of [v.a, v.b]) { const p = c.league.players.find((x) => x.id === id); if (p) p.potential += 1; }
           c.addForm(-0.005, 10, '멘토링'); return '젊은 선수들이 베테랑에게서 많이 배우고 있습니다.';

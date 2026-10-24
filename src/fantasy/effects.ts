@@ -137,7 +137,8 @@ export function effectText(e: FantasyEffect, nameOf: (id: string) => string): st
     case 'teamForm': return `${e.side === 'bat' ? '타자진' : e.side === 'pit' ? '투수진' : '선수단'} 경기력 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
     case 'playerForm': return `${nameOf(e.player)} 경기력 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
     case 'rest': return `${nameOf(e.player)} ${e.days}일 휴식`;
-    case 'potential': return `${nameOf(e.player)} 잠재력 ${sign(e.delta)}`;
+    // 잠재(천장)는 숫자로 보이지 않는다 (능력치 v2 17.6): 방향만 말로
+    case 'potential': return `${nameOf(e.player)} 성장 여지가 ${e.delta > 0 ? '넓어진다' : e.delta < 0 ? '좁아진다' : '그대로'}`;
     case 'prospect': return `유망주 ${e.name} (${e.pos === 'P' ? '투수' : e.pos === 'C' ? 'C' : e.pos === 'IF' ? 'IF' : 'OF'}, ${e.age}세) 다음 개막에 입단`;
     case 'ownerChange': return `구단주 교체 (신뢰 ${e.trust}에서 새로 시작)`;
     case 'tradeGoodwill': return `상대 구단 호감 ${sign(e.runs)}런 (${e.days}일, 트레이드 평가에 더함)`;

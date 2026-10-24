@@ -51,7 +51,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
+  activeLevel, addExpansionCapital, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -265,6 +265,8 @@ export interface LeagueView {
   wage: number;
   /** 다음 시즌(계약이 시작되는 해)의 최저 연봉 (salary.ts minSalary) */
   minPay: number;
+  /** 다음 시즌 기준 월드 (화면 갈래 등급 computeGrades용, 무소속 선수는 sim에만) */
+  world?: World;
 }
 
 /** 다음 시즌(league.year + 1) 기준으로 선수 가치를 잴 수 있게 SimPlayer를 만든다. 무소속 선수도 포함 */
@@ -280,7 +282,7 @@ export function leagueView(league: LeagueState, store: Store, params: EnginePara
     if (sim.has(lp.id)) continue;
     sim.set(lp.id, { ...asSim(lp, world.league, next.year), idx: 1_000_000 + k++, name: lp.name, foreign: lp.foreign, teamIdx: lp.team });
   }
-  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league) };
+  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league), world };
 }
 
 const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p]));
@@ -1804,7 +1806,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, false, year);
     p.fx = { region: slot.region, from: 0, until: FX_OFF_UNTIL };
     p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year + 1), year + 1), true, slot.asia, league, year + 1), until: year + 1 };
-    p.scoutPotential = scoutView(league, p.potential, rng);
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     p.transferFee = transferFeeUsd(p.contract.salary);
     pool.push(p.id);
   }
@@ -2073,7 +2075,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * devRng.range(0.7, 1.3));
     const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential }, year);
     p.school = univ ? 'UNIV' : 'HS';
-    p.scoutPotential = scoutView(league, potential, devRng);
+    devRng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
     p.contract = { kind: 'reserve', salary: rookieSalary(year + 1, league), until: year + 1 };
     off.devExtra.push(p.id);
@@ -2093,8 +2095,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     p.school = univ ? 'UNIV' : 'HS';
     // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
     if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;
-    // 스카우트 평가: 실제 잠재력에 오차 (모든 구단이 같은 평가를 본다. 난이도별 오차는 M7)
-    p.scoutPotential = scoutView(league, potential, rng);
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
     p.contract = { kind: 'rookie', salary: rookieSalary(year + 1, league), until: year + 1 };
     pool.push(p.id);
@@ -2793,7 +2794,7 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
     const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, true, year - 1);
     p.fx = fxSeasonWindow(rng, slot.region, FX_SEASON_WEEKS);
     p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year), year), true, slot.asia, league, year), until: year };
-    p.scoutPotential = scoutView(league, p.potential, rng);
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     p.market = year;
   }
   fxState(league, year, false);
@@ -2802,12 +2803,6 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
 
 /** 시즌 중 후보가 나올 수 있는 주 수 (개막 ~ 8월 중순 외국인 교체 마감 약 20주, 임시값) */
 export const FX_SEASON_WEEKS = 20;
-
-/** 우리 구단이 보는 잠재력 (스카우트 투자 단계에 따른 오차) */
-function scoutView(league: LeagueState, potential: number, rng: Rng): number {
-  const n = SCOUT_NOISE[activeLevel(league, league.owner?.team ?? -1, 'scout')];
-  return Math.round(potential + rng.range(-n, n));
-}
 
 /** 시기 τ (16-4a): 리그를 만들 때 정한 값, 없으면 시드로 (branches.ts) */
 function timingFor(league: LeagueState, p: LeaguePlayer, params: EngineParams): number {
@@ -2938,7 +2933,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   // 겸업 재능 (league/twoway.ts): 실제 지명 표기가 투타겸업 (예: 하현승 2027 키움 1순위)
   if (d.twoWay) p.twoWayTalent = true;
   if (m && !m.birthYear) p.birthYearEstimated = true;
-  p.scoutPotential = scoutView(league, potential, rng);
+  rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
   view.ctx.potential?.set(p.id, aiPotential(league, p));
   p.contract = { kind: 'rookie', salary: rookieSalary(entryYear, league), until: entryYear };
   // 해외 프로에서 뛰다 들어온 선수 (해외파 특별지명, 해외 진출 뒤 늦게 입단): 신인상 자격이 없고 다시 포스팅을 요청하지 않는다

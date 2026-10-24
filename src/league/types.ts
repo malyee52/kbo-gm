@@ -118,8 +118,6 @@ export interface LeaguePlayer {
   drillPos?: Partial<Record<import('../engine').FieldPos, number>>;
   /** 시기 τ (해, 숨은 값, 16-4a): 성장이 몰리는 나이를 당기거나 민다. 없으면 시드로 다시 뽑는다 (branches.ts timingOf) */
   timing?: number;
-  /** 스카우트 평가 잠재력 (가상 신인만. 실제 잠재력 대신 화면과 AI 지명에 쓴다) */
-  scoutPotential?: number;
   /** 직전 기록이 없어 그 해 기록으로 능력을 추정한 선수 (첫 시즌만) */
   estimated: boolean;
   /** 소속 구단 색인. -1 = 무소속 (방출, 미계약 FA) */

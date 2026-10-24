@@ -1216,3 +1216,8 @@ button.link.team-link:hover:not(:disabled) .team { text-decoration: underline; t
   .rule-line { grid-template-columns: 1fr; }
   .rule-line .rule-meta { grid-column: 1; grid-row: auto; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 8px; }
 }
+.guess-set { display: inline-flex; gap: 0.45em; white-space: nowrap; }
+.guess-set > span { display: inline-flex; gap: 0.15em; align-items: baseline; }
+.track.range { display: flex; }
+.track.range i:first-child { border-radius: 4px 0 0 4px; }
+.track i.rng { opacity: 0.4; border-radius: 0 4px 4px 0; }

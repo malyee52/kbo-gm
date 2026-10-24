@@ -4,9 +4,10 @@
 // 이 화면은 보기와 육성선수 정식 등록만 한다.
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
-import { GradeBar, PotCell, usePotentialOf } from '../parts';
+import { GradeBar, GuessGrade, useSeen, type SeenGrades } from '../parts';
+import { guessMid } from '../../league/scout';
 import { seasonWar } from '../../league/awards';
-import { defenseAt, defenseGrade, fieldPosOf, teamRules, type SimPlayer } from '../../engine';
+import { defenseAt, defenseGrade, FIELD_POS, fieldPosOf, teamRules, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { worldParkFactor } from '../../game/parkView';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
@@ -15,13 +16,13 @@ import {
   type LeagueBase,
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
-import { ForeignMark, Grade, HAND, posName, useGame, useWon } from '../context';
+import { ForeignMark, HAND, posName, useGame, useWon } from '../context';
 import { dollarText } from '../../league/salary';
 import type { FuturesLine } from '../../league/futures';
 import { ruleOf } from '../../league/rules';
 
 type Kind = 'hit' | 'pit';
-type SortKey = 'value' | 'name' | 'age' | 'g1' | 'g2' | 'g3' | 'g4' | 'stat' | 'saber';
+type SortKey = 'pos' | 'name' | 'age' | 'g1' | 'g2' | 'g3' | 'g4' | 'stat' | 'saber';
 /** 선수단 표의 페이지: 게임 능력치와 상태 / 클래식 기록 / 세이버 기록 */
 type Page = 'ability' | 'classic' | 'saber';
 const PAGES: [Page, string][] = [['ability', '능력·상태'], ['classic', '클래식 기록'], ['saber', '세이버 기록']];
@@ -47,11 +48,12 @@ interface Column {
 
 
 export function Roster() {
-  const { session, grades, changed, version, openPlayer, go } = useGame();
+  const { session, changed, version, openPlayer, go } = useGame();
+  const seen = useSeen();
   const [kind, setKind] = useState<Kind>('hit');
   const [inFirst, setInFirst] = useState(true);
   const [sel, setSel] = useState<number | null>(null);
-  const [sort, setSort] = useState<SortKey>('value');
+  const [sort, setSort] = useState<SortKey>('pos');
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
   const [page, setPageState] = useState<Page>(savedPage);
   const setPage = (v: Page) => {
@@ -109,7 +111,7 @@ export function Roster() {
   const fut = useMemo(() => session.futures().lines, [session, version]);
   const list = (inFirst: boolean) => {
     const rows = org.filter((p) => (kind === 'pit') === p.isPitcher && view.registered.has(p.idx) === inFirst);
-    return sortPlayers(rows, sort, kind, session, grades, lg);
+    return sortPlayers(rows, sort, kind, session, seen, lg);
   };
 
   const rows = list(inFirst);
@@ -179,7 +181,7 @@ export function Roster() {
             <label className="inline small">
               정렬
               <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                <option value="value">능력 종합</option>
+                <option value="pos">포지션</option>
                 <option value="name">이름</option>
                 <option value="age">나이</option>
                 {kind === 'hit' ? (
@@ -247,11 +249,11 @@ export function Roster() {
       if (pg === 'ability') {
         return [
           { h: '포지션', v: (p) => posName(p.pos) }, { h: '나이', v: (p) => p.age ?? '-' }, { h: '타', v: (p) => (p.bats ? HAND[p.bats] : '-') },
-          { h: '컨택', v: (p) => <Grade v={grades.batters.get(p.id)?.contact} /> },
-          { h: '파워', v: (p) => <Grade v={grades.batters.get(p.id)?.power} /> },
-          { h: '선구안', v: (p) => <Grade v={grades.batters.get(p.id)?.eye} /> },
-          { h: '주력', v: (p) => <Grade v={grades.batters.get(p.id)?.speed} /> },
-          { h: '수비', title: '지금 자리(서브는 주 포지션)의 수비 등급', v: (p) => <Grade v={defGrade(p)} /> },
+          { h: '컨택', v: (p) => <GuessGrade v={seen.grade(p.id, 'contact')} /> },
+          { h: '파워', v: (p) => <GuessGrade v={seen.grade(p.id, 'power')} /> },
+          { h: '선구안', v: (p) => <GuessGrade v={seen.grade(p.id, 'eye')} /> },
+          { h: '주력', v: (p) => <GuessGrade v={seen.grade(p.id, 'speed')} /> },
+          { h: '수비', title: '지금 자리(서브는 주 포지션)의 수비 등급', v: (p) => <GuessGrade v={seen.grade(p.id, 'defense', defGrade(p))} /> },
           status,
         ];
       }
@@ -280,11 +282,11 @@ export function Roster() {
     if (pg === 'ability') {
       return [
         { h: '나이', v: (p) => p.age ?? '-' }, { h: '투', title: '투구손. 언 = 언더·사이드', v: (p) => (p.throws ? `${HAND[p.throws]}${p.underhand ? '언' : ''}` : '-') },
-        { h: '구위', v: (p) => <Grade v={grades.pitchers.get(p.id)?.stuff} /> },
-        { h: '제구', v: (p) => <Grade v={grades.pitchers.get(p.id)?.control} /> },
-        { h: '장타 억제', v: (p) => <Grade v={grades.pitchers.get(p.id)?.hrSuppression} /> },
-        { h: '선발 체력', title: '선발로 나왔을 때 길게 던지는 정도', v: (p) => <Grade v={grades.pitchers.get(p.id)?.stamina} /> },
-        { h: '구원 체력', title: '구원 한 번 등판에 길게 던지는 정도 (롱릴리프)', v: (p) => <Grade v={grades.pitchers.get(p.id)?.reliefStamina} /> },
+        { h: '구위', v: (p) => <GuessGrade v={seen.grade(p.id, 'stuff')} /> },
+        { h: '제구', v: (p) => <GuessGrade v={seen.grade(p.id, 'control')} /> },
+        { h: '장타 억제', v: (p) => <GuessGrade v={seen.grade(p.id, 'hrSuppression')} /> },
+        { h: '선발 체력', title: '선발로 나왔을 때 길게 던지는 정도', v: (p) => <GuessGrade v={seen.grade(p.id, 'stamina')} /> },
+        { h: '구원 체력', title: '구원 한 번 등판에 길게 던지는 정도 (롱릴리프)', v: (p) => <GuessGrade v={seen.grade(p.id, 'reliefStamina')} /> },
         status,
       ];
     }
@@ -307,17 +309,18 @@ export function Roster() {
   }
 }
 
+/** 기본 정렬: 포지션 차례 (C 1B … DH) → 이름 */
+const posRank = (p: SimPlayer) => { const i = (FIELD_POS as readonly string[]).indexOf(p.pos ?? ''); return i < 0 ? 99 : i; };
+
 const fixed1 = (x: number) => (Number.isFinite(x) ? x.toFixed(1) : '-');
 
-function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: ReturnType<typeof useGame>['session'], grades: ReturnType<typeof useGame>['grades'],
+function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: ReturnType<typeof useGame>['session'], seen: SeenGrades,
                      lg: LeagueBase): SimPlayer[] {
+  // 갈래 정렬은 스카우트 추측의 가운데값 (능력치 v2 17.6)
   const gradeOf = (p: SimPlayer, k: 'g1' | 'g2' | 'g3' | 'g4'): number => {
-    if (kind === 'hit') {
-      const g = grades.batters.get(p.id);
-      return g ? [g.contact, g.power, g.eye, g.speed][Number(k[1]) - 1] : 0;
-    }
-    const g = grades.pitchers.get(p.id);
-    return g ? [g.stuff, g.control, g.hrSuppression, g.stamina ?? 0][Number(k[1]) - 1] : 0;
+    const key = (kind === 'hit' ? ['contact', 'power', 'eye', 'speed'] : ['stuff', 'control', 'hrSuppression', 'stamina'])[Number(k[1]) - 1];
+    const v = seen.grade(p.id, key);
+    return v ? guessMid(v) : 0;
   };
   const statOf = (p: SimPlayer): number => {
     if (kind === 'hit') {
@@ -333,7 +336,7 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
     return Number.isFinite(v) ? v : -9999;
   };
   const by: Record<SortKey, (a: SimPlayer, b: SimPlayer) => number> = {
-    value: (a, b) => (kind === 'hit' ? b.value - a.value : a.value - b.value),
+    pos: (a, b) => posRank(a) - posRank(b) || a.name.localeCompare(b.name, 'ko'),
     name: (a, b) => a.name.localeCompare(b.name, 'ko'),
     age: (a, b) => (a.age ?? 99) - (b.age ?? 99),
     g1: (a, b) => gradeOf(b, 'g1') - gradeOf(a, 'g1'),
@@ -348,12 +351,13 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
 
 /** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
 function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number }) {
-  const { session, grades, openPlayer } = useGame();
-  const potOf = usePotentialOf();
+  const { session, openPlayer } = useGame();
+  const seen = useSeen();
   const won = useWon();
   const lp = session.leaguePlayer(p.id);
-  const bg = grades.batters.get(p.id);
-  const pg = grades.pitchers.get(p.id);
+  const g = (k: string) => seen.grade(p.id, k);
+  const pg = p.isPitcher && g('stuff');
+  const bg = !p.isPitcher && g('contact');
   const b = session.season.bat[p.idx];
   const x = session.season.pit[p.idx];
   const line = p.isPitcher
@@ -368,22 +372,22 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
       <div className="side-body">
         {status && <p>{status}</p>}
         <div className="grades">
-          {p.isPitcher && pg ? (
+          {pg ? (
             <>
-              <GradeBar label="구위" v={pg.stuff} /><GradeBar label="제구" v={pg.control} />
-              <GradeBar label="장타 억제" v={pg.hrSuppression} /><GradeBar label="선발 체력" v={pg.stamina} />
+              <GradeBar label="구위" v={g('stuff')} /><GradeBar label="제구" v={g('control')} />
+              <GradeBar label="장타 억제" v={g('hrSuppression')} /><GradeBar label="선발 체력" v={g('stamina')} />
             </>
           ) : bg ? (
             <>
-              <GradeBar label="컨택" v={bg.contact} /><GradeBar label="파워" v={bg.power} />
-              <GradeBar label="선구안" v={bg.eye} /><GradeBar label="주력" v={bg.speed} />
+              <GradeBar label="컨택" v={g('contact')} /><GradeBar label="파워" v={g('power')} />
+              <GradeBar label="선구안" v={g('eye')} /><GradeBar label="주력" v={g('speed')} />
             </>
           ) : null}
         </div>
         <p className="small">{session.world.year} {line}{war !== undefined ? ` · WAR ${war.toFixed(1)}` : ''}</p>
         {lp && (
           <p className="small muted">
-            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재 <PotCell v={potOf(lp, p.age)} />
+            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지{session.scoutPhrase(p.id) ? ` · ${session.scoutPhrase(p.id)}` : ''}
           </p>
         )}
         <p className="inline">

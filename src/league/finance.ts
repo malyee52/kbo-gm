@@ -118,8 +118,6 @@ export const INVEST_COST: Record<InvestKind, number[]> = {
 /** 마케팅 단계별 관중률 보정과 스폰서 배율 */
 export const MARKETING_FILL = [0, 0.03, 0.06, 0.09];
 export const MARKETING_SPONSOR = [1, 1.05, 1.1, 1.15];
-/** 스카우트: 우리 구단이 보는 후보 잠재력 평가 오차 (±런). 16-7 화면 개편 때 갈래 추측(scout.ts)으로 바뀐다 */
-export const SCOUT_NOISE = [8, 6, 4, 2];
 /** 스카우트 단계(0~3)별 추측 폭 배율 (아마추어·프로 모두, 기획안 17.7 표, 임시값). scout.ts가 쓴다 */
 export const SCOUT_SCALE = [1, 0.8, 0.65, 0.5];
 /** 아마추어 스카우트 단계별 신인 천장 추측 폭 σ_천장 (등급, 19.2 확정 Q15 ①: 보드와 진짜 천장 상관 0.6 → 0.9) */

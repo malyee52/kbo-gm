@@ -110,6 +110,11 @@ export const GAP_PHRASES: { upTo: number; text: string }[] = [
 ];
 export const PHRASE_MAX_AGE = 31;
 
+/** 문구의 단계 (정렬용): 문구 없음 −1, '거의 다 자랐다' 0 … '리그 정상급' 3 */
+export function phraseRank(text: string | null | undefined): number {
+  return text ? GAP_PHRASES.findIndex((r) => r.text === text) : -1;
+}
+
 export function gapPhrase(gapGrade: number, ageNext: number): string | null {
   if (ageNext > PHRASE_MAX_AGE) return null;
   return GAP_PHRASES.find((r) => Math.round(gapGrade) <= r.upTo)!.text;
@@ -245,6 +250,26 @@ export const GUESS_KIND: Record<string, GuessKind> = {
   speed: 'mid', defense: 'mid', arm: 'mid', stamina: 'mid', reliefStamina: 'mid', catcher: 'mid',
   hrSuppression: 'faint',
 };
+
+/** 화면 목록의 갈래 추측 셋 (17.6): 타자 컨택·파워·선구, 투수 구위·제구·체력. 짧은 이름은 표 칸용 */
+export const GUESS_SET = {
+  bat: [{ key: 'contact', label: '컨택', short: '컨' }, { key: 'power', label: '파워', short: '파' }, { key: 'eye', label: '선구', short: '선' }],
+  pit: [{ key: 'stuff', label: '구위', short: '구' }, { key: 'control', label: '제구', short: '제' }, { key: 'stamina', label: '체력', short: '체' }],
+} as const;
+
+export interface GuessItem { key: string; label: string; short: string; view: GuessView }
+/** 갈래 추측 셋과 정렬값 (가운데값 평균) */
+export interface GuessSet { pitcher: boolean; items: GuessItem[]; sort: number }
+
+/** 갈래 추측 셋을 글 한 줄로 ("컨택 55~65 · 파워 60 · 선구 45~55"). LLM에 넘기는 글도 플레이어가 보는 이것만 쓴다 */
+export function guessSetText(g: GuessSet | null): string {
+  return g ? g.items.map((it) => `${it.label} ${guessText(it.view)}`).join(' · ') : '능력 추측 없음';
+}
+
+/** 추측 꼴의 가운데값 (정렬·거르기용) */
+export function guessMid(v: GuessView): number {
+  return v.kind === 'one' ? v.v : v.mid;
+}
 
 /** 보는 쪽이 보는 선수 (화면 추측에 필요한 것만) */
 export interface Seen {

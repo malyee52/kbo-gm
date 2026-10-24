@@ -4,12 +4,12 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
-import { seenGrade, seenPhrase, seenSigma, type GuessView, type Seen } from '../league/scout';
+import { GUESS_SET, guessMid, guessRuns, seenGrade, seenPhrase, seenSigma, type GuessSet, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
 import {
-  absenceLabel, assignSlots, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
+  absenceLabel, assignSlots, computeGrades, type DisplayGrades, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackageWhy, tendencyOf, type PackageResult, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
@@ -25,7 +25,7 @@ import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
-import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, type RankPlace } from './rank';
+import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, strengthTier, type RankPlace, type StrengthTier } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
@@ -416,6 +416,9 @@ function seasonSeed(league: LeagueState): string {
   return league.year === league.startYear ? league.seed : `${league.seed}/${league.year}`;
 }
 
+/** 전력 전망에서 추측 어긋남을 더하는 구단별 핵심 선수 수 (타자 9 + 선발 5 + 구원 6, 임시값) */
+const OUTLOOK_CORE = 20;
+
 export class GameSession {
   readonly store: Store;
   readonly params: EngineParams;
@@ -447,6 +450,7 @@ export class GameSession {
   private valueCtx: ValueContext | null = null;
   /** 오프시즌 화면용 가치 계산 (조작할 때마다 다시 만든다) */
   private viewCache: { version: number; view: Off.LeagueView } | null = null;
+  private offGradeCache: { view: Off.LeagueView; grades: DisplayGrades } | null = null;
   private offVersion = 0;
   /** 이번 시즌 "달라지는 규칙" (메모리에만, 자료·연도·규칙 값으로 다시 계산한다) */
   private ruleCache: RuleNews | null = null;
@@ -1204,6 +1208,71 @@ export class GameSession {
   /** 우리 스카우트 팀이 보는 화면 갈래 등급 (key = contact·power·stuff 등, grade = 진짜 화면 등급) */
   guessGrade(id: string, key: string, grade: number): GuessView {
     return seenGrade(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), key, grade);
+  }
+
+  /** 지금 화면 기준 진짜 갈래 등급 (시즌 중 월드, 오프시즌 다음 시즌 보기). guessSet에 넘기는 용도, 화면 밖(LLM 글 등)에서 쓴다 */
+  currentGrades(): DisplayGrades {
+    return this.phase === 'season' ? computeGrades(this.world) : this.offGrades();
+  }
+
+  /** 오프시즌 화면의 진짜 갈래 등급 (다음 시즌 기준 보기, 무소속·새 후보 포함). 화면은 guessSet으로만 거친다 */
+  offGrades(): DisplayGrades {
+    const v = this.offView();
+    if (this.offGradeCache?.view !== v) this.offGradeCache = { view: v, grades: computeGrades({ ...(v.world ?? this.world), players: [...v.sim.values()] }) };
+    return this.offGradeCache.grades;
+  }
+
+  /**
+   * 목록 칸의 갈래 추측 셋 (17.6): 타자 컨택·파워·선구, 투수 구위·제구·체력. grades는 진짜 화면 등급
+   * (시즌 중 GameShell의 computeGrades(world), 오프시즌 offGrades()). 등급이 없는 선수(기록 없는 새 후보 등)는 null
+   */
+  guessSet(id: string, grades: DisplayGrades): GuessSet | null {
+    const lp = this.leaguePlayer(id);
+    const b = grades.batters.get(id);
+    const pt = grades.pitchers.get(id);
+    const pitcher = pt && (!b || (lp?.isPitcher ?? true)) ? true : false;
+    const g: Record<string, number | null> | undefined = pitcher ? { ...pt!, stamina: pt!.stamina ?? pt!.reliefStamina } : b ? { ...b } : undefined;
+    if (!g) return null;
+    const seen = this.seenOf(id);
+    const who = { team: this.teamIdx, user: true };
+    const items = (pitcher ? GUESS_SET.pit : GUESS_SET.bat).map((d) => ({ ...d, view: seenGrade(this.league, who, seen, d.key, g[d.key] ?? 50) }));
+    return { pitcher, items, sort: Math.round(items.reduce((a, it) => a + guessMid(it.view), 0) / items.length) };
+  }
+
+  /**
+   * 플레이어가 보는 구단별 전력 전망 (17.6, 시즌 중): 각 구단의 진짜 전력에 그 구단 핵심 선수(추측 기여 상위 OUTLOOK_CORE명)의
+   * 추측 어긋남(guessRuns − 진짜)을 더해 순위를 매기고 세 단계로. 우리 구단은 폭이 좁아 거의 맞고, 다른 구단은 오차가 섞인다.
+   * 내부 판단(구단주 목표·AI 성향)은 진짜 teamStrength를 그대로 쓴다
+   */
+  strengthOutlook(): StrengthTier[] {
+    const who = { team: this.teamIdx, user: true };
+    const year = this.world.year;
+    const str = this.world.teams.map((t) => {
+      const shifts = t.org.map((p) => {
+        const r = currentRuns(p, this.values);
+        return guessRuns(this.league, who, p.id, r, this.guessSigma(p.id), year) - r;
+      });
+      const order = t.org.map((p, i) => ({ g: currentRuns(p, this.values) + shifts[i], d: shifts[i] })).sort((a, b) => b.g - a.g);
+      return teamStrength(t.org, this.values, 0) + order.slice(0, OUTLOOK_CORE).reduce((a, x) => a + x.d, 0);
+    });
+    const n = str.length;
+    return str.map((v, i) => strengthTier(1 + str.filter((w, j) => w > v || (w === v && j < i)).length, n));
+  }
+
+  /**
+   * 우리 스카우트 팀이 보는 한 시즌 기여 (런, 추측: 진짜 + z × σ). 자리 등급·약한 자리 같은 화면 요약은 진짜 기여 대신 이것을 쓴다.
+   * 시즌 중은 지금 시즌, 오프시즌은 다음 시즌 기준
+   */
+  seenRuns(id: string): number {
+    const off = this.phase !== 'season';
+    const sim = off ? null : this.world.players.find((p) => p.id === id);
+    const r = off ? this.nextRuns(id) : sim ? currentRuns(sim, this.values) : 0;
+    return guessRuns(this.league, { team: this.teamIdx, user: true }, id, r, this.guessSigma(id), this.world.year + (off ? 1 : 0));
+  }
+
+  /** 투타 겸업 반대쪽 지금 능력의 추측 (기록 표본이 없다고 보고 덜 드러나는 갈래 폭으로, z는 본업과 따로) */
+  guessAltGrade(id: string, grade: number): GuessView {
+    return seenGrade(this.league, { team: this.teamIdx, user: true }, { ...this.seenOf(id), sample: 0 }, 'alt', grade);
   }
 
   /** 우리 스카우트 팀의 지금 능력 추측 폭 (등급, 잘 드러나는 갈래) */
@@ -3072,7 +3141,9 @@ export class GameSession {
     const rank = 1 + str.filter((v, i) => (!pool || pool.includes(i)) && (v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx))).length;
     const kind = pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams);
     o.goal = { year: this.year, kind, projectedRank: rank, ...(pool ? { projectedLeague: div!.names[k] } : {}) };
-    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${pool ? `${div!.names[k]} ` : ''}${rank}위). 신뢰도 ${o.trust}.` });
+    // 소식에는 순위 숫자 대신 세 단계 (능력치 v2 17.6: 진짜 전력 순위가 드러나지 않게)
+    const tier = strengthTier(rank, pool ? pool.length : str.length);
+    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (구단주 전망 ${pool ? `${div!.names[k]} ` : ''}${tier}). 신뢰도 ${o.trust}.` });
   }
 
   /** 시즌 평가: 목표 달성, 신뢰도, 업적. 신뢰도가 바닥나면 해고되고 하위권 구단의 영입 제의를 받는다 */

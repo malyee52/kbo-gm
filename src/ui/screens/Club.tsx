@@ -1,4 +1,5 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
+import { strengthTier } from '../../game/rank';
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
 import { ScenarioBanner } from '../ScenarioBanner';
@@ -196,13 +197,13 @@ function OwnerCard() {
       {o.goal && (
         <p>
           {o.goal.year} 시즌 목표: <strong>{GOAL_LABEL[o.goal.kind]}</strong>
-          <span className="muted small"> (개막 때 전력 예상 {o.goal.projectedLeague ? `${o.goal.projectedLeague} ` : ''}{o.goal.projectedRank}위)</span>
+          <span className="muted small"> (개막 때 구단주 전망 {o.goal.projectedLeague ? `${o.goal.projectedLeague} ` : ''}{strengthTier(o.goal.projectedRank, session.world.divisions && o.goal.projectedLeague ? session.world.divisions.teams[0].length : session.world.teams.length)})</span>
         </p>
       )}
       <p className="muted small">
         {session.world.divisions
-          ? <>목표는 개막 때 리그 안 전력 예상 순위로 정합니다 (양대 리그): 리그 1위는 한국시리즈 우승, 2~3위는 가을야구 진출, 그 아래는 탈꼴찌. 가을야구는 실제 진출(리그 1·2위, 준플레이오프 조건을 채운 3위), 꼴찌는 통합 순위로 봅니다.</>
-          : <>목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.</>}
+          ? <>목표는 개막 때 구단주가 본 리그 안 전력 전망으로 정합니다 (양대 리그): 맨 위로 보면 한국시리즈 우승, 그다음은 가을야구 진출, 그 아래는 탈꼴찌. 가을야구는 실제 진출(리그 1·2위, 준플레이오프 조건을 채운 3위), 꼴찌는 통합 순위로 봅니다.</>
+          : <>목표는 개막 때 구단주가 본 전력 전망으로 정합니다: 맨 윗자리로 보면 한국시리즈 우승, 가을야구권으로 보면 가을야구 진출, 그 아래는 탈꼴찌.</>}
         {' '}달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
       </p>
       <p className="muted small">난이도: {settingsLabel(L)}</p>

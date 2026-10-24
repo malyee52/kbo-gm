@@ -11,7 +11,7 @@ import { GM_STYLE_LABEL, gmStyle } from '../../league/gm';
 import { managerOf } from '../../league/managers';
 import { dollarText } from '../../league/salary';
 import { Grade, PlayerLink, Pos, TeamName, useGame, useWon } from '../context';
-import { DataTable, PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import { DataTable, guessColumn, useSeen } from '../parts';
 import { useShell } from '../shell';
 import type { Column } from '../table';
 import { teamVars } from '../teams';
@@ -194,7 +194,7 @@ function Overview({ team }: { team: number }) {
 function RosterTable({ team }: { team: number }) {
   const { session, version } = useGame();
   const won = useWon();
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const { density } = useShell();
   const desk = useDesk(session);
   const [kind, setKind] = useState<'all' | 'hit' | 'pit'>('all');
@@ -203,6 +203,7 @@ function RosterTable({ team }: { team: number }) {
   const off = session.phase === 'offseason';
   const all = useMemo(() => teamRows(session, team), [session, team, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = all.filter((r) => kind === 'all' || (kind === 'pit') === r.pitcher);
+  const guessOf = new Map(all.map((r) => [r.id, seen.set(r.id)]));
 
   const act = (r: TeamRow) => {
     if (!r.p || off) return null;
@@ -231,8 +232,7 @@ function RosterTable({ team }: { team: number }) {
     { key: 'where', label: off ? '구분' : '1·2군', brief: true, text: true, value: (r) => r.where },
     { key: 'slot', label: '자리', brief: true, value: (r) => SLOTS.indexOf(r.slot as typeof SLOTS[number]), cell: (r) => (r.pitcher ? r.slot : <Pos pos={r.slot} />) },
     { key: 'age', label: '나이', brief: true, lower: true, value: (r) => r.age },
-    { key: 'ov', label: '종합', brief: true, value: (r) => r.ov, cell: (r) => <Grade v={r.ov} /> },
-    { key: 'pot', label: '잠재', brief: true, title: '27세 이하 범위(스카우트 짐작), 28~30세 숫자, 31세 이상 숨김', value: (r) => (r.lp ? potentialSortValue(potOf(r.lp, r.age)) : null), cell: (r) => (r.lp ? <PotCell v={potOf(r.lp, r.age)} /> : '-') },
+    guessColumn<TeamRow>((r) => guessOf.get(r.id)),
     { key: 'sal', label: '연봉', brief: true, value: (r) => r.lp?.contract.salary ?? null, cell: (r) => (r.lp ? (r.lp.foreign ? dollarText(r.lp.contract.salary) : won(r.lp.contract.salary)) : '-') },
     { key: 'until', label: '계약', brief: true, title: '계약 마지막 해', value: (r) => r.lp?.contract.until ?? null },
     { key: 'st', label: '상태', text: true, value: (r) => r.block ?? r.status,
@@ -252,7 +252,7 @@ function RosterTable({ team }: { team: number }) {
       <DataTable id="team-roster" cols={cols} rows={rows} rowKey={(r) => r.id} full={density === 'full'} searchText={(r) => r.name}
         rowClass={(r) => (r.block ? 'blocked' : r.p && desk.compare.includes(r.p.idx) ? 'in-cmp' : undefined)} label="구단 선수 명단" empty="선수가 없습니다." />
       {note && <p className="muted small" role="status">{note}</p>}
-      <p className="muted small">종합·잠재는 보이는 능력 기준이고 우리 선수와 같은 규칙으로 보입니다. 외국인 선수는 트레이드할 수 없습니다.</p>
+      <p className="muted small">능력은 우리 스카우트 팀의 추측이라 범위로 보입니다 (우리 선수는 데리고 있을수록 좁아집니다). 외국인 선수는 트레이드할 수 없습니다.</p>
     </section>
   );
 }
