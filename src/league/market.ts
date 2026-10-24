@@ -15,6 +15,8 @@
 
 import { currentRuns, type ValueContext } from '../ai/value';
 import { foreignSigma, guessRuns } from './scout';
+import { aiFxRegion, FX_AI_WINNOW_WEEK, FX_MAX_OUT, fxSendSeason, fxSigned, fxState, fxVisible, fxWeek, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
+import { gmStyle } from './gm';
 import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
@@ -31,9 +33,6 @@ export const MARKET_DEADLINE = { month: 8, date: 15 };
 /** 웨이버 클레임: 한 시즌 가치가 이 런 이상이고 연봉의 CLAIM_PAY_SHARE배 값어치는 하는 선수만 (임시값) */
 export const CLAIM_MIN_RUNS = 4;
 export const CLAIM_PAY_SHARE = 0.8;
-/** 개막 때 만드는 가상 외국인 후보 수 (일반, 아시아쿼터) */
-export const MARKET_REGULAR = 8;
-export const MARKET_ASIA = 2;
 /** AI 외국인 교체: 이만큼(일) 넘게 남은 결장이면 교체를 검토 (KBO 부상 대체 기준 6주) */
 export const AI_SWAP_INJURY_DAYS = 35;
 /** AI 외국인 교체: 부진한 선수는 후보가 지금 선수 + 이만큼(런) 이상이면 바꾼다. 실제 구단은 능력보다 성적을 보고 바꾸므로 음수 (한 해 교체 수를 실제 5~13명에 맞춤) */
@@ -117,9 +116,13 @@ export function releaseCost(lp: LeaguePlayer, year: number, seasonDays: number, 
   return Math.round(pay * remainingShare(year, seasonDays, day) + later);
 }
 
-/** 시장에서 데려올 수 있는 선수: 그 해 시장의 외국인 후보와 자유계약 선수 (원 소속 구단 것은 빼고) */
-export function marketPlayers(ctx: Pick<MarketCtx, 'world'>, team: number): SimPlayer[] {
-  return ctx.world.players.filter((p) => p.teamIdx === -1 && p.formerTeam !== team && !p.reserve);
+/**
+ * 시장에서 데려올 수 있는 선수: 그 해 시장의 외국인 후보와 자유계약 선수 (원 소속 구단 것은 빼고).
+ * 파견 후보(가상 외국인, scoutfx.ts)는 그 구단 관찰 명단에 있는 선수만
+ */
+export function marketPlayers(ctx: Pick<MarketCtx, 'world' | 'league'>, team: number): SimPlayer[] {
+  const lp = new Map(ctx.league.players.map((x) => [x.id, x]));
+  return ctx.world.players.filter((p) => p.teamIdx === -1 && p.formerTeam !== team && !p.reserve && (!lp.get(p.id) || fxVisible(ctx.league, team, lp.get(p.id)!)));
 }
 
 export function isMarketForeign(p: SimPlayer, lp: LeaguePlayer | undefined, year: number): boolean {
@@ -160,6 +163,7 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
   }
   if (!p.dev && regularCount(ctx.world, team) >= ruleOf(ctx.league, 'orgLimit')) return `정식 선수 정원(${ruleOf(ctx.league, 'orgLimit')}명)이 차 있습니다. 먼저 방출하세요.`;
   if (p.foreign) {
+    if (!fxVisible(ctx.league, team, lp.get(p.id) ?? { id: p.id })) return '관찰 명단에 없는 후보입니다. 스카우트 팀을 보내 찾으세요.';
     // 창단 특례 구단은 1명 더 (eras.ts teamForeignRule)
     const rule = teamForeignRule(foreignRule(ctx.meta, year, ctx.league), ctx.league, team, year);
     const held = foreignHeld(ctx.world, team, lp);
@@ -217,9 +221,10 @@ export function releasePlayer(ctx: MarketCtx, p: SimPlayer, team: number): numbe
 
 /**
  * 시장의 선수를 영입한다. 외국인 후보는 후보 계약 그대로(연봉은 남은 달만큼 나간다),
- * 자유계약 국내 선수는 최저 연봉의 남은 몫을 그때 낸다 (원 소속 계약은 방출 때 정산했다)
+ * 자유계약 국내 선수는 최저 연봉의 남은 몫을 그때 낸다 (원 소속 계약은 방출 때 정산했다).
+ * 파견 후보면 모든 관찰 명단에서 빼고 그 소식을 돌려준다 (scoutfx.ts)
  */
-export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): void {
+export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): FxNews[] {
   const { league, world, season } = ctx;
   const year = world.year;
   const lp = league.players.find((x) => x.id === p.id)!;
@@ -229,6 +234,9 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): void {
   }
   season.transfer(p.idx, team);
   (league.marketMoves ??= []).push({ year, day: season.day, id: p.id, kind: 'sign', from: -1, to: team });
+  if (!lp.fx) return [];
+  delete lp.fx;
+  return fxSigned(league, p.id, team);
 }
 
 /**
@@ -289,30 +297,83 @@ function swapTarget(ctx: MarketCtx, team: number): { out: SimPlayer; why: 'injur
  * 하루 시작 때 AI 구단의 외국인 교체 (결정적: 난수 없음). 바꾼 기록을 돌려준다 (소식용).
  * 같은 쓰임(투수·타자)·같은 구분(일반·아시아쿼터)의 시장 후보 가운데 가장 나은 선수로: 다쳤으면 그냥, 부진이면 후보가 지금 선수 + AI_SWAP_GAIN런 이상일 때
  */
-export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' }[] {
+export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump'; fx: FxNews[] }[] {
   const { world, season } = ctx;
   const day = season.day;
   if (day < AI_SWAP_FROM_DAY || day % AI_SWAP_EVERY !== 0 || day > marketDeadlineDay(world.year, season.schedule.length, ctx.league) || season.done) return [];
   const lpById = new Map(ctx.league.players.map((p) => [p.id, p]));
-  const out: { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' }[] = [];
+  const out: { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump'; fx: FxNews[] }[] = [];
   for (let t = 0; t < world.teams.length; t++) {
     if (t === ctx.userTeam || foreignSwapsUsed(ctx, t) >= ruleOf(ctx.league, 'foreignSwaps')) continue;
     const target = swapTarget(ctx, t);
     if (!target) continue;
     // 같은 쓰임(투수·타자)과 같은 구분(일반·아시아쿼터)의 후보
     const asia = !!lpById.get(target.out.id)?.asia;
+    // 파견 후보는 그 구단 관찰 명단에 있는 선수만 (scoutfx.ts)
     const cands = world.players.filter((p) => p.teamIdx === -1 && p.foreign && isMarketForeign(p, lpById.get(p.id), world.year)
-      && !!lpById.get(p.id)?.asia === asia && p.isPitcher === target.out.isPitcher && availableDay(lpById.get(p.id), season.schedule.length) <= day);
+      && fxVisible(ctx.league, t, lpById.get(p.id)!) && !!lpById.get(p.id)?.asia === asia && p.isPitcher === target.out.isPitcher && availableDay(lpById.get(p.id), season.schedule.length) <= day);
     if (!cands.length) continue;
     // 후보는 그 구단의 추측으로 본다 (진짜 + z × σ, scout.ts, 기획안 19.4). 자기 외국인은 진짜 능력 (오래 지켜봄)
     const who = { team: t, user: false };
-    const sigma = foreignSigma(ctx.league, who);
-    const seen = (p: SimPlayer) => guessRuns(ctx.league, who, p.id, currentRuns(p, ctx.values), sigma, world.year);
+    const seen = (p: SimPlayer) => guessRuns(ctx.league, who, p.id, currentRuns(p, ctx.values),
+      foreignSigma(ctx.league, who, { id: p.id, sample: p.bat?.sample ?? p.pit?.sample ?? null }), world.year);
     const pick = cands.reduce((a, b) => (seen(b) > seen(a) || (seen(b) === seen(a) && b.id < a.id) ? b : a));
     if (target.why === 'slump' && seen(pick) < currentRuns(target.out, ctx.values) + AI_SWAP_GAIN) continue;
     releasePlayer(ctx, target.out, t);
-    signPlayer(ctx, pick, t);
-    out.push({ team: t, out: target.out, in: pick, why: target.why });
+    const fx = signPlayer(ctx, pick, t);
+    out.push({ team: t, out: target.out, in: pick, why: target.why, fx });
   }
   return out;
+}
+
+// ---- 외국인 스카우트 파견 (scoutfx.ts, 기획안 19.4)
+
+function seasonFxCtx(ctx: MarketCtx): FxCtx {
+  const owner = new Map(ctx.world.players.map((p) => [p.id, p.teamIdx]));
+  return { league: ctx.league, year: ctx.world.year, userTeam: ctx.userTeam, free: (id) => (owner.get(id) ?? -1) === -1 };
+}
+
+/** 파견할 수 있는 때인가 (개막 ~ 외국인 교체 마감) */
+export function fxSeasonOpen(ctx: Pick<MarketCtx, 'world' | 'season' | 'league'>): boolean {
+  return !ctx.season.done && ctx.season.day <= marketDeadlineDay(ctx.world.year, ctx.season.schedule.length, ctx.league);
+}
+
+/** 시즌 중 파견 (플레이어 구단, 조작 'fx-send') */
+export function fxSendInSeason(ctx: MarketCtx, team: number, region: FxRegion): void {
+  fxSendSeason(seasonFxCtx(ctx), team, region);
+}
+
+/**
+ * 하루 뒤 외국인 스카우트 진행 (결정적): 7일마다 지난 한 주를 굴리고(발견·떠남·에이전트 추천), AI 구단 파견을 정한다.
+ * AI 파견: 둘째 주에 한 팀, 윈나우 성향은 FX_AI_WINNOW_WEEK에 한 팀 더 (19.3), 바꿀 외국인이 있는데 명단에 맞는 후보가 없으면 그 쓰임에 맞는 지역으로.
+ * 소식을 돌려준다 (구단별)
+ */
+export function scoutFxDay(ctx: MarketCtx): FxNews[] {
+  const { world, season, league } = ctx;
+  const d = season.day;
+  if (season.done || d === 0 || d % 7 !== 0) return [];
+  const s = fxState(league, world.year, false);
+  const fctx = seasonFxCtx(ctx);
+  const names = new Map(world.players.map((p) => [p.id, p.teamIdx]));
+  const news = fxWeek(fctx, d / 7 - 1, (id) => { const t = names.get(id) ?? -1; return t >= 0 ? world.teams[t].name : null; });
+  if (!fxSeasonOpen(ctx) || !ruleOf(league, 'foreignSwaps')) return news;
+  const week = d / 7;
+  const lpById = new Map(league.players.map((p) => [p.id, p]));
+  for (let t = 0; t < world.teams.length; t++) {
+    if (t === ctx.userTeam) continue;
+    const st = s.teams[t];
+    if (st.out.length >= FX_MAX_OUT) continue;
+    let region: FxRegion | null = null;
+    if (week === 1 || (week === FX_AI_WINNOW_WEEK && gmStyle(league, t) === 'winnow')) region = aiFxRegion(st.sent, false);
+    else if (!st.out.length && foreignSwapsUsed(ctx, t) < ruleOf(league, 'foreignSwaps')) {
+      const target = swapTarget(ctx, t);
+      if (target) {
+        const asia = !!lpById.get(target.out.id)?.asia;
+        const fits = st.list.some((e) => { const p = lpById.get(e.id); return p && !!p.asia === asia && p.isPitcher === target.out.isPitcher; });
+        if (!fits) region = asia ? aiFxRegion(st.sent, true) : target.out.isPitcher ? (st.sent % 2 ? 'japan' : 'na') : (st.sent % 2 ? 'latam' : 'na');
+      }
+    }
+    if (region) fxSendSeason(fctx, t, region);
+  }
+  return news;
 }

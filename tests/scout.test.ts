@@ -192,6 +192,7 @@ describe('외국인 (19.4): 시장 평판 몸값, AI는 추측으로', () => {
     const mk = strip(readFileSync('src/league/market.ts', 'utf8'));
     const day = mk.slice(mk.indexOf('export function aiMarketDay'));
     expect(day).toMatch(/guessRuns/);
-    expect(foreignSigma(fakeLeague(), { team: 3, user: false })).toBeCloseTo(6 * 2.5 * 0.8 * 0.49);
+    // 관찰 명단 밖(기록 없음): 기록 없는 선수 폭 × 프로 1단계
+    expect(foreignSigma(fakeLeague(), { team: 3, user: false }, { id: 'x', sample: null })).toBeCloseTo(6 * 2.5 * 0.8);
   });
 });

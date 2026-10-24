@@ -74,6 +74,8 @@ export interface LeaguePlayer {
   reserve?: number;
   /** 시장에 나오는 때 (시즌의 몫 0~1). 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 (create.ts, market.ts) */
   marketFrom?: number;
+  /** 파견으로만 찾을 수 있는 가상 외국인 후보: 지역과 시장에 머무는 주 (scoutfx.ts, 기획안 19.4). 관찰 명단에 있는 구단만 보고 계약한다 */
+  fx?: import('./scoutfx').FxWindow;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */
   noTradeYear?: number;
   id: string;
@@ -343,6 +345,8 @@ export interface LeagueState {
   aiTrades?: AiTradeRecord[];
   /** 시즌 중 방출·영입 (market.ts) */
   marketMoves?: import('./market').MarketMove[];
+  /** 외국인 스카우트 파견·관찰 명단 (그 시기 것만, scoutfx.ts) */
+  scoutFx?: import('./scoutfx').ScoutFxState;
   /**
    * 이벤트(AI 구단의 트레이드 제안)를 받아들여 이뤄진 우리 트레이드 (선수 ID). 조작 기록에는 'event'로만 남아
    * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)

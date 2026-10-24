@@ -16,6 +16,7 @@ import { gmStyle } from './gm';
 import { settingsOf } from './difficulty';
 import { runsGradeRaw, runsPerGrade } from './potential';
 import type { LeaguePlayer, LeagueState } from './types';
+import { FX_AGENT_SCALE, FX_WEEKS, fxEntry } from './scoutfx';
 
 /** 갈래 기본 폭 (등급, 17.7 ①): 기록이 잘 드러내는 갈래 · 덜 드러내는 갈래 · 거의 안 드러내는 갈래 (임시값) */
 export const BASE_SIGMA = { clear: 6, mid: 9, faint: 12 } as const;
@@ -210,10 +211,8 @@ export function draftBoard(
 
 /** 외국인 몸값을 정하는 시장 평판의 오차 (등급, 모든 구단 공통, 19.4, 임시값). 시드 `${시드}/fx-rep/${ID}` */
 export const FX_REP_SIGMA = 6;
-/** 관찰 배율: 지켜본 4주마다 σ × 0.7 (19.4) */
+/** 관찰 배율: 그 지역에 스카우트 팀이 나가 있던 4주마다 σ × 0.7 (19.4) */
 export const FX_WATCH_DECAY = 0.7;
-/** 파견(19.4 관찰 명단) 전까지 외국인 후보는 이만큼(4주 단위) 지켜본 것으로 본다 (임시값, 파견이 생기면 실제 지켜본 기간으로) */
-export const FX_DEFAULT_WATCH = 2;
 
 /**
  * 외국인 시장 평판 (런): 진짜 지금 능력 + 모든 구단이 같이 보는 오차. 요구 연봉은 이것으로 정한다 (예전에는 진짜 잠재라 "비싼 후보 = 좋은 후보"로 읽혔다)
@@ -222,9 +221,15 @@ export function marketReputation(seed: string, id: string, trueRuns: number, yea
   return trueRuns + gauss(new Rng(`${seed}/fx-rep/${id}`)) * FX_REP_SIGMA * runsPerGrade(year);
 }
 
-/** 외국인 후보의 지금 능력 추측 폭 σ (등급): 기록 없는 선수의 잘 드러나는 갈래 × 프로 스카우트 배율 × 관찰 배율 */
-export function foreignSigma(league: LeagueState, who: Observer, watch = FX_DEFAULT_WATCH): number {
-  return branchSigma(league, who, 'clear', { sample: null, seasonsWithUs: null, scout: 'pro' }) * FX_WATCH_DECAY ** watch;
+/**
+ * 외국인 후보의 지금 능력 추측 폭 σ (등급): 기록 없는 선수의 잘 드러나는 갈래 × 프로 스카우트 배율 × 관찰 배율 0.7^(지켜본 주 ÷ 4),
+ * 에이전트 추천으로 붙은 후보는 × 1.5 (scoutfx.ts). 관찰 명단 밖의 외국인(KBO에서 뛰다 풀린 선수, 시작 연도 실존 시장 외국인)은 기록 표본으로
+ */
+export function foreignSigma(league: LeagueState, who: Observer, p: { id: string; sample: number | null }): number {
+  const e = fxEntry(league, who.team, p.id);
+  if (!e) return branchSigma(league, who, 'clear', { sample: p.sample, seasonsWithUs: null, scout: 'pro' });
+  return branchSigma(league, who, 'clear', { sample: null, seasonsWithUs: null, scout: 'pro' })
+    * FX_WATCH_DECAY ** (e.weeks / FX_WEEKS) * (e.agent ? FX_AGENT_SCALE : 1);
 }
 
 /** 추측 지금 능력 (런): 진짜 + z × σ (z는 그 선수의 'now' 줄기) */

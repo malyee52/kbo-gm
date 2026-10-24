@@ -6,7 +6,7 @@
 
 import { lineTeam } from '../engine/types';
 import { repDemand } from './reputation';
-import { MARKET_ASIA, MARKET_REGULAR } from './market';
+import { aiFxRegion, FX_OFF_SENDS, fxListCount, fxOpenOff, fxPoolPlan, fxSeasonWindow, fxSendOff, fxSigned, fxSpec, fxState, fxVisible, FX_OFF_UNTIL, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
 import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
@@ -103,9 +103,6 @@ export const DRAFT_ROUNDS = 11;
 export const DRAFT_POTENTIAL_SCALE = 10.5;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
-/** 외국인 후보 인원 (임시값) */
-const FOREIGN_POOL_REGULAR = 24;
-const FOREIGN_POOL_ASIA = 8;
 /** 외국인 재계약 기준 (런, 임시값) */
 const FOREIGN_KEEP_RUNS = 12;
 /** 3명 총액 상한 안에 이만큼도 남지 않으면 재계약하지 않는다 (달러, 임시값) */
@@ -1799,23 +1796,23 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     }
   }
 
-  // 새 외국인 후보 (가상 선수)
+  // 새 외국인 후보 (가상 선수, 기획안 19.4): 지역별로 만들고 파견·에이전트 추천으로 찾은 구단만 본다 (scoutfx.ts).
+  // 능력: 실제 KBO 외국인 첫 시즌 수준 (2026-10-12 사용자 "외국인들이 너무 구리다"). 일반 평균 약 33런, 아시아쿼터 약 8런 (지역마다 폭·나이가 다르다)
   const rng = new Rng(`${league.seed}/foreign/${year}`);
   const taken = takenNames(league, store);
-  for (let i = 0; i < FOREIGN_POOL_REGULAR + (rule.asia > 0 ? FOREIGN_POOL_ASIA : 0); i++) {
-    const asia = i >= FOREIGN_POOL_REGULAR;
-    const p = makeVirtual(league, view, rng, taken, {
-      foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(8),
-      // 능력: 실제 KBO 외국인 첫 시즌 수준 (2026-10-12 사용자 "외국인들이 너무 구리다"). 일반 20~46런(평균 33, 리그 상위 30~80위권),
-      // 아시아쿼터 0~16런. 예전 값은 일반 6~36런(평균 21)이라 보통 주전에 그쳤다
-      runs: asia ? 4 + rng.range(-4, 12) : 30 + rng.range(-10, 16),
-    }, year);
-    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year + 1), year + 1), true, asia, league, year + 1), until: year + 1 };
+  for (const slot of fxPoolPlan(rule.asia > 0, false)) {
+    const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, false, year);
+    p.fx = { region: slot.region, from: 0, until: FX_OFF_UNTIL };
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year + 1), year + 1), true, slot.asia, league, year + 1), until: year + 1 };
     p.scoutPotential = scoutView(league, p.potential, rng);
     p.transferFee = transferFeeUsd(p.contract.salary);
     pool.push(p.id);
   }
   off.foreign = { order, pointer: 0, pool, keep, regular: rule.regular, asia: rule.asia };
+  // 관찰 명단: 모든 구단에 에이전트 추천, AI 구단은 빈 자리만큼 파견 (플레이어 구단은 화면에서)
+  const ctx = offFxCtx(league, off);
+  fxLog(off, fxOpenOff(ctx));
+  for (const t of order) if (t !== off.userTeam) aiFxOffseason(league, off, t, ctx);
   runForeignUntilUser(league, off, store, params);
 }
 
@@ -1860,6 +1857,7 @@ function foreignMixBlock(league: LeagueState, off: OffseasonState, team: number,
 /** 이 외국인 후보와 계약할 수 있는가 (보유 한도, 구성 제한, 금액 상한) */
 export function canSignForeign(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer): OfferCheck {
   if (!off.foreign?.pool.includes(p.id) || p.team !== -1) return { ok: false, message: '계약할 수 없는 선수입니다.' };
+  if (!fxVisible(league, team, p)) return { ok: false, message: '관찰 명단에 없는 후보입니다. 스카우트 팀을 보내 찾으세요.' };
   const s = foreignSlots(league, team, off);
   const lim = foreignLimits(off, league, team);
   const cap = (key: ForeignCapKey) => foreignCap(league, key, off.year + 1);
@@ -1895,12 +1893,55 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
   p.team = team;
   p.contract = { ...p.contract, until: off.year + 1 };
   off.foreign!.pool = off.foreign!.pool.filter((x) => x !== p.id);
+  delete p.fx;
+  fxLog(off, fxSigned(league, p.id, team));
   const fee = p.transferFee ?? 0;
   if (fee) {
     league.ledger.push({ year: off.year + 1, from: team, to: -1, amount: Math.round(fee * WON_PER_USD), note: `${p.name} 외국인 이적료`, kind: 'transfer' });
     delete p.transferFee;
   }
   log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(foreignContractTotal(p.contract) / 10000)}만 달러${fee ? `, 이적료 ${Math.round(fee / 10000)}만 달러` : ''}${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
+}
+
+/** 지역 후보 하나 (scoutfx.ts fxSpec). season이면 시즌 중 후보 */
+function makeFxCandidate(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, region: FxRegion, asia: boolean, season: boolean, year: number): LeaguePlayer {
+  const spec = fxSpec(rng, region, asia, season);
+  return makeVirtual(league, view, rng, taken, {
+    foreign: true, asia, age: spec.age, runs: spec.runs, isPitcher: spec.isPitcher, starter: spec.starter, ...(spec.control ? { control: true } : {}),
+  }, year);
+}
+
+/** 오프시즌 관찰 명단 문맥: 해는 다음 시즌 (장부·시드) */
+function offFxCtx(league: LeagueState, off: OffseasonState): FxCtx {
+  return { league, year: off.year + 1, userTeam: off.userTeam, free: (id) => league.players.find((p) => p.id === id)?.team === -1 };
+}
+
+function fxLog(off: OffseasonState, news: FxNews[]): void {
+  for (const n of news) if (n.team === off.userTeam) log(off, 'foreign', n.text, true);
+}
+
+/** AI 구단 오프시즌 파견: 빈 자리(일반·아시아쿼터)마다 명단 후보가 2명 넘게 될 때까지, 한도(FX_OFF_SENDS)까지 (결정적) */
+function aiFxOffseason(league: LeagueState, off: OffseasonState, team: number, ctx: FxCtx): void {
+  const lim = foreignLimits(off, league, team);
+  const s = foreignSlots(league, team, off);
+  const need = { regular: Math.max(0, lim.regular - s.regular), asia: Math.max(0, lim.asia - s.asia) };
+  const st = fxState(league, off.year + 1, true).teams[team];
+  while (st.sent < FX_OFF_SENDS) {
+    const asiaShort = need.asia > 0 && fxListCount(league, team, true) < need.asia + 1;
+    const regularShort = need.regular > 0 && fxListCount(league, team, false) < need.regular + 1;
+    if (!asiaShort && !regularShort) break;
+    fxSendOff(ctx, team, aiFxRegion(st.sent, asiaShort && !regularShort));
+  }
+}
+
+/** 플레이어 구단 오프시즌 파견 (외국인 단계에서만) */
+export function sendFxOff(league: LeagueState, off: OffseasonState, region: FxRegion): OfferCheck {
+  if (off.stage !== 'foreign' || !off.foreign) return { ok: false, message: '오프시즌 파견은 외국인 단계에서만 할 수 있습니다.' };
+  const st = fxState(league, off.year + 1, true).teams[off.userTeam];
+  if (st.sent >= FX_OFF_SENDS) return { ok: false, message: `이번 오프시즌 파견(${FX_OFF_SENDS}번)을 모두 썼습니다.` };
+  const news = fxSendOff(offFxCtx(league, off), off.userTeam, region);
+  fxLog(off, news);
+  return { ok: true, message: news.filter((n) => n.team === off.userTeam).map((n) => n.text).join(' ') || '이번 파견에서는 후보를 찾지 못했습니다.' };
 }
 
 /**
@@ -1910,7 +1951,7 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
 function aiSeenForeign(league: LeagueState, view: LeagueView, team: number, sim: SimPlayer): SimPlayer {
   const who = { team, user: false };
   const now = currentRuns(sim, view.ctx);
-  const target = guessRuns(league, who, sim.id, now, foreignSigma(league, who), view.year);
+  const target = guessRuns(league, who, sim.id, now, foreignSigma(league, who, { id: sim.id, sample: sim.bat?.sample ?? sim.pit?.sample ?? null }), view.year);
   const d = shiftForRuns({ ...sim, birthYear: sim.age === null ? null : view.year - sim.age }, target, view.ctx, view.year);
   return { ...sim, bat: sim.bat && shiftBat(sim.bat, d), pit: sim.pit && shiftPit(sim.pit, d) };
 }
@@ -1923,7 +1964,7 @@ function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, 
     let bestGain = 0;
     for (const id of off.foreign!.pool) {
       const p = league.players.find((x) => x.id === id)!;
-      if (!canSignForeign(league, off, team, p).ok) continue;
+      if (!canSignForeign(league, off, team, p).ok) continue; // 관찰 명단에 없는 파견 후보는 여기서 걸린다
       if (!seen.has(id)) seen.set(id, aiSeenForeign(league, view, team, view.sim.get(id)!));
       const gain = signingGain(view, team, seen.get(id)!, 2, tendency, false);
       if (gain > bestGain) {
@@ -2745,20 +2786,22 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
   const view = leagueView({ ...league, year: year - 1 }, store, params);
   const rng = new Rng(`${league.seed}/market/${year}`);
   const taken = takenNames(league, store);
-  const n = MARKET_REGULAR + (rule.asia > 0 ? MARKET_ASIA : 0);
-  for (let i = 0; i < n; i++) {
-    const asia = i >= MARKET_REGULAR;
-    // 시즌 중에 남아 있는 후보는 개막 전 시장보다 한 단계 아래 (일반 16~38런, 평균 26)
-    const p = makeVirtual(league, view, rng, taken, {
-      foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(9),
-      runs: asia ? 2 + rng.range(-4, 10) : 26 + rng.range(-10, 12),
-    }, year - 1);
-    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year), year), true, asia, league, year), until: year };
+  // 시즌 중 후보도 지역별로 만들고 파견·에이전트 추천으로 찾은 구단만 본다 (scoutfx.ts). 머무는 주는 마감 무렵까지 흩어 둔다
+  const plan = fxPoolPlan(rule.asia > 0, true);
+  for (const slot of plan) {
+    // 시즌 중에 남아 있는 후보는 개막 전 시장보다 한 단계 아래 (fxSpec season)
+    const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, true, year - 1);
+    p.fx = fxSeasonWindow(rng, slot.region, FX_SEASON_WEEKS);
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year), year), true, slot.asia, league, year), until: year };
     p.scoutPotential = scoutView(league, p.potential, rng);
     p.market = year;
   }
-  return n;
+  fxState(league, year, false);
+  return plan.length;
 }
+
+/** 시즌 중 후보가 나올 수 있는 주 수 (개막 ~ 8월 중순 외국인 교체 마감 약 20주, 임시값) */
+export const FX_SEASON_WEEKS = 20;
 
 /** 우리 구단이 보는 잠재력 (스카우트 투자 단계에 따른 오차) */
 function scoutView(league: LeagueState, potential: number, rng: Rng): number {
@@ -2936,7 +2979,12 @@ interface VirtualSpec {
   starter?: boolean;
   /** 실존 선수의 언더·사이드 여부 (가상 선수는 makeVirtual이 실제 비율로 정한다) */
   underhand?: boolean;
+  /** 제구형 투수 (외국인 일본 지역 후보, scoutfx.ts): 삼진·볼넷을 함께 낮추고 가치는 skillForRuns가 다시 맞춘다 */
+  control?: boolean;
 }
+
+/** 제구형 투수의 삼진·볼넷 배율 (임시값) */
+const CONTROL_SKILL = { so: 0.92, bb: 0.8 };
 
 /**
  * 가상 국내 투수가 언더·사이드일 확률 (투구손별). 하드힛 투수 classic 2010~2025 이닝 몫: 우완 중 15.4%, 좌완 중 0.4% (임시값)
@@ -2989,6 +3037,7 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     p.underhand = true;
     p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so, bb: p.pit.bb * UNDERHAND_SKILL.bb };
   }
+  if (spec.control && p.pit) p.pit = { ...p.pit, so: p.pit.so * CONTROL_SKILL.so, bb: p.pit.bb * CONTROL_SKILL.bb };
   Object.assign(p, skillForRuns(p, spec.runs, view.ctx, nextYear));
   p.potential = Math.max(spec.runs, spec.potential ?? spec.runs + 4 * rng.next());
   // 숨은 성장 성향 (잠재력 v2, potential.ts): 선수별 시드라 공유 난수 흐름을 바꾸지 않는다

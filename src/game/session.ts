@@ -4,6 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
+import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
 import {
@@ -45,7 +46,7 @@ import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
 import {
-  aiMarketDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
+  aiMarketDay, fxSendInSeason, fxSeasonOpen, scoutFxDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, type MarketCtx,
 } from '../league/market';
 import {
@@ -261,6 +262,12 @@ export type GameAction =
   | { year: number; type: 'def-edit-off'; id: string; def: Defense }
   /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
   | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
+  /** 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4): 시즌 중 'fx-send'(4주, 주마다 발견), 오프시즌 'fx-send-off'(외국인 단계, 4주를 바로).
+   *  'fx-drop'·'fx-drop-off': 관찰 명단에서 빼기 */
+  | { year: number; day: number; type: 'fx-send'; region: FxRegion }
+  | { year: number; day: number; type: 'fx-drop'; id: string }
+  | { year: number; type: 'fx-send-off'; region: FxRegion }
+  | { year: number; type: 'fx-drop-off'; id: string }
   /** 집중 훈련 걸기·바꾸기·풀기 (16-4c, league/training.ts). plan null이면 풂. 시즌 중 'train'(그날부터 기간 비례), 오프시즌 'train-off'(다음 개막부터) */
   | { year?: number; day: number; type: 'train'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
   | { year: number; type: 'train-off'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
@@ -872,6 +879,8 @@ export class GameSession {
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
     else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
+    else if (a.type === 'fx-send') fxSendInSeason(this.marketCtx, this.teamIdx, a.region);
+    else if (a.type === 'fx-drop') fxDrop(this.league, this.teamIdx, a.id);
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -1114,7 +1123,7 @@ export class GameSession {
   private applySign(id: string): void {
     const p = this.world.players.find((x) => x.id === id);
     if (!p || p.teamIdx !== -1) return;
-    signPlayer(this.marketCtx, p, this.teamIdx);
+    this.fxNews(signPlayer(this.marketCtx, p, this.teamIdx));
     this.valueCtx = null;
     const lp = this.leaguePlayer(id);
     this.addNews(this.day, 'entry', p.foreign && lp
@@ -1126,11 +1135,57 @@ export class GameSession {
   private aiMarket(): void {
     for (const m of aiMarketDay(this.marketCtx)) {
       this.valueCtx = null;
+      this.fxNews(m.fx);
       const t = this.world.teams[m.team];
       const body = `${t.name}, 외국인 ${josa(m.out.name, '을', '를')} 내보내고 ${josa(m.in.name, '을', '를')} 영입했다${m.why === 'injury' ? ' (부상 대체)' : ''}.`;
       this.addNews(this.season.day, 'trade', `[외국인 교체] ${body}`);
       addArticle(this.league, { year: this.world.year, day: this.season.day, kind: 'trade', franchise: t.franchise, title: `${t.name} 외국인 교체`, body });
     }
+  }
+
+  // ---- 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4)
+
+  private fxNews(news: FxNews[]): void {
+    for (const n of news) if (n.team === this.teamIdx) this.addNews(this.phase === 'season' ? this.season.day : -1, 'entry', n.text);
+  }
+
+  /** 우리 구단 파견·관찰 명단 (지금 시기 것. 없으면 빈 상태) */
+  get scoutFx(): FxTeam {
+    const s = this.league.scoutFx;
+    const year = this.phase === 'season' ? this.world.year : (this.offseason?.year ?? this.league.year) + 1;
+    const off = this.phase !== 'season';
+    return s && s.year === year && s.off === off ? s.teams[this.teamIdx] ?? { out: [], list: [], sent: 0 } : { out: [], list: [], sent: 0 };
+  }
+
+  /** 파견할 수 없는 이유 (없으면 null) */
+  fxSendBlock(region: FxRegion): string | null {
+    const off = this.phase !== 'season';
+    const open = off ? this.offseason?.stage === 'foreign' : fxSeasonOpen(this.marketCtx);
+    const why = fxSendBlock(this.league, this.teamIdx, region, { off, open, asiaRule: true });
+    if (why) return why;
+    if (!off && !ruleOf(this.league, 'foreignSwaps')) return '외국인 선수 제도가 없는 해입니다.';
+    return null;
+  }
+
+  /** 스카우트 팀을 보낸다 (3억, 시즌 중 4주 / 오프시즌 외국인 단계에서 바로) */
+  sendScout(region: FxRegion): { ok: boolean; message: string } {
+    const why = this.fxSendBlock(region);
+    if (why) return { ok: false, message: why };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'fx-send', region });
+      return { ok: true, message: `${regionName(region)}에 스카우트 팀을 보냈습니다 (4주, ${FX_COST / 10000}억 원).` };
+    }
+    return this.dispatchOff({ year: this.year, type: 'fx-send-off', region });
+  }
+
+  /** 관찰 명단에서 뺀다 */
+  dropScouted(id: string): { ok: boolean; message: string } {
+    if (!this.scoutFx.list.some((e) => e.id === id) && this.scoutFx.wait?.id !== id) return { ok: false, message: '관찰 명단에 없는 후보입니다.' };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'fx-drop', id });
+      return { ok: true, message: '' };
+    }
+    return this.dispatchOff({ year: this.year, type: 'fx-drop-off', id });
   }
 
   // ---- 판타지 모드 (src/fantasy, docs/fantasy-mode.md)
@@ -1926,6 +1981,7 @@ export class GameSession {
       this.dailyArticles();
       this.aiTradeDay();
       this.aiMarket();
+      this.fxNews(scoutFxDay(this.marketCtx));
       this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
@@ -2915,6 +2971,8 @@ export class GameSession {
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
       case 'train-off': res = setTrainingRule(L, this.teamIdx, a.id, a.plan, 0); break;
+      case 'fx-send-off': res = Off.sendFxOff(L, off, a.region); break;
+      case 'fx-drop-off': res = fxDrop(L, this.teamIdx, a.id) ? { ok: true, message: '' } : { ok: false, message: '관찰 명단에 없는 후보입니다.' }; break;
       case 'ai-off': this.applyFantasy(a.entry); break;
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;

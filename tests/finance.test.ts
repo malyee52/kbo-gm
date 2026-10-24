@@ -198,6 +198,9 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     let guard = 0;
     while (h.offseason!.stage !== 'foreign' && guard++ < 10) { if (h.offseason!.stage === 'comp') h.autoComp(); h.nextStage(); }
     const off = h.offseason!;
+    // 새 후보는 관찰 명단에 있어야 계약할 수 있다 (league/scoutfx.ts): 모두 올려 둔다
+    const st = h.league.scoutFx!.teams[lg];
+    for (const id of off.foreign!.pool) if (h.leaguePlayer(id)!.fx && !st.list.some((e) => e.id === id)) st.list.push({ id, at: -1, weeks: 0 });
     const cand = off.foreign!.pool.map((id) => h.leaguePlayer(id)!).find((p) => p.transferFee && Off.canSignForeign(h.league, off, lg, p).ok);
     if (!cand) return; // 우리 차례가 아니거나 자리가 없으면 넘어간다
     const before = cashOf(h.league, lg);
