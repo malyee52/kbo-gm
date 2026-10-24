@@ -110,19 +110,26 @@ describe('난이도 (AI의 잠재력 평가 오차)', () => {
 describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구단 부임까지 한 바퀴', () => {
   let g: GameSession;
   let firstTeam: number;
+  let seed: string;
   let save: GameSaveV2;
 
   beforeAll(() => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-    // 시드는 LG가 우승하지 못하는 판 (2026-10-22 구장 사건별 배율을 넣으며 m7-loop-14 → 15, 하드힛 포지션 규정타석 규칙을 넣으며 → 17, 2026-10-22 엔진 2 5단계 타구 모형 때 → 22 (18~21은 LG 우승), 7단계 실책·자책 때 → 23, 엔진 2 포지션 2안 때 → 25 (24도 이 시험이 성립하지 않음), 엔진 2 11단계 경기 중 부상·야수 체력 때 → 26, 일정 9단계 더블헤더 2차전 라인업 난수 때 → 27, 일정 10단계 강우 콜드·노게임 때 → 28, 2026-10-23 2026 외국인 개막 명단을 계약표로 바꾸며 → 31 (29·30은 LG 우승): 그 판들은 LG가 우승해 해고되지 않았다, 2026-10-24 병합 준비 때 → 32)
-    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-32', difficulty: 'hard' }, FAST);
-    firstTeam = g.teamIdx;
-    // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
-    g.owner.trust = 27; // 재정 흑자(+2)가 나도 해고선(25) 아래로 떨어지게 (2026-10-11 재정 상세형)
-    g.owner.goal = { year: 2026, kind: 'champion', projectedRank: 1 };
-    g.advance(100000);
-    g.beginOffseason();
-  }, 120_000);
+    // 시드: LG가 우승하면 해고되지 않아 이 묶음이 성립하지 않는다. 엔진이 바뀔 때마다 손으로 시드를 바꾸던 것을
+    // (m7-loop → … → m7-loop-32, 2026-10-08~10-24에 열 번 넘게) 후보 시드를 차례로 돌려 우승하지 못한 첫 판을 쓰게 했다 (2026-10-24 시험 속도 카드).
+    // 지금 엔진에서는 첫 후보(m7-loop-32)가 맞아 한 시즌만 돈다. 후보가 모두 우승이면 시험이 실패한다
+    for (const s of ['m7-loop-32', 'm7-loop-33', 'm7-loop-34', 'm7-loop-35', 'm7-loop-36', 'm7-loop-37']) {
+      seed = s;
+      g = GameSession.create(store, { year: 2026, teamIdx: lg, seed, difficulty: 'hard' }, FAST);
+      firstTeam = g.teamIdx;
+      // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
+      g.owner.trust = 27; // 재정 흑자(+2)가 나도 해고선(25) 아래로 떨어지게 (2026-10-11 재정 상세형)
+      g.owner.goal = { year: 2026, kind: 'champion', projectedRank: 1 };
+      g.advance(100000);
+      g.beginOffseason();
+      if (g.league.lastSeason!.postseason!.champion !== firstTeam) break;
+    }
+  }, 720_000);
 
   it('시즌 목표가 정해져 있었고, 포스트시즌을 치러 우승팀이 나온다', () => {
     const ps = g.league.lastSeason!.postseason!;
@@ -134,8 +141,8 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   it('목표를 놓쳐 해고되고, 하위권 구단의 영입 제의를 받는다. 고르기 전에는 오프시즌을 진행할 수 없다', () => {
     const ps = g.league.lastSeason!.postseason!;
-    // 이 시드에서 우승하면 이 시험은 성립하지 않는다. 엔진이 바뀌어 우승하게 되면 시드를 바꾼다 (2026-10-08 투수 교체 개편 때 m7-loop → m7-loop-2, 2026-10-09 김광현 추가 때 → m7-loop-4, 2026-10-11 시작 명단 보충 때 → m7-loop-6, 2026-10-11 코치 추가 때 → m7-loop-7, 2026-10-12 부상 빈도·외국인 능력 조정 때 → m7-loop-8, 2026-10-12 이벤트 127종 때 → m7-loop-9, 2026-10-12 하락 나이 32세 때 → m7-loop-10, 2026-10-21 첫 시즌 밸런스(엔트리 순환 해시·선발 추정·운영비) 때 → m7-loop-11, 2026-10-22 하드힛 도루·투구손 채움 때 → m7-loop-13, 2026-10-22 2026 투수 보직·선발 채움 때 → m7-loop-14)
-    expect(ps.champion, '이 시드에서 LG가 우승했습니다. 시드를 바꾸세요').not.toBe(firstTeam);
+    // 후보 시드가 모두 우승이면 여기서 실패한다 (beforeAll의 후보 목록에 시드를 더한다)
+    expect(ps.champion, '후보 시드 모두 LG가 우승했습니다. 후보를 더하세요').not.toBe(firstTeam);
     expect(g.owner.trust).toBeLessThan(FIRE_BELOW);
     expect(g.owner.offers!.length).toBeGreaterThan(0);
     expect(g.owner.offers).not.toContain(firstTeam);
@@ -167,7 +174,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(b.owner.offers).toEqual(save.league.owner!.offers);
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     // 신뢰도·목표는 이 시험에서 직접 바꿔 조작 기록에 없다. 그래서 해고까지 재현하지는 않고 시즌 결과가 같은지만 본다
-    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-32', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
+    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed, difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
     c.advance(100000);
     expect(c.season.teams).toEqual(b.season.teams);
   });
