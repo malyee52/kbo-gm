@@ -3,13 +3,15 @@
 // 타석 사이 공격은 두 단계: 주자 작전(투구 전, 도루할 수 있을 때: 대주자·도루·히트앤드런)과 타격 작전(도루가 끝난 뒤: 대타·대주자·강공·번트).
 // 타석 사이 수비: 투수 교체·유지, 고의4구, 전진 수비, 피치아웃, 대수비. 공 사이: 공격은 대주자·도루·히트앤드런, 수비는 투수 교체·고의4구.
 // 항목마다 '자동 (감독)'이면 AI 감독이, 고르면 고른 대로 한다 (engine CommandChoice).
-// 고른 대로 오늘 경기를 복사본에서 미리 돌려 보여 주고(session.commandPreview), 끝까지 가면 확정해 실제로 진행한다.
+// 진행은 세션의 진행 중인 지휘 경기(session.commandStep, 엔진 2 18단계)로 한 물음씩 나아가고 자동 저장에 남는다 (불러오면 그 물음에서 이어 간다).
+// 한 번 진행한 공은 되돌리지 않는다 (기획안 7장 결정 4): 아무것도 진행하지 않았을 때만 그만둘 수 있고, 그 뒤에는 끝까지 치르거나
+// "나머지 감독에게"(A 계속, 결정 5 기본) · "빠르게 끝내기"(지금 물음부터 B로 계산) 중 하나로 끝낸다.
 import { useEffect, useRef, useState } from 'react';
 import type { CommandChoice, CommandRequest, Play } from '../engine';
 import { BUNT_SUCCESS } from '../engine';
 import { formatDate } from '../game/calendar';
 import { inningLabel, lineScoreUpTo, pitchList, pitchNote, playText } from '../game/highlights';
-import type { CommandPreview, PreviewMode } from '../game/session';
+import { isCrisis, type CommandPreview, type PreviewMode } from '../game/session';
 import { fixed2, ops, rate3 } from '../game/stats';
 import { Diamond } from './GameCast';
 import { useGame } from './context';
@@ -27,7 +29,7 @@ const tri = (t: Tri): boolean | undefined => (t === '' ? undefined : t === 'yes'
 const WATCH_MS = 650;
 
 export function CommandView({ start, onDone, onCancel }: { start: CommandPreview; onDone: () => void; onCancel: () => void }) {
-  const { session } = useGame();
+  const { session, autosave } = useGame();
   const ref = useRef<HTMLDialogElement>(null);
   const [pv, setPv] = useState(start);
   const [tactic, setTactic] = useState<Tactic>('');
@@ -55,13 +57,20 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     setTactic(''); setSteal(''); setPh(''); setPrNone(false); setPr(['', '', '']); setPitcher(''); setWalk('');
     setInfield(''); setPitchout(''); setDefOut(''); setDefIn('');
   }, [pv.req?.n]);
-  // 공마다 지켜보기: 공 사이 물음은 빈 선택(자동)으로 이어 가고, 타석 사이 물음이 오거나 경기가 끝나면 멈춘다
+  // 공마다 지켜보기: 물음마다 빈 선택(자동)으로 이어 간다. "멈춤"을 누르거나, 위기·승부처 타석이 오거나, 경기가 끝나면 멈춘다
+  // (엔진 2 18단계: 예전에는 타석 사이 물음마다 멈춰 우리 수비는 한 타석씩이었다)
   useEffect(() => {
     if (!watching) return;
-    if (!pv.req || pv.req.step !== 'pitch') { setWatching(false); return; }
-    const t = setTimeout(() => setPv(session.commandPreview([...pv.choices, {}], 'pitch', pv.dh)), WATCH_MS);
+    if (!pv.req || (pv.req.step !== 'pitch' && isCrisis(pv.req))) { setWatching(false); return; }
+    const t = setTimeout(() => setPv(session.commandStep({}, 'pitch')), WATCH_MS);
     return () => clearTimeout(t);
   }, [watching, pv, session]);
+  // 경기 중 저장: 멈춰 있을 때 진행 중인 지휘 경기를 자동 저장한다 (지켜보는 동안은 멈춘 뒤에)
+  useEffect(() => {
+    if (watching || busy) return;
+    const t = setTimeout(() => void autosave(), 800);
+    return () => clearTimeout(t);
+  }, [pv, watching, busy, autosave]);
 
   const s = session.season;
   const W = session.world;
@@ -117,19 +126,28 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     }
     return c;
   };
-  // 미리보기는 하루 경기만 돌려 10ms 안팎이라 바로 계산한다
-  const go = (mode: PreviewMode) => setPv(session.commandPreview([...pv.choices, choice()], mode, pv.dh));
+  // 한 걸음은 그날 경기를 처음부터 다시 돌려(복사본) 10ms 안팎이라 바로 계산한다
+  const go = (mode: PreviewMode) => setPv(session.commandStep(choice(), mode));
   const watch = () => {
-    // 지금 물음의 선택을 넣고 다음 공으로 간 뒤, 공 사이 물음마다 이어 간다
-    setPv(session.commandPreview([...pv.choices, choice()], 'pitch', pv.dh));
+    // 지금 물음의 선택을 넣고 다음 공으로 간 뒤, 물음마다 이어 간다
+    setPv(session.commandStep(choice(), 'pitch'));
     setWatching(true);
   };
-  const commit = () => {
+  /** 확정: 'A' 남은 판단을 감독에게 (공 단위 그대로), 'B' 지금 물음부터 계산으로 빠르게 */
+  const finish = (how: 'A' | 'B') => {
+    setWatching(false);
     setBusy(true);
-    session.commitCommand(pv.choices, pv.dh);
+    session.commandFinish(how);
     onDone();
   };
-  const cancel = () => { setWatching(false); ref.current?.close(); onCancel(); };
+  // 아무것도 진행하지 않았을 때만 그만둘 수 있다 (위기에서 끼어든 경기는 이미 진행 중)
+  const p = session.pendingGame;
+  const canCancel = !p || (p.at === 0 && p.from === undefined);
+  const cancel = () => {
+    if (!session.commandClose()) return;
+    setWatching(false);
+    ref.current?.close();
+  };
 
   const usedBench = new Set([ph, ...pr].filter((x) => x && x !== 'none'));
   const benchOpts = (except: string) => req!.bench.filter((i) => !usedBench.has(String(i)) || String(i) === except);
@@ -192,17 +210,20 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   );
 
   return (
-    <dialog ref={ref} className="player cast command tv" onClose={() => { setWatching(false); onCancel(); }} style={teamVars(session.team.franchise, session.team.name)}>
+    <dialog ref={ref} className="player cast command tv" onCancel={(e) => { if (!canCancel || busy) e.preventDefault(); else session.commandClose(); }}
+      onClose={() => { setWatching(false); onCancel(); }} style={teamVars(session.team.franchise, session.team.name)}>
       <div className="dialog-body">
         <header className="row-between">
           <div>
             <h2>직접 지휘 · {teamName(pv.away)} <span className="muted">@</span> {teamName(pv.home)}</h2>
-            <p className="muted small">{date}{dhLabel} · 지휘하는 경기는 공 단위로 치릅니다. 고른 대로 미리 돌려 보여 주고, 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
+            <p className="muted small">{date}{dhLabel} · 지휘하는 경기는 공 단위로 치릅니다. 한 번 진행한 공은 되돌릴 수 없고, 진행 중인 경기는 저장되어 다시 열면 이어집니다.{pv.from !== undefined ? ' 위기·승부처에서 끼어든 경기입니다 (그 전까지는 감독이 치렀습니다).' : ''}</p>
           </div>
           <span className="inline">
-            {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 바로 확정합니다"
-              onClick={() => { setWatching(false); setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto', pv.dh).choices, pv.dh); onDone(); }}>나머지 자동으로 확정</button>}
-            <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>
+            {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 공 단위 그대로 끝까지 치러 확정합니다"
+              onClick={() => finish('A')}>나머지 감독에게</button>}
+            {req && <button type="button" className="ghost" disabled={busy} title="지금 물음부터 남은 경기를 계산으로 빠르게 끝내 확정합니다 (공 단위 중계가 없습니다)"
+              onClick={() => finish('B')}>빠르게 끝내기</button>}
+            {canCancel && <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>}
           </span>
         </header>
 
@@ -340,7 +361,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
               ) : (
                 <>
                   <button type="button" onClick={() => go('pitch')} disabled={busy}>다음 공</button>
-                  <button type="button" className="ghost" onClick={watch} disabled={busy} title="공 하나씩 이어 보여 주고, 다음 타석 지시 때 멈춥니다. 중간에 멈추면 공 사이 지시를 고를 수 있습니다">공마다 지켜보기</button>
+                  <button type="button" className="ghost" onClick={watch} disabled={busy} title="공 하나씩 이어 보여 주고, 멈춤을 누르거나 위기·승부처가 오면 멈춥니다. 멈추면 그 자리의 지시를 고를 수 있습니다">공마다 지켜보기</button>
                   <button type="button" onClick={() => go('next')} disabled={busy}>다음 타석</button>
                   <button type="button" className="ghost" onClick={() => go('inning')} disabled={busy}>이번 반 이닝 자동</button>
                   <button type="button" className="ghost" onClick={() => go('crisis')} disabled={busy} title="7회 이후 2점 차 안에서 득점권 주자가 있을 때만 묻습니다">위기 때만 묻기</button>
@@ -353,8 +374,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           <div className="note">
             {pv.rain && <p className="small">비로 경기가 중단됐습니다 ({pv.rain.inning}회 {pv.rain.kind === 'cold' ? '강우 콜드' : '노게임'}).{pv.rain.kind === 'nogame' ? ' 정식 경기(5회)가 되기 전이라 기록은 남지 않고 다른 날 다시 치릅니다.' : ''}</p>}
             <p><strong>{pv.rain?.kind === 'nogame' ? '노게임' : '경기 끝'}: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
-            <p className="small muted">확정하면 이 결과로 오늘 경기가 진행됩니다. 그만두면 오늘은 그대로 남습니다.</p>
-            <div className="actions"><button type="button" onClick={commit} disabled={busy}>경기 확정</button></div>
+            <p className="small muted">확정하면 이 결과로 오늘 경기가 진행됩니다. 확정하지 않고 하루를 진행해도 이 결과가 됩니다.</p>
+            <div className="actions"><button type="button" onClick={() => finish('A')} disabled={busy}>경기 확정</button></div>
           </div>
         )}
 

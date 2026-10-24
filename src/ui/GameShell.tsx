@@ -302,6 +302,10 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const endParty = useCallback(() => setParty([]), []);
   // 직접 지휘 (CommandView): 진행 설정의 "직접 지휘", 또는 자동 진행이 위기에서 멈췄을 때
   const [cmd, setCmd] = useState<CommandPreview | null>(null);
+  // 진행 중인 지휘 경기가 저장에 있으면 (경기 중 저장, 엔진 2 18단계) 열자마자 그 물음에서 이어 간다
+  useEffect(() => {
+    if (session.commandInProgress) setCmd(session.commandResume());
+  }, [session]);
   // 진행 중이 아닐 때 바뀐 것이 있으면 1.5초 뒤 자동 저장 (창을 바로 닫아도 트레이드·엔트리 변경이 남는다)
   useEffect(() => {
     if (busy || cmd || !dirty.current) return; // 직접 지휘 중에는 경기가 끝난 뒤 저장한다
@@ -319,7 +323,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       while (session.postseasonRunning && !session.ourPostseasonGameNext) session.advancePostseason(1);
       changed();
       setBusy(null);
-      if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+      if (session.canCommand) setCmd(session.commandOpen());
       else go('postseason');
       return;
     }
@@ -335,7 +339,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     setBusy(null);
     if (session.crisis) { setCmd(session.crisis); return; }
     if (attention.length) { setSummary({ snap: takeSnapshotAfter(), attention }); return; }
-    if (session.canCommand) setCmd(session.commandPreview([], 'next'));
+    if (session.canCommand) setCmd(session.commandOpen());
   };
   const endCommand = async (done: boolean) => {
     setCmd(null);
