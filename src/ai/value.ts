@@ -6,7 +6,7 @@
 // - 연봉 부담: 트레이드 판단(trade.ts)에서 연봉을 런으로 바꿔 뺀다.
 // - 포지션 희소성: 선수 가치에는 포지션 보정을, 구단 전력에는 "그 자리를 맡을 선수가 없을 때의 손해"를 넣는다.
 
-import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, eraPitching, fieldPosOf, isStarterSkill, pitValue, type SimPlayer, type Slot, type World } from '../engine';
+import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, eraPitching, fieldPosOf, fitPenalty, isStarterSkill, pitValue, type SimPlayer, type Slot, type World } from '../engine';
 
 /** 선형 가중치(wOBA 계열)를 득점으로 바꾸는 배율. 공개된 세이버메트릭스 상수의 근사값 */
 export const WOBA_SCALE = 1.2;
@@ -241,9 +241,12 @@ export function teamStrength(org: SimPlayer[], ctx: ValueContext, y: number): nu
   return total;
 }
 
-/** 주전 9명 배치: AI 감독과 같은 최적 배정(assignSlots)에 추정 타격 기여 + 그 자리 수비 런을 점수로 준다 */
+/**
+ * 주전 9명 배치: AI 감독과 같은 최적 배정(assignSlots)에 추정 타격 기여 + 그 자리 수비 런을 점수로 준다.
+ * 능력치 v2 16-3b: 감독 배정(team.ts slotRuns)처럼 수비 가능이 아닌 자리·비상 포수에 벌점(fitPenalty)을 줘 배치만 고른다 (전력 합에는 넣지 않는다)
+ */
 function assignLineupByRuns(ranked: SimPlayer[], runs: Map<number, number>): { p: SimPlayer; slot: Slot }[] {
-  return assignSlots(ranked, undefined, (p, slot) => runs.get(p.idx)! + defenseAt(p, slot));
+  return assignSlots(ranked, undefined, (p, slot) => runs.get(p.idx)! + defenseAt(p, slot) + fitPenalty(p, slot));
 }
 
 /** 시즌별 가중치를 곱해 합한 구단 전력 */
