@@ -1,8 +1,8 @@
 // 구장·팬 (구단 운영 탭, stadium.ts): 우리 구장과 공사 주문, 팬 만족도와 그 변화, 리그 구단 비교.
 import { useState } from 'react';
 import {
-  DOME, downPayment, FENCE_PRESETS, FENCE_WORK, fenceChangeText, fenceText, fenceWorkState, MUNICIPAL, municipalChance, fanFill, fanLevel, fanSponsor, HONEYMOON, installment,
-  planFenceWork, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, WALL, yearlyPayment, type ParkSize,
+  DOME, downPayment, FENCE_PRESETS, FENCE_WORK, fenceChangeText, fenceWorkCost, fenceText, fenceWorkState, MUNICIPAL, municipalChance, fanFill, fanLevel, fanSponsor, HONEYMOON, installment,
+  planFenceWork, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment, type ParkSize,
 } from '../../league/stadium';
 import { DEFAULT_PARAMS, fenceParkEvents, fenceValid, parkIndexOf, type Fence } from '../../engine';
 import { TeamName, useGame, useWon } from '../context';
@@ -330,16 +330,18 @@ function FenceWorkSection({ now, pl, onDone }: { now: TeamParkView; pl: ParkLeag
     onDone(session.orderStadium(id, id === 'wall-off' ? {} : { fence: work }));
     setConfirm(null);
   };
-  const cost = wallMode ? WALL.install : FENCE_WORK.cost;
+  const year = session.year + 1;
+  // 비용은 그 해 연봉 상승 지수만큼 오른다 (리모델링·신구장과 같은 규칙). 조립·해체는 첫 시즌 값
+  const cost = fenceWorkCost(wallMode ? 'wall' : 'fence', wageIndex(year, L));
+  const yearly = fenceWorkCost('wall-yearly', wageIndex(year, L));
   const short = session.cashNow() < cost ? `자금이 모자랍니다. ${won(cost)}은 있어야 합니다.` : undefined;
   const partner = st.partner !== undefined ? L.teams[st.partner].name : undefined;
-  const year = session.year + 1;
   const button = (id: string, label: string, disabled: boolean) => (confirm === id
     ? <span className="inline"><button type="button" className="small-btn danger" onClick={() => order(id)}>정말 주문</button><button type="button" className="small-btn" onClick={() => setConfirm(null)}>취소</button></span>
     : <button type="button" className="small-btn" disabled={disabled} onClick={() => setConfirm(id)}>{label}</button>);
   return (
     <>
-      <h3>{wallMode ? '가벽' : '펜스 조정'} <span className="muted small">오프시즌 안에 끝나 {year} 시즌부터 · {wallMode ? `설치 ${won(WALL.install)} + 서 있는 시즌마다 ${won(WALL.yearly)}` : `구단 부담 ${won(cost)} (일시불)`}</span></h3>
+      <h3>{wallMode ? '가벽' : '펜스 조정'} <span className="muted small">오프시즌 안에 끝나 {year} 시즌부터 · {wallMode ? `설치 ${won(cost)} + 서 있는 시즌마다 ${won(yearly)}부터` : `구단 부담 ${won(cost)} (일시불)`}</span></h3>
       <p className="small">지금 펜스: {fenceText(st.now)}{st.wall ? ` · 가벽 ${fenceText(st.wall)}` : ''}{st.history ? ` · 실제 역사의 가벽 (${st.history.name}, ${st.history.from}~${st.history.to})이 섭니다` : ''}</p>
       {wallMode
         ? <p className="muted small">함께 쓰는 구장({partner})이라 펜스 대신 원래 펜스 앞에 가벽을 세웁니다. 가벽은 우리 홈 경기에만 세웁니다. {partner} 홈 경기는 원래 펜스 그대로입니다. 구장 효과는 양 팀 타자에게 같이 들어갑니다.</p>

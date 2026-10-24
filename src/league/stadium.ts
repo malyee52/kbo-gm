@@ -251,7 +251,7 @@ export interface StadiumOption {
 
 /**
  * 고를 수 있는 공사 (화면·주문 검사). wage = 착공하는 해의 연봉 상승 지수 (salary.ts wageIndex, 리모델링·신구장 공사비가 해마다 그만큼 오른다,
- * 2026-10-22 사용자 결정. 펜스 조정·가벽 비용은 그대로). at = 그 구단 펜스 공사 상황이면 화면에 보일 것만:
+ * 2026-10-22 사용자 결정. 펜스 조정·가벽 비용도 같은 규칙, 2026-10-24 클사장 결정, fenceWorkCost). at = 그 구단 펜스 공사 상황이면 화면에 보일 것만:
  * 혼자 쓰는 구장은 펜스 조정, 함께 쓰는 구장은 가벽 설치, 가벽이 서 있으면(실제 역사의 가벽 포함) 가벽 철거 (6.7.5·6.8.7). 빼면 모두
  */
 export function stadiumOptions(wage = 1, at?: Pick<FenceWorkState, 'kind' | 'wall' | 'history'>): StadiumOption[] {
@@ -261,8 +261,8 @@ export function stadiumOptions(wage = 1, at?: Pick<FenceWorkState, 'kind' | 'wal
     ...NEW_PARK.options.map((o, i) => ({
       id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: Math.round(o.cost * wage), years: NEW_PARK.years, capacity: () => o.capacity,
     })),
-    ...(!at || at.kind === 'fence' ? [{ id: 'fence', kind: 'fence' as const, label: '펜스 조정', cost: FENCE_WORK.cost, years: 0, capacity: same }] : []),
-    ...(!at || at.kind === 'wall' ? [{ id: 'wall', kind: 'wall' as const, label: at?.wall ? '가벽 제원 바꾸기' : '가벽 설치', cost: WALL.install, years: 0, capacity: same }] : []),
+    ...(!at || at.kind === 'fence' ? [{ id: 'fence', kind: 'fence' as const, label: '펜스 조정', cost: fenceWorkCost('fence', wage), years: 0, capacity: same }] : []),
+    ...(!at || at.kind === 'wall' ? [{ id: 'wall', kind: 'wall' as const, label: at?.wall ? '가벽 제원 바꾸기' : '가벽 설치', cost: fenceWorkCost('wall', wage), years: 0, capacity: same }] : []),
     ...(!at || at.wall || at.history ? [{ id: 'wall-off', kind: 'wall' as const, label: '가벽 철거', cost: 0, years: 0, capacity: same }] : []),
   ];
 }
@@ -411,6 +411,17 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
 export const FENCE_WORK = { cost: 300_000, every: 5 };
 export const WALL = { install: 100_000, yearly: 40_000 };
 
+/**
+ * 그 해 펜스 조정·가벽 설치·가벽 조립·해체 비용 (만 원): 위 값(2026년 물가) × 그 해 연봉 상승 지수 wage (salary.ts wageIndex).
+ * 리모델링·신구장 공사비와 같은 규칙 (2026-10-24 클사장 결정). 설치·조정은 다음 시즌 해, 조립·해체는 그 시즌 해의 지수
+ */
+/** 억 원 글: 지수를 곱해 끝자리가 생기는 펜스·가벽 비용은 소수 한 자리까지 ("31.5억 원", "30억 원") */
+const eokText = (man: number) => `${Math.round(man / 1000) / 10}억 원`;
+
+export function fenceWorkCost(kind: 'fence' | 'wall' | 'wall-yearly', wage = 1): number {
+  return Math.round((kind === 'fence' ? FENCE_WORK.cost : kind === 'wall' ? WALL.install : WALL.yearly) * wage);
+}
+
 /** 그 해 실제로 쓰인 게임 안 구장 공사 (done에서 개막이 그 해 이전인 것, 기획안 6.8.4 값을 고르는 순서) */
 interface WorksAt {
   /** 게임 안 신구장 값 (있으면 신구장) */
@@ -511,7 +522,7 @@ const intIn = (x: number, [lo, hi]: [number, number]) => Number.isInteger(x) && 
  * 펜스 조정(id 'fence'): 칸마다 지금 값 그대로이거나 고르는 범위 안. 가벽('wall'): 거리는 원래 펜스 이하(하한은 범위), 높이는 범위 안.
  * 실제 구장은 차이 방식 = 조정 전 값(실측 기간 평균) × (새 제원 짐작 ÷ 원래 제원 짐작), 게임 안 신구장은 새 제원으로 다시 (6.7.2·6.8.4)
  */
-export function planFenceWork(league: Pick<LeagueState, 'teams' | 'stadiums'>, team: number, offYear: number, id: 'fence' | 'wall', f: Fence | undefined,
+export function planFenceWork(league: Pick<LeagueState, 'teams' | 'stadiums' | 'ruleShifts'>, team: number, offYear: number, id: 'fence' | 'wall', f: Fence | undefined,
                               cash: number, src: ParkSource | undefined, pp: EngineParams['park'] = DEFAULT_PARAMS.park):
   { ok: false; message: string } | { ok: true; park: ParkEvents; cost: number; fence: Fence; from: Fence } {
   const st = fenceWorkState(league, team, offYear, src, pp);
@@ -535,8 +546,8 @@ export function planFenceWork(league: Pick<LeagueState, 'teams' | 'stadiums'>, t
     if (f.l === st.now.l && f.c === st.now.c && f.r === st.now.r) return { ok: false, message: '줄어드는 펜스 거리가 없습니다.' };
     if (st.wall && f.l === st.wall.l && f.c === st.wall.c && f.r === st.wall.r && f.h === st.wall.h) return { ok: false, message: '바뀌는 펜스가 없습니다.' };
   }
-  const cost = id === 'wall' ? WALL.install : FENCE_WORK.cost;
-  if (cash < cost) return { ok: false, message: `자금이 모자랍니다. ${(cost / 10000).toFixed(0)}억 원은 있어야 합니다.` };
+  const cost = fenceWorkCost(id, wageIndex(offYear + 1, league));
+  if (cash < cost) return { ok: false, message: `자금이 모자랍니다. ${eokText(cost)}은 있어야 합니다.` };
   const s = league.stadiums?.[team];
   let park: ParkEvents;
   if ((s?.done ?? []).some((d) => d.kind === 'new')) {
@@ -600,9 +611,9 @@ function orderFenceWork(league: LeagueState, team: number, offYear: number, id: 
   league.ledger.push({ year, from: team, to: -1, amount: plan.cost, note: `${name} ${note}`, kind: 'stadium' });
   const after = Math.round(hrNow() * 100);
   const hr = `홈런 지수 ${Math.round(before * 100)} → ${after}`;
-  if (id === 'fence') return { ok: true, message: `${name}, ${parkName} 펜스 조정 (${fenceChangeText(plan.from, plan.fence)}, ${hr}), ${year} 시즌부터. 구단 부담 ${(plan.cost / 10000).toFixed(0)}억 원.${built ? '' : ' 실측 구장 효과에 펜스가 바뀐 만큼의 짐작을 곱합니다.'}` };
+  if (id === 'fence') return { ok: true, message: `${name}, ${parkName} 펜스 조정 (${fenceChangeText(plan.from, plan.fence)}, ${hr}), ${year} 시즌부터. 구단 부담 ${eokText(plan.cost)}.${built ? '' : ' 실측 구장 효과에 펜스가 바뀐 만큼의 짐작을 곱합니다.'}` };
   const partner = sharedPartner(league, team, year, src);
-  return { ok: true, message: `${name}, ${parkName}에 가벽 설치 (${fenceChangeText(plan.from, plan.fence)}, ${name} 홈 경기 ${hr}), ${year} 시즌부터.${partner !== undefined ? ` ${league.teams[partner].name} 홈 경기는 그대로.` : ''} 설치 ${(WALL.install / 10000).toFixed(0)}억 원, 가벽이 서 있는 시즌마다 ${(WALL.yearly / 10000).toFixed(0)}억 원.` };
+  return { ok: true, message: `${name}, ${parkName}에 가벽 설치 (${fenceChangeText(plan.from, plan.fence)}, ${name} 홈 경기 ${hr}), ${year} 시즌부터.${partner !== undefined ? ` ${league.teams[partner].name} 홈 경기는 그대로.` : ''} 설치 ${eokText(plan.cost)}, 가벽이 서 있는 시즌마다 ${eokText(fenceWorkCost('wall-yearly', wageIndex(year, league)))} (해마다 연봉 지수만큼 오른다).` };
 }
 
 /** 개막 때 (league.year = 새 시즌): 가벽이 서 있는 구단의 조립·해체 비용을 장부에 (6.8.3). 우리 구단 소식 문장 */
@@ -611,8 +622,9 @@ export function openWalls(league: LeagueState, userTeam: number): string[] {
   for (let t = 0; t < (league.stadiums?.length ?? 0); t++) {
     const w = league.stadiums![t].wall;
     if (!w || w.from > league.year) continue;
-    league.ledger.push({ year: league.year, from: t, to: -1, amount: WALL.yearly, note: `${league.teams[t].name} 가벽 조립·해체`, kind: 'stadium' });
-    if (t === userTeam) news.push(`가벽 조립·해체 비용 ${(WALL.yearly / 10000).toFixed(0)}억 원 (${league.year} 시즌)`);
+    const cost = fenceWorkCost('wall-yearly', wageIndex(league.year, league));
+    league.ledger.push({ year: league.year, from: t, to: -1, amount: cost, note: `${league.teams[t].name} 가벽 조립·해체`, kind: 'stadium' });
+    if (t === userTeam) news.push(`가벽 조립·해체 비용 ${eokText(cost)} (${league.year} 시즌)`);
   }
   return news;
 }

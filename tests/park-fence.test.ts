@@ -6,8 +6,9 @@ import { applyDiff, DEFAULT_PARAMS, fenceBaseOf, fenceParkEvents, fenceSpecOf, g
 import { GameSession } from '../src/game/session';
 import { createLeague } from '../src/league/create';
 import {
-  FENCE_PRESETS, FENCE_WORK, fenceWorkState, openWalls, orderStadium, stadiumOptions, stadiumYearEnd, teamParkInfo, WALL, type StadiumState,
+  FENCE_PRESETS, FENCE_WORK, fenceWorkCost, fenceWorkState, openWalls, orderStadium, stadiumOptions, stadiumYearEnd, teamParkInfo, WALL, type StadiumState,
 } from '../src/league/stadium';
+import { wageIndex } from '../src/league/salary';
 import type { LeagueState } from '../src/league/types';
 
 let store: DataStore;
@@ -51,8 +52,12 @@ describe('펜스 조정 공사 (6.7, P6b)', () => {
     const want = applyDiff(b.base, guessLogs(fenceSpecOf(fence, b.row, PP), PP)!, b.ref, PP);
     close(s.park, want);
     expect(s).toMatchObject({ fence, fenceFrom: 2027 });
-    expect(s.done!.at(-1)).toMatchObject({ kind: 'fence', open: 2027, cost: FENCE_WORK.cost, fence });
-    expect(L.ledger.at(-1)).toMatchObject({ year: 2027, from: nc, amount: FENCE_WORK.cost, kind: 'stadium' });
+    // 공사비는 다음 시즌(2027) 연봉 상승 지수만큼 오른다 (리모델링·신구장과 같은 규칙, 2026-10-24 클사장 결정)
+    const cost = Math.round(FENCE_WORK.cost * wageIndex(2027, L));
+    expect(cost).toBeGreaterThan(FENCE_WORK.cost);
+    expect(s.done!.at(-1)).toMatchObject({ kind: 'fence', open: 2027, cost, fence });
+    expect(L.ledger.at(-1)).toMatchObject({ year: 2027, from: nc, amount: cost, kind: 'stadium' });
+    expect(r.message).toContain('구단 부담 31.5억 원'); // 30억 × 2027 지수 1.05
     // 조정 전 시즌(2026)은 그대로, 2027부터 조정 값 (펜스를 당겼으니 홈런이 는다)
     expect(park(L, nc, 2026)).toEqual(park(base, nc, 2026));
     expect(park(L, nc, 2027)).toMatchObject({ basis: 'fence', park: { hr: 1, ev: s.park } });
@@ -65,6 +70,17 @@ describe('펜스 조정 공사 (6.7, P6b)', () => {
     // 원래 펜스로 되돌리면 실측 값(실측 기간 평균)으로 정확히 돌아간다
     expect(orderStadium(L, nc, 2031, 'fence', 1e9, { fence: { l: 101, c: 122, r: 101, h: 33 } }, src).ok).toBe(true);
     close(park(L, nc, 2032).park!.ev, b.base);
+    // 다섯 해 뒤 공사비는 그 해(2032) 지수
+    expect(L.ledger.at(-1)).toMatchObject({ year: 2032, from: nc, amount: Math.round(FENCE_WORK.cost * wageIndex(2032, L)) });
+  });
+
+  it('펜스 조정·가벽 비용은 리모델링·신구장처럼 연봉 상승 지수만큼 오른다 (2026-10-24 클사장 결정)', () => {
+    expect([fenceWorkCost('fence'), fenceWorkCost('wall'), fenceWorkCost('wall-yearly')]).toEqual([FENCE_WORK.cost, WALL.install, WALL.yearly]);
+    expect([fenceWorkCost('fence', 1.2), fenceWorkCost('wall', 1.2), fenceWorkCost('wall-yearly', 1.2)]).toEqual([360_000, 120_000, 48_000]);
+    const cost = (wage: number) => Object.fromEntries(stadiumOptions(wage).map((o) => [o.id, o.cost]));
+    const a = cost(1), b = cost(1.2);
+    for (const id of ['remodel', 'new-0', 'fence', 'wall']) expect(b[id]).toBe(Math.round(a[id] * 1.2));
+    expect(b['wall-off']).toBe(0);
   });
 
   it('거절: 범위·단위 밖, 바뀌는 칸 없음, 자금, 함께 쓰는 구장, 신구장 공사 중', () => {
@@ -75,7 +91,7 @@ describe('펜스 조정 공사 (6.7, P6b)', () => {
     expect(orderStadium(L, nc, 2026, 'fence', 1e9, { fence: { ...now, l: 94 } }, src).message).toBe('고를 수 없는 펜스 제원입니다.');
     expect(orderStadium(L, nc, 2026, 'fence', 1e9, { fence: { ...now, h: 32 } }, src).message).toBe('고를 수 없는 펜스 제원입니다.');
     expect(orderStadium(L, nc, 2026, 'fence', 1e9, { fence: now }, src).message).toBe('바뀌는 펜스가 없습니다.');
-    expect(orderStadium(L, nc, 2026, 'fence', 100_000, { fence: { ...now, c: 120 } }, src).message).toBe('자금이 모자랍니다. 30억 원은 있어야 합니다.');
+    expect(orderStadium(L, nc, 2026, 'fence', 100_000, { fence: { ...now, c: 120 } }, src).message).toBe('자금이 모자랍니다. 31.5억 원은 있어야 합니다.');
     expect(orderStadium(L, lg, 2026, 'fence', 1e9, { fence: { l: 99, c: 122, r: 99, h: 30 } }, src).message).toBe('함께 쓰는 구장은 펜스 대신 가벽을 세웁니다.');
     // 그대로 둔 칸은 범위 밖 값도 된다 (사직 95.8m · 6m, 중앙만 당김)
     const lt = idx(L, '롯데');
@@ -116,7 +132,7 @@ describe('가벽 (6.8, P6c)', () => {
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 101, c: 121, r: 100, h: 25 } }, src).message).toBe('가벽은 원래 펜스보다 안쪽에만 세울 수 있습니다.');
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 100, c: 125, r: 100, h: 25 } }, src).message).toBe('줄어드는 펜스 거리가 없습니다.');
     expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 100, c: 121, r: 100, h: 26 } }, src).message).toBe('고를 수 없는 펜스 제원입니다.');
-    expect(orderStadium(L, lg, 2026, 'wall', 50_000, { fence: { l: 100, c: 121, r: 100, h: 25 } }, src).message).toBe('자금이 모자랍니다. 10억 원은 있어야 합니다.');
+    expect(orderStadium(L, lg, 2026, 'wall', 50_000, { fence: { l: 100, c: 121, r: 100, h: 25 } }, src).message).toBe('자금이 모자랍니다. 10.5억 원은 있어야 합니다.');
     expect(orderStadium(L, lg, 2026, 'wall-off', 1e9, {}, src).message).toBe('철거할 가벽이 없습니다.');
     expect(orderStadium(L, idx(L, 'NC'), 2026, 'wall', 1e9, { fence: { l: 100, c: 121, r: 100, h: 25 } }, src).message).toBe('혼자 쓰는 구장은 가벽 대신 펜스 조정을 합니다.');
     const wall = { l: 100, c: 121, r: 100, h: 25 };
@@ -124,7 +140,7 @@ describe('가벽 (6.8, P6c)', () => {
     const r = orderStadium(L, lg, 2026, 'wall', 1e9, { fence: wall }, src);
     expect(r.ok).toBe(true);
     expect(r.message).toContain('두산 홈 경기는 그대로');
-    expect(L.ledger.at(-1)).toMatchObject({ year: 2027, from: lg, amount: WALL.install, kind: 'stadium' });
+    expect(L.ledger.at(-1)).toMatchObject({ year: 2027, from: lg, amount: Math.round(WALL.install * wageIndex(2027, L)), kind: 'stadium' });
     expect(park(L, lg, 2027).basis).toBe('wall');
     expect(hr(L, lg, 2027)).toBeGreaterThan(before);
     expect(park(L, ds, 2027)).toEqual(park(base, ds, 2027));
@@ -133,7 +149,7 @@ describe('가벽 (6.8, P6c)', () => {
     L.year = 2027;
     const n = L.ledger.length;
     openWalls(L, lg);
-    expect(L.ledger.slice(n)).toEqual([{ year: 2027, from: lg, to: -1, amount: WALL.yearly, note: `${L.teams[lg].name} 가벽 조립·해체`, kind: 'stadium' }]);
+    expect(L.ledger.slice(n)).toEqual([{ year: 2027, from: lg, to: -1, amount: Math.round(WALL.yearly * wageIndex(2027, L)), note: `${L.teams[lg].name} 가벽 조립·해체`, kind: 'stadium' }]);
     // 철거는 간격과 상관없이, 다음 시즌부터 원래 펜스(실측 값). 다시 세우는 것은 간격 뒤
     expect(stadiumOptions(1, fenceWorkState(L, lg, 2027, src)).map((o) => o.id)).toContain('wall-off');
     expect(orderStadium(L, lg, 2027, 'wall-off', 0, {}, src).ok).toBe(true);
