@@ -129,6 +129,17 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     });
   }
 
+  // 외국인 관찰 명단이 차서 기다리는 후보 (능력치 v2 19.4): 명단에서 하나를 빼야 들어온다. 또 찾으면 이 후보를 놓친다
+  const wait = s.scoutFx.wait;
+  if (wait) {
+    const name = s.leaguePlayer(wait.id)?.name ?? '후보';
+    out.push({
+      key: 'fx-wait', kind: '선수단', group: '영입', title: `관찰 명단 대기: ${name}`,
+      why: '관찰 명단(8명)이 차 있어 새 후보가 기다리고 있습니다. 명단에서 한 명을 빼야 들어오고, 그사이 또 찾으면 이 후보를 놓칩니다.',
+      go: 'scout-fx', ack: wait.id,
+    });
+  }
+
   // 판타지: 답을 기다리는 선택 (기한이 지난 제안은 뺀다)
   const choices = pendingChoices(s.fantasy).filter((e) => !offerExpired(s, e));
   if (choices.length) {

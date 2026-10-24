@@ -22,6 +22,18 @@ describe('결정함', () => {
     expect(decisions(g)).toEqual([]);
   });
 
+  it('외국인 관찰 명단이 차서 기다리는 후보가 있으면 한 줄 (확인하면 같은 후보는 다시 띄우지 않는다)', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: team, seed: 'inbox-1' }, FAST);
+    const ids = g.league.players.filter((p) => p.team === -1).slice(0, 9).map((p) => p.id);
+    const teams = g.league.teams.map(() => ({ out: [], list: [], sent: 0 }));
+    teams[team] = { out: [], list: ids.slice(0, 8).map((id) => ({ id, at: 0, weeks: 0 })), sent: 0, wait: { id: ids[8], at: 1, weeks: 0 } } as never;
+    g.league.scoutFx = { year: g.world.year, off: false, teams };
+    const d = decisions(g).find((x) => x.key === 'fx-wait')!;
+    expect(d.go).toBe('scout-fx');
+    expect(d.title).toContain(g.leaguePlayer(ids[8])!.name);
+    expect(decisions(g, { 'fx-wait': ids[8] }).some((x) => x.key === 'fx-wait')).toBe(false);
+  });
+
   it('이벤트가 걸리면 진행을 막는 일로 맨 앞에 온다', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: team, seed: 'inbox-1' }, FAST);
     for (let i = 0; i < 200 && !g.pendingEvent && !g.done; i++) g.advance(1, { event: true });
