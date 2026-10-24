@@ -8,6 +8,9 @@ import { computeGrades, DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { guessMid, guessSetText } from '../src/league/scout';
 import { strengthTier } from '../src/game/rank';
+import { EVENTS } from '../src/league/events';
+import { prospects } from '../src/league/events-extra';
+import * as Off from '../src/league/offseason';
 
 function filesUnder(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
@@ -68,6 +71,22 @@ describe('화면 코드는 숨긴 값을 읽지 않는다 (소스 검사)', () =
     expect(neg).not.toMatch(/sit\.rank/);
   });
 
+  it('플레이어 구단 쪽 정렬(이벤트 유망주·자동 방출)은 진짜 잠재로 줄 세우지 않는다', () => {
+    // 이벤트 유망주: 한 곳(events-extra.ts prospects)에서 우리 스카우트 가치로만
+    for (const f of ['src/league/events.ts', 'src/league/events-extra.ts']) {
+      expect(readFileSync(f, 'utf8')).not.toMatch(/\.sort\([^\n]*\.potential/);
+    }
+    const ex = readFileSync('src/league/events-extra.ts', 'utf8');
+    const body = ex.slice(ex.indexOf('export function prospects'), ex.indexOf('const losing'));
+    expect(body).toContain('c.seenValue(');
+    expect(body).not.toMatch(/\.potential/);
+    // 정원 정리: 플레이어 구단의 기본 방출 가치는 우리 스카우트 가치, 자동 방출·화면 계획은 기본 가치를 그대로 쓴다
+    const off = readFileSync('src/league/offseason.ts', 'utf8');
+    expect(off).toMatch(/team === off\.userTeam \? \(p\) => userReleaseValue/);
+    const auto = off.slice(off.indexOf('export function autoReleaseUser'), off.indexOf('export function userOrgSize'));
+    expect(auto).not.toMatch(/releaseValue/);
+  });
+
   it('이벤트·판타지 효과 문구에 잠재 숫자가 없다', () => {
     for (const f of ['src/league/events.ts', 'src/league/events-extra.ts', 'src/fantasy/effects.ts']) {
       expect(readFileSync(f, 'utf8')).not.toMatch(/잠재력? *[+−-]\d|잠재력? \$\{sign/);
@@ -117,6 +136,30 @@ describe('한 시즌 짧게 돌린 화면 값', () => {
     const ours = g.world.teams[0].org.find((p) => !p.isPitcher && (p.bat?.sample ?? 0) > 600)!;
     expect(g.seenOf(ours.id).seasonsWithUs).not.toBeNull();
     expect(g.seenOf(theirs[0].id).seasonsWithUs).toBeNull();
+  });
+
+  it('이벤트가 고르는 우리 유망주는 우리 스카우트 가치 순이다', () => {
+    const c = g.eventContext();
+    const list = prospects(c);
+    expect(list.length).toBeGreaterThan(2);
+    const v = list.map((p) => g.seenValue(p.id));
+    for (let i = 1; i < v.length; i++) expect(v[i - 1]).toBeGreaterThanOrEqual(v[i]);
+    const mentor = EVENTS.find((e) => e.id === 'veteran-mentor')!;
+    expect(mentor.vars!(c, null as never)).toMatchObject({ a: list[0].id, b: list[1].id });
+  });
+
+  it('정원 정리 순서: 우리 구단은 스카우트 가치, AI 구단은 8시즌 가치(aiPotential 길)', () => {
+    const view = Off.leagueView(g.league, store, { ...DEFAULT_PARAMS, pilotSeasons: 1 });
+    const off = { year: g.year, userTeam: g.teamIdx } as Off.OffseasonState;
+    const fresh = (p: { entryYear: number }) => p.entryYear >= off.year + 2 - Off.ROOKIE_GRACE;
+    const ascending = (xs: number[]) => xs.every((x, i) => i === 0 || xs[i - 1] <= x);
+    const mine = Off.releaseSplit(g.league, off, view, g.teamIdx).order.filter((p) => !fresh(p));
+    expect(mine.length).toBeGreaterThan(5);
+    expect(ascending(mine.map((p) => Off.userReleaseValue(g.league, off, view, p)))).toBe(true);
+    // 진짜 8시즌 가치 순과는 다르다 (같으면 순서 열이 숨은 값을 줄 세워 보여 준다)
+    expect(ascending(mine.map((p) => Off.releaseValue(view, p)))).toBe(false);
+    const theirs = Off.releaseSplit(g.league, off, view, 3).order.filter((p) => !fresh(p));
+    expect(ascending(theirs.map((p) => Off.releaseValue(view, p)))).toBe(true);
   });
 
   it('전력 전망은 구단마다 세 단계 하나이고, 위·아래 30%씩', () => {

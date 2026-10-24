@@ -5,6 +5,7 @@
 
 import type { Rng } from '../engine';
 import type { EventChoice, EventContext, EventDef, EventPlayer, PendingEvent } from './events';
+import type { LeaguePlayer } from './types';
 
 type V = PendingEvent['vars'];
 const eok = (man: number) => `${(man / 10000).toFixed(1)}억 원`;
@@ -28,9 +29,12 @@ const foreigners = (c: EventContext) => c.players.filter((p) => p.foreign);
 const regulars = (c: EventContext) => c.players.filter((p) => p.pa >= 40 || p.outs >= 30);
 const pick = <T>(xs: T[], rng: Rng): T => xs[rng.int(xs.length)];
 const who = (p: EventPlayer) => ({ id: p.id, name: p.name });
-const prospects = (c: EventContext) => c.roster
-  .filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving')
-  .sort((a, b) => b.potential - a.potential || a.id.localeCompare(b.id));
+/** 2군 유망주 (24세 이하, 우리 스카우트 가치 높은 순. 진짜 잠재 순이면 이벤트 대상으로 숨은 값이 드러난다). events.ts도 쓴다 */
+export function prospects(c: EventContext): LeaguePlayer[] {
+  const list = c.roster.filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving');
+  const v = new Map(list.map((p) => [p.id, c.seenValue(p)]));
+  return list.sort((a, b) => v.get(b.id)! - v.get(a.id)! || a.id.localeCompare(b.id));
+}
 const losing = (c: EventContext) => c.rank >= c.teams - 2 || c.streak <= -4;
 
 // ---- 공통 효과

@@ -22,7 +22,7 @@ import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, t
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex } from './growth';
-import { draftBoard, foreignSigma, guessRuns, marketReputation, type BoardRow } from './scout';
+import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenValue, type BoardRow } from './scout';
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
@@ -2484,17 +2484,17 @@ const CATCHER_NEED_BONUS = 8;
 
 /**
  * 방출 순서 (먼저 내보낼 선수부터). 외국인·복무 중·FA·다년 계약 선수는 빼고, 입단 ROOKIE_GRACE시즌 안의 신인은 뒤로,
- * 나머지는 앞으로 8시즌 가치가 낮은 순. 포지션 최소 인원 아래로 내려가게 하는 선수는 건너뛰어 맨 뒤에 둔다.
+ * 나머지는 가치가 낮은 순 (AI 구단은 앞으로 8시즌 가치, 플레이어 구단은 우리 스카우트 가치). 포지션 최소 인원 아래로 내려가게 하는 선수는 건너뛰어 맨 뒤에 둔다.
  */
 export function releaseOrder(league: LeagueState, off: OffseasonState, view: LeagueView, team: number,
-                             valueOf: (p: LeaguePlayer) => number = (p) => releaseValue(view, p)): LeaguePlayer[] {
+                             valueOf: (p: LeaguePlayer) => number = defaultReleaseValue(league, off, view, team)): LeaguePlayer[] {
   const { order, kept } = releaseSplit(league, off, view, team, valueOf);
   return [...order, ...kept];
 }
 
 /** releaseOrder를 둘로: order = 최소 인원을 지키며 차례로 내보낼 수 있는 선수, kept = 최소 인원 때문에 뒤로 미룬 선수 */
 export function releaseSplit(league: LeagueState, off: OffseasonState, view: LeagueView, team: number,
-                             valueOf: (p: LeaguePlayer) => number = (p) => releaseValue(view, p)): { order: LeaguePlayer[]; kept: LeaguePlayer[] } {
+                             valueOf: (p: LeaguePlayer) => number = defaultReleaseValue(league, off, view, team)): { order: LeaguePlayer[]; kept: LeaguePlayer[] } {
   // 육성선수는 정원에 들지 않으므로 방출 순서에서 뺀다
   const roster = league.players.filter((p) => p.team === team && !isServing(p) && !p.dev);
   const left = {
@@ -2526,6 +2526,23 @@ export function releaseSplit(league: LeagueState, off: OffseasonState, view: Lea
 /** 방출 판단의 가치: 앞으로 8시즌 (RELEASE_WEIGHTS). AI가 보는 잠재력(view.ctx.potential)으로 성장을 내다본다 */
 export function releaseValue(view: LeagueView, p: LeaguePlayer): number {
   return playerValue(view.sim.get(p.id)!, view.ctx, RELEASE_WEIGHTS);
+}
+
+/**
+ * 플레이어 구단의 방출 가치: 우리 스카우트 가치 (scout.ts seenValue = 추측 지금 + 추측 격차 × 나이 몫, 다음 시즌 기준).
+ * 정원 정리 화면의 순서·'방출 대상'과 자동 방출이 이것을 따른다 (진짜 8시즌 가치로 줄 세우면 숨은 잠재가 드러난다, 2026-10-25 클사장 결정)
+ */
+export function userReleaseValue(league: LeagueState, off: OffseasonState, view: LeagueView, p: LeaguePlayer): number {
+  const sp = view.sim.get(p.id);
+  const year = off.year + 1;
+  const seen = seenFor(league, off.userTeam, p.id, p, sp?.bat?.sample ?? sp?.pit?.sample ?? 0, true);
+  const ageNext = p.birthYear ? year - p.birthYear : 25;
+  return seenValue(league, { team: off.userTeam, user: true }, seen, sp ? currentRuns(sp, view.ctx) : 0, p.potential, ageNext, year);
+}
+
+/** 방출 순서의 기본 가치: 플레이어 구단은 우리 스카우트 가치, AI 구단은 releaseValue (aiPotential 길) */
+function defaultReleaseValue(league: LeagueState, off: OffseasonState, view: LeagueView, team: number): (p: LeaguePlayer) => number {
+  return team === off.userTeam ? (p) => userReleaseValue(league, off, view, p) : (p) => releaseValue(view, p);
 }
 
 function enterRelease(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {

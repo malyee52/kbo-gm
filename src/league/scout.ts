@@ -299,7 +299,33 @@ export function seenGrade(league: LeagueState, who: Observer, p: Seen, key: stri
  * 신인(amateur)은 천장 추측 폭 σ_천장. 32세부터는 없음
  */
 export function seenPhrase(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, ageNext: number, year: number): string | null {
+  return gapPhrase(seenGap(league, who, p, nowRuns, potential, year), ageNext);
+}
+
+/** 추측 격차 (등급, 0 이상): 진짜 천장 − 지금 격차 + z × σ. 문구와 스카우트 가치가 같은 값을 쓴다 */
+function seenGap(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, year: number): number {
   const s = p.amateur ? ceilingSigma(league, who) : seenSigma(league, who, p, 'clear');
-  const gap = runsGradeRaw(Math.max(nowRuns, potential), year) - runsGradeRaw(nowRuns, year) + scoutZ(league.seed, who, p.id, 'gap') * s;
-  return gapPhrase(Math.max(0, gap), ageNext);
+  return Math.max(0, runsGradeRaw(Math.max(nowRuns, potential), year) - runsGradeRaw(nowRuns, year) + scoutZ(league.seed, who, p.id, 'gap') * s);
+}
+
+/**
+ * 우리 스카우트 가치 (런, 추측): 추측 지금 + 추측 격차 × 나이 몫 (드래프트 보드와 같은 꼴, boardGapShare). 격차는 문구와 같은 추측이고,
+ * 문구가 없는 나이(32세부터)는 격차를 보지 않는다. 플레이어 구단의 자동 방출 순서·이벤트가 고르는 유망주 순서에 쓴다 (진짜 잠재 대신)
+ */
+export function seenValue(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, ageNext: number, year: number): number {
+  const now = guessRuns(league, who, p.id, nowRuns, seenSigma(league, who, p, 'clear'), year);
+  if (ageNext > PHRASE_MAX_AGE) return now;
+  return now + seenGap(league, who, p, nowRuns, potential, year) * runsPerGrade(year) * boardGapShare(ageNext);
+}
+
+/**
+ * 보는 구단이 보는 선수 정보 (Seen): sample = 그 시점 능력 산출 표본, mine = 지금 보는 구단 소속인가.
+ * 우리 구단에서 보낸 시즌 = 게임 안 이력 + 게임 시작 전 실제 기록의 같은 계보 시즌 (stadium.ts 프랜차이즈 판정과 같은 셈)
+ */
+export function seenFor(league: LeagueState, team: number, id: string, lp: LeaguePlayer | undefined, sample: number, mine: boolean): Seen {
+  const t = league.teams[team];
+  const seasonsWithUs = mine ? (lp?.history ?? []).filter((h) => h.team === t?.name && (h.bat || h.pit)).length
+    + (lp?.tenure0 && lp.tenure0.franchise === t?.franchise ? lp.tenure0.seasons : 0) : null;
+  const amateur = !!lp && !lp.foreign && !lp.history.some((h) => h.bat || h.pit);
+  return { id, sample, seasonsWithUs, ...(amateur ? { amateur } : {}) };
 }

@@ -4,7 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
-import { GUESS_SET, guessMid, guessRuns, seenGrade, seenPhrase, seenSigma, type GuessSet, type GuessView, type Seen } from '../league/scout';
+import { GUESS_SET, guessMid, guessRuns, seenFor, seenGrade, seenPhrase, seenSigma, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
@@ -1199,12 +1199,7 @@ export class GameSession {
     const sim = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : this.offView().sim.get(id);
     const sample = sim?.bat?.sample ?? sim?.pit?.sample ?? 0;
     const mine = this.phase === 'season' ? sim?.teamIdx === this.teamIdx : lp?.team === this.teamIdx;
-    // 우리 구단에서 보낸 시즌: 게임 안 이력 + 게임 시작 전 실제 기록의 같은 계보 시즌 (stadium.ts 프랜차이즈 판정과 같은 셈)
-    const t = this.league.teams[this.teamIdx];
-    const seasonsWithUs = mine ? (lp?.history ?? []).filter((h) => h.team === t?.name && (h.bat || h.pit)).length
-      + (lp?.tenure0 && lp.tenure0.franchise === t?.franchise ? lp.tenure0.seasons : 0) : null;
-    const amateur = !!lp && !lp.foreign && !lp.history.some((h) => h.bat || h.pit);
-    return { id, sample, seasonsWithUs, ...(amateur ? { amateur } : {}) };
+    return seenFor(this.league, this.teamIdx, id, lp, sample, mine);
   }
 
   /** 우리 스카우트 팀이 보는 화면 갈래 등급 (key = contact·power·stuff 등, grade = 진짜 화면 등급) */
@@ -1284,6 +1279,18 @@ export class GameSession {
 
   /** 스카우트 보고 문구 (천장까지 격차 4단계, 틀릴 수 있다. 32세부터 없음) */
   scoutPhrase(id: string): string | null {
+    const a = this.scoutArgs(id);
+    return a && seenPhrase(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), a.now, a.potential, a.ageNext, a.year);
+  }
+
+  /** 우리 스카우트 가치 (런, 추측 지금 + 추측 격차 × 나이 몫, 드래프트 보드 꼴). 이벤트가 고르는 유망주 순서 (진짜 잠재 대신) */
+  seenValue(id: string): number {
+    const a = this.scoutArgs(id);
+    return a ? seenValue(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), a.now, a.potential, a.ageNext, a.year) : 0;
+  }
+
+  /** 스카우트 보고·가치의 재료: 진짜 지금 기여(시즌 중 지금 시즌, 오프시즌 다음 시즌), 천장, 다음 시즌 나이, 등급 눈금의 해 */
+  private scoutArgs(id: string): { now: number; potential: number; ageNext: number; year: number } | null {
     const lp = this.leaguePlayer(id);
     if (!lp) return null;
     const off = this.phase !== 'season';
@@ -1291,7 +1298,7 @@ export class GameSession {
     const sim = off ? null : this.world.players.find((p) => p.id === id);
     const now = off ? this.nextRuns(id) : sim ? currentRuns(sim, this.values) : 0;
     const ageNext = lp.birthYear ? year + (off ? 0 : 1) - lp.birthYear : 25;
-    return seenPhrase(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), now, lp.potential, ageNext, year);
+    return { now, potential: lp.potential, ageNext, year };
   }
 
   // ---- 판타지 모드 (src/fantasy, docs/fantasy-mode.md)
@@ -2144,6 +2151,7 @@ export class GameSession {
       addTrust: (d) => { const o = this.owner; o.trust = Math.max(0, Math.min(100, o.trust + d)); },
       addFill: (fill, days, note) => { ensureEvents(L).buffs.push({ team, year, from: day, until: day + days, fill, note }); },
       addFans: (delta, note) => addFanEvent(L, team, year, day, delta, note),
+      seenValue: (p) => this.seenValue(p.id),
       addPotential: (id, delta) => { const p = L.players.find((x) => x.id === id && x.team === team); if (p) p.potential += delta; },
       // ---- 경기에 영향을 주는 도구
       players: this.team.org.map((p) => {

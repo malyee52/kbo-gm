@@ -1278,7 +1278,7 @@ function ReleasePanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>정원 정리 <span className="muted small">소속 선수 {mine.length}/{ruleOf(session.league, 'orgLimit')}명</span></h2>
         <p className="muted small">
-          방출은 되돌릴 수 없고, 방출한 선수는 다른 구단이 데려갈 수 있습니다. 자동 방출 순서대로 늘어놓았습니다: 앞으로 8시즌 가치(잠재력·나이 반영)가 낮은 순,
+          방출은 되돌릴 수 없고, 방출한 선수는 다른 구단이 데려갈 수 있습니다. 자동 방출 순서대로 늘어놓았습니다: 우리 스카우트 평가(지금 능력 추측 + 성장 여지 추측, 나이 반영)가 낮은 순,
           입단 {Off.ROOKIE_GRACE}년 안의 신인은 뒤로. 포수 {Off.MIN_CATCHERS}명·투수 {Off.MIN_PITCHERS}명·야수 {Off.MIN_HITTERS}명 아래로 내려가게 하는 선수는 맨 뒤로 미룹니다.
           {serving ? ` 복무 중 ${serving}명은 정원에 들지 않아 여기 없습니다.` : ''}
         </p>

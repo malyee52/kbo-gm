@@ -9,7 +9,7 @@
 
 import { Rng } from '../engine';
 import type { LeaguePlayer, LeagueState } from './types';
-import { EXTRA_EVENTS } from './events-extra';
+import { EXTRA_EVENTS, prospects } from './events-extra';
 
 /** 하루 확률의 처음 값, 하루마다 오르는 폭, 최대 */
 // 2026-10-12 이벤트를 127종으로 늘리며 조금 잦게 (한 시즌 무작위 이벤트 약 10 → 14번, 임시값)
@@ -115,6 +115,8 @@ export interface EventContext {
   cash: number;
   /** 우리 구단 선수 (개막 때 리그 상태 기준) */
   roster: LeaguePlayer[];
+  /** 우리 스카우트 가치 (런, 추측 지금 + 추측 격차 × 나이 몫, scout.ts seenValue). 유망주를 고르는 순서 (진짜 잠재는 보지 않는다) */
+  seenValue(p: LeaguePlayer): number;
   addCash(amount: number, note: string): void;
   addTrust(delta: number): void;
   addFill(fill: number, days: number, note: string): void;
@@ -203,12 +205,6 @@ function bullpenTired(c: EventContext): boolean {
   return c.players.filter((p) => p.isPitcher && !p.starter).reduce((s, p) => s + p.fatigue, 0) >= 125;
 }
 const num = (v: PendingEvent['vars'], k: string) => Number(v[k]);
-
-/** 2군 유망주 (24세 이하, 잠재력 높은 순) */
-function prospects(c: EventContext): LeaguePlayer[] {
-  return c.roster.filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving')
-    .sort((a, b) => b.potential - a.potential || a.id.localeCompare(b.id));
-}
 
 export const EVENTS: EventDef[] = [
   {
