@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, worldForYear } from '../src/engine';
 import { GameSession, type GameSave } from '../src/game/session';
 import { isServing } from '../src/league/careers';
-import { createLeague, openingForeigners } from '../src/league/create';
+import { createLeague, openingForeigners, openingTeamMoves } from '../src/league/create';
 import * as Off from '../src/league/offseason';
 import {
   ASIA_NEW_CAP, COMPENSATION, FA_COMP, faEligible, faGrade, foreignContractTotal, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, foreignTeamCap, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
@@ -65,7 +65,11 @@ describe('리그 상태 만들기', () => {
     expect(world.players.some((p) => p.name === '박병호')).toBe(false);
     // 1군 기록 없는 2026 신인(d2026-)은 따로 더해진다 (다음 테스트)
     const recorded = world.players.filter((p) => !p.id.startsWith('d2026-') && p.teamIdx >= 0);
-    expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${p.teamIdx}`));
+    // 시즌 중 이적한 개막 외국인(2026 데이비슨: 개막 NC, 기록 키움)은 개막 구단에서 시작한다
+    const moves = openingTeamMoves(store, 2026);
+    const teamOf = new Map(ref.teams.map((t) => [t.name, t.idx]));
+    expect(moves.get('54944')).toBe('NC');
+    expect(recorded.map((p) => `${p.id}@${p.teamIdx}`)).toEqual(kept.map((p) => `${p.id}@${moves.has(p.id) ? teamOf.get(moves.get(p.id)!) : p.teamIdx}`));
     expect(recorded.map((p) => p.value)).toEqual(kept.map((p) => p.value));
     expect(ref.players.length - recorded.length).toBeGreaterThan(20);
   });
@@ -100,7 +104,9 @@ describe('리그 상태 만들기', () => {
     }
     expect(league.players.filter((p) => p.asia).length).toBeGreaterThanOrEqual(9);
     const ssg = league.teams.findIndex((t) => t.name === 'SSG');
-    expect(league.players.find((p) => p.name === '아빌라')?.team).toBe(ssg);
+    // 나무위키 계약표의 개막 선수 미치 화이트(55855)는 SSG, 출전량 추정으로 넣었던 아빌라는 시즌 중 교체 선수라 시장 후보
+    expect(league.players.find((p) => p.id === '55855')?.team).toBe(ssg);
+    expect(league.players.find((p) => p.name === '아빌라')?.team).toBe(-1);
   });
 
   it('잠재력은 지금 능력 이상이고, 같은 시드면 같다', () => {

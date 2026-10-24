@@ -192,8 +192,9 @@ export interface Meta {
    * 시작 연도 개막 때 구단별 외국인 (연도 → 구단 이름 → 선수). data-src/외국인_개막명단.csv에서 만든다.
    * 그 해 기록에는 시즌 중 교체된 외국인까지 있어서, 새 게임은 이 명단에 있는 외국인만 넣는다. 없는 해는 기록 그대로.
    * salary·bonus: 실제 계약 연봉·계약금 (달러, 있는 선수만, source = 출처). 시작 계약에 그대로 쓴다
+   * recordTeam: 시즌 중 이적해 그 해 기록 소속이 개막 구단과 다른 선수의 기록 소속 (예: 2026 데이비슨, 개막 NC → 기록 키움).
    */
-  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean; salary?: number; bonus?: number; source?: string }[]>>;
+  foreignOpening?: Record<string, Record<string, { id: string; asia: boolean; confirmed: boolean; recordTeam?: string; salary?: number; bonus?: number; source?: string }[]>>;
   /**
    * 연도별 특별 엔트리 선수 id (은퇴식 등으로 하루 1군에 등록된 선수. tools/build_data.py의 규칙으로 고른 값).
    * 새 게임은 시작 연도 명단의 선수를 리그에 넣지 않는다.
@@ -293,6 +294,72 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 연도별 정규시즌 일정 규칙 (schedule.json, data-src/일정규칙.csv, 일정 개편 기획안 2장). 한 해 규칙은 data/schedule.ts의 scheduleRule로 읽는다 */
+  schedule?: ScheduleData;
+}
+
+/** 그 해 안의 날짜 'MM-DD' */
+export type MonthDay = string;
+
+/** 자료 없는 해의 날짜 규칙: from~to 구간에 있는 그 요일 (weekday는 Date.getDay 순서, 0 = 일요일) */
+export interface WeekdayRule {
+  weekday: number;
+  from: MonthDay;
+  to: MonthDay;
+}
+
+/** 연전 틀 코드 (일정 개편 기획안 2.1) */
+export type ScheduleFrame = 'W82' | 'W83' | 'T3W2' | 'S2' | 'S33' | 'S33-99' | 'S33-9' | 'S33L2' | 'S33F';
+/** 순연 규칙 코드 (일정 개편 기획안 4.3) */
+export type PostponeRule = 'R1' | 'R2' | 'R3' | 'R3c' | 'R4' | 'R5';
+
+/** schedule.json 한 줄 (tools/build_data.py build_schedule). 날짜는 'MM-DD', 자료 없는 해 줄은 opening·allStar가 WeekdayRule */
+export interface ScheduleRuleRow {
+  /** 구단 수 (검사용). 자료 없는 해 줄에는 없다 (월드의 구단 수를 쓴다) */
+  teams?: number;
+  games: number;
+  /** 상대별 경기 수. 양대 리그 해는 같은 리그 상대 */
+  vs: number;
+  /** 양대 리그 해의 다른 리그 상대별 경기 수 (1999) */
+  vsOther?: number;
+  frame: ScheduleFrame;
+  opening: MonthDay | WeekdayRule;
+  /** 실제 정규시즌 종료일 (견줄 참고값, 출처가 갈리면 endRef2도) */
+  endRef?: MonthDay;
+  endRef2?: MonthDay;
+  /** 정규시즌 경기가 없는 기간 (올스타·전후기 사이·국제대회·코로나) */
+  breaks: { from: MonthDay; to: MonthDay; reason: string }[];
+  /** 게임의 올스타전 날 (모든 해 1경기). 없으면 그 해 올스타전 없음 */
+  allStar?: MonthDay | WeekdayRule;
+  /** 자료 없는 해: 올스타 휴식 = 올스타 날 + [앞, 뒤] 날 */
+  allStarBreak?: [number, number];
+  /** 실제 올스타전 경기 수 (개막 알림 "게임은 단순화" 문구용, 0 = 미개최) */
+  allStarGamesReal: number;
+  /** 가을야구 시작일 (1988만, 없으면 정규시즌 끝 + 3일) */
+  postseasonStart?: MonthDay;
+  postpone: PostponeRule;
+  /** 더블헤더를 두지 않는 기간 */
+  dhBan: { from: MonthDay; to: MonthDay }[];
+  /** 개막 때 편성하지 않고 잔여 경기로 미루는 팀당 경기 수 */
+  unscheduled: number;
+  /** 잔여 경기 일정 발표일 (2015~, 임시값) */
+  remainingFrom?: MonthDay;
+  /** 2연전기 시작: 'allStar' = 올스타 휴식 뒤 (S33-99), 'MM-DD' = 그날부터 (S33L2, 해마다 실제 날짜) */
+  twoGameFrom?: 'allStar' | MonthDay;
+  /** 2연전기 마지막 날 (그 뒤 다시 3연전, 2020). 없으면 본 일정 끝까지 */
+  twoGameTo?: MonthDay;
+  /** 경기 중 비 규칙 코드 (C5 = 5회 성립, 일정 개편 기획안 4.7) */
+  rainMid: string;
+  /** 확인 상태: 확인·조사값·출처 갈림·미확인·임시값 */
+  status: string;
+  /** 자료 없는 해 줄: 이 해부터 */
+  from?: number;
+}
+
+/** schedule.json */
+export interface ScheduleData {
+  years: Record<string, ScheduleRuleRow>;
+  future: ScheduleRuleRow;
 }
 
 /** 규칙 변경 자료 (tools/build_data.py build_rule_changes, data-src/규칙변경.csv·공인구.csv) */

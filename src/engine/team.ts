@@ -646,5 +646,14 @@ export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, par
     if (p === ts.closer || currentFatigue(st, p.idx, day) > 0) continue;
     if (!spot || p.pit!.reliefStint > spot.pit!.reliefStint) spot = p;
   }
-  return spot ?? ts.rotation[0] ?? ts.bullpen[0];
+  if (spot) return spot;
+  // 모두 지쳤으면 로테이션 첫 투수. 다만 더블헤더 1차전에 이미 선발로 나왔으면 가장 오래 쉰 다른 로테이션 투수
+  // (노게임 다시 편성으로 일정이 몰린 날 2차전에서 같은 선발이 또 나오던 것, 일정 개편 10단계)
+  const first = ts.rotation[0];
+  if (first && st.lastStartDay[first.idx] === day) {
+    let other: SimPlayer | null = null;
+    for (const p of ts.rotation) if (st.lastStartDay[p.idx] !== day && (!other || st.lastStartDay[p.idx] < st.lastStartDay[other.idx])) other = p;
+    if (other) return other;
+  }
+  return first ?? ts.bullpen[0];
 }

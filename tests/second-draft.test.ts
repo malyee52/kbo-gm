@@ -28,8 +28,20 @@ describe('2차 드래프트', () => {
   });
 
   it('2025: 보호 35명, 우리 명단을 고치고 지명 희망대로 데려온다. 자동 제외 대상은 지명되지 않고, 양도금이 장부에 남는다', () => {
-    // 시드는 양도금 낸 미계약 FA 지명이 있는 판 (2026-10-22 엔진 2 포지션 2안 때 sd-3 → sd-4)
-    const g = toSecond(2025, 'sd-4');
+    // 양도금은 미계약 FA를 원 소속이 아닌 구단이 지명할 때만 생긴다 (원 소속이 다시 데려가면 없음). 어느 시드에서 그런 지명이 나오는지는
+    // 시즌 결과·FA 시장에 달려 엔진·일정이 바뀔 때마다 옮겨 다녔다 (sd-3 → sd-4 → 2026-10-23 일정 개편 7단계 뒤 sd-4는 둘 다 원 소속이 지명).
+    // 그래서 시드 몇 개를 차례로 보고, 모든 시드에서 규칙을 확인하며 양도금 지명이 나온 시드에서 멈춘다
+    let faFees = 0;
+    for (const seed of ['sd-4', 'sd-1', 'sd-2']) {
+      faFees += secondDraftChecks(seed);
+      if (faFees > 0) break;
+    }
+    expect(faFees).toBeGreaterThan(0);
+  }, 900_000);
+
+  /** 2025 2차 드래프트 한 판을 확인하고 양도금 낸 미계약 FA 지명 수를 돌려준다 */
+  function secondDraftChecks(seed: string): number {
+    const g = toSecond(2025, seed);
     const off = g.offseason!;
     expect(off.stage).toBe('second');
     const d = off.second!;
@@ -47,6 +59,8 @@ describe('2차 드래프트', () => {
     const want = cands.find((p) => p.team >= 0)!;
     expect(g.setDraftWish('second', [want.id]).ok).toBe(true);
     const ledger = g.league.ledger.length;
+    // 미계약 FA의 원 소속 (지명되면 무적 표시가 지워진다)
+    const origin = new Map(Off.unsignedFas(g.league, off).map((p) => [p.id, p.freeAgent?.from ?? -1]));
     g.nextStage();
     expect(off.stage).not.toBe('second');
     const picks = d.picks!;
@@ -62,6 +76,8 @@ describe('2차 드래프트', () => {
       if (k.from! < 0) {
         // 계약하지 못한 FA: 최저 연봉, 무적 표시가 지워진다. 양도금은 그 라운드 값을 원 소속 구단에 (2026-10-21, 예전에는 양도금 없음)
         expect(p.freeAgent).toBeUndefined();
+        const o = origin.get(p.id) ?? -1;
+        expect(k.origin, `${seed} ${p.name}`).toBe(o >= 0 && o !== k.team ? o : undefined);
         if (k.origin !== undefined) {
           expect(k.origin).not.toBe(k.team);
           expect(g.league.ledger.some((e) => e.from === k.team && e.to === k.origin && e.amount === k.fee && e.note.includes(p.name))).toBe(true);
@@ -75,8 +91,8 @@ describe('2차 드래프트', () => {
       lost.set(k.from!, (lost.get(k.from!) ?? 0) + 1);
     }
     for (const n of lost.values()) expect(n).toBeLessThanOrEqual(Off.SECOND_MAX_LOSS);
-    expect(faFees).toBeGreaterThan(0);
-  }, 600_000);
+    return faFees;
+  }
 
   it('2026 시즌 뒤에는 열리지 않는다 (짝수 해)', () => {
     const g = toSecond(2026, 'sd-2');

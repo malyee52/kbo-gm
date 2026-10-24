@@ -73,7 +73,7 @@ describe('경기별 난수 줄기', () => {
   it('경기 난수는 날짜와 대진으로만 정해진다 (저장에 경기 난수 위치가 없다)', () => {
     const s = Season.start(world, FAST, 'rng-key', { cal });
     const save = s.toSave() as SeasonSave & { rngGames?: number };
-    expect(save.format).toBe(2);
+    expect(save.format).toBe(3);
     expect(save.rngGames).toBeUndefined();
     const g = s.schedule[0][0];
     expect(s.gameRng(0, g).next()).toBe(s.gameRng(0, g).next());

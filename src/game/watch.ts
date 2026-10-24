@@ -108,7 +108,7 @@ export interface WatchNewsCtx extends WatchCtx {
   deadline: { month: number; date: number };
 }
 
-const subj = (name: string) => `관심 선수 ${name}${josa(name, '가이')}`;
+const subj = (name: string) => `관심 선수 ${name}${josa(name, '이가')}`;
 
 /** 담은 선수에게 지금 참인 일 */
 export function watchSignals(c: WatchNewsCtx, id: string, name: string): WatchSignal[] {
@@ -152,7 +152,7 @@ export function watchSignals(c: WatchNewsCtx, id: string, name: string): WatchSi
     if (wp && c.tradeOpen && wp.teamIdx >= 0 && wp.teamIdx !== c.userTeam && !wp.foreign && lp.noTradeYear !== c.year) {
       const t = teamName(wp.teamIdx);
       out.push({ key: `trade:${c.year}:${wp.teamIdx}`, kind: 'trade', teamName: t,
-        text: `관심 선수 ${name}${josa(name, '를을')} 트레이드로 데려올 수 있습니다 (${t}, 마감 ${c.deadline.month}월 ${c.deadline.date}일).` });
+        text: `관심 선수 ${name}${josa(name, '을를')} 트레이드로 데려올 수 있습니다 (${t}, 마감 ${c.deadline.month}월 ${c.deadline.date}일).` });
     }
   }
   return out;

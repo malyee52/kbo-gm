@@ -91,8 +91,8 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
           <table>
             <thead><tr><th className="l">시리즈</th><th className="l">대진</th><th>결과</th><th className="l">경기</th></tr></thead>
             <tbody>
-              {ps.series.map((x) => (
-                <tr key={x.round} className={x.high === me || x.low === me ? 'me' : ''}>
+              {ps.series.map((x, i) => (
+                <tr key={i} className={x.high === me || x.low === me ? 'me' : ''}>
                   <td className="l">{ROUND_LABEL[x.round]}</td>
                   <td className="l">{name(x.high)} vs {name(x.low)}</td>
                   <td>{x.winsHigh} - {x.winsLow}{x.round === 'wc' ? ' *' : ''} → {name(x.winner)}</td>
@@ -196,12 +196,14 @@ function OwnerCard() {
       {o.goal && (
         <p>
           {o.goal.year} 시즌 목표: <strong>{GOAL_LABEL[o.goal.kind]}</strong>
-          <span className="muted small"> (개막 때 전력 예상 {o.goal.projectedRank}위)</span>
+          <span className="muted small"> (개막 때 전력 예상 {o.goal.projectedLeague ? `${o.goal.projectedLeague} ` : ''}{o.goal.projectedRank}위)</span>
         </p>
       )}
       <p className="muted small">
-        목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.
-        달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
+        {session.world.divisions
+          ? <>목표는 개막 때 리그 안 전력 예상 순위로 정합니다 (양대 리그): 리그 1위는 한국시리즈 우승, 2~3위는 가을야구 진출, 그 아래는 탈꼴찌. 가을야구는 실제 진출(리그 1·2위, 준플레이오프 조건을 채운 3위), 꼴찌는 통합 순위로 봅니다.</>
+          : <>목표는 개막 때 전력 예상 순위로 정합니다: 예상 1~2위는 한국시리즈 우승, 3~{session.world.rules.postseasonTeams + 1}위는 가을야구 진출, 그 아래는 탈꼴찌.</>}
+        {' '}달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
       </p>
       <p className="muted small">난이도: {settingsLabel(L)}</p>
     </div>

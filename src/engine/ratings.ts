@@ -7,7 +7,9 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward, PpaData } from '../data/types';
+import type { DefenseAward, PpaData, ScheduleData } from '../data/types';
+import { divisionsOf, scheduleRule } from '../data/schedule';
+import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
 import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
@@ -269,6 +271,8 @@ export interface BuildWorldInput {
   defenseAwards?: Record<string, DefenseAward[]>;
   /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
+  schedule?: ScheduleData;
 }
 
 /**
@@ -507,6 +511,12 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  // 일정 규칙과 개막 홈 구단 (지난 시즌 자료의 순위, 일정 개편 기획안 2.2)
+  const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
+  const franchises = teams.map((t) => t.franchise);
+  const hosts = pickOpeningHosts(year, rankedFromSeason(history[0], franchises), franchises);
+  // 양대 리그 나눔 (1999·2000, 그 해 시즌 자료의 league 칸)
+  const divisions = divisionsOf(current, franchises);
   return {
     year,
     gamesPerTeam: current.games,
@@ -515,6 +525,9 @@ export function buildWorld(input: BuildWorldInput): World {
     env: leagueEnvFor(current.league, params, year),
     teams,
     players,
+    ...(rule ? { schedule: rule } : {}),
+    ...(hosts ? { openingHosts: hosts } : {}),
+    ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
 }
 

@@ -9,10 +9,30 @@ import { RULE_DEFAULTS, ruleOf } from './rules';
 import { seasonsWith } from './stadium';
 import { futureValue } from './futureRules';
 
-/** 최저 연봉: 2021년부터 3,000만 원 (출처 확인) */
+/** 최저 연봉: 2021년부터 3,000만 원 (출처 확인). 2026년 물가 그대로라 2021년 이후 내부 값과 같다. 규정은 그 해 값 minSalary(year)를 쓴다 */
 export const MIN_SALARY = 3000;
 
-/** 샐러리캡 (만 원). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1). 미래 규칙 변경 ②가 상향률을 바꿀 수 있다 */
+/**
+ * 연도별 최저 연봉 (그 해 명목 금액, 만 원). data-src/제도연표_보정.csv 44 (나무위키 선수 문서 주석·KBO 규약).
+ * 2010 2,400만·2015 2,700만·2021 3,000만은 원문 문장으로 확인했고, 1982 600만·1988 840만·2000 1,500만·2005 2,000만은 위키 조사 요약에서,
+ * 1991 1,000만·1996 1,200만은 "1990년대 초·후반"이라 해가 임시값이다.
+ * 게임 규정은 minSalary(year)로 쓴다 (2026-10-23 결정: 내부 연봉은 2026년 물가라 옛 시대 최저 연봉이 3,000만보다 커진다, 1982년 600만 ÷ 물가 0.08 = 7,500만).
+ */
+export const MIN_SALARY_HISTORY: [number, number][] = [
+  [1982, 600], [1988, 840], [1991, 1000], [1996, 1200], [2000, 1500], [2005, 2000], [2010, 2400], [2015, 2700], [2021, 3000],
+];
+/** 그 해 명목 최저 연봉 (만 원) */
+export function minSalaryNominal(year: number): number {
+  let v = MIN_SALARY_HISTORY[0][1];
+  for (const [y, won] of MIN_SALARY_HISTORY) if (year >= y) v = won;
+  return v;
+}
+
+/**
+ * 샐러리캡 (만 원). 2023~2024 114억 2,638만, 2025 137억 1,165만(2024-08-02 20% 상향, 이름 '경쟁균형세')은 출처 확인
+ * (나무위키 샐러리캡/KBO 리그, data-src/제도연표_보정.csv 34). 2026~2028은 발표값(출처 확인), 이후는 매년 5% 상향 (기획서 4.1).
+ * 미래 규칙 변경 ②가 상향률을 바꿀 수 있다
+ */
 const CAP: Record<number, number> = { 2023: 1142638, 2024: 1142638, 2025: 1371165, 2026: 1439723, 2027: 1511709, 2028: 1587294 };
 export function salaryCap(year: number, league?: Pick<LeagueState, 'rules' | 'ruleShifts'>): number | null {
   if (year < 2023) return null;
@@ -69,8 +89,14 @@ export function ruleStepIndex(year: number, league?: Pick<LeagueState, 'ruleShif
   return s === null ? 1 : wageIndex(s, league);
 }
 
-/** 그 해 최저 연봉 (만 원): MIN_SALARY × 규정 인상 배율, 100만 원 단위 반올림. 연봉 하한 검사는 계약이 시작되는 해 값을 쓴다 */
+/**
+ * 그 해 최저 연봉 (내부 값, 2026년 물가 만 원). 연봉 하한 검사는 계약이 시작되는 해 값을 쓴다 (오프시즌 계약은 다음 해).
+ * - 2026년까지: 명목 최저 연봉(MIN_SALARY_HISTORY) ÷ 물가 계수, 10만 원 단위.
+ *   1982 7,500만 · 1990 6,000만 · 2000 5,000만 · 2010 4,290만 · 2015 3,750만 · 2020 2,900만 · 2026 3,000만. 물가 계수가 임시값이라 내부 값도 임시값이다
+ * - 2027년부터: MIN_SALARY × 규정 인상 배율(ruleStepIndex, 2030·2034… 계단식), 100만 원 단위
+ */
 export function minSalary(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  if (year <= RULE_STEP_BASE) return Math.round(minSalaryNominal(year) / priceIndex(year) / 10) * 10;
   return Math.round((MIN_SALARY * ruleStepIndex(year, league)) / 100) * 100;
 }
 
@@ -204,10 +230,13 @@ export function runsForSalary(salary: number, wage = 1): number {
   return (Math.max(0, salary) / (1200 * wage)) ** (1 / 1.31);
 }
 
-/** 보류 선수(FA 전) 연봉 목표: 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음). wage = 연봉 상승 지수 */
-export function reserveTarget(runs: number, service: number, wage = 1): number {
+/**
+ * 보류 선수(FA 전) 연봉 목표: 그 해 최저 연봉 + 연차에 따른 기본분 + 기여에 따른 몫 (임시값. 연도별 평균 연봉 자료 없음).
+ * wage = 연봉 상승 지수, floor = 계약 시작 해의 최저 연봉(minSalary). 바탕은 최저 연봉과 MIN_SALARY × wage 중 큰 값
+ */
+export function reserveTarget(runs: number, service: number, wage = 1, floor = MIN_SALARY): number {
   const seniority = Math.min(1.2, 0.4 + 0.12 * service);
-  return Math.round((MIN_SALARY + SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority) * wage);
+  return Math.round(Math.max(floor, MIN_SALARY * wage) + (SENIORITY_PAY * Math.min(12, service) + RUN_PAY * Math.max(0, runs) ** 1.3 * seniority) * wage);
 }
 
 const SENIORITY_PAY = 900;
@@ -233,7 +262,7 @@ export function faYears(age: number): number {
 /** 런을 돈으로 바꾸는 시장 단가 (만 원/런, 임시값). 시장 연봉식의 주전급 기울기 근처 */
 export const WON_PER_RUN = 4500;
 
-/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (임시값) */
+/** FA 자격 연한: 고졸 8년·대졸 7년 (2022년 시즌 뒤부터, 출처 확인). 그 전 시대는 eras.ts의 faServiceNeeded (1999~2000 고졸 10·대졸 9 출처 확인, 2001~2021 임시값) */
 export function serviceNeeded(school: School | null, entryYear: number, birthYear: number | null, year = 2022): number {
   const s = school ?? (birthYear && entryYear - birthYear >= 22 ? 'UNIV' : 'HS');
   return faServiceNeeded(year, s === 'UNIV');

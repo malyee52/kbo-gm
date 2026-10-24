@@ -6,6 +6,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { TENDENCY_LABEL } from '../../ai/trade';
 import type { SimPlayer } from '../../engine';
 import { formatDate, shortDate } from '../../game/calendar';
+import { rankText } from '../../game/rank';
 import { type ShopOffer, type ShopWant } from '../../game/session';
 import { avg, era, fixed2, ipText, obp, ops, rate3, whip } from '../../game/stats';
 import { Grade, PlayerLink, Pos, TeamLink, TeamName, useGame, usePriceIndex, useWon } from '../context';
@@ -350,7 +351,8 @@ function Offer() {
     () => new Map(others.map((t) => {
       const sit = session.situation(t.idx);
       const early = session.season.teams[t.idx].g < 20;
-      return [t.idx, { tendency: session.tendency(t.idx), rank: `${early ? '전력 ' : ''}${sit.rank}위` }];
+      // 양대 리그 해(1999·2000)는 리그 순위 ("드림 2위", game/rank.ts). 전력 순위는 통합
+      return [t.idx, { tendency: session.tendency(t.idx), rank: early ? `전력 ${sit.rank}위` : rankText(session, t.idx) }];
     })),
     [session, version], // eslint-disable-line react-hooks/exhaustive-deps
   );

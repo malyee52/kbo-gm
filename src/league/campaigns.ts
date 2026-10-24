@@ -92,7 +92,17 @@ const rank = (n: number): Metric => ({ k: 'rank', n });
 const pct = (v: number): Metric => ({ k: 'pct', v });
 const home = (n: number): Metric => ({ k: 'home', n });
 
-function metricText(m: Metric): string {
+/** 양대 리그 해 (시즌 자료의 league 칸이 두 가지인 해, 일정 개편 기획안 10.2). 문구용: 캠페인 순위 목표는 이 해에도 통합 승률 순위로 판정한다 (기획안 10.6) */
+const TWO_LEAGUE_YEARS = [1999, 2000];
+
+/** 목표 문구. from~to = 그 목표의 해 (주면 양대 리그 해의 순위 목표에 "통합"을 붙인다) */
+function metricText(m: Metric, from?: number, to = from): string {
+  if (m.k === 'rank' && from !== undefined) {
+    const two = TWO_LEAGUE_YEARS.filter((y) => y >= from && y <= to!);
+    const base = metricText(m);
+    if (two.length) return from === to ? base.replace('정규시즌 ', '정규시즌 통합 ') : `${base} (${two.join('·')}년은 통합 순위)`;
+    return base;
+  }
   switch (m.k) {
     case 'champ': return '한국시리즈 우승';
     case 'ks': return '한국시리즈 진출';
@@ -108,11 +118,11 @@ function metricText(m: Metric): string {
 
 export function condText(c: Cond): string {
   switch (c.t) {
-    case 'in': return `${c.year}년 ${metricText(c.m)}`;
+    case 'in': return `${c.year}년 ${metricText(c.m, c.year)}`;
     case 'by': return `${c.year}년까지 ${metricText(c.m)}`;
-    case 'count': return `${c.from}~${c.to}년 중 ${metricText(c.m).replace(' 진출', '')} ${c.n}회`;
-    case 'all': return `${c.from}~${c.to}년 모두 ${metricText(c.m)}`;
-    case 'same': return `${c.from}~${c.to}년 중 한 시즌에 ${c.ms.map(metricText).join(' + ')}`;
+    case 'count': return `${c.from}~${c.to}년 중 ${metricText(c.m, c.from, c.to).replace(' 진출', '')} ${c.n}회`;
+    case 'all': return `${c.from}~${c.to}년 모두 ${metricText(c.m, c.from, c.to)}`;
+    case 'same': return `${c.from}~${c.to}년 중 한 시즌에 ${c.ms.map((m) => metricText(m, c.from, c.to)).join(' + ')}`;
   }
 }
 
@@ -120,7 +130,7 @@ export function condText(c: Cond): string {
 
 type Short = [no: string, year: number, franchise: string, title: string, background: string, fun: string, ...stages: Stage[]];
 const one = (label: string, ...conds: Cond[]): Stage => ({ label, conds });
-const seasonGoal = (year: number, m: Metric) => one(`${year}년 ${metricText(m)}`, { t: 'in', year, m });
+const seasonGoal = (year: number, m: Metric) => one(`${year}년 ${metricText(m, year)}`, { t: 'in', year, m });
 const byGoal = (year: number, m: Metric) => one(`${year}년까지 ${metricText(m)}`, { t: 'by', year, m });
 
 const LOW: Short[] = [
@@ -230,7 +240,7 @@ const build = (tier: Tier, list: Short[], kind: PlanKind, legacy = false): PlanC
 const champs = (from: number, to: number, n: number) => one(`${from}~${to}년 중 우승 ${n}회`, { t: 'count', from, to, m: champ, n });
 const kss = (from: number, to: number, n: number) => one(`${from}~${to}년 중 한국시리즈 진출 ${n}회`, { t: 'count', from, to, m: ks, n });
 const pss = (from: number, to: number, n: number) => one(`${from}~${to}년 중 포스트시즌 진출 ${n}회`, { t: 'count', from, to, m: ps, n });
-const allOf = (from: number, to: number, m: Metric) => one(`${from}~${to}년 모두 ${metricText(m)}`, { t: 'all', from, to, m });
+const allOf = (from: number, to: number, m: Metric) => one(`${from}~${to}년 모두 ${metricText(m, from, to)}`, { t: 'all', from, to, m });
 /** 시즌 도전 쉬움·중간: 정규시즌 1위(완전 클리어) → 한국시리즈 우승 */
 const title = (y: number) => [seasonGoal(y, rank(1)), seasonGoal(y, champ)];
 /** 시즌 도전 어려움: 승률 5할(완전 클리어) → 포스트시즌 진출 */

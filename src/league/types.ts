@@ -14,7 +14,7 @@ import type { Manager, ManagerChange } from './managers';
 import type { AiTradeRecord, GmStyle } from './gm';
 import type { AbroadState } from './overseas';
 import type { DifficultySettings } from './difficulty';
-import type { BatSkill, PitSkill, TeamRecord } from '../engine';
+import type { BatSkill, DivisionTable, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
 import type { PostseasonResult } from './postseason';
@@ -233,7 +233,8 @@ export interface LeagueState {
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
   /** hr: 리그 전체 홈런 ("달라지는 규칙"의 지난 시즌 한 줄, 2026-10-22부터. 예전 저장에는 없다) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult; hr?: number } | null;
+  /** divisions: 양대 리그 해(1999·2000)의 리그별 최종 순위 (Season.divisionStandings, 2026-10-23 추가. 예전 저장·단일 리그 해에는 없다) */
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; divisions?: DivisionTable[]; postseason?: PostseasonResult; hr?: number } | null;
   /** 구장 (stadium.ts, 구단 색인) */
   stadiums?: import('./stadium').StadiumState[];
   /** 팬 만족도 (stadium.ts, 구단 색인) */

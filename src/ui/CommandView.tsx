@@ -83,10 +83,10 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     return c;
   };
   // 미리보기는 하루 경기만 돌려 10ms 안팎이라 바로 계산한다
-  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode));
+  const go = (mode: 'next' | 'inning' | 'crisis' | 'auto') => setPv(session.commandPreview([...pv.choices, choice()], mode, pv.dh));
   const commit = () => {
     setBusy(true);
-    session.commitCommand(pv.choices);
+    session.commitCommand(pv.choices, pv.dh);
     onDone();
   };
   const cancel = () => { ref.current?.close(); onCancel(); };
@@ -96,6 +96,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const canBunt = !!req && req.outs < 2 && req.bases.some((b) => b >= 0);
   const recent = plays.slice(-8).reverse();
   const date = formatDate(W.year, s.day);
+  // 더블헤더 날은 몇 차전인지 (지휘하지 않은 차전은 감독이 맡는다)
+  const dhLabel = pv.dh ? ' · 더블헤더 2차전' : session.ourGamesToday().length > 1 ? ' · 더블헤더 1차전' : '';
 
   return (
     <dialog ref={ref} className="player cast command tv" onClose={onCancel} style={teamVars(session.team.franchise, session.team.name)}>
@@ -103,11 +105,11 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
         <header className="row-between">
           <div>
             <h2>직접 지휘 · {teamName(pv.away)} <span className="muted">@</span> {teamName(pv.home)}</h2>
-            <p className="muted small">{date} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
+            <p className="muted small">{date}{dhLabel} · 고른 대로 미리 돌려 보여 줍니다. 끝까지 가서 "경기 확정"을 눌러야 실제로 진행됩니다.</p>
           </div>
           <span className="inline">
             {req && <button type="button" className="ghost" disabled={busy} title="남은 판단을 감독에게 맡기고 바로 확정합니다"
-              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto').choices); onDone(); }}>나머지 자동으로 확정</button>}
+              onClick={() => { setBusy(true); session.commitCommand(session.commandPreview(pv.choices, 'auto', pv.dh).choices, pv.dh); onDone(); }}>나머지 자동으로 확정</button>}
             <button type="button" className="ghost" onClick={cancel} disabled={busy}>그만두기</button>
           </span>
         </header>
@@ -215,7 +217,8 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           </>
         ) : (
           <div className="note">
-            <p><strong>경기 끝: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
+            {pv.rain && <p className="small">비로 경기가 중단됐습니다 ({pv.rain.inning}회 {pv.rain.kind === 'cold' ? '강우 콜드' : '노게임'}).{pv.rain.kind === 'nogame' ? ' 정식 경기(5회)가 되기 전이라 기록은 남지 않고 다른 날 다시 치릅니다.' : ''}</p>}
+            <p><strong>{pv.rain?.kind === 'nogame' ? '노게임' : '경기 끝'}: {teamName(pv.away)} {score.away} : {score.home} {teamName(pv.home)}</strong></p>
             <p className="small muted">확정하면 이 결과로 오늘 경기가 진행됩니다. 그만두면 오늘은 그대로 남습니다.</p>
             <div className="actions"><button type="button" onClick={commit} disabled={busy}>경기 확정</button></div>
           </div>

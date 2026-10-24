@@ -57,8 +57,7 @@
    "after": "15회",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "2002년까지 실제 15회인데 게임은 12회 (경기 엔진 2 14단계에서 고침)"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 1983,
@@ -98,8 +97,7 @@
    "after": "(승+0.5×무)÷경기",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 1989,
@@ -249,10 +247,9 @@
    "cat": "league",
    "title": "드림·매직 양대 리그 (1999~2000)",
    "after": "양대 리그",
-   "effect": "show",
+   "effect": "league",
    "status": "confirmed",
-   "source": "자료집 제도연표",
-   "simplified": "단일 리그"
+   "source": "자료집 제도연표"
   },
   {
    "year": 2000,
@@ -357,8 +354,7 @@
    "after": "승수",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 2003,
@@ -493,8 +489,7 @@
    "after": "승÷(승+패+무)",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "늘 무승부를 뺀 승률 (경기 엔진 2 14단계에서 고침)"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 2009,
@@ -826,8 +821,7 @@
    "after": "9회까지",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "더블헤더·월요일 경기 없음"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 2020,
@@ -877,8 +871,7 @@
    "after": "9회까지",
    "effect": "league",
    "status": "research",
-   "source": "웹 조사(잼쨩) 2026-10-22",
-   "simplified": "12회 연장 그대로 (경기 엔진 2 14단계에서 고침)"
+   "source": "웹 조사(잼쨩) 2026-10-22"
   },
   {
    "year": 2021,

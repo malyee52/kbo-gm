@@ -107,6 +107,16 @@ function realParkValue<T>(table: Record<string, Record<string, T>> | undefined, 
   return moved ? undefined : table[String(last)][franchise];
 }
 
+/**
+ * 그 해 홈 구장이 돔인가 (우천 취소 없음, engine/weather.ts). 게임 안에서 옮긴 구장(opened)은 그 구장의 dome,
+ * 아직 옮기지 않았으면 그 해 실제 구장 (새 게임의 구장 상태에는 돔이 붙어 있지 않다: 2016~ 시작 고척)
+ */
+export function homeIsDome(s: StadiumState | undefined, franchise: string, year: number): boolean {
+  if (s?.dome) return true;
+  if (s?.opened !== undefined) return false;
+  return !!realParkAt(franchise, year)?.dome;
+}
+
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
   return { hr: s?.hr ?? 1, dome: !!s?.dome };
 }

@@ -27,7 +27,7 @@ import {
 import { foreignName, josa, koreanName } from './names';
 import {
   capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
-  FA_RE_ELIGIBLE, foreignCap, foreignContractTotal, foreignSalary, foreignTeamCap, isNewForeign, marketSalary, MIN_SALARY, minSalary, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
+  FA_RE_ELIGIBLE, foreignCap, foreignContractTotal, foreignSalary, foreignTeamCap, isNewForeign, marketSalary, MIN_SALARY, minSalary, minSalaryNominal, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, salaryFloor, teamCapPayroll, type ForeignCapKey, WON_PER_RUN, wageIndex, rookieSalary, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
@@ -281,10 +281,14 @@ const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p
 const ageIn = (p: LeaguePlayer, year: number) => (p.birthYear ? year - p.birthYear : 28);
 
 function tendencyFor(league: LeagueState, view: LeagueView, team: number): Tendency {
-  const st = league.lastSeason?.standings ?? league.teams.map((_, i) => i);
+  const last = league.lastSeason;
+  const st = last?.standings ?? league.teams.map((_, i) => i);
+  // 지난 시즌이 양대 리그 해(1999·2000)면 진출권은 실제 가을야구 진출로 (일정 개편 기획안 10.6)
+  const ps = last?.divisions ? last.postseason?.seeds : undefined;
   return tendencyOf({
     teamIdx: team, rank: (st.indexOf(team) < 0 ? st.length : st.indexOf(team)) + 1, nTeams: league.teams.length, cut: 5,
     coreAge: coreAge(view.orgs[team], view.ctx), remaining: 1, style: gmStyle(league, team),
+    ...(ps ? { inPlace: ps.includes(team) } : {}),
   });
 }
 
@@ -524,7 +528,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * futuresForm(fl), dev);
     Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
   }
-  league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0) };
+  const divisions = season.divisionStandings();
+  league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0), ...(divisions ? { divisions } : {}) };
   // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 정한다.
   // 구단 투표가 켜진 리그(ruleVote.ts)는 바로 넣지 않고 안건으로 올려 단장 회의에서 표결한다
   const voting = ruleVoteOn(league);
@@ -952,7 +957,7 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
   const e = off.fa.entries.find((x) => x.id === id);
   if (off.stage !== 'fa' || !e || e.status !== 'open') return { ok: false, message: '지금 제시할 수 없는 선수입니다.' };
   const min = minSalary(off.year + 1, league);
-  if (!Number.isFinite(salary) || salary < min) return { ok: false, message: `연봉은 최저 연봉 ${(min / 10000).toFixed(1)}억 원(${min.toLocaleString('ko-KR')}만 원) 이상이어야 합니다.` };
+  if (!Number.isFinite(salary) || salary < min) return { ok: false, message: `연봉은 최저 연봉 ${minSalaryText(off.year + 1, min)} 이상이어야 합니다.` };
   if (!Number.isInteger(years) || years < 1 || years > 6) return { ok: false, message: '계약 기간은 1~6년입니다.' };
   const t = off.userTeam;
   if (e.from !== t) {
@@ -2082,6 +2087,12 @@ export function autoDraftRest(league: LeagueState, off: OffseasonState): void {
 
 // ---- 연봉 협상
 
+/** 그 해 최저 연봉 문구 (명목 금액: 화면 입력과 같은 그 해 돈) */
+/** 최저 연봉 표기: 2026년까지는 그 해 명목 금액(화면의 그 해 물가와 같다), 2027년부터는 규정 값(min, 내부 값) */
+function minSalaryText(year: number, min: number): string {
+  return wonText(year <= 2026 ? minSalaryNominal(year) : min);
+}
+
 function enterSalary(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   off.stage = 'salary';
   const view = leagueView(league, store, params);
@@ -2089,7 +2100,7 @@ function enterSalary(league: LeagueState, off: OffseasonState, store: Store, par
   for (const p of league.players) {
     if (p.team < 0 || p.foreign || p.contract.until > off.year) continue;
     const runs = currentRuns(view.sim.get(p.id)!, view.ctx);
-    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service, view.wage), Math.round(marketSalary(runs, view.wage, view.minPay) * POST_FA_RESERVE)) : reserveTarget(runs, p.service, view.wage);
+    const target = p.faCount > 0 ? Math.max(reserveTarget(runs, p.service, view.wage, view.minPay), Math.round(marketSalary(runs, view.wage, view.minPay) * POST_FA_RESERVE)) : reserveTarget(runs, p.service, view.wage, view.minPay);
     // FA·비FA 다년 계약이 끝난 뒤 첫 협상은 삭감 한도가 넓다 (계약 연봉이 그대로 굳지 않게)
     demands[p.id] = nextReserveSalary(p.contract.salary, target, p.contract.kind === 'fa' || p.contract.kind === 'nonFA', view.minPay);
   }
@@ -2101,7 +2112,7 @@ function enterSalary(league: LeagueState, off: OffseasonState, store: Store, par
 /** min = 다음 시즌(계약이 시작되는 해)의 최저 연봉 (salary.ts minSalary) */
 export function setSalaryOffer(off: OffseasonState, id: string, amount: number, min = MIN_SALARY): OfferCheck {
   if (off.stage !== 'salary' || !off.salary || !(id in off.salary.offers)) return { ok: false, message: '제시할 수 없는 선수입니다.' };
-  if (!Number.isFinite(amount) || amount < min) return { ok: false, message: `최저 연봉 ${(min / 10000).toFixed(1)}억 원(${min.toLocaleString('ko-KR')}만 원) 이상이어야 합니다.` };
+  if (!Number.isFinite(amount) || amount < min) return { ok: false, message: `최저 연봉 ${minSalaryText(off.year + 1, min)} 이상이어야 합니다.` };
   off.salary.offers[id] = Math.round(amount);
   return { ok: true, message: '' };
 }
@@ -2419,8 +2430,10 @@ export function releaseByUser(league: LeagueState, off: OffseasonState, id: stri
 
 // ---- 방출 선수 시장 (2026-10-11): 방출된 선수를 다른 구단이 데려간다. 쓸 만한 선수가 정원 압박만으로 리그를 떠나지 않게
 
-/** 방출 선수 계약: 최저 연봉 1년 (임시값). 2026 규정 값이고, 계약은 그 해 최저 연봉(minSalary)으로 한다 */
-export const CLAIM_SALARY = MIN_SALARY;
+/** 방출 선수 계약: 그 해(다음 시즌) 최저 연봉 1년 (임시값) */
+export function claimSalary(year: number, league?: Pick<LeagueState, 'ruleShifts'> | null): number {
+  return minSalary(year, league);
+}
 /** AI 구단이 한 오프시즌에 데려오는 방출 선수 수 상한 (임시값) */
 export const CLAIM_PER_TEAM = 3;
 /** 자기 방출 1순위보다 이만큼(런, 8시즌 가치) 나아야 데려온다 (임시값) */

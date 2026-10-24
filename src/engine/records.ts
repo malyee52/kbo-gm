@@ -1,5 +1,6 @@
 // 기록 규정 연표 (경기 엔진 2 14단계, docs/경기엔진2_기획안.md 3.10.1): 연장 이닝·무승부·승률의 무승부 처리.
 // 값은 public/data/meta.json의 rules[연도] (tools/build_data.py rules_for). 시간제한(22:30, 4시간)은 엔진에 경기 시각이 없어 넣지 않는다.
+import { defaultOpening } from '../data/schedule';
 import type { YearRules } from '../data/types';
 import type { TeamRecord } from './types';
 
@@ -43,7 +44,7 @@ export interface GameDayInfo {
   md: number;
   /** 0 = 일요일 */
   weekday: number;
-  /** 더블헤더 경기 (지금 일정에는 없다. 일정 개편 브랜치에서 넘긴다) */
+  /** 더블헤더 경기 (PlanGame.dh) */
   doubleheader?: boolean;
 }
 
@@ -65,12 +66,10 @@ export function postseasonMaxInnings(rules?: Pick<YearRules, 'postseasonMaxInnin
 }
 
 /**
- * 일정 색인(0 = 개막일)의 달력 날짜. 개막일은 "3월 24일 이후 첫 화요일" (임시값, game/calendar.ts가 화면 날짜에 같은 함수를 쓴다).
- * 엔진 일정은 6일 경기 뒤 하루 휴식이라 휴식일이 월요일이다
+ * 일정 색인(0 = 개막일)의 달력 날짜. 개막일은 그 시즌 일정의 개막일(SchedulePlan.opening, 'YYYY-MM-DD').
+ * 없으면 규칙 표가 없을 때의 개막일(data/schedule.ts defaultOpening). game/calendar.ts가 화면 날짜에 같은 함수를 쓴다
  */
-export function dateOfDay(year: number, day: number): { year: number; month: number; date: number; weekday: number } {
-  const open = new Date(Date.UTC(year, 2, 24));
-  const shift = (2 - open.getUTCDay() + 7) % 7; // 화요일 = 2
-  const d = new Date(Date.UTC(year, 2, 24 + shift) + day * 86400000);
+export function dateOfDay(year: number, day: number, opening: string = defaultOpening(year)): { year: number; month: number; date: number; weekday: number } {
+  const d = new Date(Date.UTC(Number(opening.slice(0, 4)), Number(opening.slice(5, 7)) - 1, Number(opening.slice(8, 10))) + day * 86400000);
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, date: d.getUTCDate(), weekday: d.getUTCDay() };
 }

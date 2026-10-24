@@ -41,6 +41,7 @@ import { currentSeries, ROUND_LABEL, stillAlive } from '../league/postseason';
 import { STAGE_LABEL } from '../league/offseason';
 import { teamVars } from './teams';
 import { gamesBehind } from '../game/stats';
+import { lastSeasonPlace, placeLabel, seasonPlace } from '../game/rank';
 import { ErrorBoundary } from './ErrorBoundary';
 import { EventDialog } from './EventDialog';
 import { RuleNewsDialog } from './RuleNews';
@@ -66,7 +67,7 @@ import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, t
 const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
 /** 상태 줄의 성적 (중계 창이 열려 있는 동안은 경기 전 값을 보여 준다: 결과가 미리 보이지 않게) */
-interface Head { when: string; left: number; rec: { w: number; l: number; t: number; g: number; rank: number; behind: number | null } | null }
+interface Head { when: string; left: number; rec: { w: number; l: number; t: number; g: number; rank: number; league: string | null; behind: number | null } | null }
 
 function headOf(session: GameSession): Head {
   const off = session.phase === 'offseason';
@@ -76,14 +77,17 @@ function headOf(session: GameSession): Head {
     : psCur ? `${session.world.year} 가을야구 · ${ROUND_LABEL[psCur.round]} ${psCur.games.length + 1}차전`
       : session.done ? `${session.world.year} ${session.postseason?.done ? '가을야구 종료' : '정규시즌 종료'}`
         : formatDate(session.world.year, session.day, true);
-  const left = session.season.schedule.slice(session.day).filter((d) => d.some((g) => g.home === session.teamIdx || g.away === session.teamIdx)).length;
+  // 남은 경기 수: 오늘 알려진 일정 기준 (앞날의 우천 취소는 모른다). 날짜 미정(추후 편성) 경기와 더블헤더 두 경기를 모두 센다
+  const known = off || session.done ? null : session.season.knownSchedule(session.day);
+  const ours = (g: { home: number; away: number }) => g.home === session.teamIdx || g.away === session.teamIdx;
+  const left = known ? known.days.slice(session.day).reduce((n, d) => n + d.filter(ours).length, 0) + known.pending.filter(ours).length : 0;
   if (off) return { when, left, rec: null };
   const s = session.season;
   const r = s.teams[session.teamIdx];
-  const order = s.standings();
-  const rank = order.indexOf(session.teamIdx) + 1;
-  const lead = rank > 1 ? s.teams[order[0]] : null;
-  return { when, left, rec: { w: r.w, l: r.l, t: r.t, g: r.g, rank, behind: lead ? gamesBehind(lead, r) : null } };
+  // 양대 리그 해(1999·2000)는 우리 리그 안 순위와 그 리그 선두 (일정 개편 기획안 10.4)
+  const place = seasonPlace(s, session.teamIdx);
+  const lead = place.rank > 1 ? s.teams[place.order[0]] : null;
+  return { when, left, rec: { w: r.w, l: r.l, t: r.t, g: r.g, rank: place.rank, league: place.league, behind: lead ? gamesBehind(lead, r) : null } };
 }
 
 export function GameShell({ store, session, onQuit }: { store: BrowserStore; session: GameSession; onQuit: () => void }) {
@@ -397,7 +401,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
   const { when, left, rec: head } = (cast && castHead) || headOf(session);
-  const lastRank = off ? (session.league.lastSeason?.standings ?? []).indexOf(session.teamIdx) + 1 : 0;
+  const lastPlace = off ? lastSeasonPlace(session.league, session.teamIdx) : null;
   const pending = !!session.pendingEvent;
   const seasonRunning = !off && !session.done;
   const advanceDisabled = !!busy || pending || (!seasonRunning && !session.postseasonRunning);
@@ -505,9 +509,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             </div>
             <span className="sb-when">{when}{(seasonRunning || (cast && left > 0)) && <span className="muted"> · 남은 경기 {left}</span>}</span>
             <span className="sb-score" title={summaryOf(session)}>
-              {head && head.g > 0 && <><b>{head.rank}위</b> <span className="num">{head.w}–{head.l}{head.t ? `–${head.t}` : ''}</span>{density === 'full' && <span className="muted small"> {head.behind === null ? '선두' : `선두와 ${head.behind.toFixed(1)}`}</span>}</>}
+              {head && head.g > 0 && <><b>{placeLabel({ league: head.league, order: [], rank: head.rank })}</b> <span className="num">{head.w}–{head.l}{head.t ? `–${head.t}` : ''}</span>{density === 'full' && <span className="muted small"> {head.behind === null ? '선두' : `선두와 ${head.behind.toFixed(1)}`}</span>}</>}
               {head && head.g === 0 && <span className="muted">개막 전</span>}
-              {off && lastRank > 0 && <><b>{lastRank}위</b> <span className="muted small">지난 시즌</span></>}
+              {off && lastPlace && lastPlace.rank > 0 && <><b>{placeLabel(lastPlace)}</b> <span className="muted small">지난 시즌</span></>}
             </span>
             <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('find'); }}>
               <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="검색: 선수·구단·날짜" aria-label="전체 검색 (선수·은퇴 선수·구단·경기·소식)" />

@@ -86,12 +86,16 @@ export function planTeam(store: Pick<DataStore, 'season'>, c: Challenge): number
   return t >= 0 ? t : null;
 }
 
-/** 직전 시즌 최하위 구단의 그 해 색인 (최종 순위 기준). 직전 시즌 자료가 없으면 null */
+/**
+ * 직전 시즌 최하위 구단의 그 해 색인 (최종 순위 기준). 직전 시즌 자료가 없으면 null.
+ * 양대 리그 해(1999·2000)는 자료의 최종 순위가 리그별이라(4위가 둘) 통합 승률로 가린다 (일정 개편 기획안 10.6, 결과는 최종 순위 + 승률과 같다)
+ */
 export function lastPlaceTeam(store: Pick<DataStore, 'season'>, year: number): number | null {
   const prev = store.season(year - 1);
   const cur = store.season(year);
   if (!prev || !cur) return null;
-  const worst = [...prev.teams].sort((a, b) => b.rank - a.rank || a.pct - b.pct)[0];
+  const split = prev.teams.every((t) => t.league) && new Set(prev.teams.map((t) => t.league)).size === 2;
+  const worst = [...prev.teams].sort((a, b) => (split ? 0 : b.rank - a.rank) || a.pct - b.pct)[0];
   const t = cur.teams.findIndex((x) => x.franchise === worst.franchise);
   return t >= 0 ? t : null;
 }

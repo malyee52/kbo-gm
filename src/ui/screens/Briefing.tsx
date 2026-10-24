@@ -7,6 +7,7 @@ import type { SimPlayer } from '../../engine';
 import { formatDate, gameTime, shortDate } from '../../game/calendar';
 import { fixed2, gamesBehind, ipText, rate3, recentForm } from '../../game/stats';
 import { lastOutings, outingText } from '../../game/boxscore';
+import { lastSeasonPlace, placeLabel, seasonPlace } from '../../game/rank';
 import { isRivalry } from '../../league/rivals';
 import { stadiumName } from '../../league/naming';
 import { ROUND_LABEL, stillAlive, currentSeries } from '../../league/postseason';
@@ -110,7 +111,6 @@ function MatchCard() {
   if (!next) return <section className="card match"><h2>다음 경기</h2><p className="muted">남은 경기가 없습니다.</p></section>;
   const home = next.home === me;
   const opp = home ? next.away : next.home;
-  const order = s.standings();
   const park = stadiumName(session.league, next.home, session.year);
   const gap = next.day - session.day;
   const last = s.log.map((g, i) => ({ g, i })).filter(({ g }) => g.home === me || g.away === me).at(-1);
@@ -124,7 +124,7 @@ function MatchCard() {
       <div className={`match-side${t === me ? ' mine' : ''}`} style={chipVars(session.teamInfo(t).franchise, session.teamInfo(t).name)}>
         <strong className="match-team">{session.teamInfo(t).name}</strong>
         <i className="match-band" aria-hidden />
-        <span className="small muted num">{r.g ? `${r.w}–${r.l}${r.t ? `–${r.t}` : ''} · ${order.indexOf(t) + 1}위` : '개막 전'}</span>
+        <span className="small muted num">{r.g ? `${r.w}–${r.l}${r.t ? `–${r.t}` : ''} · ${placeLabel(seasonPlace(s, t))}` : '개막 전'}</span>
         <div className="match-sp">
           <span className="tag">SP</span> {sp ? <PlayerLink p={sp} /> : <span className="muted">선발 미정</span>}
           <span className="small num">{sp ? spLine(session, sp) : ''}</span>
@@ -206,12 +206,12 @@ function PostseasonCard() {
 /** 정규시즌(과 가을야구)이 끝난 뒤, 결산 전 */
 function WrapCard() {
   const { session, go } = useGame();
-  const order = session.season.standings();
-  const rank = order.indexOf(session.teamIdx) + 1;
+  // 양대 리그 해(1999·2000)는 리그 안 순위 (rank.ts)
+  const place = seasonPlace(session.season, session.teamIdx);
   const ps = session.postseason;
   return (
     <section className="card match" aria-label="시즌 마무리">
-      <div className="card-top"><h2>시즌 마무리</h2><span className="small muted">{session.year} 정규시즌 최종 {rank}위{ps?.done ? ' · 가을야구 종료' : ''}</span></div>
+      <div className="card-top"><h2>시즌 마무리</h2><span className="small muted">{session.year} 정규시즌 최종 {placeLabel(place)}{ps?.done ? ' · 가을야구 종료' : ''}</span></div>
       <ol className="steps" aria-label="시즌 마무리 단계">
         <li className={ps ? 'done' : ''}>가을야구</li>
         <li className="now" aria-current="step">시즌 결산</li>
@@ -406,13 +406,15 @@ function StandingsCard() {
   const { density } = useShell();
   const off = session.phase === 'offseason';
   const last = session.league.lastSeason;
-  const order = off ? last?.standings ?? [] : session.season.standings();
+  const me = session.teamIdx;
+  // 우리 구단이 속한 순위표: 단일 리그는 통합, 양대 리그 해(1999·2000)는 우리 리그 (일정 개편 기획안 10.4)
+  const place = off ? lastSeasonPlace(session.league, me) : seasonPlace(session.season, me);
+  const order = place?.order ?? [];
   const teams = off ? last?.teams ?? [] : session.season.teams;
   const moves = useRankMoves(order);
   // 휴대폰에서는 접힌 채로 시작한다 (펼치기 단추). 넓은 화면은 접기와 상관없이 늘 보인다 (game.css .stand.folded)
   const [folded, setFolded] = useState(true);
-  const me = session.teamIdx;
-  const cut = session.world.rules.postseasonTeams;
+  const cut = place?.league ? 2 : session.world.rules.postseasonTeams;
   if (!order.length) return null;
   const at = Math.max(0, order.indexOf(me));
   const from = Math.max(0, Math.min(at - 2, order.length - 5));
@@ -422,7 +424,7 @@ function StandingsCard() {
     <section className={`card stand${folded ? ' folded' : ''}`} aria-label="순위">
         <div className="card-top">
           <h2>순위</h2>
-          <span className="small muted">{off ? `${last?.year} 최종` : `상위 ${cut}팀 가을야구`}</span>
+          <span className="small muted">{off ? `${last?.year} 최종${place?.league ? ` · ${place.league}리그` : ''}` : place?.league ? `${place.league}리그 · 1·2위 가을야구` : `상위 ${cut}팀 가을야구`}</span>
           <button type="button" className="link small card-more" onClick={() => go('standings')}>전체</button>
           <button type="button" className="ghost small-btn fold-btn" aria-expanded={!folded} onClick={() => setFolded(!folded)}>{folded ? '펼치기' : '접기'}</button>
         </div>
@@ -489,20 +491,23 @@ function WeekCard() {
   const { session } = useGame();
   const s = session.season;
   const me = session.teamIdx;
-  const days = Array.from({ length: 7 }, (_, k) => session.day + k).filter((d) => d < s.schedule.length);
+  // 오늘 아침까지 알려진 일정 (앞날의 우천 취소는 모른다, Season.knownSchedule)
+  const known = s.knownSchedule(session.day).days;
+  const days = Array.from({ length: 7 }, (_, k) => session.day + k).filter((d) => d < known.length);
   if (!days.length) return null;
   return (
     <section className="card week" aria-label="7일 일정">
       <h2>7일 일정</h2>
       <ol className="week-days">
         {days.map((d) => {
-          const g = s.schedule[d].find((x) => x.home === me || x.away === me);
+          const mine = known[d].filter((x) => x.home === me || x.away === me);
+          const g = mine[0];
           const opp = g ? (g.home === me ? g.away : g.home) : -1;
           const t = opp >= 0 ? session.teamInfo(opp) : null;
           return (
             <li key={d} className={g ? '' : 'rest'}>
               <span className="small muted num">{shortDate(session.year, d)}{g ? ` ${gameTime(session.year, d)}` : ''}</span>
-              {t ? <span className="week-opp"><i className="chip" style={chipVars(t.franchise, t.name)} aria-hidden />{g!.home === me ? 'vs' : '@'} {t.name}</span> : <span className="muted small">휴식</span>}
+              {t ? <span className="week-opp"><i className="chip" style={chipVars(t.franchise, t.name)} aria-hidden />{g!.home === me ? 'vs' : '@'} {t.name}{mine.length > 1 ? ' (더블헤더)' : ''}</span> : <span className="muted small">휴식</span>}
             </li>
           );
         })}

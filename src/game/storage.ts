@@ -1,6 +1,7 @@
 // 브라우저 저장: IndexedDB 저장 칸과 JSON 파일 내보내기·가져오기.
 // 엔진·세션은 이 파일에 의존하지 않는다 (Node 테스트에서는 toSave/load만 쓴다).
 
+import { SEASON_SAVE_FORMAT } from '../engine';
 import type { GameSave } from './session';
 
 const DB_NAME = 'kbo-gm';
@@ -85,6 +86,22 @@ export function deleteSave(slot: string): Promise<undefined> {
 export async function listSaves(): Promise<SaveRecord[]> {
   const all = await tx('readonly', (s) => s.getAll() as IDBRequest<SaveRecord[]>);
   return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
+/** 예전 저장을 지운 뒤 한 번 보여 주는 문구 (일정 개편 기획안 6.1) */
+export const OUTDATED_NOTICE = '정규시즌 일정이 바뀌어 예전 저장을 지웠습니다';
+
+/** 시즌 저장 형식이 지금(SEASON_SAVE_FORMAT)보다 낮아 불러올 수 없는 저장인가 (엔진 2·일정 개편 이전) */
+export function isOutdatedSave(data: GameSave | undefined): boolean {
+  const f = (data as { season?: { format?: unknown } } | undefined)?.season?.format;
+  return typeof f !== 'number' || f < SEASON_SAVE_FORMAT;
+}
+
+/** 불러올 수 없는 예전 형식 저장 칸(자동 저장·예전 'auto'·수동 칸)을 지운다. 지운 칸 수 */
+export async function purgeOutdatedSaves(): Promise<number> {
+  const old = (await listSaves()).filter((r) => isOutdatedSave(r.data));
+  for (const r of old) await deleteSave(r.slot);
+  return old.length;
 }
 
 /** 저장 데이터를 JSON 파일로 내려받게 한다 */

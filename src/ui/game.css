@@ -358,6 +358,10 @@ table.roster td.l:first-child { min-width: 110px; }
 .cal-cell.r-무::before { background: var(--tie); }
 .cal-date { font-weight: 800; font-size: 12px; line-height: 18px; min-width: 20px; padding: 0 4px; border-radius: 4px; text-align: center; }
 .cal-opp { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; font-weight: 600; }
+/* 일정 개편 15단계: 더블헤더는 한 칸에 두 줄, 우천 취소·콜드·노게임 표시 */
+.cal-line { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; max-width: 100%; }
+.cal-opp.cancel, .cal-opp .cancel { text-decoration: line-through; color: var(--muted); font-weight: 400; }
+.tag.rain { margin-left: 0; background: var(--info-bg); border-color: transparent; color: var(--fg); }
 .linescore th, .linescore td { padding: 5px 9px; text-align: center; }
 .linescore td.l, .linescore th.l { text-align: left; }
 .box .two { margin-top: 12px; }

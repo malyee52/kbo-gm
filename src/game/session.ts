@@ -23,6 +23,7 @@ import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
+import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, type RankPlace } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
@@ -32,7 +33,7 @@ import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
+import { isNoGame, type BoxScore, type CommandChoice, type CommandRequest, type KnownSchedule, type Play, type PlanCancel } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
@@ -63,16 +64,18 @@ import {
 import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
-  ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, newAchievements, newOwner, outcomeLabel,
+  ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, goalForLeague, newAchievements, newOwner, outcomeLabel,
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
-  currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, RULES, startPostseason, stillAlive,
-  type PostseasonResult, type PostseasonState, type SeriesGame,
+  bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, seriesHome, seriesToday, startPostseason, stillAlive,
+  type PostseasonResult, type PostseasonState, type SeriesGame, type SeriesResult,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
 import { addFanEvent, FAN_LOSS, orderStadium, starLeaves, type ParkSize } from '../league/stadium';
-import { ALLSTAR_FAN, allStarDay, playAllStar, SIDE_NAMES, type AllStarRecord } from '../league/allstar';
+import { ALLSTAR_FAN, allStarDay, playAllStar, recordSideNames, type AllStarRecord } from '../league/allstar';
+import { leagueNews, scheduleNews, scheduleNewsText } from '../league/scheduleNews';
+import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
 import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
@@ -112,6 +115,23 @@ export interface CommandPreview {
   away: number;
   /** 경기가 끝났을 때 점수 */
   final?: { away: number; home: number };
+  /** 더블헤더 2차전이면 2 (확정할 때 commitCommand에 넘긴다) */
+  dh?: 2;
+  /** 비로 멈춘 경기 (일정 개편 10단계): 몇 회를 마치고 강우 콜드·노게임이 됐는지 */
+  rain?: { kind: 'cold' | 'nogame'; inning: number };
+}
+
+/** 조작 기록으로 받은 지휘 (dh: 더블헤더 2차전이면 2) */
+interface PendingCommand {
+  day: number;
+  dh?: 2;
+  choices: CommandChoice[];
+}
+
+/** 조작 기록의 지휘 선택을 물음 순서대로 돌려주는 지휘자 (모자라면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
+function replayCommander(team: number, cmds: PendingCommand[]): GameCommand | null {
+  if (!cmds.length) return null;
+  return { team, decide: (req) => cmds.find((c) => c.dh === req.dh)?.choices[req.n] ?? {} };
 }
 
 /** 미리보기를 멈추는 신호 (엔진 지휘 함수가 던진다) */
@@ -185,8 +205,9 @@ export type GameAction =
   | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number; pg?: string[]; pr?: string[] }
   | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
   | { year: number; day: number; type: 'event'; choice: number }
-  /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인 */
-  | { year: number; day: number; type: 'command'; choices: CommandChoice[] }
+  /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인.
+   *  dh: 더블헤더 2차전이면 2 (일정 개편 9단계). 없으면 그날 첫 우리 경기 (더블헤더 1차전) */
+  | { year: number; day: number; type: 'command'; dh?: 2; choices: CommandChoice[] }
   /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장).
    *  apply: 그중 군 야구단(상무·경찰) 지원 명단. 없으면 지원할 수 있는 선수 모두 (2026-10-21 전 기록) */
   | { year: number; type: 'begin-off'; enlist?: string[]; apply?: string[] }
@@ -345,6 +366,8 @@ interface ArticleState {
   gameIdx: number;
   /** 지난번 선두 (20경기 전에는 -1) */
   leader: number;
+  /** 양대 리그 해: 리그마다 지난번 선두 (Season.divisionStandings 순서) */
+  leaders?: number[];
   /** 우리 구단이 가을야구권에 있었나 */
   psIn: boolean;
   /** 부상 기사를 어디까지 봤나 (season.absences 색인) */
@@ -354,6 +377,8 @@ interface ArticleState {
 }
 /** 단장 인터뷰 간격 (일, 임시값) */
 const GM_INTERVIEW_EVERY = 21;
+/** 월간 MVP를 따로 내는 달의 최소 경기일. 모자라면 기사 없이 다음 달과 합친다 (일정 개편 11단계, 임시값) */
+const MONTHLY_MIN_DAYS = 10;
 /** 다른 구단 화제 경기 기사를 내는 하루 확률 (임시값) */
 const LEAGUE_GAME_CHANCE = 0.3;
 const SEASON_KEYS = ['hr', 'h', 'rbi', 'sb', 'w', 'sv', 'so'];
@@ -366,7 +391,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges'>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -423,8 +448,8 @@ export class GameSession {
 
   // ---- 직접 지휘 (경기 개입, 2026-10-12 사용자 요청: 대주자·대타·작전·투수 교체)
 
-  /** 조작 기록으로 받은 그날 지휘 선택 (하루 진행 때 쓰고 비운다) */
-  private pendingCommand: { day: number; choices: CommandChoice[] } | null = null;
+  /** 조작 기록으로 받은 그날 지휘 선택 (하루 진행 때 쓰고 비운다). 더블헤더 날은 차전마다 하나씩 */
+  private pendingCommands: PendingCommand[] = [];
   /** 자동 진행이 위기에서 멈췄을 때의 미리보기 (화면이 지휘 창을 연다) */
   crisis: CommandPreview | null = null;
   /** 미리보기용 개막 월드 (시즌마다 한 번 만든다. 시즌 중 리그 상태는 개막 때로 고정이다) */
@@ -441,11 +466,15 @@ export class GameSession {
     return (this.hasGameToday || this.ourPostseasonGameNext) && !this.pendingEvent;
   }
 
-  /** 가을야구의 다음 경기가 우리 경기인가 (직접 지휘, 2026-10-12) */
+  /** 가을야구의 다음 경기(날)가 우리 경기인가 (직접 지휘, 2026-10-12). 양대 리그 해는 같은 날 두 시리즈가 열릴 수 있다 */
   get ourPostseasonGameNext(): boolean {
-    if (!this.postseasonRunning) return false;
-    const x = currentSeries(this.postseason!);
-    return !!x && (x.high === this.teamIdx || x.low === this.teamIdx);
+    return !!this.ourPostseasonSeriesToday();
+  }
+
+  /** 다음 가을야구 경기 날에 우리 경기가 있는 시리즈 (없으면 null) */
+  private ourPostseasonSeriesToday(st: PostseasonState | null = this.postseason): SeriesResult | null {
+    if (!this.postseasonRunning || !st) return null;
+    return seriesToday(st).find((x) => x.high === this.teamIdx || x.low === this.teamIdx) ?? null;
   }
 
   /** 하루 진행 직전 준비 (실제 진행과 미리보기가 같게) */
@@ -482,16 +511,20 @@ export class GameSession {
    * 직접 지휘 미리보기: choices까지 고른 상태로 오늘을 복사본에서 돌려 다음 물음에서 멈춘다. 실제 게임은 그대로다.
    * mode: next 바로 다음 물음, crisis 위기·승부처까지 자동, inning 이 반 이닝이 끝날 때까지 자동, auto 경기 끝까지 자동
    */
-  commandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto' = 'next'): CommandPreview {
+  commandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto' = 'next', dh?: 2): CommandPreview {
     if (this.postseasonRunning) return this.postseasonCommandPreview(choices, mode);
     const s = this.scratchSeason();
     const out = choices.map((c) => ({ ...c }));
     const me = this.teamIdx;
-    const game = s.schedule[s.day].find((g) => g.home === me || g.away === me);
+    const isTarget = (g: { home: number; away: number; dh?: 1 | 2 }) => (g.home === me || g.away === me) && (g.dh === 2) === (dh === 2);
+    const game = s.schedule[s.day].find(isTarget);
+    // 더블헤더 날 다른 차전은 조작 기록에 이미 있는 지휘대로 (없으면 자동)
+    const other = replayCommander(me, this.pendingCommands.filter((c) => c.day === s.day && c.dh !== dh));
     let half: { inn: number; top: boolean } | null = null;
     s.commander = {
       team: me,
       decide: (req) => {
+        if (req.dh !== dh) return other?.decide(req) ?? {};
         if (req.n < choices.length) return choices[req.n];
         half ??= { inn: req.inn, top: req.top };
         const stop = mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top));
@@ -505,22 +538,34 @@ export class GameSession {
       s.simulateDay();
     } catch (e) {
       if (!(e instanceof CommandPause)) throw e;
-      return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1 };
+      return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1, ...(dh ? { dh } : {}) };
     }
-    const i = s.log.findIndex((g, k) => k >= this.season.log.length && (g.home === me || g.away === me));
-    const g = s.log[i];
-    return { req: null, choices: out, plays: s.plays.get(i) ?? [], home: g?.home ?? -1, away: g?.away ?? -1, ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}) };
+    // 노게임은 기록(log)에 없고 noGames에만 있다
+    const i = s.log.findIndex((g, k) => k >= this.season.log.length && isTarget(g));
+    const ng = i < 0 ? s.noGames.find((x) => x.day === s.day - 1 && isTarget(x)) : undefined;
+    const g = ng ?? s.log[i];
+    return {
+      req: null, choices: out, plays: (ng ? ng.plays : s.plays.get(i)) ?? [], home: g?.home ?? -1, away: g?.away ?? -1,
+      ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}), ...(dh ? { dh } : {}),
+      ...(g?.rain ? { rain: { kind: g.rain, inning: g.innings } } : {}),
+    };
+  }
+
+  /** 오늘 우리 정규시즌 경기들의 차전 (더블헤더면 [undefined, 2], 한 경기면 [undefined], 없으면 []) */
+  ourGamesToday(): (2 | undefined)[] {
+    const s = this.season;
+    if (this.phase !== 'season' || s.done) return [];
+    const games = (s.schedule[s.day] ?? []).filter((g) => g.home === this.teamIdx || g.away === this.teamIdx);
+    return [...(games.some((g) => g.dh !== 2) ? [undefined] : []), ...(games.some((g) => g.dh === 2) ? [2 as const] : [])];
   }
 
   /** 가을야구 직접 지휘 미리보기: 가을야구 상태와 시즌을 복사해 다음 경기를 돌려 본다 (실제 진행은 그대로) */
   private postseasonCommandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto'): CommandPreview {
     const s = this.scratchSeason();
     const st: PostseasonState = JSON.parse(JSON.stringify(this.postseason));
-    const x = currentSeries(st)!;
-    const rule = RULES[x.round];
-    const highHome = rule.homePattern[x.games.length] ?? true;
-    const home = highHome ? x.high : x.low;
-    const away = highHome ? x.low : x.high;
+    // 같은 날 다른 시리즈 경기가 먼저여도 우리 경기만 돌린다 (구단이 겹치지 않아 순서가 결과에 닿지 않는다)
+    const x = this.ourPostseasonSeriesToday(st) ?? currentSeries(st)!;
+    const { home, away } = seriesHome(x, x.games.length);
     const out = choices.map((c) => ({ ...c }));
     let half: { inn: number; top: boolean } | null = null;
     const commander: GameCommand = {
@@ -536,7 +581,7 @@ export class GameSession {
     };
     s.boxTeams.add(this.teamIdx);
     try {
-      const g = playNextGame(st, s, commander)!;
+      const g = playNextGame(st, s, commander, x)!;
       return { req: null, choices: out, plays: g.plays ?? [], home, away, final: { away: g.awayRuns, home: g.homeRuns } };
     } catch (e) {
       if (!(e instanceof CommandPause)) throw e;
@@ -544,10 +589,14 @@ export class GameSession {
     }
   }
 
-  /** 직접 지휘 확정: 고른 대로 오늘(가을야구면 다음 경기)을 진행한다 (조작 기록에 남아 다시 돌려도 같다) */
-  commitCommand(choices: CommandChoice[]): { ok: boolean; message: string } {
+  /**
+   * 직접 지휘 확정: 고른 대로 오늘(가을야구면 다음 경기)을 진행한다 (조작 기록에 남아 다시 돌려도 같다).
+   * dh: 더블헤더 2차전을 지휘했으면 2 (CommandPreview.dh). 더블헤더 날도 하루를 진행하므로 지휘하지 않은 차전은 감독이 맡는다
+   */
+  commitCommand(choices: CommandChoice[], dh?: 2): { ok: boolean; message: string } {
     if (!this.canCommand) return { ok: false, message: '오늘 지휘할 경기가 없습니다.' };
-    this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'command', choices: choices.map((c) => ({ ...c })) });
+    const game = !this.postseasonRunning && dh ? { dh } : {};
+    this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'command', ...game, choices: choices.map((c) => ({ ...c })) });
     this.crisis = null;
     if (this.postseasonRunning) this.advancePostseason(1);
     else this.advance(1);
@@ -559,16 +608,24 @@ export class GameSession {
    * 지난 시즌에 없던 구단(창단)이면 null
    */
   lastSeasonRank(): number | null {
+    return this.lastSeasonPlace()?.rank ?? null;
+  }
+
+  /** lastSeasonRank의 자리: 지난 시즌이 양대 리그 해면 리그 안 순위와 리그 이름 (placeLabel로 "드림 2위") */
+  lastSeasonPlace(): RankPlace | null {
     const L = this.league;
     if (L.lastSeason && L.lastSeason.year === this.world.year - 1) {
-      const k = L.lastSeason.standings.indexOf(this.teamIdx);
-      return k >= 0 ? k + 1 : null;
+      const p = lastSeasonPlace(L, this.teamIdx);
+      return p && p.rank > 0 ? p : null;
     }
     const prev = this.store.season(this.world.year - 1);
     if (!prev) return null;
-    const order = [...prev.teams].sort((a, b) => b.pct - a.pct || b.w - a.w);
-    const k = order.findIndex((t) => t.franchise === this.team.franchise);
-    return k >= 0 ? k + 1 : null;
+    const mine = prev.teams.find((t) => t.franchise === this.team.franchise);
+    if (!mine) return null;
+    // 자료의 league 칸이 두 가지인 해(1999·2000)는 리그 안 승률 순 (rank는 가을야구를 반영한 리그별 최종 순위라 쓰지 않는다)
+    const split = new Set(prev.teams.map((t) => t.league)).size === 2 && !!mine.league;
+    const order = prev.teams.filter((t) => !split || t.league === mine.league).sort((a, b) => b.pct - a.pct || b.w - a.w);
+    return { league: split ? mine.league : null, order: [], rank: order.indexOf(mine) + 1 };
   }
 
   /** 우리 구단 경기 (fromDay 일정 색인부터, 날짜 순). 가을야구 경기도 뒤에 붙는다 */
@@ -672,6 +729,7 @@ export class GameSession {
     g.startEntry();
     g.addNews(0, 'season', `${world.year} 시즌 ${world.teams[opts.teamIdx].name} 단장으로 부임했습니다. 개막일은 ${formatDate(world.year, 0)}입니다.`);
     g.addNews(0, 'season', g.ruleNewsFor().headline);
+    g.scheduleNotice();
     const ch = opts.challenge ? challengeById(opts.challenge) : undefined;
     if (ch) {
       // 기획안 도전: 시작 때 만 23세 이하 우리 선수가 자체 육성 후보 (campaigns.ts HOMEGROWN)
@@ -790,7 +848,10 @@ export class GameSession {
     if (a.type === 'entry') this.applyEntry(a.ids ? idxs(a.ids) : null);
     else if (a.type === 'plan') this.season.setPlan(this.teamIdx, a.plan ? this.planFromIds(a.plan) : null);
     else if (a.type === 'event') this.applyEventChoice(a.choice);
-    else if (a.type === 'command') this.pendingCommand = { day: a.day, choices: a.choices.map((c) => ({ ...c })) };
+    else if (a.type === 'command') {
+      this.pendingCommands = this.pendingCommands.filter((c) => c.day !== a.day || c.dh !== a.dh);
+      this.pendingCommands.push({ day: a.day, ...(a.dh ? { dh: a.dh } : {}), choices: a.choices.map((c) => ({ ...c })) });
+    }
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'release-in') this.applyRelease(a.id);
     else if (a.type === 'sign-in') this.applySign(a.id);
@@ -1696,12 +1757,19 @@ export class GameSession {
         if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
-      // 위기 멈춤 (직접 지휘): 오늘 우리 경기를 미리 돌려 위기가 오면 그날을 진행하지 않고 멈춘다
-      if (r.crisis && this.hasGameToday && this.pendingCommand?.day !== this.day) {
-        const pv = this.commandPreview([], 'crisis');
-        if (pv.req) {
-          this.crisis = pv;
-          this.attention.push({ kind: 'crisis', text: `오늘 경기 ${pv.req.inn}회${pv.req.top ? '초' : '말'} 위기·승부처입니다. 직접 지휘하세요.` });
+      // 위기 멈춤 (직접 지휘): 오늘 우리 경기를 미리 돌려 위기가 오면 그날을 진행하지 않고 멈춘다.
+      // 더블헤더 날은 1차전 → 2차전 차례로 (이미 지휘한 차전은 건너뛴다)
+      if (r.crisis && this.hasGameToday) {
+        let crisis: CommandPreview | null = null;
+        for (const dh of this.ourGamesToday()) {
+          if (this.pendingCommands.some((c) => c.day === this.day && c.dh === dh)) continue;
+          const pv = this.commandPreview([], 'crisis', dh);
+          if (pv.req) { crisis = pv; break; }
+        }
+        if (crisis?.req) {
+          this.crisis = crisis;
+          const which = crisis.dh ? '더블헤더 2차전' : this.ourGamesToday().length > 1 ? '더블헤더 1차전' : '오늘 경기';
+          this.attention.push({ kind: 'crisis', text: `${which} ${crisis.req.inn}회${crisis.req.top ? '초' : '말'} 위기·승부처입니다. 직접 지휘하세요.` });
           this.stopped = true;
           break;
         }
@@ -1799,14 +1867,16 @@ export class GameSession {
     if (day > 0) for (const n of this.ruleNewsFor().dated) if (n.day === day) this.addNews(day, 'season', n.text);
     const before = org.map((p) => s.states.absentUntil[p.idx]);
     this.absencesToday = [];
+    // 그날 아침 일정 소식 (우천 취소·잔여 경기 발표): 미리 정해 둔 일정에서 그날 알 수 있는 것만 읽는다
+    this.scheduleNews(day);
     // 무작위 이벤트의 경기력 효과 (events.ts formToday) + 코치 (coaches.ts coachEdge)
     this.prepareDay(s);
     // 직접 지휘한 경기: 조작 기록의 선택을 물음 순서대로 (모자라면 자동)
-    const cmd = this.pendingCommand?.day === day ? this.pendingCommand : null;
-    s.commander = cmd ? { team: this.teamIdx, decide: (req) => cmd.choices[req.n] ?? {} } : null;
+    s.commander = replayCommander(this.teamIdx, this.pendingCommands.filter((c) => c.day === day));
     s.simulateDay();
     s.commander = null;
-    this.pendingCommand = null;
+    this.pendingCommands = [];
+    this.rainNews(day);
 
     org.forEach((p, i) => {
       const until = s.states.absentUntil[p.idx];
@@ -1829,9 +1899,8 @@ export class GameSession {
     this.lastCallUps = new Set(ups.map((p) => p.idx));
 
     if (s.done) {
-      const rank = s.standings().indexOf(this.teamIdx) + 1;
       const t = s.teams[this.teamIdx];
-      this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rank}위 (${t.w}승 ${t.l}패 ${t.t}무).`);
+      this.addNews(day, 'season', `정규시즌 종료. ${this.team.name} 최종 ${rankText(this, this.teamIdx)} (${t.w}승 ${t.l}패 ${t.t}무).`);
       this.openPostseason();
     } else {
       if (day === this.allStarDay) this.allStarBreak(day);
@@ -1881,7 +1950,7 @@ export class GameSession {
     const team = this.teamIdx;
     return {
       league: L, team, teamName: this.team.name, year, day, seasonDays: s.schedule.length,
-      rank: st.indexOf(team) + 1, teams: st.length,
+      rank: st.indexOf(team) + 1, teams: st.length, rankLabel: placeLabel(seasonPlace(s, team)),
       winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
       cash: this.cashNow(),
       roster: L.players.filter((p) => p.team === team),
@@ -2016,6 +2085,97 @@ export class GameSession {
     return result;
   }
 
+  /**
+   * 일정 소식 (일정 개편 기획안 4.5): 잔여 경기 일정 발표, 그날 우천 취소와 다시 치르는 날.
+   * 개막 때 정해 둔 일정(Season.plan)과 그날 알려진 일정(knownSchedule)만 읽어서 같은 시드 같은 날은 같은 문장이다
+   */
+  private scheduleNews(day: number): void {
+    const s = this.season;
+    const { cancels, remainingFrom } = s.plan;
+    // 노게임(cancels의 다섯째 값)은 경기 뒤 소식 (rainNews)
+    const today = cancels.filter((c) => c[0] === day && !c[4]);
+    if (day !== remainingFrom && !today.length) return;
+    const year = this.world.year;
+    const name = (t: number) => this.world.teams[t].name;
+    const mine = (g: { home: number; away: number }) => g.home === this.teamIdx || g.away === this.teamIdx;
+    const known = s.knownSchedule(day);
+    if (day === remainingFrom) {
+      let left = 0;
+      let last = -1;
+      known.days.forEach((games, e) => {
+        if (e < day) return;
+        const n = games.filter(mine).length;
+        left += n;
+        if (n) last = e;
+      });
+      this.addNews(day, 'season', `잔여 경기 일정이 발표됐습니다. 우리 팀 남은 경기 ${left}경기${last >= 0 ? `, 마지막 경기 ${formatDate(year, last)}` : ''}.`);
+    }
+    if (!today.length) return;
+    const others: string[] = [];
+    // 같은 대진 취소가 둘이면 더블헤더 두 경기 함께 취소 (applyWeather가 1차전, 2차전 순으로 적는다)
+    const groups: PlanCancel[][] = [];
+    for (const c of today) {
+      const g = groups.find((x) => x[0][1] === c[1] && x[0][2] === c[2]);
+      if (g) g.push(c);
+      else groups.push([c]);
+    }
+    for (const g of groups) {
+      const [, h, a] = g[0];
+      const ws = g.map((c) => this.replayWhen(c, day, known));
+      if (mine({ home: h, away: a })) {
+        if (ws.length === 1) this.addNews(day, 'season', `${name(a)} 대 ${name(h)} 경기는 우천으로 취소됐습니다. ${ws[0].text}.`);
+        else this.addNews(day, 'season', `${name(a)} 대 ${name(h)} 더블헤더 두 경기가 모두 우천으로 취소됐습니다. ${ws.map((w, i) => `${i + 1}차전은 ${w.text}`).join('. ')}.`);
+      } else others.push(`${name(a)} 대 ${name(h)}${ws.length > 1 ? ' 더블헤더' : ''} (${ws.map((w) => w.short).join(' · ')})`);
+    }
+    if (others.length) this.addNews(day, 'season', `우천 취소: ${others.join(', ')}.`);
+  }
+
+  /**
+   * 다시 치르는 날 문구: 알려진 일정에 그 대진이 있으면 그날, 잔여 경기 발표 전 잔여 경기면 "추후 편성".
+   * known은 그 취소가 알려진 날(경기 전 취소는 그날, 노게임은 다음 날)의 knownSchedule, day는 그날
+   */
+  private replayWhen(c: PlanCancel, day: number, known: KnownSchedule): { text: string; short: string } {
+    const { cancels, remainingFrom, held } = this.season.plan;
+    const year = this.world.year;
+    if (held.includes(cancels.indexOf(c)) && day < remainingFrom) return { text: '추후 편성합니다 (잔여 경기 일정 발표 때)', short: '추후 편성' };
+    const dh = known.days[c[3]]?.find((g) => g.home === c[1] && g.away === c[2] && g.dh === 1);
+    return { text: `${formatDate(year, c[3])}에 ${dh ? '더블헤더 1차전으로 ' : ''}다시 치릅니다`, short: `${shortDate(year, c[3])}${dh ? ' 더블헤더' : ''}` };
+  }
+
+  /**
+   * 경기 중 비 소식 (일정 개편 기획안 4.7): 그날 경기 뒤 강우 콜드 점수와 노게임·다시 치르는 날.
+   * 콜드 점수는 경기 기록(log), 노게임은 개막 때 정해 둔 일정(plan)과 다음 날 아침에 알려진 일정만 읽는다
+   */
+  private rainNews(day: number): void {
+    const s = this.season;
+    const games = (s.plan.days[day] ?? []).filter((g) => g.rainInning);
+    if (!games.length) return;
+    const name = (t: number) => this.world.teams[t].name;
+    const mine = (g: { home: number; away: number }) => g.home === this.teamIdx || g.away === this.teamIdx;
+    const dhText = (g: { dh?: 1 | 2 }) => (g.dh ? ` ${g.dh}차전` : '');
+    const others: string[] = [];
+    const nextDay = day + 1;
+    let known: KnownSchedule | null = null;
+    for (const g of games) {
+      const vs = `${name(g.away)} 대 ${name(g.home)}`;
+      if (isNoGame(g.rainInning)) {
+        const c = s.plan.cancels.find((x) => x[4] && x[0] === day && x[1] === g.home && x[2] === g.away);
+        if (!c) continue;
+        known ??= s.knownSchedule(nextDay);
+        const w = this.replayWhen(c, nextDay, known);
+        if (mine(g)) this.addNews(day, 'season', `${vs}${dhText(g)} 경기는 ${g.rainInning}회 노게임이 선언됐습니다 (비). 기록은 남지 않습니다. ${w.text}.`);
+        else others.push(`${vs} ${g.rainInning}회 노게임 (${w.short})`);
+      } else {
+        const r = s.log.find((x) => x.day === day && x.home === g.home && x.away === g.away && x.dh === g.dh);
+        if (!r) continue;
+        const score = `${r.awayRuns}:${r.homeRuns}`;
+        if (mine(g)) this.addNews(day, 'season', `${vs}${dhText(g)} 경기는 ${g.rainInning}회 강우 콜드로 끝났습니다 (${score}${r.awayRuns === r.homeRuns ? ', 무승부' : ''}).`);
+        else others.push(`${vs} ${g.rainInning}회 강우 콜드 ${score}`);
+      }
+    }
+    if (others.length) this.addNews(day, 'season', `경기 중 비: ${others.join(', ')}.`);
+  }
+
   private addNews(day: number, kind: NewsKind, text: string): void {
     this.news.push({ year: this.year, day, kind, text });
   }
@@ -2030,23 +2190,32 @@ export class GameSession {
     this.postseason = startPostseason(this.season, st, this.world.rules.postseasonTeams, seasonSeed(this.league));
     if (ruleOf(this.league, 'postseasonMaxInnings') !== RULE_DEFAULTS.postseasonMaxInnings) this.postseason.maxInnings = ruleOf(this.league, 'postseasonMaxInnings');
     const name = (t: number) => this.world.teams[t].name;
-    const mine = this.postseason.seeds.includes(this.teamIdx);
-    this.addNews(this.day, 'season', `가을야구 대진: ${this.postseason.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ')}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
+    const ps = this.postseason;
+    const mine = ps.seeds.includes(this.teamIdx);
+    // 양대 리그 해: 준플레이오프 판정과 교차 대진 (기획안 10.5)
+    const text = ps.bracket ? `${semiCheckText(ps, name)} ${bracketText(ps, name)}` : ps.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ');
+    this.addNews(this.day, 'season', `가을야구 대진: ${text}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
   }
 
-  /** 가을야구를 games경기 진행한다. 실제로 치른 경기 수를 돌려준다 */
+  /**
+   * 가을야구를 games경기 진행한다. 실제로 치른 경기 수를 돌려준다.
+   * 같은 날 경기가 둘이면(양대 리그 해의 동시 시리즈) 그날 경기를 함께 치른다: 날짜 사이에서만 조작이 끼어들어 재현이 날짜로 맞는다
+   */
   advancePostseason(games: number): number {
     let n = 0;
     while (n < games && this.postseasonRunning) {
       const st = this.postseason!;
-      const before = currentSeries(st)!;
+      const day = st.day;
       // 직접 지휘한 경기 (조작 기록 command, 그 경기 날짜): 고른 대로, 나머지 물음은 감독에게
-      const cmd = this.pendingCommand?.day === st.day ? this.pendingCommand : null;
-      const commander: GameCommand | null = cmd ? { team: this.teamIdx, decide: (req) => cmd.choices[req.n] ?? {} } : null;
-      if (cmd) this.pendingCommand = null;
-      const g = playNextGame(st, this.season, commander)!;
-      n++;
-      this.postseasonGameNews(before, g);
+      const cmds = this.pendingCommands.filter((c) => c.day === day);
+      const commander = replayCommander(this.teamIdx, cmds);
+      if (cmds.length) this.pendingCommands = [];
+      do {
+        const before = currentSeries(st)!;
+        const g = playNextGame(st, this.season, commander)!;
+        n++;
+        this.postseasonGameNews(before, g);
+      } while (this.postseasonRunning && st.day === day);
     }
     return n;
   }
@@ -2056,7 +2225,7 @@ export class GameSession {
     const x = this.postseason && currentSeries(this.postseason);
     if (!x) return 0;
     let n = 0;
-    while (this.postseasonRunning && currentSeries(this.postseason!) === x) n += this.advancePostseason(1);
+    while (this.postseasonRunning && x.winner < 0) n += this.advancePostseason(1);
     return n;
   }
 
@@ -2064,8 +2233,7 @@ export class GameSession {
   advanceToOurPostseasonGame(): number {
     let n = 0;
     while (this.postseasonRunning) {
-      const x = currentSeries(this.postseason!)!;
-      const ours = x.high === this.teamIdx || x.low === this.teamIdx;
+      const ours = this.ourPostseasonGameNext;
       n += this.advancePostseason(1);
       if (ours) break;
     }
@@ -2077,7 +2245,7 @@ export class GameSession {
     const mine = x.high === this.teamIdx || x.low === this.teamIdx;
     const no = x.games.length;
     if (mine) {
-      this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} ${no}차전: ${name(g.away)} ${g.awayRuns} - ${g.homeRuns} ${name(g.home)}${g.innings > 9 ? ` (${g.innings}회)` : ''} · 시리즈 ${name(x.high)} ${x.winsHigh} - ${x.winsLow} ${name(x.low)}`);
+      this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} ${no}차전: ${name(g.away)} ${g.awayRuns} - ${g.homeRuns} ${name(g.home)}${g.innings > 9 ? ` (${g.innings}회)` : ''}${g.neutral ? ' (잠실 중립)' : ''} · 시리즈 ${name(x.high)} ${x.winsHigh} - ${x.winsLow} ${name(x.low)}`);
     }
     if (x.winner >= 0) {
       this.addNews(g.day, 'season', `${ROUND_LABEL[x.round]} 종료: ${name(x.winner)} 승리 (${x.winsHigh} - ${x.winsLow}).`);
@@ -2166,9 +2334,25 @@ export class GameSession {
     return this.valueCtx;
   }
 
-  /** 올스타전 날 (일정 색인, 휴식일). 없으면 -1 (league/allstar.ts) */
+  /**
+   * 개막 소식: 올해 달라지는 일정 (경기 수·연전·올스타 휴식·순연·중단, league/scheduleNews.ts). 지난해 규칙과 견준다.
+   * 양대 리그(1999·2000)의 시작·재편·끝도 같은 줄에 (leagueNews)
+   */
+  private scheduleNotice(): void {
+    const rule = this.world.schedule;
+    if (!rule) return;
+    const raw = this.store.schedule ? scheduleRule(this.store.schedule, rule.year - 1) : undefined;
+    const lines = [
+      ...scheduleNews(rule, raw && fitRuleToTeams(raw, this.world.teams.length)),
+      ...leagueNews(this.world.divisions, this.world.teams, this.store.season(rule.year), this.store.season(rule.year - 1)),
+    ];
+    const text = scheduleNewsText(rule.year, lines);
+    if (text) this.addNews(0, 'season', text);
+  }
+
+  /** 올스타전 날 (일정 색인, 휴식일). 일정 규칙 표의 날, 없는 해(2020·2021)는 -1 (league/allstar.ts) */
   get allStarDay(): number {
-    return allStarDay(this.season.schedule, this.world.year);
+    return allStarDay(this.season.schedule, this.world.year, this.world.schedule);
   }
 
   /** 올해 올스타전 기록 (아직이면 null) */
@@ -2184,7 +2368,8 @@ export class GameSession {
     const nameOf = (id: string | null) => (id ? rec.roster.find((x) => x.id === id)?.name ?? this.world.players.find((p) => p.id === id)?.name ?? id : '-');
     const ours = rec.roster.filter((x) => x.team === this.teamIdx);
     const [d, n] = rec.game.score;
-    const result = d === n ? `${d}-${n} 무승부` : `${SIDE_NAMES[d > n ? 0 : 1]} ${Math.max(d, n)}-${Math.min(d, n)} 승리`;
+    const sides = recordSideNames(rec);
+    const result = d === n ? `${d}-${n} 무승부` : `${sides[d > n ? 0 : 1]} ${Math.max(d, n)}-${Math.min(d, n)} 승리`;
     const mvpOurs = rec.game.mvp !== null && ours.some((x) => x.id === rec.game.mvp);
     const derbyOurs = rec.derby.winner !== null && ours.some((x) => x.id === rec.derby.winner);
     this.addNews(day, 'season', `올스타전: ${result}, MVP ${nameOf(rec.game.mvp)}. 홈런 더비 우승 ${nameOf(rec.derby.winner)}.`
@@ -2194,7 +2379,7 @@ export class GameSession {
     const mvpTeam = rec.roster.find((x) => x.id === rec.game.mvp)?.team;
     addArticle(this.league, {
       year, day, kind: 'allstar', title: `올스타전 ${result}, MVP ${nameOf(rec.game.mvp)}`,
-      body: `${josa(SIDE_NAMES[0], '과', '와')} ${josa(SIDE_NAMES[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
+      body: `${josa(sides[0], '과', '와')} ${josa(sides[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
         + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다.`,
       ...(mvpTeam !== undefined ? { franchise: this.world.teams[mvpTeam].franchise } : {}),
     });
@@ -2224,16 +2409,19 @@ export class GameSession {
     const s = this.season;
     const n = this.world.teams.length;
     let rank: number;
+    let inPlace: boolean | undefined;
     if (s.teams[teamIdx].g < 20) {
       // 시즌 초반은 전력 순위로
       const str = this.world.teams.map((t) => teamStrength(t.org, this.values, 0));
       rank = 1 + str.filter((v, i) => v > str[teamIdx] || (v === str[teamIdx] && i < teamIdx)).length;
     } else {
       rank = s.standings().indexOf(teamIdx) + 1;
+      // 양대 리그 해: 진출권은 실제 진출 규칙으로 (리그 2위 이내, 준플레이오프 조건을 채운 3위. game/rank.ts)
+      if (this.world.divisions) inPlace = seasonPostseasonPlaces(s, this.world.rules.postseasonTeams).includes(teamIdx);
     }
     const played = s.teams[teamIdx].g;
     return {
-      teamIdx, rank, nTeams: n, cut: this.world.rules.postseasonTeams,
+      teamIdx, rank, nTeams: n, cut: this.world.rules.postseasonTeams, ...(inPlace !== undefined ? { inPlace } : {}),
       coreAge: coreAge(this.world.teams[teamIdx].org, this.values),
       remaining: 1 - played / this.world.gamesPerTeam,
       ...(teamIdx !== this.teamIdx ? { style: gmStyle(this.league, teamIdx) } : {}),
@@ -2582,8 +2770,9 @@ export class GameSession {
         Off.closeOffseason(L, off);
         this.watch = pruneUndrafted(this.watch, undrafted, L); // 지명 안 된 신인 후보는 관심 명단에서 뺀다 (결정 9)
         // 감독: 재계약·실제 개막 감독·교체 (managers.ts). 지난 시즌 순위로 판단한다
+        // 양대 리그 해(1999·2000)의 가을야구는 실제 진출 (lastSeason.divisions가 있는 해만, 기획안 10.8 결정 2)
         const mgrNews = openManagers(L, this.store, this.teamIdx, L.lastSeason?.standings ?? [],
-          this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5);
+          this.store.meta.rules[String(L.year - 1)]?.postseasonTeams ?? 5, L.lastSeason?.divisions ? L.lastSeason.postseason?.seeds : undefined);
         this.postseason = null;
         this.hallOfFameAndFarewells(L.year - 1);
         const sanctions = applyCapSanctions(L, L.year);
@@ -2647,6 +2836,7 @@ export class GameSession {
         this.actions.push(clone(a));
         this.addNews(0, 'season', `${this.year} 시즌을 시작합니다. 개막일은 ${formatDate(this.year, 0)}입니다.`);
         this.addNews(0, 'season', this.ruleNewsFor().headline);
+        this.scheduleNotice();
         for (const p of this.team.org) {
           const until = this.season.states.absentUntil[p.idx];
           if (until > 0) this.addNews(0, 'absence', `${p.name}: ${this.absenceReason(p)}. 복귀 예정 ${formatDate(this.year, until)}.`);
@@ -2758,14 +2948,17 @@ export class GameSession {
     if (this.phase === 'season' && !this.done) this.setSeasonGoal();
   }
 
-  /** 개막 때 전력 예상 순위로 이번 시즌 목표를 정한다 */
+  /** 개막 때 전력 예상 순위로 이번 시즌 목표를 정한다. 양대 리그 해(1999·2000)는 리그 안 전력 예상 순위로 (goalForLeague) */
   private setSeasonGoal(): void {
     const o = this.league.owner!;
     const str = this.world.teams.map((t) => teamStrength(t.org, this.values, 0));
-    const rank = 1 + str.filter((v, i) => v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx)).length;
-    const kind = goalFor(rank, this.world.rules.postseasonTeams);
-    o.goal = { year: this.year, kind, projectedRank: rank };
-    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${rank}위). 신뢰도 ${o.trust}.` });
+    const div = this.world.divisions;
+    const k = div ? div.teams.findIndex((ts) => ts.includes(this.teamIdx)) : -1;
+    const pool = k >= 0 ? div!.teams[k] : null;
+    const rank = 1 + str.filter((v, i) => (!pool || pool.includes(i)) && (v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx))).length;
+    const kind = pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams);
+    o.goal = { year: this.year, kind, projectedRank: rank, ...(pool ? { projectedLeague: div!.names[k] } : {}) };
+    this.news.push({ year: this.year, day: 0, kind: 'owner', text: `구단주가 정한 ${this.year} 시즌 목표: ${GOAL_LABEL[kind]} (전력 예상 ${pool ? `${div!.names[k]} ` : ''}${rank}위). 신뢰도 ${o.trust}.` });
   }
 
   /** 시즌 평가: 목표 달성, 신뢰도, 업적. 신뢰도가 바닥나면 해고되고 하위권 구단의 영입 제의를 받는다 */
@@ -2775,7 +2968,10 @@ export class GameSession {
     const team = this.teamIdx;
     const goal = o.goal?.year === this.year ? o.goal : { year: this.year, kind: goalFor(5, this.world.rules.postseasonTeams), projectedRank: 5 };
     const capOver = (L.capStrikes?.[team] ?? 0) > 0;
-    const outcome = outcomeOf(team, standings, ps, this.world.rules.postseasonTeams, capOver);
+    // 양대 리그 해: 결과 문장은 리그 순위, 가을야구는 실제 진출, 꼴찌는 통합 순위 (기획안 10.8 결정 2)
+    const place = seasonPlace(this.season, team);
+    const outcome = outcomeOf(team, standings, ps, this.world.rules.postseasonTeams, capOver,
+      place.league && place.rank ? { name: place.league, rank: place.rank } : undefined);
     const td = trustDelta(goal.kind, outcome);
     const achieved = td.achieved;
     const delta = td.delta < 0 ? Math.round(td.delta * settingsOf(this.league).ownerPressure) : td.delta;
@@ -2785,6 +2981,7 @@ export class GameSession {
       year: this.year, team, goal: goal.kind, projectedRank: goal.projectedRank, rank: outcome.rank, result: outcomeLabel(outcome),
       // 구단 이름은 막 끝난 시즌의 월드에서 (결산 때 승계·명칭 변경이 먼저 적용돼 리그 상태는 이미 새 이름이다)
       achieved, trustBefore: before, trustAfter: o.trust, champion: outcome.champion, capOver, teamName: this.world.teams[team].name,
+      ...(outcome.league ? { league: outcome.league } : {}),
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
     say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}). 신뢰도 ${before} → ${o.trust}.`);
@@ -2910,7 +3107,8 @@ export class GameSession {
     const st: ArticleState = {
       year, base, prev: new Map(), records, broken: new Set(), streak: this.world.teams.map(() => 0), logIdx: 0,
       gameIdx: s.log.length, leader: s.teams[order[0]].g >= 20 ? order[0] : -1,
-      psIn: order.indexOf(this.teamIdx) < this.world.rules.postseasonTeams, absSeen: s.absences.length,
+      ...(s.divisionStandings() ? { leaders: s.divisionStandings()!.map((d) => (s.teams[d.teams[0]].g >= 20 ? d.teams[0] : -1)) } : {}),
+      psIn: seasonPostseasonPlaces(s, this.world.rules.postseasonTeams).includes(this.teamIdx), absSeen: s.absences.length,
       month: dateOf(year, s.day).month,
     };
     // 월간 MVP 기준점: 저장에 남아 있으면 그것, 없으면(새 시즌·예전 저장) 지금
@@ -3071,20 +3269,27 @@ export class GameSession {
       }
     }
 
-    // 순위: 선두 교체, 우리 구단의 가을야구권 진입·이탈 (20경기부터)
+    // 순위: 선두 교체, 우리 구단의 가을야구권 진입·이탈 (20경기부터). 양대 리그 해는 리그마다 선두, 가을야구권은 진출 규칙대로
     const order = s.standings();
     if (s.teams[order[0]].g >= 20) {
-      const lead = order[0];
-      if (st.leader >= 0 && lead !== st.leader) {
-        put('rank', lead, `선두 교체: ${tname(lead)} 1위`, `${josa(tname(lead), '이', '가')} ${date} 경기 뒤 ${josa(tname(st.leader), '을', '를')} 끌어내리고 1위에 올랐다.${lead === me ? quoteLine('first', rng) : ''}`);
-      }
-      st.leader = lead;
+      const divs = s.divisionStandings();
+      const tables = divs ?? [{ name: '', teams: order }];
+      tables.forEach((d, k) => {
+        const lead = d.teams[0];
+        const was = divs ? st.leaders?.[k] ?? -1 : st.leader;
+        const lg = d.name ? `${d.name}리그 ` : '';
+        if (was >= 0 && lead !== was) {
+          put('rank', lead, `${lg}선두 교체: ${tname(lead)} 1위`, `${josa(tname(lead), '이', '가')} ${date} 경기 뒤 ${josa(tname(was), '을', '를')} 끌어내리고 ${lg}1위에 올랐다.${lead === me ? quoteLine('first', rng) : ''}`);
+        }
+        if (divs) (st.leaders ??= [])[k] = lead;
+        else st.leader = lead;
+      });
       const cut = W.rules.postseasonTeams;
-      const inNow = order.indexOf(me) < cut;
+      const inNow = seasonPostseasonPlaces(s, cut).includes(me);
       if (inNow !== st.psIn) {
-        const rank = order.indexOf(me) + 1;
-        put('rank', me, inNow ? `${tname(me)}, 가을야구권 진입 (${rank}위)` : `${tname(me)}, 가을야구권 밖으로 (${rank}위)`,
-          `${josa(tname(me), '이', '가')} ${date} 경기 뒤 ${rank}위가 됐다.${quoteLine(inNow ? 'ps-in' : 'ps-out', rng)}`);
+        const rank = rankText(this, me);
+        put('rank', me, inNow ? `${tname(me)}, 가을야구권 진입 (${rank})` : `${tname(me)}, 가을야구권 밖으로 (${rank})`,
+          `${josa(tname(me), '이', '가')} ${date} 경기 뒤 ${rank}가 됐다.${quoteLine(inNow ? 'ps-in' : 'ps-out', rng)}`);
         st.psIn = inNow;
       }
     }
@@ -3101,10 +3306,17 @@ export class GameSession {
       put('injury', p.teamIdx, `${tname(p.teamIdx)} ${p.name}, 부상으로 이탈`, `${tname(p.teamIdx)} ${josa(p.name, '이', '가')} 부상으로 1군에서 빠졌다. ${out}.${mine ? quoteLine('injury', rng) : ''}`);
     }
 
-    // 월간 MVP: 그 달 마지막 경기일 다음 날 (달이 바뀌면)
+    // 월간 MVP: 그 달 마지막 경기일 다음 날 (달이 바뀌면). 경기일이 MONTHLY_MIN_DAYS보다 적은 달(3월 개막 주, 올림픽·코로나 중단,
+    // 2020 5월 개막처럼 일정 개편으로 생기는 짧은 달)은 기사 없이 다음 달과 합친다 ("3·4월 MVP"). 기준점의 month가 합친 첫 달이다
     const nextMonth = dateOf(year, Math.min(day + 1, s.schedule.length - 1)).month;
     const done = day + 1 >= s.schedule.length;
-    if (nextMonth !== st.month || done) {
+    const fromMonth = L.storyMonth?.month ?? st.month;
+    let fromDay = 0;
+    while (fromDay < day && dateOf(year, fromDay).month < fromMonth) fromDay++;
+    const gameDays = new Set(s.log.filter((g) => g.day >= fromDay && g.day <= day).map((g) => g.day)).size;
+    if (nextMonth !== st.month && !done && gameDays < MONTHLY_MIN_DAYS) {
+      st.month = nextMonth;
+    } else if (nextMonth !== st.month || done) {
       const snap = L.storyMonth?.lines ?? {};
       const d = (idx: number) => {
         const z = snap[P[idx].id] ?? [];
@@ -3120,7 +3332,7 @@ export class GameSession {
       const bh = hitters.sort((a, b) => ops(b.bat) - ops(a.bat) || a.p.idx - b.p.idx)[0];
       const bp = pitchers.sort((a, b) => era(a.pit) - era(b.pit) || b.pit.outs - a.pit.outs || a.p.idx - b.p.idx)[0];
       if (bh || bp) {
-        const m = st.month;
+        const m = fromMonth < st.month ? `${fromMonth}·${st.month}` : `${st.month}`;
         const parts: string[] = [];
         if (bh) parts.push(`타자 부문 ${tname(bh.p.teamIdx)} ${bh.p.name} (${bh.bat.pa}타석 타율 ${rate3(avg(bh.bat))}, ${bh.bat.hr}홈런, OPS ${rate3(ops(bh.bat))})`);
         if (bp) parts.push(`투수 부문 ${tname(bp.p.teamIdx)} ${bp.p.name} (${ipText(bp.pit.outs)}이닝 평균자책 ${fixed2(era(bp.pit))}, ${bp.pit.w}승 ${bp.pit.so}탈삼진)`);
@@ -3139,7 +3351,7 @@ export class GameSession {
       const sit = streak >= 4 ? 'gm-hot' : streak <= -4 ? 'gm-cold' : rank <= 2 ? 'gm-top' : rank >= n - 2 ? 'gm-low' : 'gm-mid';
       const t = s.teams[me];
       put('interview', me, `[인터뷰] ${tname(me)} 단장 "${voice(sit, rng).say.split('.')[0]}"`,
-        `${josa(tname(me), '은', '는')} ${date} 현재 ${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}로 ${rank}위다.${quoteLine(sit, rng, tname(me))}`);
+        `${josa(tname(me), '은', '는')} ${date} 현재 ${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}로 ${rankText(this, me)}다.${quoteLine(sit, rng, tname(me))}`);
     }
   }
 
