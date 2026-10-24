@@ -279,3 +279,44 @@ function computeYear(src: ParkSource, year: number, frs: string[], lg: ParkLeagu
   }
   return out;
 }
+
+// ---- 게임 안 신구장 (기획안 6장, 결정 7, 단순 규칙 6.3)
+
+/** 신구장 펜스 제원: 좌·중·우 거리 (m 정수), 높이 (0.1m 단위 정수, 예 30 = 3.0m) */
+export interface Fence {
+  l: number;
+  c: number;
+  r: number;
+  h: number;
+}
+
+/** 고를 수 있는 제원인가 (params.park.specFit.range, 거리 1m·높이 0.5m 단위) */
+export function fenceValid(f: Fence, p: ParkParams): boolean {
+  const { side, center, height } = p.specFit.range;
+  const int = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x);
+  return int(f.l) && int(f.c) && int(f.r) && int(f.h)
+    && f.l >= side[0] && f.l <= side[1] && f.r >= side[0] && f.r <= side[1] && f.c >= center[0] && f.c <= center[1]
+    && f.h >= Math.round(height[0] * 10) && f.h <= Math.round(height[1] * 10) && f.h % 5 === 0;
+}
+
+/**
+ * 고른 제원 → 사건별 배율 (단타 1, 좌타·우타 포함). 평균 거리를 고르는 범위 끝의 지수(newPark)에 대고 log 직선,
+ * 높이·좌우 비대칭 규칙(6.2)을 더한 뒤 상·하한. edge = 상·하한에 닿은 지수 (화면 "범위 끝")
+ */
+export function fenceParkEvents(f: Fence, p: ParkParams): { ev: ParkEvents; edge: { hr: boolean; xb: boolean } } {
+  const fit = p.specFit;
+  const lo = (fit.range.side[0] * 2 + fit.range.center[0]) / 3;
+  const hi = (fit.range.side[1] * 2 + fit.range.center[1]) / 3;
+  const t = ((f.l + f.c + f.r) / 3 - lo) / (hi - lo);
+  const line = ([a, b]: [number, number]) => Math.log(a / 100) + (Math.log(b / 100) - Math.log(a / 100)) * t;
+  const dh = f.h / 10 - fit.height.base;
+  const hr = line(fit.newPark.hr) + Math.log(1 + fit.height.hr) * dh;
+  const xb = line(fit.newPark.xb) + Math.log(1 + fit.height.xb) * dh;
+  const k = Math.max(-fit.asym.max, Math.min(fit.asym.max, fit.asym.perM * (f.l - f.r)));
+  const c = fit.clamp;
+  const hrM = clampTo(Math.exp(hr), c.hr);
+  const xbM = clampTo(Math.exp(xb), c.xb);
+  const side = (dk: number): ParkRates => ({ s1: 1, d2: xbM, t3: xbM, hr: clampTo(hrM * (1 + dk), c.side) });
+  const edge = { hr: hrM !== Math.exp(hr), xb: xbM !== Math.exp(xb) };
+  return { ev: { s1: 1, d2: xbM, t3: xbM, hr: hrM, L: side(k), R: side(-k) }, edge };
+}

@@ -1,9 +1,10 @@
 // 구장·팬 (구단 운영 탭, stadium.ts): 우리 구장과 공사 주문, 팬 만족도와 그 변화, 리그 구단 비교.
 import { useState } from 'react';
 import {
-  DOME, downPayment, MUNICIPAL, municipalChance, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, PARK_SIZES, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale, underConstruction, yearlyPayment,
-  type ParkSize,
+  DOME, downPayment, FENCE_PRESETS, fenceText, MUNICIPAL, municipalChance, fanFill, fanLevel, fanSponsor, HONEYMOON, installment, REMODEL, seatsAt, stadiumFill, stadiumOptions, ticketScale,
+  underConstruction, yearlyPayment, type ParkSize,
 } from '../../league/stadium';
+import { DEFAULT_PARAMS, fenceParkEvents, fenceValid, parkIndexOf, type Fence } from '../../engine';
 import { TeamName, useGame, useWon } from '../context';
 import { ConfirmButton } from '../ConfirmButton';
 import { namingAt, namingOffers, stadiumName } from '../../league/naming';
@@ -19,6 +20,19 @@ const ix = (m: number) => Math.round(m * 100);
 /** 지난 시즌과 다르면 "전 → 후" */
 const ixChange = (prev: number, now: number) => (ix(prev) !== ix(now) ? `${ix(prev)} → ${ix(now)}` : String(ix(now)));
 const m = (v: number | null) => (v == null ? '?' : `${v}`);
+
+/** 평균 거리가 가장 비슷한 실제 구장 (지금 쓰는 구장 제원 행, 기획안 6.4-3) */
+function nearestPark(specs: ParkSpec[] | undefined, f: Fence): string | undefined {
+  const avg = (f.l + f.c + f.r) / 3;
+  let best: { name: string; d: number } | undefined;
+  for (const sp of specs ?? []) {
+    const { l, c, r } = sp.fence;
+    if (sp.to !== null || sp.franchise || l == null || c == null || r == null) continue;
+    const d = Math.abs((l + c + r) / 3 - avg);
+    if (!best || d < best.d) best = { name: sp.name, d };
+  }
+  return best?.name;
+}
 
 /** 구장 제원 한 줄: 좌·중·우 펜스, 높이, 잔디, 좌석 (parks.json, 나무위키 구장 문서) */
 function specLine(sp: ParkSpec): string {
@@ -52,7 +66,8 @@ export function StadiumPanel() {
   const log = [...(L.fans?.[me]?.log ?? [])].reverse().slice(0, 14);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
-  const [size, setSize] = useState<ParkSize>('neutral');
+  // 신구장 펜스 제원 (구장효과 기획안 6.1·6.4): 예시값 버튼으로 채우고 고쳐 쓴다. 높이는 0.1m 단위 정수
+  const [fence, setFence] = useState<Fence>(FENCE_PRESETS.neutral.fence);
   const [dome, setDome] = useState(false);
   const [deal, setDeal] = useState<'standard' | 'push'>('standard');
 
@@ -65,9 +80,15 @@ export function StadiumPanel() {
   const parkPrev = L.teams.map((_, t) => teamParkView(store, L, t, year - 1, pl));
   const mine = parkNow[me];
   const spec = (s.done ?? []).some((d) => d.kind === 'new') ? undefined : realParkSpec(L.teams[me].franchise, year);
+  // 고른 펜스의 예상 구장 지수 (지금 구장 → 새 구장)
+  const okFence = fenceValid(fence, DEFAULT_PARAMS.park);
+  const planned = okFence ? fenceParkEvents(fence, DEFAULT_PARAMS.park) : undefined;
+  const plannedIx = planned ? parkIndexOf({ hr: 1, ev: planned.ev }, DEFAULT_PARAMS.park, pl.rates, pl.rpa) : undefined;
+  const R = DEFAULT_PARAMS.park.specFit.range;
+  const setF = (k: keyof Fence, v: number) => setFence({ ...fence, [k]: k === 'h' ? Math.round(v * 10) : Math.round(v) });
 
   const order = (id: string) => {
-    const r = session.orderStadium(id, id.startsWith('new') ? { size, dome, deal } : {});
+    const r = session.orderStadium(id, id.startsWith('new') ? { fence, dome, deal } : {});
     setMsg({ text: r.message, error: !r.ok });
     setConfirm(null);
     changed();
@@ -92,6 +113,7 @@ export function StadiumPanel() {
             {s.dome && <span className="small">돔</span>}</div>
         </div>
         {spec && <p className="small">{spec.name}: {specLine(spec)} <span className="muted">({spec.source}{spec.confirmed === '출처 확인' ? '' : ', 미확인'})</span></p>}
+        {s.fence && <p className="small">신구장 펜스: {fenceText(s.fence)}</p>}
         <Meter label="시설" v={s.quality} />
         <p className="muted small">시설은 해마다 1씩 낡습니다 (바닥 20). 50이 보통이고, 높을수록 관중이 더 들고 입장권을 비싸게 받을 수 있습니다. 신구장은 개장 뒤 세 시즌 동안 관중이 더 듭니다.</p>
 
@@ -107,11 +129,39 @@ export function StadiumPanel() {
           <>
             <h3>공사 주문 <span className="muted small">{year} 시즌부터 공사</span></h3>
             <div className="form-row">
-              <label>신구장 크기
-                <select value={size} onChange={(e) => setSize(e.target.value as ParkSize)}>
-                  {(Object.keys(PARK_SIZES) as ParkSize[]).map((k) => <option key={k} value={k}>{PARK_SIZES[k].label} · 홈런 ×{PARK_SIZES[k].hr}</option>)}
-                </select>
-              </label>
+              <span className="inline">신구장 펜스 예시
+                {(Object.keys(FENCE_PRESETS) as ParkSize[]).map((k) => (
+                  <button key={k} type="button" className="small-btn" onClick={() => setFence(FENCE_PRESETS[k].fence)}>{FENCE_PRESETS[k].label}</button>
+                ))}
+              </span>
+            </div>
+            <div className="form-row">
+              <label>좌측 (m)<input type="number" min={R.side[0]} max={R.side[1]} step={1} value={fence.l} onChange={(e) => setF('l', Number(e.target.value))} /></label>
+              <label>중앙 (m)<input type="number" min={R.center[0]} max={R.center[1]} step={1} value={fence.c} onChange={(e) => setF('c', Number(e.target.value))} /></label>
+              <label>우측 (m)<input type="number" min={R.side[0]} max={R.side[1]} step={1} value={fence.r} onChange={(e) => setF('r', Number(e.target.value))} /></label>
+              <label>높이 (m)<input type="number" min={R.height[0]} max={R.height[1]} step={0.5} value={fence.h / 10} onChange={(e) => setF('h', Number(e.target.value))} /></label>
+            </div>
+            {!okFence && <p className="note error-box">고를 수 있는 범위: 좌·우 {R.side[0]}~{R.side[1]}m, 중앙 {R.center[0]}~{R.center[1]}m (1m 단위), 높이 {R.height[0]}~{R.height[1]}m (0.5m 단위)</p>}
+            {planned && plannedIx && (
+              <div className="scroll flat">
+                <table>
+                  <thead><tr><th className="l">신구장 예상 지수 (짐작)</th><th>득점</th><th>홈런</th><th>2루타</th><th>3루타</th><th>좌타 홈런</th><th>우타 홈런</th></tr></thead>
+                  <tbody>
+                    <tr title="제원으로 짐작한 값">
+                      <td className="l">지금 구장 → 새 구장</td>
+                      <td>{ix(mine.index.run)} → {ix(plannedIx.run)}</td>
+                      <td>{ix(mine.index.hr)} → {ix(plannedIx.hr)}{planned.edge.hr ? ' (범위 끝)' : ''}</td>
+                      <td>{ix(mine.index.d2)} → {ix(plannedIx.d2)}{planned.edge.xb ? ' (범위 끝)' : ''}</td>
+                      <td>{ix(mine.index.t3)} → {ix(plannedIx.t3)}</td>
+                      <td>{ix(mine.index.hrL)} → {ix(plannedIx.hrL)}</td>
+                      <td>{ix(mine.index.hrR)} → {ix(plannedIx.hrR)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                {nearestPark(store.parks?.specs, fence) && <p className="muted small">평균 거리가 가장 비슷한 실제 구장: {nearestPark(store.parks?.specs, fence)}</p>}
+              </div>
+            )}
+            <div className="form-row">
               <label style={{ flexDirection: 'row', alignItems: 'center' }}><input type="checkbox" checked={dome} onChange={(e) => setDome(e.target.checked)} /> 돔 (공사비 ×{DOME.cost}, 관중률 +{Math.round(DOME.fill * 100)}%p)</label>
               <label>지자체 협상
                 <select value={deal} onChange={(e) => setDeal(e.target.value as 'standard' | 'push')}>
@@ -128,13 +178,13 @@ export function StadiumPanel() {
                     const cost = o.kind === 'new' && dome ? Math.round(o.cost * DOME.cost) : o.cost;
                     return (
                     <tr key={o.id}>
-                      <td className="l">{o.label}{o.kind === 'new' && <span className="muted small"> · {PARK_SIZES[size].label}{dome ? ' · 돔' : ''}</span>}</td><td>{won(cost)}</td><td>{won(downPayment(cost))}</td><td>{o.years}시즌</td><td>{won(yearlyPayment(cost, o.years))}</td>
+                      <td className="l">{o.label}{o.kind === 'new' && <span className="muted small"> · {fenceText(fence)}{dome ? ' · 돔' : ''}</span>}</td><td>{won(cost)}</td><td>{won(downPayment(cost))}</td><td>{o.years}시즌</td><td>{won(yearlyPayment(cost, o.years))}</td>
                       <td>{o.capacity(s.capacity).toLocaleString()}석 · 시설 {o.kind === 'new' ? 100 : Math.min(90, s.quality - 1 + REMODEL.quality)}</td>
                       <td className="l small">{o.kind === 'remodel' ? `그 시즌 관중석 ${Math.round(REMODEL.closed * 100)}% 못 씀` : '옛 구장을 그대로 씀'}</td>
                       <td>
                         {confirm === o.id
                           ? <span className="inline"><button type="button" className="small-btn danger" onClick={() => order(o.id)}>정말 주문</button><button type="button" className="small-btn" onClick={() => setConfirm(null)}>취소</button></span>
-                          : <button type="button" className="small-btn" onClick={() => setConfirm(o.id)}>주문</button>}
+                          : <button type="button" className="small-btn" disabled={o.kind === 'new' && !okFence} onClick={() => setConfirm(o.id)}>주문</button>}
                       </td>
                     </tr>
                     );
@@ -142,7 +192,9 @@ export function StadiumPanel() {
                 </tbody>
               </table>
             </div>
-            <p className="muted small">신구장 크기는 홈·원정 두 팀 타자 모두의 홈런에 그대로 곱해집니다 (신구장을 지으면 원래 구장의 구장 효과 대신 이 배율만 씁니다. 원래 구장의 구장 효과는 아래 리그 구장 지수 표에 있습니다). 신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
+            <p className="muted small">신구장 펜스는 홈·원정 두 팀 타자 모두의 2루타·3루타·홈런에 곱해집니다 (신구장을 지으면 원래 구장의 구장 효과 대신 이 값만 씁니다).
+              펜스가 가까울수록 홈런이 늘고 2루타·3루타가 줄며, 가장 작은 구장(좌·우 {R.side[0]}·중앙 {R.center[0]}m)은 실측 최대인 홈런 지수 147, 가장 큰 구장은 실측 최소인 70쯤입니다.
+              높을수록 홈런이 줄고 2루타가 늘며, 좌·우가 다르면 짧은 쪽으로 당겨 치는 타자(좌타는 우측)의 홈런이 늘어납니다. 착공 뒤에는 바꿀 수 없습니다. 신구장은 지자체와 함께 짓는 것으로 보고 구단 몫만 냅니다. 공사비 때문에 적자가 나면 모기업이 메우지만 구단주 신뢰도가 떨어집니다. 수치는 임시값입니다.</p>
           </>
         )}
         {!off && !building && <p className="muted small">공사는 오프시즌에 주문합니다.</p>}

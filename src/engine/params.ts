@@ -207,6 +207,11 @@ export interface ParkSpecFit {
   asym: { perM: number; max: number };
   /** 신구장 고르기 범위 (m): 좌·우 펜스, 중앙 펜스, 높이 */
   range: { side: [number, number]; center: [number, number]; height: [number, number] };
+  /**
+   * 게임 안 신구장 단순 규칙 (기획안 6.3, 사용자 결정 2026-10-24 "B"): 고르는 범위의 가장 작은 구장(평균 거리 최소)과 가장 큰 구장의
+   * 홈런·(2루타 + 3루타) 지수(100 = 리그). 그 사이 평균 거리는 log 직선으로 잇고 높이·좌우 규칙과 상·하한을 더한다 (당김 없음)
+   */
+  newPark: { hr: [number, number]; xb: [number, number] };
 }
 
 export interface EngineParams {
@@ -547,6 +552,8 @@ export const DEFAULT_PARAMS: EngineParams = {
       // 임시값 (기획안 6.2-3): 좌우 거리가 다른 구장이 하나뿐이라 잴 수 없었다. 좌타·우타 타석 비 대신 같은 폭으로 올리고 내린다
       asym: { perM: 0.02, max: 0.08 },
       range: { side: [95, 101], center: [120, 125], height: [2.5, 6] },
+      // 임시값 (사용자 결정 2026-10-24, 기획안 10장 물음 1 = B): 실측 범위 끝(홈런 147·70, 2루타+3루타 86·122)을 고르는 범위 끝에 댄다
+      newPark: { hr: [147, 70], xb: [86, 122] },
     },
   },
   // 한계 투구 수를 넘기면 능력이 확 꺾인다: 5구당 약 10% (사용자 결정 2026-10-22, 엔진 1은 타자 1명당 0.012 = 공 1개당 약 0.003)

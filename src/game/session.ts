@@ -29,7 +29,7 @@ import { dollarText, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import type { BoxScore, CommandChoice, CommandRequest, Play } from '../engine';
+import type { BoxScore, CommandChoice, CommandRequest, Fence, Play } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
@@ -199,7 +199,7 @@ export type GameAction =
   | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
-  | { year: number; type: 'stadium'; id: string; size?: ParkSize; dome?: boolean; deal?: 'push' }
+  | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
   | { year: number; type: 'naming'; id: string }
   /** 감독 해임·선임 (managers.ts) */
@@ -2559,7 +2559,7 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
-      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }); break;
+      case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
         if (!isCampPick(a.pick)) { res = { ok: false, message: '없는 캠프입니다.' }; break; }
@@ -3137,8 +3137,9 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
-  orderStadium(id: string, park: { size?: ParkSize; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
-    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
+  /** 공사 주문. 신구장은 펜스 제원(fence, 구장효과 기획안 6장)을 고른다. size는 P6 전 조작 기록 호환용 (예시값 제원으로 읽는다) */
+  orderStadium(id: string, park: { size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'standard' | 'push' } = {}) {
+    return this.dispatchOff({ year: this.year, type: 'stadium', id, ...(park.size && park.size !== 'neutral' ? { size: park.size } : {}), ...(park.fence ? { fence: { l: park.fence.l, c: park.fence.c, r: park.fence.r, h: park.fence.h } } : {}), ...(park.dome ? { dome: true } : {}), ...(park.deal === 'push' ? { deal: 'push' as const } : {}) });
   }
   setCamp(pick: CampPick) { return this.dispatchOff({ year: this.year, type: 'camp', pick }); }
   /** 구장 명명권 제안 받기 (오프시즌) */
