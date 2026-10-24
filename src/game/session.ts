@@ -15,7 +15,7 @@ import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
-import { worldFromLeague } from '../league/world';
+import { leagueDefense, worldFromLeague } from '../league/world';
 import { changeText } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
@@ -36,7 +36,7 @@ import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, makeDefense, pitValue, type Defense } from '../engine';
+import { batValue, FIELD_POS, makeDefense, pitValue, type Defense, type FieldPos } from '../engine';
 import { skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import {
@@ -1129,9 +1129,15 @@ export class GameSession {
             lp.potential = pot;
             if (!slot.isPitcher) {
               // 주 포지션과 그 자리 기준 수비 (빈 자리 바탕의 수비를 그대로 쓰면 모든 자리가 유격수 기준이 됐다, 2026-10-13 푸홀스 보고)
-              const pos = op.pos === 'IF' ? '2B' : op.pos === 'OF' ? 'RF' : op.pos;
+              // 능력치 v2 (16.4 나): 묶음 포지션은 넓은 쪽 자리를 본 자리로 (IF → SS, OF → CF. 외야수가 CF·코너를 모두 맡게)
+              const v2 = !!this.league.defPool;
+              const pos = op.pos === 'IF' ? (v2 ? 'SS' : '2B') : op.pos === 'OF' ? (v2 ? 'CF' : 'RF') : op.pos;
               lp.pos = pos; slot.pos = pos;
-              if (lp.bat) lp.bat = { ...lp.bat, def: makeDefense(lp.id, pos, pos === 'DH' ? [] : [pos], lp.bat.speed, op.age) };
+              if (lp.bat) {
+                const { emC: _e, cArm: _c, playable: _p, ...rest } = lp.bat;
+                lp.bat = v2 ? { ...rest, ...leagueDefense(this.league, lp.id, pos, lp.bat.speed, op.age) }
+                  : { ...lp.bat, def: makeDefense(lp.id, pos, pos === 'DH' ? [] : [pos], lp.bat.speed, op.age) };
+              }
             }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
@@ -3322,11 +3328,13 @@ export class GameSession {
   private applyDefenseEdit(id: string, def: Defense): void {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
-    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def } };
+    // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
+    const edited = (p: FieldPos[] | undefined) => (p ? { playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined) } : {});
+    lp.bat = { ...lp.bat, def: { ...lp.bat.def, ...def }, ...edited(lp.bat.playable) };
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp?.bat) {
-        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def } };
+        sp.bat = { ...sp.bat, def: { ...sp.bat.def, ...def }, ...edited(sp.bat.playable) };
         if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
       }
     }

@@ -240,6 +240,10 @@ export interface LeagueState {
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
+  /** 수비 영점 m (능력치 v2 16-3, 13.6): 시작 때 한 번 재고 장기 진행 내내 고정. 없으면 예전 수비 (영점 50) */
+  defZero?: number;
+  /** 가상 선수 수비 근거 몫 B 분포 (16.4 가, World.defPool). 있으면 가상 선수 수비를 v2 길(fielding.ts virtualDefense)로 만든다 */
+  defPool?: number[];
   /** 은퇴한 선수 (M6) */
   retired?: RetiredRecord[];
   // ---- M7 (없으면 기본값. M6 이전 저장 호환)

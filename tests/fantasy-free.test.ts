@@ -6,7 +6,7 @@ import { GameSession } from '../src/game/session';
 import { freeAction, freeContext, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
 import { currentRuns } from '../src/ai/value';
 import { cashOf } from '../src/league/finance';
-import { defenseAt } from '../src/engine';
+import { defenseAt, defenseGrade } from '../src/engine';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -97,7 +97,7 @@ describe('자유 모드', () => {
     const sp = g.world.players.find((p) => p.name === '선동열')!;
     expect(gradeOfRuns(currentRuns(sp, g.values), 2000)).toBeGreaterThanOrEqual(70);
     expect(g.registered().some((p) => p.idx === sp.idx)).toBe(true);
-    g.advance(30);
+    g.advance(40); // 30일이면 세이브 기회가 적은 해에 등판 5번에 걸린다 (16-3 수비 v2 뒤)
     expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
     expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
   }, 300_000);
@@ -111,7 +111,7 @@ describe('자유 모드', () => {
     expect(sp.pos).toBe('3B');
     expect(defenseAt(sp, 'SS')).toBeLessThan(defenseAt(sp, '3B') - 5);
     expect(defenseAt(sp, 'CF')).toBeLessThan(defenseAt(sp, '3B') - 5);
-    expect(defenseAt(sp, 'C')).toBeLessThan(-30);
+    expect(defenseGrade(defenseAt(sp, 'C'))).toBe(20); // 능력치 v2: 안 해 본 자리는 등급 20 (16.4)
   }, 120_000);
 
   it('만든 선수의 국적·병역: 외국 이름은 외국인, 28세 이상 국내 선수는 병역 마침, 리그 밖 선수는 입대하지 않는다', () => {

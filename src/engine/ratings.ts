@@ -7,7 +7,8 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward, PlateData, PpaData } from '../data/types';
+import type { DefenseAward, DefenseData, PlateData, PpaData } from '../data/types';
+import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
@@ -281,6 +282,8 @@ export interface BuildWorldInput {
   ppa?: PpaData;
   /** 선수별 볼카운트 사슬 실측 (plate.json, 능력치 v2 16-1). 없으면 결과 기록으로 짐작한다 */
   plate?: PlateData;
+  /** 1군 수비 이닝·평판 (defense.json). 있으면 수비를 능력치 v2 식(fielding.ts defenseV2)으로 만든다. 없으면 예전 추정 (defense.ts makeDefense) */
+  defense?: DefenseData;
 }
 
 /**
@@ -394,6 +397,11 @@ export function buildWorld(input: BuildWorldInput): World {
   const ratePit = seasonBasis ? [curPit, histPit[0], histPit[1]] : histPit;
   const rp = seasonBasis ? seasonRegress(params, params.seasonPitRegressScale ?? params.seasonRegressScale) : params;
   const ids = new Set<string>([...curBat.keys(), ...curPit.keys()]);
+  // 능력치 v2 수비 (16-3): 증거는 시작 연도 전 해들 (역사 재현은 그 시즌도 넣는다). 2000년 이전 해는 시즌 자료의 주 포지션으로 (결정 30)
+  const defStart = seasonBasis ? year + 1 : year;
+  const defSeasons = new Map([...(input.career ?? []), ...history.filter((s): s is SeasonData => !!s), current].map((s) => [s.year, s]));
+  const defStore = input.defense ? { defense: input.defense, meta, season: (y: number) => defSeasons.get(y) } : undefined;
+  const defSeen: { v2: DefenseV2; pa: number }[] = [];
   // 커리어 수비 포지션: 선수 → 포지션 → 타석(최근일수록 무겁게, 해마다 0.85배). 역사 재현은 그 시즌도 넣는다
   const careerPos = new Map<string, Map<string, number>>();
   const careerSeasons = [...(input.career ?? history.filter((s): s is SeasonData => !!s)), ...(seasonBasis ? [current] : [])];
@@ -501,7 +509,17 @@ export function buildWorld(input: BuildWorldInput): World {
       const career = careerPos.get(id);
       const played = hh ? hh.playable : career && career.size ? [...career.keys()] : posHist.map((h) => h?.get(id)?.pos ?? null);
       const careerField = career ? [...career.entries()].filter(([q]) => q !== 'DH').sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] : undefined;
-      bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
+      if (input.defense) {
+        // 능력치 v2 수비 (16-3): 시작 연도 전 수비 이닝·평판·수상으로. 화면 주 포지션도 수비 이닝 규칙(12.2)을 따른다 (기록이 없으면 지금 포지션)
+        const v2 = defenseV2({ id, years: fieldYears(defStore!, id, defStart), startYear: defStart, reps: input.defense.rep[id], awards: input.defenseAwards?.[id],
+          age: m.birthYear ? year - m.birthYear : null, speed: bat.speed, listed: homeOf(pos) ?? undefined, league: fieldLeague(input.defense) });
+        bat.def = v2.def;
+        bat.playable = v2.playable;
+        if (v2.emergencyC) bat.emC = true;
+        if (v2.cArm !== undefined) bat.cArm = v2.cArm;
+        if (v2.main.basis !== 'listed' && v2.main.basis !== 'none') pos = v2.main.screen;
+        if (m.real !== false) defSeen.push({ v2, pa: rateBat[0]?.get(id)?.pa ?? 0 });
+      } else bat.def = makeDefense(id, pos, played, bat.speed, m.birthYear ? year - m.birthYear : null,
         // 주전 출전 근거 타석: 하드힛 이력 선수는 수비 가능 자리 전체 (규정타석 시즌 수가 같아 최근 자리가 주 포지션이 된 선수가 오래 맡은 자리의 근거를 잃지 않게)
         hh ? hh.playable.reduce((a, q) => a + (posPa.get(q) ?? 0), 0) : pos ? posPa.get(pos) ?? 0 : 0, { awards: input.defenseAwards?.[id], year, fieldPos: pos === 'DH' ? careerField ?? (m.pos && m.pos !== 'DH' ? m.pos : undefined) : undefined });
     }
@@ -532,15 +550,40 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  const env = leagueEnvFor(current.league, params, year);
+  const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
+  if (defModel) env.defZero = defModel.zero;
   return {
     year,
     gamesPerTeam: current.games,
     rules: meta.rules[String(year)],
     league: { ...lg },
-    env: leagueEnvFor(current.league, params, year),
+    env,
     teams,
     players,
+    ...(defModel ? { defPool: defModel.pool } : {}),
   };
+}
+
+/** 가상 선수 B를 뽑는 실존 주전: 직전 시즌 이만큼 타석 (16.4 가) */
+const DEF_POOL_PA = 300;
+
+/**
+ * 수비 영점 m (13.6): 실존 선수의 바로 앞 해 자리별 수비 이닝으로 가중한 그 자리 등급 평균. 가상 선수 B 분포: 직전 시즌 300타석 이상 실존 주전의 본 자리 B (오름차순)
+ */
+function defenseModel(seen: { v2: DefenseV2; pa: number }[]): { zero: number; pool: number[] } {
+  let w = 0;
+  let s = 0;
+  const pool: number[] = [];
+  for (const { v2, pa } of seen) {
+    for (const [q, inn] of Object.entries(v2.lastInn) as [keyof DefenseV2['grade'], number][]) {
+      w += inn;
+      s += inn * v2.grade[q];
+    }
+    const home = v2.main.field;
+    if (pa >= DEF_POOL_PA && home && v2.base[home] !== undefined) pool.push(v2.base[home]!);
+  }
+  return { zero: w > 0 ? Math.round((s / w) * 10) / 10 : 50, pool: pool.sort((a, b) => a - b) };
 }
 
 /**

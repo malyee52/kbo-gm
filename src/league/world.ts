@@ -6,10 +6,11 @@ import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
 import {
   batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
-  type EngineParams, type SimPlayer, type SimTeam, type World,
+  type BatSkill, type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
+import { virtualDefense } from '../engine/fielding';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
@@ -105,9 +106,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const market = lp.team === -1 && (lp.market === year || lp.reserve === year);
     if ((lp.team < 0 && !market) || lp.team >= kept || lp.military?.state === 'serving') continue;
     const slump = form && lp.slump ? lp.slump : 0;
-    const base = lp.bat && !lp.bat.def
-      ? { ...lp.bat, def: makeDefense(lp.id, lp.pos, [], lp.bat.speed, lp.birthYear ? year - lp.birthYear : null) }
-      : lp.bat;
+    const base = lp.bat && !lp.bat.def ? { ...lp.bat, ...leagueDefense(league, lp.id, lp.pos, lp.bat.speed, lp.birthYear ? year - lp.birthYear : null) } : lp.bat;
     const bat = base && slump ? shiftBat(base, slump) : base;
     const pit = lp.pit && slump ? shiftPit(lp.pit, slump) : lp.pit;
     const p: SimPlayer = {
@@ -145,5 +144,16 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
-  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players };
+  if (league.defZero !== undefined) env = { ...env, defZero: league.defZero };
+  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players, ...(league.defPool ? { defPool: league.defPool } : {}) };
+}
+
+/**
+ * 수비 기록 없이 만드는 선수의 수비 (가상 선수·자유 모드 선수·수비 정보 없는 저장). v2 리그(defPool 있음)면 본 자리 + 유사 포지션만 수비 가능,
+ * 근거 몫은 시작 연도 실존 주전 분포에서 뽑는다 (능력치 v2 16.4 가). 아니면 예전 추정 (makeDefense)
+ */
+export function leagueDefense(league: Pick<LeagueState, 'defPool'>, id: string, pos: string | null, speed: number, age: number | null): Partial<Pick<BatSkill, 'def' | 'playable'>> {
+  if (!league.defPool) return { def: makeDefense(id, pos, [], speed, age) };
+  const v = virtualDefense(id, pos, speed, age, league.defPool);
+  return { def: v.def, playable: v.playable };
 }

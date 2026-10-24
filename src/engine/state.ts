@@ -3,6 +3,7 @@
 
 import type { GameContext, Play, PlayKind } from './game';
 import { defenseAt } from './defense';
+import { CATCHER_ARM_FLOOR } from './fielding';
 import { tallyBlown } from './manager';
 import type { GamePark } from './pa';
 import { assignSlots, type Slot, type TeamSeason } from './team';
@@ -110,8 +111,12 @@ export interface Side {
   medianValue: number;
   /** 자리별 수비 런 (defense.ts). 타구 모형(battedball.ts)이 그 타구를 맡은 수비수의 값을 쓴다 */
   slotDef: Partial<Record<Slot, number>>;
-  /** 포수의 수비 런 */
+  /** 포수의 수비 런 (폭투·포일) */
   catcherDef: number;
+  /** 포수의 도루 저지 (런, 능력치 v2 16-3 BatSkill.cArm). 예전 수비(cArm·playable 없음)면 포수 수비 런과 같다 */
+  catcherArm: number;
+  /** 수비 영점 (런 = (m − 50) ÷ 2, LeagueEnv.defZero). 자리별 수비 런에서 뺀다 */
+  defZero: number;
   /** 교체로 빠진 선수 (다시 나올 수 없다) */
   removed: Set<number>;
   /** 지금 수비 위치 (선수 색인 → 자리). 대타·대주자는 바꾼 선수의 자리를 그대로 받는다 */
@@ -138,18 +143,26 @@ export function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slo
 const ERROR_PER_RUN = 0.045;
 export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
 
-/** 수비 배치에서 자리별 수비 런, 포수 수비 런 */
-export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { slotDef: Partial<Record<Slot, number>>; catcherDef: number } {
+/**
+ * 수비 배치에서 자리별 수비 런, 포수 수비 런·도루 저지. zero: 수비 영점 (런, Side.defZero) — 리그 평균 수비가 0이 되게 뺀다 (능력치 v2 13.6).
+ * 포수 도루 저지는 v2 선수면 cArm (없으면 수비 가능 포수 0, 아니면 바닥 CATCHER_ARM_FLOOR), 예전 수비면 포수 수비 런
+ */
+export function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>, zero = 0): { slotDef: Partial<Record<Slot, number>>; catcherDef: number; catcherArm: number } {
   const slotDef: Partial<Record<Slot, number>> = {};
   let catcherDef = 0;
+  let catcherArm = 0;
   for (const p of lineup) {
     const slot = slots.get(p.idx);
     if (!slot) continue;
-    const r = defenseAt(p, slot);
+    const r = defenseAt(p, slot) - (slot === 'DH' ? 0 : zero);
     slotDef[slot] = r;
-    if (slot === 'C') catcherDef = r;
+    if (slot === 'C') {
+      catcherDef = r;
+      const b = p.bat;
+      catcherArm = b?.cArm ?? (b?.playable ? (b.playable.includes('C') ? 0 : CATCHER_ARM_FLOOR) : r);
+    }
   }
-  return { slotDef, catcherDef };
+  return { slotDef, catcherDef, catcherArm };
 }
 
 /** 그 자리를 맡은 수비수의 선수 색인 (투수는 지금 마운드의 투수). 없으면 −1 */
@@ -170,7 +183,7 @@ export function substitute(side: Side, order: number, inP: SimPlayer, kind: Game
   side.removed.add(outP.idx);
   side.slots.delete(outP.idx);
   if (slot) side.slots.set(inP.idx, slot);
-  Object.assign(side, fieldDefense(side.lineup, side.slots));
+  Object.assign(side, fieldDefense(side.lineup, side.slots, side.defZero));
   side.subs.push({ idx: inP.idx, order, kind });
   if (kind !== 'DEF') side.realign = true;
 }

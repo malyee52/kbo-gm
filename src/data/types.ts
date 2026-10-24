@@ -285,7 +285,7 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
-  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 판정 함수 src/engine/fielding.ts만 읽는다 (엔진·리그 생성에는 16-3에서 잇는다). 없으면 판정하지 않는다 */
+  /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 있으면 월드의 수비를 능력치 v2 식으로 만든다 (src/engine/fielding.ts, 16-3). 없으면 예전 추정 */
   defense?: DefenseData;
   /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
   pitches?: PitchData;

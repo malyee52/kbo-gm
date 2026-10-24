@@ -234,9 +234,10 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
     const slots = fieldSlots(ts, lineup);
-    const fd = fieldDefense(lineup, slots);
+    const defZero = ctx.env.defZero !== undefined ? (ctx.env.defZero - 50) / 2 : 0;
+    const fd = fieldDefense(lineup, slots, defZero);
     return {
-      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [],
+      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, defZero, removed: new Set(), slots, subs: [],
       starters: lineup.map((p) => ({ p, slot: slots.get(p.idx) })),
     };
   };

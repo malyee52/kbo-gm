@@ -7,7 +7,7 @@ import { eraPitching } from './eras';
 import type { BodyParams, EngineParams } from './params';
 import { overuseDecay, type OveruseParams } from './injury';
 import type { Rng } from './rng';
-import { defenseAt } from './defense';
+import { defenseAt, fitPenalty } from './defense';
 import { batValue, pitValue } from './ratings';
 import type { PitLine, SimPlayer, SimTeam, World } from './types';
 
@@ -224,9 +224,12 @@ export function batRunsVs(p: SimPlayer, throws: string | null, platoon: number):
   return p.value * RUNS_PER_VALUE * (1 + platoonSign(p.bats, throws) * platoon);
 }
 
-/** 자리 점수 → 한 시즌 런 단위: 타석 가치 × 500 + 그 자리 수비 런 */
+/** 엔트리에서 수비 가능 2명을 맞추는 자리 (포수는 백업 포수 규칙이 따로) */
+const BACKUP_SLOTS = ['SS', '2B', 'CF', '3B', '1B', 'LF', 'RF'] as const;
+
+/** 자리 점수 → 한 시즌 런 단위: 타석 가치 × 500 + 그 자리 수비 런 + 수비 가능이 아닌 자리 벌점 */
 export function slotRuns(p: SimPlayer, slot: Slot): number {
-  return p.value * RUNS_PER_VALUE + defenseAt(p, slot);
+  return p.value * RUNS_PER_VALUE + defenseAt(p, slot) + fitPenalty(p, slot);
 }
 
 /**
@@ -462,10 +465,23 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const hittersAll = [...avail.filter((p) => !p.isPitcher && !benchToday.has(p.idx)), ...batFaces].sort((a, b) => b.value - a.value);
   const chosen = assignLineup(hittersAll);
   const pick = new Set(chosen.map((p) => p.idx));
-  const backupC = hittersAll.find((p) => p.pos === 'C' && !pick.has(p.idx));
+  // 백업 포수는 정규 포수만 센다 (능력치 v2 14.2 3: 비상 포수는 포수 몫이 아니다)
+  const regularC = (p: SimPlayer) => (p.bat?.playable ? p.bat.playable.includes('C') : p.pos === 'C');
+  const backupC = hittersAll.find((p) => regularC(p) && !pick.has(p.idx));
   if (backupC && chosen.length < nHit) {
     chosen.push(backupC);
     pick.add(backupC.idx);
+  }
+  // 자리마다 수비 가능 2명 (능력치 v2 16-3, 11.1 메모): 모자란 자리는 그 자리를 맡을 수 있는 선수 중 가치 높은 선수를 먼저 (인원 안에서)
+  for (const slot of BACKUP_SLOTS) {
+    const can = (p: SimPlayer) => !!p.bat?.playable?.includes(slot);
+    if (chosen.length >= nHit || !hittersAll.some((p) => p.bat?.playable)) break;
+    if (chosen.filter(can).length >= 2) continue;
+    const add = hittersAll.find((p) => !pick.has(p.idx) && can(p));
+    if (add) {
+      chosen.push(add);
+      pick.add(add.idx);
+    }
   }
   for (const p of hittersAll) {
     if (chosen.length >= nHit + chosen.filter((x) => batFaces.includes(x)).length) break;
@@ -515,7 +531,7 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   // 날마다 바뀌는 값이라 이때는 자리 배정을 캐시하지 않는다. 성향 0이거나 효과 0이면 예전과 같다
   const condMul = cond ? (ts.tactics?.cond ?? 1) * params.cond.edge : 0;
   const batRuns = (p: SimPlayer) => (hand ? batRunsVs(p, hand, params.platoon) : p.value * RUNS_PER_VALUE) * (condMul ? 1 + condMul * cond!(p) : 1);
-  const runsOf = hand || condMul ? (p: SimPlayer, slot: Slot) => batRuns(p) + defenseAt(p, slot) : slotRuns;
+  const runsOf = hand || condMul ? (p: SimPlayer, slot: Slot) => batRuns(p) + defenseAt(p, slot) + fitPenalty(p, slot) : slotRuns;
   let full = ts.lineupCache.get('');
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
   const regulars = full.map((x) => x.p);

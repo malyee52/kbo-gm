@@ -18,7 +18,7 @@ export {
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
 export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
-  FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
+  FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, fitPenalty, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
 } from './defense';
 export {
   ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
@@ -36,7 +36,7 @@ export { dateOfDay, postseasonMaxInnings, regularMaxInnings, winPctBy, winPctRul
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense'>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
   return buildWorld({
@@ -52,5 +52,6 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     defenseAwards: store.defenseAwards,
     ppa: store.ppa,
     plate: store.plate,
+    defense: store.defense,
   });
 }

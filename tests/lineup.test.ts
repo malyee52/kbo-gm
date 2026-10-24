@@ -64,14 +64,16 @@ describe('수비 능력', () => {
     }
   });
 
-  it('한 자리에서 400타석 넘게 뛴 주전은 그 자리 수비 등급이 35 이상이다 (최정 3루가 20으로 나온 문제의 회귀 시험)', () => {
+  it('한 자리에서 400타석 넘게 뛴 주전은 그 자리 수비 가능이고 등급이 20보다 높다 (최정 3루가 20으로 나온 문제의 회귀 시험, 능력치 v2: 근거가 나쁘면 20대도 된다)', () => {
     const world = worldForYear(store, 2026, FAST);
     const prev = new Map(store.season(2025)!.bat.map((r) => [r.id, r]));
     let n = 0;
     for (const p of world.players) {
       const r = prev.get(p.id);
       if (p.isPitcher || !r || r.pa < 400 || !r.pos || ['DH', 'IF', 'OF'].includes(r.pos)) continue;
-      expect(defenseGrade(defenseAt(p, r.pos)), `${p.name} ${r.pos}`).toBeGreaterThanOrEqual(35);
+      expect(p.bat!.playable, `${p.name} ${r.pos}`).toContain(r.pos);
+      // 화면 DH(수비 없는 몫 0.6 이상, 예: 최형우 2026 LF)는 지명타자 몫으로 바닥까지 내려간다 (기획안 13.7)
+      if (p.pos !== 'DH') expect(defenseGrade(defenseAt(p, r.pos)), `${p.name} ${r.pos}`).toBeGreaterThan(20);
       n++;
     }
     expect(n).toBeGreaterThan(30);
