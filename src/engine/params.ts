@@ -772,16 +772,18 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 2012·2019 병살·희생플라이·도루를 맞춘 값. 실책(err)은 근거가 있다: 2001~2026은 사용자 수비 기록(리그 실책 합)이 비자책 비율에 비례하고,
   // 2000년 이전은 기사의 경기당 실책(1984 1.7개, 1990년대 1.5개대, OSEN 2023-04-18 등, docs/temp-values.md)이 그 비례식(1985 2.3개)보다 적다.
   // 추가 진루(adv) 1985 0.8은 근거 없이 득점을 맞춘 값이다
-  // ue (엔진 2 14단계): 비자책 채우기를 끄고(unearnedRunScale 0) tools/validate_engine.ts 10시즌으로 잰 경기 안 비자책 몫 (측정값, 다른 조정값이 바뀌면 다시 잰다)
+  // ue (엔진 2 14단계): 비자책 채우기를 끄고(unearnedRunScale 0) tools/validate_engine.ts 10시즌으로 잰 경기 안 비자책 몫 (측정값, 다른 조정값이 바뀌면 다시 잰다).
+  // 능력치 v2 16-3b (2026-10-24): 수비 v2와 실책 기울기 0.016(state.ts ERROR_PER_RUN)으로 20시즌씩 다시 잼. 2012·2025는 validate 100시즌의
+  // 남은 차이(+1.9%·+1.5%)만큼 0.0015 더함 (측정 0.052·0.059)
   eraRunning: [
-    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71, ue: 0.083 },
-    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79, ue: 0.071 },
-    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83, ue: 0.070 },
-    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1, ue: 0.058 },
-    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1, ue: 0.054 },
-    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1, ue: 0.062 },
-    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.064 },
-    { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.057 },
+    { year: 1985, dp: 0.84, sf: 0.86, steal: 1, adv: 0.8, err: 0.71, ue: 0.080 },
+    { year: 1990, dp: 0.96, sf: 0.85, steal: 1, adv: 1, err: 0.79, ue: 0.069 },
+    { year: 1995, dp: 0.92, sf: 1.02, steal: 1, adv: 1, err: 0.83, ue: 0.068 },
+    { year: 2001, dp: 0.973, sf: 0.981, steal: 1, adv: 1, err: 1, ue: 0.060 },
+    { year: 2012, dp: 1.07, sf: 0.91, steal: 1, adv: 1, err: 1, ue: 0.0535 },
+    { year: 2019, dp: 1.06, sf: 1, steal: 0.95, adv: 1, err: 1, ue: 0.060 },
+    { year: 2023, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.067 },
+    { year: 2025, dp: 1, sf: 1, steal: 1, adv: 1, err: 1, ue: 0.0605 },
   ],
   // 시간 제한 흉내 (모두 임시값): tools/time_limit_fit.ts --seasons 40으로 그 해 실제 무승부 비율에 맞춘 값 (2026-10-23).
   // 시작 회는 12회, 12회 끝 동점 비율이 실제 무승부보다 적으면 한 회씩 앞당겼다 (사용자 결정 전 임시). 1982는 실제 무승부 0이라 넣지 않는다

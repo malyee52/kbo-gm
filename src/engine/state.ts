@@ -139,8 +139,10 @@ export function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slo
 
 /**
  * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율". 엔진 2 7단계부터 실책은 타구를 맡은 수비수가 이 실책률로 한다 (rules.ts, params.error).
- * 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
-const ERROR_PER_RUN = 0.045;
+ * 수비 1런당 실책률 변화 (지수): +10런이면 0.85배, −10런이면 1.17배.
+ * 능력치 v2 16-3b (2026-10-24)에서 0.045(임시값) → 0.016: tools/error_slope.ts가 2010~2025 아홉 해 시작 월드의 v2 수비 런으로 그 해 실제 실책을
+ * 가른 기울기가 0.016 ± 0.002였다 (수비 가능이 아닌 자리 r 평균 −11~−14에서 실제 실책 1.3~1.6배, 0.045면 1.65~1.9배). 0.045일 때 2025 실책 출루 +11% */
+const ERROR_PER_RUN = 0.016;
 export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
 
 /**
