@@ -1,8 +1,9 @@
 // 구단 재정 (재정 상세형, docs/finance.md): 지금 자금, 올해 수입·지출, 월별 흐름, 지난 결산.
 import { dateOf } from '../../game/calendar';
 import {
-  FINANCE_LABEL, INVEST_COST, INVEST_EFFECT, INVEST_KINDS, INVEST_LABEL, investCost, ledgerItems, type FinanceKind,
+  FINANCE_LABEL, investCostOf, INVEST_EFFECT, INVEST_KINDS, INVEST_LABEL, investCost, ledgerItems, type FinanceKind,
 } from '../../league/finance';
+import { wageIndex } from '../../league/salary';
 import { useGame, useWon } from '../context';
 
 const INCOME: FinanceKind[] = ['gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'champion', 'rescue', 'faSupport', 'compensation', 'posting', 'trade', 'event', 'other'];
@@ -18,6 +19,8 @@ export function FinancePanel() {
   const cash = session.cashNow();
   const flows = session.seasonFinance();
   const fin = L.finance?.[me];
+  // 투자비는 그 해 연봉 상승 지수만큼 오른다 (오프시즌에는 계획이 적용될 다음 시즌 값)
+  const investWage = wageIndex(session.phase === 'offseason' ? session.year + 1 : session.year, L);
   const last = fin?.history.at(-1);
   // 시즌 중이면 진행 중인 시즌의 흐름, 오프시즌이면 다음 시즌 장부(보상금·계약금 등)
   const year = session.phase === 'season' ? session.year : session.year + 1;
@@ -88,7 +91,7 @@ export function FinancePanel() {
                     </select>
                   ) : `${lv}단계`}
                 </td>
-                <td>{won(INVEST_COST[k][lv])}</td>
+                <td>{won(investCostOf(k, lv, investWage))}</td>
                 <td className="l small">{INVEST_EFFECT[k][lv]}</td>
               </tr>
             );
@@ -97,7 +100,7 @@ export function FinancePanel() {
       </table>
       <p className="muted small">
         투자는 오프시즌에 다음 시즌 계획을 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 월말에 나눠 냅니다
-        ({session.phase === 'offseason' ? `계획 합계 연 ${won(investCost(fin, true))}` : `연 ${won(investCost(fin))}`}).
+        ({session.phase === 'offseason' ? `계획 합계 연 ${won(investCost(fin, true, investWage))}` : `연 ${won(investCost(fin, false, investWage))}`}).
         의료·마케팅은 그 시즌 동안, 육성·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
       </p>
 

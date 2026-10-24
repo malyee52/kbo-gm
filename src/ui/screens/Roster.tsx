@@ -4,10 +4,9 @@
 // 이 화면은 보기와 육성선수 정식 등록만 한다.
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
-import { GradeBar } from './PlayerDetail';
+import { GradeBar, PotCell, usePotentialOf } from '../parts';
 import { seasonWar } from '../../league/awards';
-import { runsGrade } from '../grades';
-import { defenseAt, defenseGrade, fieldPosOf, type SimPlayer } from '../../engine';
+import { defenseAt, defenseGrade, fieldPosOf, teamRules, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck } from '../../game/session';
 import {
@@ -59,7 +58,7 @@ export function Roster() {
     try { localStorage.setItem(PAGE_KEY, v); } catch { /* 기억하지 못해도 화면은 그대로 */ }
   };
   const year = session.world.year;
-  const rules = session.world.rules;
+  const rules = teamRules(session.world, session.team);
 
   // 다음 경기일 기준으로 엔진이 쓸 1군과 역할
   const view = useMemo(() => {
@@ -139,7 +138,7 @@ export function Roster() {
     <div className="stack tight">
       <section className="row-between wrap">
         <div className="muted small roster-sum">
-          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit} ·{' '}
+          1군 <strong>{first.length}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {first.length - nPit}) · 외국인 {foreign}/{rules.foreignLimit}{rules.foreignActive < rules.foreignLimit ? ` (경기 출전 ${rules.foreignActive}명)` : ''} ·{' '}
           정식 {session.regularCount()}/{ruleOf(session.league, 'orgLimit')}{org.some((p) => p.dev) ? ` · 육성 ${org.filter((p) => p.dev).length}` : ''} ·{' '}
           {view.manual ? '엔트리 직접 관리' : '엔트리 AI 관리'}{view.manual ? (session.plan ? ' · 기용 직접' : ' · 기용 AI 감독') : ''}
         </div>
@@ -342,6 +341,7 @@ function sortPlayers(rows: SimPlayer[], key: SortKey, kind: Kind, session: Retur
 /** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
 function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number }) {
   const { session, grades, openPlayer } = useGame();
+  const potOf = usePotentialOf();
   const won = useWon();
   const lp = session.leaguePlayer(p.id);
   const bg = grades.batters.get(p.id);
@@ -375,7 +375,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
         <p className="small">{session.world.year} {line}{war !== undefined ? ` · WAR ${war.toFixed(1)}` : ''}</p>
         {lp && (
           <p className="small muted">
-            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재력 <Grade v={runsGrade(lp.scoutPotential ?? lp.potential, session.year)} />
+            {lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary)} · {lp.contract.until}년까지 · 잠재 <PotCell v={potOf(lp, p.age)} />
           </p>
         )}
         <p className="inline">

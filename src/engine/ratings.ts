@@ -7,7 +7,9 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward, DefenseData, PlateData, PpaData } from '../data/types';
+import type { DefenseAward, DefenseData, PlateData, PpaData, ScheduleData } from '../data/types';
+import { divisionsOf, scheduleRule } from '../data/schedule';
+import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
 import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { applyRunSkills } from './runskills';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
@@ -285,6 +287,8 @@ export interface BuildWorldInput {
   plate?: PlateData;
   /** 1군 수비 이닝·평판 (defense.json). 있으면 수비를 능력치 v2 식(fielding.ts defenseV2)으로 만든다. 없으면 예전 추정 (defense.ts makeDefense) */
   defense?: DefenseData;
+  /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
+  schedule?: ScheduleData;
 }
 
 /**
@@ -556,6 +560,12 @@ export function buildWorld(input: BuildWorldInput): World {
   const env = leagueEnvFor(current.league, params, year);
   const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
   if (defModel) env.defZero = defModel.zero;
+  // 일정 규칙과 개막 홈 구단 (지난 시즌 자료의 순위, 일정 개편 기획안 2.2)
+  const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
+  const franchises = teams.map((t) => t.franchise);
+  const hosts = pickOpeningHosts(year, rankedFromSeason(history[0], franchises), franchises);
+  // 양대 리그 나눔 (1999·2000, 그 해 시즌 자료의 league 칸)
+  const divisions = divisionsOf(current, franchises);
   return {
     year,
     gamesPerTeam: current.games,
@@ -565,6 +575,9 @@ export function buildWorld(input: BuildWorldInput): World {
     teams,
     players,
     ...(defModel ? { defPool: defModel.pool } : {}),
+    ...(rule ? { schedule: rule } : {}),
+    ...(hosts ? { openingHosts: hosts } : {}),
+    ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
 }
 

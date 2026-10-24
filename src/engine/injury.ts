@@ -107,20 +107,25 @@ export function hitterAgeFactor(age: number | null): number {
   return Math.min(1.6, Math.max(0.75, 1 + 0.05 * (age - 29)));
 }
 
+/** 페이스 계산의 시즌 초 완충 (경기 수). 예전 달력 기준 15일 ≈ 13경기 (임시값) */
+const PACE_RAMP_GAMES = 13;
+
 /**
  * 투수의 혹사 배율: 지금까지의 이닝을 시즌 전체로 늘린 페이스가 기준(선발 160, 구원 75이닝)을 넘는 만큼 오른다.
+ * 페이스는 팀 경기 수 기준이다 (치른 경기 ÷ 팀당 경기, 일정 개편 11단계): 달력은 올스타·국제대회 휴식과 잔여 경기로 해마다 길이가 다르다.
  * 나이도 조금 반영한다 (한 살마다 2%, 0.85~1.3). 모두 임시값.
  */
-export function pitcherLoadFactor(p: SimPlayer, line: PitLine, day: number, seasonDays: number): number {
+export function pitcherLoadFactor(p: SimPlayer, line: PitLine, played: number, perTeam: number): number {
   const starter = (p.pit?.startShare ?? 0) >= 0.5;
-  const pace = (line.outs / 3) * (seasonDays / (day + 15));
+  const pace = (line.outs / 3) * (perTeam / (played + PACE_RAMP_GAMES));
   const over = starter ? Math.max(0, pace - 160) / 80 : Math.max(0, pace - 75) / 40;
   const age = p.age === null ? 1 : Math.min(1.3, Math.max(0.85, 1 + 0.02 * (p.age - 29)));
   return (1 + over) * age;
 }
 
-export function injuryChance(p: SimPlayer, line: PitLine, day: number, seasonDays: number, ip: InjuryParams): number {
-  return ip.base * (p.isPitcher ? pitcherLoadFactor(p, line, day, seasonDays) : hitterAgeFactor(p.age));
+/** 경기 전 부상 확률. played = 그 구단이 치른 경기, perTeam = 팀당 경기 수 (투수 페이스) */
+export function injuryChance(p: SimPlayer, line: PitLine, played: number, perTeam: number, ip: InjuryParams): number {
+  return ip.base * (p.isPitcher ? pitcherLoadFactor(p, line, played, perTeam) : hitterAgeFactor(p.age));
 }
 
 /** 부상 부위 */

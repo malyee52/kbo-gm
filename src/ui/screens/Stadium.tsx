@@ -7,6 +7,7 @@ import {
 import { TeamName, useGame, useWon } from '../context';
 import { ConfirmButton } from '../ConfirmButton';
 import { namingAt, namingOffers, stadiumName } from '../../league/naming';
+import { wageIndex } from '../../league/salary';
 
 const levelClass = (v: number) => (v >= 75 ? 'g-hi' : v >= 60 ? 'g-up' : v <= 25 ? 'g-lo' : v <= 40 ? 'g-dn' : '');
 const pctp = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%p`;
@@ -94,7 +95,7 @@ export function StadiumPanel() {
               <table>
                 <thead><tr><th className="l">공사</th><th>구단 부담</th><th>착공금</th><th>기간</th><th>해마다</th><th>완공 뒤</th><th className="l">공사 중</th><th /></tr></thead>
                 <tbody>
-                  {stadiumOptions().map((o) => {
+                  {stadiumOptions(wageIndex(session.year + 1, L)).map((o) => {
                     const cost = o.kind === 'new' && dome ? Math.round(o.cost * DOME.cost) : o.cost;
                     return (
                     <tr key={o.id}>

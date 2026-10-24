@@ -2,7 +2,7 @@
 // 자료 출처·라이선스, 이 게임의 규정 요약(바뀐 규정 포함), 추정값·AI 기능 안내. 시작 화면과 게임 안(구단 → 정보·출처)에서 같은 내용을 보여 준다.
 import type { LeagueState } from '../../league/types';
 import { changedRules, ruleDate, ruleOf } from '../../league/rules';
-import { dollarText, salaryCap, wonText } from '../../league/salary';
+import { dollarText, foreignCap, minSalary, salaryCap, wonText } from '../../league/salary';
 import { useGame } from '../context';
 
 const A = ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>;
@@ -64,7 +64,7 @@ export function AboutContent({ league, year }: { league?: LeagueState; year?: nu
         <h2>이 게임의 규정 {league ? <span className="muted small">지금 게임 기준</span> : <span className="muted small">2026년 기준</span>}</h2>
         <ul className="small">
           <li>소속 선수 정원 {ruleOf(league, 'orgLimit')}명, 육성선수 {ruleOf(league, 'devLimit')}명({ruleOf(league, 'devMaxAge')}세 이하, 정원 밖). 1군 엔트리는 시대별 규정 인원</li>
-          <li>외국인: 신규 계약 상한 {dollarText(ruleOf(league, 'foreignNewCap'))}, 총액 상한 {dollarText(ruleOf(league, 'foreignTotalCap'))}, 아시아쿼터 신규 상한 {dollarText(ruleOf(league, 'asiaNewCap'))}. 시즌 중 교체 {ruleOf(league, 'foreignSwaps')}번. 외국인은 트레이드할 수 없습니다</li>
+          <li>최저 연봉 {wonText(minSalary(y, league))}. 외국인: 신규 계약 상한 {dollarText(foreignCap(league, 'foreignNewCap', y))}, 총액 상한 {dollarText(foreignCap(league, 'foreignTotalCap', y))}, 아시아쿼터 신규 상한 {dollarText(foreignCap(league, 'asiaNewCap', y))}. 시즌 중 교체 {ruleOf(league, 'foreignSwaps')}번. 외국인은 트레이드할 수 없습니다</li>
           <li>샐러리캡: {cap === null ? (ruleOf(league, 'capScale') <= 0 ? '폐지됨' : '없음 (2023년 도입)') : `${wonText(cap)} (외국인·신인을 뺀 연봉 상위 ${ruleOf(league, 'capTopN')}명). 넘으면 제재금, 연속으로 넘으면 1라운드 지명 순서가 밀립니다`}</li>
           <li>트레이드: {tdl.month}월 {tdl.date}일까지, 한쪽 {ruleOf(league, 'maxPerSide')}명·지명권 {ruleOf(league, 'maxPicksPerTrade')}장까지. 시즌 중 방출·영입은 {mdl.month}월 {mdl.date}일까지</li>
           <li>FA: 고졸 8시즌·대졸 7시즌(등급에 따라 보상), 오프시즌 외부 FA {ruleOf(league, 'maxFaSignings')}명까지. 비FA 다년 계약 최대 {ruleOf(league, 'extMaxYears')}년</li>

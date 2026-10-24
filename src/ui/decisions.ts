@@ -2,7 +2,7 @@
 // 새 사건을 만들지 않는다. 이미 게임에 있는 처리 대상(이벤트, 오프시즌 단계, 시즌 마무리, 판타지 선택 등)만 모아 보여 준다.
 // 기한은 게임에 실제로 있는 단계 조건만 쓰고 날짜를 지어내지 않는다 (when).
 import type { GameSession } from '../game/session';
-import { LINEUP_SLOTS, MIN_PLAN_ROTATION } from '../engine';
+import { LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules } from '../engine';
 import * as Off from '../league/offseason';
 import { ruleOf } from '../league/rules';
 import { pendingChoices } from '../fantasy/types';
@@ -29,10 +29,18 @@ export interface Decision {
   go: Screen;
   /** 답하기 전에는 진행이 막히는 일 */
   blocking?: boolean;
+  /**
+   * "확인"으로 내려 둘 수 있는 알림이면 지금 상태 서명 (2026-10-23 UI 2차 결정 3).
+   * 확인한 서명과 지금 서명이 같으면 다시 띄우지 않고, 상태가 바뀌면(서명이 달라지면) 다시 띄운다
+   */
+  ack?: string;
 }
 
-/** 지금 처리할 일. 막히는 일 → 단계 순 */
-export function decisions(s: GameSession): Decision[] {
+/** 확인한 알림: 결정 key → 확인할 때의 상태 서명 */
+export type Acked = Record<string, string>;
+
+/** 지금 처리할 일. 막히는 일 → 단계 순. acked에 같은 상태로 확인한 알림은 뺀다 */
+export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
   const out: Decision[] = [];
   const me = s.teamIdx;
 
@@ -133,7 +141,7 @@ export function decisions(s: GameSession): Decision[] {
     out.push({ key: `meeting:${slot}`, kind: '면담', group: '경영', title: SLOT_LABEL[slot], why: '구단주 쪽 안건을 듣고 답합니다.', when, go: 'owner' });
   }
 
-  return out.sort((a, b) => Number(!!b.blocking) - Number(!!a.blocking));
+  return out.filter((d) => d.ack === undefined || acked[d.key] !== d.ack).sort((a, b) => Number(!!b.blocking) - Number(!!a.blocking));
 }
 
 /**
@@ -145,12 +153,13 @@ export function entryDecisions(s: GameSession): Decision[] {
   const out: Decision[] = [];
   const reg = s.registered();
   const regIdx = new Set(reg.map((p) => p.idx));
-  const size = s.world.rules.rosterSize;
+  const size = teamRules(s.world, s.team).rosterSize;
   const base = { kind: '엔트리' as const, group: '전력' as const, go: 'lineup' as const };
   if (reg.length > size) {
     out.push({ ...base, key: 'entry-size', title: `1군 정원 초과 ${reg.length - size}명`, why: `1군은 ${size}명까지입니다 (지금 ${reg.length}명).` });
   } else if (reg.length < size) {
-    out.push({ ...base, key: 'entry-size', title: `1군 빈자리 ${size - reg.length}명`, why: `1군 ${size}명 중 ${reg.length}명만 등록돼 있습니다.` });
+    // 빈자리는 일부러 비워 두기도 한다: 한 번 확인하면 1군 인원이 바뀔 때까지 다시 띄우지 않는다 (UI 2차 결정 3)
+    out.push({ ...base, key: 'entry-size', title: `1군 빈자리 ${size - reg.length}명`, why: `1군 ${size}명 중 ${reg.length}명만 등록돼 있습니다.`, ack: `${reg.length}/${size}` });
   }
   const absent = reg.filter((p) => s.isAbsent(p));
   if (absent.length) {
@@ -180,6 +189,26 @@ export function entryDecisions(s: GameSession): Decision[] {
     }
   }
   return out;
+}
+
+const ACK_KEY = 'kbo-gm.ack';
+
+/** 확인한 알림 (게임마다, 이 브라우저에 기억). 화면 취향이라 저장 파일·조작 기록에는 넣지 않는다 */
+export function loadAcked(game: string): Acked {
+  try {
+    const all = JSON.parse(localStorage.getItem(ACK_KEY) ?? '{}') as Record<string, Acked>;
+    return all[game] ?? {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveAcked(game: string, acked: Acked): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(ACK_KEY) ?? '{}') as Record<string, Acked>;
+    all[game] = acked;
+    localStorage.setItem(ACK_KEY, JSON.stringify(all));
+  } catch { /* 기억하지 못해도 화면은 그대로 (다시 뜰 뿐) */ }
 }
 
 /** 종류별 묶음 (홈 카드) */

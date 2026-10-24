@@ -12,7 +12,11 @@ export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 
   | 'finance' | 'stadium' | 'staff' | 'club-history'
   | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about' | 'search' | 'allstar'
   // 2026-10-22 UI 대개편 1차 (menu.ts): 결정함, 구단 소식, 기용 보드, 입대, 구단주
-  | 'inbox' | 'news' | 'lineup' | 'enlist' | 'owner';
+  | 'inbox' | 'news' | 'lineup' | 'enlist' | 'owner'
+  // 2026-10-23 UI 2단계 공통 기능: 다른 구단 보기(arg = 구단 색인), 관심 명단, 전체 검색
+  | 'team' | 'watch' | 'find'
+  // 규칙 알림: 규칙 연표
+  | 'rules';
 
 export interface GameUi {
   store: BrowserStore;
@@ -75,6 +79,17 @@ export function TeamName({ idx, short = false }: { idx: number; short?: boolean 
       <i className="chip" style={chipVars(t.franchise, t.name)} aria-hidden />
       {short ? t.name : t.name}
     </span>
+  );
+}
+
+/** 구단 이름 + 색 표시. 누르면 그 구단 창(시즌 > 구단들)이 열린다 (UI 2단계 다른 구단 보기, 기획안 4장 1) */
+export function TeamLink({ idx }: { idx: number }) {
+  const { go } = useGame();
+  if (idx < 0) return <TeamName idx={idx} />;
+  return (
+    <button type="button" className="link team-link" onClick={(e) => { e.stopPropagation(); go('team', idx); }} title="구단 보기">
+      <TeamName idx={idx} />
+    </button>
   );
 }
 

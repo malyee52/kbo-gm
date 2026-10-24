@@ -255,10 +255,16 @@ export function futuresExtras(league: LeagueState, store: Store, world: World, p
   return teams.map((team) => ({ team, org: (all.teams[team]?.org ?? []).map((p) => ({ ...p, idx: k++ })) }));
 }
 
-/** 구단의 지금 1군 명단 (직접 관리하면 그 명단, 아니면 AI 엔트리). 화면과 결산이 같은 기준을 쓴다 */
+/**
+ * 구단의 지금 1군 명단 (직접 관리하면 그 명단, 아니면 AI 엔트리). 화면과 결산이 같은 기준을 쓴다.
+ * AI 엔트리는 마지막으로 짠 명단을 읽지 않고 지금 날짜로 다시 짜 본다: 불러온 직후에는 명단이 비어 있고
+ * 시즌이 끝난 뒤 화면 조회로 명단이 바뀔 수 있어, 저장을 끼운 결산이 끊김 없이 한 결산과 달라졌다 (2026-10-23)
+ */
 export function registeredOf(season: Season, team: number): Set<number> {
   const ts = season.teamSeasons[team];
-  return ts.manual ? new Set(ts.manual) : new Set([...ts.hitters, ...ts.rotation, ...ts.bullpen].map((p) => p.idx));
+  if (ts.manual) return new Set(ts.manual);
+  const a = season.activeAt(team);
+  return new Set([...a.hitters, ...a.rotation, ...a.bullpen].map((p) => p.idx));
 }
 
 // ---- 성장 판정 (offseason.ts beginOffseason)

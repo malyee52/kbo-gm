@@ -10,6 +10,7 @@
 
 import { Rng } from '../engine';
 import type { LeagueState } from './types';
+import { wageIndex } from './salary';
 
 export type CoachRole = 'bat' | 'pit' | 'def' | 'dev';
 export type CoachStyle = 'young' | 'veteran' | 'balanced';
@@ -51,13 +52,14 @@ const CAREERS: Record<CoachRole, string[]> = {
   dev: ['전 2군 감독', '전 잔류군 책임코치', '유소년 지도자 출신', '전 육성 총괄', '해외 리그 연수 출신'],
 };
 
-function makeCoach(rng: Rng, role: CoachRole, year: number, n: number, minLevel = 1): Coach {
+/** year = 계약 전 해 (계약은 year + 1 시즌부터). 연봉은 계약이 시작되는 해의 연봉 상승 지수(salary.ts wageIndex)만큼 (2026-10-22 사용자 결정) */
+function makeCoach(rng: Rng, role: CoachRole, year: number, n: number, minLevel = 1, league?: Pick<LeagueState, 'ruleShifts'>): Coach {
   const u = rng.next();
   // 평균 3등급 (1: 10%, 2: 25%, 3: 30%, 4: 23%, 5: 12%) — 리그 평균이 기준(3등급)에 맞게
   const level = Math.max(minLevel, u < 0.1 ? 1 : u < 0.35 ? 2 : u < 0.65 ? 3 : u < 0.88 ? 4 : 5);
   const sv = rng.next();
   const style: CoachStyle = sv < 0.35 ? 'young' : sv < 0.65 ? 'veteran' : 'balanced';
-  const salary = Math.round(COACH_SALARY[level] * (0.85 + rng.next() * 0.3) / 1000) * 1000;
+  const salary = Math.round(COACH_SALARY[level] * (0.85 + rng.next() * 0.3) * wageIndex(year + 1, league) / 1000) * 1000;
   return { id: `coach-${year}-${role}-${n}`, role, level, style, salary, until: year + 1 + rng.int(3), career: CAREERS[role][rng.int(CAREERS[role].length)] };
 }
 
@@ -66,7 +68,7 @@ export function ensureCoaches(league: LeagueState): void {
   if (league.coaches) return;
   league.coaches = league.teams.map((_, t) => {
     const rng = new Rng(`${league.seed}/coaches/${league.startYear}/${t}`);
-    return COACH_ROLES.map((role, i) => ({ ...makeCoach(rng, role, league.year - 1, t * 10 + i, 2), id: `coach-start-${t}-${role}` }));
+    return COACH_ROLES.map((role, i) => ({ ...makeCoach(rng, role, league.year - 1, t * 10 + i, 2, league), id: `coach-start-${t}-${role}` }));
   });
 }
 
@@ -105,10 +107,10 @@ export function coachGrowth(league: Pick<LeagueState, 'coaches'>, team: number, 
 }
 
 /** 오프시즌 코치 시장 (역할마다 MARKET_PER_ROLE명) */
-export function coachMarket(league: Pick<LeagueState, 'seed'>, year: number): Coach[] {
+export function coachMarket(league: Pick<LeagueState, 'seed' | 'ruleShifts'>, year: number): Coach[] {
   const rng = new Rng(`${league.seed}/coach-market/${year}`);
   const out: Coach[] = [];
-  for (const role of COACH_ROLES) for (let i = 0; i < MARKET_PER_ROLE; i++) out.push(makeCoach(rng, role, year, i));
+  for (const role of COACH_ROLES) for (let i = 0; i < MARKET_PER_ROLE; i++) out.push(makeCoach(rng, role, year, i, 1, league));
   return out;
 }
 
@@ -116,11 +118,11 @@ export function coachMarket(league: Pick<LeagueState, 'seed'>, year: number): Co
  * 시즌 중 코치 시장 (2026-10-14 사용자 "코치를 데려올 방법이 없어"): 오프시즌 시장과 따로 만든 역할마다 MARKET_PER_ROLE명 가운데
  * 지금 어느 구단에도 없는 코치. 계약은 이번 시즌부터
  */
-export function coachMarketInSeason(league: Pick<LeagueState, 'seed' | 'coaches'>, year: number): Coach[] {
+export function coachMarketInSeason(league: Pick<LeagueState, 'seed' | 'coaches' | 'ruleShifts'>, year: number): Coach[] {
   const rng = new Rng(`${league.seed}/coach-market-in/${year}`);
   const employed = new Set((league.coaches ?? []).flat().map((c) => c.id));
   const out: Coach[] = [];
-  for (const role of COACH_ROLES) for (let i = 0; i < MARKET_PER_ROLE; i++) out.push({ ...makeCoach(rng, role, year - 1, i), id: `coach-in-${year}-${role}-${i}` });
+  for (const role of COACH_ROLES) for (let i = 0; i < MARKET_PER_ROLE; i++) out.push({ ...makeCoach(rng, role, year - 1, i, 1, league), id: `coach-in-${year}-${role}-${i}` });
   return out.filter((c) => !employed.has(c.id));
 }
 
@@ -144,8 +146,8 @@ export function hireCoach(league: LeagueState, team: number, c: Coach, year: num
 }
 
 /** 후보가 다 떨어졌을 때 빈자리를 채우는 2등급 이상 코치 */
-export function fallbackCoach(league: Pick<LeagueState, 'seed'>, role: CoachRole, year: number, team: number): Coach {
-  return { ...makeCoach(new Rng(`${league.seed}/coach-fill/${year}/${team}/${role}`), role, year, 90 + team, 2), id: `coach-fill-${year}-${team}-${role}` };
+export function fallbackCoach(league: Pick<LeagueState, 'seed' | 'ruleShifts'>, role: CoachRole, year: number, team: number): Coach {
+  return { ...makeCoach(new Rng(`${league.seed}/coach-fill/${year}/${team}/${role}`), role, year, 90 + team, 2, league), id: `coach-fill-${year}-${team}-${role}` };
 }
 
 /**

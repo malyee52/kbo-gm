@@ -14,9 +14,14 @@
 
 함께 읽는 파일
   (연도별 규칙)                 meta.json의 rules는 rules_for·innings_rules에 적은 연표 (자료집 '제도연표'와 조사 결과를 옮긴 값).
-                                 이것만 다시 만들려면: build_data.py --rules-only (다른 JSON과 저장 호환은 그대로)
-  data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia)
-                                 자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다.
+                                 이것만 다시 만들려면: build_data.py --rules-only (rule_changes.json도 함께, 다른 JSON과 저장 호환은 그대로)
+  data-src/외국인_개막명단.csv   시작 연도 개막 때 구단별 외국인과 아시아쿼터 여부 (meta.json의 foreignOpening, 선수 마스터의 asia).
+                                연봉(달러)·계약금(달러)·금액 출처 열이 있으면 시작 계약에 그대로 쓴다 (없으면 게임 생성식)
+                                 자료집에 날짜·국적이 없어 따로 둔다. '확인' 열이 '미확인'이면 추정값이다 ('확인'·'출처 확인'은 확인값).
+                                 구분: 개막 명단(일반·아시아쿼터) 또는 제외(시즌 중 교체 선수). 계약구분: 아시아쿼터면 시장에서도 아시아쿼터.
+                                 기록소속: 개막 구단과 그 해 기록 소속이 다를 때(시즌 중 이적) 기록 소속. 월드는 개막 구단에서 시작한다.
+  data-src/제도연표_보정.csv      자료집 '제도연표'의 미확인 항목을 위키로 확인한 값과 출처 (2026-10-23 사용자 결정 "위키 확인도 출처 확인").
+                                 엑셀은 고치지 않고 이 파일에 남긴다. 읽는 코드는 없고, 반영한 곳은 '게임 반영' 열 (rules_for 등).
   data-src/병역_면제명단.csv     국제대회 금메달 대표팀과 2026 아시안게임 새 면제자 (military.json). 출처 열 참조.
                                  상무·경찰 복무는 자료집 선수마스터의 '출신교·경력(2026 프로필)'에서 읽는다.
                                  엑셀의 다른 내용을 바꾸지 않고 이것만 다시 만들려면: build_data.py --military-only
@@ -30,6 +35,10 @@
                                  '시점'이 개막이면 그 시즌을 시작한 감독, 중도면 시즌 중 바뀐 감독. 메모에 확인할 점.
                                  감독의 운영 경향(도루 시도·희생번트·구원 등판)은 그 감독이 시즌 내내 맡은 해의 팀 기록으로 계산한다.
                                  이것만 다시 만들려면: build_data.py --managers-only
+  data-src/규칙변경.csv          연도별 리그 규칙 변경 (rule_changes.json, 개막 "올해 달라지는 규칙" 알림). 열: 연도, 날짜(MM-DD), 분류, 키,
+                                 제목, 전, 후, 단위, 반영, 확인, 출처, 비고("게임은 단순화: …"로 시작하면 단순화 문구). 키가 있으면 전·후는 게임 값에서 읽는다.
+  data-src/공인구.csv            공인구 반발계수 기준 범위·단일/복수·검사 평균 (rule_changes.json의 ball). 확인이 조사값이면 웹 조사 값.
+                                 둘만 다시 만들려면: build_data.py --rules-only
   data-src/hardhit_derived/      하드힛(https://hardhit.ai, 비상업적 이용) 기록을 게임 선수 ID에 연결한 가공값.
                                  원본(data-src/hardhit/, 커밋 안 함)에서 tools/hardhit_derive.py가 만든다. 원본이 없어도 이 폴더로 빌드된다.
                                  bat_running.csv: 자료집에 비어 있는 타자 도루·도루실패·병살타를 채운다
@@ -74,6 +83,8 @@ FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
+RULES_CSV = ROOT / 'data-src' / '규칙변경.csv'
+BALL_CSV = ROOT / 'data-src' / '공인구.csv'
 HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
 HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
@@ -318,7 +329,8 @@ def contract_years(v):
 
 
 def rules_for(year):
-    """연도별 규칙. source: 'confirmed' = 자료집 제도연표에서 출처 확인, 'assumed' = 미확인이라 가정한 값."""
+    """연도별 규칙. source: 'confirmed' = 자료집 제도연표 또는 data-src/제도연표_보정.csv에서 출처 확인, 'assumed' = 미확인이라 가정한 값.
+    2013년까지 1군 엔트리 26명은 그대로 가정값 (위키 조사의 '1982년 25명 → 1990년대 중반 26명'은 원문 문장을 찾지 못함, 보정 CSV 13)."""
     if year >= 2026: roster, rs = 29, 'confirmed'
     elif year >= 2020: roster, rs = 28, 'confirmed'
     elif year >= 2015: roster, rs = 27, 'confirmed'
@@ -327,15 +339,20 @@ def rules_for(year):
     if year < 1998: foreign, fs = 0, 'confirmed'
     elif year <= 2000: foreign, fs = 2, 'confirmed'
     elif year <= 2002: foreign, fs = 3, 'confirmed'
-    elif year <= 2013: foreign, fs = 2, 'assumed'
+    elif year <= 2013: foreign, fs = 2, 'confirmed'  # 2003년 2명 보유로 환원 (보정 CSV 16, 나무위키 외국인 선수/KBO 리그)
     elif year <= 2025: foreign, fs = 3, 'confirmed'
     else: foreign, fs = 4, 'confirmed'
+    # 한 경기 출전 외국인 (보유와 따로, 리그 규칙 기획안 D16): 2001~2002·2014~2019는 3명 보유·2명 출전 (자료집 제도연표 확인).
+    # 그 밖의 해는 보유한 외국인이 모두 출전할 수 있다
+    if 2001 <= year <= 2002 or 2014 <= year <= 2019: active, acs = 2, 'confirmed'
+    else: active, acs = foreign, fs
     if year <= 1988: post = 2
     elif year <= 2014: post = 4
     else: post = 5
     rules = {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
+        'foreignActive': active, 'foreignActiveSource': acs,
         **innings_rules(year),
         'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
     }
@@ -613,7 +630,93 @@ def build_pitches(out_dir):
     print(f'구종 {len(rows):,}행 → 선수 {len(players):,}명 ({years[0]}~{years[-1]}), 위키 구종 {len(wiki_rows):,}행 ({len(wiki):,}명) → {out_dir / "pitches.json"}')
 
 
+# ---- 규칙 변경 (rule_changes.json, 기획안 docs/리그규칙변경_기획안.md 2.3)
+
+RULE_CAT = {'공인구': 'ball', '경기': 'game', '엔트리': 'roster', '외국인': 'foreign', 'FA': 'fa', '드래프트': 'draft', '샐러리캡': 'cap', '리그': 'league'}
+RULE_EFFECT = {'표시만': 'show', '표시만(평균)': 'show-env', '리그 운영': 'league', '경기': 'engine'}
+RULE_STATUS = {'자료집 확인': 'confirmed', '조사값': 'research', '출처 갈림': 'conflict', '미확인': 'unknown'}
+# 키가 있는 항목은 전·후 값을 게임이 실제로 쓰는 값에서 읽는다 (src/league/ruleNews.ts의 RULE_KEYS와 같아야 한다)
+RULE_KEYS = {'rosterSize', 'foreignLimit', 'maxInnings', 'postseasonTeams', 'faEnabled', 'faService', 'salaryCap'}
+
+
+def build_rule_changes(out_dir):
+    """규칙변경.csv + 공인구.csv → rule_changes.json. 선수 월드 지문(선수 ID·소속)에 들어가지 않으므로 고쳐도 예전 저장을 쓴다."""
+    if not RULES_CSV.exists():
+        return
+    items = []
+    with RULES_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for n, r in enumerate(csv.DictReader(f), start=2):
+            where = f'규칙변경.csv {n}행'
+            def pick(table, col):
+                v = (r[col] or '').strip()
+                if v not in table:
+                    raise SystemExit(f'{where}: {col} 값 "{v}"는 {"/".join(table)} 중 하나여야 한다')
+                return table[v]
+            it = {'year': int(r['연도'])}
+            if (r['날짜'] or '').strip():
+                it['date'] = r['날짜'].strip()
+            it['cat'] = pick(RULE_CAT, '분류')
+            if (r['키'] or '').strip():
+                it['key'] = r['키'].strip()
+            it['title'] = r['제목'].strip()
+            for col, k in (('전', 'before'), ('후', 'after'), ('단위', 'unit')):
+                if (r[col] or '').strip():
+                    it[k] = r[col].strip()
+            it['effect'] = pick(RULE_EFFECT, '반영')
+            it['status'] = pick(RULE_STATUS, '확인')
+            if (r['출처'] or '').strip():
+                it['source'] = r['출처'].strip()
+            note = (r['비고'] or '').strip()
+            if note.startswith('게임은 단순화:'):
+                it['simplified'] = note[len('게임은 단순화:'):].strip()
+            elif note:
+                it['note'] = note
+            items.append(it)
+    balls = defaultdict(dict)
+    if BALL_CSV.exists():
+        with BALL_CSV.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                y = int(r['연도'])
+                b = balls[y]
+                b['year'] = y
+                kind, val, note = r['구분'].strip(), (r['값'] or '').strip(), (r['비고'] or '').strip()
+                status = RULE_STATUS[r['확인'].strip()]
+                if kind == '기준':
+                    lo, hi = val.split('~')
+                    b['range'] = [float(lo), float(hi)]
+                    if note:
+                        b['note'] = note
+                elif kind == '단일':
+                    b['single'] = val == '단일'
+                elif kind == '검사':
+                    t = {'round': int(r['차수'])}
+                    if (r['날짜'] or '').strip():
+                        t['date'] = r['날짜'].strip()
+                    if val:
+                        t['avg'] = float(val)
+                    if note:
+                        t['note'] = note
+                    b.setdefault('tests', []).append(t)
+                else:
+                    raise SystemExit(f'공인구.csv: 구분 "{kind}"는 기준/단일/검사 중 하나여야 한다')
+                b['status'] = status
+                if (r['출처'] or '').strip():
+                    b['source'] = r['출처'].strip()
+    (out_dir / 'rule_changes.json').write_text(json.dumps({
+        'version': 1,
+        'note': '연도별 리그 규칙 변경 (data-src/규칙변경.csv, 공인구.csv). status research = 웹 조사 값, 자료집 제도연표 확인 전. '
+                'key가 있는 항목의 전·후 값은 게임 규칙 값에서 계산한다.',
+        'items': items,
+        'ball': [balls[y] for y in sorted(balls)],
+    }, ensure_ascii=False, indent=1), encoding='utf-8')
+    print(f'규칙 변경: {len(items)}건, 공인구 {len(balls)}개 연도 → {out_dir / "rule_changes.json"}')
+
+
 # ---- 감독 (managers.json)
+
+# 양대 리그 시대(1999·2000)는 리그마다 최종 순위 1위가 있어 한국시리즈 우승 구단(그 해 이름)을 따로 둔다
+# (src/league/history.ts TWO_LEAGUE_FINAL과 같은 값)
+TWO_LEAGUE_CHAMPION = {1999: '한화', 2000: '현대'}
 
 # 문자중계 팀 코드 → 계보 (data-src/pbp_derived/team_pitching.csv)
 PBP_TEAM = {'HH': '한화', 'HT': 'KIA', 'KT': 'KT', 'LG': 'LG', 'LT': '롯데', 'NC': 'NC', 'OB': '두산', 'SK': 'SSG', 'SS': '삼성', 'WO': '히어로즈'}
@@ -654,7 +757,7 @@ def build_managers(out_dir):
             on1 = singles + g(b, 'bb', bi) + g(b, 'hbp', bi)
             out[t['franchise']] = {
                 'steal': (g(b, 'sb', bi) + g(b, 'cs', bi)), 'on1': on1, 'sac': g(b, 'sac', bi), 'pa': g(b, 'pa', bi),
-                'relief': g(p, 'g', pi) - g(p, 'gs', pi), 'games': t['g'], 'rank': t['rank'],
+                'relief': g(p, 'g', pi) - g(p, 'gs', pi), 'games': t['g'], 'rank': t['rank'], 'name': t['name'],
             }
         return out
 
@@ -678,7 +781,8 @@ def build_managers(out_dir):
                 continue
             name = full[0]['name']
             t = ts[fr]
-            if t['rank'] == 1 and y not in meta.get('inProgress', []):  # 진행 중인 시즌의 1위는 우승이 아니다
+            champion = (t['name'] == TWO_LEAGUE_CHAMPION[y]) if y in TWO_LEAGUE_CHAMPION else t['rank'] == 1
+            if champion and y not in meta.get('inProgress', []):  # 진행 중인 시즌의 1위는 우승이 아니다
                 people[name]['titles'] += 1
             ratio = lambda a, b, la, lb: (a / b) / (la / lb) if b and lb and la else None
             for k, v in (('steal', ratio(t['steal'], t['on1'], lg['steal'], lg['on1'])), ('bunt', ratio(t['sac'], t['pa'], lg['sac'], lg['pa'])),
@@ -836,6 +940,108 @@ def build_homes():
         'homes': rows,
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     return rows
+
+
+SCHEDULE_CSV = ROOT / 'data-src' / '일정규칙.csv'
+SCHEDULE_FRAMES = ('W82', 'W83', 'T3W2', 'S2', 'S33', 'S33-99', 'S33-9', 'S33L2', 'S33F')
+SCHEDULE_POSTPONE = ('R1', 'R2', 'R3', 'R3c', 'R4', 'R5')
+SCHEDULE_STATUS = ('확인', '조사값', '출처 갈림', '미확인', '임시값')
+WEEKDAYS = '일월화수목금토'  # JS Date.getDay() 순서
+
+
+def build_schedule():
+    """data-src/일정규칙.csv → public/data/schedule.json: 연도별 정규시즌 일정 규칙 (일정 개편 기획안 2장).
+    한 해 한 줄 + '2027~' 줄(자료 없는 해, 날짜를 규칙으로 계산). 날짜는 'MM-DD'.
+    '2027~' 줄은 개막·올스타를 {weekday, from, to}(그 구간의 그 요일)로, 올스타 휴식을 올스타 날 기준 [앞, 뒤] 날 수로 둔다.
+    선수 구성 지문과 무관하다 (저장 호환 그대로)."""
+    def date(s, where):
+        if not re.fullmatch(r'\d\d-\d\d', s):
+            raise SystemExit(f'일정규칙.csv {where}: 날짜 형식 "{s}" (MM-DD)')
+        return s
+
+    def day_rule(s, where):
+        m = re.fullmatch(r'(.) (\d\d-\d\d)~(\d\d-\d\d)', s)
+        if not m or m.group(1) not in WEEKDAYS:
+            raise SystemExit(f'일정규칙.csv {where}: 규칙 날짜 "{s}" (예: 토 03-22~03-28)')
+        return {'weekday': WEEKDAYS.index(m.group(1)), 'from': m.group(2), 'to': m.group(3)}
+
+    def ranges(s, where):
+        out = []
+        for part in filter(None, (x.strip() for x in (s or '').split(';'))):
+            m = re.fullmatch(r'(\d\d-\d\d)~(\d\d-\d\d)', part)
+            if not m:
+                raise SystemExit(f'일정규칙.csv {where}: 기간 형식 "{part}" (MM-DD~MM-DD)')
+            out.append({'from': m.group(1), 'to': m.group(2)})
+        return out
+
+    years, future = {}, None
+    with SCHEDULE_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            key = r['연도'].strip()
+            is_future = key.endswith('~')
+            where = key
+            vs = r['상대별'].split('·')
+            row = {}
+            if r['구단수']:
+                row['teams'] = int(r['구단수'])
+            row['games'] = int(r['팀당경기'])
+            row['vs'] = int(vs[0])
+            if len(vs) > 1:
+                row['vsOther'] = int(vs[1])  # 다른 리그 상대 (양대 리그 해)
+            if r['연전틀'] not in SCHEDULE_FRAMES:
+                raise SystemExit(f'일정규칙.csv {where}: 모르는 연전틀 {r["연전틀"]}')
+            row['frame'] = r['연전틀']
+            row['opening'] = day_rule(r['개막일'], where) if is_future else date(r['개막일'], where)
+            for col, k in (('종료참고', 'endRef'), ('종료참고2', 'endRef2'), ('가을시작', 'postseasonStart'), ('잔여발표', 'remainingFrom')):
+                if r[col]:
+                    row[k] = date(r[col], where)
+            breaks = []
+            for part in filter(None, (x.strip() for x in (r['쉬는기간'] or '').split(';'))):
+                span, _, reason = part.partition(':')
+                m = re.fullmatch(r'올스타([+-]\d+)~올스타([+-]\d+)', span)
+                if m:  # 올스타 날 기준 (자료 없는 해)
+                    row['allStarBreak'] = [int(m.group(1)), int(m.group(2))]
+                    continue
+                m = re.fullmatch(r'(\d\d-\d\d)~(\d\d-\d\d)', span)
+                if not m or not reason:
+                    raise SystemExit(f'일정규칙.csv {where}: 쉬는기간 형식 "{part}" (MM-DD~MM-DD:사유)')
+                breaks.append({'from': m.group(1), 'to': m.group(2), 'reason': reason})
+            row['breaks'] = breaks
+            if r['올스타일']:
+                row['allStar'] = day_rule(r['올스타일'], where) if is_future else date(r['올스타일'], where)
+            row['allStarGamesReal'] = int(r['실제올스타경기수'] or 0)
+            if r['순연'] not in SCHEDULE_POSTPONE:
+                raise SystemExit(f'일정규칙.csv {where}: 모르는 순연 코드 {r["순연"]}')
+            row['postpone'] = r['순연']
+            row['dhBan'] = ranges(r['더블헤더금지'], where)
+            row['unscheduled'] = int(r['미편성(팀당)'] or 0)
+            if r['2연전시작']:  # '올스타'(올스타 휴식 뒤), 'MM-DD'(그날부터 본 일정 끝까지), 'MM-DD~MM-DD'(그 뒤 다시 3연전, 2020)
+                v = r['2연전시작']
+                m = re.fullmatch(r'(\d\d-\d\d)(?:~(\d\d-\d\d))?', v)
+                if v == '올스타':
+                    row['twoGameFrom'] = 'allStar'
+                elif m:
+                    row['twoGameFrom'] = m.group(1)
+                    if m.group(2):
+                        row['twoGameTo'] = m.group(2)
+                else:
+                    raise SystemExit(f'일정규칙.csv {where}: 2연전시작은 "올스타", MM-DD, MM-DD~MM-DD ({v})')
+            row['rainMid'] = r['경기중비']
+            if r['확인'] not in SCHEDULE_STATUS:
+                raise SystemExit(f'일정규칙.csv {where}: 확인 값 "{r["확인"]}" (가능: {", ".join(SCHEDULE_STATUS)})')
+            row['status'] = r['확인']
+            if is_future:
+                row['from'] = int(key[:-1])
+                future = row
+            else:
+                years[key] = row
+    (OUT / 'schedule.json').write_text(json.dumps({
+        'version': 1,
+        'note': '연도별 정규시즌 일정 규칙 (일정 개편 기획안 2장). 출처·확인 상태·비고는 data-src/일정규칙.csv.',
+        'years': years,
+        'future': future,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    return years, future
 
 
 def build_military(profiles, out_dir):
@@ -1617,11 +1823,16 @@ def main():
         print(f'연고지 {len(build_homes())}행')
         return
     if '--rules-only' in sys.argv:
-        # 연도별 규칙(meta.json rules)만 다시 만든다 (엑셀을 읽지 않는다. 다른 칸은 그대로)
+        # 연도별 규칙(meta.json rules)과 규칙 변경 CSV(rule_changes.json)만 다시 만든다 (엑셀을 읽지 않는다. 선수 월드 지문과 무관해 저장 호환은 그대로)
         meta = json.loads((OUT / 'meta.json').read_text(encoding='utf-8'))
         meta['rules'] = {y: rules_for(y) for y in meta['years']}
         (OUT / 'meta.json').write_text(json.dumps(meta, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
         print(f'연도별 규칙 {len(meta["rules"])}개 연도')
+        build_rule_changes(OUT)
+        return
+    if '--schedule-only' in sys.argv:
+        # 일정 규칙 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
+        print(f'일정 규칙 {len(build_schedule()[0])}개 연도 + 자료 없는 해 규칙')
         return
     if '--history-only' in sys.argv:
         # 수상·구장·올스타전 CSV만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
@@ -1674,12 +1885,21 @@ def main():
     if FOREIGN_OPENING.exists():
         with FOREIGN_OPENING.open(encoding='utf-8-sig', newline='') as f:
             for r in csv.DictReader(f):
-                if r['구분'] == '제외':
-                    continue
-                asia = r['구분'] == '아시아쿼터'
-                foreign_opening[str(r['연도'])][r['구단']].append({'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] == '확인'})
+                # 계약구분 열이 없던 예전 파일은 구분만 본다
+                asia = r['구분'] == '아시아쿼터' or r.get('계약구분') == '아시아쿼터'
                 if asia:
                     asia_ids.add(str(r['선수ID']))
+                if r['구분'] == '제외':
+                    continue
+                entry = {'id': str(r['선수ID']), 'asia': asia, 'confirmed': r['확인'] in ('확인', '출처 확인')}
+                if r.get('기록소속'):
+                    entry['recordTeam'] = r['기록소속']
+                # 실제 계약 금액 (달러, 있는 선수만): 연봉·계약금·출처
+                if (r.get('연봉(달러)') or '').strip():
+                    entry['salary'] = int(r['연봉(달러)'])
+                    entry['bonus'] = int(r.get('계약금(달러)') or 0)
+                    entry['source'] = (r.get('금액 출처') or '').strip()
+                foreign_opening[str(r['연도'])][r['구단']].append(entry)
     for p in players:
         if p['id'] in asia_ids:
             p['asia'] = True
@@ -1888,7 +2108,9 @@ def main():
     }, OUT / 'meta.json')
     wiki_mil = build_military(profiles_of(wb), OUT)
     build_managers(OUT)
+    build_rule_changes(OUT)
     build_homes()
+    build_schedule()
     build_ppa()
     build_plate()
     build_history(OUT)

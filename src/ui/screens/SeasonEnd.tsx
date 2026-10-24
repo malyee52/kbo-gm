@@ -6,6 +6,7 @@ import type { BatLine, PitLine } from '../../engine';
 import {
   BAT_CATEGORIES, PIT_CATEGORIES, avg, batQualified, era, fixed2, gamesBehind, ipText, leaders, ops, pitQualified, rate3,
 } from '../../game/stats';
+import { placeLabel, seasonPlace, seasonPostseasonPlaces } from '../../game/rank';
 import { PlayerLink, TeamName, useGame } from '../context';
 import { EnlistPanel } from './Enlist';
 
@@ -18,10 +19,13 @@ export function SeasonEnd() {
   const me = session.teamIdx;
   const year = session.world.year;
   const order = s.standings();
-  const rank = order.indexOf(me) + 1;
+  // 순위 문장은 리그 순위 (양대 리그 해는 "드림 2위"), 최하위는 통합 순위 (기획안 10.8 결정 2)
+  const place = seasonPlace(s, me);
+  const rank = place.rank;
   const rec = s.teams[me];
   const cut = session.world.rules.postseasonTeams;
-  const leader = s.teams[order[0]];
+  const leader = s.teams[place.order[0]];
+  const divs = s.divisionStandings();
   const [tab, setTab] = useState<'result' | 'enlist'>('result');
   const settle = useSettle();
 
@@ -38,7 +42,9 @@ export function SeasonEnd() {
   const flow = session.phase === 'season' && !session.postseasonRunning
     ? <FlowNext step="시즌 결산" label="결산하고 시상식으로" onNext={settle} note={`입대 선택 ${session.enlistOptions().chosen.length}명 · 결산하면 구단주 평가·시상·성장 판정을 합니다`} />
     : null;
-  const verdict = rank === 1 ? '정규시즌 1위' : rank <= cut ? `포스트시즌 진출권 (${rank}위)` : rank === order.length ? '최하위' : `${rank}위, 포스트시즌 진출 실패`;
+  const label = placeLabel(place);
+  const verdict = rank === 1 ? (place.league ? `${place.league}리그 1위` : '정규시즌 1위') : seasonPostseasonPlaces(s, cut).includes(me) ? `포스트시즌 진출권 (${label})`
+    : order.indexOf(me) === order.length - 1 ? '최하위' : `${label}, 포스트시즌 진출 실패`;
   const org = session.team.org;
   // 타석이 적은 선수는 OPS를 깎아서 줄 세운다 (300타석 미만 비례)
   const batScore = (i: number) => {
@@ -79,23 +85,24 @@ export function SeasonEnd() {
         <div className="card hero">
           <h2><TeamName idx={me} /></h2>
           <p className="big">{verdict}</p>
-          <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(s.winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · 1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
+          <p>{rec.w}승 {rec.l}패 {rec.t}무 · 승률 {rate3(s.winPct(rec))} · 득점 {rec.rs} 실점 {rec.ra}{rank > 1 ? ` · ${place.league ? `${place.league}리그 ` : ''}1위와 ${gamesBehind(leader, rec)}경기 차` : ''}</p>
           <p className="muted small">{session.postseason?.done ? '결산하면 구단주 평가를 받습니다.' : '결산하면 먼저 포스트시즌을 치르고 구단주 평가를 받습니다.'} 이어서 성장 판정·1군 연차·부상 후유증이 반영되고 은퇴와 입대가 정해진 뒤 오프시즌(FA·외국인·드래프트·연봉)으로 넘어갑니다. 입대할 선수는 결산 전에 "입대 선택" 탭에서 고릅니다.</p>
         </div>
       </section>
 
-      <section>
-        <h2>최종 순위</h2>
+      {(divs ?? [{ name: '', teams: order }]).map((d) => (
+      <section key={d.name}>
+        <h2>최종 순위{d.name && ` · ${d.name}리그`}</h2>
         <div className="scroll">
           <table>
             <thead><tr><th>순위</th><th className="l">팀</th><th>승</th><th>패</th><th>무</th><th>승률</th><th>게임차</th><th>득점</th><th>실점</th></tr></thead>
             <tbody>
-              {order.map((i, k) => {
+              {d.teams.map((i, k) => {
                 const t = s.teams[i];
                 return (
-                  <tr key={i} className={`${i === me ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}`}>
+                  <tr key={i} className={`${i === me ? 'me' : ''}${k === (divs ? 2 : cut) - 1 ? ' cutline' : ''}`}>
                     <td>{k + 1}</td><td className="l"><TeamName idx={i} /></td><td>{t.w}</td><td>{t.l}</td><td>{t.t}</td>
-                    <td>{rate3(s.winPct(t))}</td><td>{k === 0 ? '-' : gamesBehind(leader, t).toFixed(1)}</td><td>{t.rs}</td><td>{t.ra}</td>
+                    <td>{rate3(s.winPct(t))}</td><td>{k === 0 ? '-' : gamesBehind(s.teams[d.teams[0]], t).toFixed(1)}</td><td>{t.rs}</td><td>{t.ra}</td>
                   </tr>
                 );
               })}
@@ -103,6 +110,7 @@ export function SeasonEnd() {
           </table>
         </div>
       </section>
+      ))}
 
       <section className="two">
         <div>

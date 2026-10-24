@@ -48,10 +48,10 @@ describe('연장·무승부·승률 연표 (meta.json rules)', () => {
     expect(regularMaxInnings(rules(2025), { md: 810, weekday: 1, doubleheader: true })).toBe(11);
   });
 
-  it('일정 색인 0은 3월 24일 이후 첫 화요일', () => {
-    expect(dateOfDay(2026, 0)).toEqual({ year: 2026, month: 3, date: 24, weekday: 2 });
-    expect(dateOfDay(2021, 0)).toEqual({ year: 2021, month: 3, date: 30, weekday: 2 });
-    expect(dateOfDay(2021, 6).weekday).toBe(1);
+  it('일정 색인 0은 그 시즌 일정의 개막일, 없으면 규칙 표가 없을 때의 개막일(3월 넷째 토요일)', () => {
+    expect(dateOfDay(2021, 0, '2021-04-03')).toEqual({ year: 2021, month: 4, date: 3, weekday: 6 });
+    expect(dateOfDay(2021, 2, '2021-04-03')).toEqual({ year: 2021, month: 4, date: 5, weekday: 1 });
+    expect(dateOfDay(2026, 0)).toEqual({ year: 2026, month: 3, date: 28, weekday: 6 });
   });
 });
 
@@ -109,7 +109,7 @@ describe('시즌에서 (연표가 경기에 걸린다)', () => {
     const world = worldForYear(store, 2021, FAST);
     const s = Season.start(world, FAST, 'records-2021');
     s.runToEnd();
-    const md = (day: number) => { const d = dateOfDay(2021, day); return d.month * 100 + d.date; };
+    const md = (day: number) => { const d = dateOfDay(2021, day, s.plan.opening); return d.month * 100 + d.date; };
     const late = s.log.filter((g) => md(g.day) >= 810);
     expect(late.length).toBeGreaterThan(0);
     expect(late.every((g) => g.innings <= 9)).toBe(true);
@@ -118,6 +118,16 @@ describe('시즌에서 (연표가 경기에 걸린다)', () => {
     const decided = s.log.filter((g) => g.homeRuns !== g.awayRuns);
     expect(decided.every((g) => g.win !== null)).toBe(true);
     expect(s.log.filter((g) => g.save !== null).length).toBeLessThan(decided.length);
+  }, 120_000);
+
+  it('2020: 더블헤더·월요일 경기는 9회까지, 나머지는 연장이 있다 (일정 개편의 더블헤더와 이어짐)', () => {
+    const world = worldForYear(store, 2020, FAST);
+    const s = Season.start(world, FAST, 'records-2020');
+    s.runToEnd();
+    const nine = s.log.filter((g) => g.dh !== undefined || dateOfDay(2020, g.day, s.plan.opening).weekday === 1);
+    expect(nine.some((g) => g.dh !== undefined)).toBe(true);
+    expect(nine.every((g) => g.innings <= 9)).toBe(true);
+    expect(s.log.some((g) => g.dh === undefined && g.innings > 9)).toBe(true);
   }, 120_000);
 
   it('1985: 15회까지 (12회를 넘긴 경기가 있다)', () => {

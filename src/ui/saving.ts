@@ -1,16 +1,16 @@
 // 화면에서 쓰는 저장 도우미: 세션 → 저장 기록, 파일 이름.
 import { formatDate } from '../game/calendar';
 import type { GameSession, ReproInfo } from '../game/session';
+import { rankText } from '../game/rank';
 import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord, getSave } from '../game/storage';
 
 export function summaryOf(s: GameSession): string {
   if (s.phase === 'offseason') {
-    const rank = s.league.lastSeason ? s.league.lastSeason.standings.indexOf(s.teamIdx) + 1 : 0;
-    return `오프시즌${rank ? ` · 지난 시즌 ${rank}위` : ''}`;
+    const rank = rankText(s, s.teamIdx);
+    return `오프시즌${rank ? ` · 지난 시즌 ${rank}` : ''}`;
   }
   const t = s.season.teams[s.teamIdx];
-  const rank = s.season.standings().indexOf(s.teamIdx) + 1;
-  return t.g === 0 ? '개막 전' : `${t.w}승 ${t.l}패 ${t.t}무 · ${rank}위`;
+  return t.g === 0 ? '개막 전' : `${t.w}승 ${t.l}패 ${t.t}무 · ${rankText(s, s.teamIdx)}`;
 }
 
 export function recordOf(s: GameSession, slot: string): SaveRecord {
