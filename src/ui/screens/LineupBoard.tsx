@@ -5,7 +5,7 @@
 // 추천은 화면에 보이는 능력 등급·상태만으로 고르고, 표시만 할 뿐 자동으로 적용하지 않는다.
 import { ConfirmButton } from '../ConfirmButton';
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
+import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type GameSession, type PitcherRole } from '../../game/session';
 import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
@@ -73,7 +73,8 @@ export function LineupBoard() {
 
   const players = session.world.players;
   const org = session.team.org;
-  const rules = teamRules(session.world, session.team);
+  const rules = session.entryRules();
+  const extra = session.season.rosterExtraOn(session.day);
   const editable = session.canManage;
   const condOf = useCondition();
   const recent = useMemo(() => recentLines(session), [session, version]);
@@ -327,7 +328,7 @@ export function LineupBoard() {
     <div className="stack tight lineup-board">
       <section className="row-between wrap">
         <div className="muted small roster-sum">
-          1군 <strong className={nFirst > rules.rosterSize ? 'neg' : undefined}>{nFirst}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {nFirst - nPit}) · 외국인 {nForeign}/{rules.foreignLimit} ·{' '}
+          1군 <strong className={nFirst > rules.rosterSize ? 'neg' : undefined}>{nFirst}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {nFirst - nPit}{rules.activeSize < rules.rosterSize ? `, 경기 출장 ${rules.activeSize}명` : ''}){extra > 0 ? ` · 엔트리 확대 +${extra}` : ''} · 외국인 {nForeign}/{rules.foreignLimit} ·{' '}
           {manual ? '엔트리 직접 관리' : '엔트리 AI 관리'} · {session.plan ? '기용 직접' : '기용 AI 감독'}
           <details className="help">
             <summary>도움말</summary>
@@ -336,6 +337,7 @@ export function LineupBoard() {
             직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 대기 선수로 채웁니다. 경기 중 교체는 AI 감독이 합니다.
             추천은 화면에 보이는 능력 등급과 출전 상태만으로 고른 것이며, 고르기 전에는 아무것도 바뀌지 않습니다.
             선수 이름 옆 좋음·보통·나쁨은 컨디션입니다. {CONDITION_HELP}
+            {rules.activeSize < rules.rosterSize && <> 1군 {rules.rosterSize}명 가운데 한 경기에는 {rules.activeSize}명까지 나옵니다. 그날 던지지 않는 선발 투수는 세지 않고, 그래도 넘치면 가장 약한 구원 투수·벤치 야수가 그 경기에 빠집니다.</>}
           </details>
         </div>
         <span className="inline">

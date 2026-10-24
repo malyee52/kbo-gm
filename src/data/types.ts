@@ -171,6 +171,23 @@ export interface YearRules {
    */
   winPct?: string;
   postseasonTeams: number;
+  /**
+   * 한 경기에 나올 수 있는 인원 (등록 rosterSize 가운데 경기 전 명단에 드는 수). 없으면 rosterSize와 같다.
+   * 2001~2007 24, 2008~2019 25, 2020~2025 26, 2026~ 27 (tools/build_data.py entry_rules)
+   */
+  activeSize?: number;
+  /**
+   * 시즌 중 엔트리 확대: '월일:더하는 인원'을 ';'로 이은 글 (예 '716:1;825:5'). 그날부터 등록·출장 모두 그만큼 늘고, 뒤 칸이 앞 칸을 덮는다.
+   * 정규시즌에만 (가을야구는 그대로). 없으면 확대 없음
+   */
+  rosterExtra?: string;
+  /** 준플레이오프·플레이오프 이기는 승수 (없으면 league/postseason.ts RULES 값) */
+  semiWins?: number;
+  poWins?: number;
+  /** 3·4위 승차가 이 경기 이상이면 준플레이오프 없이 3위가 플레이오프로 (1993~1998 3.5) */
+  semiSkipGap?: number;
+  /** 준플레이오프가 없는 해의 플레이오프 승수 (1993~1998 4, 해석값) */
+  poWinsNoSemi?: number;
   /** 값마다 확인 상태 ('<키>Source': 'confirmed' 출처 확인, 'assumed' 가정, 'disputed' 출처 갈림 다수 설) */
   [source: string]: number | string | undefined;
 }

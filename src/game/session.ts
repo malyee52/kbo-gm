@@ -68,7 +68,7 @@ import {
   outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
-  bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, seriesHome, seriesToday, startPostseason, stillAlive,
+  bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, semiSkipText, seriesHome, seriesToday, startPostseason, stillAlive,
   type PostseasonResult, type PostseasonState, type SeriesGame, type SeriesResult,
 } from '../league/postseason';
 import { dateOf, formatDate, shortDate } from './calendar';
@@ -871,6 +871,14 @@ export class GameSession {
   }
 
   /**
+   * 우리 구단의 오늘 엔트리 한도: 1군 등록·한 경기 출장 인원·외국인 보유·출전 (리그 규칙 + 창단 특례 + 그날 엔트리 확대, 9월 확대 엔트리 등).
+   * 가을야구 날은 확대 없음
+   */
+  entryRules(): ReturnType<typeof teamRules> {
+    return teamRules(this.world, this.team, this.season.rosterExtraOn(this.day));
+  }
+
+  /**
    * 구단 이름·계보. 막 끝난 시즌의 월드에 있으면 그것을, 없으면 리그 상태의 것을 쓴다.
    * 창단이 있는 해의 오프시즌에는 리그 상태에만 새 구단이 있다 (월드 8구단, 리그 9구단).
    */
@@ -1433,7 +1441,7 @@ export class GameSession {
   checkEntry(idxs: Iterable<number>): EntryCheck {
     const set = new Set(idxs);
     const players = this.team.org.filter((p) => set.has(p.idx));
-    const { rosterSize, foreignLimit, foreignActive } = teamRules(this.world, this.team);
+    const { rosterSize, foreignLimit, foreignActive } = this.entryRules();
     const errors: string[] = [];
     const warnings: string[] = [];
     const devs = players.filter((p) => p.dev);
@@ -2200,7 +2208,9 @@ export class GameSession {
     const mine = ps.seeds.includes(this.teamIdx);
     // 양대 리그 해: 준플레이오프 판정과 교차 대진 (기획안 10.5)
     const text = ps.bracket ? `${semiCheckText(ps, name)} ${bracketText(ps, name)}` : ps.seeds.map((t, i) => `${i + 1}위 ${name(t)}`).join(', ');
-    this.addNews(this.day, 'season', `가을야구 대진: ${text}.${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
+    // 1993~1998: 3·4위 승차가 커서 준플레이오프를 열지 않은 해
+    const skip = ps.semiSkip ? ` ${semiSkipText(ps, name, this.world.rules.semiSkipGap ?? 0)}` : '';
+    this.addNews(this.day, 'season', `가을야구 대진: ${text}.${skip}${mine ? ' 우리 구단이 진출했습니다!' : ''}`);
   }
 
   /**
@@ -3609,7 +3619,7 @@ export class GameSession {
     if (!ts.manual || p.dev) return;
     const cur = new Set(ts.manual);
     cur.add(p.idx);
-    const size = teamRules(this.world, this.team).rosterSize;
+    const size = this.entryRules().rosterSize;
     if (cur.size > size) {
       const same = [...cur].map((i) => this.world.players[i]).filter((x) => x.idx !== p.idx && x.isPitcher === p.isPitcher);
       // 투수 value는 작을수록, 야수는 클수록 좋다

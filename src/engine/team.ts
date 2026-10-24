@@ -2,7 +2,7 @@
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
 import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
-import type { Rates } from '../data/types';
+import type { Rates, YearRules } from '../data/types';
 import { eraPitching } from './eras';
 import type { BodyParams, EngineParams } from './params';
 import { overuseDecay, type OveruseParams } from './injury';
@@ -116,6 +116,8 @@ export interface TeamSeason {
   tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number; cond?: number; ibb?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
+  /** 마지막으로 엔트리를 짠 날의 엔트리 확대 인원 (YearRules.rosterExtra, Season.rosterExtraOn). 없으면 0 */
+  rosterExtra?: number;
 }
 
 /**
@@ -278,16 +280,32 @@ export function battingOrder(nine: SimPlayer[], lg: Rates): SimPlayer[] {
 }
 
 /**
- * 구단의 1군 엔트리·외국인 1군 한도(보유)·한 경기 출전 외국인 한도: 리그 규칙 + 창단 특례 (SimTeam.rosterBonus·foreignBonus).
- * 창단 특례는 보유·출전 모두 1명 더 (NC 2014 4보유·3출전, kt 2015~2016 4보유·3출전, 자료집 제도연표)
+ * 구단의 1군 엔트리·한 경기 출장 인원·외국인 1군 한도(보유)·한 경기 출전 외국인 한도: 리그 규칙 + 창단 특례 (SimTeam.rosterBonus·foreignBonus)
+ * + 그날 엔트리 확대 (extra, Season.rosterExtraOn). 창단 특례는 보유·출전 모두 1명 더 (NC 2014 4보유·3출전, kt 2015~2016 4보유·3출전, 자료집 제도연표).
+ * 엔트리 특례와 확대는 등록·출장 모두에 더한다
  */
-export function teamRules(world: Pick<World, 'rules'>, team: Pick<SimTeam, 'rosterBonus' | 'foreignBonus'>): { rosterSize: number; foreignLimit: number; foreignActive: number } {
+export function teamRules(world: Pick<World, 'rules'>, team: Pick<SimTeam, 'rosterBonus' | 'foreignBonus'>, extra = 0): { rosterSize: number; activeSize: number; foreignLimit: number; foreignActive: number } {
   const bonus = team.foreignBonus ?? 0;
+  const roster = (team.rosterBonus ?? 0) + extra;
   return {
-    rosterSize: world.rules.rosterSize + (team.rosterBonus ?? 0),
+    rosterSize: world.rules.rosterSize + roster,
+    activeSize: (world.rules.activeSize ?? world.rules.rosterSize) + roster,
     foreignLimit: world.rules.foreignLimit + bonus,
     foreignActive: world.rules.foreignActive + bonus,
   };
+}
+
+/** 엔트리 확대 일정 (YearRules.rosterExtra '716:1;825:5') → [월일, 인원] (월일 순) */
+export function rosterExtraSteps(rules: Pick<YearRules, 'rosterExtra'>): [number, number][] {
+  if (!rules.rosterExtra) return [];
+  return rules.rosterExtra.split(';').map((x) => x.split(':').map(Number) as [number, number]).sort((a, b) => a[0] - b[0]);
+}
+
+/** 그날(월×100 + 일) 엔트리 확대 인원 (마지막으로 시작한 칸) */
+export function rosterExtraAt(rules: Pick<YearRules, 'rosterExtra'>, md: number): number {
+  let n = 0;
+  for (const [from, plus] of rosterExtraSteps(rules)) if (md >= from) n = plus;
+  return n;
 }
 
 function pitcherCount(rosterSize: number): number {
@@ -369,8 +387,9 @@ export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { 
  * 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다).
  * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
  */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null): void {
-  const { rosterSize, foreignLimit: limit } = teamRules(world, ts.team);
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null, extra = 0): void {
+  const { rosterSize, foreignLimit: limit } = teamRules(world, ts.team, extra);
+  ts.rosterExtra = extra;
   const manual = ts.manual ?? null;
   const rotating = !manual && churn > 0;
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
@@ -444,7 +463,8 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   const benchToday = new Set(avail.filter((p) => !p.isPitcher && p.alt?.pit && restedBat(p)).map((p) => p.idx));
 
   // 직접 정한 1군은 투수·야수 인원도 플레이어가 정한 그대로 쓴다
-  const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(rosterSize);
+  // 엔트리 확대(9월 등) 때 AI는 늘어난 자리의 절반(내림)을 투수로 채운다 (임시값: 5명이면 투수 2·야수 3)
+  const nPit = manual ? Number.MAX_SAFE_INTEGER : pitcherCount(rosterSize - extra) + Math.floor(extra / 2);
   const nHit = manual ? Number.MAX_SAFE_INTEGER : rosterSize - nPit;
 
   // 투수: 선발 로테이션(시대별 4~5명), 나머지 구원. 기용표가 있으면 그 로테이션부터
@@ -621,6 +641,50 @@ function foreignOnRoster(ts: TeamSeason): number {
  * 난수를 쓰지 않는다. 한도 안이면 ts를 그대로 돌려준다
  */
 export function gameSide(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPlayer, lineup: SimPlayer[]): TeamSeason {
+  return dressedSide(foreignSide(ts, world, starter, lineup), world, starter, lineup);
+}
+
+/** 구원 투수를 이 수까지는 출장 명단에 남긴다 (임시값). 그보다 줄여야 하면 벤치 야수부터 뺀다 */
+const MIN_DRESSED_PEN = 6;
+
+/**
+ * 출장 인원 (규칙 실제화, YearRules.activeSize): 등록 인원 중 경기에 나오는 사람은 activeSize(+창단 특례·엔트리 확대)까지.
+ * 경기에 쓰는 사람 = 선발 투수 + 라인업 + 불펜(마무리 포함) + 벤치 야수 (로테이션의 다른 선발은 원래 경기에 나오지 않아 세지 않는다).
+ * 넘치면 가장 약한 구원 투수(MIN_DRESSED_PEN명까지) → 가장 약한 벤치 야수(마지막 남은 백업 포수는 남김) 순으로 그 경기만 뺀다.
+ * 이도류 얼굴은 한 명으로 센다. 난수를 쓰지 않는다. 한도 안이면 그대로 돌려준다
+ */
+function dressedSide(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPlayer, lineup: SimPlayer[]): TeamSeason {
+  const { activeSize } = teamRules(world, ts.team, ts.rosterExtra ?? 0);
+  const used = new Set<number>([starter.idx]);
+  for (const p of [...lineup, ...ts.hitters, ...ts.bullpen]) used.add(p.idx);
+  if (ts.closer) used.add(ts.closer.idx);
+  let over = used.size - activeSize;
+  if (over <= 0) return ts;
+  const inLineup = new Set(lineup.map((p) => p.idx));
+  const drop = new Set<number>();
+  // 구원: 선발·마무리·라인업에 선 이도류 얼굴은 빼지 않는다 (투수 value는 작을수록 좋다)
+  const pen = ts.bullpen.filter((p) => p.idx !== starter.idx && p.idx !== ts.closer?.idx && !inLineup.has(p.idx)).sort((a, b) => b.value - a.value);
+  let penLeft = ts.bullpen.length;
+  for (const p of pen) {
+    if (over <= 0 || penLeft <= MIN_DRESSED_PEN) break;
+    if (ts.hitters.some((h) => h.idx === p.idx)) continue;
+    drop.add(p.idx); penLeft--; over--;
+  }
+  const bench = ts.hitters.filter((p) => !inLineup.has(p.idx) && p.idx !== starter.idx).sort((a, b) => a.value - b.value);
+  let catchers = bench.filter((p) => p.pos === 'C').length;
+  for (const p of bench) {
+    if (over <= 0) break;
+    if (p.pos === 'C' && catchers <= 1) continue;
+    if (ts.bullpen.some((q) => q.idx === p.idx && !drop.has(q.idx))) continue;
+    if (p.pos === 'C') catchers--;
+    drop.add(p.idx); over--;
+  }
+  if (!drop.size) return ts;
+  return { ...ts, hitters: ts.hitters.filter((p) => !drop.has(p.idx)), bullpen: ts.bullpen.filter((p) => !drop.has(p.idx)) };
+}
+
+/** 외국인 출전 한도로 이 경기에 쓰는 구단 쪽 명단 (gameSide 앞 단계) */
+function foreignSide(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPlayer, lineup: SimPlayer[]): TeamSeason {
   const { foreignActive } = teamRules(world, ts.team);
   if (foreignOnRoster(ts) <= foreignActive) return ts;
   const dressed = new Set<number>();
