@@ -22,6 +22,35 @@ export interface BallParams {
   infieldAir: { LD: number; FB: number };
   /** 깊이별·구장 쪽별 담당 자리 가중치 (ground 내야 땅볼, air 내야 공중, outfield 외야) */
   zones: Record<'ground' | 'air' | 'outfield', [ZoneFielders, ZoneFielders, ZoneFielders]>;
+  /** 타구각 갈래 (angle.ts, 능력치 v2 16-2) */
+  angle: AngleParams;
+}
+
+/**
+ * 타구각 갈래 조정값 (angle.ts, docs/능력치v2_기획안.md 10.2·11.3). 위 type·airOut 표는 리그 구간별 결과표의 재료로 그대로 쓴다
+ * (베이즈로 뒤집음). 덩어리 몫·공중 덩어리 가운데·퍼짐은 해마다 그 해 유형 비율에 맞춰 다시 풀고, 여기 값은 그 시작점이다
+ */
+export interface AngleParams {
+  /** 구간 경계 (도): 땅볼 | 라인드라이브 | 홈런 각 | 높은 뜬공 | 내야 뜬공 */
+  cuts: [number, number, number, number];
+  /** 땅볼 덩어리 [가운데, 퍼짐] (고정) */
+  ground: [number, number];
+  /** 공중 덩어리 [가운데, 퍼짐] (풀기 시작점) */
+  air: [number, number];
+  /** 땅볼 덩어리 몫 (풀기 시작점) */
+  groundShare: number;
+  /** 퍼짐 배율 = 1 − contactSpread × 정타 z (정타 z = 정타 로짓 ÷ contactSd), spreadMin~spreadMax로 자른다 */
+  contactSpread: number;
+  contactSd: number;
+  spreadMin: number;
+  spreadMax: number;
+  /** 각도 성향이 뚜렷하면(|θ| ≥ tendencyFull) 퍼짐을 1 − tendencyTighten배로 (그 사이는 선형) */
+  tendencyTighten: number;
+  tendencyFull: number;
+  /** 땅볼 단타(내야안타) 로짓에 더하는 주력 효과: speedGb × (주력 − 0.5) × 2 */
+  speedGb: number;
+  /** 거리(파워) 로짓이 땅볼 밖 2루타·3루타 로짓에 들어가는 배율 (장타 몫) */
+  powerXbh: number;
 }
 /**
  * 인플레이 처리 조정값 (rules.ts, 엔진 2 6단계). 자리 표는 타구를 맡은 수비수 자리별 값, 외야 표는 구장 쪽 [좌익, 중견, 우익].
@@ -647,6 +676,22 @@ export const DEFAULT_PARAMS: EngineParams = {
       air: [{ '3B': 0.45, SS: 0.35, C: 0.2 }, { SS: 0.35, '2B': 0.35, P: 0.1, C: 0.2 }, { '1B': 0.45, '2B': 0.35, C: 0.2 }],
       outfield: [{ LF: 0.75, CF: 0.25 }, { CF: 1 }, { RF: 0.75, CF: 0.25 }],
     },
+    // 능력치 v2 16-2 타구각 (기획안 10.2·11.3 결정 14): 구간 경계·두 덩어리 38% N(−12°, 10°) + 62% N(29°, 12°)는 2025년 엔진 표에 맞춘 임시값.
+    // 퍼짐·주력·장타 몫 크기는 모두 임시값 (contactSd 0.14는 2026 시작 월드 가중 타석 300 넘는 타자 131명의 정타 로짓 표준편차 0.138, 측정)
+    angle: {
+      cuts: [10, 25, 35, 50],
+      ground: [-12, 10],
+      air: [29, 12],
+      groundShare: 0.38,
+      contactSpread: 0.1,
+      contactSd: 0.14,
+      spreadMin: 0.8,
+      spreadMax: 1.2,
+      tendencyTighten: 0.1,
+      tendencyFull: 0.8,
+      speedGb: 0.4,
+      powerXbh: 0.5,
+    },
   },
   // 아래 chainShapeByYear 세 해(2023~2025 맞춘 모양)를 칸마다 실제 공 수로 가중 평균. 스트라이크 = 루킹 + 헛스윙 + 번트 헛스윙
   // (+ 2스트라이크 번트 파울), 파울 = 파울 + 2스트라이크 전 번트 파울. 그 해 모양(chainShapeByYear)이 없는 해(2022년 이전, 2026년 이후)에 쓴다 (임시값: 그 시대 카운트 자료 없음.
@@ -713,8 +758,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     ],
   },
   // 엔진 2 6단계에서 2023~2025 병살·희생플라이 리그 값(engine2_baseline)에 다시 맞춤 (0.43·0.76 → 0.478·0.95. 병살은 2012·2019가 낮고 2023~2025가 높아 다섯 해 가운데로)
-  doublePlay: 0.478,
-  sacFly: 0.95,
+  // 능력치 v2 16-2 타구각 갈래에서 validate 2025·2019·2012 × 100의 병살 +1.2%·희생플라이 −1.4%(세 해 평균 변화)만큼 되돌림 (0.478·0.95 → 0.472·0.964)
+  doublePlay: 0.472,
+  sacFly: 0.964,
   groundOutScores: 0.58,
 
   firstToThirdOnSingle: 0.4,

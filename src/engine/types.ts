@@ -31,6 +31,10 @@ export interface BatSkill {
    * 시작 때는 실측 그대로이고, 성장으로 비율이 바뀌면 그만큼 따라간다. 실측이 없으면 undefined (푼 값 그대로)
    */
   plateRes?: BatPlate;
+  /** 당겨치기 성향 (로짓, 0 = 리그 방향 비율, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  pull?: number;
+  /** 좌우 상성 크기 배율 (1 = 리그 params.platoon, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  platoon?: number;
   /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
 }
@@ -57,6 +61,8 @@ export interface PitSkill {
   ppaRel?: number;
   /** 볼카운트 사슬 실측 몫 (BatSkill.plateRes와 같은 뜻) */
   plateRes?: PitPlate;
+  /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
+  platoon?: number;
 }
 
 export interface SimPlayer {

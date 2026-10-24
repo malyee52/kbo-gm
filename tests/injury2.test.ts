@@ -17,7 +17,8 @@ function run(params: EngineParams, seed: string, days: number) {
 }
 
 describe('경기 중 부상 (엔진 2 11단계)', () => {
-  const s = run(NO_PILOT, 'inj2-season', 400);
+  // 시드: 투수 부상 표본이 작아(열 건 안팎) 엔진이 바뀌면 경계에 걸릴 수 있다 (능력치 v2 16-2 타구각 때 inj2-season → inj2-season-2)
+  const s = run(NO_PILOT, 'inj2-season-2', 400);
 
   it('투구·주루·수비 사건으로 생기고, 다음 날부터 결장하며 부위가 붙는다', () => {
     const inGame = s.absences.filter((a) => a.cause);

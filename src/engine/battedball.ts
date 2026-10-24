@@ -5,9 +5,13 @@
 // 그다음 담당 수비수의 수비 런으로 안타 ↔ 아웃을 바꾼다 (수비 0이면 바꾸지 않아 결과가 타석 결과 함수 그대로).
 // 크기는 예전 팀 수비 합(T5)과 같게 맞춘다: 수비수 한 명의 +1런이 팀 인플레이 안타의 defenseHitPerRun만큼을 아웃으로 바꾼다
 // (그 수비수에게 가는 안타 몫으로 나눠 확률을 정한다). 그래서 외야수의 수비는 내야 땅볼에 영향이 없다.
-// 땅볼 성향(엔진 2 6단계): 그 해 리그 값 × 타자 × 투수의 땅볼 승산 배율(gb)을 타구 유형 표의 땅볼 가중치에 곱한다. 당겨치기 성향은 아직 리그 평균.
+// 타구 유형(능력치 v2 16-2): 타석 결과 함수가 매치업의 타구각 구간 확률과 구간별 결과 확률(angle.ts)을 넘기면, 결과에 맞는 구간을
+// P(구간) × P(결과 | 구간)에 비례해 뽑는다 (결과를 먼저 뽑고 구간을 그 조건부로 뽑아도 (구간, 결과) 결합 분포는 각도 먼저 뽑기와 같다).
+// 구간 → 유형: 땅볼·라인드라이브·뜬공(홈런 각·높은 뜬공)·내야 뜬공. 넘긴 것이 없으면 리그 표에 땅볼 승산 배율(gb)을 각도 성향으로 넣는다.
+// 당겨치기 성향은 BatSkill.pull (아직 비어 있어 리그 방향 비율).
 
 import type { Rates } from '../data/types';
+import { BAND_TYPE, ballMix, leagueBall, outTypes, resultTypes, thetaOf, O_OUT, O_S1, O_D2, O_T3, type Band } from './angle';
 import { Ev, type PaRates } from './pa';
 import type { BallParams, EngineParams } from './params';
 import type { Rng } from './rng';
@@ -26,6 +30,8 @@ export interface BattedBall {
   /** 수비를 거친 뒤의 결과 (S1·D2·T3·OUT) */
   ev: Ev;
   type: Ball;
+  /** 타구각 구간 (angle.ts Band: 땅볼·라인·홈런 각·높은 뜬공·내야 뜬공) */
+  band: Band;
   /** 치는 손 기준 방향: 0 당겨, 1 가운데, 2 밀어 */
   dir: number;
   /** 구역 = 깊이 × 3 + 구장 쪽 (0 좌익선 쪽, 1 가운데, 2 우익선 쪽). 9개 */
@@ -48,17 +54,10 @@ export interface BallTally {
 export const emptyBallTally = (): BallTally => ({ type: [0, 0, 0, 0], outType: [0, 0, 0, 0], dir: [0, 0, 0], slot: {}, toOut: 0, toHit: 0 });
 
 const HIT_EVS = [Ev.S1, Ev.D2, Ev.T3] as const;
-const HIT_KEY = { [Ev.S1]: 'S1', [Ev.D2]: 'D2', [Ev.T3]: 'T3' } as const;
+/** 타석 결과 → 타구각 결과 칸 */
+const OUTCOME = { [Ev.OUT]: O_OUT, [Ev.S1]: O_S1, [Ev.D2]: O_D2, [Ev.T3]: O_T3 } as Record<Ev, number>;
 
-/** 아웃 타구의 유형 분포: 라인드라이브 airOut.ld, 나머지를 땅볼 groundBallShare : 뜬공(내야 뜬공 airOut.pu 포함)으로 */
-function outTypes(p: EngineParams): number[] {
-  const { ld, pu } = p.ball.airOut;
-  const g = p.groundBallShare * (1 - ld);
-  const air = (1 - p.groundBallShare) * (1 - ld);
-  return [g, ld, air * (1 - pu), air * pu];
-}
-
-const typesOf = (ev: Ev, p: EngineParams): readonly number[] => (ev === Ev.OUT ? outTypes(p) : p.ball.type[HIT_KEY[ev as Ev.S1 | Ev.D2 | Ev.T3]]);
+const typesOf = (ev: Ev, p: EngineParams): readonly number[] => resultTypes(OUTCOME[ev], p);
 
 /** 유형 → 깊이 분포 [내야 땅볼, 내야 공중, 외야] */
 function depthsOf(t: Ball, b: BallParams): [number, number, number] {
@@ -67,6 +66,8 @@ function depthsOf(t: Ball, b: BallParams): [number, number, number] {
   const air = t === Ball.LD ? b.infieldAir.LD : b.infieldAir.FB;
   return [0, air, 1 - air];
 }
+
+const BANDS = [0, 1, 2, 3, 4] as Band[];
 
 /** 가중치 표에서 하나 고르기 (난수 u 하나) */
 function pick<T>(items: readonly T[], w: readonly number[], u: number): T {
@@ -158,9 +159,12 @@ export function errorPerBall(league: Rates, p: EngineParams): Record<BallSlot, n
  */
 export function battedBall(ev: Ev, rates: PaRates | null, league: Rates, pullLeft: boolean, defAt: (slot: BallSlot) => number, p: EngineParams, rng: Rng, gb = 1): BattedBall {
   const b = p.ball;
-  const tw = typesOf(ev, p);
-  const type = pick([Ball.GB, Ball.LD, Ball.FB, Ball.PU], gb === 1 ? tw : [tw[0] * gb, tw[1], tw[2], tw[3]], rng.next());
-  const dir = pick([0, 1, 2], b.dir, rng.next());
+  const m = rates?.ball ?? ballMix(leagueBall(league, p), thetaOf(gb), 1, null, null, null);
+  const o = OUTCOME[ev];
+  const band = pick(BANDS, m.pz.map((z, i) => z * m.pi[i][o]), rng.next());
+  const type = BAND_TYPE[band] as Ball;
+  const pull = m.pull ?? 0;
+  const dir = pick([0, 1, 2], pull ? [b.dir[0] * Math.exp(pull / 2), b.dir[1], b.dir[2] * Math.exp(-pull / 2)] : b.dir, rng.next());
   const side = pullLeft ? dir : 2 - dir;
   const dep = depthsOf(type, b);
   const depth = dep[0] === 1 ? 0 : dep[1] === 1 ? 1 : rng.next() < dep[1] ? 1 : 2;
@@ -183,5 +187,5 @@ export function battedBall(ev: Ev, rates: PaRates | null, league: Rates, pullLef
     // 바뀐 안타의 종류는 그 자리로 가는 안타의 종류 비율 (같은 난수를 다시 늘려 쓴다)
     if (u < q) out = pick(HIT_EVS, sh.mix[slot], u / q);
   }
-  return { ev: out, type, dir, zone: depth * 3 + side, slot, converted: out !== ev };
+  return { ev: out, type, band, dir, zone: depth * 3 + side, slot, converted: out !== ev };
 }
