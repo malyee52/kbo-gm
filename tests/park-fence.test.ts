@@ -1,12 +1,12 @@
-// 펜스 조정 공사·가벽 (league/stadium.ts·engine/park.ts, 구장효과 기획안 6.7·6.8, P6b·P6c)
+// 펜스 조정 공사·가벽·실제 미래 구장 (league/stadium.ts·engine/park.ts, 구장효과 기획안 6.7·6.8·4.5, P6b·P6c·P7)
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import type { ParkEvents } from '../src/data/types';
+import type { ParkData, ParkEvents } from '../src/data/types';
 import { applyDiff, DEFAULT_PARAMS, fenceBaseOf, fenceParkEvents, fenceSpecOf, gameParkOf, guessLogs, type ParkSource } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { createLeague } from '../src/league/create';
 import {
-  FENCE_PRESETS, FENCE_WORK, fenceWorkState, openWalls, orderStadium, stadiumOptions, stadiumYearEnd, teamParkInfo, WALL,
+  FENCE_PRESETS, FENCE_WORK, fenceWorkState, openWalls, orderStadium, stadiumOptions, stadiumYearEnd, teamParkInfo, WALL, type StadiumState,
 } from '../src/league/stadium';
 import type { LeagueState } from '../src/league/types';
 
@@ -219,4 +219,45 @@ describe('가벽 (6.8, P6c)', () => {
     expect(r.league.stadiums).toEqual(a.league.stadiums);
     expect(r.season.teams).toEqual(a.season.teams);
   }, 900_000);
+});
+
+describe('실제 미래 구장과 2027년 뒤 (4.5, P7)', () => {
+  it('2027년 뒤는 같은 구장-기간 실측 해의 기간 평균, 잠실 돔(제원 미확정)은 2031·2032·2033 배율이 같다', () => {
+    const L = copy();
+    const nc = idx(L, 'NC');
+    // 창원 2019~ 기간: 실측 f의 기하 평균
+    const fs = Object.keys(store.meta.parkFactors!).map(Number).filter((y) => y >= 2019).map((y) => store.meta.parkFactors![String(y)].NC);
+    const v = park(L, nc, 2027);
+    expect(v.basis).toBe('mean');
+    expect(v.park!.run).toBeCloseTo(Math.exp(fs.reduce((s, f) => s + Math.log(f), 0) / fs.length), 12);
+    expect(park(L, nc, 2040)).toEqual(v);
+    // 펜스 조정의 조정 전 값과 같다 (원래 펜스로 되돌리면 이 값)
+    expect(v.park!.ev).toEqual(fenceBaseOf(src, 'NC', 2027, FENCE_PRESETS.neutral.fence, PP).base);
+    for (const fr of ['LG', '두산']) {
+      const t = idx(L, fr);
+      const y31 = park(L, t, 2031);
+      expect(park(L, t, 2032)).toEqual(y31);
+      expect(park(L, t, 2033)).toEqual(y31);
+    }
+  });
+
+  it('제원이 확정된 미래 구장은 짐작 × 당김, 그 전 구장의 가벽은 옮긴 해부터 쓰지 않는다', () => {
+    const parks = JSON.parse(JSON.stringify(store.parks)) as ParkData;
+    const dome = parks.specs.find((r) => r.id === 'jamsil_dome')!;
+    Object.assign(dome, { fence: { l: 99, lc: null, c: 122, rc: null, r: 99 }, height: { lr: 3, c: 3 }, confirmed: '출처 확인' });
+    const sure = { ...src, parks };
+    const L = copy();
+    const lg = idx(L, 'LG');
+    expect(orderStadium(L, lg, 2026, 'wall', 1e9, { fence: { l: 100, c: 121, r: 100, h: 25 } }, sure).ok).toBe(true);
+    expect(park(L, lg, 2031, sure).basis).toBe('wall');
+    const v = park(L, lg, 2032, sure);
+    expect(v.basis).toBe('guess');
+    const g = guessLogs(dome, PP)!;
+    expect(v.park!.ev!.hr).toBeCloseTo(Math.exp(PP.specFit.w * g.hr), 12);
+    expect(park(L, idx(L, '두산'), 2032, sure).park!.ev).toEqual(v.park!.ev);
+    // 확정 전(지금 자료)은 가벽이 이어진다
+    expect(park(L, lg, 2032).basis).toBe('wall');
+    const s: StadiumState = L.stadiums![lg];
+    expect(s.wall).toBeDefined();
+  });
 });
