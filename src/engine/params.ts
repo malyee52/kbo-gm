@@ -442,6 +442,11 @@ export interface EngineParams {
   catcherWildPitchPerRun: number;
   /** 포수 수비 1런당 상대 도루 성공률이 줄어드는 값 (임시값) */
   catcherStealPerRun: number;
+  /**
+   * 주루·작전·포수·투수 짝 능력의 시작값 (능력치 v2 16-3, runskills.ts, 모두 임시값). scale: 등급 10칸이 손잡이 값으로 얼마인지
+   * (runIQ·bunting·cFrame·quick 로짓, cBlock·hold 로그 배율), virtualSd: 가상 선수 분포 표준편차(등급), catcherPerRun: 포수 수비 1런당 블로킹·프레이밍 등급
+   */
+  skill2: { scale: { runIQ: number; bunting: number; cBlock: number; cFrame: number; hold: number; quick: number }; virtualSd: number; catcherPerRun: number };
   /** 선발 등판 사이 최소 간격 (일) */
   starterRestDays: number;
   /**
@@ -831,6 +836,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   defenseHitPerRun: 1 / 880,
   catcherWildPitchPerRun: 0.02,
   catcherStealPerRun: 0.004,
+  // 모두 임시값 (자료 없음, 기획안 1.3~1.5·9.5). 크기는 validate 도루·폭투·희생번트 ±1% 안에서 정했다 (16-3c)
+  skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15 }, virtualSd: 8, catcherPerRun: 0.5 },
   starterRestDays: 5,
   penBlendDays: 100,
 

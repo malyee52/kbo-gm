@@ -11,6 +11,7 @@ import {
 import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { virtualDefense } from '../engine/fielding';
+import { applyRunSkills } from '../engine/runskills';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
 import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
@@ -144,6 +145,8 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
+  // 능력치 v2 16-3: 주루·작전·포수·투수 짝은 해마다 나이로 다시 낸다 (리그 영점, runskills.ts, 저장하지 않음)
+  if (league.defPool) applyRunSkills(players, params);
   if (league.defZero !== undefined) env = { ...env, defZero: league.defZero };
   return { year, gamesPerTeam: games, rules, league: lg, env, teams, players, ...(league.defPool ? { defPool: league.defPool } : {}) };
 }

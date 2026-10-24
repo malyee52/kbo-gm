@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyRunTally, Season, simulateSeason, worldForYear, type EngineParams, type World } from '../src/engine';
 import { addLogit } from '../src/engine/rules';
+import { bodyGrade, experienceGrade, runGradesOf } from '../src/engine/runskills';
 import type { BatSkill, PitSkill, SimPlayer } from '../src/engine/types';
 
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -43,7 +44,8 @@ describe('주루·작전 손잡이 (능력치 v2 16-3)', () => {
 
   it('손잡이를 모두 0으로 둔 월드는 손잡이가 없는 월드와 한 시즌 결과가 같다', () => {
     const zero = worldWith({ sbStart: 0, sbJudge: 0, runIQ: 0, bunting: 0, cBlock: 0, cFrame: 0 }, { hold: 0, quick: 0 });
-    const a = run(base);
+    const u = undefined;
+    const a = run(worldWith({ sbStart: u, sbJudge: u, runIQ: u, bunting: u, cBlock: u, cFrame: u }, { hold: u, quick: u }));
     const b = run(zero);
     expect(b.t).toEqual(a.t);
     expect(b.running).toEqual(a.running);
@@ -94,4 +96,50 @@ describe('주루·작전 손잡이 (능력치 v2 16-3)', () => {
     const sac = (r: ReturnType<typeof run>) => r.running.buntSac / r.running.bunt;
     expect(sac(iq)).toBeGreaterThan(sac(a) + 0.05);
   }, 180_000);
+});
+
+describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () => {
+  it('나이 곡선은 기획안 9.5 표와 같다 (경험 21·25·29·33·37세 45·48·51·53·53, 몸 50·51·51·49·46, 반올림 1칸 안)', () => {
+    const ages = [21, 25, 29, 33, 37];
+    expect(ages.map((a) => Math.round(experienceGrade(a)))).toEqual([45, 48, 51, 53, 53]);
+    ages.map(bodyGrade).forEach((g, i) => expect(Math.abs(g - [50, 51, 51, 49, 46][i])).toBeLessThanOrEqual(1));
+    expect(experienceGrade(null)).toBe(50);
+    expect(bodyGrade(null)).toBe(50);
+  });
+
+  it('실존 선수는 나이만으로 정해지고, 가상 선수는 선수 ID마다 같은 값을 뽑아 퍼진다 (표준편차 약 8등급)', () => {
+    const bat = { so: 1, bb: 1, hbp: 1, hr: 1, s1: 1, d2: 1, t3: 1, sbAtt: 0.05, sbPct: 0.7, speed: 0.5, sample: 300 };
+    const real = runGradesOf({ id: 'r1', age: 25, real: true, bat, pit: null }, DEFAULT_PARAMS).bat!;
+    const real2 = runGradesOf({ id: 'r2', age: 25, real: undefined, bat, pit: null }, DEFAULT_PARAMS).bat!;
+    expect(real).toEqual(real2);
+    expect(real.runIQ).toBe(experienceGrade(25));
+    expect(real.cBlock).toBe(bodyGrade(25));
+    const v = (id: string) => runGradesOf({ id, age: 25, real: false, bat, pit: null }, DEFAULT_PARAMS).bat!.runIQ;
+    expect(v('v1')).toBe(v('v1'));
+    const xs = Array.from({ length: 2000 }, (_, i) => v(`v${i}`) - experienceGrade(25));
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / xs.length);
+    expect(Math.abs(mean)).toBeLessThan(0.6);
+    expect(sd).toBeGreaterThan(7.4);
+    expect(sd).toBeLessThan(8.6);
+  });
+
+  it('2026 시작 월드: 손잡이는 리그 대비 (출장량 가중 평균 0), 정규 포수는 포수 수비 런만큼 블로킹이 옮겨진다, 도루 스타트·판단은 없다', () => {
+    const w = worldForYear(store, 2026, FAST);
+    const sc = DEFAULT_PARAMS.skill2.scale;
+    const hit = w.players.filter((p) => p.bat && !p.isPitcher);
+    const wavg = (ps: typeof hit, f: (p: SimPlayer) => number, wt: (p: SimPlayer) => number) =>
+      ps.reduce((a, p) => a + f(p) * Math.max(1, wt(p)), 0) / ps.reduce((a, p) => a + Math.max(1, wt(p)), 0);
+    expect(wavg(hit, (p) => p.bat!.runIQ ?? 0, (p) => p.bat!.sample)).toBeCloseTo(0, 9);
+    const pits = w.players.filter((p) => p.isPitcher && p.pit);
+    expect(wavg(pits, (p) => p.pit!.quick ?? 0, (p) => p.pit!.sample)).toBeCloseTo(0, 9);
+    const cs = hit.filter((p) => p.bat!.playable?.includes('C'));
+    expect(cs.length).toBeGreaterThan(15);
+    expect(wavg(cs, (p) => p.bat!.cBlock ?? 0, (p) => p.bat!.sample)).toBeCloseTo(0, 9);
+    // 같은 나이 두 포수의 블로킹 차 = 포수 수비 런 차 × catcherPerRun (등급)
+    const [a, b] = cs.filter((p) => p.age === cs[0].age && p !== cs[0]).length ? [cs[0], cs.find((p) => p.age === cs[0].age && p !== cs[0])!] : [cs[0], cs[0]];
+    const d = ((a.bat!.cBlock ?? 0) - (b.bat!.cBlock ?? 0)) / sc.cBlock * 10;
+    expect(d).toBeCloseTo(DEFAULT_PARAMS.skill2.catcherPerRun * ((a.bat!.def?.C ?? 0) - (b.bat!.def?.C ?? 0)), 6);
+    expect(hit.every((p) => p.bat!.sbStart === undefined && p.bat!.sbJudge === undefined)).toBe(true);
+  });
 });

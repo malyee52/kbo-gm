@@ -9,6 +9,7 @@ import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, Season
 import { makeDefense } from './defense';
 import type { DefenseAward, DefenseData, PlateData, PpaData } from '../data/types';
 import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
+import { applyRunSkills } from './runskills';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
@@ -550,6 +551,8 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  // 능력치 v2 16-3: 주루·작전·포수·투수 짝 시작값 (나이 평균, 리그 영점, runskills.ts)
+  if (input.defense) applyRunSkills(players, params);
   const env = leagueEnvFor(current.league, params, year);
   const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
   if (defModel) env.defZero = defModel.zero;

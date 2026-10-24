@@ -14,6 +14,7 @@ import { worldFromLeague } from './world';
 import { teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
+import { withoutRunSkills } from '../engine/runskills';
 
 type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'drafts' | 'military'>;
 
@@ -113,7 +114,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       id: p.id, name: p.name, real: m.real, isPitcher: p.isPitcher, pos: p.pos, bats: p.bats, throws: p.throws,
       foreign: p.foreign, asia, birthYear: m.birthYear ?? estimatedBirthYear(m), school: m.school ?? null, entryYear: m.entryYear,
       ...(m.birthYear ? {} : { birthYearEstimated: true }),
-      bat: p.bat, pit: p.pit, potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
+      bat: withoutRunSkills(p.bat), pit: withoutRunSkills(p.pit), potential, estimated: p.debutEstimate, team: p.teamIdx, contract,
       service, faCount: faRows.length, lastFaYear, lastSaves: p.lastSaves, ...(p.penTrust ? { penTrust: p.penTrust } : {}), ...(p.underhand ? { underhand: true } : {}), history: [], ...(ten ? { tenure0: ten } : {}),
       ...(p.foreign ? {} : { military: initialMilitary({ id: p.id, foreign: p.foreign, real: m.real, birthYear: m.birthYear ?? null }, idx, startYear, store.military?.[p.id]) }),
     };

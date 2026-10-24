@@ -13,6 +13,7 @@ import { careerIndex } from '../src/league/growth';
 import { worldFromLeague } from '../src/league/world';
 import { GameSession } from '../src/game/session';
 import { runYear, type YearMetrics } from '../tools/longsim';
+import { withoutRunSkills } from '../src/engine/runskills';
 
 let store: DataStore;
 const UNIT = { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 };
@@ -240,7 +241,8 @@ describe('슬럼프', () => {
     const sp = w.players.find((x) => x.id === p.id)!;
     expect(sp.bat!.hr).toBeLessThan(before.hr);
     expect(p.bat).toEqual(before);
-    expect(worldFromLeague(league, store, DEFAULT_PARAMS, { form: false }).players.find((x) => x.id === p.id)!.bat).toEqual(before);
+    // 주루·작전 손잡이(능력치 v2 16-3)는 월드마다 나이로 다시 내는 값이라 리그 상태에 없다
+    expect(withoutRunSkills(worldFromLeague(league, store, DEFAULT_PARAMS, { form: false }).players.find((x) => x.id === p.id)!.bat)).toEqual(before);
   });
 });
 

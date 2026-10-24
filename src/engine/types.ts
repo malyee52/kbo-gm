@@ -58,7 +58,7 @@ export interface BatSkill {
   bunting?: number;
   /** 포수 블로킹: 포수일 때 폭투·포일 확률에 exp(−값)을 곱한다 */
   cBlock?: number;
-  /** 포수 프레이밍: 포수일 때 스윙 안 한 공의 스트라이크 판정 로짓에 더한다 (자동 판정 전 해만, params.skill2.absYear) */
+  /** 포수 프레이밍: 포수일 때 스윙 안 한 공의 스트라이크 판정 로짓에 더한다 (자동 판정 전 해만, eras.ts ABS_YEAR) */
   cFrame?: number;
 }
 
