@@ -121,7 +121,7 @@ describe('투자 4종', () => {
   it('의료 투자: 같은 시드에서 부상 확률·결장 기간이 줄어 부상 결장 일수가 줄어든다', () => {
     const run = (level: number) => {
       const g = GameSession.create(store, opts('inv-med'), FAST);
-      for (const f of g.league.finance!) f.active = { scout: 1, develop: 1, medical: level, marketing: 1 };
+      for (const f of g.league.finance!) f.active = { scout: 1, scoutPro: 1, develop: 1, medical: level, marketing: 1 };
       const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST); // 월드를 투자 단계로 다시 만든다
       h.advance(100000);
       return h.season.absences.filter((a) => a.kind !== 'event').reduce((s, a) => s + (a.until - a.day), 0);

@@ -21,7 +21,9 @@ import { FIELD_POS } from '../engine/defense';
 import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
-import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
+import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, skillForRuns, type CareerIndex } from './growth';
+import { draftBoard, type BoardRow } from './scout';
+export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
 import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf } from './potential';
@@ -49,7 +51,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
+  activeLevel, addExpansionCapital, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -182,6 +184,8 @@ export interface OffseasonState {
     pick: number;
     pool: string[];
     picks: { team: number; id: string; round: number }[];
+    /** 후보(육성 후보 포함) id → 드래프트를 열 때 잰 진짜 지금 능력 (런). 스카우트 보드가 여기에 추측 오차를 씌운다 (scout.ts) */
+    now?: Record<string, number>;
   } | null;
   salary: {
     /** 선수 id → 요구 연봉 */
@@ -2052,7 +2056,10 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const [t, o] = [owned.slots[i], owned.orig[i]];
     if (t !== o && (t === off.userTeam || o === off.userTeam)) log(off, 'draft', `${built.kinds[i]}라운드 ${league.teams[o].name} 지명권은 ${league.teams[t].name}이 씁니다 (트레이드)`, true);
   }
-  off.draft = { order, slots: owned.slots, orig: owned.orig, kinds: built.kinds, pick: 0, pool, picks: [] };
+  const byId = new Map(league.players.map((p) => [p.id, p]));
+  const now: Record<string, number> = {};
+  for (const id of [...pool, ...off.devExtra]) now[id] = Math.round(runsOf(byId.get(id)!, view.ctx, year + 1) * 10) / 10;
+  off.draft = { order, slots: owned.slots, orig: owned.orig, kinds: built.kinds, pick: 0, pool, picks: [], now };
   runDraftUntilUser(league, off);
 }
 
@@ -2081,20 +2088,22 @@ export function draftTotal(off: OffseasonState): number {
 }
 
 /**
- * 남은 후보 중 가장 좋아 보이는 선수. AI 구단은 난이도 오차가 들어간 잠재력(aiPotential)으로,
- * 플레이어의 자동 지명은 스카우트 평가로 고른다.
+ * 그 구단 스카우트 팀의 드래프트 보드 (기획안 19.2): 남은 후보를 추측 지금 능력 + 추측 격차 × 나이 몫으로 줄 세운다 (scout.ts).
+ * 플레이어 보드는 선수만 보고(포지션 필요를 섞지 않음), AI 구단 보드는 성향 가중과 포수 필요(MIN_CATCHERS보다 적으면 +8런, 임시값)를 더한다.
+ * AI도 진짜 천장·지금 능력을 보지 않는다 (예전에는 진짜 잠재 + 난이도 오차)
  */
+export function boardFor(league: LeagueState, off: OffseasonState, team: number, user: boolean): BoardRow[] {
+  const d = off.draft!;
+  const byId = new Map(league.players.map((p) => [p.id, p]));
+  const ps = d.pool.map((id) => byId.get(id)!);
+  const needC = !user && league.players.filter((p) => p.team === team && !p.isPitcher && p.pos === 'C' && !isServing(p)).length < MIN_CATCHERS;
+  return draftBoard(league, { team, user }, ps, d.now, { teams: d.order.length, slots: draftTotal(off), year: off.year + 1, catcherBonus: needC ? CATCHER_NEED_BONUS : 0 });
+}
+
+/** 지금 지명 차례 구단의 보드 1위 (플레이어의 자동 지명 = 우리 보드 1위) */
 function bestProspect(league: LeagueState, off: OffseasonState, forUser = false): LeaguePlayer {
-  const ps = off.draft!.pool.map((id) => league.players.find((x) => x.id === id)!);
-  // AI 구단은 포수가 MIN_CATCHERS보다 적으면 포수 후보를 더 쳐준다 (임시값)
-  const team = draftTeamAt(off, off.draft!.pick);
-  const needC = !forUser && league.players.filter((p) => p.team === team && !p.isPitcher && p.pos === 'C' && !isServing(p)).length < MIN_CATCHERS;
-  // AI 구단은 난이도 오차가 든 평가를 보고, 스카우트 투자가 그 오차를 줄인다 (finance.ts)
-  const aiScale = AI_SCOUT_SCALE[activeLevel(league, team, 'scout')];
-  const score = (p: LeaguePlayer) =>
-    (forUser ? p.scoutPotential ?? p.potential : p.potential + (aiPotential(league, p) - p.potential) * aiScale)
-    + (needC && !p.isPitcher && p.pos === 'C' ? CATCHER_NEED_BONUS : 0);
-  return ps.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))[0];
+  const top = boardFor(league, off, draftTeamAt(off, off.draft!.pick), forUser)[0];
+  return league.players.find((p) => p.id === top.id)!;
 }
 
 function makePick(league: LeagueState, off: OffseasonState, p: LeaguePlayer): void {

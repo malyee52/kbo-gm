@@ -3493,6 +3493,10 @@ export class GameSession {
   signForeign(id: string) { return this.dispatchOff({ year: this.year, type: 'foreign-sign', id }); }
   draft(id: string | null) { return this.dispatchOff({ year: this.year, type: 'draft', id }); }
   autoDraft() { return this.dispatchOff({ year: this.year, type: 'draft-auto' }); }
+  /** 우리 스카우트 팀의 드래프트 보드 (드래프트 단계만, 기획안 19.2). 조작이 아니라 늘 다시 셈한다 */
+  draftBoard(): Off.BoardRow[] {
+    return this.offseason?.draft ? Off.boardFor(this.league, this.offseason, this.teamIdx, true) : [];
+  }
   setSalaryOffer(id: string, amount: number) { return this.dispatchOff({ year: this.year, type: 'salary-offer', id, amount }); }
   setProtect(fa: string, ids: string[]) { return this.dispatchOff({ year: this.year, type: 'comp-protect', fa, ids }); }
   pickComp(fa: string, pick: string) { return this.dispatchOff({ year: this.year, type: 'comp-pick', fa, pick }); }
