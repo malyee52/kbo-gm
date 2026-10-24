@@ -847,6 +847,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 모두 임시값 (자료 없음, 기획안 1.3~1.5·9.5). 크기는 validate 도루·폭투·희생번트 ±1% 안에서 정했다 (16-3c)
   // arm 0.04: 등급 10칸 = 수비 5런, 예전 armPerRun 0.008/런과 같은 크기. armWord 12: 가상 선수 퍼짐(8)의 1.5배 (모두 임시값, 16-3d)
   // runIqPull 80·buntPull 30: 2023~2025 선수 사이 퍼짐을 적률로 나눈 값(추가 진루 약 35~40 기회, W·V 공 대비 희생번트 약 17 사건)의 두 배쯤 (강하게 당김, 임시값)
+  //   buntPull을 줄이면 덜 당겨 퍼짐이 커진다 (15면 2026 번트 등급 표준편차 6.9 → 9.8). 발 빠른 타자 쏠림은 기습 번트 몫을 빼서 다룬다 (16-3e, runskills.ts measuredBunting)
   skill2: { scale: { runIQ: 0.25, bunting: 0.3, cBlock: 0.15, cFrame: 0.05, hold: 0.15, quick: 0.15, arm: 0.04 }, virtualSd: 8, catcherPerRun: 0.5, armWord: 12, runIqPull: 80, buntPull: 30 },
   starterRestDays: 5,
   penBlendDays: 100,

@@ -904,22 +904,23 @@ def build_ppa():
 
 def build_running():
     """선수별 추가 진루·번트 → public/data/running.json (능력치 v2 16-3d, 주루 판단·번트 수행 실측 시작값).
-    {bat: {선수 ID: {연도: [기회, 성공, 주루사, 리그 기대 성공, 희생번트, W·V 공]}}, lg: {연도: [희생번트, W·V 공]}}.
+    {bat: {선수 ID: {연도: [기회, 성공, 주루사, 리그 기대 성공, 희생번트, W·V 공, 그중 기습 번트 몫]}}, lg: {연도: [희생번트, W·V 공, 기습 번트 몫]}}.
     가공 CSV는 tools/pbp_running.py (data-src/pbp_derived/runner_adv.csv·batter_bunt.csv, 투구 단위 자료 2023~)."""
     bat = defaultdict(dict)
-    lg = defaultdict(lambda: [0, 0])
+    lg = defaultdict(lambda: [0, 0, 0.0])
     with (PBP_DERIVED / 'runner_adv.csv').open(encoding='utf-8') as f:
         for r in csv.DictReader(f):
-            bat[r['id']][r['year']] = [int(r['opp']), int(r['ext']), int(r['outs']), float(r['exp']), 0, 0]
+            bat[r['id']][r['year']] = [int(r['opp']), int(r['ext']), int(r['outs']), float(r['exp']), 0, 0, 0.0]
     with (PBP_DERIVED / 'batter_bunt.csv').open(encoding='utf-8') as f:
         for r in csv.DictReader(f):
-            row = bat[r['id']].setdefault(r['year'], [0, 0, 0, 0.0, 0, 0])
-            row[4], row[5] = int(r['sh']), int(r['wv'])
+            row = bat[r['id']].setdefault(r['year'], [0, 0, 0, 0.0, 0, 0, 0.0])
+            row[4], row[5], row[6] = int(r['sh']), int(r['wv']), float(r['wvh'])
             lg[r['year']][0] += int(r['sh'])
             lg[r['year']][1] += int(r['wv'])
+            lg[r['year']][2] = round(lg[r['year']][2] + float(r['wvh']), 3)
     (OUT / 'running.json').write_text(json.dumps({
         'version': 1,
-        'note': '선수별 추가 진루 [기회, 성공, 주루사, 리그 기대 성공]과 번트 [희생번트, 번트 파울·헛스윙 공]. 투구 단위 자료(slothman3878 '
+        'note': '선수별 추가 진루 [기회, 성공, 주루사, 리그 기대 성공]과 번트 [희생번트, 번트 파울·헛스윙 공, 그중 기습 번트 몫(주자 없을 때 비율로 추정)]. 투구 단위 자료(slothman3878 '
                 'KBO Play-by-Play v0, CC BY 4.0) 2023~, 2026은 7월 26일까지. tools/pbp_running.py → tools/build_data.py build_running',
         'bat': bat, 'lg': lg,
     }, ensure_ascii=False, separators=(',', ':'), sort_keys=True), encoding='utf-8')

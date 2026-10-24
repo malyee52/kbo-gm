@@ -81,7 +81,8 @@ export function measuredRunIQ(rows: RunRows, startYear: number, speed: number, p
 
 /**
  * 번트 수행 실측 몫 (로짓, bunting 단위): 직전 3시즌 "희생번트 ÷ (희생번트 + 번트 파울·헛스윙 공)"을 리그 값 쪽으로 pull 사건만큼 당긴
- * 베타 평균의 로짓 − 리그 로짓. 번트 실패가 인플레이로 끝난 것은 자료에서 셀 수 없어 이 비율을 대리값으로 쓴다. 자료가 없으면 0
+ * 베타 평균의 로짓 − 리그 로짓. 번트 실패가 인플레이로 끝난 것은 자료에서 셀 수 없어 이 비율을 대리값으로 쓴다. 자료가 없으면 0.
+ * W·V 공에서 기습 번트 몫(running.json 7번째 칸, 주자 없을 때 비율로 추정)을 뺀다: 발 빠른 타자의 안타 노림 번트 파울이 희생번트 실패로 세어지지 않게 (16-3e)
  */
 export function measuredBunting(rows: RunRows, lg: RunningData['lg'] | undefined, startYear: number, pull: number): number {
   let sh = 0;
@@ -90,11 +91,11 @@ export function measuredBunting(rows: RunRows, lg: RunningData['lg'] | undefined
   let lwv = 0;
   for (let y = startYear - MEASURE_YEARS; y < startYear; y++) {
     const r = rows?.[String(y)];
-    if (r) { sh += r[4]; wv += r[5]; }
+    if (r) { sh += r[4]; wv += r[5] - (r[6] ?? 0); }
     const l = lg?.[String(y)];
-    if (l) { lsh += l[0]; lwv += l[1]; }
+    if (l) { lsh += l[0]; lwv += l[1] - (l[2] ?? 0); }
   }
-  if (!(sh + wv) || !(lsh && lwv)) return 0;
+  if (!(sh + wv > 0) || !(lsh > 0 && lwv > 0)) return 0;
   const L = lsh / (lsh + lwv);
   return logit((sh + pull * L) / (sh + wv + pull)) - logit(L);
 }

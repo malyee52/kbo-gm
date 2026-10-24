@@ -161,7 +161,7 @@ describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () =>
     expect(armWord([[1, 2010, 2018], [-1, null, null]], 2026)).toBeCloseTo((w - 1) / (w + 1), 12);
   });
 
-  it('주루 판단·번트 실측 (16-3d): 직전 3시즌만, 주력 몫을 빼고, 표본만큼 당긴다', () => {
+  it('주루 판단·번트 실측 (16-3d): 직전 3시즌만, 주력 몫을 빼고, 기습 번트 몫을 빼고, 표본만큼 당긴다', () => {
     // [기회, 성공, 주루사, 리그 기대, 희생번트, W·V 공]
     const rows = { '2022': [100, 90, 0, 50, 0, 0], '2023': [40, 25, 1, 20, 6, 2], '2025': [40, 25, 1, 20, 4, 2], '2026': [100, 0, 0, 50, 0, 50] } as Record<string, [number, number, number, number, number, number]>;
     // 2023·2025만: 기회 80, 성공 50, 기대 40 → 기회당 +0.125, p 0.5 → 로짓 0.5, 당김 80 ÷ (80 + 80)
@@ -175,6 +175,12 @@ describe('시작값 (나이 평균, 가상 선수 분포, 포수 수비)', () =>
     const post = 25 / 44;
     expect(measuredBunting(rows, lg, 2026, 30)).toBeCloseTo(Math.log(post / (1 - post)), 12);
     expect(measuredBunting(rows, undefined, 2026, 30)).toBe(0);
+    // 기습 번트 몫 (16-3e, 7번째 칸): 선수 W·V 4 − 2 = 2, 리그 W·V 250 − 50 = 200 (L = 250 ÷ 450) → 당긴 평균 (10 + 30L) ÷ (12 + 30)
+    const rowsH = { '2023': [40, 25, 1, 20, 6, 2, 1.5], '2025': [40, 25, 1, 20, 4, 2, 0.5] } as Record<string, [number, number, number, number, number, number, number]>;
+    const lgH = { '2023': [100, 100, 20], '2024': [50, 50, 10], '2025': [100, 100, 20] } as Record<string, [number, number, number]>;
+    const L = 250 / 450;
+    const postH = (10 + 30 * L) / 42;
+    expect(measuredBunting(rowsH, lgH, 2026, 30)).toBeCloseTo(Math.log(postH / (1 - postH)) - Math.log(L / (1 - L)), 12);
   });
 
   it('2026 시작 월드: 어깨는 리그 대비 (타자 출장량 가중 평균 0), 어깨 좋음 낱말 선수(구자욱)는 같은 나이 실존 선수보다 armWord만큼 위', () => {

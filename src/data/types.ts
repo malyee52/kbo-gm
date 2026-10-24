@@ -485,12 +485,13 @@ export interface BallYear {
 
 /**
  * running.json (능력치 v2 16-3d, tools/build_data.py build_running ← tools/pbp_running.py, 투구 단위 자료 2023~):
- * bat: 선수 ID → 연도 → [추가 진루 기회, 성공, 주루사, 리그 기대 성공(기회 종류 × 아웃 칸 리그 성공률 합), 희생번트, 번트 파울·헛스윙 공], lg: 연도 → [희생번트, W·V 공]
+ * bat: 선수 ID → 연도 → [추가 진루 기회, 성공, 주루사, 리그 기대 성공(기회 종류 × 아웃 칸 리그 성공률 합), 희생번트, 번트 파울·헛스윙 공,
+ * 그중 기습 번트 몫(주자 없을 때 W·V 비율 × 희생번트 상황 공 수, 16-3e)], lg: 연도 → [희생번트, W·V 공, 기습 번트 몫]
  */
 export interface RunningData {
   version: number;
-  bat: Record<string, Record<string, [number, number, number, number, number, number]>>;
-  lg: Record<string, [number, number]>;
+  bat: Record<string, Record<string, [number, number, number, number, number, number, number?]>>;
+  lg: Record<string, [number, number, number?]>;
 }
 
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
