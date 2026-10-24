@@ -43,12 +43,12 @@ describe('직접 지휘', () => {
     const choices: CommandChoice[] = [];
     let pv = g.commandPreview(choices, 'next');
     let usedPh = false;
-    let steals = 0;
+    const steals: { inn: number; runner: number }[] = [];
     let guard = 0;
     while (pv.req && guard++ < 200) {
       const r = pv.req;
       const c: CommandChoice = {};
-      if (r.step === 'run') { c.steal = 'go'; steals++; }
+      if (r.step === 'run') { c.steal = 'go'; steals.push({ inn: r.inn, runner: r.bases[0] }); }
       if (r.step === 'bat' && !usedPh && r.bench.length && r.inn >= 5) { c.ph = r.bench[0]; usedPh = true; }
       if (r.step === 'bat' && r.bases[0] >= 0 && r.bases[1] < 0 && r.outs < 2) c.tactic = 'bunt';
       if (r.side === 'field' && r.inn === 6 && r.bullpen.length && !r.plays.some((p) => p.kind === 'PC' && p.inn === 6)) c.pitcher = r.bullpen[0];
@@ -56,9 +56,18 @@ describe('직접 지휘', () => {
     }
     expect(pv.req).toBeNull();
     expect(pv.plays.some((p) => p.kind === 'PH')).toBe(usedPh);
-    // 주자 작전은 1루 주자·2루 빈 때만 묻고, 도루 시도를 고르면 도루 기록이 남는다. 도루 뒤에도 같은 타석의 타격 작전을 묻는다
-    expect(steals).toBeGreaterThan(0);
-    expect(pv.plays.filter((p) => (p.kind === 'SB' || p.kind === 'CS') && !p.top === (pv.home === lg)).length).toBe(steals);
+    // 주자 작전은 1루 주자·2루 빈 때만 묻고, 도루 시도를 고르면 그 주자의 도루 기록이 남는다. 도루 뒤에도 같은 타석의 타격 작전을 묻는다.
+    // 2루 주자의 3루 도루는 묻지 않고 AI가 정하므로 도루 기록이 고른 수보다 많을 수 있다.
+    // 주자 작전을 물은 뒤 견제사(PO)면 도루 없이 끝난다 (견제는 주자 작전과 같은 1루 주자·2루 빈 때만)
+    expect(steals.length).toBeGreaterThan(0);
+    const ours = pv.plays.filter((p) => (p.kind === 'SB' || p.kind === 'CS' || p.kind === 'PO') && !p.top === (pv.home === lg));
+    expect(ours.length).toBeGreaterThanOrEqual(steals.length);
+    let at = 0;
+    for (const st of steals) {
+      const k = ours.findIndex((p, i) => i >= at && p.inn === st.inn && p.bat === st.runner);
+      expect(k, `${st.inn}회 ${st.runner}`).toBeGreaterThanOrEqual(0);
+      at = k + 1;
+    }
     g.commitCommand(pv.choices);
     const last = g.ourGames().at(-1)!;
     expect({ away: last.awayRuns, home: last.homeRuns }).toEqual(pv.final);

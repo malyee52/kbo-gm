@@ -4,21 +4,24 @@
 
 import { settingsOf, userTeamOf } from './difficulty';
 import type { DataStore, Rates } from '../data/types';
+import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import {
-  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pitValue, traitsOf,
+  batValue, DEFAULT_PARAMS, leagueEnvFor, makeDefense, pickOpeningHosts, pctRankedFromSeason, pitValue, rankedFromSeason, traitsOf,
   type EngineParams, type SimPlayer, type SimTeam, type World,
 } from '../engine';
 import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
 import { campInjury } from './camp';
-import { parkEventFactor, parkFactor, parkRunFactor } from './stadium';
+import { homeIsDome, parkEventFactor, parkFactor, parkRunFactor } from './stadium';
 import { homeOnlyUntil } from './careers';
+import { divisionsFor, expansionPerk } from './eras';
+import { ballD2, ballHrMul, futureDelta, futureValue, zoneBb } from './futureRules';
 
 /** 리그 평균을 낼 때 쓰는 최근 시즌 수 */
 const RECENT_SEASONS = 5;
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players'>>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'traits'> & Partial<Pick<DataStore, 'players' | 'schedule'>>;
 
 /** 자료가 없는 해의 리그 환경: 자료가 있는 마지막 5시즌의 평균 */
 export function projectedEnvironment(store: Store, params: EngineParams = DEFAULT_PARAMS) {
@@ -33,6 +36,7 @@ export function projectedEnvironment(store: Store, params: EngineParams = DEFAUL
     unearnedShare: avg((s) => s.league.unearnedShare),
     sacPerPa: avg((s) => s.league.sacPerPa),
     wpbkPerPa: avg((s) => s.league.wpbkPerPa ?? params.wildPitchDefault),
+    sbPct: avg((s) => s.league.sbPct ?? 0) || null,
   }, params);
   const lastYear = years[years.length - 1];
   return { rates, env, games: last.games, rules: store.meta.rules[String(lastYear)] };
@@ -72,12 +76,22 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     games = data.games;
     rules = store.meta.rules[String(year)];
   } else {
-    // 2027년 이후는 2026년 제도를 그대로 쓴다 (기획서 4.1)
+    // 2027년 이후는 2026년 제도를 그대로 쓴다 (기획서 4.1). 미래 규칙 변경 ②(futureRules.ts)는 목표 비율에 배율만 얹고
+    // 엔트리·연장·외국인 한도를 바꾼다 (변경이 없으면 배율 1, 값 그대로)
     const p = projectedEnvironment(store, params);
-    lg = p.rates;
+    const hr = ballHrMul(league, year);
+    const so = futureValue(league, 'zone', year);
+    lg = { ...p.rates, hr: p.rates.hr * hr, d2: p.rates.d2 * ballD2(hr), so: p.rates.so * so, bb: p.rates.bb * zoneBb(so) };
     env = p.env;
     games = p.games;
-    rules = p.rules;
+    rules = {
+      ...p.rules,
+      maxInnings: p.rules.maxInnings + futureDelta(league, 'extra', year),
+      rosterSize: p.rules.rosterSize + futureDelta(league, 'roster', year),
+      foreignLimit: p.rules.foreignLimit + futureDelta(league, 'foreign', year),
+      // 한 경기 출전 외국인 (리그 규칙 1-6): 2026년은 보유와 같아서 보유 한도를 따라간다
+      foreignActive: p.rules.foreignActive + futureDelta(league, 'foreign', year),
+    };
   }
 
   // 퓨처스 구단은 시즌 월드에서 뺀다. 창단 구단은 늘 구단 목록 끝에 붙으므로 빼도 다른 구단의 색인은 그대로다
@@ -95,8 +109,12 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     const park = parkFactor(league.stadiums?.[idx]);
     const run = parkRunFactor(store.meta.parkFactors, t.franchise, year, league.stadiums?.[idx]);
     const ev = run !== 1 ? parkEventFactor(store.meta.parkEvents, t.franchise, year, league.stadiums?.[idx]) : undefined;
+    // 창단 특례 (eras.ts expansionPerk): 1군 첫 두 시즌 엔트리 +1, 외국인 +1 (외국인 제도가 있는 해만)
+    const perk = expansionPerk(league, idx, year);
     return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
-      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}) };
+      ...(park.hr !== 1 || run !== 1 ? { park: { hr: park.hr, ...(run !== 1 ? { run } : {}), ...(ev ? { ev } : {}) } } : {}),
+      ...(perk ? { rosterBonus: 1, ...(rules.foreignLimit > 0 ? { foreignBonus: 1 } : {}) } : {}),
+      ...(homeIsDome(league.stadiums?.[idx], t.franchise, year) ? { dome: true } : {}) };
   });
   const players: SimPlayer[] = [];
   for (const lp of league.players) {
@@ -132,6 +150,7 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
       ...(lp.dev ? { dev: true } : {}),
       ...(lp.reserve === year && lp.team === -1 ? { reserve: true } : {}),
       ...(lp.startAbsent ? { startAbsent: lp.startAbsent } : {}),
+      ...(lp.overuse ? { overuseStart: lp.overuse } : {}),
       ...(homeOnlyUntil(lp, year) ? { homeOnlyUntil: homeOnlyUntil(lp, year)! } : {}),
       // 이도류 (league/twoway.ts): 반대쪽 실제 능력치
       ...(lp.twoWay && (lp.alt?.bat || lp.alt?.pit) ? { alt: { ...(lp.alt.bat ? { bat: lp.alt.bat } : {}), ...(lp.alt.pit ? { pit: lp.alt.pit } : {}) } } : {}),
@@ -143,5 +162,21 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
     players.push(p);
     if (!market) teams[lp.team].org.push(p);
   }
-  return { year, gamesPerTeam: games, rules, league: lg, env, teams, players };
+  // 일정 규칙과 개막 홈 구단: 지난 시즌을 게임에서 치렀으면 그 순위, 아니면(시작 연도) 시즌 자료의 순위 (worldForYear와 같다).
+  // 자료 없는 해에 구단 수가 10이 아니면(가상 창단) 규칙을 구단 수에 맞추고 팀당 경기 수도 그것을 따른다
+  const rule0 = store.schedule ? scheduleRule(store.schedule, year) : undefined;
+  const rule = rule0 && fitRuleToTeams(rule0, kept);
+  if (!data && rule) games = rule.games;
+  const franchises = teams.map((t) => t.franchise);
+  const last = league.lastSeason;
+  const ranked = last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : rankedFromSeason(store.season(year - 1), franchises);
+  const hosts = pickOpeningHosts(year, ranked, franchises);
+  // 양대 리그 나눔 (1999·2000): 결산의 구단 변화(쌍방울 → SK 승계) 뒤 새 해 자료로 다시 계산한다
+  const divisions = divisionsFor(store, year, teams);
+  // 동률 규칙 ③ 전년도 정규시즌 순위: 게임에서 치렀으면 그 통합 순위, 아니면 시즌 자료의 승률 순 (기획안 10.4)
+  const prevStandings = divisions ? (last && last.year === year - 1 ? last.standings.filter((i) => i < kept) : pctRankedFromSeason(store.season(year - 1), franchises)) : null;
+  return {
+    year, gamesPerTeam: games, rules, league: lg, env, teams, players,
+    ...(rule ? { schedule: rule } : {}), ...(hosts ? { openingHosts: hosts } : {}), ...(divisions ? { divisions, prevStandings: prevStandings! } : {}),
+  };
 }

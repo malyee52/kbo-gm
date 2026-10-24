@@ -2,8 +2,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import {
-  absenceLabel, DEFAULT_PARAMS, eventLabel, isSpecificEvent, NEUTRAL_EVENTS, pickEvent, Rng, Season, SPECIFIC_EVENTS, worldForYear,
-  type EngineParams, type World,
+  absenceLabel, DEFAULT_PARAMS, eventLabel, INJURY_PARTS, isSpecificEvent, NEUTRAL_EVENTS, pickEvent, Rng, Season, SPECIFIC_EVENTS, worldForYear,
+  type EngineParams, type InjuryPart, type World,
 } from '../src/engine';
 import { agingDelta, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
 import { DECLINE_START_AGE } from '../src/engine';
@@ -58,12 +58,23 @@ describe('실존 인물 규칙 (기획서 7장): 구체적 사건은 가상 선�
     for (const code of Object.keys(NEUTRAL_EVENTS) as (keyof typeof NEUTRAL_EVENTS)[]) expect(eventLabel(code, { real: true })).toBe(NEUTRAL_EVENTS[code].label);
   });
 
-  it('실존 선수의 결장 문구에는 부상 같은 사유가 없고, 가상 선수에게만 부상 정도를 쓴다', () => {
+  // 엔진 2 11단계 (2026-10-22 사용자 결정): 부상은 실존·가상 선수가 같은 문구 (부위·정도). 이탈 이벤트 규칙은 그대로
+  it('부상 문구는 실존·가상 선수가 같은 규칙이다 (부위·정도)', () => {
     for (const kind of ['minor', 'long', 'major'] as const) {
-      expect(absenceLabel({ kind }, { real: true }, true)).not.toMatch(/부상|골절/);
-      expect(absenceLabel({ kind }, {})).not.toMatch(/부상/);
-      expect(absenceLabel({ kind }, { real: false })).toMatch(/부상/);
+      for (const part of Object.keys(INJURY_PARTS) as InjuryPart[]) {
+        for (const out of [false, true]) {
+          const label = absenceLabel({ kind, part }, { real: false }, out);
+          expect(absenceLabel({ kind, part }, { real: true }, out)).toBe(label);
+          expect(absenceLabel({ kind, part }, {}, out)).toBe(label);
+          expect(label).toContain(`${INJURY_PARTS[part]} 부상`);
+        }
+      }
+      // 부위가 없는 예전 기록도 실존·가상이 같다
+      expect(absenceLabel({ kind }, { real: true })).toBe(absenceLabel({ kind }, { real: false }));
     }
+    expect(absenceLabel({ kind: 'long', part: 'hamstring' }, { real: true })).toBe('햄스트링 부상, 중간 정도');
+    // 이탈 이벤트는 실존 선수에게 사유 없이
+    expect(absenceLabel({ kind: 'event', event: 'suspension' }, { real: true })).toBe('1군 이탈');
   });
 
   it('중립 이벤트 문구에는 구체적 사유가 없다', () => {
@@ -240,8 +251,10 @@ describe('여러 시즌 연속 진행 (M6 완료 기준의 축소판: 4시즌, �
         expect(v, `${r.year} cal`).toBeGreaterThan(0.8);
         expect(v, `${r.year} cal`).toBeLessThan(1.25);
       }
-      expect(r.runs).toBeGreaterThan(4.73 * 0.9);
-      expect(r.runs).toBeLessThan(5.2 * 1.1);
+      // 2027년부터 시즌 반발계수로 홈런 목표가 흔들려(×0.65~×1.47) 득점 범위도 그만큼 움직인다 (홈런 배율의 0.4제곱, 2026-10-22)
+      const ball = r.ball.hrMul ** 0.4;
+      expect(r.runs).toBeGreaterThan(4.73 * 0.9 * Math.min(1, ball));
+      expect(r.runs).toBeLessThan(5.2 * 1.1 * Math.max(1, ball));
       expect(r.players, `${r.year} 소속 최대`).toBeLessThanOrEqual(68);
       expect(r.orgMin, `${r.year} 월드 최소 인원`).toBeGreaterThanOrEqual(40);
       expect(r.maxAge).toBeLessThanOrEqual(45);

@@ -7,7 +7,7 @@ import { useShell } from '../shell';
 
 export function Inbox() {
   const { session, go } = useGame();
-  const { decisions } = useShell();
+  const { decisions, ack } = useShell();
   if (!decisions.length) {
     return (
       <div className="stack">
@@ -39,7 +39,13 @@ export function Inbox() {
                   </div>
                   {d.key.startsWith('event:')
                     ? <span className="small muted">이 화면 위쪽에서 답합니다</span>
-                    : <button type="button" className="ghost" disabled={!!blocked} onClick={() => go(d.go)}>{target ? `${target.group === '공통' ? '' : `${target.group} › `}${tabLabel(session, target)}` : '열기'} ›</button>}
+                    : (
+                      <span className="inline">
+                        {/* 일부러 둔 상태면 확인으로 내려 둔다. 상태가 바뀌면 다시 뜬다 (UI 2차 결정 3) */}
+                        {d.ack !== undefined && <button type="button" className="ghost" title="이 상태가 바뀔 때까지 다시 띄우지 않습니다" onClick={() => ack(d.key, d.ack!)}>확인</button>}
+                        <button type="button" className="ghost" disabled={!!blocked} onClick={() => go(d.go)}>{target ? `${target.group === '공통' ? '' : `${target.group} › `}${tabLabel(session, target)}` : '열기'} ›</button>
+                      </span>
+                    )}
                 </li>
               );
             })}

@@ -1,6 +1,7 @@
 // 구단 연대기 (2026-10-13 사용자 선택 "구단 연대기"): 시즌이 끝나면(오프시즌) AI가 그 해의 성적·가을야구·주요 선수·행동·사건·
 // 단장 노트를 모아 연대기 한 장을 쓴다. 연대기는 이야기 기록과 따로 남겨(오래된 글이 잘려도 남게) 판정 맥락에 최근 몇 장이 들어간다.
 import type { GameSession } from '../game/session';
+import { yearLeagues, yearPlaceLabel } from '../league/history';
 import { completeJsonText, extractJson, preview, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import type { FantasyEntry } from './types';
@@ -27,7 +28,10 @@ export function chronicleSummary(g: GameSession, year: number): string {
   if (yb) {
     const rank = yb.teams.findIndex((t) => t.franchise === me.franchise || t.name === me.name);
     const t = yb.teams[rank];
-    if (t) lines.push(`정규시즌 ${rank + 1}위 (${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}). 1위 ${yb.teams[0].name}`);
+    // 양대 리그 해(1999·2000)는 리그 순위와 리그마다 1위 (league/history.ts yearLeagues)
+    const lg = yearLeagues(g.store, yb);
+    const firsts = lg ? lg.flatMap((x, i) => (x.rank === 1 ? [`${x.league} 1위 ${yb.teams[i].name}`] : [])).join(', ') : `1위 ${yb.teams[0].name}`;
+    if (t) lines.push(`정규시즌 ${yearPlaceLabel(lg, rank)} (${t.w}승 ${t.l}패${t.t ? ` ${t.t}무` : ''}). ${firsts}`);
     if (yb.champion) lines.push(`한국시리즈 우승 ${yb.champion}${yb.runnerUp ? `, 준우승 ${yb.runnerUp}` : ''}`);
     const ours = (yb.series ?? []).filter((s) => s.a === me.franchise || s.b === me.franchise || s.a === me.name || s.b === me.name);
     if (ours.length) lines.push(`우리 가을야구: ${ours.map((s) => `${s.a} 대 ${s.b} → ${s.winner} 승${s.ks ? ' (한국시리즈)' : ''}`).join(', ')}`);

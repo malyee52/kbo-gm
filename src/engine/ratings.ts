@@ -7,8 +7,10 @@
 
 import type { BatRow, Hand, Meta, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { makeDefense } from './defense';
-import type { DefenseAward } from '../data/types';
-import { estimatedStarts, type EngineParams } from './params';
+import type { DefenseAward, PpaData, ScheduleData } from '../data/types';
+import { divisionsOf, scheduleRule } from '../data/schedule';
+import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
+import { DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -30,6 +32,8 @@ export interface Weighted<T> {
   aging?: Partial<Record<string, number>>;
   /** 그 시즌 소속 구단의 시즌 단위 구장 효과 (seasonPark). 없으면 중립 */
   park?: SeasonPark;
+  /** 그 시즌 리그 도루 성공률 (도루 실패 기록이 없는 해만, params.sbPctByYear). 도루 시도 수 추정에 쓴다. 없으면 0.7 */
+  sbPct?: number;
 }
 
 /** 시즌 단위 구장 효과: run = (1 + 홈 구장 계수) / 2, ev = 사건별 홈 구장 배율 (있으면 사건마다 (1 + 배율) / 2로 쓴다) */
@@ -87,15 +91,15 @@ export function batSkillFrom(rows: Weighted<BatRow>[], priors: Rates, p: EngineP
   }
   skill.sample = rows.reduce((s, x) => s + x.w * x.row.pa, 0);
 
-  // 도루: 1루 출루(단타+볼넷+사구)당 시도율. 도루 실패 기록이 없으면 성공률 70%로 시도 수를 추정
+  // 도루: 1루 출루(단타+볼넷+사구)당 시도율. 도루 실패 기록이 없으면 그 해 리그 성공률(없으면 70%)로 시도 수를 추정
   let att = 0;
   let onFirst = 0;
   let sb = 0;
   let known = 0;
-  for (const { row, w } of rows) {
+  for (const { row, w, sbPct } of rows) {
     if (row.sb === null) continue;
     const times = row.h - row.d - row.t - row.hr + (row.bb ?? 0) + (row.hbp ?? 0);
-    const a = row.cs !== null ? row.sb + row.cs : row.sb / DEFAULT_SB_PCT;
+    const a = row.cs !== null ? row.sb + row.cs : row.sb / (sbPct ?? DEFAULT_SB_PCT);
     att += w * a;
     onFirst += w * times;
     if (row.cs !== null) {
@@ -166,6 +170,45 @@ export function pitSkillFrom(rows: Weighted<PitRow>[], priors: Meta['priors']['p
   return skill;
 }
 
+/** 땅볼 몫 배율(리그 대비)을 아웃 타구 땅볼 승산 배율로. 몫은 0.15~0.85 안에서 */
+function gbOddsOf(shareRel: number, p: EngineParams): number {
+  const odds = (x: number) => x / (1 - x);
+  const s0 = p.groundBallShare;
+  return odds(Math.min(0.85, Math.max(0.15, s0 * shareRel))) / odds(s0);
+}
+
+/** 땅볼 성향 추정에 쓰는 병살 회귀 상수 (병살 기회가 될 수 있는 인플레이 타구 수, 임시값) */
+const GB_DP_REGRESS = 500;
+/** 타자 땅볼 몫 배율의 범위 (임시값) */
+const GB_BAT_RANGE: [number, number] = [0.7, 1.4];
+/** 투수 땅볼 몫 배율 = 피홈런 배율 ^ (−이 값) (임시값: 땅볼 투수가 홈런을 덜 맞는다는 관계만 쓴다. 타구 자료가 없다) */
+const GB_PIT_HR_EXP = 0.25;
+
+/**
+ * 타자 타구 성향 (엔진 2 6단계, 추정): 인플레이 타구(삼진·볼넷·사구·홈런·희생 뺌)당 병살을 리그 대비로 재고, 주력에 따른 병살 회피(play.dpSpeed)를 덜어
+ * 땅볼 몫 배율로 본다. 병살 기회(앞 타자 출루)의 차이도 섞여 있어 크게 평균 쪽으로 당긴다. 병살 기록이 없으면 undefined
+ */
+export function batGbOf(rows: { row: BatRow; w: number; league: SeasonData['league'] }[], speed: number, p: EngineParams): number | undefined {
+  let num = 0;
+  let den = 0;
+  for (const { row: r, w, league: L } of rows) {
+    if (r.gdp === null) continue;
+    const bip = r.pa - (r.so ?? 0) - (r.bb ?? 0) - (r.hbp ?? 0) - r.hr - (r.sac ?? 0) - (r.sf ?? 0);
+    const lgBip = L.pa - L.so - L.bb - L.hbp - L.hr - L.sac - L.sf;
+    if (bip <= 0 || lgBip <= 0 || L.gdp <= 0) continue;
+    num += (w * r.gdp) / (L.gdp / lgBip);
+    den += w * bip;
+  }
+  if (den <= 0) return undefined;
+  const rel = (num + GB_DP_REGRESS) / (den + GB_DP_REGRESS) / (1 - p.play.dpSpeed * (speed - 0.5) * 2);
+  return gbOddsOf(Math.min(GB_BAT_RANGE[1], Math.max(GB_BAT_RANGE[0], rel)), p);
+}
+
+/** 투수 땅볼 성향 (엔진 2 6단계, 추정): 피홈런 배율에서 */
+export function pitGbOf(hr: number, p: EngineParams): number {
+  return gbOddsOf(Math.max(0.01, hr) ** -GB_PIT_HR_EXP, p);
+}
+
 export function batValue(s: BatSkill, lg: Rates): number {
   const W = LINEAR_WEIGHTS;
   return (
@@ -193,6 +236,24 @@ export function seasonRegress(p: EngineParams, pitScale = p.seasonRegressScale):
   return { ...p, batRegress: scale(p.batRegress, k), pitRegress: scale(p.pitRegress, pitScale) };
 }
 
+/**
+ * 선수별 P/PA 비율을 능력과 같은 시즌·가중치로 섞고 regress 타석만큼 1 쪽으로 당긴다 (D단계 가공값, 사슬 길이 손잡이).
+ * 자료가 있는 시즌이 하나도 없으면 undefined (사슬 값 그대로)
+ */
+export function ppaRelOf(rows: Record<string, [number, number]> | undefined, seasons: (SeasonData | undefined)[], w: readonly number[], regress: number): number | undefined {
+  if (!rows) return undefined;
+  let num = 0;
+  let den = 0;
+  seasons.forEach((s, i) => {
+    const r = s && rows[String(s.year)];
+    if (r && r[0] > 0) {
+      num += (w[i] ?? 0) * r[0] * r[1];
+      den += (w[i] ?? 0) * r[0];
+    }
+  });
+  return den > 0 ? (num + regress) / (den + regress) : undefined;
+}
+
 export interface BuildWorldInput {
   year: number;
   /** 로스터와 소속 팀을 정하는 시즌 (보통 year와 같다) */
@@ -208,6 +269,10 @@ export interface BuildWorldInput {
   career?: SeasonData[];
   /** KBO 수비상 순위 (선수 ID → 수상). 없으면 보정하지 않는다 */
   defenseAwards?: Record<string, DefenseAward[]>;
+  /** 선수별 타석당 투구 수 (ppa.json). 없으면 사슬 값 그대로 */
+  ppa?: PpaData;
+  /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
+  schedule?: ScheduleData;
 }
 
 /**
@@ -215,17 +280,29 @@ export interface BuildWorldInput {
  * 소속 팀은 current 시즌 기록의 팀, 능력은 history 시즌 기록에서 뽑는다.
  */
 /** 규정타석 = 그 해 팀 경기 수 × 3.1 */
+const FIELD_POS = new Set(['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF']);
 const QUAL_PA_PER_GAME = 3.1;
 
 /**
- * 하드힛 주 포지션 이력(시즌 행 posSrc 'H', 2003~)으로 정하는 수비 가능 포지션과 주 포지션 (2026-10-22 사용자 결정).
- * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 한 번이라도 있는 자리.
- * - 주 포지션: 규정타석 시즌이 가장 많은 자리 (같으면 더 최근에 채운 자리, 클사장 해석).
- * - 규정타석 시즌이 없으면 가장 많이 나온 자리 하나만 (시즌 수 → 타석 합 → 최근 순), 주 포지션도 그 자리.
+ * 하드힛 주 포지션 이력(시즌 행 posSrc 'H', 2003~)으로 정하는 수비 가능 포지션과 주 포지션 (포지션 2안, 2026-10-22 사용자 결정 "1로 하고 문제 있으면 다시 보자").
+ * - 주 포지션: 시작 연도 앞 최근 3시즌(year−1~year−3)의 자리별 타석을 최근일수록 무겁게(weights, 임시값) 더해 가장 많은 자리.
+ *   지명타자는 가중 타석의 70%를 넘을 때만 (직전 시즌 창 규칙과 같다). 같으면 더 최근에 맡은 자리.
+ *   그 3시즌에 하드힛 기록이 없으면(입대·부상 공백) 예전 규칙: 규정타석 시즌이 가장 많은 자리 → 시즌 수 → 타석 합 → 최근 순.
+ * - 수비 가능 포지션: 그 자리로 규정타석(그 해 팀 경기 × 3.1, 여러 구단이면 가장 많은 팀 경기)을 채운 시즌이 있는 자리
+ *   + 2시즌 이상 맡은 자리 + 주 포지션.
+ * - 포수 예외 (2026-10-22 사용자 결정): 포수를 주 포지션으로 삼으려면 포수로 규정타석을 채운 시즌이 있어야 한다.
+ *   하드힛 시즌 행의 타석은 지명타자 타석까지 합친 값이라, 포수 규정타석 시즌이 다른 자리 규정타석 시즌 합보다 적으면
+ *   (강백호: 포수 1 · 1루 2 · 좌익 1 · 우익 1) 포수로 채운 시즌으로 보지 않는다 (해석, 보고에 적음).
+ *   아니면 규정타석 시즌이 다음으로 많은 자리 (같으면 최근 가중 타석 → 최근) 가 주 포지션이고, 포수는 수비 가능으로 남는다. 다른 자리가 없으면 포수 그대로.
+ * - 이력이 짧은 선수 (2026-10-22 사용자 결정): 그 3시즌 타석 합이 0보다 크고 shortPa보다 적으면 fallback(자료집 주 포지션 → 그 시즌 포지션)을 쓴다 (박석민 2005 → 3B).
  * 2009년·포지션 파일에 없는 타자의 추정값('E')은 쓰지 않는다. 하드힛 이력이 없는 선수는 맵에 없다 (기존 방식).
+ * year를 주지 않으면 seasons의 가장 늦은 해 다음 해로 본다.
  */
-export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[]): Map<string, { main: string; playable: string[] }> {
-  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number };
+export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'teams' | 'bat'>[], year?: number,
+  weights: readonly number[] = DEFAULT_PARAMS.positionWeights,
+  opts: { shortPa?: number; fallback?: (id: string) => string | null | undefined } = {}): Map<string, { main: string; playable: string[] }> {
+  type Acc = { n: number; pa: number; last: number; reg: number; regLast: number; recent: number; win: number };
+  const start = year ?? Math.max(...seasons.map((s) => s.year)) + 1;
   const per = new Map<string, Map<string, Acc>>();
   for (const s of seasons) {
     const games = new Map(s.teams.map((t) => [t.name, t.g]));
@@ -237,13 +314,16 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
       x.g = Math.max(x.g, games.get(r.team) ?? 0);
       seen.set(r.id, x);
     }
+    const w = weights[start - 1 - s.year] ?? 0;
     for (const [id, x] of seen) {
       let m = per.get(id);
       if (!m) per.set(id, (m = new Map()));
-      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0 };
+      const a = m.get(x.pos) ?? { n: 0, pa: 0, last: 0, reg: 0, regLast: 0, recent: 0, win: 0 };
       a.n++;
       a.pa += x.pa;
       a.last = Math.max(a.last, s.year);
+      a.recent += Math.max(1, x.pa) * w;
+      if (w > 0) a.win += x.pa;
       if (x.g > 0 && x.pa >= QUAL_PA_PER_GAME * x.g) {
         a.reg++;
         a.regLast = Math.max(a.regLast, s.year);
@@ -254,12 +334,28 @@ export function hardhitPositions(seasons: readonly Pick<SeasonData, 'year' | 'te
   const out = new Map<string, { main: string; playable: string[] }>();
   for (const [id, m] of per) {
     const all = [...m.entries()];
-    const reg = all.filter(([, a]) => a.reg > 0).sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast);
-    if (reg.length) out.set(id, { main: reg[0][0], playable: reg.map(([q]) => q) });
-    else {
-      const top = all.sort((p, q) => q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
-      out.set(id, { main: top, playable: [top] });
+    const total = all.reduce((t, [, a]) => t + a.recent, 0);
+    let main: string;
+    if (total > 0) {
+      const field = all.filter(([q, a]) => q !== 'DH' && a.recent > 0).sort((p, q) => q[1].recent - p[1].recent || q[1].last - p[1].last)[0];
+      main = (m.get('DH')?.recent ?? 0) > 0.7 * total || !field ? 'DH' : field[0];
+    } else {
+      main = [...all].sort((p, q) => q[1].reg - p[1].reg || q[1].regLast - p[1].regLast || q[1].n - p[1].n || q[1].pa - p[1].pa || q[1].last - p[1].last)[0][0];
     }
+    if (main === 'C') {
+      const cReg = m.get('C')!.reg;
+      const otherReg = all.reduce((t, [q, a]) => t + (q === 'C' ? 0 : a.reg), 0);
+      const next = all.filter(([q]) => q !== 'C' && q !== 'DH')
+        .sort((p, q) => q[1].reg - p[1].reg || q[1].recent - p[1].recent || q[1].last - p[1].last)[0];
+      if ((cReg === 0 || cReg < otherReg) && next) main = next[0];
+    }
+    const win = all.reduce((t, [, a]) => t + a.win, 0);
+    const old = win > 0 && win < (opts.shortPa ?? DEFAULT_PARAMS.shortHistoryPa) ? opts.fallback?.(id) : undefined;
+    if (old) main = old;
+    const playable = all.filter(([q, a]) => q === main || a.reg > 0 || a.n >= 2)
+      .sort((p, q) => Number(q[0] === main) - Number(p[0] === main) || q[1].reg - p[1].reg || q[1].n - p[1].n || q[1].last - p[1].last).map(([q]) => q);
+    if (!m.has(main)) playable.unshift(main);
+    out.set(id, { main, playable });
   }
   return out;
 }
@@ -300,7 +396,11 @@ export function buildWorld(input: BuildWorldInput): World {
     }
   }
   // 하드힛 이력이 있는 선수는 수비 가능 포지션·주 포지션을 규정타석 규칙으로 정하고 기존 추정의 다른 자리를 더하지 않는다 (2002년 이전·2009년만 있는 선수는 기존 방식)
-  const hhPos = hardhitPositions(careerSeasons);
+  // 이력이 짧은 선수의 예전 규칙: 자료집 주 포지션 → 그 시즌 포지션. 투수·내야/외야 구분은 쓰지 않고,
+  // 지명타자는 2안의 70% 규칙이 정하게 둔다 (몇십 타석 선수가 자료집 지명타자로 수비 자리를 잃지 않게)
+  const fieldPos = (q: string | null | undefined) => (q && FIELD_POS.has(q) ? q : undefined);
+  const hhPos = hardhitPositions(careerSeasons, seasonBasis ? year + 1 : year, params.positionWeights,
+    { shortPa: params.shortHistoryPa, fallback: (id) => fieldPos(master.get(id)?.pos) ?? fieldPos(curBat.get(id)?.pos) });
 
   for (const id of ids) {
     const m = master.get(id);
@@ -330,6 +430,9 @@ export function buildWorld(input: BuildWorldInput): World {
       }
       // 외국인(아시아쿼터 제외)은 외국인 첫 시즌 평균 쪽으로 당긴다 (params.foreignPriors)
       pit = pitSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.pitcher : meta.priors.pitcher, rp);
+      if (rows.length) pit.gb = pitGbOf(pit.hr, params);
+      const pitPpa = ppaRelOf(input.ppa?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
+      if (pitPpa !== undefined) pit.ppaRel = pitPpa;
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);
       // 시작 불펜 서열: 세이브와 같은 기준 시즌(예측은 직전, 역사 재현은 그 해)의 실제 쓰임
@@ -339,13 +442,19 @@ export function buildWorld(input: BuildWorldInput): World {
       const rows: Weighted<BatRow>[] = [];
       rateSeasons.forEach((s, i) => {
         const r = rateBat[i]?.get(id);
-        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null) });
+        if (s && r && r.pa > 0) rows.push({ row: r, w: rateW[i] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, m.bats ?? null), sbPct: params.sbPctByYear[s.year] });
       });
       if (rows.length === 0 && bRow && bRow.pa > 0) {
-        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null) });
+        rows.push({ row: bRow, w: params.debutSeasonWeight, lg, park: seasonPark(meta, current, bRow.team, m.bats ?? null), sbPct: params.sbPctByYear[current.year] });
         debutEstimate = true;
       }
       bat = batSkillFrom(rows, m.foreign && !m.asia ? params.foreignPriors.batter : meta.priors.batter, rp);
+      const gbSeasons = debutEstimate ? [{ s: current, r: bRow, w: params.debutSeasonWeight }]
+        : rateSeasons.map((s, i) => ({ s, r: rateBat[i]?.get(id), w: rateW[i] ?? 0 }));
+      const gb = batGbOf(gbSeasons.flatMap(({ s, r, w }) => (s && r && r.pa > 0 ? [{ row: r, w, league: s.league }] : [])), bat.speed, params);
+      if (gb !== undefined) bat.gb = gb;
+      const batPpa = ppaRelOf(input.ppa?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW, params.ppaRegress);
+      if (batPpa !== undefined) bat.ppaRel = batPpa;
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
       // 가장 최근 시즌만 보면 부상 등으로 한 해 지명타자를 한 3루수(예: 최정 2025년)를 지명타자로 잘못 본다
@@ -402,24 +511,47 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  // 일정 규칙과 개막 홈 구단 (지난 시즌 자료의 순위, 일정 개편 기획안 2.2)
+  const rule = input.schedule ? scheduleRule(input.schedule, year) : undefined;
+  const franchises = teams.map((t) => t.franchise);
+  const hosts = pickOpeningHosts(year, rankedFromSeason(history[0], franchises), franchises);
+  // 양대 리그 나눔 (1999·2000, 그 해 시즌 자료의 league 칸)
+  const divisions = divisionsOf(current, franchises);
   return {
     year,
     gamesPerTeam: current.games,
     rules: meta.rules[String(year)],
     league: { ...lg },
-    env: leagueEnvFor(current.league, params),
+    env: leagueEnvFor(current.league, params, year),
     teams,
     players,
+    ...(rule ? { schedule: rule } : {}),
+    ...(hosts ? { openingHosts: hosts } : {}),
+    ...(divisions ? { divisions, prevStandings: pctRankedFromSeason(history[0], franchises) } : {}),
   };
 }
 
+/**
+ * 경기 안 판정으로 자책인 득점이 비자책이 될 확률: 그 해 비자책 비율(share)에서 경기 안 판정 몫(inGame)을 뺀 나머지를 채운다.
+ * 경기 안 몫은 해마다 다르다 (실책이 많은 옛 시대가 크다, eras.ts eraEnv가 시대 표의 ue로 다시 낸다)
+ */
+export function unearnedFill(params: EngineParams, share: number, inGame: number): number {
+  return params.unearnedRunScale * Math.max(0, share - inGame) / (1 - inGame);
+}
+
 /** 그 해 리그 합계에서 타석 결과 외의 환경 값 (실책·희생번트·폭투) */
-export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa'>, params: EngineParams): LeagueEnv {
+export function leagueEnvFor(league: Pick<SeasonData['league'], 'unearnedShare' | 'sacPerPa' | 'wpbkPerPa' | 'sbPct'>, params: EngineParams, year?: number): LeagueEnv {
+  const odds = (x: number) => x / (1 - x);
+  const gb = year !== undefined ? params.groundBallShareByYear[year] : undefined;
   return {
     roe: params.roePerUnearnedShare * league.unearnedShare,
     sac: league.sacPerPa,
-    unearnedRun: params.unearnedRunScale * league.unearnedShare,
+    // 경기 안 판정 몫(해마다 거의 같다)을 뺀 모자란 몫만 확률로 채운다. 비율에 곱하면 비자책이 적은 해(2012 0.079)에 넘쳤다
+    unearnedRun: unearnedFill(params, league.unearnedShare, params.unearnedInGame),
+    unearnedShare: league.unearnedShare,
     wildPitch: params.wildPitchScale * (league.wpbkPerPa ?? params.wildPitchDefault),
+    gbOdds: gb !== undefined ? odds(gb) / odds(params.groundBallShare) : 1,
+    ...(league.sbPct ? { sbPct: league.sbPct } : {}),
   };
 }
 

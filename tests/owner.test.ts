@@ -51,7 +51,7 @@ describe('목표와 신뢰도', () => {
   });
 });
 
-describe('예산과 샐러리캡 제재 (제도연표: 1회 50%, 2회 연속 100% + 1라운드 지명권 9단계 하락)', () => {
+describe('예산과 샐러리캡 제재 (제도연표 2023~2025: 1회 50%, 2회 연속 100% + 1라운드 지명권 9단계 하락. 2026~는 cap2026.test.ts)', () => {
   it('모기업 등급에 따라 예산이 다르고 샐러리캡을 넘지 않는다', () => {
     const { league } = createLeague(store, 2026, 'budget', FAST);
     const idx = (n: string) => league.teams.findIndex((t) => t.name === n);
@@ -60,23 +60,23 @@ describe('예산과 샐러리캡 제재 (제도연표: 1회 50%, 2회 연속 100
     expect(budgetFor(league, idx('키움'), 2026)!).toBeLessThan(budgetFor(league, idx('두산'), 2026)!);
   });
 
-  it('초과하면 제재금, 2회 연속이면 지명권 하락. 지키면 연속 횟수가 0으로', () => {
+  it('2025년까지: 초과하면 제재금, 2회 연속이면 지명권 하락. 지키면 연속 횟수가 0으로', () => {
     const { league } = createLeague(store, 2026, 'cap', FAST);
     const t = 0;
     const star = league.players.find((p) => p.team === t && !p.foreign && p.contract.kind !== 'rookie')!;
     const cap = salaryCap(2026)!;
     star.contract = { ...star.contract, salary: cap }; // 혼자 캡을 채워 초과시킨다
-    const first = applyCapSanctions(league, 2026).find((x) => x.team === t)!;
+    const first = applyCapSanctions(league, 2024).find((x) => x.team === t)!;
     expect(first.strike).toBe(1);
     expect(first.fine).toBe(Math.round(first.over * 0.5));
     expect(first.pickDrop).toBe(false);
-    const second = applyCapSanctions(league, 2027).find((x) => x.team === t)!;
+    const second = applyCapSanctions(league, 2025).find((x) => x.team === t)!;
     expect(second.strike).toBe(2);
     expect(second.fine).toBe(Math.round(second.over * 1.0));
-    expect(league.draftPenalty![t]).toBe(2027);
+    expect(league.draftPenalty![t]).toBe(2025);
     expect(league.ledger.filter((l) => l.from === t && l.note.includes('샐러리캡'))).toHaveLength(2);
     star.contract = { ...star.contract, salary: 3000 };
-    applyCapSanctions(league, 2028);
+    applyCapSanctions(league, 2026);
     expect(league.capStrikes![t]).toBe(0);
   });
 
@@ -114,8 +114,8 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
 
   beforeAll(() => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-    // 시드는 LG가 우승하지 못하는 판 (2026-10-22 구장 사건별 배율을 넣으며 m7-loop-14 → 15, 하드힛 포지션 규정타석 규칙을 넣으며 → 17: 그 판들은 LG가 우승해 해고되지 않았다)
-    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-18', difficulty: 'hard' }, FAST);
+    // 시드는 LG가 우승하지 못하는 판 (2026-10-22 구장 사건별 배율을 넣으며 m7-loop-14 → 15, 하드힛 포지션 규정타석 규칙을 넣으며 → 17, 2026-10-22 엔진 2 5단계 타구 모형 때 → 22 (18~21은 LG 우승), 7단계 실책·자책 때 → 23, 엔진 2 포지션 2안 때 → 25 (24도 이 시험이 성립하지 않음), 엔진 2 11단계 경기 중 부상·야수 체력 때 → 26, 일정 9단계 더블헤더 2차전 라인업 난수 때 → 27, 일정 10단계 강우 콜드·노게임 때 → 28, 2026-10-23 2026 외국인 개막 명단을 계약표로 바꾸며 → 31 (29·30은 LG 우승): 그 판들은 LG가 우승해 해고되지 않았다, 2026-10-24 병합 준비 때 → 32)
+    g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-32', difficulty: 'hard' }, FAST);
     firstTeam = g.teamIdx;
     // 신뢰도를 낮춰 두고 목표를 우승으로: 우승하지 못하면 해고된다
     g.owner.trust = 27; // 재정 흑자(+2)가 나도 해고선(25) 아래로 떨어지게 (2026-10-11 재정 상세형)
@@ -167,7 +167,7 @@ describe('M7 완료 기준: 2026년 시작 → 목표 → 해고 → 다른 구�
     expect(b.owner.offers).toEqual(save.league.owner!.offers);
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     // 신뢰도·목표는 이 시험에서 직접 바꿔 조작 기록에 없다. 그래서 해고까지 재현하지는 않고 시즌 결과가 같은지만 본다
-    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-18', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
+    const c = GameSession.replay(store, { year: 2026, teamIdx: lg, seed: 'm7-loop-32', difficulty: 'hard' }, [], { year: 2026, day: 100000 }, FAST);
     c.advance(100000);
     expect(c.season.teams).toEqual(b.season.teams);
   });

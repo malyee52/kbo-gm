@@ -4,7 +4,8 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { dateOf } from '../src/game/calendar';
-import { allStarHistory, allStarSides } from '../src/league/allstar';
+import { allStarHistory, allStarSideNames, allStarSides, SIDE_NAMES } from '../src/league/allstar';
+import { NO_STOPS } from '../src/game/stops';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -65,5 +66,39 @@ describe('올스타전', () => {
     const info = g.reproInfo();
     const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
     expect(roundTrip(r.allStarThisYear)).toEqual(roundTrip(rec));
+  }, 300_000);
+
+  it('1999·2000 양대 리그 해는 드림 올스타 대 매직 올스타, 편 나눔이 그 해 리그 소속과 같다 (일정 개편 기획안 10.6, 결정 3)', () => {
+    const name = (g: GameSession, ts: number[]) => ts.map((t) => g.world.teams[t].name).sort();
+    // 2000: 삼성이 드림, 롯데가 매직으로 바뀐 해
+    const g00 = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'as-2000' }, FAST);
+    const d00 = g00.world.divisions!;
+    expect(allStarSides(g00.world)).toEqual(d00.teams);
+    expect(allStarSideNames(g00.world)).toEqual(['드림 올스타', '매직 올스타']);
+    expect(name(g00, allStarSides(g00.world)[0])).toContain('삼성');
+    expect(name(g00, allStarSides(g00.world)[1])).toContain('롯데');
+    // 단일 리그 해는 예전 드림·나눔
+    const g26 = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'as-2026' }, FAST);
+    expect(allStarSideNames(g26.world)).toEqual(SIDE_NAMES);
+
+    // 1999: 그날 경기를 치르면 기록에 편 이름이 남고, 명단은 리그 소속 구단에서만
+    const g = GameSession.create(store, { year: 1999, teamIdx: 0, seed: 'as-1999' }, FAST);
+    const d = g.world.divisions!;
+    expect(allStarSides(g.world)).toEqual(d.teams);
+    expect(name(g, d.teams[0])).toEqual(['두산', '롯데', '해태', '현대'].sort());
+    expect(name(g, d.teams[1])).toEqual(['LG', '삼성', '쌍방울', '한화'].sort());
+    const day = g.allStarDay;
+    expect(day).toBeGreaterThan(0);
+    while (g.season.day < day) g.advance(day - g.season.day, NO_STOPS);
+    g.advance(1, NO_STOPS);
+    const rec = g.allStarThisYear!;
+    expect(rec).not.toBeNull();
+    expect(rec.names).toEqual(['드림 올스타', '매직 올스타']);
+    expect(rec.teams).toEqual(d.teams);
+    for (const x of rec.roster) expect(d.teams[x.side]).toContain(x.team);
+    const [a, b] = rec.game.score;
+    const news = g.news.find((n) => n.text.startsWith('올스타전: '))!;
+    expect(news.text.startsWith(a === b ? `올스타전: ${a}-${b} 무승부` : `올스타전: ${a > b ? '드림' : '매직'} 올스타 ${Math.max(a, b)}-${Math.min(a, b)} 승리`)).toBe(true);
+    expect(g.league.articles!.find((x) => x.kind === 'allstar' && x.year === 1999)!.body.startsWith('드림 올스타와 매직 올스타가 맞붙은 1999 올스타전')).toBe(true);
   }, 300_000);
 });

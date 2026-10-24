@@ -1,6 +1,6 @@
 // 스프링캠프 (2026-10-14): 오프시즌에 다음 시즌 캠프 장소와 훈련 방향을 정하고, 개막(openNextSeason) 때 효과를 준다.
 // - 장소: 비용과 시설 배율. 국내는 싸지만 추워서 부상이 조금 늘고, 해외는 비싼 만큼 효과가 크다.
-// - 훈련 방향: 개막 뒤 CAMP_DAYS일 동안의 컨디션(events.ts FormBuff), 체력은 시즌 내내 부상 빈도를 줄이고(world.ts),
+// - 훈련 방향: 개막 뒤 CAMP_DAYS일 동안의 경기력(events.ts FormBuff), 체력은 시즌 내내 부상 빈도를 줄이고(world.ts),
 //   유망주 집중은 24세 이하 선수를 잠재력 안에서 조금 더 끌어올린다 (상한을 넘기지 않아 장기 재능 총량은 그대로).
 // - AI 구단은 자금으로 장소를, 약한 쪽(타격·투수)이나 단장 성향으로 방향을 고른다.
 // 수치는 모두 임시값 (docs/temp-values.md).
@@ -25,16 +25,16 @@ export const PLACE: Record<CampPlace, { label: string; cost: number; factor: num
   usa: { label: '미국 애리조나', cost: 110_000, factor: 1.2, injury: 1 },
 };
 
-/** 방향: 개막 뒤 컨디션 (타자·투수, 장소 배율을 곱한다), 시즌 부상 배율, 유망주 성장(런, 장소 배율을 곱한다) (임시값) */
+/** 방향: 개막 뒤 경기력 (타자·투수, 장소 배율을 곱한다), 시즌 부상 배율, 유망주 성장(런, 장소 배율을 곱한다) (임시값) */
 export const FOCUS: Record<CampFocus, { label: string; note: string; bat: number; pit: number; injury: number; youth: number }> = {
   balanced: { label: '균형', note: '타자·투수 모두 조금', bat: 0.004, pit: 0.004, injury: 1, youth: 0 },
-  bat: { label: '타격', note: '타자 컨디션을 크게', bat: 0.008, pit: 0, injury: 1, youth: 0 },
-  pit: { label: '투구', note: '투수 컨디션을 크게', bat: 0, pit: 0.008, injury: 1, youth: 0 },
-  def: { label: '수비·주루', note: '실점을 줄인다 (투수 쪽 컨디션)', bat: 0.001, pit: 0.005, injury: 1, youth: 0 },
+  bat: { label: '타격', note: '타자 경기력을 크게', bat: 0.008, pit: 0, injury: 1, youth: 0 },
+  pit: { label: '투구', note: '투수 경기력을 크게', bat: 0, pit: 0.008, injury: 1, youth: 0 },
+  def: { label: '수비·주루', note: '실점을 줄인다 (투수 쪽 경기력)', bat: 0.001, pit: 0.005, injury: 1, youth: 0 },
   fitness: { label: '체력', note: '시즌 내내 부상이 줄어든다', bat: 0.002, pit: 0.002, injury: 0.85, youth: 0 },
   youth: { label: '유망주 집중', note: '24세 이하가 잠재력 안에서 성장', bat: 0.001, pit: 0.001, injury: 1, youth: 1.5 },
 };
-/** 개막 뒤 컨디션이 이어지는 날 (일정 색인) */
+/** 개막 뒤 경기력이 이어지는 날 (일정 색인) */
 export const CAMP_DAYS = 30;
 export const YOUTH_AGE = 24;
 const KEEP_YEARS = 5;
@@ -72,7 +72,7 @@ export function aiCamp(league: LeagueState, team: number, cash: number, strength
 }
 
 /**
- * 개막 때 모든 구단의 캠프: 비용을 장부에, 컨디션을 이벤트 효과로, 유망주 성장을 능력에. 우리 구단 소식 문장을 돌려준다.
+ * 개막 때 모든 구단의 캠프: 비용을 장부에, 경기력을 이벤트 효과로, 유망주 성장을 능력에. 우리 구단 소식 문장을 돌려준다.
  * teams: 이번 시즌 1군 구단 색인, sim: 선수 ID → 능력 계산용 선수 (leagueView)
  */
 export function runCamps(league: LeagueState, year: number, teams: number[], userTeam: number, userPick: CampPick | null,

@@ -31,6 +31,20 @@ export interface ShellUi {
   density: Density;
   setDensity(d: Density): void;
   decisions: Decision[];
+  /** "확인"으로 알림을 내려 둔다 (그 상태 서명이 바뀔 때까지, Decision.ack) */
+  ack(key: string, sig: string): void;
+  /**
+   * 화면이 주 진행 단추(상태 줄·휴대폰 아래 고정)를 맡는다: 오프시즌 단계 화면의 "다음 단계"·"개막" (UI 2단계 U2-6).
+   * 화면이 사라지면 null로 돌려 둔다
+   */
+  setPrimary(p: ScreenPrimary | null): void;
+}
+
+export interface ScreenPrimary {
+  label: string;
+  act(): void;
+  disabled?: boolean;
+  title?: string;
 }
 
 const Ctx = createContext<ShellUi | null>(null);

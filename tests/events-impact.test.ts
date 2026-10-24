@@ -16,7 +16,7 @@ beforeAll(() => {
 
 const GAME_EVENTS = ['team-meeting', 'momentum', 'bullpen-rest', 'slump-hitter', 'ace-manage', 'hitting-coach', 'pitching-coach', 'summer-heat', 'rival-week', 'trade-offer', 'veteran-mentor'];
 
-describe('경기력 효과 (컨디션)', () => {
+describe('경기력 효과 (이벤트·코치·캠프)', () => {
   it('formToday: 구단 전체·타자만·한 선수, 기간 밖은 0', () => {
     const players = [
       { idx: 0, id: 'a', teamIdx: 0, isPitcher: false },
@@ -38,9 +38,14 @@ describe('경기력 효과 (컨디션)', () => {
     // 한 시드는 운에 흔들려 여러 시드 평균으로 본다 (2026-10-12 투수 가치·선발 기준을 바꾼 뒤 한 시드가 +2.0%p였다).
     // 2026-10-13 엔트리 순환(rosterChurn)을 넣은 뒤 form-b가 −7.3%p(운)로 두 시드 평균이 +0.2%p가 되어 네 시드(c~f)로 바꿨다.
     // 6시드 평균: 순환 없음 +6.9%p, 순환 +3.3%p (form-b 포함). 경기력 효과는 선수마다 그대로 들어가고 순환과 관계없다
+    // 2026-10-22 선수별 P/PA(사슬 길이)를 넣은 뒤 c~f 평균이 +2.1%p(운)였다. 시드 하나의 퍼짐이 약 6%p라 네 시드로는 모자라
+    // 여덟 시드(c~j)로 늘렸다: P/PA 전 +6.8%p, 뒤 +5.6%p (c~f만 보면 전 +10.6 · 뒤 +2.1, g~j만 보면 전 +3.0 · 뒤 +9.1)
+    // 2026-10-23 엔진 2 14단계(세이브·홀드·승리 투수 규정, 결과가 바뀜) 뒤 c~j 평균이 +0.3%p(운)였다. 시드 하나가 −13.1~+21.5%p로 퍼져
+    // 열여섯 시드(c~r)로 늘렸다: c~j +0.3%p, k~r +8.1%p, 16시드 +4.2%p
     const w = (g: GameSession) => g.season.teams[lg].w / (g.season.teams[lg].w + g.season.teams[lg].l);
     let diff = 0;
-    for (const seed of ['form-c', 'form-d', 'form-e', 'form-f']) {
+    const seeds = ['c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r'].map((x) => `form-${x}`);
+    for (const seed of seeds) {
       const base = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       const boosted = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
       (ensureEvents(boosted.league).forms ??= []).push({ team: lg, year: 2026, from: 0, until: 1000, edge: 0.03, note: '시험' });
@@ -49,10 +54,10 @@ describe('경기력 효과 (컨디션)', () => {
         // 하루마다 끈다 (2026-10-12 이벤트 빈도를 올린 뒤 5일 사이에 이벤트가 끼어들었다)
         while (!g.done) { g.league.events!.chance = 0; g.advance(1); }
       }
-      diff += (w(boosted) - w(base)) / 4;
+      diff += (w(boosted) - w(base)) / seeds.length;
     }
     expect(diff).toBeGreaterThan(0.025);
-  }, 600_000);
+  }, 2_400_000);
 });
 
 describe('경기에 영향을 주는 이벤트', () => {

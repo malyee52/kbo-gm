@@ -1,5 +1,5 @@
 // 판타지 효과 (docs/fantasy-mode.md 3~5단계): AI가 제안하는 게임 수치 변화. 정해 둔 목록(화이트리스트)과 상한 안에서만.
-// - 실존 선수에게는 중립 효과(컨디션, 휴식)만. 잠재력은 가상 선수(real === false)만 (사용자 결정: 실존 선수 잠재력 = 실제 고점)
+// - 실존 선수에게는 중립 효과(경기력, 휴식)만. 잠재력은 가상 선수(real === false)만 (사용자 결정: 실존 선수 잠재력 = 실제 고점)
 // - 상한은 출처마다: 대화(chat) < 사건(event) < 이야기 줄기의 절정(arc)
 // - AI는 선수를 이름으로 말한다. 우리 구단 선수 이름으로 id를 찾고, 없거나 겹치면 그 효과를 버린다
 // 적용(applyFantasyEffects)은 세션이 한다 (조작 기록에서 재현된다).
@@ -44,8 +44,8 @@ export function effectMenu(scale: EffectScale): string {
     `- {"type":"fans","delta":정수} 팬 만족도 (±${L.fans})`,
     `- {"type":"cash","amount":정수} 구단 자금, 단위 만 원 (±${L.cash.toLocaleString('ko-KR')}, 1억 = 10000)`,
     `- {"type":"fill","fill":소수,"days":정수} 관중률 (±${L.fill}, ${L.days}일까지)`,
-    `- {"type":"teamForm","side":"bat|pit|all","edge":소수,"days":정수} 선수단 컨디션 (±${L.edge}, ${L.days}일까지)`,
-    `- {"type":"playerForm","player":"선수 이름","edge":소수,"days":정수} 우리 선수 한 명 컨디션 (±${L.edge})`,
+    `- {"type":"teamForm","side":"bat|pit|all","edge":소수,"days":정수} 선수단 경기력 (±${L.edge}, ${L.days}일까지)`,
+    `- {"type":"playerForm","player":"선수 이름","edge":소수,"days":정수} 우리 선수 한 명 경기력 (±${L.edge})`,
     `- {"type":"rest","player":"선수 이름","days":정수} 우리 선수 휴식 (${L.rest}일까지)`,
     `- {"type":"potential","player":"가상 선수 이름","delta":정수} (가상) 선수만 잠재력 (±${L.potential})`,
   ];
@@ -134,8 +134,8 @@ export function effectText(e: FantasyEffect, nameOf: (id: string) => string): st
     case 'fans': return `팬 만족도 ${sign(e.delta)}`;
     case 'cash': return `자금 ${e.amount > 0 ? '+' : '−'}${Math.abs(e.amount / 10000).toFixed(1)}억 원`;
     case 'fill': return `관중률 ${sign(Math.round(e.fill * 100))}%p (${e.days}일)`;
-    case 'teamForm': return `${e.side === 'bat' ? '타자진' : e.side === 'pit' ? '투수진' : '선수단'} 컨디션 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
-    case 'playerForm': return `${nameOf(e.player)} 컨디션 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
+    case 'teamForm': return `${e.side === 'bat' ? '타자진' : e.side === 'pit' ? '투수진' : '선수단'} 경기력 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
+    case 'playerForm': return `${nameOf(e.player)} 경기력 ${sign(Math.round(e.edge * 1000) / 10)} (${e.days}일)`;
     case 'rest': return `${nameOf(e.player)} ${e.days}일 휴식`;
     case 'potential': return `${nameOf(e.player)} 잠재력 ${sign(e.delta)}`;
     case 'prospect': return `유망주 ${e.name} (${e.pos === 'P' ? '투수' : e.pos === 'C' ? 'C' : e.pos === 'IF' ? 'IF' : 'OF'}, ${e.age}세) 다음 개막에 입단`;

@@ -103,6 +103,21 @@ describe('결정함 엔트리 기준', () => {
     expect(decisions(g).every((d) => d.kind !== '엔트리' || (d.go === 'lineup' && !d.when && !d.blocking))).toBe(true);
   });
 
+  it('1군 빈자리는 확인하면 1군 인원이 바뀔 때까지 다시 뜨지 않는다 (UI 2차 결정 3)', () => {
+    const g = game('board-ack');
+    const reg = g.registered();
+    expect(g.move(reg.find((p) => !p.isPitcher)!, false).errors).toEqual([]);
+    const gap = decisions(g).find((d) => d.key === 'entry-size')!;
+    expect(gap.ack).toBeDefined();
+    const acked = { [gap.key]: gap.ack! };
+    expect(decisions(g, acked).some((d) => d.key === 'entry-size')).toBe(false);
+    // 다른 결정은 그대로 남는다
+    expect(decisions(g, acked).length).toBe(decisions(g).length - 1);
+    // 한 명 더 내리면 인원 상태가 달라져 다시 뜬다
+    expect(g.move(g.registered().find((p) => p.isPitcher)!, false).errors).toEqual([]);
+    expect(decisions(g, acked).some((d) => d.key === 'entry-size')).toBe(true);
+  });
+
   it('엔트리를 AI에게 맡기면 엔트리 항목을 세지 않는다', () => {
     const g = game('board-inbox');
     g.move(g.registered()[0], false);

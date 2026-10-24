@@ -1,4 +1,4 @@
-// 스프링캠프 (league/camp.ts): 오프시즌에 고르고 개막 때 비용·컨디션·부상·유망주 성장. 저장·재현
+// 스프링캠프 (league/camp.ts): 오프시즌에 고르고 개막 때 비용·경기력·부상·유망주 성장. 저장·재현
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
@@ -23,7 +23,7 @@ function toReady(g: GameSession) {
 }
 
 describe('스프링캠프', () => {
-  it('고른 캠프는 개막 때 비용·개막 뒤 컨디션으로, AI 구단도 저마다 캠프를 차린다. 저장·재현이 같다', () => {
+  it('고른 캠프는 개막 때 비용·개막 뒤 경기력으로, AI 구단도 저마다 캠프를 차린다. 저장·재현이 같다', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: 2, seed: 'camp-1' }, FAST);
     toReady(g);
     expect(g.campPlan).toEqual({ place: 'japan', focus: 'balanced' });
@@ -38,7 +38,7 @@ describe('스프링캠프', () => {
     expect(L.camps!.filter((c) => c.year === 2027).length).toBe(g.world.teams.length);
     expect(L.campPlan).toBeUndefined();
     expect(g.news.some((n) => n.text.includes('스프링캠프: 미국 애리조나'))).toBe(true);
-    // 개막 직후 컨디션: 우리 타자에게 + (formToday)
+    // 개막 직후 경기력: 우리 타자에게 + (formToday)
     // 저장 → 불러와 개막해도 같다, 처음부터 재현해도 같다
     const h = GameSession.load(store, saved, FAST);
     h.openNextSeason();

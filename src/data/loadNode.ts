@@ -2,8 +2,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type PlayerMaster, type RawSeason, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type PlayerMaster, type PpaData, type RawSeason, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
 
+import { setCalendarSchedule } from './schedule';
 export type { DataStore } from './types';
 
 const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public', 'data');
@@ -16,6 +17,8 @@ export function loadDataStore(): DataStore {
   const meta = read<Meta>('meta.json');
   const players = new Map(read<{ players: PlayerMaster[] }>('players.json').players.map((p) => [p.id, p]));
   const cache = new Map<number, SeasonData>();
+  const schedule = existsSync(join(DATA_DIR, 'schedule.json')) ? read<ScheduleData>('schedule.json') : undefined;
+  setCalendarSchedule(schedule);
   return {
     meta,
     players,
@@ -25,6 +28,10 @@ export function loadDataStore(): DataStore {
     military: existsSync(join(DATA_DIR, 'military.json')) ? read<{ players: Record<string, MilitaryRecord> }>('military.json').players : undefined,
     defenseAwards: existsSync(join(DATA_DIR, 'defense_awards.json')) ? read<{ players: Record<string, DefenseAward[]> }>('defense_awards.json').players : undefined,
     managers: existsSync(join(DATA_DIR, 'managers.json')) ? read<ManagerData>('managers.json') : undefined,
+    ruleChanges: existsSync(join(DATA_DIR, 'rule_changes.json')) ? read<RuleChangeData>('rule_changes.json') : undefined,
+    homes: existsSync(join(DATA_DIR, 'homes.json')) ? read<{ homes: HomeCity[] }>('homes.json').homes : undefined,
+    ppa: existsSync(join(DATA_DIR, 'ppa.json')) ? read<PpaData>('ppa.json') : undefined,
+    schedule,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);

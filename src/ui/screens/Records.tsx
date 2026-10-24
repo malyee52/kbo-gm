@@ -4,6 +4,7 @@ import { lineTeam } from '../../engine';
 import { useMemo, useState } from 'react';
 import {
   CAREER_STATS, careerLeaders, careers, franchiseHistory, hallOfFame, LEGEND_SEASONS, legendCandidates, SEASON_STATS, seasonBests, yearbook,
+  yearLeagues, yearPlaceLabel,
 } from '../../league/history';
 import { DYNASTY_GAP, DYNASTY_TITLES, dynasties, RIVAL_FILL, RIVAL_MIN, RIVAL_YEARS } from '../../league/rivals';
 import type { SeasonLine } from '../../league/types';
@@ -55,13 +56,17 @@ export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
               <tbody>
                 {years.map((y) => {
                   const mine = y.teams.findIndex((t) => t.franchise === me);
+                  // 양대 리그 해(1999·2000): 리그마다 1위, 우리 구단은 "드림 2위" (저장하지 않고 자료로 다시 계산, league/history.ts)
+                  const lg = yearLeagues(store, y);
+                  const firsts = lg ? lg.flatMap((x, i) => (x.rank === 1 ? [i] : [])) : [0];
+                  const first = (i: number) => `${lg ? `${lg[i].league} ` : ''}${y.teams[i].name} (${y.teams[i].w}승 ${y.teams[i].l}패)`;
                   return (
                     <tr key={y.year} className={y.champion && y.teams.find((t) => t.name === y.champion)?.franchise === me ? 'me' : ''}>
                       <td className="l">{y.year}{y.inGame ? '' : <span className="muted small"> 실제</span>}</td>
                       <td className="l"><strong>{y.champion ?? '-'}</strong></td>
                       <td className="l">{y.runnerUp ?? '-'}</td>
-                      <td className="l">{y.teams[0] ? `${y.teams[0].name} (${y.teams[0].w}승 ${y.teams[0].l}패)` : '-'}</td>
-                      <td className="l">{mine >= 0 ? `${mine + 1}위 (${y.teams[mine].w}승 ${y.teams[mine].l}패 ${y.teams[mine].t}무)` : '-'}</td>
+                      <td className="l">{y.teams[0] ? firsts.map(first).join(' · ') : '-'}</td>
+                      <td className="l">{mine >= 0 ? `${yearPlaceLabel(lg, mine)} (${y.teams[mine].w}승 ${y.teams[mine].l}패 ${y.teams[mine].t}무)` : '-'}</td>
                     </tr>
                   );
                 })}

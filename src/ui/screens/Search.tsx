@@ -6,8 +6,9 @@ import { currentRuns } from '../../ai/value';
 import { seasonWar } from '../../league/awards';
 import { dollarText } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
-import { Grade, PlayerLink, posName, TeamName, useGame, useWon } from '../context';
-import { runsGrade } from '../grades';
+import { Grade, PlayerLink, posName, TeamLink, useGame, useWon } from '../context';
+import { runsGrade, type PotentialView } from '../grades';
+import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
 
 type Kind = 'all' | 'hit' | 'pit' | 'sp' | 'rp';
 type SortKey = 'now' | 'pot' | 'war' | 'age' | 'salary' | 'until' | 'name';
@@ -33,7 +34,8 @@ export interface SearchFilter {
 
 export const EMPTY_FILTER: SearchFilter = { text: '', team: 'others', kind: 'all', pos: '', ageMin: null, ageMax: null, nowMin: null, potMin: null, foreign: 'all', contract: 'all' };
 
-export interface SearchRow { p: SimPlayer; lp: LeaguePlayer | undefined; now: number; pot: number | null; war: number | null }
+/** pot은 정렬·거르기용 (범위면 가운데 짐작값), potView는 화면 표시 (결정 5: 27세 이하 범위) */
+export interface SearchRow { p: SimPlayer; lp: LeaguePlayer | undefined; now: number; pot: number | null; potView?: PotentialView; war: number | null }
 
 /** 거르기 (화면과 시험이 같이 쓴다). 등급은 화면과 같은 눈금 (runsGrade, 그 해 리그 수준) */
 export function filterPlayers(rows: SearchRow[], f: SearchFilter, userTeam: number, year: number): SearchRow[] {
@@ -85,6 +87,7 @@ export function Search({ initialText = '' }: { initialText?: string }) {
   const [f, setF] = useState<SearchFilter>(initialText ? { ...EMPTY_FILTER, text: initialText, team: 'all' } : EMPTY_FILTER);
   const [sort, setSort] = useState<SortKey>('now');
   const [shown, setShown] = useState(PAGE);
+  const potOf = usePotentialOf();
   const set = (patch: Partial<SearchFilter>) => { setF((x) => ({ ...x, ...patch })); setShown(PAGE); };
 
   const all = useMemo<SearchRow[]>(() => {
@@ -97,10 +100,10 @@ export function Search({ initialText = '' }: { initialText?: string }) {
       .filter((p) => lp.get(p.id)?.reserve === undefined && (p.teamIdx >= 0 || market.has(p.idx)))
       .map((p) => {
         const l = lp.get(p.id);
-        const potRuns = l ? (l.scoutPotential ?? l.potential) : null;
-        return { p, lp: l, now: runsGrade(currentRuns(p, ctx), year), pot: potRuns === null ? null : runsGrade(potRuns, year), war: war.get(p.idx) ?? null };
+        const potView = l ? potOf(l, p.age) : null;
+        return { p, lp: l, now: runsGrade(currentRuns(p, ctx), year), pot: potentialSortValue(potView), potView, war: war.get(p.idx) ?? null };
       });
-  }, [session, version, year]);
+  }, [session, version, year]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => sortRows(filterPlayers(all, f, session.teamIdx, year), sort), [all, f, sort, session.teamIdx, year]);
   const role = (p: SimPlayer) => (p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : posName(p.pos));
   const salary = (lp: LeaguePlayer | undefined) => (!lp ? '-' : lp.contract.kind === 'foreign' ? dollarText(lp.contract.salary) : won(lp.contract.salary));
@@ -158,7 +161,7 @@ export function Search({ initialText = '' }: { initialText?: string }) {
             </select>
           </label>
         </div>
-        <p className="muted small" role="status">{rows.length}명{rows.length > shown ? ` 중 ${shown}명 표시` : ''}. 외국인은 트레이드할 수 없습니다. 잠재력은 스카우트 평가가 있으면 그 값입니다.</p>
+        <p className="muted small" role="status">{rows.length}명{rows.length > shown ? ` 중 ${shown}명 표시` : ''}. 외국인은 트레이드할 수 없습니다. 잠재는 스카우트 짐작이라 27세 이하는 범위로 보이고 실제와 다를 수 있습니다 (31세 이상은 숨김).</p>
       </section>
 
       <section className="panel">
@@ -167,14 +170,14 @@ export function Search({ initialText = '' }: { initialText?: string }) {
             <table>
               <thead><tr><th className="l">이름</th><th className="l">구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>WAR</th><th>연봉</th><th>계약</th></tr></thead>
               <tbody>
-                {rows.slice(0, shown).map(({ p, lp, now, pot, war }) => (
+                {rows.slice(0, shown).map(({ p, lp, now, potView, war }) => (
                   <tr key={p.idx}>
                     <td className="l"><PlayerLink p={p} /></td>
-                    <td className="l small"><TeamName idx={p.teamIdx} /></td>
+                    <td className="l small"><TeamLink idx={p.teamIdx} /></td>
                     <td>{role(p)}</td>
                     <td>{p.age === null ? '-' : p.ageEstimated ? `약 ${p.age}` : p.age}</td>
                     <td><Grade v={now} /></td>
-                    <td><Grade v={pot} /></td>
+                    <td><PotCell v={potView ?? null} /></td>
                     <td className="small">{war === null ? '-' : (Math.abs(war) < 0.05 ? 0 : war).toFixed(1)}</td>
                     <td className="small">{salary(lp)}</td>
                     <td className="small">{lp ? `${lp.contract.until}년` : '-'}</td>
