@@ -8,7 +8,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 - M0 기획 확정, M2 경기 엔진, M3 첫 플레이 버전, M4 트레이드와 AI 구단, M5 오프시즌, M6 다년 진행, M7 구단주 평가와 난이도: 완료. **2026 시작판 1.0** (package 1.0.0).
 - M1 데이터 기반: 스키마·변환·검사 스크립트 완료. KBO 사이트에서 직접 모아야 하는 항목 4개가 남음 (`docs/milestones.md`).
 - M8 과거 시대 확장: 코드 쪽 완료 (2026-10-08). 1982년 시작 → 2026년 자동 진행이 돌아가고 구단 변화·제도 도입이 실제 연도를 따른다. 자료 보완(타자 결측 329행, 제도연표 확인)은 사용자 몫.
-- 경기 엔진 2 (2026-10-24 병합 준비 `merge/prep-1`): 볼카운트 사슬·투구 수 운용·타구와 담당 수비수·주루·AI 감독 경기 중 교체·부상과 혹사·선수 컨디션·시대 배율·기록 규정(연장·무승부·세이브), 1~15단계 끝. 남은 단계는 `docs/경기엔진2_기획안.md`.
+- 경기 엔진 2 (2026-10-24 병합 준비 `merge/prep-1`): 볼카운트 사슬·투구 수 운용·타구와 담당 수비수·주루·AI 감독 경기 중 교체·부상과 혹사·선수 컨디션·시대 배율·기록 규정(연장·무승부·세이브), 1~15단계 끝. 17단계 A 해결기 (2026-10-24 `feat/engine2-17`): 직접 지휘하는 경기는 공 단위로 치르고 지휘 화면에 볼카운트·투구 수·공 목록, 다음 공·공마다 지켜보기·멈춤(공 사이 지시). 남은 단계는 `docs/경기엔진2_기획안.md`.
 - 일정 개편 (2026-10-23): 연도별 규칙 표로 만드는 연전 일정, 우천 취소·순연·더블헤더·잔여 경기, 강우 콜드·노게임, 1999·2000 드림·매직 양대 리그. 1~16단계 끝 (15단계 일정 화면 포함). 임시값은 `docs/temp-values.md` "일정 개편".
 - 리그 규칙 변경 알림·미래 규칙·창단 특례·외국인 출전 한도, 구단 투표(단장 회의), UI 대개편(브리핑·공통 표): 2026-10-24 병합 준비.
 - 구장 효과 (2026-10-24 main, PR #131): 1982~2027년 뒤 모든 해 구장 배율, 신구장 펜스 제원·펜스 조정·가벽 공사, 구장 화면 지수. 능력치 v2 16-1(볼카운트 사슬 칸 함수 `plate.ts`)·16-2(타구각 갈래 `angle.ts`)·16-3 첫 단계(수비 v2 `fielding.ts`)도 같이 main에 들어갔다. 16-3 나머지(주루·작전·어깨 `runskills.ts`)와 16-4~는 `feat/ratings-v2`에만 있다.
@@ -21,7 +21,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 전체 시험 (Vitest, 1028개). 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
+npm test           # 전체 시험 (Vitest, 1038개). 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
                    # 환경 맞춤 디스크 캐시(node_modules/.cache/kbo-cal, tools/calCache.ts): 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다
                    # (결과 같음. 혼자 돌린 PC에서 캐시 없음 1019초 → 찬 캐시 438초, 작업자 8개면 약 +30%). 끄기 KBO_CAL_CACHE=0
                    # 작업자 기본 8개 (약 3.8GB, vite.config.ts). KBO_TEST_FORKS=<수>, 0이면 vitest 기본(코어 수 − 1)
@@ -39,6 +39,8 @@ npx tsx tools/longsim.ts --seasons 20 --seeds a,b --out reports/longsim-20.md   
 npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 나이 보정 효과 측정
 npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진행 흐름 진단 (유입·방출·입대·포수, docs/longterm-plan.md)
 npx tsx tools/engine_fingerprint.ts         # 같은 시드 결과 지문 (구조만 바꾸는 수정 확인용)
+npx tsx tools/engine_ab.ts --year 2025 --pairs 50 --pa 200000 --games 2000   # A(공 단위) ↔ B(사슬) 동등성: 매치업 카이제곱·경기 지표 (reports/engine-ab.md)
+npm run validate -- --engine A --years 2025 --seasons 20   # 모든 경기를 A 해결기로 돌린 리그 검증 (reports/validate-engine-a.md)
 npx tsx tools/engine2_baseline.ts --years 2025 --seasons 10   # 투수 운용·투구 수·카운트 칸·P/PA·타구 방향 실제 대조 (하드힛 가공값이 없으면 오류)
 npx tsx tools/running_check.ts --years 2025,2019,2012 --seasons 20   # 주루·작전 점검
 npx tsx tools/manager_check.ts --years 2025,2019,2012 --seasons 10   # 상위 9명 타석·경기당 교체·4칸 OPS
@@ -75,7 +77,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 | `data-src/` | 원자료 엑셀. 출처와 한계는 엑셀의 "안내", "출처", "데이터공백" 시트. `일정규칙.csv`는 연도별 정규시즌 일정 규칙 (경기 수·연전 틀·개막·올스타·쉬는 기간, `python tools/build_data.py --schedule-only` → `public/data/schedule.json`), `외국인_개막명단.csv`는 2026 개막 외국인·아시아쿼터 (나무위키 2026 KBO 리그 계약표, 국적, 시즌 중 이적은 `기록소속` 열, 연봉·계약금 열이 있는 선수(지금 LG 3명)는 시작 계약에 그대로), `제도연표_보정.csv`는 자료집 제도연표를 위키로 확인한 값과 출처, `규칙변경.csv`·`공인구.csv`는 개막 알림 자료(조사값 표시), `pbp_derived/`는 투구 단위(네이버 문자중계 기반 HF 자료, CC BY 4.0) 리그·선수별 가공값, `hardhit/`·`hardhit_derived/`(하드힛 원본·가공값)와 `naver_pbp/`·`batted_ball/` 원본은 커밋하지 않는다, `추가_명단.csv`는 그 해 1군 기록이 자료에 없어도 선수단에 넣을 선수 (기록 0 행으로 더해 능력은 직전 시즌에서. 2026 김광현, 사용자 요청), `baseballchart/`는 1982~2027년 입단 신인 지명 원본 (baseballchart.kr CSV, CC BY-NC-SA 2.0 KR, 고치지 않는다) |
 | `reports/` | 엔진 검증 결과 |
 
-엔진 파일: `rng.ts` 시드 난수 · `ratings.ts` 능력 산출과 월드 구성 · `team.ts` 엔트리·라인업(최적 배정)·로테이션·기용표 · `defense.ts` 포지션별 수비 · `game.ts` 한 경기 · `state.ts` 경기 상태 · `manager.ts` AI 감독(등판·교체, 한계 투구 수) · `subs.ts` 경기 중 교체(대타·대주자·대수비) · `rules.ts` 주루·진루 규칙 · `pa.ts` 타석 결과 · `resolver.ts`·`chain.ts` 볼카운트 사슬 · `plate.ts` 볼카운트 사슬 칸 함수와 사슬 능력(능력치 v2 16-1) · `angle.ts` 타구각 구간·구간별 결과·선수 손잡이(16-2) · `fielding.ts` 수비 판정·v2 등급(16-3) · `park.ts` 구장 배율·옛 해 대리값·펜스 제원 · `battedball.ts` 타구 유형·방향·담당 수비수 · `condition.ts` 선수 컨디션 · `records.ts` 연장·무승부·승률·세이브 규정 · `schedule.ts` 연전 일정 생성 · `weather.ts` 날씨·우천 취소·순연·경기 중 비 · `season.ts` 환경 맞춤·하루 단위 시즌 진행(`Season`)과 저장·복원 · `injury.ts` 부상·이탈 이벤트와 결장 문구 · `display.ts` 20~80 등급 · `params.ts` 조정값.
+엔진 파일: `rng.ts` 시드 난수 · `ratings.ts` 능력 산출과 월드 구성 · `team.ts` 엔트리·라인업(최적 배정)·로테이션·기용표 · `defense.ts` 포지션별 수비 · `game.ts` 한 경기 · `state.ts` 경기 상태 · `manager.ts` AI 감독(등판·교체, 한계 투구 수) · `subs.ts` 경기 중 교체(대타·대주자·대수비) · `rules.ts` 주루·진루 규칙 · `pa.ts` 타석 결과 · `resolver.ts`·`chain.ts` 볼카운트 사슬 · `pitch.ts` A 해결기(공 하나·카운트·공 기호, 구종 칸 자리 `arsenal`, 엔진 2 17단계) · `plate.ts` 볼카운트 사슬 칸 함수와 사슬 능력(능력치 v2 16-1) · `angle.ts` 타구각 구간·구간별 결과·선수 손잡이(16-2) · `fielding.ts` 수비 판정·v2 등급(16-3) · `park.ts` 구장 배율·옛 해 대리값·펜스 제원 · `battedball.ts` 타구 유형·방향·담당 수비수 · `condition.ts` 선수 컨디션 · `records.ts` 연장·무승부·승률·세이브 규정 · `schedule.ts` 연전 일정 생성 · `weather.ts` 날씨·우천 취소·순연·경기 중 비 · `season.ts` 환경 맞춤·하루 단위 시즌 진행(`Season`)과 저장·복원 · `injury.ts` 부상·이탈 이벤트와 결장 문구 · `display.ts` 20~80 등급 · `params.ts` 조정값.
 
 ## 지켜야 할 규칙
 
@@ -109,6 +111,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - AI 판단을 바꾸면 `docs/trade-exploits.md` 시나리오 테스트(`tests/trade.test.ts`)를 돌린다.
 - 저장 후 이어서 돌린 결과, 화면 조회(`refresh`)를 끼운 결과가 끊김 없이 돌린 결과와 같아야 한다 (`tests/game.test.ts`). 엔진 진행 순서를 바꿀 때 이 테스트가 깨지지 않게 한다.
 - 화면 스타일은 `src/ui/base.css`(색·글꼴 토큰, 입력·버튼·표 공통)와 `src/ui/game.css`(게임 화면 부품)에 모은다. 색은 토큰만 쓰고 직접 값을 넣지 않는다. 구단 색은 `.shell`의 `--team` 변수(선수 창·구단 카드는 `--team`·`--c` 인라인 변수)로 내려오고, 라이트·다크는 `prefers-color-scheme`으로 모두 지원한다. 글꼴 Pretendard는 `index.html`에서 CDN으로 받고 없으면 시스템 글꼴로 대신한다.
+- **지휘하는 경기는 A 해결기(공 단위), 나머지는 B(사슬을 계산으로 접음)** (엔진 2 17단계, `GameContext.engine`, 더블헤더는 `GameCommand.covers`로 지휘한 차전만). AI 감독 판단·주루(도루·견제·피치아웃·히트앤드런·폭투)·피로는 두 엔진 모두 타석 경계라 분포가 식으로 같다. 공 사이에는 플레이어 지시만 (`CommandRequest.step` 'pitch'). B 결과를 바꾸는 수정은 `tools/engine_ab.ts`로 동등성을 다시 본다. 지휘 선택은 항목마다 값 없음 = 자동(감독), 값 = 고른 대로 (`CommandChoice`).
 - **난수는 `Rng`만 쓴다.** `Math.random()`, 현재 시각 등 시드로 재현되지 않는 값을 엔진에 넣지 않는다. 같은 시드는 같은 결과를 내야 한다 (테스트로 확인 중).
 - 엔진을 고치면 `npm test`와 `npm run validate -- --years 2025,2019,2012 --seasons 100`으로 리그 평균이 틀어지지 않았는지 확인한다 (병합 준비·PR 전. 카드 중에는 아래 "시험 돌리는 단계"). 기준은 `docs/engine.md` 4장.
 - **시험 돌리는 단계** (2026-10-24 클사장 결정, 시험 속도 카드): 카드 중에는 `npm run test:fast` + 고친 곳과 관련된 무거운 시험 파일(`npx vitest run tests/<파일>`)만, validate는 `--seasons 20`으로 먼저 본다. 전체 `npm test`와 validate 100시즌은 병합 준비·PR 전에 돌린다. 무거운 명령은 `bash C:/Users/ararp/kbo-gm-raw/heavy2.sh <명령>`으로 줄을 세운다 (자리 최대 3개, 하나가 돌고 있으면 남은 메모리가 7GB 이상일 때만 다음 자리. `HEAVY_SLOTS`·`HEAVY_NEED_GB`, 옛 판 `heavy2.sh.bak`).
@@ -150,6 +153,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 선수 컨디션(12단계)은 경기 결과·출전·피로를 보지 않는다. 화면에는 낱말·사유만 (`GameSession.conditionText`). 구단 선택·환경 보정은 '경기력'이라 부른다. 혹사지수는 오프시즌을 넘어 0.25배로 이어진다 (숨김 값).
 - 포지션: 주 포지션 = 직전 3시즌 하드힛 자리별 타석 가중(1·0.7·0.5, 임시값), 수비 가능 = 규정타석 시즌이 있는 자리 + 2시즌 이상 맡은 자리 (2026-10-22).
 - 근거 없는 조정값 (`params.ts`에 "임시값"): 투수 피로, 땅볼 비율, 실책 출루 배분, 부상 확률·기간·부위, 야수 피로, 혹사지수, 주루·번트(`params.run`·`params.bunt`), 선수 컨디션(`params.cond`, 효과 0.04는 사용자 결정 크기), 승리 투수(선발 5이닝 미만) 규칙, 투수 부상 페이스의 팀 경기 수 보정(`injury.ts` `PACE_RAMP_GAMES` 13).
+- A 해결기(17단계): 공 사이 폭투(기획안 3.4 2번)는 하지 않았다 (AI는 타석 단위). 피로는 타석 시작 때 확률표를 끝까지 쓰고 공 사이 투수 교체 때만 새 표. 공 사이 도루 실패로 이닝이 끝나면 그 타석은 없던 일 (`abortPlateAppearance`). 위기 멈춤은 확인 미리보기만 A, 위기가 없으면 그날은 B (B → A 끼어들기는 18단계). 조작 기록에 공마다 빈 선택이 쌓인다 (한 경기 약 300개, 압축은 18단계). 17단계 전 지휘 조작 기록은 물음 번호가 달라 같은 결과로 재현되지 않는다.
 - 경기 중 비: 강우 콜드(5~8회, 기록 남음·동점이면 무승부)와 노게임(1~4회, 기록을 되돌리고 피로·부상만 남김, 개막 때 다시 편성). 온 이닝 끝에서만 멈춘다 (4.5회 홈 앞섬 성립 없음, 임시 단순화). 서스펜디드는 없다 (엔진 2 18단계와 함께).
 
 ### M3 첫 플레이 버전
