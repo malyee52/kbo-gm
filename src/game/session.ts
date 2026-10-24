@@ -131,12 +131,32 @@ interface PendingCommand {
 /** 조작 기록의 지휘 선택을 물음 순서대로 돌려주는 지휘자 (모자라면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
 function replayCommander(team: number, cmds: PendingCommand[]): GameCommand | null {
   if (!cmds.length) return null;
-  return { team, decide: (req) => cmds.find((c) => c.dh === req.dh)?.choices[req.n] ?? {} };
+  return { team, decide: (req) => cmds.find((c) => c.dh === req.dh)?.choices[req.n] ?? {}, covers: (dh) => cmds.some((c) => (c.dh === 2) === (dh === 2)) };
 }
 
 /** 미리보기를 멈추는 신호 (엔진 지휘 함수가 던진다) */
 class CommandPause {
   constructor(readonly req: CommandRequest) {}
+}
+
+/** 미리보기 멈춤 방식: pitch 다음 공(공 사이 물음 포함), next 다음 타석 물음, crisis 위기·승부처까지 자동, inning 이 반 이닝이 끝날 때까지 자동, auto 경기 끝까지 자동 */
+export type PreviewMode = 'pitch' | 'next' | 'crisis' | 'inning' | 'auto';
+
+/**
+ * 미리보기 지휘자의 판단: 고른 선택은 물음 번호대로, 그 뒤 물음은 mode에 따라 멈추거나(CommandPause) 빈 선택(자동)으로 넘긴다.
+ * 공 사이 물음(pitch, A 해결기)에서는 pitch 방식만 멈춘다
+ */
+function previewDecide(choices: CommandChoice[], mode: PreviewMode, out: CommandChoice[]): (req: CommandRequest) => CommandChoice {
+  let half: { inn: number; top: boolean } | null = null;
+  return (req) => {
+    if (req.n < choices.length) return choices[req.n];
+    half ??= { inn: req.inn, top: req.top };
+    const stop = mode === 'pitch' || (req.step !== 'pitch'
+      && (mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top))));
+    if (stop) throw new CommandPause(req);
+    out.push({});
+    return {};
+  };
 }
 
 /** 위기·승부처: 7회 이후, 2점 차 안, 득점권 주자 (StopRules.crisis) */
@@ -509,9 +529,9 @@ export class GameSession {
 
   /**
    * 직접 지휘 미리보기: choices까지 고른 상태로 오늘을 복사본에서 돌려 다음 물음에서 멈춘다. 실제 게임은 그대로다.
-   * mode: next 바로 다음 물음, crisis 위기·승부처까지 자동, inning 이 반 이닝이 끝날 때까지 자동, auto 경기 끝까지 자동
+   * 지휘하는 경기는 A 해결기(공 단위, 엔진 2 17단계)로 치르고 공마다 물음이 있다. mode는 PreviewMode
    */
-  commandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto' = 'next', dh?: 2): CommandPreview {
+  commandPreview(choices: CommandChoice[], mode: PreviewMode = 'next', dh?: 2): CommandPreview {
     if (this.postseasonRunning) return this.postseasonCommandPreview(choices, mode);
     const s = this.scratchSeason();
     const out = choices.map((c) => ({ ...c }));
@@ -520,18 +540,10 @@ export class GameSession {
     const game = s.schedule[s.day].find(isTarget);
     // 더블헤더 날 다른 차전은 조작 기록에 이미 있는 지휘대로 (없으면 자동)
     const other = replayCommander(me, this.pendingCommands.filter((c) => c.day === s.day && c.dh !== dh));
-    let half: { inn: number; top: boolean } | null = null;
+    const decide = previewDecide(choices, mode, out);
     s.commander = {
-      team: me,
-      decide: (req) => {
-        if (req.dh !== dh) return other?.decide(req) ?? {};
-        if (req.n < choices.length) return choices[req.n];
-        half ??= { inn: req.inn, top: req.top };
-        const stop = mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top));
-        if (stop) throw new CommandPause(req);
-        out.push({});
-        return {};
-      },
+      team: me, decide: (req) => (req.dh !== dh ? other?.decide(req) ?? {} : decide(req)),
+      covers: (g) => ((g === 2) === (dh === 2) ? true : other?.covers?.(g) ?? false),
     };
     this.prepareDay(s);
     try {
@@ -560,25 +572,14 @@ export class GameSession {
   }
 
   /** 가을야구 직접 지휘 미리보기: 가을야구 상태와 시즌을 복사해 다음 경기를 돌려 본다 (실제 진행은 그대로) */
-  private postseasonCommandPreview(choices: CommandChoice[], mode: 'next' | 'crisis' | 'inning' | 'auto'): CommandPreview {
+  private postseasonCommandPreview(choices: CommandChoice[], mode: PreviewMode): CommandPreview {
     const s = this.scratchSeason();
     const st: PostseasonState = JSON.parse(JSON.stringify(this.postseason));
     // 같은 날 다른 시리즈 경기가 먼저여도 우리 경기만 돌린다 (구단이 겹치지 않아 순서가 결과에 닿지 않는다)
     const x = this.ourPostseasonSeriesToday(st) ?? currentSeries(st)!;
     const { home, away } = seriesHome(x, x.games.length);
     const out = choices.map((c) => ({ ...c }));
-    let half: { inn: number; top: boolean } | null = null;
-    const commander: GameCommand = {
-      team: this.teamIdx,
-      decide: (req) => {
-        if (req.n < choices.length) return choices[req.n];
-        half ??= { inn: req.inn, top: req.top };
-        const stop = mode === 'next' || (mode === 'crisis' && isCrisis(req)) || (mode === 'inning' && (req.inn !== half.inn || req.top !== half.top));
-        if (stop) throw new CommandPause(req);
-        out.push({});
-        return {};
-      },
-    };
+    const commander: GameCommand = { team: this.teamIdx, decide: previewDecide(choices, mode, out) };
     s.boxTeams.add(this.teamIdx);
     try {
       const g = playNextGame(st, s, commander, x)!;

@@ -20,6 +20,8 @@ export interface PaResolver {
   pitchesPerPa?(K: number, W: number, H: number, len?: number): number;
   /** 리그 평균 상대로 K·W·H인 선수의 기대 투구 수가 target이 되는 길이 손잡이 (난수 없음, D단계 선수별 P/PA). 없으면 1 */
   lengthFor?(K: number, W: number, H: number, target: number): number;
+  /** 확률표의 삼진·볼넷·사구를 끝 확률로 하는 사슬 (A 해결기가 공 하나씩 돌린다, 칸 함수 사슬이 없을 때). 없으면 A를 못 쓴다 */
+  chainFor?(r: PaRates): SolvedChain;
 }
 
 /** 확률표에서 결과 하나를 뽑는다 (난수 한 번). 예전 엔진의 타석 뽑기와 같은 순서·같은 산술 */

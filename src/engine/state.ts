@@ -293,13 +293,14 @@ export class GameState {
   }
 
   /** 중계 기록 한 줄 (ctx.plays가 있을 때만). r0: 플레이 전 공격 팀 점수 */
-  note(kind: PlayKind, who: number, pit: number, r0: number): void {
+  note(kind: PlayKind, who: number, pit: number, r0: number, extra?: Pick<Play, 'seq' | 'np'>): void {
     const plays = this.ctx.plays;
     if (!plays) return;
     const play: Play = {
       inn: this.inning, top: !this.bat.isHome, kind, bat: who, pit, outs: Math.min(3, this.outs),
       bases: this.baseIdx(), away: this.away.runs, home: this.home.runs, runs: this.bat.runs - r0,
       ...(kind === 'E' && this.errFielder >= 0 ? { fielder: this.errFielder } : {}),
+      ...extra,
     };
     plays.push(play);
   }

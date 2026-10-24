@@ -24,6 +24,7 @@ export {
   ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
   INJURY_PARTS, SEVERITY_LABEL, overuseDecay, type Absence, type AbsenceKind, type EventCode, type InjuryCause, type InjuryParams, type InjuryPart, type OveruseParams,
 } from './injury';
+export { applyPitch, arsenalChain, calledShare, drawPitch, newCount, playOut, PITCH_TEXT, type ArsenalPitch, type Count, type Pitch, type PitchCode } from './pitch';
 export { condLine, condWord, condSpread, conditionOf, type CondWord } from './condition';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
 // 숨겨진 특수능력: 화면(src/ui)은 이것을 가져다 쓰면 안 된다 (tests/traits.test.ts가 검사). 도구·테스트·리그 계층용

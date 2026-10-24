@@ -11,6 +11,7 @@ import { currentBody } from './team';
 import { conditionOf } from './condition';
 import { expectedPitches, type SolvedChain } from './chain';
 import { batBallSide, ballMix, clampRate, leagueBall, parkLogits, pitBallSide, thetaOf, type BallMix, type BallSide, type LeagueBall } from './angle';
+import { arsenalChain, calledShare } from './pitch';
 import { addBat, addPit, leaguePlateFor, plateChain, shiftFor, solvedBatPlate, solvedPitPlate, ZERO_BAT, ZERO_PIT, type BatPlate, type LeaguePlate, type PitPlate } from './plate';
 
 /** 지친 야수의 타석 손해 (타자 유리도에서 뺀다, 엔진 2 11단계, 임시값): 피로가 penaltyFrom을 넘은 1당 penaltyPer, 최대 penaltyMax */
@@ -40,6 +41,8 @@ export interface PaRates {
   chain?: SolvedChain;
   /** 이 매치업의 타구각 구간 확률과 구간별 결과 확률 (능력치 v2 16-2, angle.ts). 타구 모형이 결과에 맞는 구간을 여기서 뽑는다 */
   ball?: BallMix;
+  /** 칸마다 스트라이크 가운데 루킹 몫 (A 해결기 중계용, pitch.ts calledShare). A로 치르는 경기만 낸다 */
+  called?: Float64Array;
 }
 
 /**
@@ -206,7 +209,12 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   // (리그 평균 매치업에서 같은 배율이 되는 크기, 기획안 1.9 4·5), 사구는 배율로
   const mK = cal.so * down * (1 - fat);
   const mW = cal.bb * up * worse;
-  const ch = plateChain(pl.lp, batPlateOf(pl, b), pitPlateOf(pl, pg.p), shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]));
+  // 구종(arsenal)이 있으면 칸마다 구종 비율로 섞는다 (엔진 2 17단계는 자리만, 기획안 3.4.1). 없으면 칸 함수 사슬 그대로
+  const bp = batPlateOf(pl, b);
+  const pp = pitPlateOf(pl, pg.p);
+  const sh = shiftFor(pl.lp, mK, mW, hbp / pl.lp.end[2]);
+  const arsenal = pg.p.pit?.arsenal;
+  const ch = arsenal?.length ? arsenalChain(pl.lp, bp, pp, sh, arsenal) : plateChain(pl.lp, bp, pp, sh);
   const X = ch.e[3];
   // 능력치 v2 16-2: 맞힌 공 X 뒤 결과는 타구 갈래(angle.ts)에서. 각도 성향 θ = 타자 + 투수, 퍼짐은 타자 컨택, 구간별 결과 로짓에 양쪽 손잡이를 더한다.
   // 환경 맞춤·좌우·홈·특수능력·컨디션·피로의 예전 배율은 결과 로짓에 로그로 더한다 (환경 맞춤은 시범 시즌으로 다시 맞춰진다)
@@ -219,5 +227,8 @@ export function paRates(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx
   const ball = ballMix(pl.ball!.lb, bside.theta + pside.theta, bside.k, bside.shift, pside.shift, mod);
   if (bs.pull) ball.pull = bs.pull;
   const q = ball.q;
-  return { so: ch.e[0], bb: ch.e[1], hbp: ch.e[2], hr: X * q[4], s1: X * q[1], d2: X * q[2], t3: X * q[3], scale: 1, chain: ch, ball };
+  return {
+    so: ch.e[0], bb: ch.e[1], hbp: ch.e[2], hr: X * q[4], s1: X * q[1], d2: X * q[2], t3: X * q[3], scale: 1, chain: ch, ball,
+    ...(ctx.engine === 'A' ? { called: calledShare(pl.lp, bp, pp, sh, arsenal) } : {}),
+  };
 }

@@ -86,10 +86,9 @@ export function pickPinchRunner(st: GameState): [0 | 1 | 2, SimPlayer] | null {
 /**
  * 수비 반 이닝을 시작할 때 (AI 감독): ① 대타·대주자가 들어왔으면 9명의 수비 위치를 다시 배정 (수비 런 합이 가장 큰 배정),
  * 포수 자리에 포수가 없으면 벤치 포수를 넣는다. ② 7회 이후 리드 중이면 수비 런이 defGain 넘게 나은 벤치 선수로 대수비 (반 이닝에 한 명).
- * 수비 위치는 지금 수비 모델(defense.ts)의 수비 런 안에서만 고른다
+ * 수비 위치는 지금 수비 모델(defense.ts)의 수비 런 안에서만 고른다. late = false면 ②를 하지 않는다 (직접 지휘하는 수비는 물음에서, aiLateDefense)
  */
-export function aiDefense(st: GameState, fld: Side, bat: Side): void {
-  const sp = st.ctx.params.sub;
+export function aiDefense(st: GameState, fld: Side, bat: Side, late = true): void {
   if (fld.realign) {
     fld.realign = false;
     realignSlots(fld);
@@ -101,6 +100,12 @@ export function aiDefense(st: GameState, fld: Side, bat: Side): void {
       if (c) defSub(st, fld, atC, c, 'C');
     }
   }
+  if (late) aiLateDefense(st, fld, bat);
+}
+
+/** AI 감독 대수비 (aiDefense ②): 7회 이후 리드 중이면 수비 런이 defGain 넘게 나은 벤치 선수로 한 명 */
+export function aiLateDefense(st: GameState, fld: Side, bat: Side): void {
+  const sp = st.ctx.params.sub;
   if (st.inning < sp.defInning || fld.runs <= bat.runs) return;
   let best: { out: SimPlayer; in: SimPlayer; slot: Slot; gain: number } | null = null;
   const bench = benchOf(fld);
@@ -116,6 +121,19 @@ export function aiDefense(st: GameState, fld: Side, bat: Side): void {
     }
   }
   if (best) defSub(st, fld, best.out, best.in, best.slot);
+}
+
+/**
+ * 플레이어가 고른 대수비 (엔진 2 17단계): out(라인업, 지명타자 아님) 대신 벤치 야수 in이 그 타순·수비 자리를 받는다.
+ * 포수 자리는 포수를 맡을 수 있는 선수만 (정규 포수가 없으면 비상 포수). 맞지 않으면 아무것도 안 한다
+ */
+export function orderedDefSub(st: GameState, side: Side, out: number, inIdx: number): void {
+  const o = side.lineup.find((p) => p.idx === out);
+  const b = benchOf(side).find((p) => p.idx === inIdx);
+  const slot = o ? side.slots.get(o.idx) : undefined;
+  if (!o || !b || !slot || slot === 'DH') return;
+  if (slot === 'C' && !canCatch(b) && !(emergencyCatcher(b) && !benchOf(side).some(canCatch))) return;
+  defSub(st, side, o, b, slot);
 }
 
 /** 대수비 한 명: 나간 선수의 타순과 자리를 받는다 */

@@ -291,6 +291,8 @@ export interface SeasonInit {
   boxTeams?: number[];
   /** 타석 해결기. 기본은 볼카운트 사슬 B1 (params.chainShape) */
   resolver?: PaResolver;
+  /** 'A'면 모든 경기를 공 단위(A 해결기)로 (A 리그 검증, 엔진 2 17단계). 없으면 직접 지휘하는 경기만 A */
+  engine?: 'A';
   /** 인플레이 타구 집계 (검증 도구용). 저장하지 않는다 */
   balls?: BallTally;
   /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계). 저장하지 않는다 */
@@ -339,6 +341,8 @@ export class Season {
   readonly plays = new Map<number, Play[]>();
   /** 직접 지휘 (경기 개입): 있으면 그 구단 경기에 건다. 저장하지 않는다 (조작 기록이 다시 채운다) */
   commander: GameCommand | null = null;
+  /** 모든 경기를 A 해결기로 (SeasonInit.engine, 검증 도구용) */
+  private readonly engineAll: boolean;
   readonly boxTeams: Set<number>;
   private dayRng: Rng;
   /** 정규시즌 경기 난수의 뿌리. 경기마다 여기서 따로 줄기를 갈라 쓴다 (gameRng) */
@@ -388,6 +392,7 @@ export class Season {
     this.teams = world.teams.map(emptyTeamRecord);
     this.totals = emptyLeagueCounters();
     this.boxTeams = new Set(init.boxTeams ?? []);
+    this.engineAll = init.engine === 'A';
     this.teamSeasons = world.teams.map((team) => ({
       team, hitters: [], rotation: [], bullpen: [], closer: null, nextReturnDay: 0, dirty: true, manual: null, callUps: [],
     }));
@@ -664,7 +669,9 @@ export class Season {
       // 경기 전 실책 수 (박스스코어 E): 이 경기에 나올 수 있는 선수 전부
       const errBefore = wantBox ? new Map([...batBefore!.keys(), ...pitBefore!.keys()].map((i) => [i, this.errors[i]])) : null;
       ctx.plays = wantBox ? [] : null;
-      ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) ? this.commander : null;
+      ctx.command = this.commander && (g.home === this.commander.team || g.away === this.commander.team) && (this.commander.covers?.(g.dh) ?? true) ? this.commander : null;
+      // 직접 지휘하는 경기는 A 해결기 (공 단위, 엔진 2 17단계). 경기마다 난수 줄기가 따로라 다른 경기 결과는 그대로다
+      ctx.engine = ctx.command || this.engineAll ? 'A' : undefined;
       ctx.rng = this.gameRng(day, g);
       ctx.injuries = [];
       ctx.maxInnings = this.maxInningsOn(day, g.dh !== undefined);
@@ -674,6 +681,7 @@ export class Season {
       const plays = ctx.plays;
       ctx.plays = null;
       ctx.command = null;
+      ctx.engine = undefined;
       ctx.dh = undefined;
       ctx.rainInning = undefined;
       // 경기 중 부상 (엔진 2 11단계): 다음 날부터 결장. 구단 의료 투자의 기간 배율은 경기 전 부상과 같다
@@ -836,7 +844,8 @@ export class Season {
     // 시간 제한 흉내는 timeLimitPostseason에 있는 해만 (정규시즌과 같은 값, 경기 난수의 'time' 줄기)
     const year = this.world.year;
     const timeLimit = params.timeLimitPostseason?.includes(year) ? params.timeLimit?.[year] : undefined;
-    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit, plays, command: cmd, injuries: undefined };
+    const ctx: GameContext = { ...this.ctx, params, day, rng, maxInnings, bat: rec.bat, pit: rec.pit, totals: rec.totals, postseason: true, timeLimit, plays, command: cmd, injuries: undefined,
+      engine: cmd || this.engineAll ? 'A' : undefined };
     const h = this.teamSeasons[home];
     const a = this.teamSeasons[away];
     h.away = false;

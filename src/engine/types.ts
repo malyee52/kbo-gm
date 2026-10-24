@@ -1,6 +1,7 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense, FieldPos } from './defense';
 import type { BatPlate, PitPlate } from './plate';
+import type { ArsenalPitch } from './pitch';
 import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
@@ -70,6 +71,8 @@ export interface PitSkill {
   plateRes?: PitPlate;
   /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
   platoon?: number;
+  /** 구종 (엔진 2 17단계는 자리만, 20-1단계에서 채운다. pitch.ts ArsenalPitch). 없으면 지금 능력이 "평균 구종" 하나 */
+  arsenal?: ArsenalPitch[];
 }
 
 export interface SimPlayer {
