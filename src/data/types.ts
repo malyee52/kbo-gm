@@ -347,6 +347,8 @@ export interface DefenseData {
   to: number;
   players: Record<string, Record<string, DefenseYear>>;
   rep: Record<string, [string, number, number | null, number | null][]>;
+  /** 평판 글의 어깨 낱말: 선수 ID → [1 좋음 / −1 나쁨, 시기 시작, 시기 끝] (능력치 v2 12.6, 16-3b 자료 단계. 엔진은 아직 안 씀). 예전 파일에는 없다 */
+  arm?: Record<string, [number, number | null, number | null][]>;
 }
 
 /** 한 선수의 한 해 수비 (여러 구단을 거쳤으면 합친 값) */

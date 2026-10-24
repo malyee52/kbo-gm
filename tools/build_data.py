@@ -484,15 +484,19 @@ def build_defense(out_dir):
             if not yr['p']:
                 del yr['p']
     rep = defaultdict(list)
+    arm = defaultdict(list)
     for r in read_src_csv(src / '수비평판.csv'):
         rep[r['선수ID']].append([r['자리'], int(r['수준']), num(r['시기_시작']), num(r['시기_끝'])])
+        if int(r.get('어깨') or 0):
+            arm[r['선수ID']].append([int(r['어깨']), num(r['시기_시작']), num(r['시기_끝'])])
     (out_dir / 'defense.json').write_text(json.dumps({
         'version': 1,
         'source': 'data-src/수비이닝.csv (KBO 공식 사이트 수비 기록, 사용자 수집, 가공) · 수비평판.csv (나무위키·위키백과 서술 요약, 등급·시기만)',
         'fields': ['g', 'gs', 'outs', 'e', 'po', 'a', 'dp', 'sb', 'cs', 'pb'], 'from': first, 'to': last,
         'note': 'players: 선수 ID → 연도 → {p: 자리 → fields 순 값 (outs = 이닝 × 3), pa: 타석, nd: 수비 없는 타석 근사}. '
-                'rep: 선수 ID → [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산)',
-        'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)},
+                'rep: 선수 ID → [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산). '
+                'arm: 선수 ID → [어깨 1 좋음 / −1 나쁨, 시기 시작, 시기 끝] (평판 글의 어깨 낱말, 능력치 v2 12.6. 아직 엔진에 쓰지 않음)',
+        'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)}, 'arm': {k: arm[k] for k in sorted(arm)},
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'수비 이닝 {len(rows):,}행 → 선수 {len(players):,}명 ({first}~{last}), 평판 {sum(len(v) for v in rep.values()):,}행 ({len(rep):,}명) → {out_dir / "defense.json"}')
 
