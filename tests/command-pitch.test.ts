@@ -44,11 +44,14 @@ describe('공 사이 지휘 (A 해결기)', () => {
     let changed: { pit: number; count: [number, number] } | null = null;
     let stole: number | null = null;
     let counted = 0;
+    // 타석 첫 공 물음: [그때까지 중계 수, 물음의 타자]
+    const firstPitch: [number, number][] = [];
     const pv = play(g, 'pitch', (r) => {
       // 수비 타석 물음에는 라인업 순서대로 수비 자리 (대수비 화면)
       if (r.step === 'field') expect(r.fieldSlots?.length).toBe(r.lineup.length);
       if (r.step !== 'pitch') return {};
       expect(r.count).toBeDefined();
+      if (!r.seq) firstPitch.push([r.plays.length, r.batter]);
       // 화면의 공 목록 카운트(game/highlights.ts)가 엔진 카운트와 같다
       if (r.seq) {
         expect(pitchCounts(r.seq).at(-1)!.after).toEqual(r.count);
@@ -67,6 +70,15 @@ describe('공 사이 지휘 (A 해결기)', () => {
     });
     expect(changed).not.toBeNull();
     expect(counted).toBeGreaterThan(50);
+    // 공 사이 물음의 타자 = 그 타석을 끝낸 타자 (도루 실패로 타석이 없던 일이 된 때는 빼고)
+    let checked = 0;
+    for (const [at, batter] of firstPitch) {
+      const k = pv.plays.findIndex((p, i) => i >= at && (p.seq !== undefined || p.kind === 'CS' || p.kind === 'PO'));
+      if (k < 0 || pv.plays[k].seq === undefined) continue;
+      expect(pv.plays[k].bat).toBe(batter);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(30);
     // 최근 장면 문구: A로 끝낸 타석마다 "N구, B-S에서 …"
     const paPlays = pv.plays.filter((p) => p.seq);
     expect(paPlays.length).toBeGreaterThan(50);

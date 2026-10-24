@@ -374,9 +374,11 @@ function restoreRecords(ctx: GameContext, s: RecordSnapshot): void {
 function ask(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'] = side, cnt?: Count): CommandChoice {
   const { bat, fld, ctx } = st;
   const plays = ctx.plays;
+  // 공 사이 물음은 타석을 시작한 뒤라 타순이 이미 다음 타자로 넘어가 있다 (beginPlateAppearance)
+  const spot = step === 'pitch' ? (bat.spot + 8) % 9 : bat.spot;
   return ctx.command!.decide({
     n: st.cmdN++, side, step, inn: st.inning, top: !bat.isHome, outs: st.outs, bases: st.baseIdx(),
-    away: st.away.runs, home: st.home.runs, batter: bat.lineup[bat.spot].idx, onDeck: bat.lineup[(bat.spot + 1) % 9].idx,
+    away: st.away.runs, home: st.home.runs, batter: bat.lineup[spot].idx, onDeck: bat.lineup[(spot + 1) % 9].idx,
     pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs, pitcherPitches: fld.pitcher.pitches,
     ...(cnt ? { count: [cnt.b, cnt.s] as [number, number], seq: cnt.seq } : {}),
     lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
