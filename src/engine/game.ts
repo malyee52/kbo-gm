@@ -754,6 +754,7 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
           }
           return done(Ev.BB, { intentional: true, rates: null });
         }
+        aim = c.pitch && (c.pitch.type || c.pitch.zone) ? c.pitch : undefined;
       } else {
         runnerSub(st, c.pr ?? undefined);
         if (c.steal === 'go') {
@@ -782,7 +783,6 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
           }
           continue;
         }
-        aim = c.pitch && (c.pitch.type || c.pitch.zone) ? c.pitch : undefined;
       }
     }
     const cell = cnt.b * 3 + cnt.s;

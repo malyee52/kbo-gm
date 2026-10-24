@@ -180,7 +180,11 @@ describe('20-3·20-4 구종·코스 지시', () => {
     expect(a.season.log).toEqual(b.season.log);
     const plays = a.ourGames().at(-1)!.plays!;
     expect(plays).toEqual(b.ourGames().at(-1)!.plays);
-    expect(plays.some((p) => p.pz?.includes('out_low'))).toBe(true);
+    // 우리 투수의 공은 모두 지시한 코스 (고의4구·히트앤드런 공은 빈 낱말), 지시한 구종은 그 투수 구종 안에서
+    const ours = plays.filter((p) => p.pz && a.season.world.players[p.pit].teamIdx === lg);
+    expect(ours.length).toBeGreaterThan(10);
+    for (const p of ours) for (const z of p.pz!) expect(['out_low', 'chase', '']).toContain(z);
+    expect(plays.filter((p) => p.pz && a.season.world.players[p.pit].teamIdx !== lg).some((p) => p.pz!.some((z) => z !== 'out_low' && z !== 'chase'))).toBe(true);
     const rep = GameSession.replay(store, a.reproInfo().opts, a.actions, { year: 2026, day: a.day }, fast);
     expect(rep.season.log).toEqual(a.season.log);
     expect(rep.ourGames().at(-1)!.plays).toEqual(plays);

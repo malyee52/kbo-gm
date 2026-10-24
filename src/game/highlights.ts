@@ -52,11 +52,12 @@ export function pitchList(seq: string): string[] {
   return pitchCounts(seq).map((x, i) => `${i + 1}구 ${PITCH_TEXT[x.code]} (${x.after[0]}-${x.after[1]})`);
 }
 
-/** 타석 끝 공: "6구, 2-2에서 헛스윙" (A 해결기로 끝낸 타석만, 없으면 null) */
+/** 타석 끝 공: "6구, 2-2에서 슬라이더 헛스윙" (A 해결기로 끝낸 타석만, 없으면 null. 구종은 엔진 2 20단계, 없으면 뺀다) */
 export function pitchNote(p: Play): string | null {
   if (!p.seq) return null;
   const last = pitchCounts(p.seq).at(-1)!;
-  return `${p.seq.length}구, ${last.before[0]}-${last.before[1]}에서 ${PITCH_TEXT[last.code]}`;
+  const type = p.pt?.[p.seq.length - 1];
+  return `${p.seq.length}구, ${last.before[0]}-${last.before[1]}에서 ${type ? `${type} ` : ''}${PITCH_TEXT[last.code]}`;
 }
 
 export const inningLabel = (p: Pick<Play, 'inn' | 'top'>) => `${p.inn}회${p.top ? '초' : '말'}`;

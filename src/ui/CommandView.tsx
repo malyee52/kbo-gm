@@ -9,7 +9,7 @@
 // "자동으로 끝내기"(AI 감독이 공 단위로 계속 = 결정 5 기본 / 빠르게 끝내기 = 지금 물음부터 B로 계산)로 끝낸다.
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { CommandChoice, CommandRequest, Play } from '../engine';
-import { BUNT_SUCCESS, DEFAULT_PARAMS, PITCH_TEXT, shownPitchLimit } from '../engine';
+import { BUNT_SUCCESS, DEFAULT_PARAMS, PITCH_TEXT, PITCH_ZONES, shownPitchLimit, ZONE_TEXT, type PitchZone } from '../engine';
 import { lastOutings, outingText } from '../game/boxscore';
 import { formatDate } from '../game/calendar';
 import { inningLabel, isHit, lineScoreUpTo, pitchCounts, pitchNote, playText } from '../game/highlights';
@@ -51,6 +51,20 @@ const AT_BAT = new Set(['SO', 'HR', '3B', '2B', '1B', 'E', 'GDP', 'GO', 'FO', 'B
 const PA_KINDS = new Set([...AT_BAT, 'BB', 'HBP', 'IBB', 'SF', 'SAC']);
 const BASES_TEXT = ['', '1루', '2루', '1·2루', '3루', '1·3루', '2·3루', '만루'];
 /** 주자 모양 "1·3루" (없으면 '주자 없음') */
+/** 중계 한 공의 구종·코스 앞말 ("슬라이더 · 바깥쪽 낮게 "), 없으면 빈 낱말 (엔진 2 20단계) */
+function pitchKind(pt: readonly string[] | undefined, pz: readonly string[] | undefined, j: number): string {
+  const t = pt?.[j];
+  if (!t) return '';
+  const z = pz?.[j] as PitchZone | '' | undefined;
+  return `${t}${z ? ` · ${ZONE_TEXT[z]}` : ''} `;
+}
+
+/** 구종 비율 (구종 칸 옆, 5% 밑은 "가끔") */
+function shareText(share: number, all: readonly { share: number }[]): string {
+  const pct = (share / all.reduce((s, a) => s + a.share, 0)) * 100;
+  return pct < 5 ? '가끔' : `${Math.round(pct)}%`;
+}
+
 export function basesText(bases: readonly number[]): string {
   const k = (bases[0] >= 0 ? 1 : 0) + (bases[1] >= 0 ? 2 : 0) + (bases[2] >= 0 ? 4 : 0);
   return k ? BASES_TEXT[k] : '주자 없음';
@@ -73,6 +87,9 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   const [walk, setWalk] = useState<Tri>('');
   const [infield, setInfield] = useState<'' | 'in' | 'back'>('');
   const [pitchout, setPitchout] = useState<Tri>('');
+  // 구종·코스 지시 (공 사이 수비, 엔진 2 20-3단계): '' = AI 포수
+  const [ptype, setPtype] = useState('');
+  const [pzone, setPzone] = useState<'' | PitchZone>('');
   // 대수비: '' 자동(감독), 'none' 그대로, 숫자 = 나갈 선수 (defIn = 들어갈 선수)
   const [defOut, setDefOut] = useState('');
   const [defIn, setDefIn] = useState('');
@@ -97,7 +114,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
   // 물음이 바뀌면 고르던 것을 비운다
   useEffect(() => {
     setTactic(''); setSteal(''); setPh(''); setPrNone(false); setPr(['', '', '']); setPitcher(''); setWalk('');
-    setInfield(''); setPitchout(''); setDefOut(''); setDefIn(''); setOpen('');
+    setInfield(''); setPitchout(''); setDefOut(''); setDefIn(''); setOpen(''); setPtype(''); setPzone('');
   }, [pv.req?.n]);
   // 공을 이어서 굴린다: 공 사이 물음은 빈 선택(자동)으로 넘기고, 다음 타석(pa)은 타석 사이 물음에서, 지켜보기(watch)는 위기·승부처 타석에서 멈춘다.
   // 타석이 끝나면 한 번 더 쉰다 (기획안 2.2.2 속도). 멈췄다가 아무것도 고르지 않고 이어 가도 결과가 같다 (엔진 2 3.4)
@@ -179,6 +196,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
       if (pitcher === 'keep') c.keep = true;
       else if (pitcher) c.pitcher = Number(pitcher);
       if (tri(walk) !== undefined) c.walk = tri(walk);
+      if (pitch && (ptype || pzone)) c.pitch = { ...(ptype ? { type: ptype } : {}), ...(pzone ? { zone: pzone } : {}) };
       if (!pitch) {
         if (infield) c.infield = infield;
         if (tri(pitchout) !== undefined) c.pitchout = tri(pitchout);
@@ -201,6 +219,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     if (c.infield) t.push(c.infield === 'in' ? '전진 수비' : '정상 수비');
     if (c.pitchout !== undefined) t.push(c.pitchout ? '피치아웃' : '피치아웃 안 함');
     if (c.def !== undefined) t.push(c.def ? `대수비 ${name(c.def.in)} (${name(c.def.out)} 대신)` : '대수비 없음');
+    if (c.pitch) t.push([c.pitch.type, c.pitch.zone && ZONE_TEXT[c.pitch.zone]].filter(Boolean).join(' ') + ' 지시');
     return t.join(' · ');
   };
   /** 지금 물음에 고른 것을 넣고 mode대로 (고른 작전은 중계 줄에 남긴다). 한 걸음은 그날 경기를 처음부터 다시 돌려 10ms 안팎이다 */
@@ -343,6 +362,13 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
             {cands('pitcher', '투수 바꾸기', pitcher && pitcher !== 'keep' ? name(Number(pitcher)) : '', req.bullpen.map(pitCols), ['손', '평균자책', '지난 등판'], (i) => setPitcher(String(i)))}
             {pitcher && <p className="small">지금 카운트({count[0]}-{count[1]})부터 {name(Number(pitcher))}이(가) 던집니다. <button type="button" className="link" onClick={() => setPitcher('')}>취소</button></p>}
             {seg('고의4구', walk, setWalk, [['', '자동'], ['yes', `${name(req.batter)} 내보내기`]])}
+            {req.arsenal && req.arsenal.length > 0 && !walk && (
+              <>
+                {seg('구종', ptype, setPtype, [['', 'AI 포수'], ...req.arsenal.map((a): [string, string] => [a.type, `${a.type} ${shareText(a.share, req.arsenal!)}`])])}
+                {seg('코스', pzone, setPzone, [['', 'AI 포수'], ...PITCH_ZONES.map((z): [PitchZone, string] => [z, ZONE_TEXT[z]])],
+                  '이 공 하나만 지시합니다. 같은 구종·코스만 계속 고르면 타자가 노려 칩니다.')}
+              </>
+            )}
           </>
         )
       ) : ourBat ? (
@@ -386,7 +412,6 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
           )}
         </>
       )}
-      <p className="muted small">구종·코스 지시는 나중 단계입니다.</p>
     </section>
   );
 
@@ -401,7 +426,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     noteAt(k);
     if (pl.seq && detail) {
       pitchCounts(pl.seq).forEach((x, j) => feed.push(
-        <li key={`${k}-${j}`} className="cmd-pitch"><span>{j + 1}구 {PITCH_TEXT[x.code]}</span><span className="num muted">B{x.after[0]} S{x.after[1]}</span></li>,
+        <li key={`${k}-${j}`} className="cmd-pitch"><span>{j + 1}구 {pitchKind(pl.pt, pl.pz, j)}{PITCH_TEXT[x.code]}</span><span className="num muted">B{x.after[0]} S{x.after[1]}</span></li>,
       ));
     }
     const note = pitchNote(pl);
@@ -417,7 +442,7 @@ export function CommandView({ start, onDone, onCancel }: { start: CommandPreview
     noteAt(plays.length);
     if (req.seq) {
       pitchCounts(req.seq).forEach((x, j) => feed.push(
-        <li key={`now-${j}`} className="cmd-pitch now"><span>{j + 1}구 {PITCH_TEXT[x.code]}</span><span className="num muted">B{x.after[0]} S{x.after[1]}</span></li>,
+        <li key={`now-${j}`} className="cmd-pitch now"><span>{j + 1}구 {pitchKind(req.pt, req.pz, j)}{PITCH_TEXT[x.code]}</span><span className="num muted">B{x.after[0]} S{x.after[1]}</span></li>,
       ));
     }
     feed.push(<li key="who" className="cmd-now muted small">타석 {name(req.batter)} · 투수 {name(req.pitcher)}</li>);
