@@ -94,9 +94,12 @@ describe('직접 지휘', () => {
     expect(stopped).toBe(true);
     const day = g.day;
     expect(isCrisis(g.crisis!.req!)).toBe(true);
-    const pv = g.commandPreview(g.crisis!.choices, 'auto');
-    g.commitCommand(pv.choices);
+    // 위기에서 끼어든 경기는 진행 중인 지휘 경기가 된다 (엔진 2 18단계, B → A)
+    expect(g.pendingGame).toMatchObject({ day, at: 0, from: g.crisis!.from });
+    g.commandStep({}, 'auto');
+    g.commandFinish('A');
     expect(g.day).toBe(day + 1);
     expect(g.crisis).toBeNull();
+    expect(g.pendingGame).toBeNull();
   }, 240_000);
 });

@@ -9,7 +9,7 @@ import { Ev, paRates, type GamePark, type PaRates } from './pa';
 import { gameParkOf } from './park';
 import type { EngineParams } from './params';
 import { B0, drawInPlay, type PaResolver } from './resolver';
-import { End, type SolvedChain } from './chain';
+import { End, foldFrom, type SolvedChain } from './chain';
 import { applyPitch, drawPitch, newCount, type Count } from './pitch';
 import type { Situation } from './traits';
 import type { Rng } from './rng';
@@ -150,6 +150,22 @@ export interface GameCommand {
    * 더블헤더 날 한 차전만 지휘하면 다른 차전은 지휘하지 않은 경기(B)와 같다
    */
   covers?: (dh?: 1 | 2) => boolean;
+  /** 그 경기(더블헤더 차전)의 지휘 방식 (엔진 2 18단계). 없거나 undefined면 처음부터 끝까지 지휘한다 (A) */
+  mode?: (dh?: 1 | 2) => CommandMode | undefined;
+}
+
+/** 한 경기 지휘 방식 (엔진 2 18단계, docs/경기엔진2_기획안.md 3.8) */
+export interface CommandMode {
+  /**
+   * B → A 끼어들기 (위기 멈춤, 기획안 7장 결정 6): 지휘 없이(B, 지휘하지 않은 경기와 똑같이) 시작해 우리 경기의 타석 경계마다 묻고,
+   * true인 경계부터 지휘한다 (A, 난수는 경기 줄기의 a@k). k는 타석 경계 번호 (0부터), req.n은 0. 묻기만 하고 난수·상태를 건드리지 않는다
+   */
+  takeover?: (req: CommandRequest, k: number) => boolean;
+  /**
+   * A → B 넘기기 ("빠르게 끝내기", 결정 5): 이 물음 번호부터 묻지 않고 남은 경기를 B로 (난수는 경기 줄기의 b@번호).
+   * 공 사이 물음이면 그 카운트에서 남은 타석을 접는다 (chain.ts foldFrom)
+   */
+  handoff?: number;
 }
 
 /** 지휘자에게 묻는 순간 (우리 공격 또는 우리 수비의 타석 직전) */
@@ -297,6 +313,14 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   const park: GamePark = gameParkOf(homeTs.team.park, ctx.params.park);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
   const st = new GameState(ctx, home, away, park);
+  // 지휘 방식 (엔진 2 18단계): 끼어들기면 지휘 없이 B로 시작하고, 넘기기 물음 번호를 잡아 둔다
+  const mode = ctx.command?.mode?.(ctx.dh);
+  if (mode?.takeover) {
+    st.cmdWatch = { cmd: ctx.command!, takeover: mode.takeover, k: 0 };
+    ctx.command = null;
+    ctx.engine = undefined;
+  }
+  st.cmdHandoff = mode?.handoff ?? -1;
 
   let inning = 0;
   const lineScore = { away: [] as number[], home: [] as number[] };
@@ -370,14 +394,44 @@ function restoreRecords(ctx: GameContext, s: RecordSnapshot): void {
   for (const k of TALLIES) if (ctx[k] && s.tallies[k]) restoreInto(ctx[k]!, s.tallies[k]!);
 }
 
-/** 직접 지휘자에게 묻는다 */
+/**
+ * 직접 지휘자에게 묻는다. 지휘하지 않는 동안(끼어들기 전, 넘긴 뒤)은 빈 선택(자동).
+ * 넘기기 물음 번호(CommandMode.handoff)에 오면 묻지 않고 지휘를 그만둔다: 남은 경기는 B, 난수는 경기 줄기의 b@번호
+ */
 function ask(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'] = side, cnt?: Count): CommandChoice {
+  const { ctx } = st;
+  const cmd = ctx.command;
+  if (!cmd) return {};
+  if (st.cmdN === st.cmdHandoff) {
+    ctx.command = null;
+    ctx.engine = undefined;
+    ctx.rng = ctx.rng.fork(`b@${st.cmdN}`);
+    return {};
+  }
+  return cmd.decide(commandRequest(st, side, step, st.cmdN++, cnt));
+}
+
+/** 끼어들기 (CommandMode.takeover): 우리 경기의 타석 경계마다 묻고, 그러자고 하면 그 자리부터 지휘한다 (A, 난수는 경기 줄기의 a@k) */
+function checkTakeover(st: GameState): void {
+  const w = st.cmdWatch!;
+  const { ctx } = st;
+  const side = st.bat.ts.team.idx === w.cmd.team ? 'bat' : 'field';
+  const k = w.k++;
+  if (!w.takeover(commandRequest(st, side, side, st.cmdN), k)) return;
+  st.cmdWatch = null;
+  ctx.command = w.cmd;
+  ctx.engine = 'A';
+  ctx.rng = ctx.rng.fork(`a@${k}`);
+}
+
+/** 지휘자에게 보이는 지금 상황 (난수·상태를 건드리지 않는다) */
+function commandRequest(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'], n: number, cnt?: Count): CommandRequest {
   const { bat, fld, ctx } = st;
   const plays = ctx.plays;
   // 공 사이 물음은 타석을 시작한 뒤라 타순이 이미 다음 타자로 넘어가 있다 (beginPlateAppearance)
   const spot = step === 'pitch' ? (bat.spot + 8) % 9 : bat.spot;
-  return ctx.command!.decide({
-    n: st.cmdN++, side, step, inn: st.inning, top: !bat.isHome, outs: st.outs, bases: st.baseIdx(),
+  return {
+    n, side, step, inn: st.inning, top: !bat.isHome, outs: st.outs, bases: st.baseIdx(),
     away: st.away.runs, home: st.home.runs, batter: bat.lineup[spot].idx, onDeck: bat.lineup[(spot + 1) % 9].idx,
     pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs, pitcherPitches: fld.pitcher.pitches,
     ...(cnt ? { count: [cnt.b, cnt.s] as [number, number], seq: cnt.seq } : {}),
@@ -388,7 +442,7 @@ function ask(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'] 
       fieldSlots: fld.lineup.map((p) => fld.slots.get(p.idx) ?? 'DH') } : {}),
     plays: plays ? plays.slice() : [],
     ...(ctx.dh === 2 ? { dh: 2 as const } : {}),
-  });
+  };
 }
 
 /** 공격 반 이닝. 끝내기면 true */
@@ -400,13 +454,15 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
     ctx.pen.lateLead[Math.max(-4, Math.min(4, fld.runs - bat.runs)) + 4]++;
   }
   const resolver = ctx.resolver ?? B0;
-  const cmd = ctx.command;
   // AI 감독 수비 교체 (엔진 2 9단계): 대타·대주자 뒤 수비 위치 다시 정하기, 후반 리드 때 대수비.
   // 지휘하는 수비의 대수비는 반 이닝 첫 물음에서 (그 항목이 자동일 때만)
-  aiDefense(st, fld, bat, !(cmd && fld.ts.team.idx === cmd.team));
+  aiDefense(st, fld, bat, !(ctx.command && fld.ts.team.idx === ctx.command.team));
   let first = true;
 
   while (st.outs < 3) {
+    // 끼어들기·넘기기 (엔진 2 18단계)로 지휘 여부가 경기 중에 바뀐다
+    if (st.cmdWatch) checkTakeover(st);
+    const cmd = ctx.command;
     // 직접 지휘 (엔진 2 17단계 정리): 물음의 항목마다 '자동'(값 없음)이면 AI 감독이, 고르면 고른 대로 한다 (CommandChoice).
     // 우리 수비면 투수 교체·유지, 고의4구, 전진 수비, 피치아웃, 대수비
     const fcAsk = !!cmd && fld.ts.team.idx === cmd.team;
@@ -529,7 +585,7 @@ function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean 
         if (out === 'end') break;
         if (out === 'walkoff') return true;
         ({ ev, pg: mound, rates, intentional, going: runnerGoing } = out);
-        extra = { seq: out.seq, np: mound.pitches };
+        if (!out.folded) extra = { seq: out.seq, np: mound.pitches };
       } else {
         const res = resolver.resolve(rates, ctx.rng);
         ev = res.ev;
@@ -616,6 +672,8 @@ interface PitchOutcome {
   /** 히트앤드런으로 1루 주자가 뛰었다 */
   going: boolean;
   seq: string;
+  /** 타석 중간에 B로 넘겨 남은 공을 계산으로 접었다 (공 기호가 모자라 중계에 남기지 않는다) */
+  folded?: true;
 }
 
 /**
@@ -638,6 +696,12 @@ function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: Pitcher
     if (asks) {
       const side = bat.ts.team.idx === cmd!.team ? 'bat' : 'field';
       const c = ask(st, side, 'pitch', cnt);
+      if (ctx.engine !== 'A') {
+        // A → B 넘기기 (엔진 2 18단계): 지금 카운트에서 남은 타석을 계산으로 접는다
+        const { end, pitches } = foldFrom(chain, cnt.b, cnt.s, ctx.rng);
+        addPitches(ctx, pg, pitches);
+        return done(end === End.K ? Ev.SO : end === End.W ? Ev.BB : end === End.H ? Ev.HBP : drawInPlay(rates, ctx.rng), { folded: true });
+      }
       if (side === 'field') {
         const next = c.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === c.pitcher) : undefined;
         if (next) {

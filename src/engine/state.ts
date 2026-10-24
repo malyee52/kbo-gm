@@ -1,7 +1,7 @@
 // 경기 상태 (두 해결기 공통): 이닝·아웃·주자와 책임 투수·점수·타순·수비 배치·마운드 투수·교체로 빠진 선수·승패 후보.
 // 점수·아웃·중계 기록을 남기는 기본 동작도 여기에 둔다 (docs/경기엔진2_기획안.md 3.2).
 
-import type { GameContext, Play, PlayKind } from './game';
+import type { CommandMode, GameCommand, GameContext, Play, PlayKind } from './game';
 import { defenseAt } from './defense';
 import { CATCHER_ARM_FLOOR } from './fielding';
 import { tallyBlown } from './manager';
@@ -205,6 +205,10 @@ export class GameState {
   infieldIn = false;
   /** 직접 지휘 물음 번호 */
   cmdN = 0;
+  /** 끼어들기를 기다리는 지휘 (엔진 2 18단계, CommandMode.takeover): 있으면 지휘 없이 진행하며 타석 경계마다 묻는다. k = 다음 타석 경계 번호 */
+  cmdWatch: { cmd: GameCommand; takeover: NonNullable<CommandMode['takeover']>; k: number } | null = null;
+  /** A → B 넘기기 물음 번호 (CommandMode.handoff, 없으면 −1) */
+  cmdHandoff = -1;
   /** 이번 타석 인플레이 타구를 맡은 수비 자리 (없으면 null). 경기 중 수비 부상에 쓴다 (엔진 2 11단계) */
   ballSlot: Slot | 'P' | null = null;
 

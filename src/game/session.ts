@@ -33,7 +33,7 @@ import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
-import { isNoGame, type BoxScore, type CommandChoice, type CommandRequest, type Fence, type KnownSchedule, type Play, type PlanCancel } from '../engine';
+import { isNoGame, type BoxScore, type CommandChoice, type CommandMode, type CommandRequest, type Fence, type KnownSchedule, type Play, type PlanCancel } from '../engine';
 import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
@@ -119,19 +119,73 @@ export interface CommandPreview {
   dh?: 2;
   /** 비로 멈춘 경기 (일정 개편 10단계): 몇 회를 마치고 강우 콜드·노게임이 됐는지 */
   rain?: { kind: 'cold' | 'nogame'; inning: number };
+  /** 위기에서 끼어든 경기: 몇 번째 타석 경계부터 지휘했나 (CommandCtl.from) */
+  from?: number;
+  /** B로 넘긴 물음 번호 (CommandCtl.handoff) */
+  handoff?: number;
+}
+
+/** 지휘 선택 하나 [물음 번호, 선택] (엔진 2 18단계 압축: 빈 선택(자동)은 적지 않는다) */
+export type CommandPick = [number, CommandChoice];
+
+/** 지휘 방식 (엔진 2 18단계, engine CommandMode): from 위기에서 끼어든 타석 경계 번호 (B → A), handoff B로 넘긴 물음 번호 (A → B) */
+export interface CommandCtl {
+  from?: number;
+  handoff?: number;
+}
+
+/**
+ * 진행 중인 지휘 경기 (엔진 2 18단계, 세션 저장 pendingGame, docs/경기엔진2_기획안.md 3.7.3). 경기 상태는 담지 않는다:
+ * 불러오면 경기 처음부터 A를 고른 선택으로 다시 돌려 at번 물음에서 멈춘다 (결정적). 한 번 진행한 공은 되돌리지 않는다 (7장 결정 4)
+ */
+export interface PendingGame extends CommandCtl {
+  year: number;
+  /** 그날 (가을야구면 그 경기 날, currentDay) */
+  day: number;
+  dh?: 2;
+  picks: CommandPick[];
+  /** 지금 멈춰 있는 물음 번호 (= 지금까지 물은 수) */
+  at: number;
+  /** 경기가 끝났다 (확정만 남음) */
+  over?: true;
+}
+
+/** 물음 순서대로인 선택 목록을 [물음 번호, 선택] 짝으로 (빈 선택은 뺀다) */
+export function packChoices(choices: readonly CommandChoice[]): CommandPick[] {
+  const out: CommandPick[] = [];
+  choices.forEach((c, n) => { if (Object.keys(c).length) out.push([n, { ...c }]); });
+  return out;
+}
+
+/** [물음 번호, 선택] 짝을 물음 순서대로인 목록으로 (len개, 없는 물음은 빈 선택) */
+export function unpackChoices(picks: readonly CommandPick[], len: number): CommandChoice[] {
+  const out: CommandChoice[] = Array.from({ length: len }, () => ({}));
+  for (const [n, c] of picks) if (n < len) out[n] = { ...c };
+  return out;
 }
 
 /** 조작 기록으로 받은 지휘 (dh: 더블헤더 2차전이면 2) */
-interface PendingCommand {
+interface PendingCommand extends CommandCtl {
   day: number;
   dh?: 2;
-  choices: CommandChoice[];
+  picks: Map<number, CommandChoice>;
 }
 
-/** 조작 기록의 지휘 선택을 물음 순서대로 돌려주는 지휘자 (모자라면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
+/** 지휘 방식 → 엔진 CommandMode (from은 그 번호의 타석 경계에서 끼어든다) */
+function commandMode(c: CommandCtl | undefined): CommandMode | undefined {
+  if (!c || (c.from === undefined && c.handoff === undefined)) return undefined;
+  const from = c.from;
+  return { ...(from !== undefined ? { takeover: (_r: CommandRequest, k: number) => k === from } : {}), ...(c.handoff !== undefined ? { handoff: c.handoff } : {}) };
+}
+
+/** 조작 기록의 지휘 선택을 물음 번호로 돌려주는 지휘자 (없으면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
 function replayCommander(team: number, cmds: PendingCommand[]): GameCommand | null {
   if (!cmds.length) return null;
-  return { team, decide: (req) => cmds.find((c) => c.dh === req.dh)?.choices[req.n] ?? {}, covers: (dh) => cmds.some((c) => (c.dh === 2) === (dh === 2)) };
+  const of = (dh?: 1 | 2) => cmds.find((c) => (c.dh === 2) === (dh === 2));
+  return {
+    team, decide: (req) => of(req.dh)?.picks.get(req.n) ?? {}, covers: (dh) => !!of(dh),
+    mode: (dh) => commandMode(of(dh)),
+  };
 }
 
 /** 미리보기를 멈추는 신호 (엔진 지휘 함수가 던진다) */
@@ -225,9 +279,10 @@ export type GameAction =
   | { year?: number; day: number; type: 'trade'; team: number; give: string[]; get: string[]; cash?: number; pg?: string[]; pr?: string[] }
   | { year: number; day: number; type: 'plan'; plan: PlanIds | null }
   | { year: number; day: number; type: 'event'; choice: number }
-  /** 직접 지휘한 그날 우리 경기의 선택 (물음 순서대로, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인.
-   *  dh: 더블헤더 2차전이면 2 (일정 개편 9단계). 없으면 그날 첫 우리 경기 (더블헤더 1차전) */
-  | { year: number; day: number; type: 'command'; dh?: 2; choices: CommandChoice[] }
+  /** 직접 지휘한 그날 우리 경기의 선택 [물음 번호, 선택] (엔진 2 18단계 압축: 빈 선택은 적지 않는다, engine/game.ts CommandChoice). 선수는 그 시즌 월드의 색인.
+   *  dh: 더블헤더 2차전이면 2 (일정 개편 9단계). 없으면 그날 첫 우리 경기 (더블헤더 1차전).
+   *  from: 위기에서 끼어든 타석 경계 번호 (B → A), handoff: B로 넘긴 물음 번호 (A → B). choices는 18단계 전 기록 (물음 순서대로) */
+  | { year: number; day: number; type: 'command'; dh?: 2; picks?: CommandPick[]; from?: number; handoff?: number; choices?: CommandChoice[] }
   /** enlist: 결산 때 우리 구단 입대 명단 (시즌 결과의 입대 선택). 없으면 AI 규칙 (이전 저장).
    *  apply: 그중 군 야구단(상무·경찰) 지원 명단. 없으면 지원할 수 있는 선수 모두 (2026-10-21 전 기록) */
   | { year: number; type: 'begin-off'; enlist?: string[]; apply?: string[] }
@@ -357,6 +412,8 @@ export interface GameSaveV2 {
   callUps?: number[];
   /** 관심 명단 (game/watch.ts, 2026-10-23). 조작 기록 밖 화면 상태라 예전 저장에는 없다 (빈 목록) */
   watch?: WatchEntry[];
+  /** 진행 중인 지휘 경기 (엔진 2 18단계, 경기 중 저장). 형식을 올리지 않은 선택 칸 (없으면 진행 중인 경기 없음) */
+  pendingGame?: PendingGame;
   news: NewsItem[];
   actions: GameAction[];
 }
@@ -470,6 +527,8 @@ export class GameSession {
 
   /** 조작 기록으로 받은 그날 지휘 선택 (하루 진행 때 쓰고 비운다). 더블헤더 날은 차전마다 하나씩 */
   private pendingCommands: PendingCommand[] = [];
+  /** 진행 중인 지휘 경기 (엔진 2 18단계, commandOpen·commandStep. 세션 저장에 남는다) */
+  pendingGame: PendingGame | null = null;
   /** 자동 진행이 위기에서 멈췄을 때의 미리보기 (화면이 지휘 창을 연다) */
   crisis: CommandPreview | null = null;
   /** 미리보기용 개막 월드 (시즌마다 한 번 만든다. 시즌 중 리그 상태는 개막 때로 고정이다) */
@@ -531,8 +590,28 @@ export class GameSession {
    * 직접 지휘 미리보기: choices까지 고른 상태로 오늘을 복사본에서 돌려 다음 물음에서 멈춘다. 실제 게임은 그대로다.
    * 지휘하는 경기는 A 해결기(공 단위, 엔진 2 17단계)로 치르고 공마다 물음이 있다. mode는 PreviewMode
    */
-  commandPreview(choices: CommandChoice[], mode: PreviewMode = 'next', dh?: 2): CommandPreview {
-    if (this.postseasonRunning) return this.postseasonCommandPreview(choices, mode);
+  commandPreview(choices: CommandChoice[], mode: PreviewMode = 'next', dh?: 2, ctl: CommandCtl = {}): CommandPreview {
+    const own: CommandCtl = { ...(ctl.from !== undefined ? { from: ctl.from } : {}), ...(ctl.handoff !== undefined ? { handoff: ctl.handoff } : {}) };
+    return this.runPreview(choices, mode, dh, commandMode(own), own);
+  }
+
+  /**
+   * 위기 멈춤 미리보기 (B → A 끼어들기, 엔진 2 18단계): 오늘 우리 경기를 지휘 없이(B) 돌리다 위기·승부처 타석 경계에서 지휘로 넘겨 첫 물음에서 멈춘다.
+   * 위기가 없으면 req가 null이고, 그 경기는 지휘하지 않은 경기와 똑같다
+   */
+  private crisisPreview(dh?: 2): CommandPreview {
+    const ctl: CommandCtl = {};
+    const takeover = (req: CommandRequest, k: number) => {
+      if (!isCrisis(req)) return false;
+      ctl.from = k;
+      return true;
+    };
+    const pv = this.runPreview([], 'next', dh, { takeover }, {});
+    return { ...pv, ...ctl };
+  }
+
+  private runPreview(choices: CommandChoice[], mode: PreviewMode, dh: 2 | undefined, gm: CommandMode | undefined, ctl: CommandCtl): CommandPreview {
+    if (this.postseasonRunning) return { ...this.postseasonCommandPreview(choices, mode, gm), ...ctl };
     const s = this.scratchSeason();
     const out = choices.map((c) => ({ ...c }));
     const me = this.teamIdx;
@@ -544,13 +623,14 @@ export class GameSession {
     s.commander = {
       team: me, decide: (req) => (req.dh !== dh ? other?.decide(req) ?? {} : decide(req)),
       covers: (g) => ((g === 2) === (dh === 2) ? true : other?.covers?.(g) ?? false),
+      mode: (g) => ((g === 2) === (dh === 2) ? gm : other?.mode?.(g)),
     };
     this.prepareDay(s);
     try {
       s.simulateDay();
     } catch (e) {
       if (!(e instanceof CommandPause)) throw e;
-      return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1, ...(dh ? { dh } : {}) };
+      return { req: e.req, choices: out, plays: e.req.plays, home: game?.home ?? -1, away: game?.away ?? -1, ...(dh ? { dh } : {}), ...ctl };
     }
     // 노게임은 기록(log)에 없고 noGames에만 있다
     const i = s.log.findIndex((g, k) => k >= this.season.log.length && isTarget(g));
@@ -559,7 +639,7 @@ export class GameSession {
     return {
       req: null, choices: out, plays: (ng ? ng.plays : s.plays.get(i)) ?? [], home: g?.home ?? -1, away: g?.away ?? -1,
       ...(g ? { final: { away: g.awayRuns, home: g.homeRuns } } : {}), ...(dh ? { dh } : {}),
-      ...(g?.rain ? { rain: { kind: g.rain, inning: g.innings } } : {}),
+      ...(g?.rain ? { rain: { kind: g.rain, inning: g.innings } } : {}), ...ctl,
     };
   }
 
@@ -572,14 +652,14 @@ export class GameSession {
   }
 
   /** 가을야구 직접 지휘 미리보기: 가을야구 상태와 시즌을 복사해 다음 경기를 돌려 본다 (실제 진행은 그대로) */
-  private postseasonCommandPreview(choices: CommandChoice[], mode: PreviewMode): CommandPreview {
+  private postseasonCommandPreview(choices: CommandChoice[], mode: PreviewMode, gm: CommandMode | undefined): CommandPreview {
     const s = this.scratchSeason();
     const st: PostseasonState = JSON.parse(JSON.stringify(this.postseason));
     // 같은 날 다른 시리즈 경기가 먼저여도 우리 경기만 돌린다 (구단이 겹치지 않아 순서가 결과에 닿지 않는다)
     const x = this.ourPostseasonSeriesToday(st) ?? currentSeries(st)!;
     const { home, away } = seriesHome(x, x.games.length);
     const out = choices.map((c) => ({ ...c }));
-    const commander: GameCommand = { team: this.teamIdx, decide: previewDecide(choices, mode, out) };
+    const commander: GameCommand = { team: this.teamIdx, decide: previewDecide(choices, mode, out), mode: () => gm };
     s.boxTeams.add(this.teamIdx);
     try {
       const g = playNextGame(st, s, commander, x)!;
@@ -594,14 +674,88 @@ export class GameSession {
    * 직접 지휘 확정: 고른 대로 오늘(가을야구면 다음 경기)을 진행한다 (조작 기록에 남아 다시 돌려도 같다).
    * dh: 더블헤더 2차전을 지휘했으면 2 (CommandPreview.dh). 더블헤더 날도 하루를 진행하므로 지휘하지 않은 차전은 감독이 맡는다
    */
-  commitCommand(choices: CommandChoice[], dh?: 2): { ok: boolean; message: string } {
+  commitCommand(choices: CommandChoice[], dh?: 2, ctl: CommandCtl = {}): { ok: boolean; message: string } {
+    return this.commitPicks(packChoices(choices), dh, ctl);
+  }
+
+  private commitPicks(picks: CommandPick[], dh: 2 | undefined, ctl: CommandCtl): { ok: boolean; message: string } {
     if (!this.canCommand) return { ok: false, message: '오늘 지휘할 경기가 없습니다.' };
-    const game = !this.postseasonRunning && dh ? { dh } : {};
-    this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'command', ...game, choices: choices.map((c) => ({ ...c })) });
+    this.dispatchSeason(this.commandAction(picks, dh, ctl));
+    this.pendingGame = null;
     this.crisis = null;
     if (this.postseasonRunning) this.advancePostseason(1);
     else this.advance(1);
     return { ok: true, message: '경기를 마쳤습니다.' };
+  }
+
+  private commandAction(picks: CommandPick[], dh: 2 | undefined, ctl: CommandCtl): Extract<GameAction, { type: 'command' }> {
+    const game = !this.postseasonRunning && dh ? { dh } : {};
+    return {
+      year: this.year, day: this.currentDay, type: 'command', ...game, picks: picks.map(([n, c]) => [n, { ...c }] as CommandPick),
+      ...(ctl.from !== undefined ? { from: ctl.from } : {}), ...(ctl.handoff !== undefined ? { handoff: ctl.handoff } : {}),
+    };
+  }
+
+  // ---- 진행 중인 지휘 경기 (엔진 2 18단계): 화면은 이 함수들로 한 물음씩 나아가고, 세션 저장에 pendingGame으로 남는다
+
+  /** 진행 중인 지휘 경기 (없으면 null). 오늘 경기가 아니면 버린다 */
+  get commandInProgress(): PendingGame | null {
+    const p = this.pendingGame;
+    if (p && (p.year !== this.year || p.day !== this.currentDay || !(this.hasGameToday || this.ourPostseasonGameNext))) this.pendingGame = null;
+    return this.pendingGame;
+  }
+
+  /** 지휘 창 열기: 진행 중인 지휘 경기가 있으면 그 물음에서 이어 가고, 없으면 오늘 우리 경기(dh 2면 더블헤더 2차전)를 새로 */
+  commandOpen(dh?: 2): CommandPreview {
+    if (this.commandInProgress) return this.commandResume();
+    this.pendingGame = { year: this.year, day: this.currentDay, ...(dh && !this.postseasonRunning ? { dh } : {}), picks: [], at: 0 };
+    return this.commandStep(null, 'next');
+  }
+
+  /** 진행 중인 지휘 경기를 처음부터 다시 돌려 멈춘 물음에서 보여 준다 (불러온 뒤 이어 가기) */
+  commandResume(): CommandPreview {
+    const p = this.pendingGame!;
+    return this.commandPreview(unpackChoices(p.picks, p.at), 'pitch', p.dh, p);
+  }
+
+  /** 지금 물음에 choice로 답하고 mode대로 다음 멈출 곳까지 (choice가 null이면 답하지 않고 mode대로 첫 물음까지) */
+  commandStep(choice: CommandChoice | null, mode: PreviewMode): CommandPreview {
+    const p = this.pendingGame!;
+    const pv = this.commandPreview([...unpackChoices(p.picks, p.at), ...(choice ? [choice] : [])], mode, p.dh, p);
+    p.picks = packChoices(pv.choices);
+    p.at = pv.choices.length;
+    if (pv.req) delete p.over;
+    else p.over = true;
+    return pv;
+  }
+
+  /** 아직 아무것도 진행하지 않은 지휘 경기면 버린다 (창 닫기). 한 번 진행한 경기는 남기고 false (결정 4: 되돌리지 않는다) */
+  commandClose(): boolean {
+    const p = this.pendingGame;
+    if (p && (p.at > 0 || p.from !== undefined)) return false;
+    this.pendingGame = null;
+    this.crisis = null;
+    return true;
+  }
+
+  /**
+   * 진행 중인 지휘 경기를 끝낸다: 'A' 남은 판단을 감독에게 맡기고 공 단위로 계속 (기본, 결정 5), 'B' 지금 물음부터 계산으로 빠르게 끝내기.
+   * 끝난 경기면 그대로 확정
+   */
+  commandFinish(how: 'A' | 'B' = 'A'): { ok: boolean; message: string } {
+    const p = this.commandInProgress;
+    if (!p) return { ok: false, message: '진행 중인 지휘 경기가 없습니다.' };
+    const ctl: CommandCtl = { ...(p.from !== undefined ? { from: p.from } : {}), ...(how === 'B' && !p.over ? { handoff: p.at } : {}) };
+    return this.commitPicks(p.picks, p.dh, ctl);
+  }
+
+  /** 하루(가을야구 하루)를 진행하기 전에, 진행 중인 지휘 경기가 있으면 감독에게 맡겨 확정 기록에 넣는다 (A 계속) */
+  private settlePending(): void {
+    const p = this.commandInProgress;
+    if (!p) return;
+    this.dispatchSeason(this.commandAction(p.picks, p.dh, { ...(p.from !== undefined ? { from: p.from } : {}) }));
+    this.pendingGame = null;
+    this.crisis = null;
   }
 
   /**
@@ -767,6 +921,7 @@ export class GameSession {
     g.enlistChoice = save.phase === 'season' && save.enlistChoice ? [...save.enlistChoice] : null;
     g.applyChoice = save.phase === 'season' && save.applyChoice ? [...save.applyChoice] : null;
     g.watch = save.watch ? clone(save.watch) : [];
+    g.pendingGame = save.phase === 'season' && save.pendingGame ? clone(save.pendingGame) : null;
     // 알린 일 칸이 없는 관심 선수(2026-10-23 소식 알림 전 저장)는 지금 상태를 알린 것으로 둔다
     if (g.watch.some((w) => !w.told)) g.watch = g.watch.map((w) => (w.told ? w : markTold(g.watchCtx(), w)));
     g.ensureOwner();
@@ -851,7 +1006,11 @@ export class GameSession {
     else if (a.type === 'event') this.applyEventChoice(a.choice);
     else if (a.type === 'command') {
       this.pendingCommands = this.pendingCommands.filter((c) => c.day !== a.day || c.dh !== a.dh);
-      this.pendingCommands.push({ day: a.day, ...(a.dh ? { dh: a.dh } : {}), choices: a.choices.map((c) => ({ ...c })) });
+      const picks = a.picks ?? packChoices(a.choices ?? []);
+      this.pendingCommands.push({
+        day: a.day, ...(a.dh ? { dh: a.dh } : {}), picks: new Map(picks.map(([n, c]) => [n, { ...c }])),
+        ...(a.from !== undefined ? { from: a.from } : {}), ...(a.handoff !== undefined ? { handoff: a.handoff } : {}),
+      });
     }
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'release-in') this.applyRelease(a.id);
@@ -1759,22 +1918,26 @@ export class GameSession {
     this.attention = [];
     this.stopped = false;
     while (n < days && this.phase === 'season' && !this.season.done) {
+      // 진행 중인 지휘 경기는 감독에게 맡겨 끝낸다 (엔진 2 18단계, 결정 5 기본 A 계속)
+      this.settlePending();
       const ev = this.league.events?.pending;
       if (ev) {
         if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
-      // 위기 멈춤 (직접 지휘): 오늘 우리 경기를 미리 돌려 위기가 오면 그날을 진행하지 않고 멈춘다.
+      // 위기 멈춤 (직접 지휘, B → A 끼어들기, 엔진 2 18단계): 오늘 우리 경기를 지휘 없이 미리 돌려 위기가 오면 그날을 진행하지 않고,
+      // 그 타석 경계에서 지휘로 넘겨 멈춘다 (진행 중인 지휘 경기가 된다). 위기가 없으면 미리 돌린 경기는 지휘하지 않은 경기와 같다.
       // 더블헤더 날은 1차전 → 2차전 차례로 (이미 지휘한 차전은 건너뛴다)
       if (r.crisis && this.hasGameToday) {
         let crisis: CommandPreview | null = null;
         for (const dh of this.ourGamesToday()) {
           if (this.pendingCommands.some((c) => c.day === this.day && c.dh === dh)) continue;
-          const pv = this.commandPreview([], 'crisis', dh);
+          const pv = this.crisisPreview(dh);
           if (pv.req) { crisis = pv; break; }
         }
         if (crisis?.req) {
           this.crisis = crisis;
+          this.pendingGame = { year: this.year, day: this.day, ...(crisis.dh ? { dh: crisis.dh } : {}), picks: [], at: crisis.choices.length, from: crisis.from };
           const which = crisis.dh ? '더블헤더 2차전' : this.ourGamesToday().length > 1 ? '더블헤더 1차전' : '오늘 경기';
           this.attention.push({ kind: 'crisis', text: `${which} ${crisis.req.inn}회${crisis.req.top ? '초' : '말'} 위기·승부처입니다. 직접 지휘하세요.` });
           this.stopped = true;
@@ -2211,6 +2374,7 @@ export class GameSession {
   advancePostseason(games: number): number {
     let n = 0;
     while (n < games && this.postseasonRunning) {
+      this.settlePending();
       const st = this.postseason!;
       const day = st.day;
       // 직접 지휘한 경기 (조작 기록 command, 그 경기 날짜): 고른 대로, 나머지 물음은 감독에게
@@ -3835,6 +3999,7 @@ export class GameSession {
       news: this.news.map((n) => ({ ...n })),
       actions: this.actions.map((a) => clone(a)),
       ...(this.watch.length ? { watch: clone(this.watch) } : {}),
+      ...(this.pendingGame && this.phase === 'season' ? { pendingGame: clone(this.pendingGame) } : {}),
     };
     if (this.phase === 'offseason') {
       return { ...base, phase: 'offseason', league: clone(this.league), finishedLeague: clone(this.finishedLeague!), offseason: clone(this.offseason!) };
