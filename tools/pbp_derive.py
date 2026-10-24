@@ -14,6 +14,9 @@
   starter_ip_pitches.csv  선발 이닝 ↔ 투구 수 관계 (구간별)
   relief.csv              구원 등판당 투구 수·아웃, 연투·3연투 비율
   relief_rest.csv         구원 등판 전 휴식일 분포
+  team_pitching.csv       구단-시즌별 선발 투구 수·100구 이상 비율, 구원 연투·3연투 비율 (감독 성향 '투수 밀어붙이기'·'불펜 연투 허용', 엔진 2 10단계),
+                          고의4구 수·상대 타석 (감독 성향 '고의4구 빈도', 엔진 2 13단계)
+  team_lineup.csv         구단-시즌별 선발 라인업 변동: 전 경기와 선발 9명이 다른 경기 비율, 바뀐 사람 수 평균 (감독 성향 '컨디션 반영' 대리값, 13단계)
   ibb.csv                 고의4구 팀·시즌당 수 (투구 없는 자동 고의4구 + 볼 3개 전에 끝난 볼넷 = 카운트 중 고의4구 선언)
   pitch_types.csv         구종 비율과 평균 구속
   pitch_types_count.csv   카운트별 구종 비율
@@ -116,7 +119,7 @@ def main():
              '카운트(볼-스트라이크)별 다음 공 결과 확률. 투구 없는 자동 고의4구 제외. 2스트라이크 파울은 카운트 유지, '
              '2스트라이크 번트 파울(bunt_foul)은 삼진. hbp는 사구로 끝난 공', 'years': {}}
     rows = {k: [] for k in ['count_pitch', 'count_pa', 'pa_pitches', 'starter', 'starter_rel', 'relief', 'rest',
-                            'ibb', 'ptype', 'ptype_count', 'home', 'platoon', 'summary', 'validation']}
+                            'ibb', 'team', 'lineup', 'ptype', 'ptype_count', 'home', 'platoon', 'summary', 'validation']}
 
     for year in YEARS:
         part = 1 if year in PARTIAL else 0
@@ -198,7 +201,7 @@ def main():
         rp = app[~app.is_start].copy()
         team_games = pitched.groupby('fld_team').game_pk.nunique().sum()
         # 휴식일: 같은 투수의 바로 앞 등판(선발 포함)과의 날짜 차이 - 1
-        allapp = app[['pitcher', 'game_date', 'game_pk', 'first_idx', 'is_start']].copy()
+        allapp = app[['pitcher', 'game_date', 'game_pk', 'first_idx', 'is_start', 'fld_team']].copy()
         allapp['d'] = pd.to_datetime(allapp.game_date)
         allapp = allapp.sort_values(['pitcher', 'd', 'game_pk'], kind='mergesort')
         allapp['prev_d'] = allapp.groupby('pitcher').d.shift(1)
@@ -219,6 +222,35 @@ def main():
         rr = ra.rest[has_prev]
         for label, f in buckets:
             rows['rest'].append([year, part, label, int(f(rr).sum()), r(f(rr).mean())])
+
+        # 구단별 (팀 코드 = 문자중계 표기). 연투·3연투는 앞 등판이 있는 구원 등판 중 비율 (리그 값과 같은 정의)
+        for team in sorted(app.fld_team.unique()):
+            ts_ = st[st.fld_team == team].pitches
+            tra = ra[ra.fld_team == team]
+            thp = tra.rest.notna()
+            tgames = pitched[pitched.fld_team == team].game_pk.nunique()
+            tpa = pa[(pa.fld_team == team) & pa.ev.notna()]
+            rows['team'].append([year, part, team, len(ts_), r(ts_.mean(), 2), r((ts_ >= 100).mean()), len(tra),
+                                 r(len(tra) / tgames, 3), r((tra.rest[thp] == 0).mean()), r(tra.three[thp].mean()),
+                                 int(tpa.ibb.sum()), len(tpa)])
+
+        # 구단별 선발 라인업 변동 (감독 성향 '컨디션 반영' 대리값, 엔진 2 13단계): 경기마다 그 팀 첫 9타석의 타자 = 선발 9명.
+        # 전 경기(날짜·경기 순)와 선발 9명 구성이 다른 경기 비율, 바뀐 사람 수 평균. 첫 9타석이 안 되는 경기는 건너뛴다
+        first9 = pa.sort_values(KEY, kind='mergesort').groupby(['game_pk', 'bat_team'], sort=False).head(9)
+        lineups = first9.groupby(['bat_team', 'game_date', 'game_pk'], sort=True).batter.apply(lambda b: frozenset(b) if len(b) == 9 else None)
+        for team in sorted(pa.bat_team.unique()):
+            prev, n, changed, moved = None, 0, 0, 0
+            for lu in lineups.loc[team]:
+                if lu is None or len(lu) != 9:
+                    prev = None
+                    continue
+                if prev is not None:
+                    n += 1
+                    d = len(lu - prev)
+                    changed += d > 0
+                    moved += d
+                prev = lu
+            rows['lineup'].append([year, part, team, n, r(changed / n), r(moved / n, 3)])
 
         # ---- 6. 자동 고의4구 ----
         ibb = pa[pa.ibb]
@@ -334,6 +366,10 @@ def main():
               ['year', 'partial', 'apps', 'apps_per_team_game', 'mean_pitches', 'sd_pitches', 'p10', 'p25', 'p50', 'p75',
                'p90', 'share_30plus', 'mean_outs', 'relief_out_share', 'back_to_back_rate', 'three_straight_rate',
                'same_day_rate'])
+    write_csv('team_pitching.csv', rows['team'], ['year', 'partial', 'team', 'starts', 'starter_mean', 'share_100plus',
+                                                  'relief_apps', 'relief_per_game', 'back_to_back_rate', 'three_straight_rate',
+                                                  'ibb', 'bf'])
+    write_csv('team_lineup.csv', rows['lineup'], ['year', 'partial', 'team', 'games', 'changed_share', 'mean_changed'])
     write_csv('relief_rest.csv', rows['rest'], ['year', 'partial', 'rest_days', 'apps', 'share'])
     write_csv('ibb.csv', rows['ibb'], ['year', 'partial', 'ibb', 'ibb_no_pitch', 'ibb_mid_count', 'per_team', 'team_min', 'team_max', 'per_1000_pa'])
     write_csv('pitch_types.csv', rows['ptype'], ['year', 'partial', 'pitch_type', 'name_ko', 'pitches', 'share',

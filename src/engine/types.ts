@@ -18,6 +18,13 @@ export interface BatSkill {
   speed: number;
   /** 능력 산출에 쓴 가중 타석 수 */
   sample: number;
+  /**
+   * 타구 성향: 아웃 타구의 땅볼 승산에 곱하는 배율 (1 = 리그 평균, 클수록 땅볼형, 엔진 2 6단계). 타구 자료가 없어 병살 기록으로 추정한다
+   * (ratings.ts batGbOf). 없으면 1
+   */
+  gb?: number;
+  /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
+  ppaRel?: number;
   /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
 }
@@ -38,6 +45,10 @@ export interface PitSkill {
   startShare: number;
   /** 능력 산출에 쓴 가중 상대 타자 수 */
   sample: number;
+  /** 땅볼 성향: 아웃 타구의 땅볼 승산 배율 (1 = 리그 평균, 엔진 2 6단계). 타구 자료가 없어 피홈런 능력으로 추정한다 (ratings.ts pitGbOf). 없으면 1 */
+  gb?: number;
+  /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
+  ppaRel?: number;
 }
 
 export interface SimPlayer {
@@ -91,6 +102,10 @@ export interface SimPlayer {
   ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */
   traits?: readonly import('./traits').Trait[];
+  /** 숨은 능력 '부상 경향' (부상 확률 배율, 엔진 2 16단계에서 붙는다). 없으면 1.00 */
+  injuryProne?: number;
+  /** 개막 때 혹사지수 (지난 시즌에서 넘어온 값, league/offseason.ts). 없으면 0 */
+  overuseStart?: number;
 }
 
 export interface SimTeam {
@@ -130,8 +145,14 @@ export interface LeagueEnv {
   sac: number;
   /** 득점이 (타자 출루 외의 실책 때문에) 비자책으로 기록될 확률 */
   unearnedRun: number;
+  /** 그 해 리그 비자책 실점 비율 (엔진 2 14단계: 시대 표의 경기 안 몫으로 unearnedRun을 다시 낼 때, eras.ts eraEnv). 없으면 다시 내지 않는다 */
+  unearnedShare?: number;
   /** 주자가 있는 타석에서 폭투·포일·보크로 주자가 한 베이스씩 가는 확률 */
   wildPitch: number;
+  /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */
+  gbOdds?: number;
+  /** 그 해 리그 도루 성공률 (엔진 2 9단계 앞, 도루 실패 2025 +11.5% 고침). 시즌 시작 때 선수 성공률 평균과의 차를 모든 도루에 더한다 (GameCtx.sbShift). 없으면 0 */
+  sbPct?: number;
 }
 
 export interface BatLine {

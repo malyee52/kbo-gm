@@ -16,8 +16,10 @@ export interface PaResolver {
   resolve(rates: PaRates, rng: Rng): PaOutcome;
   /** 해결기를 거치지 않는 번트 타석의 공 수. 없으면 0 (투구 수를 세지 않는 해결기) */
   inPlayPitches?(rng: Rng): number;
-  /** 삼진·볼넷·사구 확률이 K·W·H인 타석의 기대 투구 수 (난수 없음). 없으면 params.pitchesPerPaDefault */
-  pitchesPerPa?(K: number, W: number, H: number): number;
+  /** 삼진·볼넷·사구 확률이 K·W·H이고 길이 손잡이가 len인 타석의 기대 투구 수 (난수 없음). 없으면 params.pitchesPerPaDefault */
+  pitchesPerPa?(K: number, W: number, H: number, len?: number): number;
+  /** 리그 평균 상대로 K·W·H인 선수의 기대 투구 수가 target이 되는 길이 손잡이 (난수 없음, D단계 선수별 P/PA). 없으면 1 */
+  lengthFor?(K: number, W: number, H: number, target: number): number;
 }
 
 /** 확률표에서 결과 하나를 뽑는다 (난수 한 번). 예전 엔진의 타석 뽑기와 같은 순서·같은 산술 */
@@ -26,6 +28,16 @@ export function drawEvent(r: PaRates, rng: Rng): Ev {
   if ((u -= r.so) < 0) return Ev.SO;
   if ((u -= r.bb) < 0) return Ev.BB;
   if ((u -= r.hbp) < 0) return Ev.HBP;
+  if ((u -= r.hr) < 0) return Ev.HR;
+  if ((u -= r.s1) < 0) return Ev.S1;
+  if ((u -= r.d2) < 0) return Ev.D2;
+  if ((u -= r.t3) < 0) return Ev.T3;
+  return Ev.OUT;
+}
+
+/** 인플레이로 끝난 타석의 결과 (홈런·단타·2루타·3루타·아웃 몫으로, 히트앤드런 첫 공 인플레이, 엔진 2 8단계) */
+export function drawInPlay(r: PaRates, rng: Rng): Ev {
+  let u = rng.next() * (1 / r.scale - r.so - r.bb - r.hbp);
   if ((u -= r.hr) < 0) return Ev.HR;
   if ((u -= r.s1) < 0) return Ev.S1;
   if ((u -= r.d2) < 0) return Ev.D2;
@@ -53,27 +65,46 @@ const CHAIN_CACHE = 50000;
  * 결과는 B0와 같은 확률표에서 뽑고(난수 한 번), 손잡이를 풀어 끝 확률이 그 확률표의 삼진·볼넷·사구와 같은 사슬에서
  * "그 결과로 끝나는 공 경로"를 뽑아 투구 수를 낸다 (칸마다 난수 한 번). 그래서 (결과, 투구 수)의 결합 분포가 사슬과 같다
  */
-export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}): PaResolver & { chainFor(r: PaRates): SolvedChain; inPlayPitches(rng: Rng): number; pitchesPerPa(K: number, W: number, H: number): number } {
+export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}): PaResolver & { chainFor(r: PaRates): SolvedChain; inPlayPitches(rng: Rng): number; pitchesPerPa(K: number, W: number, H: number, len?: number): number; lengthFor(K: number, W: number, H: number, target: number): number } {
   const cache = new Map<string, SolvedChain>();
   const league = solvedChain(shape, [1, 1, 1]);
-  const solved = (K: number, W: number, H: number): SolvedChain => {
-    const key = `${K},${W},${H}`;
+  const solved = (K: number, W: number, H: number, len = 1): SolvedChain => {
+    const key = `${K},${W},${H},${len}`;
     let ch = cache.get(key);
     if (!ch) {
       if (cache.size >= CHAIN_CACHE) cache.clear();
-      ch = solvedChain(shape, solveKnobs(shape, K, W, H));
+      ch = solvedChain(shape, solveKnobs(shape, K, W, H, len), len);
       cache.set(key, ch);
     }
     return ch;
   };
-  const chainFor = (r: PaRates): SolvedChain => solved(r.so * r.scale, r.bb * r.scale, r.hbp * r.scale);
+  const chainFor = (r: PaRates): SolvedChain => solved(r.so * r.scale, r.bb * r.scale, r.hbp * r.scale, r.len ?? 1);
   const ppa = new Map<string, number>();
-  const pitchesPerPa = (K: number, W: number, H: number): number => {
-    const key = `${K},${W},${H}`;
+  const pitchesPerPa = (K: number, W: number, H: number, len = 1): number => {
+    const key = `${K},${W},${H},${len}`;
     let v = ppa.get(key);
     if (v === undefined) {
-      v = expectedPitches(solved(K, W, H));
+      v = expectedPitches(solved(K, W, H, len));
       ppa.set(key, v);
+    }
+    return v;
+  };
+  const lens = new Map<string, number>();
+  // 로그 공간 이분법 (손잡이 e^-2.5 ~ e^2.5, 40번). 기대 투구 수는 파울 배율에 대해 늘 는다
+  const lengthFor = (K: number, W: number, H: number, target: number): number => {
+    const key = `${K},${W},${H},${target}`;
+    let v = lens.get(key);
+    if (v === undefined) {
+      let lo = -2.5;
+      let hi = 2.5;
+      for (let i = 0; i < 40; i++) {
+        const mid = (lo + hi) / 2;
+        if (expectedPitches(solvedChain(shape, solveKnobs(shape, K, W, H, Math.exp(mid), 1e-10), Math.exp(mid))) < target) lo = mid;
+        else hi = mid;
+      }
+      v = Math.exp((lo + hi) / 2);
+      if (lens.size >= CHAIN_CACHE) lens.clear();
+      lens.set(key, v);
     }
     return v;
   };
@@ -82,6 +113,7 @@ export function chainResolver(shape: ChainShape, opts: ChainResolverOptions = {}
     name: 'B1',
     chainFor,
     pitchesPerPa,
+    lengthFor,
     resolve(r, rng) {
       const ev = drawEvent(r, rng);
       return { ev, pitches: samplePitches(chainFor(r), END_OF[ev], rng, opts.observe) };

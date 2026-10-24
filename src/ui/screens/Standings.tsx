@@ -1,5 +1,4 @@
 // 순위표: 승·패·무, 승률, 게임차, 득실, 홈·원정, 최근 10경기, 연속 기록.
-import { winPct } from '../../engine';
 import { gamesBehind, rate3, recentForm } from '../../game/stats';
 import { useMemo, useState } from 'react';
 import { TeamName, useGame } from '../context';
@@ -39,7 +38,7 @@ export function Standings() {
               return (
                 <tr key={i} className={`${i === session.teamIdx ? 'me' : ''}${k === cut - 1 ? ' cutline' : ''}`}>
                   <td>{k + 1}</td><td className="l"><TeamName idx={i} /></td>
-                  <td>{t.g}</td><td>{t.w}</td><td>{t.l}</td><td>{t.t}</td><td>{rate3(winPct(t))}</td>
+                  <td>{t.g}</td><td>{t.w}</td><td>{t.l}</td><td>{t.t}</td><td>{rate3(s.winPct(t))}</td>
                   <td>{k === 0 ? '-' : gamesBehind(leader, t).toFixed(1)}</td>
                   <td>{t.rs}</td><td>{t.ra}</td><td>{t.rs - t.ra > 0 ? `+${t.rs - t.ra}` : t.rs - t.ra}</td>
                   <td>{t.homeW}-{t.homeT}-{t.homeL}</td><td>{away.w}-{away.t}-{away.l}</td>

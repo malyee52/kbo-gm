@@ -79,7 +79,10 @@ describe('타순 직접 정하기', () => {
       if (!box) continue;
       const side = g.season.log[k].home === lg ? box.home : box.away;
       const expected = mine.map((s) => plan.starters[s]);
-      if (expected.some((i) => i === undefined || g.season.absences.some((a) => a.idx === i))) continue;
+      // 그 경기 날에 결장 중인 선수가 있으면 건너뛴다 (feat/schedule 8146d98과 같은 고침: 전에는 시즌 중 한 번이라도 빠진 선수가 있으면 모든 경기를 건너뛰어
+      // 엔진 2 14단계에서 검사한 경기가 0이 됐다)
+      const day = g.season.log[k].day;
+      if (expected.some((i) => i === undefined || g.season.absences.some((a) => a.idx === i && a.day <= day && day < a.until))) continue;
       expect(side.batters.slice(0, 9).map((b) => b.idx)).toEqual(expected);
       checked++;
     }

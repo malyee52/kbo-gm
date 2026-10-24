@@ -1,10 +1,11 @@
 // 선수 기용: 1군 엔트리, 선발 라인업, 타순, 선발 로테이션, 불펜.
 // 경기 중 작전은 AI 감독이 처리한다는 기획에 따라 플레이어 구단도 같은 규칙을 쓴다.
 
-import { BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
+import { BULLPEN_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY, BULLPEN_THIRD_DAY_BELOW, isStarterSkill } from './params';
 import type { Rates } from '../data/types';
 import { eraPitching } from './eras';
-import type { EngineParams } from './params';
+import type { BodyParams, EngineParams } from './params';
+import { overuseDecay, type OveruseParams } from './injury';
 import type { Rng } from './rng';
 import { defenseAt } from './defense';
 import { batValue, pitValue } from './ratings';
@@ -20,6 +21,15 @@ export interface PlayerStates {
   /** fatigueDay까지 연속으로 던진 날 수 (연투 관리) */
   streak: Int32Array;
   lastStartDay: Int32Array;
+  /** 혹사지수 (투수, fatigueDay에 기록한 값. 기획안 4.6). 등판 없는 날이 이어지면 overuseDecay만큼 빠진다 */
+  overuse: Float32Array;
+  /** 투구 피로 하루 회복량 배율 (혹사지수로 정한다, 1 = 보통). 숨은 능력 '회복력'(16단계)이 곱해질 자리 */
+  recoverMul: Float32Array;
+  /** 야수 피로 (경기 단위, 엔진 2 11단계)와 그 값을 기록한 날짜. 하루에 params.body.recover씩 빠진다 */
+  body: Float32Array;
+  bodyDay: Int32Array;
+  /** 컨디션의 흐름 (엔진 2 12단계, condition.ts). 시즌이 날마다 한 걸음씩 옮긴다 (Season.condDay). 사건 몫은 GameContext.condEvent */
+  cond: Float32Array;
 }
 
 export function newPlayerStates(n: number): PlayerStates {
@@ -29,20 +39,47 @@ export function newPlayerStates(n: number): PlayerStates {
     fatigueDay: new Int32Array(n),
     streak: new Int32Array(n),
     lastStartDay: new Int32Array(n).fill(-99),
+    overuse: new Float32Array(n),
+    recoverMul: new Float32Array(n).fill(1),
+    body: new Float32Array(n),
+    bodyDay: new Int32Array(n).fill(-99),
+    cond: new Float32Array(n),
   };
+}
+
+/** 오늘 경기 전 야수 피로 */
+export function currentBody(st: PlayerStates, idx: number, day: number, body: BodyParams): number {
+  return Math.max(0, st.body[idx] - body.recover * (day - st.bodyDay[idx]));
+}
+
+/** 오늘 경기 전 혹사지수 (마지막 등판 뒤 쉰 날만큼 빠진 값) */
+export function currentOveruse(st: PlayerStates, idx: number, day: number, o: OveruseParams): number {
+  const v = st.overuse[idx];
+  return v > 0 ? v * overuseDecay(day - st.fatigueDay[idx], o) : 0;
 }
 
 export { BULLPEN_AVAILABLE_BELOW as FATIGUE_AVAILABLE_BELOW, BULLPEN_RECOVERY_PER_DAY as FATIGUE_RECOVERY_PER_DAY } from './params';
 
-/** 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만) */
-export function needsRest(st: PlayerStates, idx: number, day: number): boolean {
+/**
+ * 어제까지 이틀 연속 던졌고 아직 덜 회복해 오늘 쉬어야 하는가 (3연투는 짧게 던진 날 뒤에만).
+ * pen: 감독 성향 '불펜 연투 허용' (엔진 2 10단계, 1이면 기준 그대로, 클수록 3연투를 더 허용)
+ */
+export function needsRest(st: PlayerStates, idx: number, day: number, pen = 1): boolean {
   // 어제 경기 뒤 피로(오늘 회복 전)로 본다: 이틀 모두 짧게 던졌으면 사흘째도 나온다
-  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW;
+  return st.fatigueDay[idx] === day - 1 && st.streak[idx] >= 2 && st.fatigue[idx] >= BULLPEN_THIRD_DAY_BELOW * pen;
 }
 
-/** 오늘 경기 전 피로 (공 수). 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
+/**
+ * 등판할 수 있는 경기 전 피로 기준 (공). pen(감독 성향 '불펜 연투 허용')은 "전날 몇 구까지 던졌으면 오늘도 나오나"
+ * (회복량 + 기준 = 15구)에 곱한다. 1이면 BULLPEN_AVAILABLE_BELOW 그대로
+ */
+export function availableBelow(pen = 1): number {
+  return pen === 1 ? BULLPEN_AVAILABLE_BELOW : (BULLPEN_RECOVERY_PER_DAY + BULLPEN_AVAILABLE_BELOW) * pen - BULLPEN_RECOVERY_PER_DAY;
+}
+
+/** 오늘 경기 전 피로 (공 수). 하루 회복량에 혹사 배율(recoverMul)을 곱한다. 회복력(숨은 능력, 지금은 모두 1.00) 자리 */
 export function currentFatigue(st: PlayerStates, idx: number, day: number): number {
-  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * (day - st.fatigueDay[idx]));
+  return Math.max(0, st.fatigue[idx] - BULLPEN_RECOVERY_PER_DAY * st.recoverMul[idx] * (day - st.fatigueDay[idx]));
 }
 
 export interface TeamSeason {
@@ -71,8 +108,12 @@ export interface TeamSeason {
   plan?: DepthPlan | null;
   /** 선발 등판 사이 최소 휴식일 (시대별, eras.ts). 없으면 params.starterRestDays */
   restDays?: number;
-  /** 감독 작전 배율 (league/managers.ts): 도루 시도, 희생번트, 선발 한계. 없으면 모두 1 */
-  tactics?: { steal: number; bunt: number; hook: number };
+  /**
+   * 감독 성향 배율 (league/managers.ts Tactics): 도루 시도, 희생번트, hook 투수 밀어붙이기(선발 투구 수 기준·여유), 없으면 모두 1.
+   * sub = 대타·대주자 빈도 (엔진 2 9단계), pen = 불펜 연투 허용 (엔진 2 10단계). 없으면 1
+   */
+  /** cond: 컨디션 반영 (엔진 2 12단계), ibb: 고의4구 빈도 (엔진 2 13단계). 없으면 1 */
+  tactics?: { steal: number; bunt: number; hook: number; sub?: number; pen?: number; cond?: number; ibb?: number };
   /** 오늘(마지막으로 엔트리를 짠 날) 원정 경기다. 방위병(homeOnlyUntil)이 빠진다 */
   away?: boolean;
 }
@@ -109,7 +150,7 @@ export const LINEUP_SLOTS = ['C', 'SS', 'CF', '2B', '3B', 'RF', 'LF', '1B', 'DH'
 export type Slot = (typeof LINEUP_SLOTS)[number];
 
 /** 타석 가치 1 = 한 시즌(600타석) 약 500런. 수비 런을 가치와 더할 때 쓴다 */
-const RUNS_PER_VALUE = 500;
+export const RUNS_PER_VALUE = 500;
 
 
 /**
@@ -169,6 +210,18 @@ export function bestAssignment(score: number[][]): number[] {
   const out = new Array<number>(nRows).fill(-1);
   for (let j = 1; j <= n; j++) if (p[j] >= 1 && p[j] <= nRows && j <= nCols) out[p[j] - 1] = j - 1;
   return out;
+}
+
+/** 좌우 상성 (pa.ts platoonEdge와 같다): 같은 손이면 −1, 다른 손·양타면 +1, 모르면 0 */
+export function platoonSign(bats: string | null, throws: string | null): number {
+  if (!bats || !throws) return 0;
+  if (bats === 'S') return 1;
+  return bats === throws ? -1 : 1;
+}
+
+/** 상대 투수 손을 넣은 타자의 한 시즌 타격 런 (플래툰 라인업·대타 판단). 좌우 상성은 타석 보정(params.platoon)과 같은 비율 */
+export function batRunsVs(p: SimPlayer, throws: string | null, platoon: number): number {
+  return p.value * RUNS_PER_VALUE * (1 + platoonSign(p.bats, throws) * platoon);
 }
 
 /** 자리 점수 → 한 시즌 런 단위: 타석 가치 × 500 + 그 자리 수비 런 */
@@ -250,7 +303,7 @@ export const CHURN_DAYS = 10;
  * 2026-10-21: 마무리 섞기 추가. FNV-1a만 쓰면 끝 글자(주기 번호)만 다른 문자열의 값이 서로 붙어 있어서,
  * 같은 투수가 시즌 내내 순환으로 빠지거나(2026 KT 배제성: 17주기 모두, 시드와 상관없이 0이닝) 한 번도 빠지지 않았다
  */
-function unitHash(s: string): number {
+export function unitHash(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -450,9 +503,19 @@ function planFixed(ts: TeamSeason, pool: SimPlayer[]): Map<Slot, SimPlayer> | un
   return fixed;
 }
 
-/** 오늘의 선발 라인업 (타순 포함). 주전에게 확률로 휴식을 준다. 수비 배치는 ts.field에 남긴다 */
-export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng): SimPlayer[] {
+/**
+ * 오늘의 선발 라인업 (타순 포함). 지친 주전에게 휴식을 준다 (tired: 경기 전 야수 피로, 없으면 쉬지 않는다). 수비 배치는 ts.field에 남긴다.
+ * 플래툰 (엔진 2 9단계): 상대 선발의 손(oppThrows)을 알면 좌우 상성을 넣은 타격 런으로 자리를 배정한다 (주전 휴식 순위는 그대로)
+ */
+export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rng: Rng, oppThrows: string | null = null,
+                             tired?: (p: SimPlayer) => number, cond?: (p: SimPlayer) => number): SimPlayer[] {
   ts.lineupCache ??= new Map();
+  const hand = oppThrows === 'L' || oppThrows === 'R' ? oppThrows : '';
+  // 컨디션 (엔진 2 12단계, docs/컨디션_기획안.md 7.4): 타격 런 × (1 + 컨디션 반영 성향 × condEdge × 그날 컨디션). 좌우 상성과 같은 꼴.
+  // 날마다 바뀌는 값이라 이때는 자리 배정을 캐시하지 않는다. 성향 0이거나 효과 0이면 예전과 같다
+  const condMul = cond ? (ts.tactics?.cond ?? 1) * params.cond.edge : 0;
+  const batRuns = (p: SimPlayer) => (hand ? batRunsVs(p, hand, params.platoon) : p.value * RUNS_PER_VALUE) * (condMul ? 1 + condMul * cond!(p) : 1);
+  const runsOf = hand || condMul ? (p: SimPlayer, slot: Slot) => batRuns(p) + defenseAt(p, slot) : slotRuns;
   let full = ts.lineupCache.get('');
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
   const regulars = full.map((x) => x.p);
@@ -461,20 +524,28 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   const byValue = [...regulars].sort((a, b) => b.value - a.value);
   // 플레이어가 직접 정한 주전은 AI가 쉬게 하지 않는다 (2026-10-11 사용자: 직접 짠 라인업을 AI가 무단으로 바꾸지 않게). 결장 때만 서브가 채운다
   const planned = ts.plan && ts.manual ? new Set(Object.values(ts.plan.starters)) : null;
+  // 휴식은 피로로 정한다 (엔진 2 11단계, 확률 휴식 대신): 경기 전 피로가 body.restFrom을 넘은 만큼 쉴 확률이 오른다.
+  // 감독은 상위 3명을 지쳐도 더 내보내고 하위 3명은 일찍 쉬게 한다 (배율 0.4·1·1.8, 최대 60%)
   byValue.forEach((p, rank) => {
     if (planned?.has(p.idx)) return;
     const factor = rank < 3 ? 0.4 : rank < 6 ? 1 : 1.8;
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
-    if (rng.chance(Math.min(0.6, base * factor))) resting.add(p.idx);
+    const over = Math.max(0, (tired ? tired(p) : 0) - params.body.restFrom);
+    if (rng.chance(Math.min(0.6, base * factor * over))) resting.add(p.idx);
   });
-  const key = [...resting].sort((a, b) => a - b).join(',');
+  // 벤치가 모자라 9명을 못 채우면 가치 높은 주전부터 다시 내보낸다 (예전에는 모두 쉬지 않았다: 많이 지칠수록 오히려 덜 쉬었다)
+  for (const p of byValue) {
+    if (ts.hitters.length - resting.size >= 9) break;
+    resting.delete(p.idx);
+  }
+  const key = `${hand}:${[...resting].sort((a, b) => a - b).join(',')}`;
   ts.lineupCache ??= new Map();
-  let placed = ts.lineupCache.get(key);
+  let placed = condMul ? undefined : ts.lineupCache.get(key);
   if (!placed) {
     const avail = ts.hitters.filter((p) => !resting.has(p.idx));
     const pool = avail.length >= 9 ? avail : ts.hitters;
-    placed = assignSlots(pool, planFixed(ts, pool));
-    ts.lineupCache.set(key, placed);
+    placed = assignSlots(pool, planFixed(ts, pool), runsOf);
+    if (!condMul) ts.lineupCache.set(key, placed);
   }
   ts.field = new Map(placed.map((x) => [x.p.idx, x.slot]));
   // 플레이어가 정한 타순: 자리 순서대로 (그 자리에 나온 선수가 그 타순)
@@ -487,13 +558,21 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   return battingOrder(placed.map((x) => x.p), lg);
 }
 
-/** 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수 */
-export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams): SimPlayer {
+/**
+ * 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수.
+ * 컨디션 (엔진 2 12단계, cond가 있을 때): 차례인 투수의 (컨디션 반영 성향 × 컨디션)이 나쁨 경계(cond.bad) 이하이고
+ * 다음으로 오래 쉰 투수가 등판할 수 있으면 하루 미룬다 (성향 0이면 미루지 않는다, 1.5면 컨디션 −0.27부터, 0.5면 −0.8부터)
+ */
+export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams, cond?: (p: SimPlayer) => number): SimPlayer {
   let best: SimPlayer | null = null;
+  let next: SimPlayer | null = null;
   for (const p of ts.rotation) {
     if (day - st.lastStartDay[p.idx] < (ts.restDays ?? params.starterRestDays)) continue;
-    if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) best = p;
+    if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) { next = best; best = p; }
+    else if (!next || st.lastStartDay[p.idx] < st.lastStartDay[next.idx]) next = p;
   }
+  const tac = ts.tactics?.cond ?? 1;
+  if (best && next && cond && tac > 0 && params.cond.edge > 0 && params.cond.delayStarter !== false && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;
   if (best) return best;
   let spot: SimPlayer | null = null;
   for (const p of ts.bullpen) {

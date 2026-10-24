@@ -61,7 +61,7 @@ describe('게임 속 감독', () => {
     const names = m.map((x) => x!.name);
     expect(new Set(names).size).toBe(names.length);
     // 작전 배율이 팀 시즌에 걸린다
-    expect(g.season.teamSeasons[lg].tactics).toEqual(tacticsOf(infoOf(store, '염경엽')));
+    expect(g.season.teamSeasons[lg].tactics).toEqual(tacticsOf(infoOf(store, '염경엽'), '염경엽', 2026));
   });
 
   it('과거 시작: 자료가 있는 해에는 AI 구단 감독이 실제대로 바뀐다 (2012 시작 → 2013 KIA 선동열 유지, 한화 김응용 취임)', () => {
@@ -95,7 +95,7 @@ describe('게임 속 감독', () => {
     expect(g.hireManager(pick).ok).toBe(true);
     nextSeason(g);
     expect(g.league.managers![lg]).toMatchObject({ name: pick, since: 2027 });
-    expect(g.season.teamSeasons[lg].tactics).toEqual(tacticsOf(infoOf(store, pick)));
+    expect(g.season.teamSeasons[lg].tactics).toEqual(tacticsOf(infoOf(store, pick), pick, 2027));
     const rep = GameSession.replay(store, opts('mgr-c'), g.actions, undefined, FAST);
     expect(rep.league.managers).toEqual(g.league.managers);
   }, 240_000);

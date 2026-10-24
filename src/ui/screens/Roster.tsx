@@ -284,7 +284,7 @@ export function Roster() {
     if (pg === 'classic') {
       return [
         pit('경기', (x) => x.g), pit('선발', (x) => x.gs), pit('승', (x) => x.w), pit('패', (x) => x.l), pit('세이브', (x) => x.sv), pit('홀드', (x) => x.hld ?? 0),
-        pit('QS', (x) => x.qs ?? 0, '퀄리티 스타트: 선발로 6이닝 이상 던지고 3자책 이하'), pit('블론', (x) => x.bsv ?? 0, '블론 세이브: 1~3점 리드에 나와 동점·역전을 허용'),
+        pit('QS', (x) => x.qs ?? 0, '퀄리티 스타트: 선발로 6이닝 이상 던지고 3자책 이하'), pit('블론', (x) => x.bsv ?? 0, '블론 세이브: 7회 이후 세이브 상황(1~3점 리드, 또는 동점 주자가 누상·타석·대기 타석)에 나와 동점·역전을 허용'),
         pit('이닝', (x) => ipText(x.outs)), pit('피안타', (x) => x.h), pit('피홈런', (x) => x.hr), pit('볼넷', (x) => x.bb),
         pit('탈삼진', (x) => x.so), pit('실점', (x) => x.r), pit('자책', (x) => x.er), pit('평균자책', (x) => fixed2(era(x))),
         pit('WHIP', (x) => fixed2(whip(x)), '이닝당 출루 허용: (피안타 + 볼넷) ÷ 이닝'), warCol,

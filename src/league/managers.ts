@@ -13,6 +13,7 @@
 
 import type { DataStore, ManagerInfo } from '../data/types';
 import type { LeagueState } from './types';
+import { Rng } from '../engine/rng';
 
 export interface Manager {
   name: string;
@@ -42,14 +43,42 @@ export interface ManagerChange {
 export interface Tactics {
   steal: number;
   bunt: number;
-  /** 선발 한계 배율 (작을수록 일찍 바꾼다) */
+  /**
+   * 투수 밀어붙이기 (엔진 2 10단계, 기획안 3.9.1): 선발 투구 수 기준(plan)과 기준 뒤 여유의 배율 (작을수록 일찍 바꾼다).
+   * 투구 단위 자료가 있는 감독(2023~)은 팀 선발 평균 투구 수 ÷ 리그, 없으면 구원 등판 배율(relief)에서
+   */
   hook: number;
+  /** 불펜 연투 허용 (엔진 2 10단계): 연투·3연투 기준의 배율 (클수록 연투가 잦다). 팀 구원 연투 비율 ÷ 리그 (2023~), 자료 없으면 1 */
+  pen: number;
+  /**
+   * 대타·대주자 빈도 (엔진 2 9단계, 기획안 3.9.1): 대타 기준 이득·대주자 주력 차를 이 값으로 나눈다 (클수록 자주).
+   * 실존 감독은 자료가 없어 모두 1, 가상 감독만 이름으로 정한 0.7~1.3 (임시값)
+   */
+  sub: number;
+  /**
+   * 컨디션 반영 (엔진 2 12단계, docs/컨디션_기획안.md 7.4): AI 감독이 라인업·선발을 고를 때 컨디션 효과를 얼마나 크게 보는가 (1 = 효과만큼).
+   * 실존 감독은 선발 라인업 변동 기록(2023~ 투구 단위 자료, 경기마다 전 경기와 바뀐 선발 수 ÷ 그 해 리그, byYear·평균 cond)을 대리값으로 쓴다
+   * (2026-10-22 사용자 결정, 엔진 2 13-0-5). 자료 없으면 1, 가상 감독은 이름으로 정한 0.5~1.5 (임시값)
+   */
+  cond: number;
+  /**
+   * 고의4구 빈도 (엔진 2 13단계, 2026-10-23 사용자 결정): AI 감독 고의4구 확률의 배율. 실존 감독은 2023~ 투구 단위 구단 값(byYear·평균 ibb),
+   * 자료 없으면 1, 가상 감독은 이름으로 정한 VIRTUAL_RANGE.ibb 안 값 (임시값)
+   */
+  ibb: number;
 }
 
-export const NEUTRAL_TACTICS: Tactics = { steal: 1, bunt: 1, hook: 1 };
+export const NEUTRAL_TACTICS: Tactics = { steal: 1, bunt: 1, hook: 1, pen: 1, sub: 1, cond: 1, ibb: 1 };
 
-/** 기록 배율을 경기 배율로 옮길 때의 비율: 팀 기록에는 선수 구성 몫도 섞여 있어 절반 남짓만 감독 몫으로 본다 (임시값) */
-export const TACTIC_SHARE = { steal: 0.6, bunt: 0.8, hook: 0.6 };
+/**
+ * 기록 배율을 경기 배율로 옮길 때의 비율: 팀 기록에는 선수 구성 몫도 섞여 있어 절반 남짓만 감독 몫으로 본다 (임시값).
+ * push·pen (엔진 2 10단계)은 2023~2025 선발 100구 이상 비율·구원 연투에 맞춘 값 (임시값)
+ */
+export const TACTIC_SHARE = { steal: 0.6, bunt: 0.8, hook: 0.6, push: 1, pen: 1, ibb: 1, cond: 0.6 };
+/** 가상 감독 성향 폭 (이름 해시, 임시값): 대타·대주자 빈도, 투수 밀어붙이기, 불펜 연투 허용, 컨디션 반영, 고의4구 빈도 */
+export const VIRTUAL_RANGE = { sub: [0.7, 1.3], hook: [0.94, 1.06], pen: [0.85, 1.15], cond: [0.5, 1.5], ibb: [0.5, 1.5] } as const;
+/** 고의4구 빈도 범위 (실존 구단 값 0.27~1.83: 팀당 수가 적어 흔들림이 크다, 임시값) */
+export const IBB_CLAMP = [0.3, 2] as const;
 /** 연봉: 기본 2억 + 감독 시즌마다 4천만, 우승마다 5천만, 최대 7억 (만 원, 임시값) */
 export const MANAGER_SALARY = { base: 20_000, perSeason: 4_000, perTitle: 5_000, max: 70_000 };
 /** 계약 기간 (시즌, 임시값). 실제 KBO 감독 계약은 대개 2~3년 */
@@ -66,14 +95,43 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 export const infoOf = (store: Pick<DataStore, 'managers'>, name: string): ManagerInfo | undefined => store.managers?.people[name];
 
-/** 기록 배율 → 경기 배율 */
-export function tacticsOf(info: ManagerInfo | undefined): Tactics {
-  if (!info) return NEUTRAL_TACTICS;
+/**
+ * 기록 배율 → 경기 배율. year: 그 시즌 (있으면 그 해 개막 감독으로 맡은 팀의 투구 단위 값 byYear를 먼저 쓴다).
+ * 자료 없는 이름(가상 감독)은 대타·대주자 빈도·투수 밀어붙이기·불펜 연투 허용을 이름으로 정한다
+ */
+export function tacticsOf(info: ManagerInfo | undefined, name?: string, year?: number): Tactics {
+  if (!info) {
+    return name
+      ? { ...NEUTRAL_TACTICS, sub: virtualSub(name), hook: virtualTactic(name, 'hook'), pen: virtualTactic(name, 'pen'), cond: virtualTactic(name, 'cond'), ibb: virtualTactic(name, 'ibb') }
+      : NEUTRAL_TACTICS;
+  }
+  const by = year !== undefined ? info.byYear?.[String(year)] : undefined;
+  const push = by?.push ?? info.push;
+  const pen = by?.pen ?? info.pen;
+  const ibb = by?.ibb ?? info.ibb;
+  const cond = by?.cond ?? info.cond;
   return {
+    sub: 1,
+    cond: cond !== undefined ? round3(clamp(1 + (cond - 1) * TACTIC_SHARE.cond, VIRTUAL_RANGE.cond[0], VIRTUAL_RANGE.cond[1])) : 1,
+    ibb: ibb !== undefined ? round3(clamp(1 + (ibb - 1) * TACTIC_SHARE.ibb, IBB_CLAMP[0], IBB_CLAMP[1])) : 1,
     steal: clamp(1 + (info.steal - 1) * TACTIC_SHARE.steal, 0.7, 1.4),
     bunt: clamp(1 + (info.bunt - 1) * TACTIC_SHARE.bunt, 0.7, 1.4),
-    hook: clamp(1 - (info.relief - 1) * TACTIC_SHARE.hook, 0.9, 1.1),
+    hook: push !== undefined ? round3(clamp(1 + (push - 1) * TACTIC_SHARE.push, 0.85, 1.15)) : clamp(1 - (info.relief - 1) * TACTIC_SHARE.hook, 0.9, 1.1),
+    pen: pen !== undefined ? round3(clamp(1 + (pen - 1) * TACTIC_SHARE.pen, 0.7, 1.4)) : 1,
   };
+}
+
+const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** 가상 감독의 대타·대주자 빈도: 이름으로 정한 0.7~1.3 (같은 이름은 늘 같다, 임시값) */
+export function virtualSub(name: string): number {
+  return Math.round((0.7 + 0.6 * new Rng(`manager-sub/${name}`).next()) * 100) / 100;
+}
+
+/** 가상 감독의 투수 밀어붙이기·불펜 연투 허용·컨디션 반영·고의4구 빈도: 이름으로 정한 VIRTUAL_RANGE 안 값 (같은 이름은 늘 같다, 임시값) */
+export function virtualTactic(name: string, key: 'hook' | 'pen' | 'cond' | 'ibb'): number {
+  const [lo, hi] = VIRTUAL_RANGE[key];
+  return Math.round((lo + (hi - lo) * new Rng(`manager-${key}/${name}`).next()) * 100) / 100;
 }
 
 /** 배율을 말로 (화면). 기록 비교일 뿐 좋고 나쁨이 아니다 */

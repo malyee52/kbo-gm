@@ -4,15 +4,17 @@
 // - 구원: 팀 경기당 등판, 등판당 아웃, 구원 아웃 몫(선발 아닌 등판의 아웃 ÷ 전체), 연투(전날 등판)·3연투 비율, 휴식일 분포
 // - 홈·원정 경기당 득점, 홈 승률, 규정 타석 타자 BABIP 표준편차
 // - 투구 수 (엔진 2 3단계): 타석당·결과별·선발·구원, 투수별 P/PA 퍼짐(상대 타자 100명 이상), 카운트 12칸의 공 결과 비율
+// - 타구 (엔진 2 5단계): 인플레이 방향 당겨·가운데·밀어 (실제는 임시값, 출처 미확인: data-src/batted_ball_derived/), 수비로 바뀐 안타·아웃
 // - 고의4구·좌우 분할은 아직 없어 "없음"으로 남긴다 (엔진 2에서 채울 자리)
 // 경기별 기록은 모든 구단의 박스스코어를 켜서 얻는다 (박스스코어는 난수를 쓰지 않아 결과가 같다).
 // 사용법:  npx tsx tools/engine2_baseline.ts [--years 2025,2019,2012] [--seasons 20] [--out reports/engine2-baseline-pitching.md]
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadDataStore } from '../src/data/loadNode';
 import { calibrate, DEFAULT_PARAMS, Rng, Season, winPct, worldForYear } from '../src/engine';
 import { Ev } from '../src/engine/pa';
 import { chainShapeFor } from '../src/engine/params';
 import { chainResolver, type PaResolver } from '../src/engine/resolver';
+import { emptyBallTally } from '../src/engine/battedball';
 import { babip } from '../src/game/saber';
 
 const arg = (name: string): string | undefined => {
@@ -40,8 +42,16 @@ interface Measure {
   rest: Record<string, number>;
   pPa: number; spPitches: number; sp100: number; sp110: number; rpPitches: number; kPitches: number; bbPitches: number; ipPitches: number;
   pitP10: number; pitP90: number;
+  /** 투수 ID → [상대 타자, 투구 수] (선수별 P/PA 대조용) */
+  pitById: Map<string, [number, number]>;
   /** 칸 × [볼, 스트라이크, 파울, 맞힘, 사구] 공 수 */
   cells: number[][];
+  /** 인플레이 방향 [당겨, 가운데, 밀어] 몫, 수비로 아웃이 된 안타·안타가 된 아웃 (팀 경기당) */
+  pull: number; center: number; oppo: number; toOut: number; toHit: number;
+  /** 인플레이 아웃의 땅볼 ÷ (땅볼 + 뜬공 + 내야 뜬공) (엔진 2 6단계), 타석당 병살·희생플라이·실책 출루, 비자책 실점 비율 */
+  gbOut: number; dpPa: number; sfPa: number; roePa: number; unearned: number;
+  /** 팀 경기당 실책 (엔진 2 7단계, 실제 값은 자료 없음) */
+  errPg: number;
 }
 
 function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<typeof calibrate>, seed: string): Measure {
@@ -58,7 +68,8 @@ function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<t
       return o;
     },
   };
-  const s = Season.start(world, params, seed, { cal, resolver });
+  const balls = emptyBallTally();
+  const s = Season.start(world, params, seed, { cal, resolver, balls });
   for (let t = 0; t < world.teams.length; t++) s.boxTeams.add(t);
   s.runToEnd();
   const st = { outs: [] as number[], bf: [] as number[], qs: 0, np: [] as number[] };
@@ -123,6 +134,12 @@ function measureSeason(world: ReturnType<typeof worldForYear>, cal: ReturnType<t
     pPa: s.totals.pitches / s.totals.pa, spPitches: mean(st.np), sp100: mean(st.np.map((n) => (n >= 100 ? 1 : 0))), sp110: mean(st.np.map((n) => (n >= 110 ? 1 : 0))), rpPitches: rpNp / Math.max(1, reliefApps),
     kPitches: byEv.k[1] / byEv.k[0], bbPitches: byEv.bb[1] / byEv.bb[0], ipPitches: byEv.ip[1] / byEv.ip[0],
     pitP10: pct(pitPpa, 0.1), pitP90: pct(pitPpa, 0.9), cells,
+    ...(() => { const n = balls.dir[0] + balls.dir[1] + balls.dir[2]; return { pull: balls.dir[0] / n, center: balls.dir[1] / n, oppo: balls.dir[2] / n }; })(),
+    toOut: balls.toOut / teamGames, toHit: balls.toHit / teamGames,
+    gbOut: balls.outType[0] / (balls.outType[0] + balls.outType[2] + balls.outType[3]),
+    dpPa: s.totals.gdp / s.totals.pa, sfPa: s.totals.sf / s.totals.pa, roePa: s.totals.roe / s.totals.pa, unearned: 1 - s.totals.er / s.totals.r,
+    errPg: s.errors.reduce((a, x) => a + x, 0) / teamGames,
+    pitById: new Map(s.pit.map((q, i): [string, [number, number]] => [world.players[i].id, [q.bf, q.np]]).filter(([, v]) => v[0] > 0)),
   };
 }
 
@@ -152,6 +169,19 @@ const qsByYear = (() => {
   return m;
 })();
 const paPitches = readCsv('pa_pitches.csv');
+/** 리그 타구 방향 (임시값, 출처 미확인, data-src/batted_ball_derived/batted_ball.csv) */
+const ballDir = (() => {
+  const ls = readFileSync('data-src/batted_ball_derived/batted_ball.csv', 'utf-8').trim().split(/\r?\n/);
+  const h = ls[0].split(',');
+  return new Map(ls.slice(1).map((l) => { const c = l.split(','); return [Number(c[h.indexOf('year')]), ['pull_pct', 'center_pct', 'oppo_pct'].map((k) => Number(c[h.indexOf(k)]) / 100)]; }));
+})();
+/** 판정된 아웃 타구의 땅볼 ÷ (땅볼 + 뜬공) (임시값, 출처 미확인) */
+const gbShare = (() => {
+  const ls = readFileSync('data-src/batted_ball_derived/batted_ball.csv', 'utf-8').trim().split(/\r?\n/);
+  const h = ls[0].split(',');
+  return new Map(ls.slice(1).map((l) => { const c = l.split(','); return [Number(c[h.indexOf('year')]), Number(c[h.indexOf('gb_share_of_gb_fb')])]; }));
+})();
+const gbReal = (year: number) => (gbShare.has(year) ? { gbOut: gbShare.get(year)! } : {});
 const countPitch = readCsv('count_pitch.csv');
 /** 하드힛 월별 표 리그 P/PA (2015~, 고의4구 포함 정의, data-src/hardhit_derived/league_ppa.csv) */
 const hardhitPpa = (() => {
@@ -195,6 +225,8 @@ function realFor(year: number): (Partial<Omit<Measure, 'cells'>> & { ibb?: numbe
     kPitches: pp('K'), bbPitches: pp('BB'), ipPitches: pp('in_play'), ...hhPart,
     sp100: Number(sp.share_100plus), sp110: Number(sp.share_110plus), qs: (qsByYear.get(year) ?? NaN) / Number(sp.starts),
     ibb: Number(ibb.find((r) => Number(r.year) === year)!.per_team),
+    dpPa: sm.dp_per_pa, sfPa: sm.sf_per_pa, roePa: sm.roe_per_pa, ...gbReal(year),
+    unearned: JSON.parse(readFileSync(`public/data/seasons/${year}.json`, 'utf-8')).league.unearnedShare,
   };
 }
 
@@ -213,8 +245,27 @@ for (const year of years) {
   const t0 = Date.now();
   const ms: Measure[] = [];
   for (let i = 0; i < nSeasons; i++) ms.push(measureSeason(world, cal, `validate-${year}-${i}`));
-  type Num = keyof Omit<Measure, 'rest' | 'cells'>;
+  type Num = keyof Omit<Measure, 'rest' | 'cells' | 'pitById'>;
   const avg = (k: Num) => mean(ms.map((m) => m[k]));
+  // 선수별 P/PA (D단계 뒤 3단계 기준): 실제 상대 타자 300 이상 투수의 시뮬 P/PA(모든 시즌 합)가 실제 ±0.10구 안인 비율
+  const actualPit = new Map<string, [number, number]>();
+  const src = year >= 2023 ? 'data-src/pbp_derived/pitcher_ppa.csv' : 'data-src/hardhit_derived/pitcher_ppa.csv';
+  if (existsSync(src)) {
+    const [head, ...lines] = readFileSync(src, 'utf-8').trim().split(/\r?\n/);
+    const col = Object.fromEntries(head.split(',').map((h, i) => [h, i]));
+    for (const l of lines) {
+      const c = l.split(',');
+      if (Number(c[col.year]) !== year) continue;
+      const a = actualPit.get(c[col.id]) ?? [0, 0];
+      a[0] += Number(c[col.pa]);
+      a[1] += year >= 2023 ? Number(c[col.pa]) * Number(c[col.ppa]) : Number(c[col.pitches]);
+      actualPit.set(c[col.id], a);
+    }
+  }
+  const simPit = new Map<string, [number, number]>();
+  for (const m of ms) for (const [id, [bf, np]] of m.pitById) { const a = simPit.get(id) ?? [0, 0]; a[0] += bf; a[1] += np; simPit.set(id, a); }
+  const pairs = [...actualPit].filter(([id, a]) => a[0] >= 300 && (simPit.get(id)?.[0] ?? 0) > 0).map(([id, a]) => [a[1] / a[0], simPit.get(id)![1] / simPit.get(id)![0]]);
+  const within = pairs.filter(([a, b]) => Math.abs(a - b) <= 0.1).length;
   const se = (k: Num) => sd(ms.map((m) => m[k])) / Math.sqrt(ms.length);
   const real = realFor(year);
   emit(`### ${year}년 (${world.teams.length}구단, 팀당 ${world.gamesPerTeam}경기, ${((Date.now() - t0) / 1000).toFixed(1)}초)`);
@@ -249,10 +300,20 @@ for (const year of years) {
   row('선발 100구 이상 비율', 'sp100', 3, true);
   row('선발 110구 이상 비율', 'sp110', 3, true);
   row('구원 등판당 투구 수', 'rpPitches', 1);
+  if (pairs.length) emit(`| 투수별 P/PA 실제 ±0.10구 안 (실제 상대 타자 300 이상 ${pairs.length}명) | 50% 이상 | ${f(100 * within / pairs.length, 1)}% | | 평균 절대 차 ${f(mean(pairs.map(([a, b]) => Math.abs(a - b))), 3)}구 |`);
   row('투수별 P/PA 백분위 10 (상대 타자 100명 이상)', 'pitP10', 2);
   row('투수별 P/PA 백분위 90', 'pitP90', 2);
   if (real?.hhP10 !== undefined) emit(`| 투수별 P/PA 백분위 10·90 (하드힛, 규정 기준 미상) | ${f(real.hhP10, 2)} · ${f(real.hhP90, 2)} | ${f(avg('pitP10'), 2)} · ${f(avg('pitP90'), 2)} | | |`);
   emit(`| 팀당 고의4구 | ${f(real?.ibb, 1)} | 0 (없음) | | |`);
+  const bd = ballDir.get(year);
+  emit(`| 인플레이 방향 당겨·가운데·밀어 (실제는 임시값, 출처 미확인) | ${bd ? bd.map((x) => p(x)).join(' · ') : '—'} | ${p(avg('pull'))} · ${p(avg('center'))} · ${p(avg('oppo'))} | | ${bd ? `최대 ${(Math.max(Math.abs(avg('pull') - bd[0]), Math.abs(avg('center') - bd[1]), Math.abs(avg('oppo') - bd[2])) * 100).toFixed(1)}%p` : ''} |`);
+  emit(`| 수비로 아웃이 된 안타 · 안타가 된 아웃 (팀 경기당) | | ${f(avg('toOut'), 3)} · ${f(avg('toHit'), 3)} | | |`);
+  row('인플레이 아웃 땅볼 ÷ (땅볼+뜬공) (실제는 임시값, 출처 미확인)', 'gbOut', 3);
+  row('타석당 병살', 'dpPa', 4);
+  row('타석당 희생플라이', 'sfPa', 4);
+  row('타석당 실책 출루', 'roePa', 4);
+  row('비자책 실점 비율 (실제는 시즌 자료)', 'unearned', 3, true);
+  row('팀 경기당 실책 (실제 자료 없음)', 'errPg', 3);
   emit('');
   emit(`구원 등판 전 휴식일 분포 (앞 등판이 있는 구원 등판 중):`);
   emit('');

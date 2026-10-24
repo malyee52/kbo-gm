@@ -136,7 +136,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);
-        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats) }] : [];
+        return r && s && r.pa > 0 ? [{ row: r, w: params.seasonBlend[k] ?? 0, lg: s.league.rates, park: seasonPark(meta, s, r.team, p.bats), sbPct: params.sbPctByYear[s.year] }] : [];
       });
       const skill = batSkillFrom(rows, meta.priors.batter, seasonRegress(params));
       take(runsOf({ ...p, bat: skill, pit: null, birthYear: null }, ctx, 0) * qRatio(year));

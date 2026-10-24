@@ -72,8 +72,9 @@ describe('시즌을 진행하면 기사가 나온다', () => {
 
   it('순위 기사: 선두 교체나 우리 구단 가을야구권 드나듦이 있는 시즌이면 나온다', () => {
     // 중위권 구단으로 한 시즌. 순위 기사가 하나도 없다면 선두가 20경기 뒤로 한 번도 안 바뀌고 우리 구단도 줄곧 같은 쪽이었다는 뜻이라 드물다
+    // 시드: 엔진 2 13단계 희생번트 배율 16 → 17.6 때 articles-rank → articles-rank-2 (그 판은 선두 교체·가을야구권 드나듦이 한 번도 없었다)
     const ssg = store.season(2026)!.teams.findIndex((t) => t.name === 'SSG');
-    const g = GameSession.create(store, { year: 2026, teamIdx: ssg, seed: 'articles-rank' }, FAST);
+    const g = GameSession.create(store, { year: 2026, teamIdx: ssg, seed: 'articles-rank-2' }, FAST);
     g.advance(100000);
     expect((g.league.articles ?? []).some((a) => a.kind === 'rank')).toBe(true);
   }, 300_000);

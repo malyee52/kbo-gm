@@ -1,4 +1,4 @@
-// 경기 AI 연출: 후일담(경기 key로 한 편), 경기 전 미팅(하루 한 번, 선수단 컨디션), 재현
+// 경기 AI 연출: 후일담(경기 key로 한 편), 경기 전 미팅(하루 한 번, 선수단 경기력), 재현
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
