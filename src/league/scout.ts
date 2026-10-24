@@ -236,3 +236,45 @@ export function foreignSigma(league: LeagueState, who: Observer, p: { id: string
 export function guessRuns(league: LeagueState, who: Observer, id: string, trueRuns: number, sigma: number, year: number): number {
   return trueRuns + scoutZ(league.seed, who, id, 'now') * sigma * runsPerGrade(year);
 }
+
+// ---- 화면에 보이는 추측 (16-7, 기획안 17.6·17.7): 갈래 등급 범위와 스카우트 보고 문구
+
+/** 화면 갈래 → 기본 폭 묶음 (17.7 ①: 기록이 잘 드러내는 갈래 · 덜 · 거의 안) */
+export const GUESS_KIND: Record<string, GuessKind> = {
+  contact: 'clear', power: 'clear', eye: 'clear', stuff: 'clear', control: 'clear',
+  speed: 'mid', defense: 'mid', arm: 'mid', stamina: 'mid', reliefStamina: 'mid', catcher: 'mid',
+  hrSuppression: 'faint',
+};
+
+/** 보는 쪽이 보는 선수 (화면 추측에 필요한 것만) */
+export interface Seen {
+  id: string;
+  /** 1군 표본 (타석·상대 타자, 능력 산출의 sample). 기록 없으면 0 */
+  sample: number;
+  /** 보는 구단에서 보낸 시즌 수 (우리 소속일 때, 다른 구단 선수면 null) */
+  seasonsWithUs: number | null;
+  /** 1군 기록이 없는 신인이면 아마추어 스카우트 배율로 */
+  amateur?: boolean;
+}
+
+/** 그 선수 그 갈래의 추측 폭 σ (등급). 관찰 명단의 외국인 후보는 관찰 기간으로 (foreignSigma) */
+export function seenSigma(league: LeagueState, who: Observer, p: Seen, kind: GuessKind): number {
+  if (fxEntry(league, who.team, p.id)) return foreignSigma(league, who, { id: p.id, sample: null }) * BASE_SIGMA[kind] / BASE_SIGMA.clear;
+  return branchSigma(league, who, kind, { sample: p.sample || null, seasonsWithUs: p.seasonsWithUs, scout: p.amateur ? 'amateur' : 'pro' });
+}
+
+/** 화면 갈래 등급의 추측 꼴 (key = 화면 갈래 이름, 진짜 등급은 computeGrades 값) */
+export function seenGrade(league: LeagueState, who: Observer, p: Seen, key: string, trueGrade: number): GuessView {
+  const kind = GUESS_KIND[key] ?? 'mid';
+  return guessView(trueGrade, seenSigma(league, who, p, kind), scoutZ(league.seed, who, p.id, key));
+}
+
+/**
+ * 스카우트 보고 문구 (천장 − 지금 격차 4단계, 17.7 ①). 격차는 진짜 격차 + z × σ(그 선수의 잘 드러나는 갈래 폭)라 틀릴 수 있다.
+ * 신인(amateur)은 천장 추측 폭 σ_천장. 32세부터는 없음
+ */
+export function seenPhrase(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, ageNext: number, year: number): string | null {
+  const s = p.amateur ? ceilingSigma(league, who) : seenSigma(league, who, p, 'clear');
+  const gap = runsGradeRaw(Math.max(nowRuns, potential), year) - runsGradeRaw(nowRuns, year) + scoutZ(league.seed, who, p.id, 'gap') * s;
+  return gapPhrase(Math.max(0, gap), ageNext);
+}

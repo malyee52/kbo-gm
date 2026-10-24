@@ -4,6 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
+import { seenGrade, seenPhrase, seenSigma, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
@@ -1186,6 +1187,40 @@ export class GameSession {
       return { ok: true, message: '' };
     }
     return this.dispatchOff({ year: this.year, type: 'fx-drop-off', id });
+  }
+
+  /** 화면 추측용 선수 정보 (scout.ts Seen): 표본, 우리 구단에서 보낸 시즌 수, 신인 여부 */
+  seenOf(id: string): Seen {
+    const lp = this.leaguePlayer(id);
+    const sim = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : this.offView().sim.get(id);
+    const sample = sim?.bat?.sample ?? sim?.pit?.sample ?? 0;
+    const mine = this.phase === 'season' ? sim?.teamIdx === this.teamIdx : lp?.team === this.teamIdx;
+    const name = this.league.teams[this.teamIdx]?.name;
+    const seasonsWithUs = mine ? (lp?.history ?? []).filter((h) => h.team === name && (h.bat || h.pit)).length : null;
+    const amateur = !!lp && !lp.foreign && !lp.history.some((h) => h.bat || h.pit);
+    return { id, sample, seasonsWithUs, ...(amateur ? { amateur } : {}) };
+  }
+
+  /** 우리 스카우트 팀이 보는 화면 갈래 등급 (key = contact·power·stuff 등, grade = 진짜 화면 등급) */
+  guessGrade(id: string, key: string, grade: number): GuessView {
+    return seenGrade(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), key, grade);
+  }
+
+  /** 우리 스카우트 팀의 지금 능력 추측 폭 (등급, 잘 드러나는 갈래) */
+  guessSigma(id: string): number {
+    return seenSigma(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), 'clear');
+  }
+
+  /** 스카우트 보고 문구 (천장까지 격차 4단계, 틀릴 수 있다. 32세부터 없음) */
+  scoutPhrase(id: string): string | null {
+    const lp = this.leaguePlayer(id);
+    if (!lp) return null;
+    const off = this.phase !== 'season';
+    const year = this.world.year + (off ? 1 : 0);
+    const sim = off ? null : this.world.players.find((p) => p.id === id);
+    const now = off ? this.nextRuns(id) : sim ? currentRuns(sim, this.values) : 0;
+    const ageNext = lp.birthYear ? year + (off ? 0 : 1) - lp.birthYear : 25;
+    return seenPhrase(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), now, lp.potential, ageNext, year);
   }
 
   // ---- 판타지 모드 (src/fantasy, docs/fantasy-mode.md)

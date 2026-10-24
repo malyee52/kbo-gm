@@ -45,6 +45,7 @@ export const MENU: MenuItem[] = [
   one('market', '영입', '시장', 'market'),
   one('trade', '영입', '트레이드', 'trade'),
   one('offseason', '영입', '계약·지명', 'offseason'),
+  { key: 'scout', group: '영입', label: '스카우트', tabs: [{ screen: 'scout-amateur', label: '아마추어' }, { screen: 'scout-pro', label: '프로' }, { screen: 'scout-fx', label: '해외' }] },
   one('watch', '영입', '관심 명단', 'watch'),
 
   one('schedule', '시즌', '일정·결과', 'schedule', '지난 시즌 일정'),

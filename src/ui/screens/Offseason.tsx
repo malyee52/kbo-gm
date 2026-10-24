@@ -1,4 +1,5 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
+import { fxVisible } from '../../league/scoutfx';
 import { isStarterSkill } from '../../engine';
 import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -890,7 +891,9 @@ function ForeignPanel({ act }: { act: Act }) {
   const lim = foreignLimits(off, session.league, session.teamIdx);
   const perk = expansionPerk(session.league, session.teamIdx, off.year + 1);
   const myTurn = f.order[f.pointer] === session.teamIdx;
-  const pool = f.pool.map((id) => players.get(id)!).sort((a, b) => session.nextRuns(b.id) - session.nextRuns(a.id))
+  // 새 후보(파견 후보)는 우리 관찰 명단에 있는 선수만 (league/scoutfx.ts). 진짜 능력 순으로 늘어놓지 않는다 (요구액 순)
+  const pool = f.pool.map((id) => players.get(id)!).filter((p) => fxVisible(session.league, session.teamIdx, p))
+    .sort((a, b) => b.contract.salary - a.contract.salary || a.id.localeCompare(b.id))
     .map((p) => ({ p, i: info(p), check: canSignForeign(session.league, off, session.teamIdx, p) }));
   const expiringMine = Object.keys(f.keep).map((id) => { const p = players.get(id)!; return { p, i: info(p) }; });
   const pickedBefore = f.order.slice(0, f.pointer).filter((t) => t !== session.teamIdx);
@@ -948,7 +951,7 @@ function ForeignPanel({ act }: { act: Act }) {
       )}
 
       <div>
-        <h2>후보 <span className="muted small">{pool.length}명 (실존 선수는 다른 구단에서 재계약하지 않은 선수, 나머지는 가상 선수)</span></h2>
+        <h2>후보 <span className="muted small">{pool.length}명 (실존 선수는 다른 구단에서 재계약하지 않은 선수, 나머지는 우리 관찰 명단의 가상 선수. 스카우트 파견은 영입 &gt; 스카우트 &gt; 해외)</span></h2>
         <div className="pick-table">
           <DataTable id="off-foreign-pool" label="외국인 후보" cols={poolCols} rows={pool} rowKey={(r) => r.p.id} full={full} searchText={byName} />
         </div>

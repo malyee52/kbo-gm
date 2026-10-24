@@ -14,7 +14,7 @@ export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 
   // 2026-10-22 UI 대개편 1차 (menu.ts): 결정함, 구단 소식, 기용 보드, 입대, 구단주
   | 'inbox' | 'news' | 'lineup' | 'enlist' | 'owner'
   // 2026-10-23 UI 2단계 공통 기능: 다른 구단 보기(arg = 구단 색인), 관심 명단, 전체 검색
-  | 'team' | 'watch' | 'find' | 'training'
+  | 'team' | 'watch' | 'find' | 'training' | 'scout-amateur' | 'scout-pro' | 'scout-fx'
   // 규칙 알림: 규칙 연표
   | 'rules';
 
