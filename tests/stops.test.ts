@@ -127,6 +127,8 @@ describe('진행 멈춤 설정', () => {
     for (let i = 0; i < 2000 && !b.done; i++) {
       b.advance(7, all);
       if (b.pendingEvent) b.answerEvent(0);
+      // 위기 때 멈추기(기본 켬): 끼어들기 창에서 "AI 감독에게 맡기기"면 끼어들지 않은 진행과 같다 (UI 2단계 2.2.3)
+      if (b.crisis) expect(b.crisisDecline()).toBe(true);
     }
     expect(b.done).toBe(true);
     expect(b.season.standings()).toEqual(a.season.standings());

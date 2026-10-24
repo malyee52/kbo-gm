@@ -169,4 +169,57 @@ describe('수동 경기 저장·재현·전환 (엔진 2 18단계)', () => {
     }
     expect(done).toBe(true);
   }, 600_000);
+
+  it('위기 끼어들기 창 "AI 감독에게 맡기기" 진행 = 위기 멈춤을 끈 진행 (UI 2단계 2.2.3), 끼어든 동안은 선수단 조작을 막는다', () => {
+    let done = false;
+    for (const seed of ['cmd-crisis-a', 'cmd-crisis-b', 'cmd-crisis-c']) {
+      const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
+      const plain = GameSession.create(store, { year: 2026, teamIdx: lg, seed }, FAST);
+      let declined = 0;
+      for (let k = 0; k < 40; k++) {
+        if (g.pendingEvent) { g.answerEvent(0); plain.answerEvent(0); }
+        g.advance(1, { ...NO_STOPS, crisis: true });
+        if (g.crisis) {
+          // 끼어든 경기(from)는 진행한 경기로 보아 선수단·트레이드를 막는다
+          expect(g.gameLock).not.toBeNull();
+          expect(g.setEntry(null).errors).toEqual([g.gameLock]);
+          expect(g.crisisDecline()).toBe(true);
+          expect(g.gameLock).toBeNull();
+          expect(g.pendingGame).toBeNull();
+          declined++;
+          // 같은 경기에서 다시 묻지 않고 그날을 치른다
+          g.advance(1, { ...NO_STOPS, crisis: true });
+          expect(g.crisis).toBeNull();
+        }
+        plain.advance(1, NO_STOPS);
+        expect(g.day).toBe(plain.day);
+        expect(g.season.log).toEqual(plain.season.log);
+        if (declined) break;
+      }
+      expect(g.actions).toEqual(plain.actions);
+      if (!declined) continue;
+      done = true;
+      break;
+    }
+    expect(done).toBe(true);
+  }, 600_000);
+
+  it('화면의 "다음 타석"을 공마다 굴리거나 중간에 멈췄다 이어 가도 한 번에 다음 타석까지 간 것과 같다 (UI 2단계 U2-10)', () => {
+    const a = gameDay('cmd-pause');
+    const b = gameDay('cmd-pause');
+    let pa = a.commandOpen();
+    let pb = b.commandOpen();
+    for (let k = 0; k < 25 && pa.req && pb.req; k++) {
+      // a: 한 번에 다음 타석 물음까지 (속도 '즉시'), b: 공 하나씩 (빈 선택 = 멈췄다가 아무것도 고르지 않고 이어 감)
+      pa = a.commandStep({}, 'next');
+      pb = b.commandStep({}, 'pitch');
+      while (pb.req && pb.req.step === 'pitch') pb = b.commandStep({}, 'pitch');
+      expect(pb.plays).toEqual(pa.plays);
+      expect(pb.req).toEqual(pa.req);
+    }
+    expect(b.pendingGame!.picks).toEqual([]);
+    a.commandFinish('A');
+    b.commandFinish('A');
+    expect(b.season.log).toEqual(a.season.log);
+  }, 120_000);
 });

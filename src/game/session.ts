@@ -150,6 +150,23 @@ export interface PendingGame extends CommandCtl {
   over?: true;
 }
 
+/** 진행 중인 지휘 경기의 지금 모습 (GameSession.pendingScore): 원정·홈 구단, 점수, 이닝·아웃, 끝났나 */
+export interface PendingScore {
+  key: string;
+  away: number;
+  home: number;
+  awayRuns: number;
+  homeRuns: number;
+  inn: number;
+  top: boolean;
+  outs: number;
+  over: boolean;
+}
+
+function viewKey(p: PendingGame): string {
+  return `${p.year}:${p.day}:${p.dh ?? 1}:${p.at}`;
+}
+
 /** 물음 순서대로인 선택 목록을 [물음 번호, 선택] 짝으로 (빈 선택은 뺀다) */
 export function packChoices(choices: readonly CommandChoice[]): CommandPick[] {
   const out: CommandPick[] = [];
@@ -529,8 +546,15 @@ export class GameSession {
   private pendingCommands: PendingCommand[] = [];
   /** 진행 중인 지휘 경기 (엔진 2 18단계, commandOpen·commandStep. 세션 저장에 남는다) */
   pendingGame: PendingGame | null = null;
-  /** 자동 진행이 위기에서 멈췄을 때의 미리보기 (화면이 지휘 창을 연다) */
+  /** 자동 진행이 위기에서 멈췄을 때의 미리보기 (화면이 끼어들기 창을 띄운다, UI 2단계 2.2.3) */
   crisis: CommandPreview | null = null;
+  /**
+   * 위기 끼어들기를 "AI 감독에게 맡기기"로 넘긴 경기 (`연도:날:차전`). 그 경기는 다시 묻지 않고 지휘하지 않은 경기로 치른다.
+   * 화면 편의라 저장하지 않는다 (끼어들지 않은 경기와 결과가 같아 재현에 영향 없음)
+   */
+  private crisisSkip = new Set<string>();
+  /** 진행 중인 지휘 경기를 마지막으로 본 모습 (pendingScore) */
+  private pendingView: PendingScore | null = null;
   /** 미리보기용 개막 월드 (시즌마다 한 번 만든다. 시즌 중 리그 상태는 개막 때로 고정이다) */
   private openingWorld: { season: Season; world: World } | null = null;
 
@@ -698,6 +722,26 @@ export class GameSession {
 
   // ---- 진행 중인 지휘 경기 (엔진 2 18단계): 화면은 이 함수들로 한 물음씩 나아가고, 세션 저장에 pendingGame으로 남는다
 
+  /**
+   * 한 번이라도 진행한 지휘 경기가 있으면 그 사유 (없으면 null). 그동안 선수단·기용·트레이드·난이도처럼 경기 결과에 닿는 조작을 막는다:
+   * 지휘 경기는 물음마다 경기 처음부터 다시 돌리므로, 도중에 바꾸면 이미 본 앞부분이 달라진다 (UI 2단계 2.2.2 경기 중 창 닫기)
+   */
+  get gameLock(): string | null {
+    const p = this.phase === 'season' ? this.commandInProgress : null;
+    return p && (p.at > 0 || p.from !== undefined) ? '진행 중인 경기가 있습니다. 경기를 끝낸 뒤 바꿀 수 있습니다.' : null;
+  }
+
+  /** 위기 끼어들기 창에서 "AI 감독에게 맡기기": 끼어들기를 버리고, 그 경기는 이번에 다시 묻지 않는다. 다음 진행에서 지휘하지 않은 경기로 치른다 */
+  crisisDecline(): boolean {
+    const p = this.pendingGame;
+    const c = this.crisis;
+    if (!c || !p || p.from === undefined || p.picks.length || p.at !== c.choices.length) return false;
+    this.crisisSkip.add(`${p.year}:${p.day}:${p.dh ?? 1}`);
+    this.pendingGame = null;
+    this.crisis = null;
+    return true;
+  }
+
   /** 진행 중인 지휘 경기 (없으면 null). 오늘 경기가 아니면 버린다 */
   get commandInProgress(): PendingGame | null {
     const p = this.pendingGame;
@@ -715,7 +759,28 @@ export class GameSession {
   /** 진행 중인 지휘 경기를 처음부터 다시 돌려 멈춘 물음에서 보여 준다 (불러온 뒤 이어 가기) */
   commandResume(): CommandPreview {
     const p = this.pendingGame!;
-    return this.commandPreview(unpackChoices(p.picks, p.at), 'pitch', p.dh, p);
+    return this.noteView(this.commandPreview(unpackChoices(p.picks, p.at), 'pitch', p.dh, p));
+  }
+
+  /** 진행 중인 지휘 경기의 지금 모습 (홈 다음 경기 카드 "경기 중: 7회초 3:2"). 없으면 null. 마지막으로 본 물음이 아니면 다시 돌려 본다 (약 0.1초) */
+  pendingScore(): PendingScore | null {
+    const p = this.commandInProgress;
+    if (!p) return null;
+    if (this.pendingView?.key !== viewKey(p)) this.commandResume();
+    return this.pendingView;
+  }
+
+  private noteView(pv: CommandPreview): CommandPreview {
+    const p = this.pendingGame;
+    if (p) {
+      const r = pv.req;
+      const last = pv.plays.at(-1);
+      this.pendingView = {
+        key: viewKey(p), away: pv.away, home: pv.home, awayRuns: r?.away ?? pv.final?.away ?? 0, homeRuns: r?.home ?? pv.final?.home ?? 0,
+        inn: r?.inn ?? last?.inn ?? 1, top: r?.top ?? last?.top ?? true, outs: r?.outs ?? 0, over: !r,
+      };
+    }
+    return pv;
   }
 
   /** 지금 물음에 choice로 답하고 mode대로 다음 멈출 곳까지 (choice가 null이면 답하지 않고 mode대로 첫 물음까지) */
@@ -726,7 +791,7 @@ export class GameSession {
     p.at = pv.choices.length;
     if (pv.req) delete p.over;
     else p.over = true;
-    return pv;
+    return this.noteView(pv);
   }
 
   /** 아직 아무것도 진행하지 않은 지휘 경기면 버린다 (창 닫기). 한 번 진행한 경기는 남기고 false (결정 4: 되돌리지 않는다) */
@@ -1141,7 +1206,7 @@ export class GameSession {
 
   /** 엔트리·기용표를 바꿀 수 있는가: 정규시즌 중이거나, 가을야구에서 아직 탈락하지 않았을 때 */
   get canManage(): boolean {
-    if (this.phase !== 'season') return false;
+    if (this.phase !== 'season' || this.gameLock) return false;
     if (!this.done) return true;
     return this.postseasonRunning && stillAlive(this.postseason!, this.teamIdx);
   }
@@ -1219,11 +1284,13 @@ export class GameSession {
 
   releaseBlock(p: SimPlayer): string | null {
     if (this.phase !== 'season') return '시즌 중에만 방출할 수 있습니다 (오프시즌에는 정원 정리 단계에서).';
+    if (this.gameLock) return this.gameLock;
     return releaseBlock(this.marketCtx, p, this.teamIdx);
   }
 
   signBlock(p: SimPlayer): string | null {
     if (this.phase !== 'season') return '시즌 중에만 영입할 수 있습니다.';
+    if (this.gameLock) return this.gameLock;
     return signBlock(this.marketCtx, p, this.teamIdx);
   }
 
@@ -1292,6 +1359,7 @@ export class GameSession {
   /** AI가 만든 글을 이야기 기록에 넣고 조작 기록에 남긴다 (화면이 AI를 부른 뒤). 판타지 게임이 아니면 넣지 않는다 */
   addFantasy(entry: Omit<FantasyEntry, 'year' | 'day'>): { ok: boolean; message: string } {
     if (!this.league.fantasy) return { ok: false, message: '판타지 모드 게임이 아닙니다.' };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     if (this.phase === 'season') {
       const e: FantasyEntry = { ...entry, year: this.year, day: this.currentDay };
       this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'ai', entry: e });
@@ -1339,6 +1407,7 @@ export class GameSession {
     if (!e || !e.choices?.[choice]) return { ok: false, message: '고를 수 없는 선택지입니다.' };
     if (e.chosen !== undefined) return { ok: false, message: '이미 골랐습니다.' };
     if (offerExpired(this, e)) return { ok: false, message: `제안이 만료됐습니다 (${RIVAL_OFFER_DAYS}일 안에 답해야 합니다).` };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     if (this.phase === 'season') this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'ai-choice', id, choice });
     else this.dispatchOff({ year: this.year, type: 'ai-choice-off', id, choice });
     return { ok: true, message: e.choices[choice].result || '골랐습니다.' };
@@ -1526,6 +1595,7 @@ export class GameSession {
   convertBlock(p: SimPlayer): string | null {
     if (!p.dev || p.teamIdx !== this.teamIdx) return '정식 등록할 육성선수가 아닙니다.';
     if (this.phase !== 'season' || this.done) return '시즌 중에만 정식 등록할 수 있습니다 (오프시즌에는 정원 정리 단계에서).';
+    if (this.gameLock) return this.gameLock;
     const dt = dateOf(this.world.year, Math.min(this.day, this.season.schedule.length - 1));
     if (dt.month < DEV_REGISTER_FROM.month) return `육성선수는 ${DEV_REGISTER_FROM.month}월 ${DEV_REGISTER_FROM.date}일부터 정식 등록할 수 있습니다.`;
     if (this.day > this.tradeDeadlineDay) return `선수 등록 마감(${this.tradeDl.month}월 ${this.tradeDl.date}일)이 지났습니다.`;
@@ -1619,7 +1689,7 @@ export class GameSession {
 
   /** 1군 명단을 통째로 바꾼다. 규정 위반이면 바꾸지 않고 errors를 돌려준다. null이면 AI에게 맡긴다 */
   setEntry(idxs: number[] | null): EntryCheck {
-    if (!this.canManage) return { errors: [this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다'], warnings: [] };
+    if (!this.canManage) return { errors: [this.gameLock ?? (this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다')], warnings: [] };
     const check = idxs ? this.checkEntry(idxs) : { errors: [], warnings: [] };
     if (check.errors.length) return check;
     this.applyEntry(idxs);
@@ -1724,7 +1794,7 @@ export class GameSession {
    * 기용표는 새 1군 명단 기준으로 본다
    */
   checkBoard(change: { entry?: number[]; plan?: DepthPlan | null }): EntryCheck {
-    if (!this.canManage) return { errors: [this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다'], warnings: [] };
+    if (!this.canManage) return { errors: [this.gameLock ?? (this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다')], warnings: [] };
     const errors: string[] = [];
     const warnings: string[] = [];
     const entry = change.entry ?? (change.plan && !this.manualEntry ? this.registered().map((p) => p.idx) : undefined);
@@ -1872,7 +1942,7 @@ export class GameSession {
 
   /** 기용표를 정한다. null이면 AI 감독에게 맡긴다 */
   setPlan(plan: DepthPlan | null): EntryCheck {
-    if (!this.canManage) return { errors: [this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다'], warnings: [] };
+    if (!this.canManage) return { errors: [this.gameLock ?? (this.done ? '시즌이 끝났습니다 (가을야구에서 탈락했거나 진출하지 못함)' : '지금은 바꿀 수 없습니다')], warnings: [] };
     if (!this.manualEntry) return { errors: ['1군을 직접 관리할 때만 기용표를 정할 수 있습니다'], warnings: [] };
     const check = plan ? this.checkPlan(plan) : { errors: [], warnings: [] };
     if (check.errors.length) return check;
@@ -1932,6 +2002,7 @@ export class GameSession {
         let crisis: CommandPreview | null = null;
         for (const dh of this.ourGamesToday()) {
           if (this.pendingCommands.some((c) => c.day === this.day && c.dh === dh)) continue;
+          if (this.crisisSkip.has(`${this.year}:${this.day}:${dh ?? 1}`)) continue;
           const pv = this.crisisPreview(dh);
           if (pv.req) { crisis = pv; break; }
         }
@@ -2610,6 +2681,7 @@ export class GameSession {
   evaluateTrade(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0, picks: PickSwap = NO_PICKS): TradeEvaluation {
     const none = { gain: 0, need: 0, before: 0, after: 0, tendency: 'rebuild' as const };
     if (aiTeam === this.teamIdx || !this.world.teams[aiTeam]) return { verdict: 'reject-invalid', message: '상대 구단을 고르세요.', detail: none };
+    if (this.gameLock) return { verdict: 'reject-invalid', message: this.gameLock, detail: none };
     if (!this.tradeOpen) {
       const why = this.done ? '시즌이 끝났습니다.' : `트레이드 마감(${this.tradeDl.month}월 ${this.tradeDl.date}일)이 지났습니다.`;
       return { verdict: 'reject-invalid', message: why, detail: none };
@@ -3678,6 +3750,7 @@ export class GameSession {
   /** 시즌 중 감독 교체 (name null = 감독 대행). 정규시즌 중에만 */
   changeManager(name: string | null): { ok: boolean; message: string } {
     if (this.phase !== 'season' || this.season.done) return { ok: false, message: '시즌 중 감독 교체는 정규시즌 동안만 할 수 있습니다. 오프시즌에는 구단 → 감독·코치에서 바꿉니다.' };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     const r = this.applyManagerChange(name);
     if (r.ok) this.actions.push({ year: this.year, day: this.day, type: 'mgr-change', name });
     return r;
@@ -3701,6 +3774,7 @@ export class GameSession {
   /** 시즌 중 코치 고용 (같은 역할 코치는 위약금을 내고 바꾼다) */
   hireCoachInSeason(id: string): { ok: boolean; message: string } {
     if (this.phase !== 'season' || this.season.done) return { ok: false, message: '시즌 중 코치 고용은 정규시즌 동안만 할 수 있습니다.' };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     const r = this.applyHireCoachIn(id);
     if (r.ok) this.actions.push({ year: this.year, day: this.day, type: 'hire-coach-in', id });
     return r;
@@ -3722,6 +3796,7 @@ export class GameSession {
   editDefense(id: string, def: Defense): { ok: boolean; message: string } {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return { ok: false, message: '타자 능력이 없는 선수입니다.' };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     const clean: Defense = {};
     for (const q of FIELD_POS) {
       const v = def[q];
@@ -3742,6 +3817,7 @@ export class GameSession {
     const lp = this.leaguePlayer(id);
     if (!lp || lp.team !== this.teamIdx) return { ok: false, message: '우리 구단 선수만 정할 수 있습니다.' };
     if (!!lp.twoWay === on) return { ok: false, message: on ? '이미 이도류입니다.' : '이미 본업만 맡고 있습니다.' };
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     if (this.phase === 'season') {
       this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'two-way', id, on });
       return { ok: true, message: on ? `${lp.name}을(를) 이도류로 씁니다.` : `${lp.name}은(는) 본업만 맡습니다.` };
@@ -3864,6 +3940,7 @@ export class GameSession {
    * 세부 난이도를 바꾼다 (게임 중에도, 조작 기록에 남는다). 부상 빈도는 다음 경기부터
    */
   setDifficulty(s: DifficultySettings): { ok: boolean; message: string } {
+    if (this.gameLock) return { ok: false, message: this.gameLock };
     if (this.phase === 'season') {
       this.applySettings(s);
       this.actions.push({ year: this.year, day: this.currentDay, type: 'settings', s: { ...s } });
