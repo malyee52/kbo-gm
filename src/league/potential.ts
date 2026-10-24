@@ -56,6 +56,12 @@ export function sampleScale(sample: number, pp: PotParams = DEFAULT_PARAMS.poten
   return 1 + pp.sampleExtra * (1 - Math.min(1, Math.max(0, sample) / pp.sampleFull));
 }
 
+/** 실존 선수 성장 여유분 가운데값 (런, 시작 시즌 나이, 16-5 실측). 27세부터 0 */
+export function roomOf(age: number, pp: PotParams = DEFAULT_PARAMS.potential): number {
+  const r = pp.room;
+  return age <= 20 ? r[0] : age <= 22 ? r[1] : age <= 24 ? r[2] : age <= 26 ? r[3] : 0;
+}
+
 /** 범위 선수 나이 바닥 (등급, 28세부터 없음) */
 export function ageFloorGrade(ageNext: number, pp: PotParams = DEFAULT_PARAMS.potential): number | null {
   const f = pp.ageFloor;
@@ -167,7 +173,7 @@ export interface RealCeilingInput {
   sample: number;
   /** 시작 시즌 (등급 눈금 해) */
   year: number;
-  /** 성장 여유분 가운데값 (런, growthRoom(시작 연도 나이)) */
+  /** 성장 여유분 가운데값 (런, roomOf(시작 연도 나이)) */
   room: number;
   draft?: DraftInfo;
 }

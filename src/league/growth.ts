@@ -103,9 +103,10 @@ export function careerIndex(store: Pick<DataStore, 'meta' | 'season'>): CareerIn
  */
 export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'parks'>>, ctx: ValueContext,
                              params: EngineParams = DEFAULT_PARAMS, before = Infinity,
-                             out?: { peak?: BatSkill | PitSkill; seasons?: (BatSkill | PitSkill)[] }): number | null {
+                             out?: { peak?: BatSkill | PitSkill; seasons?: (BatSkill | PitSkill)[] }, from = -Infinity): number | null {
   // out: 고점 시즌 능력과 출전이 충분했던 시즌들의 능력 (갈래 천장 모양, 16-4a branches.ts peakShape)
   // before: 이 해 전 시즌만 본다 (잠재력 v2, 기획안 18.1: 시작 연도 실존 선수의 고정 판단·바닥은 시작 연도 전 기록뿐)
+  // from: 이 해부터의 시즌만 본다 (tools/fit_prospects.ts: 기준 해 뒤 몇 해 안의 전성기)
   // 2026-10-12 사용자 "실제로 높았던 선수들의 잠재력이 실제보다 낮다": 예전에는 한 시즌씩 따로 능력을 뽑아(한 시즌 표본이라
   // 평균 쪽으로 크게 당겨진다) 좋은 두 시즌을 평균했다. 이제는 게임이 능력을 매기는 방식 그대로(그 시즌과 앞 두 시즌을
   // seasonWeights로 가중) 출전이 충분했던 시즌마다 능력을 뽑아 가장 높은 값을 쓴다. "그 선수의 전성기에 게임이 매겼을 능력"
@@ -125,7 +126,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
     const list = idx.pit.get(p.id) ?? [];
     const at = new Map(list.map((x) => [x.year, x.row]));
     for (const { year, row } of list) {
-      if (year >= before) continue;
+      if (year >= before || year < from) continue;
       const starter = row.gs !== null ? row.gs / Math.max(1, row.g) >= 0.5 : row.outs / Math.max(1, row.g) >= 12;
       if (row.tbf < (starter ? PEAK_MIN_BF_SP : PEAK_MIN_BF_RP)) continue;
       const rows = [0, 1, 2].flatMap((k) => {
@@ -140,7 +141,7 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
     const list = idx.bat.get(p.id) ?? [];
     const at = new Map(list.map((x) => [x.year, x.row]));
     for (const { year, row } of list) {
-      if (year >= before || row.pa < PEAK_MIN_PA) continue;
+      if (year >= before || year < from || row.pa < PEAK_MIN_PA) continue;
       const rows = [0, 1, 2].flatMap((k) => {
         const r = at.get(year - k);
         const s = store.season(year - k);

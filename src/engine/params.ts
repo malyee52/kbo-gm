@@ -504,14 +504,15 @@ export interface EngineParams {
    * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
    * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
    * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
-   * ageFloor: 범위 선수 중심 바닥(등급, ≤21·22~24·25~27), rankDecay: 지명 순위 바닥이 입단 뒤 해마다 줄어드는 런, rankPull: 실제 커리어 고점 당김 k,
+   * ageFloor: 범위 선수 중심 바닥(등급, ≤21·22~24·25~27), room: 실존 선수 성장 여유분 가운데값(런, 시작 시즌 나이 ≤20·21~22·23~24·25~26, 27세부터 0),
+   * draftScale: 가상 신인 잠재력 배율 (−10 + 배율 × (−ln u)^1.2, league/offseason.ts DRAFT_POTENTIAL_SCALE의 근거), rankDecay: 지명 순위 바닥이 입단 뒤 해마다 줄어드는 런, rankPull: 실제 커리어 고점 당김 k,
    * driveSpeed·reachBase·reachDrive: 성장 속도 × (1 + driveSpeed d) × (reachBase + reachDrive d),
    * eduRate: 입단 전 한 해 성장 몫(2군 나이 비율 × 기회), eduPath: 입단 전 경로 배율 c
    */
   potential: {
     width: [number, number, number, number, number]; sampleFull: number; sampleExtra: number;
     fixWar: number; extremeWar: number; fixedWidth: number; extremeDrive: number;
-    ageFloor: [number, number, number]; rankDecay: number; rankPull: number;
+    ageFloor: [number, number, number]; rankDecay: number; rankPull: number; room: [number, number, number, number]; draftScale: number;
     driveSpeed: number; reachBase: number; reachDrive: number;
     eduRate: number; eduPath: { univ: number; abroad: number; other: number };
   };
@@ -946,6 +947,11 @@ export const DEFAULT_PARAMS: EngineParams = {
     width: [14, 10, 6, 3, 0], sampleFull: 1500, sampleExtra: 0.5,
     fixWar: 2, extremeWar: 8, fixedWidth: 0.5, extremeDrive: 0.25,
     ageFloor: [47, 44, 41], rankDecay: 4, rankPull: 0.25,
+    // 여유분 (16-5, tools/fit_prospects.ts → reports/prospect-growth.md): 2001~2018년 그 나이·지금 0런 이상 국내 선수의 8시즌 안 전성기 − 지금 가운데값에서
+    // 28~30세 같은 값(5.4런, 다 큰 나이에도 전성기를 고르며 생기는 덤)을 뺀 값. 예전 growthRoom 30·24·16·8(근거 없는 임시값)은 실측의 약 세 배라 유망주 언덕을 만들었다
+    room: [10.5, 6, 4.5, 1.5],
+    // 가상 신인 배율 (16-5): 여유분 실측 뒤 tools/flow_longterm.ts 3시드 20시즌 2043~2045 평균이 시작 대비 −1.7·+0.7·+3.1% (10.5면 +17~23%, 9.25면 −3.1~+5.7%, 8.5면 −6~−16%)
+    draftScale: 9,
     driveSpeed: 0.25, reachBase: 0.85, reachDrive: 0.15,
     eduRate: 0.28, eduPath: { univ: 0.75, abroad: 0.9, other: 0.5 },
   },

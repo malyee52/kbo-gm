@@ -10,6 +10,7 @@ import { careerIndex, growthRoom, growthRuns, realPeakRuns } from '../src/league
 import {
   ageWidth, bestSeasonWar, draftIndex, entryGap, entryPathOf, gradeRuns, realCeiling, recentSample, runsGradeRaw, runsPerGrade,
   type RealCeilingInput,
+  roomOf,
 } from '../src/league/potential';
 import type { LeagueState } from '../src/league/types';
 
@@ -36,7 +37,7 @@ function inputsOf(year: number, seed: string): Map<string, RealCeilingInput> {
     if (!lp || lp.foreign || lp.entryYear >= year) continue;
     out.set(sp.id, {
       id: sp.id, now: currentRuns(sp, ctx), peakBefore: realPeakRuns(sp, idx, store, ctx, undefined, year), bestWar: bestSeasonWar(sp, idx, store, year),
-      age: sp.age, sample: recentSample(sp, idx, year), year, room: growthRoom(sp.age ?? 28), draft: drafts.get(sp.id),
+      age: sp.age, sample: recentSample(sp, idx, year), year, room: roomOf(sp.age ?? 28), draft: drafts.get(sp.id),
     });
   }
   return out;
@@ -47,12 +48,15 @@ beforeAll(() => {
 });
 
 describe('잠재력 v2: 실존 선수 천장 (18.2)', () => {
-  it('2026판 김도영(2024 8.6승, 극단 줄)은 판마다 천장 80 고정이고 성장 성향은 ¼ 폭', () => {
-    for (const seed of ['pot-a', 'pot-b', 'pot-c']) {
+  // 16-5에서 여유분을 실측(params.potential.room, 22세 6런)으로 줄여 천장이 보여 준 고점(2024, 등급 77)이 됐다 (전에는 지금 72 + 여유분 24런으로 80)
+  it('2026판 김도영(2024 8.6승, 극단 줄)은 판마다 같은 천장(보여 준 고점 77 이상)이고 성장 성향은 ¼ 폭', () => {
+    const pots = ['pot-a', 'pot-b', 'pot-c'].map((seed) => {
       const p = byId(leagueOf(2026, seed).league, '52605');
-      expect(grade(p.potential, 2026), seed).toBe(80);
       expect(Math.abs(p.drive ?? 0)).toBeLessThanOrEqual(0.25);
-    }
+      return p.potential;
+    });
+    expect(new Set(pots).size).toBe(1);
+    expect(grade(pots[0], 2026)).toBeGreaterThanOrEqual(77);
   });
 
   it('고정 선수(시작 전 2승+)는 천장이 보여 준 고점 아래로 안 가고, 기준 ± 나이 폭 ½ 안에 있다', () => {

@@ -67,9 +67,11 @@ describe('갈래 천장 P_c', () => {
       const atCeil = runsOf({ ...p, bat: { ...p.bat, ...p.ceil.bat } }, ctx, YEAR);
       n++;
       if (atCeil >= p.potential - 0.5 && atCeil <= p.potential + 4) near++;
+      else expect(atCeil).toBeGreaterThan(p.potential);
     }
     expect(n).toBeGreaterThan(50);
-    expect(near / n).toBeGreaterThan(0.9);
+    // 16-5 여유분 실측으로 격차가 큰 선수가 줄어 +4 넘는 몫(모두 위쪽, 2026 시드 br-a 230명 중 23명)이 10%가 됐다
+    expect(near / n).toBeGreaterThan(0.85);
   });
 
   it('김도영(극단 천장) τ는 ¼ 폭 안, 다른 실존 선수 τ는 ±2해 안', () => {

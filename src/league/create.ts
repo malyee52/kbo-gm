@@ -10,7 +10,7 @@ import { ABROAD, FA_DEPARTURE_SEASONS, KNOWN_OVERSEAS } from './overseas';
 import { lateDebutDraftees, leagueTeamFor, makeLateDraftee, servingAt } from './missing';
 import { makeCeiling, peakShape, timingOf } from './branches';
 import { careerIndex, growthRoom, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
-import { bestSeasonWar, draftIndex, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, realCeiling, recentSample } from './potential';
+import { bestSeasonWar, draftIndex, roomOf, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, realCeiling, recentSample } from './potential';
 import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
@@ -134,7 +134,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
       // 성장 여유분은 시작 연도 나이로 본다 (17.3 ①. 예전에는 자료 마지막 해 나이라 옛 시작판의 젊은 선수가 실제 고점에 묶였다)
       const c = realCeiling({
         id: p.id, now, peakBefore: realPeakRuns(p, idx, store, ctx, params, startYear, peakSeasons), bestWar: bestSeasonWar(p, idx, store, startYear),
-        age: p.age, sample: recentSample(p, idx, startYear), year: startYear, room: growthRoom(p.age ?? 28), draft: drafts.get(p.id),
+        age: p.age, sample: recentSample(p, idx, startYear), year: startYear, room: roomOf(p.age ?? 28, pp), draft: drafts.get(p.id),
       }, seed, pp);
       potential = c.potential;
       extreme = c.kind === 'extreme';

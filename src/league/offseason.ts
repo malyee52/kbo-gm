@@ -98,9 +98,10 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 하락 나이 32세·완만한 하락으로 바꾸며 9 (2026 시작 2시드 20시즌: 2045년 상위 270명 기여 합 시작 대비 -2.3%, 8.5면 -8.5%).
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
- * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
+ * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9
  */
-export const DRAFT_POTENTIAL_SCALE = 10.5;
+export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
 /** 드래프트 풀 인원 (임시값) */
 const DRAFT_POOL = 150;
 /** 외국인 재계약 기준 (런, 임시값) */
@@ -2068,7 +2069,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
   // 드래프트 미지명 입단 테스트 선수 (가상): 실제 육성 계약 자료가 모자란 만큼. 대부분 1군감이 아니지만 가끔 늦게 피는 선수가 있다 (임시값)
   for (let i = devRows.length; i < DEV_TRYOUTS; i++) {
     const univ = devRng.chance(0.5);
-    const potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(1 - devRng.next()) * 0.55) ** 1.2;
+    const potential = -10 + params.potential.draftScale * (-Math.log(1 - devRng.next()) * 0.55) ** 1.2;
     const age = univ ? 23 : 19;
     // 시작 능력은 천장에서 학력 시작 식만큼 아래 (잠재력 v2 18.5, 고졸 19세 = 입단 전 1년 "기타 경로")
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
@@ -2085,7 +2086,7 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 잠재력 분포: 실제 입단 동기(2012~2018년 입단)의 전성기 기여 순위에 맞춘 식 (M6).
     // 한 해 풀 150명 중 1위 약 45런, 10위 16런, 20위 6런, 40위 0런, 그 아래는 1군 주전감이 아니다.
     // M5의 2 + 58u^2.2는 10위가 52런이라, 장기 진행에서 가상 신인이 실존 선수를 몇 해 만에 모두 밀어냈다.
-    const potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(1 - rng.next())) ** 1.2;
+    const potential = -10 + params.potential.draftScale * (-Math.log(1 - rng.next())) ** 1.2;
     const age = univ ? 22 : 18;
     // 시작 능력 (잠재력 v2 18.5): 천장 − 고졸 18세 격차 × (1 − 성장 몫)^(입단 전 해 수 × 경로 배율). 대졸은 대학 4년 = 프로 3년 꼴로 자란 채 들어온다
     // (예전 식 고졸 0.1P − 14 · 대졸 0.35P − 8은 같은 천장의 대졸이 22세에 8~9등급 뒤였다)
