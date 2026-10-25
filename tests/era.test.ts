@@ -84,10 +84,12 @@ describe('시대별 제도', () => {
     expect(foreignRule(store.meta, 2040)).toEqual({ total: 4, asia: 1, regular: 3 });
   });
 
-  it('투수 기용: 1980년대는 4인 로테이션에 긴 선발, 2000년대는 5인', () => {
+  it('투수 기용: 1980년대는 4인 로테이션에 긴 선발, 2000년대는 5인 (2009년까지 선발을 조금 더 길게), 2010년부터 기본', () => {
     expect(eraPitching(1985).rotation).toBe(4);
     expect(eraPitching(1985).limitScale).toBeGreaterThan(1);
-    expect(eraPitching(2005)).toEqual({ rotation: 5, restDays: 5, limitScale: 1 });
+    expect(eraPitching(2005).rotation).toBe(5);
+    expect(eraPitching(2005).limitScale).toBeGreaterThan(1);
+    expect(eraPitching(2015)).toEqual({ rotation: 5, restDays: 5, limitScale: 1 });
   });
 
   it('생년 추정: 입단 연도에서 대졸 22세, 1991년 이전 23세, 그 뒤 19세', () => {

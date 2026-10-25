@@ -974,6 +974,12 @@ export const DEFAULT_PARAMS: EngineParams = {
 export const BULLPEN_RECOVERY_PER_DAY = 12;
 export const BULLPEN_AVAILABLE_BELOW = 3;
 export const BULLPEN_THIRD_DAY_BELOW = 10;
+/**
+ * 마무리(TeamSeason.closer)에게만 더하는 등판 가능 피로 여유 (공). 감독은 마무리를 더 자주 연투시킨다: 실제 2023~2025 팀 세이브 1위의
+ * 연투율은 0.229~0.237(data-src/pbp_derived/relief_usage.csv)인데 모든 구원과 같은 기준(전날 15구)이면 시뮬 마무리 연투율이 0.120, 세이브 몫 0.47(실제 약 0.75)이었다.
+ * 15이면 전날 30구까지 다음 날도 나오고 2025 4시즌에서 연투율 0.196·세이브 몫 0.57·등판 35 → 40경기 (첫 시즌 밸런스 2차, 2026-10-25, 임시값)
+ */
+export const CLOSER_AVAILABLE_EXTRA = 15;
 
 /** 그 해의 볼카운트 사슬 모양 */
 export function chainShapeFor(params: EngineParams, year: number): ChainShape {

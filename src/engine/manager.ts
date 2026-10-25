@@ -2,7 +2,7 @@
 
 import type { GameContext } from './game';
 import { isSaveSituation, tyingRunNear, type GameState, type PitcherInGame, type Side } from './state';
-import { isStarterSkill } from './params';
+import { CLOSER_AVAILABLE_EXTRA, isStarterSkill } from './params';
 import { availableBelow, currentFatigue, currentOveruse, needsRest } from './team';
 import type { SimPlayer } from './types';
 import { lengthOf, pitPlateOf } from './pa';
@@ -140,8 +140,9 @@ export function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
   const st = ctx.states;
   const pen = fld.ts.tactics?.pen ?? 1;
   const below = availableBelow(pen);
+  // 마무리는 피로 여유를 더 준다 (CLOSER_AVAILABLE_EXTRA, 3연투 기준은 같다)
   return fld.ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx)
-    && currentFatigue(st, p.idx, ctx.day) < below && !needsRest(st, p.idx, ctx.day, pen));
+    && currentFatigue(st, p.idx, ctx.day) < below + (p === fld.ts.closer ? CLOSER_AVAILABLE_EXTRA : 0) && !needsRest(st, p.idx, ctx.day, pen));
 }
 
 /**
