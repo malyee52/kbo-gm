@@ -12,7 +12,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 - 일정 개편 (2026-10-23): 연도별 규칙 표로 만드는 연전 일정, 우천 취소·순연·더블헤더·잔여 경기, 강우 콜드·노게임, 1999·2000 드림·매직 양대 리그. 1~16단계 끝 (15단계 일정 화면 포함). 임시값은 `docs/temp-values.md` "일정 개편".
 - 리그 규칙 변경 알림·미래 규칙·창단 특례·외국인 출전 한도, 구단 투표(단장 회의), UI 대개편(브리핑·공통 표): 2026-10-24 병합 준비.
 - 출처 표기·제도 고침과 옛 규칙 실제화 (2026-10-24 `feat/rule-fidelity`, 2026-10-25 병합 준비 `merge/prep-2`): 정보·출처 화면과 `DATA_LICENSES.md`(자료별 출처·라이선스), FA 도입 때 자격 10시즌, 위키 병역 현역·보충역 구분 없앰, 1군 등록·출장 인원 분리와 엔트리 확대, 가을야구 시리즈 승수·1993~1998 준PO 생략·1986~1988 3팀.
-- 구장 효과 (2026-10-24 main, PR #131): 1982~2027년 뒤 모든 해 구장 배율, 신구장 펜스 제원·펜스 조정·가벽 공사, 구장 화면 지수. 능력치 v2 16-1(볼카운트 사슬 칸 함수 `plate.ts`)·16-2(타구각 갈래 `angle.ts`)·16-3 첫 단계(수비 v2 `fielding.ts`)도 같이 main에 들어갔다. 16-3 나머지(주루·작전·어깨 `runskills.ts`)와 16-4~16-7(잠재력 v2·갈래 성장·집중 훈련·스카우트·외국인 파견·숨은 값 화면)은 2026-10-25 병합 준비 `merge/prep-2`에 들어갔다 (`feat/ratings-v2`). 남은 것: 16-5 장기 맞춤, 16-6 공개 특수능력.
+- 구장 효과 (2026-10-24 main, PR #131): 1982~2027년 뒤 모든 해 구장 배율, 신구장 펜스 제원·펜스 조정·가벽 공사, 구장 화면 지수. 능력치 v2 16-1(볼카운트 사슬 칸 함수 `plate.ts`)·16-2(타구각 갈래 `angle.ts`)·16-3 첫 단계(수비 v2 `fielding.ts`)도 같이 main에 들어갔다. 16-3 나머지(주루·작전·어깨 `runskills.ts`)와 16-4~16-7(잠재력 v2·갈래 성장·집중 훈련·스카우트·외국인 파견·숨은 값 화면)은 2026-10-25 병합 준비 `merge/prep-2`에 들어갔다 (`feat/ratings-v2`). 16-5 장기 맞춤(성장 여유분 실측·가상 신인 배율)과 16-5b(지명 순위 표를 가상 신인 눈금으로)도 같은 브랜치. 남은 것: 16-6 공개 특수능력 (갈래 성장 크기를 측정값으로 바꾸는 일은 따로 남김).
 - **다음 작업: M9 확장과 공개 검토** (`docs/milestones.md`). 시작 전에 아래 "마일스톤별 문제점과 빠진 점"을 본다.
 
 읽는 순서: `docs/milestones.md` (할 일) → `docs/design.md` (기획서 v1.0, 확정 사항) → `docs/engine.md` (엔진 구조, 검증 결과, 한계. 엔진 2는 6장).
@@ -41,7 +41,8 @@ npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 �
 npx tsx tools/fit_aging_components.ts             # 갈래별 나이 곡선 (fit_aging 뒤, params.growth2)
 npx tsx tools/error_slope.ts                      # 수비 런 → 실책 기울기 (state.ts ERROR_PER_RUN)
 python tools/build_data.py --running-only         # running.json (선수별 추가 진루·번트) ← python -I -X utf8 tools/pbp_running.py [--raw <parquet 폴더>]
-npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진행 흐름 진단 (유입·방출·입대·포수, docs/longterm-plan.md)
+npx tsx tools/flow_longterm.ts --seasons 15 --seeds diag-a,diag-b   # 장기 진행 흐름 진단 (유입·방출·입대·포수, docs/longterm-plan.md). 잠재력 손잡이 덮어쓰기 --pot reachBase=0.8,draftScale=9.5,room=10.5/6/4.5/1.5
+npx tsx tools/fit_prospects.ts > reports/prospect-growth.md   # 젊은 실존 선수 성장 여유분 실측 (약 3분, params.potential.room 근거)
 npx tsx tools/engine_fingerprint.ts         # 같은 시드 결과 지문 (구조만 바꾸는 수정 확인용)
 npx tsx tools/pitch_balance.ts --out reports/pitch-balance.md   # 구종·코스 지시 균형 (한 구종만·한 코스만·욕심쟁이 대 AI 배합, 약 20초)
 python -I -X utf8 tools/pbp_pitch_mix.py <원본 폴더>   # 구종 × 코스 × 공 결과 리그 표 → pitch_type_zone.csv·src/engine/pitchTable.ts
@@ -215,9 +216,9 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 입대 (2026-10-21, 사용자 "현실과 똑같이"): 군 야구단(상무 1999~, 경찰 2006~2018 입대) 정원 + 나머지는 현역, 보충역(1994년 입대까지 방위병 = 리그에 남아 홈경기만, 그 뒤 공익·사회복무). 정원·복무 기간 연도표는 `docs/milestones.md` M6 "입대". 규칙 상한은 없고 AI는 강제 입대 포함 한 해 5명까지(`AI_ENLIST_TEAM`). 플레이어는 "입대 선택" 탭에서 미룸 / 상무 지원 / 현역을 고르고, 결산 조작(`begin-off`의 `enlist`·`apply`)에 남는다. 엔진은 `SimPlayer.homeOnlyUntil`로 방위병을 원정 경기에서 뺀다.
 - 2026년에 복무 중인 실존 선수는 그 해 기록이 없어 게임에 없다.
 - 장기 진행 기량 하락 (20년 -16~-27%)은 2026-10-11 고침 (`docs/longterm-plan.md` 7장, `reports/flow-longterm.md`): 정원을 80명으로 늘려도 그대로라 원인은 방출이 아니라 신인 잠재력이었다. 가상 신인 잠재력 배율 8 → 9(`DRAFT_POTENTIAL_SCALE`), 2군 성장 기회 0.5(`FUTURES_SHARE`, 25세 이하), 방출은 8시즌 가치·입단 2년 유예·포수 3명/투수·야수 18명 최소(`releaseOrder`), 방출 선수 시장(`releaseMarket`·`claimByUser`). 3시드 20시즌에서 2043~2045년 상위 270명 기여 합이 시작값의 -2.6~+6.2%. 남은 것: 2033~2036년 +18~27% 언덕 (시작 때 실존 유망주 잠재력이 높다).
-- **기량 하락 나이는 32세** (`DECLINE_START_AGE`, engine/params.ts). 2026-10-11 사용자 결정으로 31 → 33 → 35세로 늦췄다가, 2026-10-12 사용자 "기량 하락 나이는 낮추되 하락 폭을 둔화"로 32세부터, 처음 몇 해는 실제 추정치의 절반쯤으로 천천히 바꿨다 (`6790d32`, ai/value.ts `DECLINE_BAT`·`DECLINE_PIT`. 35세 시작은 과거 연도 시작 때 리그 재능이 부풀었다: 2005 시작 → 2010 상위 270명 +28%). 실제 기록 추정(`tools/fit_aging.ts`)은 31세. 능력·수비·조기 노쇠·노화 특수능력이 같은 값을 쓴다. 바꾸면 `DRAFT_POTENTIAL_SCALE`(지금 10.5, `league/offseason.ts`)을 `tools/flow_longterm.ts`로 다시 맞춘다. 육성 투자 효과는 30세 이하 (`DEVELOP_AGE`).
+- **기량 하락 나이는 32세** (`DECLINE_START_AGE`, engine/params.ts). 2026-10-11 사용자 결정으로 31 → 33 → 35세로 늦췄다가, 2026-10-12 사용자 "기량 하락 나이는 낮추되 하락 폭을 둔화"로 32세부터, 처음 몇 해는 실제 추정치의 절반쯤으로 천천히 바꿨다 (`6790d32`, ai/value.ts `DECLINE_BAT`·`DECLINE_PIT`. 35세 시작은 과거 연도 시작 때 리그 재능이 부풀었다: 2005 시작 → 2010 상위 270명 +28%). 실제 기록 추정(`tools/fit_aging.ts`)은 31세. 능력·수비·조기 노쇠·노화 특수능력이 같은 값을 쓴다. 바꾸면 `params.potential.draftScale`(지금 9.5, 2026-10-25 16-5b. `league/offseason.ts DRAFT_POTENTIAL_SCALE`은 이 값을 읽는다)을 `tools/flow_longterm.ts`로 다시 맞춘다. 육성 투자 효과는 30세 이하 (`DEVELOP_AGE`).
 - 자리별 수비 이닝은 경기마다 센다 (`Season.defOuts` → 이력 `SeasonLine.def`, 2군 `fdef`). 결산 때 수비 가능·비상 포수를 다시 보고, 익숙함이 바뀐 자리는 등급을 재능 T × Δu만큼 옮긴다 (`BatSkill.defTalent`, `familiarityShift`, 16-4). 2군 훈련 자리는 훈련 탭에서.
-- 잠재력 v2 (`league/potential.ts`, `params.potential` 임시값): 천장 고정·극단·범위, 지명 순위 표, 바닥, 학력 시작 식, 숨은 성장 성향 d (어디에도 안 보임). 성장은 갈래별 (16-4a, `league/branches.ts`): 런 변화의 크기는 성장 판정, 모양은 갈래 나이 곡선(`params.growth2`, 측정 모양)·갈래 천장 P_c(`LeaguePlayer.ceil`)·시기 τ(`timing`, 숨은 값). 크기를 갈래 측정값으로 바꾸는 것은 16-5 (장기 맞춤, 아직).
+- 잠재력 v2 (`league/potential.ts`, `params.potential` 임시값): 천장 고정·극단·범위, 지명 순위 표, 바닥, 학력 시작 식, 숨은 성장 성향 d (어디에도 안 보임). 성장은 갈래별 (16-4a, `league/branches.ts`): 런 변화의 크기는 성장 판정, 모양은 갈래 나이 곡선(`params.growth2`, 측정 모양)·갈래 천장 P_c(`LeaguePlayer.ceil`)·시기 τ(`timing`, 숨은 값). 크기를 갈래 측정값으로 바꾸는 것은 아직 (16-5에서 따로 남김: 하락 32세·완만한 하락 결정과 부딪침). 성장 여유분은 실측 (`params.potential.room` 10.5·6·4.5·1.5런, `tools/fit_prospects.ts`, 16-5). 지명 순위 표는 순위 구간(실측)마다 가상 신인 천장 분포의 같은 분위 값을 중심으로 쓴다 (16-5b, 사용자 답 ①, 학력 구분 없음, `potential.ts rankCenterRuns`). 장기 흐름 3시드 20시즌: 2043~45 시작 대비 +1.0·−3.9·+1.1%, 2033~36 +6.6·+7.3·+11.2% (`reports/flow-longterm.md`). 25세 이하 잠재 비 1.3배 이하는 못 맞춤 (1.80~2.15).
 - 잠재 표시는 숫자가 아니라 스카우트 보고 문구 4단계 (32세부터 없음). 옛 `scoutPotential`은 없어졌다.
 - 대체 선수 기준은 고정 비율(`REPL_BAT_RATIO`·`REPL_PIT_RATIO`)이다. 선수 표본으로 해마다 재면 가상 선수만 남을 때 무너진다.
 
