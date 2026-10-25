@@ -9,7 +9,7 @@ import { overuseDecay, type OveruseParams } from './injury';
 import type { Rng } from './rng';
 import { defenseAt, fitPenalty } from './defense';
 import { batValue, pitValue } from './ratings';
-import type { PitLine, SimPlayer, SimTeam, World } from './types';
+import type { BatLine, PitLine, SimPlayer, SimTeam, World } from './types';
 
 /** 시즌 중 바뀌는 선수 상태. 색인은 SimPlayer.idx */
 export interface PlayerStates {
@@ -356,18 +356,27 @@ export function unitHash(s: string): number {
  * 국내 투수 몇 명이 부진·피로·잔부상으로 2군에 내려가고 다음 투수가 올라온다 (확률 churn). 실제로는 약한 투수도 꽤 던진다.
  * 해시로 정해 난수 흐름과 저장·재현에 영향이 없다
  */
-export function churnedOut(world: World, p: SimPlayer, day: number, churn: number, slump?: ArrayLike<number> | null): boolean {
-  if (churn <= 0 || !p.isPitcher || p.foreign) return false;
+export function churnedOut(world: World, p: SimPlayer, day: number, churn: number, slump?: ArrayLike<number> | null, batChurn = 0): boolean {
+  if (p.foreign) return false;
+  if (!p.isPitcher) {
+    // 야수는 부진한 타자만 (slumpingHitters, 첫 시즌 밸런스 3차). 부진 목록이 없으면 내려가지 않는다
+    if (batChurn <= 0 || !slump || !slump[p.idx]) return false;
+    return unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}`) < batChurn;
+  }
+  if (churn <= 0) return false;
   // 부진한 투수만 (slumpingPitchers). 잘 던지는 투수는 에이스든 아니든 내려가지 않는다
   if (slump && !slump[p.idx]) return false;
   return unitHash(`${world.year}/${p.id}/${Math.floor(day / CHURN_DAYS)}`) < churn;
 }
 
+/** 이 시즌(또는 지난 시즌) 세이브가 이만큼 이상이면 마무리로 보고 부진 기준을 churnSlump.closerRatio배로 늦춘다 (임시값) */
+const CLOSER_SLUMP_SAVES = 5;
+
 /**
  * 엔트리 순환 대상인 부진한 투수 (선수 색인 → 1). 그 시즌 기록(pit)으로 정한다. 난수를 쓰지 않는다.
  * 평균자책을 리그 평균자책 쪽으로 rule.priorOuts아웃만큼 당긴 값이 리그 평균자책 × rule.eraRatio 이상이고 아웃이 rule.minOuts 이상이면 부진
  */
-export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { minOuts: number; priorOuts: number; eraRatio: number }): Uint8Array {
+export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { minOuts: number; priorOuts: number; eraRatio: number; closerRatio?: number }): Uint8Array {
   const out = new Uint8Array(world.players.length);
   let er = 0, outs = 0;
   for (const q of pit) { er += q.er; outs += q.outs; }
@@ -378,23 +387,47 @@ export function slumpingPitchers(world: World, pit: readonly PitLine[], rule: { 
     const q = pit[p.idx];
     if (!q || q.outs < rule.minOuts) continue;
     const era = (q.er * 27 + rule.priorOuts * lg) / (q.outs + rule.priorOuts);
-    if (era >= lg * rule.eraRatio) out[p.idx] = 1;
+    // 세이브를 쌓는 마무리는 웬만큼 부진해도 내리지 않는다 (closerRatio배, 첫 시즌 밸런스 3차)
+    const ratio = q.sv >= CLOSER_SLUMP_SAVES || p.lastSaves >= CLOSER_SLUMP_SAVES ? rule.eraRatio * (rule.closerRatio ?? 1) : rule.eraRatio;
+    if (era >= lg * ratio) out[p.idx] = 1;
   }
   return out;
+}
+
+/**
+ * 엔트리 순환 대상인 부진한 타자를 out에 표시한다 (선수 색인 → 1, 첫 시즌 밸런스 3차). 그 시즌 기록(bat)으로 정한다. 난수를 쓰지 않는다.
+ * OPS를 리그 OPS 쪽으로 rule.priorPa타석만큼 당긴 값이 리그 OPS × rule.opsRatio 이하이고 타석이 rule.minPa 이상이면 부진
+ */
+export function slumpingHitters(world: World, bat: readonly BatLine[], rule: { minPa: number; priorPa: number; opsRatio: number }, out: Uint8Array): void {
+  const ops = (b: { h: number; d: number; t: number; hr: number; ab: number; bb: number; hbp: number; sf: number }) => {
+    const obpDen = b.ab + b.bb + b.hbp + b.sf;
+    return (obpDen > 0 ? (b.h + b.bb + b.hbp) / obpDen : 0) + (b.ab > 0 ? (b.h + b.d + 2 * b.t + 3 * b.hr) / b.ab : 0);
+  };
+  const lg = { h: 0, d: 0, t: 0, hr: 0, ab: 0, bb: 0, hbp: 0, sf: 0, pa: 0 };
+  for (const b of bat) for (const k of Object.keys(lg) as (keyof typeof lg)[]) lg[k] += b[k];
+  if (lg.pa <= 0) return;
+  const lgOps = ops(lg);
+  for (const p of world.players) {
+    if (p.isPitcher) continue;
+    const b = bat[p.idx];
+    if (!b || b.pa < rule.minPa) continue;
+    const w = b.pa / (b.pa + rule.priorPa);
+    if (w * ops(b) + (1 - w) * lgOps <= lgOps * rule.opsRatio) out[p.idx] = 1;
+  }
 }
 
 /**
  * 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다).
  * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
  */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null, extra = 0): void {
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null, extra = 0, batChurn = 0): void {
   const { rosterSize, foreignLimit: limit } = teamRules(world, ts.team, extra);
   ts.rosterExtra = extra;
   const manual = ts.manual ?? null;
-  const rotating = !manual && churn > 0;
+  const rotating = !manual && (churn > 0 || batChurn > 0);
   // 육성선수는 1군에 못 나간다 (정식 등록 전)
   // 방위병(1982~1994)은 원정 경기에 못 나간다 (league/careers.ts)
-  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump))
+  const ready = (p: SimPlayer) => st.absentUntil[p.idx] <= day && !p.dev && !(rotating && churnedOut(world, p, day, churn, slump, batChurn))
     && !(ts.away && p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day);
   const availAll = ts.team.org.filter((p) => ready(p) && (!manual || manual.has(p.idx)));
   ts.callUps = [];
@@ -492,7 +525,8 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
     .slice(0, Math.max(0, nPit - rotation.length));
   let closer: SimPlayer | null = plan?.closer !== null && plan?.closer !== undefined ? bullpen.find((p) => p.idx === plan.closer) ?? null : null;
   if (!closer) for (const p of bullpen) if (p.lastSaves >= 5 && (!closer || p.lastSaves > closer.lastSaves)) closer = p;
-  if (!closer) closer = bullpen[0] ?? null;
+  // 지난 시즌 마무리가 없으면 불펜에서 가장 좋은 투수 (흔들림 없이 가치로: 엔트리 순환 주기마다 마무리가 바뀌지 않게, 첫 시즌 밸런스 3차)
+  if (!closer) for (const p of bullpen) if (!closer || p.value < closer.value) closer = p;
 
   // 야수: 주전 9명 → 백업 포수 → 가치 순 (이도류 투수의 타자 얼굴은 인원 밖에서 더한다)
   const hittersAll = [...avail.filter((p) => !p.isPitcher && !benchToday.has(p.idx)), ...batFaces].sort((a, b) => b.value - a.value);
@@ -570,18 +604,19 @@ export function todaysLineup(ts: TeamSeason, lg: Rates, params: EngineParams, rn
   if (!full) ts.lineupCache.set('', (full = assignSlots(ts.hitters, planFixed(ts, ts.hitters))));
   const regulars = full.map((x) => x.p);
   const resting = new Set<number>();
-  // 주전 중 가치 상위 3명은 덜 쉬고 하위 3명은 더 쉰다 (하위 타선의 플래툰·교체 출전 몫)
+  // 주전은 가치 순으로 줄 세워 휴식 배율을 정한다 (params.restRank: 스타는 덜 쉬고 약한 주전은 더 쉰다)
   const byValue = [...regulars].sort((a, b) => b.value - a.value);
   // 플레이어가 직접 정한 주전은 AI가 쉬게 하지 않는다 (2026-10-11 사용자: 직접 짠 라인업을 AI가 무단으로 바꾸지 않게). 결장 때만 서브가 채운다
   const planned = ts.plan && ts.manual ? new Set(Object.values(ts.plan.starters)) : null;
   // 휴식은 피로로 정한다 (엔진 2 11단계, 확률 휴식 대신): 경기 전 피로가 body.restFrom을 넘은 만큼 쉴 확률이 오른다.
-  // 감독은 상위 3명을 지쳐도 더 내보내고 하위 3명은 일찍 쉬게 한다 (배율 0.4·1·1.8, 최대 60%)
+  // 감독은 가치가 높은 주전을 지쳐도 더 내보내고 약한 주전은 일찍 쉬게 한다 (가치 순위별 배율 params.restRank, 상한 params.restMax)
+  const rankMul = params.restRank;
   byValue.forEach((p, rank) => {
     if (planned?.has(p.idx)) return;
-    const factor = rank < 3 ? 0.4 : rank < 6 ? 1 : 1.8;
+    const factor = rankMul[Math.min(rank, rankMul.length - 1)];
     const base = p.pos === 'C' ? params.catcherRestChance : params.restChance;
     const over = Math.max(0, (tired ? tired(p) : 0) - params.body.restFrom);
-    if (rng.chance(Math.min(0.6, base * factor * over))) resting.add(p.idx);
+    if (rng.chance(Math.min(params.restMax, base * factor * over))) resting.add(p.idx);
   });
   // 외국인 출전 한도 (리그 규칙 1-6): 쉬지 않는 외국인 타자가 한도를 넘으면 가치 낮은 쪽부터 그 경기만 빠진다 (직접 정한 주전도)
   const sitOut = new Set<number>();

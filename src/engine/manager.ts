@@ -146,6 +146,17 @@ export function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
 }
 
 /**
+ * 마무리 몸 풀기 등판 (params.mgr.closerWarmup): 마무리가 오래 쉬었고, 세이브 상황은 아니지만 몇 점 앞서거나 근소하게 지는 후반 이닝
+ */
+function closerWarmupSpot(fld: Side, lead: number, inning: number, ctx: GameContext): boolean {
+  const w = ctx.params.mgr.closerWarmup;
+  const closer = fld.ts.closer;
+  if (!w || !closer || inning < w.inning) return false;
+  if (!((lead >= w.leadMin && lead <= w.leadMax) || (lead < 0 && -lead <= w.trailMax))) return false;
+  return ctx.day - ctx.states.fatigueDay[closer.idx] > w.rest;
+}
+
+/**
  * 불펜 서열 (2026-10-22, docs/하드힛_현실감_기획안.md 2.1). 개막에는 지난 시즌 실제 쓰임 순(penTrust 큰 순, 쓰임을 모르는 투수는 그 뒤에 능력 순),
  * blendDays가 지나면 능력 순. 그 사이는 두 순위를 날짜 비율로 섞는다. 난수를 쓰지 않는다
  */
@@ -180,6 +191,8 @@ function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext)
   const closerOk = !!closer && pool.includes(closer);
   // 마무리: 9회 이후 3점 차 이내 리드, 또는 9회 이후 동점(홈은 끝내기를 기다리며, 원정은 연장)
   if (closerOk && inning >= 9 && lead >= 0 && lead <= 3) return closer;
+  // 오래 쉰 마무리는 세이브 상황이 아니어도 몸 풀기로 (첫 시즌 밸런스 3차)
+  if (closerOk && closerWarmupSpot(fld, lead, inning, ctx)) return closer;
   // 불펜 서열 (마무리는 빼고): 능력 순(value가 낮을수록 좋다)과 지난 시즌 실제 쓰임 순(penTrust)을 날짜에 따라 섞는다
   const order = bullpenOrder(ts.bullpen.filter((p) => p !== closer), ctx.day, ctx.params.penBlendDays);
   const avail = order.filter((p) => pool.includes(p));
@@ -276,6 +289,9 @@ export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEm
   if (pg.injured) pull = true;
   // 9회 세이브 상황에서 마무리가 쉬었으면 이닝 시작에 마무리로
   if (!pull && start && inning >= 9 && lead >= 1 && lead <= 3 && closer && pg.p !== closer && availableRelievers(fld, ctx).includes(closer)) pull = true;
+  // 오래 쉰 마무리의 몸 풀기: 구원이 던지고 있으면 이닝 시작에 마무리로 (잘 던지는 선발은 그대로 둔다)
+  if (!pull && start && !pg.isStarter && closer && pg.p !== closer && closerWarmupSpot(fld, lead, inning, ctx)
+    && availableRelievers(fld, ctx).includes(closer)) pull = true;
   if (!pull) return;
   const next = pickReliever(fld, lead, inning, ctx);
   if (!next) return;

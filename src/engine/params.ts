@@ -193,6 +193,11 @@ export interface Manager2Params {
   onePoint: { inning: number; maxDiff: number; rate: number };
   /** 기용표로 역할을 정하지 않은 불펜에서 필승조로 보는 서열 수 (마무리 빼고) */
   setup: number;
+  /**
+   * 마무리 몸 풀기 등판 (첫 시즌 밸런스 3차, 2026-10-25 사용자 물음 1 ①): 마무리가 rest일 넘게 쉬었으면 inning회 이후 세이브 상황이 아니어도
+   * leadMin~leadMax점 리드나 1~trailMax점 지는 이닝 시작에 마무리를 올린다 (manager.ts). 마무리를 실전 감각 때문에 내보내는 감독 습관. 모두 임시값
+   */
+  closerWarmup: { rest: number; inning: number; leadMin: number; leadMax: number; trailMax: number };
 }
 
 /** 시대별 주루·병살·희생플라이·도루 배율 한 줄 (엔진 2 13단계). 현대 값(params의 기본값)에 곱한다 */
@@ -301,7 +306,17 @@ export interface EngineParams {
    * 순환 주기(CHURN_DAYS)가 시작할 때의 시즌 기록으로 정한다: 아웃 minOuts 이상이고,
    * 평균자책을 리그 평균자책 priorOuts아웃만큼 섞어 당긴 값이 리그 평균자책 × eraRatio 이상이면 부진. 모두 임시값
    */
-  churnSlump?: { minOuts: number; priorOuts: number; eraRatio: number };
+  churnSlump?: { minOuts: number; priorOuts: number; eraRatio: number; closerRatio?: number };
+  /**
+   * 야수 엔트리 순환 (첫 시즌 밸런스 3차, team.ts churnedOut): 직접 정하지 않은 1군에서 10일마다 부진한 국내 타자가 2군에 내려갈 확률. 없으면 0.
+   * 실제 구단은 한 시즌에 타자 25명 넘게 쓰는데 시뮬 1군 야수는 부상 때만 바뀌어 팀 안 타석 10~14위가 실제보다 많고 15위 아래가 적었다
+   */
+  rosterChurnBat?: number;
+  /**
+   * 야수 순환 대상 = 부진한 타자: 순환 주기가 시작할 때 타석 minPa 이상이고, OPS를 리그 OPS priorPa타석만큼 섞어 당긴 값이
+   * 리그 OPS × opsRatio 이하 (team.ts slumpingHitters). 모두 임시값
+   */
+  churnSlumpBat?: { minPa: number; priorPa: number; opsRatio: number };
   /** 엔트리 순환 중 불펜 고를 때 가치에 더하는 흔들림 폭 (런). 2군에서 "요즘 좋은" 투수가 올라오는 몫 */
   rosterJitter?: number;
   /** 타자 사건별 회귀 상수: 이만큼의 타석을 사전 평균으로 더한다. tools/fit_regression.py로 맞춘 값 */
@@ -449,6 +464,13 @@ export interface EngineParams {
   restChance: number;
   /** 포수의 휴식 확률 배율 (피로 1당, restChance와 같은 쓰임) */
   catcherRestChance: number;
+  /**
+   * 주전 가치 순위(0 = 팀 주전 9명 중 가장 높음)별 휴식 확률 배율 (team.ts todaysLineup). 감독은 스타를 지쳐도 더 내보내고 약한 주전은 일찍 쉬게 한다.
+   * 마지막 값은 9번째보다 아래 순위(기용표 서브가 주전 자리에 선 날 등)에 쓴다
+   */
+  restRank: number[];
+  /** 휴식 확률 상한 */
+  restMax: number;
   /** 야수 체력 (엔진 2 11단계, team.ts hitterFatigue). 모두 임시값 */
   body: BodyParams;
   /** 선수 컨디션 (엔진 2 12단계, condition.ts, docs/컨디션_기획안.md). 모두 임시값 */
@@ -619,8 +641,12 @@ export const DEFAULT_PARAMS: EngineParams = {
   seasonRegressScale: 0.5,
   seasonPitRegressScale: 0.25,
   rosterChurn: 0.5,
-  churnSlump: { minOuts: 15, priorOuts: 30, eraRatio: 1.15 },
+  // closerRatio (첫 시즌 밸런스 3차, 임시값): 세이브 5개 이상 마무리는 평균자책 기준을 이만큼 더 늦춘다 (개막 마무리가 부진 순환으로 2군에 간 날 13%)
+  churnSlump: { minOuts: 15, priorOuts: 30, eraRatio: 1.15, closerRatio: 1.4 },
   rosterJitter: 0.06,
+  // 야수 엔트리 순환 (첫 시즌 밸런스 3차, 임시값): 휴식 배율(restRank)과 함께 맞춤. 상위 9명 타석 비중은 바꾸기 전과 같게 (2025 6시즌 0.720 → 0.723)
+  rosterChurnBat: 0.65,
+  churnSlumpBat: { minPa: 40, priorPa: 80, opsRatio: 0.91 },
   batRegress: { so: 50, bb: 150, hbp: 300, hr: 100, s1: 150, d2: 300, t3: 600 },
   pitRegress: { so: 200, bb: 150, hbp: 300, hr: 600, hit: 400 },
   foreignPriors: {
@@ -735,6 +761,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     infieldIn: { inning: 7, maxLead: 1, rate: 0.8, hit: 0.1, score: 0.4 },
     onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
     setup: 2,
+    closerWarmup: { rest: 3, inning: 9, leadMin: 4, leadMax: 5, trailMax: 2 },
   },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인 참고값). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
@@ -899,6 +926,10 @@ export const DEFAULT_PARAMS: EngineParams = {
 
   restChance: 0.6,
   catcherRestChance: 0.6,
+  // 주전 가치 순위별 휴식 배율 (첫 시즌 밸런스 3차, 2026-10-25 사용자 물음 1 ①, 임시값): 예전 0.4·1·1.8 세 단계(상한 0.6)는 팀 안 타석 1위 약 550으로
+  // 실제 600~610보다 적었다. 부진 타자 순환(rosterChurnBat)과 함께 2025 6시즌 팀 안 타석 순위 1~10을 실제 2023~2026 평균에 맞춤 (reports/tmp)
+  restRank: [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3, 5, 8],
+  restMax: 0.9,
   // 야수 체력 (엔진 2 11단계, 임시값): 2025 상위 9명 타석 비중 실제 0.708에 tools/injury_check.ts 6시즌으로 맞춤 (0.788 → 0.706)
   body: {
     load: 1, catcher: 1.3, dh: 0.6, sub: 0.3, agePer: 0.02, recover: 0.6, cap: 4, restFrom: 1, penaltyFrom: 2, penaltyPer: 0.01, penaltyMax: 0.02,
