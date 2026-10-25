@@ -308,28 +308,34 @@ export function solveSide(lb: LeagueBall, pz: number[], target: readonly number[
 
 export const clampRate = (x: number) => (x < 0.0005 ? 0.0005 : x > 0.6 ? 0.6 : x);
 
-/** 타석 확률 → 맞힌 공당 결과. 일곱 사건 합이 0.93을 넘으면 줄여 쓰는 pa.ts paRates와 같은 산술 */
-export function perContactScaled(r: Pick<Rates, 'so' | 'bb' | 'hbp' | 'hr' | 's1' | 'd2' | 't3'>): number[] {
+/**
+ * 타석 확률 → 맞힌 공당 결과. 일곱 사건 합이 0.93을 넘으면 줄여 쓰는 pa.ts paRates와 같은 산술.
+ * contact: 맞힌 공 수 배율 (사슬 실측 몫이 삼진·볼넷을 바꿔 맞힌 공이 기록보다 많거나 적을 때, 실측 사슬 ÷ 기록으로 푼 사슬). 1이면 기록 그대로
+ */
+export function perContactScaled(r: Pick<Rates, 'so' | 'bb' | 'hbp' | 'hr' | 's1' | 'd2' | 't3'>, contact = 1): number[] {
   const sum = r.so + r.bb + r.hbp + r.hr + r.s1 + r.d2 + r.t3;
   const scale = sum > 0.93 ? 0.93 / sum : 1;
-  const inPlay = (1 - scale * (r.so + r.bb + r.hbp)) / scale;
+  const inPlay = ((1 - scale * (r.so + r.bb + r.hbp)) / scale) * contact;
   const q = [0, r.s1 / inPlay, r.d2 / inPlay, r.t3 / inPlay, r.hr / inPlay];
   q[0] = 1 - q[1] - q[2] - q[3] - q[4];
   return q;
 }
 
-/** 타자가 리그 평균 투수를 상대할 때 지금 결과 비율(BatSkill)의 맞힌 공당 결과 (16-1까지의 paRates와 같은 값) */
-export function batTarget(bs: BatSkill, lg: Rates): number[] {
+/**
+ * 타자가 리그 평균 투수를 상대할 때 지금 결과 비율(BatSkill)의 맞힌 공당 결과 (16-1까지의 paRates와 같은 값).
+ * contact는 맞힌 공 수 배율 (perContactScaled): 사슬 실측 몫은 삼진·볼넷만 바꾸고 홈런·안타의 타석당 비율은 기록대로 둔다 (2026-10-25 사용자, 홈런 원인 점검)
+ */
+export function batTarget(bs: BatSkill, lg: Rates, contact = 1): number[] {
   const f = (k: 'so' | 'bb' | 'hbp' | 'hr' | 's1' | 'd2' | 't3') => clampRate(bs[k] * lg[k]);
-  return perContactScaled({ so: f('so'), bb: f('bb'), hbp: f('hbp'), hr: f('hr'), s1: f('s1'), d2: f('d2'), t3: f('t3') });
+  return perContactScaled({ so: f('so'), bb: f('bb'), hbp: f('hbp'), hr: f('hr'), s1: f('s1'), d2: f('d2'), t3: f('t3') }, contact);
 }
 
 /** 투수가 리그 평균 타자를 상대할 때 지금 결과 비율(PitSkill)의 맞힌 공당 결과 */
-export function pitTarget(ps: PitSkill, lg: Rates): number[] {
+export function pitTarget(ps: PitSkill, lg: Rates, contact = 1): number[] {
   return perContactScaled({
     so: clampRate(ps.so * lg.so), bb: clampRate(ps.bb * lg.bb), hbp: clampRate(ps.hbp * lg.hbp), hr: clampRate(ps.hr * lg.hr),
     s1: clampRate(ps.hit * lg.s1), d2: clampRate(ps.hit * lg.d2), t3: clampRate(ps.hit * lg.t3),
-  });
+  }, contact);
 }
 
 /** 각도 성향: 땅볼 승산 배율 gb(BatSkill.gb·PitSkill.gb)의 로그를 뒤집은 값 (뜬공 쪽 +) */
@@ -345,10 +351,10 @@ export function spreadOf(contact: number, theta: number, ap: AngleParams): numbe
  * 타자 손잡이: 리그 평균 투수 상대로 맞힌 공당 결과가 지금 결과 비율과 같게 푼다. 퍼짐은 컨택에 달려 있어,
  * 퍼짐 1로 한 번 풀고 그 정타로 퍼짐을 정한 뒤 다시 푼다 (난수 없음)
  */
-export function batBallSide(bs: BatSkill, lg: Rates, lb: LeagueBall, p: EngineParams): BallSide {
+export function batBallSide(bs: BatSkill, lg: Rates, lb: LeagueBall, p: EngineParams, contact = 1): BallSide {
   const ap = p.ball.angle;
   const theta = thetaOf(bs.gb);
-  const target = batTarget(bs, lg);
+  const target = batTarget(bs, lg, contact);
   const build = (x: readonly number[]) => buildShift(x, true, ap.speedGb * (bs.speed - 0.5) * 2, ap.powerXbh);
   const x1 = solveSide(lb, theta === 0 ? lb.pz : bandProbs(lb.mix, lb.cuts, theta, 1), target, build);
   const k = spreadOf(x1[0], theta, ap);
@@ -357,11 +363,11 @@ export function batBallSide(bs: BatSkill, lg: Rates, lb: LeagueBall, p: EnginePa
 }
 
 /** 투수 손잡이: 리그 평균 타자 상대로 맞힌 공당 결과가 지금 결과 비율과 같게 푼다 (타구 억제 = −정타, 장타 억제 = −거리) */
-export function pitBallSide(ps: PitSkill, lg: Rates, lb: LeagueBall, p: EngineParams): BallSide {
+export function pitBallSide(ps: PitSkill, lg: Rates, lb: LeagueBall, p: EngineParams, contact = 1): BallSide {
   const ap = p.ball.angle;
   const theta = thetaOf(ps.gb);
   const build = (x: readonly number[]) => buildShift(x, false, 0, ap.powerXbh);
-  const x = solveSide(lb, theta === 0 ? lb.pz : bandProbs(lb.mix, lb.cuts, theta, 1), pitTarget(ps, lg), build);
+  const x = solveSide(lb, theta === 0 ? lb.pz : bandProbs(lb.mix, lb.cuts, theta, 1), pitTarget(ps, lg, contact), build);
   return { shift: build(x), theta, k: 1, x };
 }
 
