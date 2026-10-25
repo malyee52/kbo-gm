@@ -347,17 +347,61 @@ def rules_for(year):
     # 그 밖의 해는 보유한 외국인이 모두 출전할 수 있다
     if 2001 <= year <= 2002 or 2014 <= year <= 2019: active, acs = 2, 'confirmed'
     else: active, acs = foreign, fs
-    if year <= 1988: post = 2
-    elif year <= 2014: post = 4
-    else: post = 5
     rules = {
         'rosterSize': roster, 'rosterSizeSource': rs,
         'foreignLimit': foreign, 'foreignLimitSource': fs,
         'foreignActive': active, 'foreignActiveSource': acs,
+        **entry_rules(year, roster),
         **innings_rules(year),
-        'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed' if year >= 2015 else 'assumed',
+        **postseason_rules(year),
     }
     return rules
+
+
+def entry_rules(year, roster):
+    """1군 등록·출장 인원과 확대 엔트리 (규칙 실제화 카드 2026-10-24, data-src/규칙변경.csv 엔트리 줄).
+      activeSize: 한 경기에 나올 수 있는 인원 (등록 rosterSize 중 경기 전 명단에 드는 수).
+        2001~2007 24 (조사값), 2008~2013 25 (조사값), 2014 25 (보정 CSV 13), 2015~2019 25·2020~2025 26·2026~ 27 (자료집 제도연표).
+        2000년까지는 등록과 출장을 가른 자료가 없어 등록 인원과 같다 (가정값)
+      rosterExtra: 시즌 중 엔트리 확대. '월일:더하는 인원' 을 ';'로 잇고, 그날부터 그 값 (뒤 칸이 앞 칸을 덮는다). 등록·출장 모두 더한다.
+        2001~ 9월 1일 +5 (조사값), 2020은 2연전 시작 8월 18일부터 +5 (나무위키 2020 KBO 리그 '2연전 시작부터 5명 확대 엔트리를 앞당겨'),
+        2026은 후반기(7월 16일) +1 (아시안게임 한시 30명·28명) · 8월 25일 +5 (34명·32명, 나무위키 2026 KBO 리그)"""
+    if year >= 2026: active, acs = 27, 'confirmed'
+    elif year >= 2020: active, acs = 26, 'confirmed'
+    elif year >= 2014: active, acs = 25, 'confirmed'
+    elif year >= 2008: active, acs = 25, 'assumed'
+    elif year >= 2001: active, acs = 24, 'assumed'
+    else: active, acs = roster, 'assumed'
+    out = {'activeSize': active, 'activeSizeSource': acs}
+    if year == 2026: out.update(rosterExtra='716:1;825:5', rosterExtraSource='confirmed')
+    elif year == 2020: out.update(rosterExtra='818:5', rosterExtraSource='confirmed')
+    elif year >= 2001: out.update(rosterExtra='901:5', rosterExtraSource='assumed')
+    return out
+
+
+def postseason_rules(year):
+    """가을야구 진출 구단 수와 시리즈 승수 (규칙 실제화 카드 2026-10-24). 근거: 나무위키 'KBO 준플레이오프'·'KBO 플레이오프'·'KBO 한국시리즈'
+    (2026-08-29 덤프). 양대 리그 해(1999·2000)는 league/postseason.ts의 대진 규칙을 쓰고 여기 값은 보지 않는다.
+      postseasonTeams: 1982~1985 2 (한국시리즈만), 1986~1988 3 (전·후기 성적으로 한 팀 직행·두 팀 플레이오프, '3년 모두 한 팀만 한국시리즈에
+        직행'. 게임은 단일 시즌이라 1위 직행·2위 대 3위), 1989~2014 4, 2015~ 5
+      semiWins: 준플레이오프 이기는 승수. 1989~2004 2, 2005 3, 2006~2007 2, 2008~2019 3, 2020~2021 2, 2022~ 3
+      poWins: 플레이오프. 3, 단 1995·2008 4 (각주 '1995년, 1999~2000년, 2008년에는 4선승제'), 2021 2
+      semiSkipGap: 1993~1998 3·4위 승차가 이 경기 이상이면 준플레이오프 없이 3위가 플레이오프로 (4위 탈락, 1995년 한 번)
+      poWinsNoSemi: 준플레이오프가 없는 해의 플레이오프 승수. 1995 7전 4선승을 '준PO 생략 때 7전'으로 읽은 해석 (가정값, 확인 필요)"""
+    if year <= 1985: post = 2
+    elif year <= 1988: post = 3
+    elif year <= 2014: post = 4
+    else: post = 5
+    out = {'postseasonTeams': post, 'postseasonTeamsSource': 'confirmed'}
+    if year >= 1989:
+        semi = 3 if year == 2005 or 2008 <= year <= 2019 or year >= 2022 else 2
+        out.update(semiWins=semi, semiWinsSource='confirmed')
+    if year >= 1986:
+        po = 4 if year == 2008 else 2 if year == 2021 else 3
+        out.update(poWins=po, poWinsSource='confirmed')
+    if 1993 <= year <= 1998:
+        out.update(semiSkipGap=3.5, semiSkipGapSource='confirmed', poWinsNoSemi=4, poWinsNoSemiSource='assumed')
+    return out
 
 
 def innings_rules(year):
@@ -511,15 +555,19 @@ def build_defense(out_dir):
             if not yr['p']:
                 del yr['p']
     rep = defaultdict(list)
+    arm = defaultdict(list)
     for r in read_src_csv(src / '수비평판.csv'):
         rep[r['선수ID']].append([r['자리'], int(r['수준']), num(r['시기_시작']), num(r['시기_끝'])])
+        if int(r.get('어깨') or 0):
+            arm[r['선수ID']].append([int(r['어깨']), num(r['시기_시작']), num(r['시기_끝'])])
     (out_dir / 'defense.json').write_text(json.dumps({
         'version': 1,
         'source': 'data-src/수비이닝.csv (KBO 공식 사이트 수비 기록, 사용자 수집, 가공) · 수비평판.csv (나무위키·위키백과 서술 요약, 등급·시기만)',
         'fields': ['g', 'gs', 'outs', 'e', 'po', 'a', 'dp', 'sb', 'cs', 'pb'], 'from': first, 'to': last,
         'note': 'players: 선수 ID → 연도 → {p: 자리 → fields 순 값 (outs = 이닝 × 3), pa: 타석, nd: 수비 없는 타석 근사}. '
-                'rep: 선수 ID → [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산)',
-        'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)},
+                'rep: 선수 ID → [자리(C…RF·IF·OF·전반), 수준 −2(매우 나쁨)~2(매우 좋음), 시기 시작, 시기 끝] (null = 통산). '
+                'arm: 선수 ID → [어깨 1 좋음 / −1 나쁨, 시기 시작, 시기 끝] (평판 글의 어깨 낱말, 능력치 v2 12.6. 아직 엔진에 쓰지 않음)',
+        'players': {k: players[k] for k in sorted(players)}, 'rep': {k: rep[k] for k in sorted(rep)}, 'arm': {k: arm[k] for k in sorted(arm)},
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'수비 이닝 {len(rows):,}행 → 선수 {len(players):,}명 ({first}~{last}), 평판 {sum(len(v) for v in rep.values()):,}행 ({len(rep):,}명) → {out_dir / "defense.json"}')
 
@@ -640,7 +688,7 @@ def build_pitches(out_dir):
 
 RULE_CAT = {'공인구': 'ball', '경기': 'game', '엔트리': 'roster', '외국인': 'foreign', 'FA': 'fa', '드래프트': 'draft', '샐러리캡': 'cap', '리그': 'league'}
 RULE_EFFECT = {'표시만': 'show', '표시만(평균)': 'show-env', '리그 운영': 'league', '경기': 'engine'}
-RULE_STATUS = {'자료집 확인': 'confirmed', '조사값': 'research', '출처 갈림': 'conflict', '미확인': 'unknown'}
+RULE_STATUS = {'자료집 확인': 'confirmed', '출처 확인': 'confirmed', '조사값': 'research', '출처 갈림': 'conflict', '미확인': 'unknown'}
 # 키가 있는 항목은 전·후 값을 게임이 실제로 쓰는 값에서 읽는다 (src/league/ruleNews.ts의 RULE_KEYS와 같아야 한다)
 RULE_KEYS = {'rosterSize', 'foreignLimit', 'maxInnings', 'postseasonTeams', 'faEnabled', 'faService', 'salaryCap'}
 
@@ -908,6 +956,31 @@ def build_ppa():
     return sum(len(v) for v in out['bat'].values()), sum(len(v) for v in out['pit'].values())
 
 
+def build_running():
+    """선수별 추가 진루·번트 → public/data/running.json (능력치 v2 16-3d, 주루 판단·번트 수행 실측 시작값).
+    {bat: {선수 ID: {연도: [기회, 성공, 주루사, 리그 기대 성공, 희생번트, W·V 공, 그중 기습 번트 몫]}}, lg: {연도: [희생번트, W·V 공, 기습 번트 몫]}}.
+    가공 CSV는 tools/pbp_running.py (data-src/pbp_derived/runner_adv.csv·batter_bunt.csv, 투구 단위 자료 2023~)."""
+    bat = defaultdict(dict)
+    lg = defaultdict(lambda: [0, 0, 0.0])
+    with (PBP_DERIVED / 'runner_adv.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            bat[r['id']][r['year']] = [int(r['opp']), int(r['ext']), int(r['outs']), float(r['exp']), 0, 0, 0.0]
+    with (PBP_DERIVED / 'batter_bunt.csv').open(encoding='utf-8') as f:
+        for r in csv.DictReader(f):
+            row = bat[r['id']].setdefault(r['year'], [0, 0, 0, 0.0, 0, 0, 0.0])
+            row[4], row[5], row[6] = int(r['sh']), int(r['wv']), float(r['wvh'])
+            lg[r['year']][0] += int(r['sh'])
+            lg[r['year']][1] += int(r['wv'])
+            lg[r['year']][2] = round(lg[r['year']][2] + float(r['wvh']), 3)
+    (OUT / 'running.json').write_text(json.dumps({
+        'version': 1,
+        'note': '선수별 추가 진루 [기회, 성공, 주루사, 리그 기대 성공]과 번트 [희생번트, 번트 파울·헛스윙 공, 그중 기습 번트 몫(주자 없을 때 비율로 추정)]. 투구 단위 자료(slothman3878 '
+                'KBO Play-by-Play v0, CC BY 4.0) 2023~, 2026은 7월 26일까지. tools/pbp_running.py → tools/build_data.py build_running',
+        'bat': bat, 'lg': lg,
+    }, ensure_ascii=False, separators=(',', ':'), sort_keys=True), encoding='utf-8')
+    return len(bat)
+
+
 def build_plate():
     """선수별 볼카운트 사슬 실측 → public/data/plate.json (능력치 v2 16-1, 엔진 src/engine/plate.ts·ratings.ts plateResidual).
     {bat|pit: {선수 ID: {연도: [건수...]}}}. 타자 [존 안 공, 존 안 스윙, 기대, 존 밖 공, 존 밖 스윙, 기대, 스윙, 맞힘, 기대,
@@ -1105,7 +1178,7 @@ def build_military(profiles, out_dir):
         'version': 1,
         'note': '실제 병역 자료. served = 2026 프로필 경력의 상무·경찰(end = 1군 공백으로 본 복무 끝 해, 추정), '
                 'exempt = 국제대회 금메달 대표팀(병역_면제명단.csv, year = 대회 연도). '
-                'src = wiki 는 위 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (served.kind active = 현역, reserve = 보충역). '
+                'src = wiki 는 위 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (served.unit 복무 = 군 야구단 밖 복무, 현역·보충역을 가르지 않는다). '
                 '여기 없는 선수는 자료가 없는 것이다.',
         'players': dict(sorted(table.items())),
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
@@ -1301,7 +1374,8 @@ def write_wiki_report(players_n, records, record_n, mil, special, fixes=((), ())
 def wiki_military(table, players, seen):
     """실제 병역 자료가 없는 국내 선수에게 위키 병역 칸을 더한다 (table을 고친다). 더한 수와 읽지 못한 글 목록을 돌려준다.
     - 면제(예술체육요원·병역면제·전시근로역): exempt.year = 글 속 해, 없으면 첫 1군 시즌 (임시값: 언제 면제됐는지 모름)
-    - 상무·경찰·성무: served.unit, 현역·보충역(공익·사회복무·방위·산업기능요원): served.unit '현역'·'보충역' + kind.
+    - 상무·경찰·성무: served.unit, 현역·보충역(공익·사회복무·방위·산업기능요원): served.unit '복무' (둘을 가르지 않는다.
+      보충역은 신체 등급과 이어질 수 있어 배포 파일에 남기지 않는다, 2026-10-24 사용자 M9 Q5). 게임은 '복무'를 현역 규칙으로 본다.
       end = 글 속 마지막 해 (없으면 모름). 미필·불명은 넣지 않는다"""
     prof = wiki_profile()
     added, skip = 0, []
@@ -1325,14 +1399,13 @@ def wiki_military(table, players, seen):
             event = '예술체육요원' if '요원' in text else '병역 면제'
             table[p['id']] = {'src': 'wiki', 'exempt': {'year': year, 'event': event}}
         else:
-            unit = {'active': '현역', 'reserve': '보충역'}.get(kind, kind)
+            unit = '복무' if kind in ('active', 'reserve') else kind
             # end는 실제 자료와 같은 뜻(복무로 빠진 마지막 시즌)으로 맞춘다: 전역한 해에 1군 기록이 있으면(시즌 중 전역, 방위병) 그 앞 해로.
             # 그대로 두면 그 해 시작 게임에서 '시작 뒤 복무'로 잡혀 다시 입대한다
             end = max(years) if years else None
             while end and end in seen.get(p['id'], {}) and end > min(years):
                 end -= 1
-            served = {'unit': unit, **({'end': end} if end else {}),
-                      **({'kind': kind} if kind in ('active', 'reserve') else {})}
+            served = {'unit': unit, **({'end': end} if end else {})}
             table[p['id']] = {'src': 'wiki', 'served': served}
         added += 1
     return added, skip
@@ -1822,6 +1895,10 @@ def main():
         # 선수별 P/PA만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
         print('선수별 P/PA 타자 %d·투수 %d 시즌' % build_ppa())
         return
+    if '--running-only' in sys.argv:
+        # 선수별 추가 진루·번트만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
+        print('선수별 추가 진루·번트 %d명' % build_running())
+        return
     if '--plate-only' in sys.argv:
         # 선수별 볼카운트 사슬 실측만 다시 반영한다 (가공 CSV에서 읽는다, 저장 호환은 그대로)
         print('선수별 사슬 실측 타자 %d·투수 %d 시즌' % build_plate())
@@ -2125,6 +2202,7 @@ def main():
     build_homes()
     build_schedule()
     build_ppa()
+    build_running()
     build_plate()
     build_history(OUT)
     build_defense(OUT)

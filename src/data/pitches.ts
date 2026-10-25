@@ -174,3 +174,81 @@ export function rankShares(prior: Pick<PitchPrior, 'share'>, k: number): (number
   out[0] = 100 - others;
   return out;
 }
+
+/** 경기 엔진 구종 한 줄 (engine/arsenal.ts ArsenalPitch와 같은 꼴): 구종, 비율(%), 등급(20~80, 없으면 리그 평균) */
+export interface ArsenalLine {
+  type: string;
+  share: number;
+  grade?: number;
+}
+
+/** 엔진이 쓰는 표준 구종 (engine/arsenal.ts PITCH_TYPES) */
+const ENGINE_TYPES = new Set(['포심', '투심', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼']);
+const engineType = (t: string) => (ENGINE_TYPES.has(t) ? t : t === '싱커' ? '투심' : t === '슬러브' ? '슬라이더' : null);
+/** 엔진 구종에 넣는 가장 작은 사용률 (%, 임시값): 이보다 드문 실측 구종은 뺀다 */
+const ENGINE_MIN_USAGE = 2;
+/** 위키 사용률 "가끔"의 엔진 비율 (%, 임시값) */
+const RARE_SHARE = 2;
+/** 위키 주무기의 엔진 등급 (임시값) */
+const MAIN_GRADE = 60;
+/** 자료 없는 투수의 둘째 구종 뒤 후보와 무게 (리그 구종 몫, data-src/pbp_derived/pitch_types.csv 2023~2025 대략, 임시값) */
+const DEFAULT_POOL: [string, number][] = [['슬라이더', 25], ['체인지업', 12], ['커브', 10], ['포크', 8], ['투심', 7], ['커터', 5]];
+
+/** 선수 ID 해시 (자료 없는 투수 구종을 정하는 데만, 난수 아님) */
+function idHash(id: string, salt: number): number {
+  let h = 2166136261 ^ salt;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 1000003) / 1000003;
+}
+
+/**
+ * 경기 엔진 구종 (엔진 2 20-1단계): 시작 연도 전 실측(사용률·등급) → 위키 목록(사용률 짐작, 주무기 등급 60) → 자료 없음(선수 ID로 정한 리그 평균 꼴 4구종).
+ * 난수를 쓰지 않아 같은 선수·연도면 늘 같다. 저장하지 않는다 (월드를 만들 때마다 자료에서 다시 낸다)
+ */
+export function arsenalFor(data: PitchData | undefined, id: string, year: number): ArsenalLine[] {
+  if (data) {
+    const m = measuredArsenal(data, id, year);
+    if (m) {
+      const out: ArsenalLine[] = [];
+      for (const x of m) {
+        const t = engineType(x.type);
+        if (!t || (x.usage ?? 0) < ENGINE_MIN_USAGE) continue;
+        const same = out.find((l) => l.type === t);
+        if (same) same.share += x.usage!;
+        else out.push({ type: t, share: x.usage!, ...(typeof x.grade === 'number' ? { grade: x.grade } : {}) });
+      }
+      if (out.length) return out;
+    }
+    const w = data.wiki.players[id];
+    if (w) {
+      const out: ArsenalLine[] = [];
+      for (const l of wikiArsenal(w, data.wiki.names, data.prior, year)) {
+        const t = engineType(l.type);
+        if (!t) continue;
+        const share = l.share === 'mostly' ? 100 : l.share === 'rare' ? RARE_SHARE : l.share;
+        const same = out.find((x) => x.type === t);
+        if (same) same.share += share;
+        else out.push({ type: t, share, ...(l.main ? { grade: MAIN_GRADE } : {}) });
+      }
+      if (out.length) return out;
+    }
+  }
+  const shares = [54, 28, 13, 5];
+  const pool = [...DEFAULT_POOL];
+  const out: ArsenalLine[] = [{ type: '포심', share: shares[0] }];
+  for (let k = 1; k < 4; k++) {
+    let u = idHash(id, k) * pool.reduce((a, [, x]) => a + x, 0);
+    let i = 0;
+    while (i < pool.length - 1 && (u -= pool[i][1]) >= 0) i++;
+    out.push({ type: pool[i][0], share: shares[k] });
+    pool.splice(i, 1);
+  }
+  return out;
+}
+
+/** 월드의 투수 구종 (선수 ID → 구종, 투수와 투타 겸업만) */
+export function arsenalsOf(players: readonly { id: string; pit?: unknown }[], data: PitchData | undefined, year: number): Record<string, ArsenalLine[]> {
+  const out: Record<string, ArsenalLine[]> = {};
+  for (const p of players) if (p.pit) out[p.id] = arsenalFor(data, p.id, year);
+  return out;
+}

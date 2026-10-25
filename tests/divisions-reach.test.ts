@@ -1,5 +1,6 @@
 // 리그 나눔이 닿는 곳 (일정 개편 14단계, 기획안 10.6·10.7 A5): 구단주·AI·감독 기준(10.8 결정 2), 축하, 연표 표시, 개막 알림, 캠페인 문구.
 // 올스타 드림 대 매직은 tests/allstar.test.ts
+import { strengthTier } from '../src/game/rank';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { divisionsOf } from '../src/data/schedule';
@@ -131,7 +132,7 @@ describe('1999 한 시즌: 구단주 목표·평가, AI 진출권, 축하가 리
     expect(goal.projectedRank).toBeGreaterThanOrEqual(1);
     expect(goal.projectedRank).toBeLessThanOrEqual(4);
     expect(goal.kind).toBe(goalForLeague(goal.projectedRank));
-    expect(g.news.some((n) => n.kind === 'owner' && n.text.includes(`(전력 예상 ${myLeague} ${goal.projectedRank}위)`))).toBe(true);
+    expect(g.news.some((n) => n.kind === 'owner' && n.text.includes(`(구단주 전망 ${myLeague} ${strengthTier(goal.projectedRank, 4)})`))).toBe(true);
     // 개막 알림: 양대 리그 시작
     expect(g.news.some((n) => n.text.includes('리그: 단일 리그 → 드림·매직 양대 리그 (드림 '))).toBe(true);
 
@@ -177,7 +178,7 @@ describe('1999 한 시즌: 구단주 목표·평가, AI 진출권, 축하가 리
   it('2026(단일 리그)은 목표에 리그가 없고 AI 진출권 칸도 없다', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'div-a5-2026' }, FAST);
     expect(g.owner.goal!.projectedLeague).toBeUndefined();
-    expect(g.news.some((n) => n.kind === 'owner' && /\(전력 예상 \d+위\)/.test(n.text))).toBe(true);
+    expect(g.news.some((n) => n.kind === 'owner' && /\(구단주 전망 (상위권|중위권|하위권)\)/.test(n.text))).toBe(true);
     g.advance(40, NO_STOPS);
     expect(g.situation(3).inPlace).toBeUndefined();
     expect(g.news.some((n) => n.text.includes('양대 리그'))).toBe(false);

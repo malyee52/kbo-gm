@@ -2,7 +2,7 @@
 // 새 사건을 만들지 않는다. 이미 게임에 있는 처리 대상(이벤트, 오프시즌 단계, 시즌 마무리, 판타지 선택 등)만 모아 보여 준다.
 // 기한은 게임에 실제로 있는 단계 조건만 쓰고 날짜를 지어내지 않는다 (when).
 import type { GameSession } from '../game/session';
-import { LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules } from '../engine';
+import { LINEUP_SLOTS, MIN_PLAN_ROTATION } from '../engine';
 import * as Off from '../league/offseason';
 import { ruleOf } from '../league/rules';
 import { pendingChoices } from '../fantasy/types';
@@ -50,6 +50,16 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     out.push({
       key: `event:${ev.id}`, kind: '사건', group: '브리핑', title: eventDef(ev.id)?.title ?? '이벤트',
       why: '답하기 전에는 경기를 진행할 수 없습니다.', when: '진행 전', go: 'home', blocking: true,
+    });
+  }
+
+  // 진행 중인 경기 (UI 2단계 2.2.2): 지휘하던 경기 창을 닫았다. 끝까지 지휘하거나 감독에게 맡기기 전에는 진행·선수단 조작이 막힌다 (session.gameLock)
+  if (s.gameLock) {
+    const v = s.pendingScore();
+    const at = v ? (v.over ? `경기 끝 ${v.awayRuns}:${v.homeRuns}` : `${v.inn}회${v.top ? '초' : '말'} ${v.awayRuns}:${v.homeRuns}`) : '';
+    out.push({
+      key: 'live-game', kind: '시즌', group: '브리핑', title: `진행 중인 경기${at ? ` (${at})` : ''}`,
+      why: '지휘하던 경기가 저장돼 있습니다. 홈의 다음 경기 카드에서 이어서 지휘하거나 감독에게 맡겨 끝내야 진행·선수단 조작을 할 수 있습니다.', go: 'home', blocking: true,
     });
   }
 
@@ -129,6 +139,17 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     });
   }
 
+  // 외국인 관찰 명단이 차서 기다리는 후보 (능력치 v2 19.4): 명단에서 하나를 빼야 들어온다. 또 찾으면 이 후보를 놓친다
+  const wait = s.scoutFx.wait;
+  if (wait) {
+    const name = s.leaguePlayer(wait.id)?.name ?? '후보';
+    out.push({
+      key: 'fx-wait', kind: '선수단', group: '영입', title: `관찰 명단 대기: ${name}`,
+      why: '관찰 명단(8명)이 차 있어 새 후보가 기다리고 있습니다. 명단에서 한 명을 빼야 들어오고, 그사이 또 찾으면 이 후보를 놓칩니다.',
+      go: 'scout-fx', ack: wait.id,
+    });
+  }
+
   // 판타지: 답을 기다리는 선택 (기한이 지난 제안은 뺀다)
   const choices = pendingChoices(s.fantasy).filter((e) => !offerExpired(s, e));
   if (choices.length) {
@@ -153,7 +174,7 @@ export function entryDecisions(s: GameSession): Decision[] {
   const out: Decision[] = [];
   const reg = s.registered();
   const regIdx = new Set(reg.map((p) => p.idx));
-  const size = teamRules(s.world, s.team).rosterSize;
+  const size = s.entryRules().rosterSize;
   const base = { kind: '엔트리' as const, group: '전력' as const, go: 'lineup' as const };
   if (reg.length > size) {
     out.push({ ...base, key: 'entry-size', title: `1군 정원 초과 ${reg.length - size}명`, why: `1군은 ${size}명까지입니다 (지금 ${reg.length}명).` });

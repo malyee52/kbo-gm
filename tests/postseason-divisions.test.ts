@@ -250,6 +250,8 @@ describe('단일 리그 해는 사다리 그대로', () => {
     expect(ps.seeds).toEqual(g.season.standings().slice(0, g.world.rules.postseasonTeams));
     expect(g.news.find((n) => n.text.startsWith('가을야구 대진'))!.text).toMatch(/^가을야구 대진: 1위 /);
     g.advancePostseason(100000);
-    expect(resultOf(g.postseason!).series.every((x) => x.node === undefined && x.rule === undefined)).toBe(true);
+    // 시리즈 규칙은 연표의 그 해 승수(규칙 실제화, yearRoundRule)만: 대진 마디·양대 리그 규칙은 없다
+    const st = g.postseason!;
+    expect(resultOf(st).series.every((x) => x.node === undefined && JSON.stringify(x.rule) === JSON.stringify(st.roundRules?.[x.round]))).toBe(true);
   }, 300_000);
 });

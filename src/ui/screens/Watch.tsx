@@ -3,11 +3,11 @@
 // 은퇴한 선수는 "은퇴" 회색으로 남기고 사용자가 직접 뺀다. 지명 안 된 신인 후보는 다음 개막 때 저절로 빠진다 (game/watch.ts).
 import { useMemo } from 'react';
 import { dollarText } from '../../league/salary';
-import { overall, slotOf, tradeBlockReason } from '../tradeDesk';
-import { runsGrade } from '../grades';
+import { slotOf, tradeBlockReason } from '../tradeDesk';
+import type { GuessSet } from '../../league/scout';
 import { isStarterSkill } from '../../engine';
-import { Grade, PlayerLink, Pos, TeamLink, useGame, useWon } from '../context';
-import { DataTable, PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import { PlayerLink, Pos, TeamLink, useGame, useWon } from '../context';
+import { DataTable, guessColumn, useSeen } from '../parts';
 import { useShell } from '../shell';
 import type { Column } from '../table';
 import type { WatchEntry, WatchStatus } from '../../game/watch';
@@ -28,12 +28,12 @@ export function WatchStar({ id, name, small = false, bare = false }: { id: strin
   );
 }
 
-interface Row { w: WatchEntry; st: WatchStatus; lp: LeaguePlayer | undefined; p: SimPlayer | null; age: number | null; ov: number | null; slot: string; trade: string | null }
+interface Row { w: WatchEntry; st: WatchStatus; lp: LeaguePlayer | undefined; p: SimPlayer | null; age: number | null; guess: GuessSet | null; slot: string; trade: string | null }
 
 export function Watch() {
   const { session, version, changed } = useGame();
   const won = useWon();
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const { density } = useShell();
   const off = session.phase === 'offseason';
   const year = session.world.year;
@@ -47,10 +47,10 @@ export function Watch() {
       // 시즌 중엔 월드 선수(지금 능력), 오프시즌엔 리그 상태(다음 시즌 예상)
       const p = !off && wp ? wp : null;
       const age = p ? p.age : lp?.birthYear ? year + (off ? 1 : 0) - lp.birthYear : null;
-      const ov = p ? overall(session, p) : lp && off ? runsGrade(session.nextRuns(lp.id), year) : null;
+      const guess = p || (lp && off) ? seen.set(w.id) : null;
       const slot = p ? slotOf(p) : lp ? (lp.isPitcher ? (isStarterSkill(lp.pit) ? 'SP' : 'RP') : lp.pos ?? 'DH') : '-';
       const trade = p && p.teamIdx >= 0 && p.teamIdx !== session.teamIdx ? tradeBlockReason(session, p) ?? '트레이드 가능' : null;
-      return { w, st, lp, p: wp, age, ov, slot, trade };
+      return { w, st, lp, p: wp, age, guess, slot, trade };
     });
   }, [session, version, off, year]);
 
@@ -62,9 +62,9 @@ export function Watch() {
       cell: (r) => (r.st.kind === 'team' ? <TeamLink idx={r.st.team} /> : <span className={r.st.gray ? 'muted' : 'status'}>{r.st.text}</span>) },
     { key: 'slot', label: '자리', brief: true, value: (r) => r.slot, cell: (r) => (r.slot === 'SP' || r.slot === 'RP' || r.slot === '-' ? r.slot : <Pos pos={r.slot} />) },
     { key: 'age', label: '나이', brief: true, lower: true, value: (r) => (r.st.gray ? null : r.age) },
-    { key: 'ov', label: '종합', brief: true, value: (r) => (r.st.gray ? null : r.ov), cell: (r) => (r.st.gray ? '-' : <Grade v={r.ov} />) },
-    { key: 'pot', label: '잠재', brief: true, title: '27세 이하 범위(스카우트 짐작), 28~30세 숫자, 31세 이상 숨김',
-      value: (r) => (r.lp && !r.st.gray ? potentialSortValue(potOf(r.lp, r.age)) : null), cell: (r) => (r.lp && !r.st.gray ? <PotCell v={potOf(r.lp, r.age)} /> : '-') },
+    guessColumn<Row>((r) => (r.st.gray ? null : r.guess)),
+    { key: 'note', label: '스카우트 보고', text: true, title: '앞으로 클 여지에 대한 스카우트 평 (틀릴 수 있다, 32세부터 없음)',
+      value: (r) => (r.st.gray ? null : session.scoutPhrase(r.w.id)), cell: (r) => <span className="small">{(r.st.gray ? null : session.scoutPhrase(r.w.id)) ?? '-'}</span> },
     { key: 'sal', label: '연봉', brief: true, value: (r) => r.lp?.contract.salary ?? null,
       cell: (r) => (r.lp && !r.st.gray && r.st.kind !== 'prospect' && r.st.kind !== 'undrafted' ? (r.lp.foreign ? dollarText(r.lp.contract.salary) : won(r.lp.contract.salary)) : '-') },
     { key: 'until', label: '계약', title: '계약 마지막 해', value: (r) => (r.lp && r.st.kind === 'team' ? r.lp.contract.until : null) },

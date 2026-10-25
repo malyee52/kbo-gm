@@ -5,14 +5,15 @@
 // 추천은 화면에 보이는 능력 등급·상태만으로 고르고, 표시만 할 뿐 자동으로 적용하지 않는다.
 import { ConfirmButton } from '../ConfirmButton';
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, teamRules, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
+import { defenseAt, defenseGrade, LINEUP_SLOTS, MIN_PLAN_ROTATION, type DepthPlan, type SimPlayer, type Slot } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { PITCHER_ROLE_LABEL, type EntryCheck, type GameSession, type PitcherRole } from '../../game/session';
 import { ForeignMark, Grade, POS_KO, posName, useGame } from '../context';
 import { recentLines } from '../recent';
 import { lastOutings, outingText, type Outing } from '../../game/boxscore';
 import { futuresText } from './Roster';
-import { CondTag, CONDITION_HELP, useCondition } from '../parts';
+import { CondTag, CONDITION_HELP, GuessGrade, useCondition, useSeen } from '../parts';
+import { guessMid } from '../../league/scout';
 
 type Tab = 'hit' | 'pit' | 'entry';
 type PenRole = 'SU' | 'LR' | 'RP' | 'MOP';
@@ -61,7 +62,8 @@ function prune(d: Draft, players: SimPlayer[]): void {
 }
 
 export function LineupBoard() {
-  const { session, grades, changed, version, openPlayer } = useGame();
+  const { session, changed, version, openPlayer } = useGame();
+  const seen = useSeen();
   const [tab, setTab] = useState<Tab>('hit');
   const [target, setTarget] = useState<Target | null>(null);
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
@@ -73,7 +75,8 @@ export function LineupBoard() {
 
   const players = session.world.players;
   const org = session.team.org;
-  const rules = teamRules(session.world, session.team);
+  const rules = session.entryRules();
+  const extra = session.season.rosterExtraOn(session.day);
   const editable = session.canManage;
   const condOf = useCondition();
   const recent = useMemo(() => recentLines(session), [session, version]);
@@ -251,11 +254,16 @@ export function LineupBoard() {
     }
     return { text: '출전 가능', out: false, cond: condOf(p) };
   };
-  const bg = (p: SimPlayer) => grades.batters.get(p.id);
-  const pg = (p: SimPlayer) => grades.pitchers.get(p.id);
-  const defAt = (p: SimPlayer, s: Slot) => (s === 'DH' ? null : defenseGrade(defenseAt(p, s)));
+  // 갈래 등급은 우리 스카우트 팀의 추측 가운데값 (능력치 v2 17.6)
+  const gm = (p: SimPlayer, k: string): number | null => { const v = seen.grade(p.id, k); return v ? guessMid(v) : null; };
+  const bg = (p: SimPlayer) => (p.isPitcher || gm(p, 'contact') === null ? undefined
+    : { contact: gm(p, 'contact')!, power: gm(p, 'power')!, eye: gm(p, 'eye')!, speed: gm(p, 'speed')! });
+  const pg = (p: SimPlayer) => (!p.isPitcher || gm(p, 'stuff') === null ? undefined
+    : { stuff: gm(p, 'stuff')!, control: gm(p, 'control')!, hrSuppression: gm(p, 'hrSuppression')!, stamina: gm(p, 'stamina'), reliefStamina: gm(p, 'reliefStamina') });
+  const defView = (p: SimPlayer, s: Slot) => (s === 'DH' ? null : seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, s))));
+  const defAt = (p: SimPlayer, s: Slot) => { const v = defView(p, s); return v ? guessMid(v) : null; };
 
-  /** 추천 점수: 보이는 능력 등급만 쓴다 */
+  /** 추천 점수: 보이는 능력 등급(스카우트 추측)만 쓴다 */
   const score = (p: SimPlayer, t: Target): number => {
     if (t.kind === 'slot') {
       const g = bg(p);
@@ -327,7 +335,7 @@ export function LineupBoard() {
     <div className="stack tight lineup-board">
       <section className="row-between wrap">
         <div className="muted small roster-sum">
-          1군 <strong className={nFirst > rules.rosterSize ? 'neg' : undefined}>{nFirst}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {nFirst - nPit}) · 외국인 {nForeign}/{rules.foreignLimit} ·{' '}
+          1군 <strong className={nFirst > rules.rosterSize ? 'neg' : undefined}>{nFirst}/{rules.rosterSize}</strong>명 (투수 {nPit}, 야수 {nFirst - nPit}{rules.activeSize < rules.rosterSize ? `, 경기 출장 ${rules.activeSize}명` : ''}){extra > 0 ? ` · 엔트리 확대 +${extra}` : ''} · 외국인 {nForeign}/{rules.foreignLimit} ·{' '}
           {manual ? '엔트리 직접 관리' : '엔트리 AI 관리'} · {session.plan ? '기용 직접' : '기용 AI 감독'}
           <details className="help">
             <summary>도움말</summary>
@@ -336,6 +344,7 @@ export function LineupBoard() {
             직접 정한 주전은 AI가 쉬게 하지 않고, 결장할 때만 AI 감독이 대기 선수로 채웁니다. 경기 중 교체는 AI 감독이 합니다.
             추천은 화면에 보이는 능력 등급과 출전 상태만으로 고른 것이며, 고르기 전에는 아무것도 바뀌지 않습니다.
             선수 이름 옆 좋음·보통·나쁨은 컨디션입니다. {CONDITION_HELP}
+            {rules.activeSize < rules.rosterSize && <> 1군 {rules.rosterSize}명 가운데 한 경기에는 {rules.activeSize}명까지 나옵니다. 그날 던지지 않는 선발 투수는 세지 않고, 그래도 넘치면 가장 약한 구원 투수·벤치 야수가 그 경기에 빠집니다.</>}
           </details>
         </div>
         <span className="inline">
@@ -556,7 +565,8 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
   defAt: (p: SimPlayer, s: Slot) => number | null; editable: boolean;
   onPick: (p: SimPlayer) => void; onClear: () => void; onClose: () => void;
 }) {
-  const { session, grades, openPlayer } = useGame();
+  const { session, openPlayer } = useGame();
+  const seen = useSeen();
   const ref = useRef<HTMLElement>(null);
   const pit = target.kind !== 'slot';
   useEffect(() => {
@@ -610,8 +620,7 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
             <tbody key={title}>
               <tr className="group-row"><th className="l" colSpan={8}>{title}</th></tr>
               {list.map(({ p, st }) => {
-                const bgs = grades.batters.get(p.id);
-                const pgs = grades.pitchers.get(p.id);
+                const gv = (k: string) => <GuessGrade v={seen.grade(p.id, k)} />;
                 return (
                   <tr key={p.idx} className={best?.p.idx === p.idx ? 'rec' : undefined}>
                     <td>
@@ -627,10 +636,10 @@ function Candidates({ target, label, occupant, d, statusOf, nowText, score, whyT
                     </td>
                     <td className="l small">{nowText(p)}{st.out && <><br /><span className="status out">{st.text}</span></>}{st.cond && <><br /><CondTag text={st.cond} /></>}</td>
                     {pit ? (
-                      <><td><Grade v={pgs?.stuff} /></td><td><Grade v={pgs?.control} /></td><td><Grade v={pgs?.hrSuppression} /></td>
-                        <td><Grade v={target.kind === 'pen' && target.role === 'LR' ? pgs?.reliefStamina : pgs?.stamina} /></td></>
+                      <><td>{gv('stuff')}</td><td>{gv('control')}</td><td>{gv('hrSuppression')}</td>
+                        <td>{gv(target.kind === 'pen' && target.role === 'LR' ? 'reliefStamina' : 'stamina')}</td></>
                     ) : (
-                      <>{target.slot !== 'DH' && <td><Grade v={defAt(p, target.slot)} /></td>}<td><Grade v={bgs?.contact} /></td><td><Grade v={bgs?.power} /></td><td><Grade v={bgs?.eye} /></td></>
+                      <>{target.slot !== 'DH' && <td><GuessGrade v={seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, target.slot)))} /></td>}<td>{gv('contact')}</td><td>{gv('power')}</td><td>{gv('eye')}</td></>
                     )}
                   </tr>
                 );
@@ -652,7 +661,7 @@ function EntryLists({ d, curReg, toggle, statusOf, nowText, recent, fut, editabl
   const [kind, setKind] = useState<'all' | 'hit' | 'pit'>('all');
   const org = session.team.org.filter((p) => kind === 'all' || (kind === 'pit') === p.isPitcher);
   const sortKey = (p: SimPlayer) => (p.isPitcher ? 1 : 0);
-  const col = (first: boolean) => org.filter((p) => d.entry.has(p.idx) === first).sort((a, b) => sortKey(a) - sortKey(b) || b.value - a.value || a.idx - b.idx);
+  const col = (first: boolean) => org.filter((p) => d.entry.has(p.idx) === first).sort((a, b) => sortKey(a) - sortKey(b) || a.name.localeCompare(b.name, 'ko') || a.idx - b.idx);
   return (
     <section className="card" aria-label="엔트리">
       <div className="card-top">

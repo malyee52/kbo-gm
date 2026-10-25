@@ -97,12 +97,20 @@ export const BALLPARK: Record<string, { capacity: number; market: number }> = {
 };
 const DEFAULT_PARK = { capacity: 18_000, market: 0 };
 
-export type InvestKind = 'scout' | 'develop' | 'medical' | 'marketing';
-export const INVEST_KINDS: InvestKind[] = ['scout', 'develop', 'medical', 'marketing'];
-export const INVEST_LABEL: Record<InvestKind, string> = { scout: '스카우트', develop: '육성 (2군·코치)', medical: '의료·트레이닝', marketing: '마케팅·구장' };
-/** 투자 단계별 연간 비용 (0~3단계, 만 원) */
+/**
+ * 투자 갈래. 스카우트는 셋으로 나뉜다 (능력치 v2 기획안 19.3, 사용자 2026-10-24 확정 Q12 ①): scout = 아마추어(드래프트·육성선수 보드),
+ * scoutPro = 프로(다른 구단·시장 선수 추측), 해외 파견은 단계가 아니라 파견마다 낸다 (scoutfx.ts). 장부에는 '스카우트비' 한 줄 (scouting)
+ */
+export type InvestKind = 'scout' | 'scoutPro' | 'develop' | 'medical' | 'marketing';
+export const INVEST_KINDS: InvestKind[] = ['scout', 'scoutPro', 'develop', 'medical', 'marketing'];
+export const SCOUT_KINDS: InvestKind[] = ['scout', 'scoutPro'];
+export const INVEST_LABEL: Record<InvestKind, string> = {
+  scout: '스카우트 (아마추어)', scoutPro: '스카우트 (프로)', develop: '육성 (2군·코치)', medical: '의료·트레이닝', marketing: '마케팅·구장',
+};
+/** 투자 단계별 연간 비용 (0~3단계, 만 원). 스카우트 두 갈래는 0·5억·12억·20억 (19.3 확정 Q13 ①, 크기는 임시값) */
 export const INVEST_COST: Record<InvestKind, number[]> = {
-  scout: [0, 100_000, 200_000, 350_000],
+  scout: [0, 50_000, 120_000, 200_000],
+  scoutPro: [0, 50_000, 120_000, 200_000],
   develop: [0, 150_000, 300_000, 500_000],
   medical: [0, 100_000, 200_000, 350_000],
   marketing: [0, 100_000, 250_000, 450_000],
@@ -110,10 +118,11 @@ export const INVEST_COST: Record<InvestKind, number[]> = {
 /** 마케팅 단계별 관중률 보정과 스폰서 배율 */
 export const MARKETING_FILL = [0, 0.03, 0.06, 0.09];
 export const MARKETING_SPONSOR = [1, 1.05, 1.1, 1.15];
-/** 스카우트: 우리 구단이 보는 후보 잠재력 평가 오차 (±런) */
-export const SCOUT_NOISE = [8, 6, 4, 2];
-/** 스카우트: AI 구단의 드래프트 판단 오차 배율 (난이도 오차에 곱한다) */
-export const AI_SCOUT_SCALE = [1.2, 1, 0.75, 0.5];
+/** 스카우트 단계(0~3)별 추측 폭 배율 (아마추어·프로 모두, 기획안 17.7 표, 임시값). scout.ts가 쓴다 */
+export const SCOUT_SCALE = [1, 0.8, 0.65, 0.5];
+/** 아마추어 스카우트 단계별 신인 천장 추측 폭 σ_천장 (등급, 19.2 확정 Q15 ①: 보드와 진짜 천장 상관 0.6 → 0.9) */
+export const CEIL_SIGMA = [12, 9, 6.5, 4.5];
+const scaleText = (i: number) => (i ? `−${Math.round((1 - SCOUT_SCALE[i]) * 100)}%` : '기본');
 /** 육성: DEVELOP_AGE(30세) 이하 성장 폭 배율 가산, 2군 유망주 출전 몫 가산 */
 export const DEVELOP_BONUS = [0, 0.06, 0.12, 0.2];
 export const DEVELOP_SHARE = [0, 0.05, 0.1, 0.15];
@@ -124,7 +133,8 @@ export const MEDICAL_RATE = [1, 0.92, 0.85, 0.78];
 export const MEDICAL_DAYS = [1, 0.93, 0.87, 0.8];
 /** 투자 효과 설명 (화면용) */
 export const INVEST_EFFECT: Record<InvestKind, string[]> = {
-  scout: SCOUT_NOISE.map((n, i) => `후보 잠재력 평가 오차 ±${n}${i ? '' : ' (기본)'}`),
+  scout: CEIL_SIGMA.map((n, i) => `신인 천장 추측 폭 ±${n}등급, 신인 능력 추측 범위 ${scaleText(i)}`),
+  scoutPro: SCOUT_SCALE.map((_, i) => `다른 구단·시장 선수 능력 추측 범위 ${scaleText(i)}`),
   develop: DEVELOP_BONUS.map((b, i) => (i ? `${DEVELOP_AGE}세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
   medical: MEDICAL_RATE.map((r, i) => (i ? `부상 확률 −${Math.round((1 - r) * 100)}%, 결장 기간 −${Math.round((1 - MEDICAL_DAYS[i]) * 100)}%` : '효과 없음')),
   marketing: MARKETING_FILL.map((f, i) => (i ? `관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}%` : '효과 없음')),
@@ -160,18 +170,18 @@ export interface FinanceYear {
 
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
-  | 'payroll' | 'foreign' | 'ops' | 'invest'
+  | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
-  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
+  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자', scouting: '스카우트비',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
-const startInvest = (): Record<InvestKind, number> => ({ scout: 1, develop: 1, medical: 1, marketing: 1 });
+const startInvest = (): Record<InvestKind, number> => ({ scout: 1, scoutPro: 1, develop: 1, medical: 1, marketing: 1 });
 
 /** 이번 시즌에 적용 중인 투자 단계 */
 export function activeLevel(league: Pick<LeagueState, 'finance'>, team: number, kind: InvestKind): number {
@@ -323,12 +333,13 @@ function rosterAt(league: LeagueState, team: number, day: number, trades: TradeM
   return out;
 }
 
-/** 투자 연간 비용 합 */
-export function investCost(f: TeamFinance | undefined, planned = false, wage = 1): number {
+/** 투자 연간 비용 합. only를 주면 그 갈래만 (장부의 투자·스카우트비 나누기) */
+export function investCost(f: TeamFinance | undefined, planned = false, wage = 1, only?: (k: InvestKind) => boolean): number {
   if (!f) return 0;
   const lv = planned ? f.invest : f.active ?? f.invest;
-  return INVEST_KINDS.reduce((s, k) => s + investCostOf(k, lv[k] ?? 0, wage), 0);
+  return INVEST_KINDS.filter((k) => !only || only(k)).reduce((s, k) => s + investCostOf(k, lv[k] ?? 0, wage), 0);
 }
+const isScoutKind = (k: InvestKind) => SCOUT_KINDS.includes(k);
 
 /** 투자 한 항목의 그 해 연간 비용 (INVEST_COST × 연봉 상승 지수, 10만 원 단위 아래는 반올림) */
 export function investCostOf(kind: InvestKind, level: number, wage = 1): number {
@@ -457,7 +468,8 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const n = pays.length;
     const parts: [FinanceKind, number][] = [
       ['payroll', -Math.round(dom / n)], ['foreign', -Math.round(fgn / n)],
-      ['ops', -Math.round(((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wage) / n)], ['invest', -Math.round(investCost(fin, false, wage) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
+      ['ops', -Math.round(((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wage) / n)], ['invest', -Math.round(investCost(fin, false, wage, (k) => !isScoutKind(k)) / n)],
+      ['scouting', -Math.round(investCost(fin, false, wage, isScoutKind) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
       ['broadcast', Math.round(yearly.broadcast / n)], ['parent', Math.round(yearly.parent / n)], ['sponsor', Math.round(yearly.sponsor / n)],
     ];
     for (const [k, v] of parts) { add(k, v); byMonth.set(pd.month, (byMonth.get(pd.month) ?? 0) + v); }
@@ -640,15 +652,16 @@ export function lockInvestments(league: LeagueState, userTeam: number): void {
       const r = st.indexOf(t);
       const n = st.length || 1;
       const plan = startInvest();
-      if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; }
+      // 스카우트 갈래 (19.3): 하위 ⅓은 아마추어 2, 상위 ⅓은 프로 2, 리빌딩 성향 아마추어 +1, 윈나우 성향 프로 +1 (해외 파견 +1번은 scoutfx.ts)
+      if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; plan.scoutPro = 2; }
       else if (r >= 0 && r >= (2 * n) / 3) { plan.scout = 2; plan.develop = 2; }
       // 단장 성향 (gm.ts)
       const style = gmStyle(league, t);
       if (style === 'develop') { plan.develop = Math.min(3, plan.develop + 1); plan.scout = Math.min(3, plan.scout + 1); }
-      if (style === 'winnow') plan.medical = Math.min(3, plan.medical + 1);
+      if (style === 'winnow') { plan.medical = Math.min(3, plan.medical + 1); plan.scoutPro = Math.min(3, plan.scoutPro + 1); }
       if (style === 'frugal') for (const k of Object.keys(plan) as InvestKind[]) plan[k] = Math.max(0, plan[k] - 1);
       const room = Math.max(0, cashOf(league, t) * 0.6);
-      const order: InvestKind[] = ['marketing', 'medical', 'scout', 'develop'];
+      const order: InvestKind[] = ['marketing', 'medical', 'scoutPro', 'scout', 'develop'];
       for (let guard = 0; guard < 12 && investCost({ invest: plan, history: [] }, true, wageIndex(league.year, league)) > room; guard++) {
         const k = order.filter((x) => plan[x] > 0).sort((a, b) => plan[b] - plan[a])[0];
         if (!k) break;

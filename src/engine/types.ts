@@ -1,6 +1,7 @@
 import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
 import type { Defense, FieldPos } from './defense';
 import type { BatPlate, PitPlate } from './plate';
+import type { ArsenalPitch } from './arsenal';
 import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
@@ -42,8 +43,33 @@ export interface BatSkill {
   playable?: FieldPos[];
   /** 비상 포수 (14.2): 포수 수비 가능은 아니지만 직전 3시즌 포수 150이닝 이상. 정규 포수가 없을 때만 포수로 쓴다 */
   emC?: true;
+  /** 익숙함이 다 차지 않은 자리의 수비 재능 T (등급 단위, 능력치 v2 16-4). 결산 때 익숙함 u가 바뀐 만큼 T × Δu로 등급을 옮긴다 (fielding.ts familiarityShift) */
+  defTalent?: Partial<Record<FieldPos, number>>;
+  /** 수비 고치기(16.4 다)로 수비 가능이 된 자리. 결산 때 수비 가능을 다시 볼 때도 남긴다 (16-3b) */
+  defEdit?: FieldPos[];
   /** 포수 도루 저지 (런, 한 시즌당, 16-3). 없으면 포수 자리에서 수비 가능 포수 0 · 아니면 바닥 (state.ts fieldDefense) */
   cArm?: number;
+  /**
+   * 주루·작전·포수 손잡이 (능력치 v2 16-3, 기획안 1.3·1.4). 모두 리그 대비 값이고 없거나 0이면 리그 평균 (앞 단계와 같은 결과).
+   * 도루 스타트: 도루 성공 확률 로짓에 더한다 (투수 퀵모션과 로짓 덧셈). 기록 성공률(sbPct)에 이미 든 몫 밖의 차이
+   */
+  sbStart?: number;
+  /** 도루 판단: 도루 시도 확률에 exp(값)을 곱한다 (투수 견제와 덧셈). 기록 시도율(sbAtt)에 이미 든 몫 밖의 차이 */
+  sbJudge?: number;
+  /** 주루 판단: 추가 진루 시도 확률 로짓에 더하고 주루사 확률 로짓에서 뺀다 (주력과 따로) */
+  runIQ?: number;
+  /** 번트·작전 수행: 번트 실패 몫(선행 주자 아웃·뜬공·병살, 스퀴즈 실패)에 exp(−값)을 곱한다 */
+  bunting?: number;
+  /** 포수 블로킹: 포수일 때 폭투·포일 확률에 exp(−값)을 곱한다 */
+  cBlock?: number;
+  /** 포수 프레이밍: 포수일 때 스윙 안 한 공의 스트라이크 판정 로짓에 더한다 (자동 판정 전 해만, eras.ts ABS_YEAR) */
+  cFrame?: number;
+  /**
+   * 어깨 (능력치 v2 16-3d, 기획안 12.6·결정 28): 선수 하나의 송구 힘 (자리마다 아님). 확률 단위 리그 대비 값으로, 외야로 간 타구에서 주자의
+   * 추가 진루 시도 확률(희생플라이, 2루 주자 태그업, 단타 1→3·2→홈, 2루타 1→홈)에서 빼고, 내야 땅볼 병살 확률에 (1 + play.armDp × 값)을 곱한다.
+   * v2 수비 선수(playable 있음)는 없으면 0 = 리그 평균. 예전 수비 선수는 외야 수비 런 × play.armPerRun을 그대로 쓴다 (state.ts fieldDefense)
+   */
+  arm?: number;
 }
 
 /** 투수 능력: 상대 타석 결과별 리그 대비 비율 (1.00 = 리그 평균, 삼진은 클수록 좋고 나머지는 작을수록 좋다) */
@@ -70,6 +96,10 @@ export interface PitSkill {
   plateRes?: PitPlate;
   /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
   platoon?: number;
+  /** 견제 (능력치 v2 16-3, 기획안 1.5): 1루 주자의 도루 시도 확률에 exp(−값), 견제사 확률에 exp(값). 없거나 0이면 리그 평균 */
+  hold?: number;
+  /** 퀵모션: 도루 성공 확률 로짓에서 뺀다 (주자 도루 스타트와 로짓 덧셈). 없거나 0이면 리그 평균 */
+  quick?: number;
 }
 
 export interface SimPlayer {
@@ -161,6 +191,8 @@ export interface World {
   env: LeagueEnv;
   teams: SimTeam[];
   players: SimPlayer[];
+  /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
+  defPool?: number[];
   /** 그 해 정규시즌 일정 규칙 (schedule.json, 일정 개편 기획안 2장). 없으면 기본 개막일에 하루 한 경기씩 편다 (engine/schedule.ts planForWorld) */
   schedule?: YearScheduleRule;
   /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 5팀, 기획안 2.2). 없으면 시드로 */
@@ -169,8 +201,8 @@ export interface World {
   divisions?: Divisions;
   /** 전년도 정규시즌 순위 (구단 색인, 1위부터). 양대 리그 해의 동률 규칙 ③에만 쓴다 (기획안 10.4). 나눔이 없는 해에는 붙이지 않는다 */
   prevStandings?: number[];
-  /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
-  defPool?: number[];
+  /** 투수 구종 (엔진 2 20-1단계, data/pitches.ts arsenalFor): 선수 ID → 구종. 월드를 만들 때 자료에서 내고 저장하지 않는다. 없는 선수는 선수 ID로 정한 리그 평균 꼴 */
+  arsenals?: Record<string, ArsenalPitch[]>;
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */

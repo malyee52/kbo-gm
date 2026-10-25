@@ -2,18 +2,17 @@
 // 트레이드 상대를 찾을 때 쓰라고 만든 화면이라 시즌 중에만 연다 (오프시즌은 오프시즌 화면의 FA·외국인 목록).
 import { useMemo, useState } from 'react';
 import { isStarterSkill, lineTeam, type SimPlayer } from '../../engine';
-import { currentRuns } from '../../ai/value';
 import { seasonWar } from '../../league/awards';
 import { dollarText } from '../../league/salary';
 import type { LeaguePlayer } from '../../league/types';
-import { Grade, PlayerLink, posName, TeamLink, useGame, useWon } from '../context';
-import { runsGrade, type PotentialView } from '../grades';
-import { PotCell, potentialSortValue, usePotentialOf } from '../parts';
+import type { GuessSet } from '../../league/scout';
+import { PlayerLink, posName, TeamLink, useGame, useWon } from '../context';
+import { GuessCell, useSeen } from '../parts';
 
 type Kind = 'all' | 'hit' | 'pit' | 'sp' | 'rp';
-type SortKey = 'now' | 'pot' | 'war' | 'age' | 'salary' | 'until' | 'name';
+type SortKey = 'guess' | 'war' | 'age' | 'salary' | 'until' | 'name';
 const POS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
-const SORTS: [SortKey, string][] = [['now', '현재 등급'], ['pot', '잠재력'], ['war', '올해 WAR'], ['age', '나이 (어린 순)'], ['salary', '연봉'], ['until', '계약 끝 (빠른 순)'], ['name', '이름']];
+const SORTS: [SortKey, string][] = [['guess', '능력 추측 (가운데값 평균)'], ['war', '올해 WAR'], ['age', '나이 (어린 순)'], ['salary', '연봉'], ['until', '계약 끝 (빠른 순)'], ['name', '이름']];
 const PAGE = 100;
 
 export interface SearchFilter {
@@ -24,23 +23,25 @@ export interface SearchFilter {
   pos: string;
   ageMin: number | null;
   ageMax: number | null;
-  nowMin: number | null;
-  potMin: number | null;
+  /** 능력 추측 가운데값 평균 이상 (타자 컨택·파워·선구, 투수 구위·제구·체력) */
+  guessMin: number | null;
   /** foreign은 아시아쿼터 포함 외국인 전부, asia는 아시아쿼터만 */
   foreign: 'all' | 'domestic' | 'foreign' | 'asia';
   /** 'fa' = 이번 시즌 뒤 계약이 끝남 */
   contract: 'all' | 'fa' | 'multi';
 }
 
-export const EMPTY_FILTER: SearchFilter = { text: '', team: 'others', kind: 'all', pos: '', ageMin: null, ageMax: null, nowMin: null, potMin: null, foreign: 'all', contract: 'all' };
+export const EMPTY_FILTER: SearchFilter = { text: '', team: 'others', kind: 'all', pos: '', ageMin: null, ageMax: null, guessMin: null, foreign: 'all', contract: 'all' };
 
-/** pot은 정렬·거르기용 (범위면 가운데 짐작값), potView는 화면 표시 (결정 5: 27세 이하 범위) */
-export interface SearchRow { p: SimPlayer; lp: LeaguePlayer | undefined; now: number; pot: number | null; potView?: PotentialView; war: number | null }
+/** guess는 우리 스카우트 팀의 갈래 추측 셋 (능력치 v2 17.6: 종합·잠재 대신), 정렬·거르기는 그 가운데값 평균 */
+export interface SearchRow { p: SimPlayer; lp: LeaguePlayer | undefined; guess: GuessSet | null; war: number | null }
 
-/** 거르기 (화면과 시험이 같이 쓴다). 등급은 화면과 같은 눈금 (runsGrade, 그 해 리그 수준) */
+const guessOf = (r: SearchRow) => r.guess?.sort ?? -1;
+
+/** 거르기 (화면과 시험이 같이 쓴다) */
 export function filterPlayers(rows: SearchRow[], f: SearchFilter, userTeam: number, year: number): SearchRow[] {
   const text = f.text.trim().toLowerCase();
-  return rows.filter(({ p, lp, now, pot }) => {
+  return rows.filter(({ p, lp, guess }) => {
     const team = lineTeam(p);
     if (f.team === 'others' && team === userTeam) return false;
     if (f.team === 'free' && p.teamIdx >= 0) return false;
@@ -53,8 +54,7 @@ export function filterPlayers(rows: SearchRow[], f: SearchFilter, userTeam: numb
     if (f.pos && (p.isPitcher || p.pos !== f.pos)) return false;
     if (f.ageMin !== null && (p.age === null || p.age < f.ageMin)) return false;
     if (f.ageMax !== null && (p.age === null || p.age > f.ageMax)) return false;
-    if (f.nowMin !== null && now < f.nowMin) return false;
-    if (f.potMin !== null && (pot === null || pot < f.potMin)) return false;
+    if (f.guessMin !== null && (!guess || guess.sort < f.guessMin)) return false;
     if (f.foreign === 'domestic' && p.foreign) return false;
     if (f.foreign === 'foreign' && !p.foreign) return false;
     if (f.foreign === 'asia' && !(p.foreign && lp?.asia)) return false;
@@ -66,12 +66,11 @@ export function filterPlayers(rows: SearchRow[], f: SearchFilter, userTeam: numb
 
 export function sortRows(rows: SearchRow[], key: SortKey): SearchRow[] {
   const by: Record<SortKey, (a: SearchRow, b: SearchRow) => number> = {
-    now: (a, b) => b.now - a.now,
-    pot: (a, b) => (b.pot ?? -1) - (a.pot ?? -1) || b.now - a.now,
+    guess: (a, b) => guessOf(b) - guessOf(a),
     war: (a, b) => (b.war ?? -99) - (a.war ?? -99),
-    age: (a, b) => (a.p.age ?? 99) - (b.p.age ?? 99) || b.now - a.now,
+    age: (a, b) => (a.p.age ?? 99) - (b.p.age ?? 99) || guessOf(b) - guessOf(a),
     salary: (a, b) => (b.lp?.contract.salary ?? 0) - (a.lp?.contract.salary ?? 0),
-    until: (a, b) => (a.lp?.contract.until ?? 9999) - (b.lp?.contract.until ?? 9999) || b.now - a.now,
+    until: (a, b) => (a.lp?.contract.until ?? 9999) - (b.lp?.contract.until ?? 9999) || guessOf(b) - guessOf(a),
     name: (a, b) => a.p.name.localeCompare(b.p.name, 'ko'),
   };
   return [...rows].sort((a, b) => by[key](a, b) || a.p.idx - b.p.idx);
@@ -85,23 +84,20 @@ export function Search({ initialText = '' }: { initialText?: string }) {
   const won = useWon();
   const year = session.world.year;
   const [f, setF] = useState<SearchFilter>(initialText ? { ...EMPTY_FILTER, text: initialText, team: 'all' } : EMPTY_FILTER);
-  const [sort, setSort] = useState<SortKey>('now');
+  const [sort, setSort] = useState<SortKey>('guess');
   const [shown, setShown] = useState(PAGE);
-  const potOf = usePotentialOf();
+  const seen = useSeen();
   const set = (patch: Partial<SearchFilter>) => { setF((x) => ({ ...x, ...patch })); setShown(PAGE); };
 
   const all = useMemo<SearchRow[]>(() => {
     const lp = new Map(session.league.players.map((p) => [p.id, p]));
     const war = seasonWar(session.world, session.season);
-    const ctx = session.values;
     const market = new Set(session.marketPlayers().map((p) => p.idx));
     return session.world.players
       // 소속 선수와 시장(자유계약·외국인 후보)만. 자유 모드 예비 자리(아직 안 쓴 빈 선수)는 뺀다
       .filter((p) => lp.get(p.id)?.reserve === undefined && (p.teamIdx >= 0 || market.has(p.idx)))
       .map((p) => {
-        const l = lp.get(p.id);
-        const potView = l ? potOf(l, p.age) : null;
-        return { p, lp: l, now: runsGrade(currentRuns(p, ctx), year), pot: potentialSortValue(potView), potView, war: war.get(p.idx) ?? null };
+        return { p, lp: lp.get(p.id), guess: seen.set(p.id), war: war.get(p.idx) ?? null };
       });
   }, [session, version, year]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => sortRows(filterPlayers(all, f, session.teamIdx, year), sort), [all, f, sort, session.teamIdx, year]);
@@ -143,8 +139,7 @@ export function Search({ initialText = '' }: { initialText?: string }) {
               <input type="number" min={15} max={50} value={f.ageMax ?? ''} placeholder="최대" style={{ width: '5em' }} onChange={(e) => set({ ageMax: numOrNull(e.target.value) })} />
             </span>
           </label>
-          <label>현재 등급 이상<input type="number" min={20} max={80} step={5} value={f.nowMin ?? ''} placeholder="20~80" style={{ width: '7em' }} onChange={(e) => set({ nowMin: numOrNull(e.target.value) })} /></label>
-          <label>잠재력 이상<input type="number" min={20} max={80} step={5} value={f.potMin ?? ''} placeholder="20~80" style={{ width: '7em' }} onChange={(e) => set({ potMin: numOrNull(e.target.value) })} /></label>
+          <label title="타자 컨택·파워·선구, 투수 구위·제구·체력 추측의 가운데값 평균">능력 추측 이상<input type="number" min={20} max={80} step={5} value={f.guessMin ?? ''} placeholder="20~80" style={{ width: '7em' }} onChange={(e) => set({ guessMin: numOrNull(e.target.value) })} /></label>
           <label>국적
             <select value={f.foreign} onChange={(e) => set({ foreign: e.target.value as SearchFilter['foreign'] })}>
               <option value="all">전체</option><option value="domestic">국내</option><option value="foreign">외국인</option><option value="asia">아시아쿼터</option>
@@ -161,23 +156,22 @@ export function Search({ initialText = '' }: { initialText?: string }) {
             </select>
           </label>
         </div>
-        <p className="muted small" role="status">{rows.length}명{rows.length > shown ? ` 중 ${shown}명 표시` : ''}. 외국인은 트레이드할 수 없습니다. 잠재는 스카우트 짐작이라 27세 이하는 범위로 보이고 실제와 다를 수 있습니다 (31세 이상은 숨김).</p>
+        <p className="muted small" role="status">{rows.length}명{rows.length > shown ? ` 중 ${shown}명 표시` : ''}. 외국인은 트레이드할 수 없습니다. 능력은 우리 스카우트 팀의 추측이라 범위로 보이고 실제와 다를 수 있습니다 (타자 컨·파·선 = 컨택·파워·선구, 투수 구·제·체 = 구위·제구·체력).</p>
       </section>
 
       <section className="panel">
         {rows.length === 0 ? <p className="muted small">조건에 맞는 선수가 없습니다.</p> : (
           <div className="scroll flat">
             <table>
-              <thead><tr><th className="l">이름</th><th className="l">구단</th><th>자리</th><th>나이</th><th>현재</th><th>잠재</th><th>WAR</th><th>연봉</th><th>계약</th></tr></thead>
+              <thead><tr><th className="l">이름</th><th className="l">구단</th><th>자리</th><th>나이</th><th>능력 추측</th><th>WAR</th><th>연봉</th><th>계약</th></tr></thead>
               <tbody>
-                {rows.slice(0, shown).map(({ p, lp, now, potView, war }) => (
+                {rows.slice(0, shown).map(({ p, lp, guess, war }) => (
                   <tr key={p.idx}>
                     <td className="l"><PlayerLink p={p} /></td>
                     <td className="l small"><TeamLink idx={p.teamIdx} /></td>
                     <td>{role(p)}</td>
                     <td>{p.age === null ? '-' : p.ageEstimated ? `약 ${p.age}` : p.age}</td>
-                    <td><Grade v={now} /></td>
-                    <td><PotCell v={potView ?? null} /></td>
+                    <td><GuessCell g={guess} /></td>
                     <td className="small">{war === null ? '-' : (Math.abs(war) < 0.05 ? 0 : war).toFixed(1)}</td>
                     <td className="small">{salary(lp)}</td>
                     <td className="small">{lp ? `${lp.contract.until}년` : '-'}</td>

@@ -1,6 +1,7 @@
 // 엔진 공개 진입점. 화면(src/ui)과 도구(tools)는 여기서만 가져다 쓴다.
 
 import type { DataStore, SeasonData } from '../data/types';
+import { arsenalsOf } from '../data/pitches';
 import { DEFAULT_PARAMS, type EngineParams } from './params';
 import { buildWorld } from './ratings';
 import type { World } from './types';
@@ -16,7 +17,7 @@ export {
   MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, MIN_PLAN_ROTATION, LINEUP_SLOTS, type DepthPlan, type PenRole, assignLineup, assignSlots, battingOrder, bestAssignment, slotRuns, teamRules, todaysStarter, currentFatigue, currentOveruse, currentBody, type Slot, type TeamSeason,
 } from './team';
 export { emptyBatLine, emptyPitLine, lineTeam } from './types';
-export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
+export { BUNT_SUCCESS, bullpenOrder, emptyLeagueCounters, emptyPenTally, emptyRunTally, type PenTally, type RunTally, type CommandChoice, type CommandMode, type CommandRequest, type GameCommand, type GameResult, type LeagueCounters, type Play, type PlayKind } from './game';
 export {
   FIELD_POS, ageDefense, defenseAt, defenseGrade, fieldPosOf, fitPenalty, makeDefense, moveRuns, playablePositions, type Defense, type FieldPos,
 } from './defense';
@@ -24,6 +25,9 @@ export {
   ABSENCE_KIND_LABEL, NEUTRAL_EVENTS, absenceLabel, SPECIFIC_EVENTS, eventLabel, isSpecificEvent, isVirtual, pickEvent, injuryChance, drawInjury,
   INJURY_PARTS, SEVERITY_LABEL, overuseDecay, type Absence, type AbsenceKind, type EventCode, type InjuryCause, type InjuryParams, type InjuryPart, type OveruseParams,
 } from './injury';
+export { applyPitch, calledShare, drawPitch, newCount, playOut, PITCH_TEXT, type Count, type Pitch, type PitchCode } from './pitch';
+export { PITCH_TYPES, PITCH_ZONES, ZONE_TEXT, type ArsenalPitch, type PitchZone } from './arsenal';
+export { shownPitchLimit } from './manager';
 export { condLine, condWord, condSpread, conditionOf, type CondWord } from './condition';
 export { computeGrades, type BatterGrades, type PitcherGrades, type DisplayGrades } from './display';
 // 숨겨진 특수능력: 화면(src/ui)은 이것을 가져다 쓰면 안 된다 (tests/traits.test.ts가 검사). 도구·테스트·리그 계층용
@@ -43,10 +47,10 @@ export { planForWorld, pickOpeningHosts, rankedFromSeason, pctRankedFromSeason, 
 export type * from './types';
 
 /** 데이터 저장소에서 그 해 시작 시점의 월드를 만든다 (능력은 직전 3시즌 기준) */
-export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule'> & Partial<Pick<DataStore, 'parks'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
+export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season' | 'traits' | 'defenseAwards' | 'ppa' | 'plate' | 'defense' | 'schedule' | 'running'> & Partial<Pick<DataStore, 'parks' | 'pitches'>>, year: number, params: EngineParams = DEFAULT_PARAMS): World {
   const current = store.season(year);
   if (!current) throw new Error(`${year}년 시즌 데이터가 없습니다`);
-  return buildWorld({
+  const world = buildWorld({
     year,
     current,
     history: [store.season(year - 1), store.season(year - 2), store.season(year - 3)],
@@ -62,5 +66,9 @@ export function worldForYear(store: Pick<DataStore, 'meta' | 'players' | 'season
     plate: store.plate,
     defense: store.defense,
     parks: store.parks,
+    running: store.running,
   });
+  // 투수 구종 (엔진 2 20-1단계, A 해결기만 쓴다)
+  world.arsenals = arsenalsOf(world.players, store.pitches, year);
+  return world;
 }

@@ -1,15 +1,14 @@
 // 다른 구단 보기 (2026-10-23 UI 2단계 공통 기능, 기획안 4장 1·결정 7): 계산만. 그리기는 screens/TeamView.tsx.
 // 우리 구단 화면과 같은 틀(명단 표·기용·구단 현황)을 읽기 전용으로 채운다. 아무것도 바꾸지 않는다.
 // 1군·예상 기용은 Season.refresh(엔트리 다시 짜기, 난수 없음)로 읽는다. 화면 조회를 끼워도 결과가 같다 (tests/game.test.ts).
-// 잠재는 우리 선수와 같은 표시 규칙(화면의 usePotentialOf)을 쓰고, AI 구단의 판단값(aiPotential)은 쓰지 않는다.
+// 능력은 우리 선수와 같은 스카우트 추측(화면의 useSeen)으로 보이고, 진짜 기여·AI 구단의 판단값(aiPotential)은 쓰지 않는다.
 import { activeOf, type GameSession } from '../game/session';
 import { assignSlots, isStarterSkill, LINEUP_SLOTS, type SimPlayer, type Slot } from '../engine';
 import type { LeaguePlayer } from '../league/types';
 import { capPayroll, faEligible, salaryCap } from '../league/salary';
 import { ruleOf } from '../league/rules';
 import { parsePick } from '../league/picks';
-import { runsGrade } from './grades';
-import { overall, slotOf, tradeBlockReason } from './tradeDesk';
+import { slotOf, tradeBlockReason } from './tradeDesk';
 
 export interface TeamRow {
   id: string;
@@ -20,7 +19,6 @@ export interface TeamRow {
   pitcher: boolean;
   slot: string;
   age: number | null;
-  ov: number;
   /** '1군' | '2군' | '육성' (오프시즌은 '계약') */
   where: string;
   status: string;
@@ -38,7 +36,7 @@ export function teamRows(s: GameSession, team: number): TeamRow[] {
       return {
         id: lp.id, p: byId.get(lp.id) ?? null, lp, name: lp.name, pitcher: lp.isPitcher,
         slot: lp.isPitcher ? (isStarterSkill(lp.pit) ? 'SP' : 'RP') : lp.pos ?? 'DH',
-        age, ov: runsGrade(s.nextRuns(lp.id), year), where: lp.dev ? '육성' : '계약', status: '-', block: null,
+        age, where: lp.dev ? '육성' : '계약', status: '-', block: null,
       };
     });
   }
@@ -48,7 +46,7 @@ export function teamRows(s: GameSession, team: number): TeamRow[] {
     const back = s.returnDay(p);
     const status = back !== null ? `결장 · ${back >= s.season.schedule.length ? '시즌 아웃' : '복귀 예정'}` : '출전 가능';
     return {
-      id: p.id, p, lp: s.leaguePlayer(p.id), name: p.name, pitcher: p.isPitcher, slot: slotOf(p), age: p.age, ov: overall(s, p),
+      id: p.id, p, lp: s.leaguePlayer(p.id), name: p.name, pitcher: p.isPitcher, slot: slotOf(p), age: p.age,
       where: p.dev ? '육성' : active.has(p.idx) ? '1군' : '2군', status, block: team === s.teamIdx ? null : tradeBlockReason(s, p),
     };
   });

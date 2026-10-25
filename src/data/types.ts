@@ -171,6 +171,23 @@ export interface YearRules {
    */
   winPct?: string;
   postseasonTeams: number;
+  /**
+   * 한 경기에 나올 수 있는 인원 (등록 rosterSize 가운데 경기 전 명단에 드는 수). 없으면 rosterSize와 같다.
+   * 2001~2007 24, 2008~2019 25, 2020~2025 26, 2026~ 27 (tools/build_data.py entry_rules)
+   */
+  activeSize?: number;
+  /**
+   * 시즌 중 엔트리 확대: '월일:더하는 인원'을 ';'로 이은 글 (예 '716:1;825:5'). 그날부터 등록·출장 모두 그만큼 늘고, 뒤 칸이 앞 칸을 덮는다.
+   * 정규시즌에만 (가을야구는 그대로). 없으면 확대 없음
+   */
+  rosterExtra?: string;
+  /** 준플레이오프·플레이오프 이기는 승수 (없으면 league/postseason.ts RULES 값) */
+  semiWins?: number;
+  poWins?: number;
+  /** 3·4위 승차가 이 경기 이상이면 준플레이오프 없이 3위가 플레이오프로 (1993~1998 3.5) */
+  semiSkipGap?: number;
+  /** 준플레이오프가 없는 해의 플레이오프 승수 (1993~1998 4, 해석값) */
+  poWinsNoSemi?: number;
   /** 값마다 확인 상태 ('<키>Source': 'confirmed' 출처 확인, 'assumed' 가정, 'disputed' 출처 갈림 다수 설) */
   [source: string]: number | string | undefined;
 }
@@ -294,6 +311,8 @@ export interface DataStore {
   homes?: HomeCity[];
   /** 선수별 타석당 투구 수의 리그 대비 비율 (ppa.json, 엔진 2 D단계). 없으면 사슬 값 그대로 */
   ppa?: PpaData;
+  /** 선수별 추가 진루·번트 (running.json, 능력치 v2 16-3d). 없으면 주루 판단·번트 수행은 나이 평균에서 시작 */
+  running?: RunningData;
   /** 1군 수비 이닝(2001~)과 수비 평판 (defense.json, 능력치 v2 16-3a). 있으면 월드의 수비를 능력치 v2 식으로 만든다 (src/engine/fielding.ts, 16-3). 없으면 예전 추정 */
   defense?: DefenseData;
   /** 구종 자료 (pitches.json, 능력치 v2 16-1a·16-1b): visualbaseball 실측(2016~)과 위키 구종 목록. 가공 함수 src/data/pitches.ts만 읽는다 (등급 근거·화면·스킬에는 16-1·16-7·16-6에서 잇는다). 없으면 구종 자료 없음 */
@@ -408,6 +427,8 @@ export interface DefenseData {
   to: number;
   players: Record<string, Record<string, DefenseYear>>;
   rep: Record<string, [string, number, number | null, number | null][]>;
+  /** 평판 글의 어깨 낱말: 선수 ID → [1 좋음 / −1 나쁨, 시기 시작, 시기 끝] (능력치 v2 12.6, 16-3b 자료 단계. 엔진은 아직 안 씀). 예전 파일에는 없다 */
+  arm?: Record<string, [number, number | null, number | null][]>;
 }
 
 /** 한 선수의 한 해 수비 (여러 구단을 거쳤으면 합친 값) */
@@ -529,6 +550,17 @@ export interface BallYear {
   source?: string;
 }
 
+/**
+ * running.json (능력치 v2 16-3d, tools/build_data.py build_running ← tools/pbp_running.py, 투구 단위 자료 2023~):
+ * bat: 선수 ID → 연도 → [추가 진루 기회, 성공, 주루사, 리그 기대 성공(기회 종류 × 아웃 칸 리그 성공률 합), 희생번트, 번트 파울·헛스윙 공,
+ * 그중 기습 번트 몫(주자 없을 때 W·V 비율 × 희생번트 상황 공 수, 16-3e)], lg: 연도 → [희생번트, W·V 공, 기습 번트 몫]
+ */
+export interface RunningData {
+  version: number;
+  bat: Record<string, Record<string, [number, number, number, number, number, number, number?]>>;
+  lg: Record<string, [number, number, number?]>;
+}
+
 /** ppa.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → [타석, 그 선수 P/PA ÷ 그 해 리그 P/PA] */
 /**
  * plate.json: 타자(bat)·투수(pit) → 선수 ID → 연도 → 건수 (tools/build_data.py build_plate ← tools/pbp_plate.py, 2023~).
@@ -597,8 +629,9 @@ export interface ManagerInfo {
 /** 한 선수의 실제 병역 자료 (tools/build_data.py build_military) */
 export interface MilitaryRecord {
   /** 2026 프로필 경력에 상무·경찰이 있다. end = 1군 기록 공백으로 본 복무 끝 해 (추정, 없으면 모름).
-   *  src가 wiki면 위키 병역 칸: unit '현역'·'보충역'도 있고 kind로 복무 형태를 알린다 (없으면 군 야구단), end는 글에 적힌 마지막 해 */
-  served?: { unit: string; end?: number; kind?: 'active' | 'reserve' };
+   *  src가 wiki면 위키 병역 칸: unit '복무'는 군 야구단 밖 복무(현역·보충역을 가르지 않는다, 2026-10-24 사용자 M9 Q5 — 게임은 현역 규칙),
+   *  그 밖의 unit은 군 야구단. end는 글에 적힌 마지막 해 */
+  served?: { unit: string; end?: number };
   /** 국제대회 금메달 대표팀 (미필이었으면 면제). year = 대회 연도. src가 wiki면 예술체육요원·병역 면제 (해를 모르면 첫 1군 시즌) */
   exempt?: { year: number; event: string };
   /** 'wiki' = 위 실제 자료가 없는 선수를 위키백과·나무위키 병역 칸으로 채운 것 (2026-10-23) */

@@ -10,8 +10,8 @@ import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import { Rng } from '../engine';
 import type { ValueContext } from '../ai/value';
 import { growthRoom, skillForRuns, type CareerIndex } from './growth';
-import { initialMilitary } from './careers';
-import { makeDraftee, matchDraftee, type LeagueView } from './offseason';
+import { initialMilitary, SERVICE_UNIT_GENERIC } from './careers';
+import { drafteeCenterOf, makeDraftee, matchDraftee, type LeagueView } from './offseason';
 import { minSalary } from './salary';
 import type { LeaguePlayer, LeagueState, Military } from './types';
 
@@ -77,7 +77,9 @@ export function makeLateDraftee(league: LeagueState, view: LeagueView, x: LateDr
   const rng = new Rng(`${league.seed}/late/${x.m.id}`);
   const p = makeDraftee(league, view, rng, taken, x.d, x.index, x.entry, store, career);
   const age = p.birthYear ? year - p.birthYear : 22;
-  const runs = Math.max(-15, p.potential - growthRoom(age) * rng.range(0.7, 1.3));
+  // 지금 능력은 뽑힌 천장이 아니라 천장 중심에서 낸다 (잠재력 v2 18.3 ③: 지금 능력이 천장을 흘리지 않게). 천장 위로는 두지 않는다
+  const center = drafteeCenterOf(store, x.m, x.d, x.entry, p.isPitcher, p.pos, view, career);
+  const runs = Math.min(p.potential, Math.max(-15, center - growthRoom(age) * rng.range(0.7, 1.3)));
   Object.assign(p, skillForRuns({ ...p }, runs, view.ctx as ValueContext, year));
   p.team = team;
   p.entryYear = x.entry;
@@ -94,6 +96,7 @@ export function servingAt(store: Pick<DataStore, 'military'>, id: string, year: 
   const rec = store.military?.[id];
   const s = rec?.served;
   if (!s?.end || s.end < year || s.end > year + 1) return null;
+  // unit '복무' = 위키 병역 칸의 현역·보충역 (배포 파일이 둘을 가르지 않는다) → 현역 규칙. 그 밖의 unit은 군 야구단
   return { state: 'serving', enlisted: year - 1, returnYear: s.end + 1, basis: rec?.src === 'wiki' ? 'wiki' : 'record', note: s.unit,
-           ...(s.kind ? { kind: s.kind } : {}) };
+           ...(s.unit === SERVICE_UNIT_GENERIC ? { kind: 'active' as const } : {}) };
 }

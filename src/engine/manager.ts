@@ -67,6 +67,14 @@ const SPARE_YESTERDAY = 0.4;
 /** 직접 정한 롱릴리프가 이른 이닝에 나왔을 때 한계 투구 수 배율 (임시값) */
 const LONG_RELIEF_STRETCH = 1.6;
 
+/**
+ * 화면에 보이는 한계 투구 수 짐작 "약 N구" (UI 2단계 2.2.2 점수판): 기록으로 추정한 체력 × 타석당 투구 수(ppa)를 5구 단위로.
+ * 그날 몸 상태·감독 기준·실제 한계 배율(혹사)은 넣지 않는다 (실제 한계는 숨김)
+ */
+export function shownPitchLimit(skill: Pick<SimPlayer['pit'] & object, 'stamina' | 'reliefStint'>, starter: boolean, ppa: number): number {
+  return Math.round(((starter ? skill.stamina * STARTER_LIMIT_SCALE : skill.reliefStint) * ppa) / 5) * 5;
+}
+
 export function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameContext): PitcherInGame {
   const skill = p.pit!;
   const line = ctx.pit[p.idx];

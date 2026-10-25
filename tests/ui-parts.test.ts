@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { leagueRank, topPercent, vsMark } from '../src/ui/compare';
 import { EMPTY_VIEW, filterRows, loadView, nextSort, saveView, sortRows, toggleColumn, toggleGroup, visibleColumns, type Column } from '../src/ui/table';
-import { POT_MIN_SPAN, POT_RANGE_SCALE, potentialText, potentialView, runsGrade } from '../src/ui/grades';
 
 type Row = { name: string; avg: number | null; era: number; pa: number };
 const COLS: Column<Row>[] = [
@@ -77,61 +76,6 @@ describe('공통 표', () => {
     expect(loadView('t2')).toEqual(EMPTY_VIEW);
     mem.set('kbo-gm.views', '{깨짐');
     expect(loadView('t1')).toEqual(EMPTY_VIEW);
-  });
-});
-
-describe('잠재 범위 (결정 5)', () => {
-  const noise = 8;
-  it('27세 이하는 범위, 28~30세는 숫자 하나, 31세 이상은 숨김', () => {
-    const p = { id: 'x', potential: 40 };
-    expect(potentialView(p, 24, { seed: 's', noise })?.kind).toBe('range');
-    expect(potentialView(p, 29, { seed: 's', noise })).toEqual({ kind: 'one', v: runsGrade(40) });
-    expect(potentialView(p, 31, { seed: 's', noise })).toBeNull();
-    expect(potentialText(null)).toBeNull();
-  });
-  it('같은 게임·선수는 늘 같은 범위, 범위 가운데는 짐작값이라 실제 값이 밖일 때가 있다', () => {
-    const a = potentialView({ id: 'p1', potential: 40 }, 22, { seed: 'g', noise });
-    expect(potentialView({ id: 'p1', potential: 40 }, 22, { seed: 'g', noise })).toEqual(a);
-    let outside = 0;
-    const n = 400;
-    for (let i = 0; i < n; i++) {
-      const v = potentialView({ id: `p${i}`, potential: 40 }, 22, { seed: 'g', noise });
-      if (v?.kind !== 'range') throw new Error('범위가 아님');
-      // 런 단위로 본다: 반폭 밖이면 실제 값이 범위 밖
-      const truth = runsGrade(40);
-      if (truth < v.lo || truth > v.hi) outside++;
-    }
-    // 반폭 0.75 × 오차라 균등 어긋남이면 약 25%가 밖 (등급 반올림으로 조금 줄어든다)
-    expect(POT_RANGE_SCALE).toBeLessThan(1);
-    expect(outside / n).toBeGreaterThan(0.08);
-    expect(outside / n).toBeLessThan(0.4);
-  });
-  it('스카우트 평가가 있는 선수(신인)는 그 값을 가운데로 쓴다', () => {
-    const v = potentialView({ id: 'r', potential: 40, scoutPotential: 30 }, 19, { seed: 'g', noise });
-    expect(v).toMatchObject({ kind: 'range', guess: runsGrade(30) });
-  });
-  it('27세 이하는 20·80 끝에 걸려도, 오차가 작아도 늘 범위 꼴 (숫자 하나로 줄지 않는다)', () => {
-    for (const n of [8, 2]) {
-      for (const [potential, edge] of [[200, 80], [-80, 20], [40, null]] as const) {
-        const v = potentialView({ id: 'e', potential }, 23, { seed: 'g', noise: n });
-        if (v?.kind !== 'range') throw new Error('범위가 아님');
-        expect(v.hi - v.lo).toBeGreaterThanOrEqual(POT_MIN_SPAN);
-        expect(v.lo).toBeGreaterThanOrEqual(20);
-        expect(v.hi).toBeLessThanOrEqual(80);
-        expect(v.guess).toBeGreaterThanOrEqual(v.lo);
-        expect(v.guess).toBeLessThanOrEqual(v.hi);
-        if (edge === 80) expect(v.hi).toBe(80);
-        if (edge === 20) expect(v.lo).toBe(20);
-        expect(potentialText(v)).toMatch(/^\d+~\d+$/);
-      }
-    }
-  });
-  it('화면은 잠재를 potentialView(범위 규칙)로만 보인다: 등급 함수에 잠재 런을 바로 넣지 않는다', () => {
-    const dir = 'src/ui';
-    const files = [...readdirSync(dir).map((f) => join(dir, f)), ...readdirSync(join(dir, 'screens')).map((f) => join(dir, 'screens', f))]
-      .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('grades.ts'));
-    const bad = files.filter((f) => /(runsGrade|gradeAt)\([^)]*\.potential/i.test(readFileSync(f, 'utf8')));
-    expect(bad).toEqual([]);
   });
 });
 

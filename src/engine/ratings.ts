@@ -8,10 +8,11 @@
 import type { BatRow, Hand, Meta, ParkData, ParkRates, PitRow, PlayerMaster, Rates, SeasonData } from '../data/types';
 import { realParkYear } from './park';
 import { makeDefense } from './defense';
-import type { DefenseAward, DefenseData, PlateData, PpaData, ScheduleData } from '../data/types';
+import type { DefenseAward, DefenseData, PlateData, PpaData, RunningData, ScheduleData } from '../data/types';
 import { divisionsOf, scheduleRule } from '../data/schedule';
-import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './schedule';
+import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
+import { applyRunSkills } from './runskills';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
 import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
@@ -294,6 +295,8 @@ export interface BuildWorldInput {
   plate?: PlateData;
   /** 1군 수비 이닝·평판 (defense.json). 있으면 수비를 능력치 v2 식(fielding.ts defenseV2)으로 만든다. 없으면 예전 추정 (defense.ts makeDefense) */
   defense?: DefenseData;
+  /** 선수별 추가 진루·번트 (running.json, 능력치 v2 16-3d). 있으면 실존 선수의 주루 판단·번트 수행 시작값에 쓴다 (수비 v2 월드만) */
+  running?: RunningData;
   /** 실제 구장 제원 (parks.json). 있으면 2015년 이전 구장 효과를 차이 방식·짐작으로 넣는다 (park.ts). 없으면 그 해들은 중립 */
   parks?: ParkData;
   /** 연도별 일정 규칙 (schedule.json). 그 해 줄이 World.schedule이 된다. 없으면 일정 규칙 없이 */
@@ -531,6 +534,7 @@ export function buildWorld(input: BuildWorldInput): World {
           age: m.birthYear ? year - m.birthYear : null, speed: bat.speed, listed: homeOf(pos) ?? undefined, league: fieldLeague(input.defense) });
         bat.def = v2.def;
         bat.playable = v2.playable;
+        if (Object.keys(v2.talent).length) bat.defTalent = v2.talent;
         if (v2.emergencyC) bat.emC = true;
         if (v2.cArm !== undefined) bat.cArm = v2.cArm;
         if (v2.main.basis !== 'listed' && v2.main.basis !== 'none') pos = v2.main.screen;
@@ -566,6 +570,9 @@ export function buildWorld(input: BuildWorldInput): World {
     teams[team].org.push(p);
   }
 
+  // 능력치 v2 16-3: 주루·작전·포수·투수 짝 시작값 (나이 평균, 리그 영점, runskills.ts)
+  // 어깨 낱말·추가 진루·번트 실측은 수비 평판과 같은 시작 연도(defStart) 전 시기만 (16-3d)
+  if (input.defense) applyRunSkills(players, params, { arm: input.defense.arm, running: input.running, startYear: defStart });
   const env = leagueEnvFor(current.league, params, year);
   const defModel = defSeen.length ? defenseModel(defSeen) : undefined;
   if (defModel) env.defZero = defModel.zero;

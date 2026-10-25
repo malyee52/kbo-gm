@@ -12,23 +12,22 @@ import { futuresFromRecord, type FuturesLine } from '../../league/futures';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { BatRow, PitRow } from '../../data/types';
 import {
-  absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIELD_POS, isVirtual, lineTeam, playablePositions, type BatLine, type PitLine, type SimPlayer,
+  absenceLabel, defenseAt, defenseGrade, emptyBatLine, emptyPitLine, FIELD_POS, isVirtual, lineTeam, playablePositions, type BatLine, type FieldPos, type PitLine, type SimPlayer,
 } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, qualifiedOuts, qualifiedPa, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
-import { ForeignMark, Grade, HAND, POS_KO, posName, TeamLink, useGame, useWon } from '../context';
-import { potentialText, runsGrade, type PotentialView } from '../grades';
+import { ForeignMark, HAND, POS_KO, posName, TeamLink, useGame, useWon } from '../context';
 import { gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
 import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
 import { realSeasonParkFactor, seasonParkFactor, worldParkFactor } from '../../game/parkView';
-import { currentRuns } from '../../ai/value';
 import { DensityToggle, useShell } from '../shell';
 import { leagueRank } from '../compare';
-import { CondTag, DataTable, Delta, GradeBar, Missing, PotCell, ScoutNote, useCondition, usePotentialOf, VsLeague } from '../parts';
+import { CondTag, DataTable, GradeBar, GuessGrade, ScoutNote, useCondition, useSeen, VsLeague } from '../parts';
+import { guessMid, type GuessView } from '../../league/scout';
 import type { Column } from '../table';
 import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
@@ -120,7 +119,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           {shownTab === 'sum' && <SummaryTab p={p} full={full} narrow={narrow} onClose={close} />}
           {shownTab === 'abil' && <AbilityTab p={p} full={full} />}
           {shownTab === 'rec' && <RecordTab p={p} full={full} store={store} />}
-          {shownTab === 'deal' && <><ContractInfo id={p.id} p={p} /><CareerInfo p={p} /></>}
+          {shownTab === 'deal' && <><ContractInfo id={p.id} /><CareerInfo p={p} /></>}
           {shownTab === 'pit' && (pitOpen ? <PitchingTab rows={pitchLog} full={full} /> : <p className="muted small">우리 구단 경기 기록만 있습니다 (다른 구단 경기는 박스스코어를 남기지 않는다).</p>)}
         </div>
         {year !== session.year && <p className="muted small">오프시즌: 기록은 {year} 시즌 기준입니다.</p>}
@@ -169,16 +168,14 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
   );
 }
 
-/** 종합·잠재·계약 한 줄과 단추. 넓은 화면은 머리에, 휴대폰은 요약 탭 맨 위에 */
+/** 스카우트 보고·계약 한 줄과 단추. 넓은 화면은 머리에, 휴대폰은 요약 탭 맨 위에 (종합·잠재는 보이지 않는다, 능력치 v2 17.6) */
 function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: ReturnType<typeof useGame>['go'] }) {
   const { session, changed } = useGame();
   const won = useWon();
   const lp = session.leaguePlayer(p.id);
   const mine = p.teamIdx === session.teamIdx;
   const registered = session.registered().some((x) => x.idx === p.idx);
-  const now = runsGrade(currentRuns(p, session.values), session.world.year);
-  const pot = usePotential(p);
-  const potText = potentialText(pot);
+  const note = session.scoutPhrase(p.id);
   const c = lp?.contract;
   const tradeBlock = tradeBlockReason(session, p);
   const move = () => { session.move(p, !registered); changed(); };
@@ -198,8 +195,7 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
   return (
     <>
       <p className="pd-line small">
-        <span>종합 <Grade v={now} /></span>
-        <span title={pot?.kind === 'range' ? '스카우트 짐작 범위 (실제 값이 범위 밖일 수도 있다)' : undefined}>잠재 {potText === null ? <span className="muted">— (31세 이상)</span> : <b>{potText}</b>}</span>
+        {note && <span title="앞으로 클 여지에 대한 우리 스카우트 팀의 평 (틀릴 수 있다)">스카우트 보고: <b>{note}</b></span>}
         {c && <span>연봉 {c.kind === 'foreign' ? dollarText(c.salary) : won(c.salary)} · {c.until}년까지</span>}
       </p>
       <div className="pd-line">
@@ -220,13 +216,6 @@ function HeadMore({ p, onClose, go }: { p: SimPlayer; onClose: () => void; go: R
       {deskNote && <p className="muted small" role="status">{deskNote}</p>}
     </>
   );
-}
-
-function usePotential(p: SimPlayer): PotentialView {
-  const { session } = useGame();
-  const potOf = usePotentialOf();
-  const lp = session.leaguePlayer(p.id);
-  return lp ? potOf(lp, p.age) : null;
 }
 
 // ---- 리그 대비 (그 해 리그, 규정 이상 선수)
@@ -269,31 +258,32 @@ function Rec({ label, v, rank, full }: { label: string; v: ReactNode; rank?: num
 // ---- 탭 1: 요약
 
 function SummaryTab({ p, full, narrow, onClose }: { p: SimPlayer; full: boolean; narrow: boolean; onClose: () => void }) {
-  const { session, grades, go, version } = useGame();
+  const { session, go, version } = useGame();
+  const seen = useSeen();
   const lg = useLeague();
   const s = session.season;
-  const bg = grades.batters.get(p.id);
-  const pg = grades.pitchers.get(p.id);
+  const g = (k: string) => seen.grade(p.id, k);
   const recent = useMemo(() => (p.teamIdx === session.teamIdx ? recentLines(session, 10).get(p.idx) : undefined), [session, version, p]); // eslint-disable-line react-hooks/exhaustive-deps
   const war = session.phase === 'season' ? seasonWar(session.world, s).get(p.idx) : undefined;
-  const core: { label: string; v: number | null }[] = p.isPitcher && pg
-    ? [{ label: '구위', v: pg.stuff }, { label: '제구', v: pg.control }, { label: '장타 억제', v: pg.hrSuppression }, { label: '선발 체력', v: pg.stamina }, { label: '구원 체력', v: pg.reliefStamina }]
-    : bg ? [{ label: '컨택', v: bg.contact }, { label: '파워', v: bg.power }, { label: '선구안', v: bg.eye }, { label: '주력', v: bg.speed }] : [];
+  // 갈래 등급은 우리 스카우트 팀의 추측 (능력치 v2 17.7): 범위 막대, 가장 나은·아쉬운 능력도 가운데값으로
+  const core: { label: string; v: GuessView | null }[] = p.isPitcher && g('stuff')
+    ? [{ label: '구위', v: g('stuff') }, { label: '제구', v: g('control') }, { label: '장타 억제', v: g('hrSuppression') }, { label: '선발 체력', v: g('stamina') }, { label: '구원 체력', v: g('reliefStamina') }]
+    : g('contact') ? [{ label: '컨택', v: g('contact') }, { label: '파워', v: g('power') }, { label: '선구안', v: g('eye') }, { label: '주력', v: g('speed') }] : [];
   const mainPos = FIELD_POS.find((q) => q === p.pos);
-  if (!p.isPitcher && mainPos) core.push({ label: `${posName(mainPos)} 수비`, v: defenseGrade(defenseAt(p, mainPos)) });
-  const ranked = core.filter((c): c is { label: string; v: number } => c.v !== null);
-  const best = [...ranked].sort((a, b) => b.v - a.v)[0];
-  const worst = [...ranked].sort((a, b) => a.v - b.v)[0];
+  if (!p.isPitcher && mainPos) core.push({ label: `${posName(mainPos)} 수비`, v: seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, mainPos))) });
+  const ranked = core.filter((c): c is { label: string; v: GuessView } => c.v !== null).map((c) => ({ label: c.label, m: guessMid(c.v) }));
+  const best = [...ranked].sort((a, b) => b.m - a.m)[0];
+  const worst = [...ranked].sort((a, b) => a.m - b.m)[0];
   const b = s.bat[p.idx];
   const q = s.pit[p.idx];
   const pitView = p.isPitcher || (q.bf > 0 && b.pa === 0);
   return (
     <>
       {narrow && <section className="pd-more-m"><HeadMore p={p} onClose={onClose} go={go} /></section>}
-      {best && worst && best.v !== worst.v && <p className="small">가장 나은 능력은 <b>{best.label}</b>, 가장 아쉬운 능력은 <b>{worst.label}</b>입니다.</p>}
+      {best && worst && best.m !== worst.m && <p className="small">가장 나은 능력은 <b>{best.label}</b>, 가장 아쉬운 능력은 <b>{worst.label}</b>입니다.</p>}
       <div className="pd-split">
         <section>
-          <h3>핵심 능력 <span className="muted small">20~80, 50이 리그 주전 평균 (2승 선수)</span></h3>
+          <h3>핵심 능력 <span className="muted small">20~80, 50이 리그 주전 평균 (2승 선수) · 스카우트 추측</span></h3>
           <div className="grades">{core.map((c) => <GradeBar key={c.label} label={c.label} v={c.v} />)}</div>
         </section>
         <section>
@@ -336,13 +326,12 @@ function SummaryTab({ p, full, narrow, onClose }: { p: SimPlayer; full: boolean;
 // ---- 탭 2: 능력
 
 function AbilityTab({ p, full }: { p: SimPlayer; full: boolean }) {
-  const { session, grades } = useGame();
+  const { session } = useGame();
+  const seen = useSeen();
   const lg = useLeague();
   const year = session.world.year;
-  const bg = grades.batters.get(p.id);
-  const pg = grades.pitchers.get(p.id);
-  const pot = potentialText(usePotential(p));
-  const delta = useGrowthDelta(p);
+  const g = (k: string) => seen.grade(p.id, k);
+  const note = session.scoutPhrase(p.id);
   const b = session.season.bat[p.idx];
   const q = session.season.pit[p.idx];
   const bOk = b.pa >= RANK_MIN_PA;
@@ -355,49 +344,47 @@ function AbilityTab({ p, full }: { p: SimPlayer; full: boolean }) {
       <h3>능력치 <span className="muted small">20~80, 50이 리그 주전 평균 (2승 선수)</span></h3>
       {full && (
         <p className="pd-line small">
-          <span>종합 <Grade v={runsGrade(currentRuns(p, session.values), year)} /></span>
-          <span>잠재 {pot ?? <Missing why="31세 이상" />}</span>
-          <span>지난 성장 판정 대비 <Delta v={delta} /></span>
-          <span className="muted">잠재·변화는 종합 기준 (능력별은 능력치 v2 뒤)</span>
+          {note && <span>스카우트 보고: {note}</span>}
+          <span className="muted">능력은 우리 스카우트 팀의 추측 범위입니다. 기록이 쌓일수록, 우리 구단에서 오래 뛸수록, 스카우트 투자를 늘릴수록 좁아집니다.</span>
         </p>
       )}
-      {p.isPitcher && pg ? (
+      {p.isPitcher && g('stuff') ? (
         <>
           <div className="pd-group">
             <h4>공</h4>
             <div className="grades">
-              <GradeBar label="구위" v={pg.stuff} note={full ? rec(pOk, `K% ${pct1(pitKPct(q))}`, lg.pit(pitKPct(q), pitKPct)) : undefined} />
-              <GradeBar label="제구" v={pg.control} note={full ? rec(pOk, `BB% ${pct1(pitBbPct(q))}`, lg.pit(pitBbPct(q), pitBbPct, false)) : undefined} />
-              <GradeBar label="장타 억제" v={pg.hrSuppression} note={full ? rec(pOk, `9이닝당 피홈런 ${fixed2(hr9(q))}`, lg.pit(hr9(q), hr9, false)) : undefined} />
+              <GradeBar label="구위" v={g('stuff')} note={full ? rec(pOk, `K% ${pct1(pitKPct(q))}`, lg.pit(pitKPct(q), pitKPct)) : undefined} />
+              <GradeBar label="제구" v={g('control')} note={full ? rec(pOk, `BB% ${pct1(pitBbPct(q))}`, lg.pit(pitBbPct(q), pitBbPct, false)) : undefined} />
+              <GradeBar label="장타 억제" v={g('hrSuppression')} note={full ? rec(pOk, `9이닝당 피홈런 ${fixed2(hr9(q))}`, lg.pit(hr9(q), hr9, false)) : undefined} />
             </div>
           </div>
           <div className="pd-group">
             <h4>체력</h4>
             <div className="grades">
-              <GradeBar label="선발 체력" v={pg.stamina} note={full ? (q.gs ? `선발 ${q.gs}경기` : '선발 기록 없음') : undefined} />
-              <GradeBar label="구원 체력" v={pg.reliefStamina} note={full ? (q.g - q.gs > 0 ? `구원 ${q.g - q.gs}경기` : '구원 기록 없음') : undefined} />
+              <GradeBar label="선발 체력" v={g('stamina')} note={full ? (q.gs ? `선발 ${q.gs}경기` : '선발 기록 없음') : undefined} />
+              <GradeBar label="구원 체력" v={g('reliefStamina')} note={full ? (q.g - q.gs > 0 ? `구원 ${q.g - q.gs}경기` : '구원 기록 없음') : undefined} />
             </div>
           </div>
         </>
-      ) : bg ? (
+      ) : g('contact') ? (
         <>
           <div className="pd-group">
             <h4>타석에서</h4>
             <div className="grades">
-              <GradeBar label="선구안" v={bg.eye} note={full ? rec(bOk, `BB% ${pct1(bbPct(b))}`, lg.bat(bbPct(b), bbPct)) : undefined} />
+              <GradeBar label="선구안" v={g('eye')} note={full ? rec(bOk, `BB% ${pct1(bbPct(b))}`, lg.bat(bbPct(b), bbPct)) : undefined} />
             </div>
           </div>
           <div className="pd-group">
             <h4>타구</h4>
             <div className="grades">
-              <GradeBar label="컨택" v={bg.contact} note={full ? rec(bOk, `K% ${pct1(kPct(b))} · BABIP ${rate3(babip(b))}`, lg.bat(kPct(b), kPct, false)) : undefined} />
-              <GradeBar label="파워" v={bg.power} note={full ? rec(bOk, `ISO ${rate3(iso(b))}`, lg.bat(iso(b), iso)) : undefined} />
+              <GradeBar label="컨택" v={g('contact')} note={full ? rec(bOk, `K% ${pct1(kPct(b))} · BABIP ${rate3(babip(b))}`, lg.bat(kPct(b), kPct, false)) : undefined} />
+              <GradeBar label="파워" v={g('power')} note={full ? rec(bOk, `ISO ${rate3(iso(b))}`, lg.bat(iso(b), iso)) : undefined} />
             </div>
           </div>
           <div className="pd-group">
             <h4>주루</h4>
             <div className="grades">
-              <GradeBar label="주력" v={bg.speed} note={full ? (b.pa > 0 ? `도루 ${b.sb} · 3루타 ${b.t}` : '기록 없음') : undefined} />
+              <GradeBar label="주력" v={g('speed')} note={full ? (b.pa > 0 ? `도루 ${b.sb} · 3루타 ${b.t}` : '기록 없음') : undefined} />
             </div>
           </div>
         </>
@@ -410,13 +397,6 @@ function AbilityTab({ p, full }: { p: SimPlayer; full: boolean }) {
   );
 }
 
-/** 지난 오프시즌 성장 판정 전후 차이 (등급). 오프시즌 성장 결과가 있을 때만 */
-function useGrowthDelta(p: SimPlayer): number | null {
-  const { session } = useGame();
-  const g = session.offseason?.growth?.find((x) => x.id === p.id);
-  if (!g) return null;
-  return runsGrade(g.after, session.year) - runsGrade(g.before, session.year);
-}
 
 // ---- 탭 3: 기록
 
@@ -698,11 +678,11 @@ function RecentPitchBars({ rows }: { rows: PitchRow[] }) {
 
 const KIND_LABEL: Record<string, string> = { reserve: '보류 선수 (해마다 협상)', rookie: '신인', fa: 'FA 계약', nonFA: '비FA 다년 계약', foreign: '외국인 (1년)' };
 
-function ContractInfo({ id, p }: { id: string; p: SimPlayer }) {
+function ContractInfo({ id }: { id: string }) {
   const { session, store } = useGame();
   const won = useWon();
   const lp = session.leaguePlayer(id);
-  const pot = usePotential(p);
+  const note = session.scoutPhrase(id);
   const master = store.players.get(id);
   if (!lp) return null;
   const c = lp.contract;
@@ -710,14 +690,13 @@ function ContractInfo({ id, p }: { id: string; p: SimPlayer }) {
   const clubs = [...new Set(lp.history.map((h) => `${h.year} ${h.team}`))];
   return (
     <section>
-      <h3>계약과 잠재력</h3>
+      <h3>계약과 스카우트 보고</h3>
       <dl className="facts">
         <dt>계약</dt><dd>{KIND_LABEL[c.kind]} · {c.kind === 'foreign' ? `${dollarText(c.salary)}${c.bonus ? ` + 계약금 ${dollarText(c.bonus)}` : ''}` : won(c.salary)} · {c.until}년까지</dd>
-        <dt>잠재력</dt>
+        <dt>스카우트 보고</dt>
         <dd>
-          {potentialText(pot) ?? <Missing why="31세 이상은 보이지 않음" />}
-          {pot?.kind === 'range' && <span className="muted small"> (스카우트 짐작 범위. 실제 값이 범위 밖일 수도 있고, 스카우트 투자를 늘리면 범위가 좁아진다)</span>}
-          {pot?.kind === 'one' && lp.scoutPotential !== undefined && <span className="muted small"> (스카우트 평가)</span>}
+          {note ?? <span className="muted">— (32세부터는 평을 내지 않는다)</span>}
+          {note && <span className="muted small"> (앞으로 클 여지에 대한 평. 틀릴 수 있다)</span>}
         </dd>
         {!lp.foreign && <><dt>FA</dt><dd>1군 연차 {lp.service}년{lp.faCount ? ` · FA 계약 ${lp.faCount}회` : ''}</dd></>}
         {allStar.years.length > 0 && <><dt>올스타</dt><dd>{allStar.years.length}회 ({allStar.years.join(', ')}){allStar.mvp.length ? ` · MVP ${allStar.mvp.join(', ')}` : ''}{allStar.derby.length ? ` · 홈런 더비 우승 ${allStar.derby.join(', ')}` : ''}</dd></>}
@@ -736,11 +715,8 @@ function ContractInfo({ id, p }: { id: string; p: SimPlayer }) {
 function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const { session, changed, autosave } = useGame();
   const [msg, setMsg] = useState<string | null>(null);
-  const potOf = usePotentialOf();
   const lp = session.leaguePlayer(p.id);
   if (!lp?.alt) return null;
-  // 반대쪽 잠재도 같은 표시 규칙 (결정 5). 짐작 어긋남은 본업과 따로 정한다 (id 뒤에 :alt)
-  const altPot = potOf({ id: `${lp.id}:alt`, potential: lp.alt.potential }, p.age);
   const year = session.phase === 'season' ? session.world.year : session.year + 1;
   const side = p.isPitcher ? '타격' : '투구';
   const mine = lp.team === session.teamIdx;
@@ -752,7 +728,7 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   return (
     <div className="defense">
       <h4 className="small">
-        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <Grade v={gradeAt(lp.alt.runs, year)} /> · 잠재 {altPot ? <PotCell v={altPot} /> : <Missing why="31세 이상" />}{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
+        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <GuessGrade v={session.guessAltGrade(p.id, gradeAt(lp.alt.runs, year))} /> <span title="기록이 거의 없어 추측 범위가 넓다">(추측)</span>{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
         {mine && <button type="button" className="link small" onClick={toggle}>{lp.twoWay ? '본업만 맡기기' : '이도류로 쓰기'}</button>}
       </h4>
       {full && <p className="muted small">모든 선수가 반대쪽 능력을 갖지만 대부분은 낮고 자라지 않습니다. 겸업 재능이 있는 몇 명만 크게 자랍니다. 이도류로 쓰면 {p.isPitcher ? '등판하지 않는 날 지명타자로 나가고(등판 날도 타석에 서고, 다음 날은 쉰다)' : '선발 투수 후보에도 들어가고, 던진 다음 날은 타석에서 쉰다'}.</p>}
@@ -767,7 +743,10 @@ function DefenseInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const [edit, setEdit] = useState<Record<string, number> | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const playable = playablePositions(p.bat);
-  const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => [q, defenseGrade(defenseAt(p, q))])));
+  const seen = useSeen();
+  const dv = (q: FieldPos) => seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, q)));
+  // 고치기 칸은 보이는 값(추측 가운데값)에서 시작한다 (진짜 값을 채워 넣지 않는다)
+  const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => { const v = dv(q); return [q, v ? guessMid(v) : 50]; })));
   const save = () => {
     if (!edit) return;
     // 등급 → 수비 런 (5런 = 10점)
@@ -798,7 +777,7 @@ function DefenseInfo({ p, full }: { p: SimPlayer; full: boolean }) {
         </div>
       ) : (
         <div className="grades">
-          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} title={POS_KO[q]} v={defenseGrade(defenseAt(p, q))} />)}
+          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} title={POS_KO[q]} v={dv(q)} />)}
         </div>
       )}
       {msg && <p className="muted small">{msg}</p>}

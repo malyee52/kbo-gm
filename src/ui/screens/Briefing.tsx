@@ -109,6 +109,8 @@ function MatchCard() {
   const s = session.season;
   const me = session.teamIdx;
   if (!next) return <section className="card match"><h2>다음 경기</h2><p className="muted">남은 경기가 없습니다.</p></section>;
+  // 지휘하던 경기 창을 닫았으면 "경기 중: 7회초 3:2 · [이어서 지휘]" (UI 2단계 2.2.2)
+  const live = session.gameLock ? session.pendingScore() : null;
   const home = next.home === me;
   const opp = home ? next.away : next.home;
   const park = stadiumName(session.league, next.home, session.year);
@@ -155,11 +157,19 @@ function MatchCard() {
         })()}</p>
       )}
       {session.fantasy && <PregameTalk />}
+      {live && (
+        <p className="match-live" role="status">
+          <b>경기 중</b>{live.over ? ` · 경기 끝 ${live.awayRuns}:${live.homeRuns} (확정 전)` : ` · ${live.inn}회${live.top ? '초' : '말'} ${live.awayRuns}:${live.homeRuns} · ${live.outs}아웃`}
+          <span className="muted small"> {session.teamInfo(live.away).name} @ {session.teamInfo(live.home).name}</span>
+        </p>
+      )}
       <div className="match-actions">
-        <button type="button" className="go" onClick={advanceNext} disabled={advanceDisabled}>{busy ?? '다음 경기'}</button>
+        {live
+          ? <button type="button" className="go" onClick={command} disabled={!!busy}>이어서 지휘</button>
+          : <button type="button" className="go" onClick={advanceNext} disabled={advanceDisabled}>{busy ?? '다음 경기'}</button>}
         <button type="button" className="ghost" onClick={() => go('lineup')}>기용 확인</button>
         <button type="button" className="ghost" onClick={openProgress}>진행 설정</button>
-        {density === 'full' && <button type="button" className="ghost" onClick={command} disabled={advanceDisabled}>직접 지휘</button>}
+        {density === 'full' && !live && <button type="button" className="ghost" onClick={command} disabled={advanceDisabled}>직접 지휘</button>}
       </div>
       {session.pendingEvent && <p className="small error-text">이벤트에 답한 뒤 진행할 수 있습니다 (화면 위쪽).</p>}
     </section>
@@ -174,7 +184,7 @@ function spLine(session: ReturnType<typeof useGame>['session'], p: SimPlayer): s
 
 /** 가을야구 중: 지금 시리즈와 다음 경기 */
 function PostseasonCard() {
-  const { session, go } = useGame();
+  const { session, go, command } = useGame();
   const { advanceNext, advanceDisabled, openProgress, busy } = useShell();
   const st = session.postseason!;
   const x = currentSeries(st)!;
@@ -195,7 +205,9 @@ function PostseasonCard() {
       {x.round === 'wc' && <p className="small muted">와일드카드 결정전은 4위가 1승을 안고 시작합니다.</p>}
       <p className="small">{ours ? '우리 구단 시리즈입니다.' : alive ? '우리 구단은 다음 시리즈를 기다립니다.' : st.seeds.includes(me) ? '우리 구단은 탈락했습니다.' : '우리 구단은 가을야구에 나가지 못했습니다.'}</p>
       <div className="match-actions">
-        <button type="button" className="go" onClick={advanceNext} disabled={advanceDisabled}>{busy ?? '다음 경기'}</button>
+        {session.gameLock
+          ? <button type="button" className="go" onClick={command} disabled={!!busy}>이어서 지휘</button>
+          : <button type="button" className="go" onClick={advanceNext} disabled={advanceDisabled}>{busy ?? '다음 경기'}</button>}
         <button type="button" className="ghost" onClick={() => go('postseason')}>대진·결과</button>
         <button type="button" className="ghost" onClick={openProgress}>진행 설정</button>
       </div>

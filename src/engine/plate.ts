@@ -39,11 +39,15 @@ export interface PlateShift {
   con: number;
   eye: number;
   hbp: number;
+  /** 포수 프레이밍 (능력치 v2 16-3): 스윙 안 한 공의 스트라이크 판정 로짓에 더한다. 없거나 0이면 리그 판정률 그대로 */
+  frame?: number;
 }
 export const NO_SHIFT: PlateShift = { con: 0, eye: 0, hbp: 1 };
 
 const sig = (x: number) => 1 / (1 + Math.exp(-x));
 const logit = (p: number) => Math.log(p / (1 - p));
+/** 판정률 q에 프레이밍 f (0이면 그대로) */
+const framed = (q: number, f: number | undefined) => (f ? sig(logit(q) + f) : q);
 
 /**
  * 그 해 리그 칸 상수: 칸마다 존 비율·스윙·맞힘·파울의 로짓과 스윙 안 한 공의 스트라이크 판정률, 사구 몫.
@@ -179,8 +183,10 @@ function cellInto(out: Float64Array, c: number, lp: LeaguePlate, b: BatPlate, p:
   const h = Math.min(0.5, lp.h[c] * sh.hbp);
   const nb = 1 - h;
   const o = c * 5;
-  out[o] = (ti * (1 - lp.csi[c]) + to * (1 - lp.cso[c])) * nb;
-  out[o + 1] = (ti * lp.csi[c] + to * lp.cso[c] + si - ci + so - co) * nb;
+  const csi = framed(lp.csi[c], sh.frame);
+  const cso = framed(lp.cso[c], sh.frame);
+  out[o] = (ti * (1 - csi) + to * (1 - cso)) * nb;
+  out[o + 1] = (ti * csi + to * cso + si - ci + so - co) * nb;
   out[o + 2] = (fi + fo) * nb;
   out[o + 3] = (ci - fi + co - fo) * nb;
   out[o + 4] = h;
@@ -206,8 +212,8 @@ export function plateSteps(lp: LeaguePlate, c: number, b: BatPlate, p: PitPlate,
     contactOut: sig(lp.lco[c] + cadj),
     foulIn: sig(lp.lfi[c] + fadj),
     foulOut: sig(lp.lfo[c] + fadj),
-    calledIn: lp.csi[c],
-    calledOut: lp.cso[c],
+    calledIn: framed(lp.csi[c], sh.frame),
+    calledOut: framed(lp.cso[c], sh.frame),
     hbp: Math.min(0.5, lp.h[c] * sh.hbp),
   };
 }

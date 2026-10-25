@@ -9,18 +9,18 @@ let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
 beforeAll(() => { store = loadDataStore(); }, 120_000);
 
-/** 미리보기에서 처음 대타를 쓸 수 있는 물음까지 자동, 거기서 벤치 첫 선수를 대타로, 나머지는 자동 */
+/**
+ * 미리보기에서 처음 대타를 쓸 수 있는 물음까지 자동, 거기서 벤치 첫 선수를 대타로, 나머지는 자동.
+ * 선택은 미리보기가 돌려준 것(pv.choices: 자동으로 넘긴 공 사이 물음의 빈 선택 포함, 엔진 2 17단계)에 잇는다
+ */
 function pinchHitChoices(g: GameSession): { choices: CommandChoice[]; ph: number } | null {
   let pv = g.commandPreview([], 'next');
-  const choices: CommandChoice[] = [];
   while (pv.req) {
     if (pv.req.side === 'bat' && pv.req.step === 'bat' && pv.req.bench.length && pv.req.inn >= 5) {
       const ph = pv.req.bench[0];
-      choices.push({ ph });
-      return { choices: g.commandPreview(choices, 'auto').choices, ph };
+      return { choices: g.commandPreview([...pv.choices, { ph }], 'auto').choices, ph };
     }
-    choices.push({});
-    pv = g.commandPreview(choices, 'next');
+    pv = g.commandPreview([...pv.choices, {}], 'next');
   }
   return null;
 }

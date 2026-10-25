@@ -55,3 +55,10 @@ export function postseasonPlaces(order: number[], tables: DivisionTable[] | null
 export function seasonPostseasonPlaces(season: Season, cut: number): number[] {
   return postseasonPlaces(season.standings(), season.divisionStandings(), cut, season.teams, season.log, season.world.prevStandings);
 }
+
+/** 전력 전망 세 단계 (능력치 v2 17.6): 순위 숫자 대신. 위 30%·아래 30%를 상위권·하위권으로 (10구단이면 1~3위·8~10위, 임시값) */
+export type StrengthTier = '상위권' | '중위권' | '하위권';
+export function strengthTier(rank: number, n: number): StrengthTier {
+  const k = Math.max(1, Math.round(n * 0.3));
+  return rank <= k ? '상위권' : rank > n - k ? '하위권' : '중위권';
+}

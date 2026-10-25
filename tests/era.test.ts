@@ -19,13 +19,14 @@ beforeAll(() => {
 });
 
 describe('시대별 제도', () => {
-  it('FA는 1999 시즌 뒤부터, 자격 연차는 10(대졸 9) → 9(대졸도 9, 2001 시즌 뒤) → 9(대졸 8, 2011 시즌 뒤) → 8(대졸 7)', () => {
+  it('FA는 1999 시즌 뒤부터, 자격 연차는 10(대졸도 10) → 9(대졸도 9, 2001 시즌 뒤) → 9(대졸 8, 2011 시즌 뒤) → 8(대졸 7)', () => {
     expect(faEnabled(1998)).toBe(false);
     expect(faEnabled(1999)).toBe(true);
-    // 도입 때 고졸 10·대졸 9 (출처 확인, data-src/제도연표_보정.csv 26)
+    // 도입 때 대졸 구분 없이 10 (나무위키 KBO FA 제도 각주 4, 뉴시스 2020-01-16, data-src/제도연표_보정.csv 26)
     expect(faServiceNeeded(1999, false)).toBe(10);
-    expect(faServiceNeeded(1999, true)).toBe(9);
-    expect(faServiceNeeded(2000, true)).toBe(9);
+    expect(faServiceNeeded(1999, true)).toBe(10);
+    expect(faServiceNeeded(2000, false)).toBe(10);
+    expect(faServiceNeeded(2000, true)).toBe(10);
     expect(faServiceNeeded(2001, true)).toBe(9);
     expect(faServiceNeeded(2010, false)).toBe(9);
     expect(faServiceNeeded(2010, true)).toBe(9);

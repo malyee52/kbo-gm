@@ -20,7 +20,7 @@ function fakeContext(month: number, rank: number, streak: number) {
   ] as unknown as LeaguePlayer[];
   const c: EventContext = {
     league: { seed: 's' } as LeagueState, team: 0, teamName: 'LG', year: 2026, day: 50, seasonDays: 140, rank, teams: 10, winPct: 0.5,
-    cash: 500000, roster, players, recent: { w: 5, l: 5 }, streak, month, hasRival: true, tradeOpen: true,
+    cash: 500000, roster, seenValue: (p) => (p.id === 'y1' ? 2 : 1), players, recent: { w: 5, l: 5 }, streak, month, hasRival: true, tradeOpen: true,
     addCash: (a) => calls.push(`cash ${a}`), addTrust: (d) => calls.push(`trust ${d}`), addFill: (f) => calls.push(`fill ${f}`),
     addForm: (e) => calls.push(`form ${e}`), addCond: (v, d, r) => calls.push(`cond ${v} ${d} ${r}`), restPitchers: () => calls.push('restPitchers'), rest: (id, d) => calls.push(`rest ${id} ${d}`),
     tradeOffer: () => null, trade: () => '', addFans: (d) => calls.push(`fans ${d}`), addPotential: (id, d) => calls.push(`pot ${id} ${d}`),

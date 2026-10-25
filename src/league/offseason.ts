@@ -6,7 +6,7 @@
 
 import { lineTeam } from '../engine/types';
 import { repDemand } from './reputation';
-import { MARKET_ASIA, MARKET_REGULAR } from './market';
+import { aiFxRegion, FX_OFF_SENDS, fxListCount, fxOpenOff, fxPoolPlan, fxSeasonWindow, fxSendOff, fxSigned, fxSpec, fxState, fxVisible, FX_OFF_UNTIL, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
 import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
@@ -15,11 +15,18 @@ import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import {
   ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, penTrustOf, Rng, traitsOf,
-  type EngineParams, type Season, type SimPlayer, type World,
+  type BatSkill, type EngineParams, type Season, type SimPlayer, type World,
 } from '../engine';
+import { FIELD_POS } from '../engine/defense';
+import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
-import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, skillForRuns, type CareerIndex } from './growth';
+import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex } from './growth';
+import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenValue, type BoardRow } from './scout';
+export type { BoardRow } from './scout';
+import { ceilingFor, growBranches, timingOf } from './branches';
+import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
+import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, VIRTUAL_POOL } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
   type CareerNews,
@@ -44,7 +51,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, AI_SCOUT_SCALE, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments, SCOUT_NOISE,
+  activeLevel, addExpansionCapital, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -52,7 +59,7 @@ import { estimatedBirthYear } from './create';
 import { foreignPostingOn, ruleOf } from './rules';
 import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_TWO_WAY_SHARE } from './twoway';
 
-type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits'>;
+type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits' | 'defense'>;
 
 /** vote: 단장 회의 (구단 투표, 안건이 있는 해만 열린다. league/ruleVote.ts) */
 export type Stage = 'vote' | 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
@@ -91,14 +98,12 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 하락 나이 32세·완만한 하락으로 바꾸며 9 (2026 시작 2시드 20시즌: 2045년 상위 270명 기여 합 시작 대비 -2.3%, 8.5면 -8.5%).
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
- * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장
+ * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5
  */
-export const DRAFT_POTENTIAL_SCALE = 10.5;
-/** 드래프트 풀 인원 (임시값) */
-const DRAFT_POOL = 150;
-/** 외국인 후보 인원 (임시값) */
-const FOREIGN_POOL_REGULAR = 24;
-const FOREIGN_POOL_ASIA = 8;
+export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
+/** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
+const DRAFT_POOL = VIRTUAL_POOL;
 /** 외국인 재계약 기준 (런, 임시값) */
 const FOREIGN_KEEP_RUNS = 12;
 /** 3명 총액 상한 안에 이만큼도 남지 않으면 재계약하지 않는다 (달러, 임시값) */
@@ -177,6 +182,8 @@ export interface OffseasonState {
     pick: number;
     pool: string[];
     picks: { team: number; id: string; round: number }[];
+    /** 후보(육성 후보 포함) id → 드래프트를 열 때 잰 진짜 지금 능력 (런). 스카우트 보드가 여기에 추측 오차를 씌운다 (scout.ts) */
+    now?: Record<string, number>;
   } | null;
   salary: {
     /** 선수 id → 요구 연봉 */
@@ -259,6 +266,8 @@ export interface LeagueView {
   wage: number;
   /** 다음 시즌(계약이 시작되는 해)의 최저 연봉 (salary.ts minSalary) */
   minPay: number;
+  /** 다음 시즌 기준 월드 (화면 갈래 등급 computeGrades용, 무소속 선수는 sim에만) */
+  world?: World;
 }
 
 /** 다음 시즌(league.year + 1) 기준으로 선수 가치를 잴 수 있게 SimPlayer를 만든다. 무소속 선수도 포함 */
@@ -274,7 +283,7 @@ export function leagueView(league: LeagueState, store: Store, params: EnginePara
     if (sim.has(lp.id)) continue;
     sim.set(lp.id, { ...asSim(lp, world.league, next.year), idx: 1_000_000 + k++, name: lp.name, foreign: lp.foreign, teamIdx: lp.team });
   }
-  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league) };
+  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league), world };
 }
 
 const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p]));
@@ -362,6 +371,32 @@ function ruleSignalOf(league: LeagueState, season: Season): RuleSignal {
  * userEnlist: 플레이어가 고른 우리 구단 입대 명단 (없으면 AI 규칙. careers.ts normalizeEnlist로 규칙에 맞춘다)
  * userApply: 그중 군 야구단(상무·경찰)에 지원하는 선수 (없으면 지원할 수 있는 선수 모두, normalizeApply)
  */
+/** 한 선수의 수비 경험: 시작 전 수비 기록(defense.json) + 게임 안 이력의 자리별 이닝(def·fdef) (15.2) */
+function playerFieldYears(league: LeagueState, store: Store, p: LeaguePlayer): FieldYear[] {
+  return [
+    ...(store.defense ? fieldYears(store, p.id, league.startYear) : []),
+    ...p.history.filter((h) => h.year >= league.startYear && (h.def || h.fdef)).map((h) => gameFieldYear(h.year, h.def, h.fdef, h.bat?.[BAT_PA_AT] ?? 0)),
+  ];
+}
+
+/**
+ * 결산 때 수비 가능·비상 포수 다시 보기 (능력치 v2 16-3b, 15.2): 수비 경험으로 다음 시즌 기준 판정.
+ * 등급 오름·내림은 familiarityShift (16-4). 수비 고치기로 연 자리(defEdit)는 남긴다
+ */
+function refreshedPlayable(years: FieldYear[], p: LeaguePlayer, nextYear: number): Pick<BatSkill, 'playable' | 'emC'> {
+  const r = refreshPlayable(years, nextYear, homeOf(p.pos) ?? undefined, p.drillPos);
+  const keep = p.bat?.defEdit ?? [];
+  const list = FIELD_POS.filter((q) => r.playable.includes(q) || keep.includes(q));
+  return { playable: list, ...(r.emergencyC && !list.includes('C') ? { emC: true as const } : {}) };
+}
+const BAT_PA_AT = Object.keys(emptyBatLine()).indexOf('pa');
+
+/** 그 시즌 1군 자리별 수비 이닝 (C…RF, 반올림 정수, 능력치 v2 12.9). 수비를 안 했으면 빈 칸 */
+function defenseInnings(season: Season, idx: number): { def?: number[] } {
+  const inn = Array.from(season.defOuts.subarray(idx * 8, idx * 8 + 8), (o) => Math.round(o / 3));
+  return inn.some((v) => v > 0) ? { def: inn } : {};
+}
+
 export function beginOffseason(league: LeagueState, world: World, season: Season, store: Store, userTeam: number,
                                params: EngineParams = DEFAULT_PARAMS, userEnlist?: string[], userApply?: string[]): OffseasonState {
   const year = league.year;
@@ -391,7 +426,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
 
   // 퓨처스리그 성적 (futures.ts): 2군 선수의 출전 기회와 활약을 성장 판정에 쓴다. 시즌 마지막 1군 명단 기준
   const extras = futuresExtras(league, store, world, params);
-  const fut = futuresSeason(world, season, league.seed, (t) => registeredOf(season, t), extras);
+  const fut = futuresSeason(world, season, league.seed, (t) => registeredOf(season, t), extras, futuresTrainSlots(league));
+  // 집중 훈련 명단 (16-4c): 우리 구단은 걸어 둔 것, AI 구단은 규칙 (training.ts)
+  const trainPlans = trainingPlans(league, userTeam, year);
   const futById = new Map<string, ReturnType<typeof fut.lines.get>>();
   for (const sp of world.players) futById.set(sp.id, fut.lines.get(sp.idx));
   for (const e of extras) for (const sp of e.org) futById.set(sp.id, fut.lines.get(sp.idx));
@@ -430,6 +467,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       ...(b.pa > 0 ? { bat: batKeys.map((k) => b[k]) } : {}),
       ...(pt.bf > 0 ? { pit: pitKeys.map((k) => pt[k]) } : {}),
       ...futuresRecord(futById.get(sp.id)),
+      ...defenseInnings(season, sp.idx),
     });
     p.lastSaves = pt.sv;
     const trust = penTrustOf(pt.g - pt.gs, pt.sv, pt.hld, null);
@@ -471,15 +509,22 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const share = young && futOpp > 0 ? Math.max(firstTeam, firstTeam + FUTURES_WEIGHT * futOpp + DEVELOP_SHARE[dev]) : firstTeam;
     const form = young ? futuresForm(fl) : 0;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
     const grown = developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
-      agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * form, dev);
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2) + FUT_FORM_RUNS * form, dev);
     if (Math.abs(form) >= 0.5) {
       const g = growth.get(p.id)!;
       g.tags = [...(g.tags ?? []), form > 0 ? '퓨처스 활약' : '퓨처스 부진'];
     }
     // 코치 효과 (coaches.ts): 타격·투수 코치의 성장·하락 완화, 시즌을 주로 2군에서 보낸 선수는 2군 코치
-    const next = coachGrowth(league, team, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE) - eff.runsDrop;
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    // 천장(잠재력 v2)은 넘지 않는다: 터지는 해·운·퓨처스 활약·육성·코치 몫까지 더한 뒤 자른다 (기획안 17.2, Q3)
+    const next = capAtCeiling(coachGrowth(league, team, sp.isPitcher, ageIn(p, year + 1), runs, grown, firstTeam < FUTURES_SHARE), runs, p.potential) - eff.runsDrop;
+    // 집중 훈련 (16-4c, training.ts): 갈래 집중은 성장 방향에, 자라지 않는 능력·수비 자리는 따로 쌓는다 (시즌 중에 걸었으면 기간 몫)
+    const plan = trainPlans.get(p.id);
+    const frac = plan ? trainingFrac(plan, seasonDays) : 0;
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params, focusOf(plan, frac));
+    const trainBefore = p.drillPos ? { ...p.drillPos } : undefined;
+    if (plan) applyDrill(p, plan, frac, ageIn(p, year + 1), homeOf(p.pos));
     p.estimated = false;
     // 표본: 지난 시즌 출전 + 이전 표본의 60% (직전 3시즌 가중치 1.0·0.8·0.6과 비슷한 무게).
     // 등급(20~80)의 기준 집단이 "표본이 충분한 선수"라서, 가상 선수도 뛰면 기준 집단에 들어가야 한다
@@ -487,23 +532,32 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (p.pit) p.pit = { ...p.pit, sample: Math.round(pt.bf + 0.6 * p.pit.sample) };
     // 반대쪽 능력 성장 (league/twoway.ts): 이도류로 뛰면 출전 몫 0.5, 아니면 연습만 0.1. 겸업 재능이 없으면 잠재력이 낮아 거의 자라지 않는다
     if (p.alt) {
-      p.alt.runs = growthRuns(age, p.alt.runs, p.alt.potential, p.twoWay ? 0.5 : 0.1, new Rng(`${league.seed}/alt-growth/${year}/${p.id}`), !p.isPitcher,
-        agingScale(traitsOf(store.traits, p.id), params.traits));
+      p.alt.runs = capAtCeiling(growthRuns(age, p.alt.runs, p.alt.potential, p.twoWay ? 0.5 : 0.1, new Rng(`${league.seed}/alt-growth/${year}/${p.id}`), !p.isPitcher,
+        agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential), p.alt.runs, p.alt.potential);
       if (p.twoWay) Object.assign(p.alt, altSkillFor(p, ctxNow, year));
     }
     // 수비 나이 변화 (수비 정보가 없던 저장은 여기서 만든다)
     if (p.bat) {
       const made = p.bat.def ?? sp.bat?.def ? undefined : leagueDefense(league, p.id, p.pos, p.bat.speed, ageIn(p, year));
       const def = p.bat.def ?? sp.bat?.def ?? made!.def!;
-      p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
+      p.bat = { ...p.bat, ...(made?.playable ? { playable: made.playable, ...(made.defTalent ? { defTalent: made.defTalent } : {}) } : {}), def: ageDefense(def, ageIn(p, year + 1)) };
+      if (p.bat.playable) {
+        const { emC: _was, ...rest } = p.bat;
+        const years = playerFieldYears(league, store, p);
+        // 익숙함이 늘어난 자리는 등급도 오른다 (16-4, 등급 = 20 + T × u)
+        const shifted = rest.defTalent && rest.def ? familiarityShift(years, year, homeOf(p.pos) ?? undefined, rest.defTalent, rest.def, trainBefore, p.drillPos) : rest.def;
+        p.bat = { ...rest, def: shifted, ...refreshedPlayable(years, p, year + 1) };
+      }
     }
   }
   // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
   for (const p of league.players) {
     if (!isAbroad(p)) continue;
-    const next = growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 1,
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits));
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
+    const next = capAtCeiling(growthRuns(age, runsAt(p, year), p.potential, 1, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2), runsAt(p, year), p.potential);
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
   // 복무 중인 선수 (careers.ts): 군 야구단(상무·경찰)은 퓨처스리그에서 뛰는 것으로 보고 출전 기회 40%로 성장 판정 (임시값).
   // 현역·보충역(공익·사회복무)은 경기에 못 나가 자라지 않고 해마다 SERVICE_DECAY만큼 감각이 떨어진다
@@ -511,11 +565,13 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (!isServing(p) || p.team < 0) continue;
     const kind = p.military!.kind ?? 'unit';
     growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runsAt(p, year), after: 0, tags: [`복무 중 (${serviceName(p.military)})`] });
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
     const next = kind === 'unit'
-      ? growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runsAt(p, year), p.potential, 0.4,
-        new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits))
+      ? capAtCeiling(growthRuns(age, runsAt(p, year), p.potential, 0.4, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+        agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2), runsAt(p, year), p.potential)
       : runsAt(p, year) - SERVICE_DECAY[kind];
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
   // 퓨처스 구단(창단 뒤 1군 진입 전) 선수: 시즌 월드에 없어 퓨처스리그 성적(extras)으로 성장 판정. 나이와 상관없이 퓨처스가 주 무대다
   for (const p of league.players) {
@@ -525,10 +581,13 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const dev = activeLevel(league, p.team, 'develop');
     const fl = futById.get(p.id);
     const share = fl ? FUTURES_WEIGHT * futuresOpportunity(fl) + DEVELOP_SHARE[dev] : FUTURES_SHARE + DEVELOP_SHARE[dev];
-    const next = developed(ageIn(p, year + 1), runs, growthRuns(ageIn(p, year + 1) + (p.decline ?? 0), runs, p.potential, share,
-      new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher, agingScale(traitsOf(store.traits, p.id), params.traits)) + FUT_FORM_RUNS * futuresForm(fl), dev);
-    Object.assign(p, skillForRuns({ ...p }, next, ctxNow, year));
+    const age = ageIn(p, year + 1) + (p.decline ?? 0);
+    const burst: { breakout?: boolean } = {};
+    const next = capAtCeiling(developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
+      agingScale(traitsOf(store.traits, p.id), params.traits), p.drive, params.potential, timingFor(league, p, params), burst, params.growth2) + FUT_FORM_RUNS * futuresForm(fl), dev), runs, p.potential);
+    growInBranches(league, p, next, ctxNow, year, age, burst.breakout, params);
   }
+  rollTraining(league);
   const divisions = season.divisionStandings();
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0), ...(divisions ? { divisions } : {}) };
   // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 정한다.
@@ -850,7 +909,7 @@ function overseasOffseason(league: LeagueState, off: OffseasonState, store: Stor
     if (p.foreign) p.abroad!.returnYear = FOREIGN_NEVER_RETURNS;
     log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (${league.teams[from].name}, 이적료 ${(fee / 10000).toFixed(0)}억 원)`, false, true);
     addArticle(league, { year, day: -1, kind: 'overseas', franchise: league.teams[from].franchise, title: `${p.name}, 해외 진출`,
-      body: `${league.teams[from].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+      body: `${league.teams[from].name} ${p.name}${josa(p.name, '이가')} 포스팅으로 해외 무대에 도전한다.` });
   }
 }
 
@@ -876,7 +935,7 @@ export function answerPosting(league: LeagueState, off: OffseasonState, id: stri
   if (fe) fe.status = 'left';
   log(off, 'settle', `${p.name}, 포스팅으로 해외 진출 (이적료 ${(req.fee / 10000).toFixed(0)}억 원)`, true, true);
   addArticle(league, { year: off.year, day: -1, kind: 'overseas', franchise: league.teams[off.userTeam].franchise, title: `${p.name}, 해외 진출`,
-    body: `${league.teams[off.userTeam].name} ${p.name}이(가) 포스팅으로 해외 무대에 도전한다.` });
+    body: `${league.teams[off.userTeam].name} ${p.name}${josa(p.name, '이가')} 포스팅으로 해외 무대에 도전한다.` });
   return { ok: true, message: `${p.name}을(를) 해외로 보냈습니다 (이적료 ${(req.fee / 10000).toFixed(0)}억 원).` };
 }
 
@@ -1648,8 +1707,13 @@ const isForeignOf = (p: LeaguePlayer, t: number) => p.team === t && p.foreign;
 function toPool(league: LeagueState, view: LeagueView, p: LeaguePlayer): void {
   p.team = -1;
   // 계약금은 지난 계약 것이라 지운다
-  p.contract = { kind: p.contract.kind, salary: foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), true, p.asia, league, view.year), until: p.contract.until };
+  p.contract = { kind: p.contract.kind, salary: foreignSalary(fxRep(league, view, p), true, p.asia, league, view.year), until: p.contract.until };
 }
+/** 외국인 시장 평판 (런, scout.ts): 요구 연봉은 진짜 능력이 아니라 이것으로 (기획안 19.4) */
+function fxRep(league: LeagueState, view: LeagueView, p: LeaguePlayer): number {
+  return marketReputation(league.seed, p.id, currentRuns(view.sim.get(p.id)!, view.ctx), view.year);
+}
+
 /** 계약 기간이 이번 오프시즌에 끝나는 외국인 */
 const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.until <= year;
 
@@ -1659,7 +1723,7 @@ function foreignKeepAdvice(view: LeagueView, p: LeaguePlayer, year: number): boo
 
 /** 재계약 연봉: 원래 받을 금액과 3명 총액 상한의 남은 몫 중 작은 쪽 (아시아쿼터는 상한 없음, 임시 규칙) */
 function resignForeignSalary(league: LeagueState, view: LeagueView, p: LeaguePlayer, room: number): number {
-  const want = foreignSalary(currentRuns(view.sim.get(p.id)!, view.ctx), false, p.asia, league, view.year);
+  const want = foreignSalary(fxRep(league, view, p), false, p.asia, league, view.year);
   return p.asia ? want : Math.min(want, Math.max(0, room));
 }
 
@@ -1735,23 +1799,23 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     }
   }
 
-  // 새 외국인 후보 (가상 선수)
+  // 새 외국인 후보 (가상 선수, 기획안 19.4): 지역별로 만들고 파견·에이전트 추천으로 찾은 구단만 본다 (scoutfx.ts).
+  // 능력: 실제 KBO 외국인 첫 시즌 수준 (2026-10-12 사용자 "외국인들이 너무 구리다"). 일반 평균 약 33런, 아시아쿼터 약 8런 (지역마다 폭·나이가 다르다)
   const rng = new Rng(`${league.seed}/foreign/${year}`);
   const taken = takenNames(league, store);
-  for (let i = 0; i < FOREIGN_POOL_REGULAR + (rule.asia > 0 ? FOREIGN_POOL_ASIA : 0); i++) {
-    const asia = i >= FOREIGN_POOL_REGULAR;
-    const p = makeVirtual(league, view, rng, taken, {
-      foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(8),
-      // 능력: 실제 KBO 외국인 첫 시즌 수준 (2026-10-12 사용자 "외국인들이 너무 구리다"). 일반 20~46런(평균 33, 리그 상위 30~80위권),
-      // 아시아쿼터 0~16런. 예전 값은 일반 6~36런(평균 21)이라 보통 주전에 그쳤다
-      runs: asia ? 4 + rng.range(-4, 12) : 30 + rng.range(-10, 16),
-    }, year);
-    p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia, league, year + 1), until: year + 1 };
-    p.scoutPotential = scoutView(league, p.potential, rng);
+  for (const slot of fxPoolPlan(rule.asia > 0, false)) {
+    const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, false, year);
+    p.fx = { region: slot.region, from: 0, until: FX_OFF_UNTIL };
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year + 1), year + 1), true, slot.asia, league, year + 1), until: year + 1 };
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     p.transferFee = transferFeeUsd(p.contract.salary);
     pool.push(p.id);
   }
   off.foreign = { order, pointer: 0, pool, keep, regular: rule.regular, asia: rule.asia };
+  // 관찰 명단: 모든 구단에 에이전트 추천, AI 구단은 빈 자리만큼 파견 (플레이어 구단은 화면에서)
+  const ctx = offFxCtx(league, off);
+  fxLog(off, fxOpenOff(ctx));
+  for (const t of order) if (t !== off.userTeam) aiFxOffseason(league, off, t, ctx);
   runForeignUntilUser(league, off, store, params);
 }
 
@@ -1796,6 +1860,7 @@ function foreignMixBlock(league: LeagueState, off: OffseasonState, team: number,
 /** 이 외국인 후보와 계약할 수 있는가 (보유 한도, 구성 제한, 금액 상한) */
 export function canSignForeign(league: LeagueState, off: OffseasonState, team: number, p: LeaguePlayer): OfferCheck {
   if (!off.foreign?.pool.includes(p.id) || p.team !== -1) return { ok: false, message: '계약할 수 없는 선수입니다.' };
+  if (!fxVisible(league, team, p)) return { ok: false, message: '관찰 명단에 없는 후보입니다. 스카우트 팀을 보내 찾으세요.' };
   const s = foreignSlots(league, team, off);
   const lim = foreignLimits(off, league, team);
   const cap = (key: ForeignCapKey) => foreignCap(league, key, off.year + 1);
@@ -1831,6 +1896,8 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
   p.team = team;
   p.contract = { ...p.contract, until: off.year + 1 };
   off.foreign!.pool = off.foreign!.pool.filter((x) => x !== p.id);
+  delete p.fx;
+  fxLog(off, fxSigned(league, p.id, team));
   const fee = p.transferFee ?? 0;
   if (fee) {
     league.ledger.push({ year: off.year + 1, from: team, to: -1, amount: Math.round(fee * WON_PER_USD), note: `${p.name} 외국인 이적료`, kind: 'transfer' });
@@ -1839,15 +1906,70 @@ function signForeign(league: LeagueState, off: OffseasonState, team: number, p: 
   log(off, 'foreign', `${league.teams[team].name}, 외국인 ${p.name}${josa(p.name, '와과')} 계약 (${Math.round(foreignContractTotal(p.contract) / 10000)}만 달러${fee ? `, 이적료 ${Math.round(fee / 10000)}만 달러` : ''}${p.asia ? ', 아시아쿼터' : ''})`, team === off.userTeam);
 }
 
+/** 지역 후보 하나 (scoutfx.ts fxSpec). season이면 시즌 중 후보 */
+function makeFxCandidate(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, region: FxRegion, asia: boolean, season: boolean, year: number): LeaguePlayer {
+  const spec = fxSpec(rng, region, asia, season);
+  return makeVirtual(league, view, rng, taken, {
+    foreign: true, asia, age: spec.age, runs: spec.runs, isPitcher: spec.isPitcher, starter: spec.starter, ...(spec.control ? { control: true } : {}),
+  }, year);
+}
+
+/** 오프시즌 관찰 명단 문맥: 해는 다음 시즌 (장부·시드) */
+function offFxCtx(league: LeagueState, off: OffseasonState): FxCtx {
+  return { league, year: off.year + 1, userTeam: off.userTeam, free: (id) => league.players.find((p) => p.id === id)?.team === -1 };
+}
+
+function fxLog(off: OffseasonState, news: FxNews[]): void {
+  for (const n of news) if (n.team === off.userTeam) log(off, 'foreign', n.text, true);
+}
+
+/** AI 구단 오프시즌 파견: 빈 자리(일반·아시아쿼터)마다 명단 후보가 2명 넘게 될 때까지, 한도(FX_OFF_SENDS)까지 (결정적) */
+function aiFxOffseason(league: LeagueState, off: OffseasonState, team: number, ctx: FxCtx): void {
+  const lim = foreignLimits(off, league, team);
+  const s = foreignSlots(league, team, off);
+  const need = { regular: Math.max(0, lim.regular - s.regular), asia: Math.max(0, lim.asia - s.asia) };
+  const st = fxState(league, off.year + 1, true).teams[team];
+  while (st.sent < FX_OFF_SENDS) {
+    const asiaShort = need.asia > 0 && fxListCount(league, team, true) < need.asia + 1;
+    const regularShort = need.regular > 0 && fxListCount(league, team, false) < need.regular + 1;
+    if (!asiaShort && !regularShort) break;
+    fxSendOff(ctx, team, aiFxRegion(st.sent, asiaShort && !regularShort));
+  }
+}
+
+/** 플레이어 구단 오프시즌 파견 (외국인 단계에서만) */
+export function sendFxOff(league: LeagueState, off: OffseasonState, region: FxRegion): OfferCheck {
+  if (off.stage !== 'foreign' || !off.foreign) return { ok: false, message: '오프시즌 파견은 외국인 단계에서만 할 수 있습니다.' };
+  const st = fxState(league, off.year + 1, true).teams[off.userTeam];
+  if (st.sent >= FX_OFF_SENDS) return { ok: false, message: `이번 오프시즌 파견(${FX_OFF_SENDS}번)을 모두 썼습니다.` };
+  const news = fxSendOff(offFxCtx(league, off), off.userTeam, region);
+  fxLog(off, news);
+  return { ok: true, message: news.filter((n) => n.team === off.userTeam).map((n) => n.text).join(' ') || '이번 파견에서는 후보를 찾지 못했습니다.' };
+}
+
+/**
+ * AI 구단이 보는 외국인 후보 (기획안 17.8·19.4): 진짜 능력 대신 그 구단의 추측(진짜 + z × σ, 프로 스카우트 단계·난이도·관찰 기간)만큼
+ * 능력을 옮긴 모습. 계약은 진짜 선수로 한다
+ */
+function aiSeenForeign(league: LeagueState, view: LeagueView, team: number, sim: SimPlayer): SimPlayer {
+  const who = { team, user: false };
+  const now = currentRuns(sim, view.ctx);
+  const target = guessRuns(league, who, sim.id, now, foreignSigma(league, who, { id: sim.id, sample: sim.bat?.sample ?? sim.pit?.sample ?? null }), view.year);
+  const d = shiftForRuns({ ...sim, birthYear: sim.age === null ? null : view.year - sim.age }, target, view.ctx, view.year);
+  return { ...sim, bat: sim.bat && shiftBat(sim.bat, d), pit: sim.pit && shiftPit(sim.pit, d) };
+}
+
 function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, view: LeagueView): void {
   const tendency = tendencyFor(league, view, team);
+  const seen = new Map<string, SimPlayer>();
   for (let guard = 0; guard < 4; guard++) {
     let best: LeaguePlayer | null = null;
     let bestGain = 0;
     for (const id of off.foreign!.pool) {
       const p = league.players.find((x) => x.id === id)!;
-      if (!canSignForeign(league, off, team, p).ok) continue;
-      const gain = signingGain(view, team, view.sim.get(id)!, 2, tendency, false);
+      if (!canSignForeign(league, off, team, p).ok) continue; // 관찰 명단에 없는 파견 후보는 여기서 걸린다
+      if (!seen.has(id)) seen.set(id, aiSeenForeign(league, view, team, view.sim.get(id)!));
+      const gain = signingGain(view, team, seen.get(id)!, 2, tendency, false);
       if (gain > bestGain) {
         bestGain = gain;
         best = p;
@@ -1937,22 +2059,24 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
   const real = draftPool(store, year + 1);
   let ci: CareerIndex | null = null;
   real.forEach((d, i) => {
-    const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)));
+    const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)), params.potential);
     pool.push(p.id);
   });
   // 실제 육성선수 계약 신인: 드래프트에는 안 나오고 정원 정리 때 육성선수로 데려올 수 있다 (devPool). 지명 난수와 따로 굴린다
   const devRows = (store.drafts?.[String(year + 1)] ?? []).filter((d) => d.kind === '육성선수');
   const devRng = new Rng(`${league.seed}/dev-rookies/${year}`);
-  off.devExtra = devRows.map((d, i) => makeDraftee(league, view, devRng, taken, d, real.length + i, year + 1, store, () => (ci ??= careerIndex(store))).id);
+  off.devExtra = devRows.map((d, i) => makeDraftee(league, view, devRng, taken, d, real.length + i, year + 1, store, () => (ci ??= careerIndex(store)), params.potential).id);
   // 드래프트 미지명 입단 테스트 선수 (가상): 실제 육성 계약 자료가 모자란 만큼. 대부분 1군감이 아니지만 가끔 늦게 피는 선수가 있다 (임시값)
   for (let i = devRows.length; i < DEV_TRYOUTS; i++) {
     const univ = devRng.chance(0.5);
-    const potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(1 - devRng.next()) * 0.55) ** 1.2;
+    const potential = -10 + params.potential.draftScale * (-Math.log(1 - devRng.next()) * 0.55) ** 1.2;
     const age = univ ? 23 : 19;
-    const runs = univ ? potential * 0.3 - 10 : potential * 0.1 - 15;
-    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs: runs + devRng.range(-2, 2), potential }, year);
+    // 시작 능력은 천장에서 학력 시작 식만큼 아래 (잠재력 v2 18.5, 고졸 19세 = 입단 전 1년 "기타 경로")
+    const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
+    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * devRng.range(0.7, 1.3));
+    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential }, year);
     p.school = univ ? 'UNIV' : 'HS';
-    p.scoutPotential = scoutView(league, potential, devRng);
+    devRng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
     p.contract = { kind: 'reserve', salary: rookieSalary(year + 1, league), until: year + 1 };
     off.devExtra.push(p.id);
@@ -1962,15 +2086,17 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 잠재력 분포: 실제 입단 동기(2012~2018년 입단)의 전성기 기여 순위에 맞춘 식 (M6).
     // 한 해 풀 150명 중 1위 약 45런, 10위 16런, 20위 6런, 40위 0런, 그 아래는 1군 주전감이 아니다.
     // M5의 2 + 58u^2.2는 10위가 52런이라, 장기 진행에서 가상 신인이 실존 선수를 몇 해 만에 모두 밀어냈다.
-    const potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(1 - rng.next())) ** 1.2;
+    const potential = -10 + params.potential.draftScale * (-Math.log(1 - rng.next())) ** 1.2;
     const age = univ ? 22 : 18;
-    const runs = univ ? potential * 0.35 - 8 : potential * 0.1 - 14;
-    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs: runs + rng.range(-3, 3), potential }, year);
+    // 시작 능력 (잠재력 v2 18.5): 천장 − 고졸 18세 격차 × (1 − 성장 몫)^(입단 전 해 수 × 경로 배율). 대졸은 대학 4년 = 프로 3년 꼴로 자란 채 들어온다
+    // (예전 식 고졸 0.1P − 14 · 대졸 0.35P − 8은 같은 천장의 대졸이 22세에 8~9등급 뒤였다)
+    const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
+    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * rng.range(0.7, 1.3));
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential }, year);
     p.school = univ ? 'UNIV' : 'HS';
     // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
     if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;
-    // 스카우트 평가: 실제 잠재력에 오차 (모든 구단이 같은 평가를 본다. 난이도별 오차는 M7)
-    p.scoutPotential = scoutView(league, potential, rng);
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
     p.contract = { kind: 'rookie', salary: rookieSalary(year + 1, league), until: year + 1 };
     pool.push(p.id);
@@ -1992,7 +2118,10 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const [t, o] = [owned.slots[i], owned.orig[i]];
     if (t !== o && (t === off.userTeam || o === off.userTeam)) log(off, 'draft', `${built.kinds[i]}라운드 ${league.teams[o].name} 지명권은 ${league.teams[t].name}이 씁니다 (트레이드)`, true);
   }
-  off.draft = { order, slots: owned.slots, orig: owned.orig, kinds: built.kinds, pick: 0, pool, picks: [] };
+  const byId = new Map(league.players.map((p) => [p.id, p]));
+  const now: Record<string, number> = {};
+  for (const id of [...pool, ...off.devExtra]) now[id] = Math.round(runsOf(byId.get(id)!, view.ctx, year + 1) * 10) / 10;
+  off.draft = { order, slots: owned.slots, orig: owned.orig, kinds: built.kinds, pick: 0, pool, picks: [], now };
   runDraftUntilUser(league, off);
 }
 
@@ -2021,20 +2150,22 @@ export function draftTotal(off: OffseasonState): number {
 }
 
 /**
- * 남은 후보 중 가장 좋아 보이는 선수. AI 구단은 난이도 오차가 들어간 잠재력(aiPotential)으로,
- * 플레이어의 자동 지명은 스카우트 평가로 고른다.
+ * 그 구단 스카우트 팀의 드래프트 보드 (기획안 19.2): 남은 후보를 추측 지금 능력 + 추측 격차 × 나이 몫으로 줄 세운다 (scout.ts).
+ * 플레이어 보드는 선수만 보고(포지션 필요를 섞지 않음), AI 구단 보드는 성향 가중과 포수 필요(MIN_CATCHERS보다 적으면 +8런, 임시값)를 더한다.
+ * AI도 진짜 천장·지금 능력을 보지 않는다 (예전에는 진짜 잠재 + 난이도 오차)
  */
+export function boardFor(league: LeagueState, off: OffseasonState, team: number, user: boolean): BoardRow[] {
+  const d = off.draft!;
+  const byId = new Map(league.players.map((p) => [p.id, p]));
+  const ps = d.pool.map((id) => byId.get(id)!);
+  const needC = !user && league.players.filter((p) => p.team === team && !p.isPitcher && p.pos === 'C' && !isServing(p)).length < MIN_CATCHERS;
+  return draftBoard(league, { team, user }, ps, d.now, { teams: d.order.length, slots: draftTotal(off), year: off.year + 1, catcherBonus: needC ? CATCHER_NEED_BONUS : 0 });
+}
+
+/** 지금 지명 차례 구단의 보드 1위 (플레이어의 자동 지명 = 우리 보드 1위) */
 function bestProspect(league: LeagueState, off: OffseasonState, forUser = false): LeaguePlayer {
-  const ps = off.draft!.pool.map((id) => league.players.find((x) => x.id === id)!);
-  // AI 구단은 포수가 MIN_CATCHERS보다 적으면 포수 후보를 더 쳐준다 (임시값)
-  const team = draftTeamAt(off, off.draft!.pick);
-  const needC = !forUser && league.players.filter((p) => p.team === team && !p.isPitcher && p.pos === 'C' && !isServing(p)).length < MIN_CATCHERS;
-  // AI 구단은 난이도 오차가 든 평가를 보고, 스카우트 투자가 그 오차를 줄인다 (finance.ts)
-  const aiScale = AI_SCOUT_SCALE[activeLevel(league, team, 'scout')];
-  const score = (p: LeaguePlayer) =>
-    (forUser ? p.scoutPotential ?? p.potential : p.potential + (aiPotential(league, p) - p.potential) * aiScale)
-    + (needC && !p.isPitcher && p.pos === 'C' ? CATCHER_NEED_BONUS : 0);
-  return ps.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id))[0];
+  const top = boardFor(league, off, draftTeamAt(off, off.draft!.pick), forUser)[0];
+  return league.players.find((p) => p.id === top.id)!;
 }
 
 function makePick(league: LeagueState, off: OffseasonState, p: LeaguePlayer): void {
@@ -2354,17 +2485,17 @@ const CATCHER_NEED_BONUS = 8;
 
 /**
  * 방출 순서 (먼저 내보낼 선수부터). 외국인·복무 중·FA·다년 계약 선수는 빼고, 입단 ROOKIE_GRACE시즌 안의 신인은 뒤로,
- * 나머지는 앞으로 8시즌 가치가 낮은 순. 포지션 최소 인원 아래로 내려가게 하는 선수는 건너뛰어 맨 뒤에 둔다.
+ * 나머지는 가치가 낮은 순 (AI 구단은 앞으로 8시즌 가치, 플레이어 구단은 우리 스카우트 가치). 포지션 최소 인원 아래로 내려가게 하는 선수는 건너뛰어 맨 뒤에 둔다.
  */
 export function releaseOrder(league: LeagueState, off: OffseasonState, view: LeagueView, team: number,
-                             valueOf: (p: LeaguePlayer) => number = (p) => releaseValue(view, p)): LeaguePlayer[] {
+                             valueOf: (p: LeaguePlayer) => number = defaultReleaseValue(league, off, view, team)): LeaguePlayer[] {
   const { order, kept } = releaseSplit(league, off, view, team, valueOf);
   return [...order, ...kept];
 }
 
 /** releaseOrder를 둘로: order = 최소 인원을 지키며 차례로 내보낼 수 있는 선수, kept = 최소 인원 때문에 뒤로 미룬 선수 */
 export function releaseSplit(league: LeagueState, off: OffseasonState, view: LeagueView, team: number,
-                             valueOf: (p: LeaguePlayer) => number = (p) => releaseValue(view, p)): { order: LeaguePlayer[]; kept: LeaguePlayer[] } {
+                             valueOf: (p: LeaguePlayer) => number = defaultReleaseValue(league, off, view, team)): { order: LeaguePlayer[]; kept: LeaguePlayer[] } {
   // 육성선수는 정원에 들지 않으므로 방출 순서에서 뺀다
   const roster = league.players.filter((p) => p.team === team && !isServing(p) && !p.dev);
   const left = {
@@ -2396,6 +2527,23 @@ export function releaseSplit(league: LeagueState, off: OffseasonState, view: Lea
 /** 방출 판단의 가치: 앞으로 8시즌 (RELEASE_WEIGHTS). AI가 보는 잠재력(view.ctx.potential)으로 성장을 내다본다 */
 export function releaseValue(view: LeagueView, p: LeaguePlayer): number {
   return playerValue(view.sim.get(p.id)!, view.ctx, RELEASE_WEIGHTS);
+}
+
+/**
+ * 플레이어 구단의 방출 가치: 우리 스카우트 가치 (scout.ts seenValue = 추측 지금 + 추측 격차 × 나이 몫, 다음 시즌 기준).
+ * 정원 정리 화면의 순서·'방출 대상'과 자동 방출이 이것을 따른다 (진짜 8시즌 가치로 줄 세우면 숨은 잠재가 드러난다, 2026-10-25 클사장 결정)
+ */
+export function userReleaseValue(league: LeagueState, off: OffseasonState, view: LeagueView, p: LeaguePlayer): number {
+  const sp = view.sim.get(p.id);
+  const year = off.year + 1;
+  const seen = seenFor(league, off.userTeam, p.id, p, sp?.bat?.sample ?? sp?.pit?.sample ?? 0, true);
+  const ageNext = p.birthYear ? year - p.birthYear : 25;
+  return seenValue(league, { team: off.userTeam, user: true }, seen, sp ? currentRuns(sp, view.ctx) : 0, p.potential, ageNext, year);
+}
+
+/** 방출 순서의 기본 가치: 플레이어 구단은 우리 스카우트 가치, AI 구단은 releaseValue (aiPotential 길) */
+function defaultReleaseValue(league: LeagueState, off: OffseasonState, view: LeagueView, team: number): (p: LeaguePlayer) => number {
+  return team === off.userTeam ? (p) => userReleaseValue(league, off, view, p) : (p) => releaseValue(view, p);
 }
 
 function enterRelease(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
@@ -2657,25 +2805,37 @@ export function openMarket(league: LeagueState, store: Store, params: EnginePara
   const view = leagueView({ ...league, year: year - 1 }, store, params);
   const rng = new Rng(`${league.seed}/market/${year}`);
   const taken = takenNames(league, store);
-  const n = MARKET_REGULAR + (rule.asia > 0 ? MARKET_ASIA : 0);
-  for (let i = 0; i < n; i++) {
-    const asia = i >= MARKET_REGULAR;
-    // 시즌 중에 남아 있는 후보는 개막 전 시장보다 한 단계 아래 (일반 16~38런, 평균 26)
-    const p = makeVirtual(league, view, rng, taken, {
-      foreign: true, asia, age: asia ? 22 + rng.int(9) : 26 + rng.int(9),
-      runs: asia ? 2 + rng.range(-4, 10) : 26 + rng.range(-10, 12),
-    }, year - 1);
-    p.contract = { kind: 'foreign', salary: foreignSalary(p.potential, true, asia, league, year), until: year };
-    p.scoutPotential = scoutView(league, p.potential, rng);
+  // 시즌 중 후보도 지역별로 만들고 파견·에이전트 추천으로 찾은 구단만 본다 (scoutfx.ts). 머무는 주는 마감 무렵까지 흩어 둔다
+  const plan = fxPoolPlan(rule.asia > 0, true);
+  for (const slot of plan) {
+    // 시즌 중에 남아 있는 후보는 개막 전 시장보다 한 단계 아래 (fxSpec season)
+    const p = makeFxCandidate(league, view, rng, taken, slot.region, slot.asia, true, year - 1);
+    p.fx = fxSeasonWindow(rng, slot.region, FX_SEASON_WEEKS);
+    p.contract = { kind: 'foreign', salary: foreignSalary(marketReputation(league.seed, p.id, runsOf(p, view.ctx, year), year), true, slot.asia, league, year), until: year };
+    rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     p.market = year;
   }
-  return n;
+  fxState(league, year, false);
+  return plan.length;
 }
 
-/** 우리 구단이 보는 잠재력 (스카우트 투자 단계에 따른 오차) */
-function scoutView(league: LeagueState, potential: number, rng: Rng): number {
-  const n = SCOUT_NOISE[activeLevel(league, league.owner?.team ?? -1, 'scout')];
-  return Math.round(potential + rng.range(-n, n));
+/** 시즌 중 후보가 나올 수 있는 주 수 (개막 ~ 8월 중순 외국인 교체 마감 약 20주, 임시값) */
+export const FX_SEASON_WEEKS = 20;
+
+/** 시기 τ (16-4a): 리그를 만들 때 정한 값, 없으면 시드로 (branches.ts) */
+function timingFor(league: LeagueState, p: LeaguePlayer, params: EngineParams): number {
+  return p.timing ?? timingOf(league.seed, p.id, false, params);
+}
+
+/**
+ * 갈래 성장 (16-4a, branches.ts): 성장 판정이 정한 새 종합 런(next)을 갈래별 나이 곡선과 갈래 천장까지 남은 거리 방향으로 싣는다.
+ * 갈래 천장이 없거나 종합 천장이 바뀌었으면 여기서 (다시) 만든다
+ */
+function growInBranches(league: LeagueState, p: LeaguePlayer, next: number, ctx: ValueContext, year: number, age: number, breakout: boolean | undefined,
+                        params: EngineParams, focus?: { branch: string; up: number; down: number }): void {
+  p.ceil = ceilingFor(p, ctx, year, league.seed, params);
+  Object.assign(p, growBranches({ ...p }, p.ceil, next, ctx, year,
+    { age, timing: timingFor(league, p, params), stream: `${league.seed}/growth2/${year}/${p.id}`, breakout, ...(focus ? { focus } : {}) }, params));
 }
 
 /** 육성 투자: 25세 이하 선수가 오를 때 오름폭을 늘린다 */
@@ -2729,17 +2889,12 @@ export function masterIsPitcher(m: PlayerMaster, career: () => CareerIndex): boo
   return tbf > pa;
 }
 
-/** 1군에 끝내 오르지 못한 지명자의 잠재력 (기획서 6.3: 낮은 범위, 임시값) */
-const NEVER_POTENTIAL: [number, number] = [-15, -3];
-
 /**
- * 실제 지명 신인 한 명을 리그(무소속)에 넣는다 (기획서 6.3).
- * - 실제 기록이 있는 선수(마스터와 맞춰짐): 실존 선수와 같은 id·생년·투타를 쓰고, 잠재력은 실제 커리어의 전성기 기여(realPeakRuns).
- *   그래서 과거 연도에서 시작하면 류현진 같은 선수는 실제 커리어대로 높은 잠재력을 가진다.
- * - 과거 지명자인데 1군 기록이 없는 선수: 낮은 범위에서.
- * - 아직 커리어를 알 수 없는 최근 지명자 (자료 마지막 해 기준 2년 안, 예: 2027 입단): 지명 순번(index, 0부터)을 가상 신인과 같은
- *   순위 식에 넣고 운을 크게 더한다. 지명 순번과 실제 커리어의 관계는 약하다 (임시값).
- * 시작 능력은 잠재력에서 나이 여유분(growthRoom × 0.7~1.3)을 뺀 값 (-15런 아래로는 내리지 않는다).
+ * 실제 지명 신인 한 명을 리그(무소속)에 넣는다 (잠재력 v2, 능력치 v2 기획안 18.3 — 2026-10-24 사용자 덧붙임 2 "그렇게 클거라고는 누구도 모르고").
+ * - 천장 중심 = 지명 순위 표(당시 평가 순, potential.ts) + 실제 커리어 고점 쪽으로 ¼ (Q10 ②, 고점이 낮으면 당기지 않음).
+ *   1군에 끝내 못 온 지명자도 같은 표라 어떤 판에서는 주전이 된다. 천장 = 중심 + 입단 나이 폭 × 1.5 × 삼각 분포 (시드 `pa`)
+ * - 실제 기록이 있는 선수(마스터와 맞춰짐)는 실존 선수와 같은 id·생년·투타를 쓴다.
+ * - 시작 능력은 중심에서 학력 시작 식(entryGap × 0.7~1.3)만큼 아래 (-15런 아래로는 내리지 않는다). 뽑힌 천장에서 빼지 않아 지금 능력이 천장을 흘리지 않는다.
  */
 /**
  * 신인의 수비 포지션 (2026-10-13 사용자 "이대호는 지명하자마자 지명타자로 뜬다. 현실에서 그런 선수는 없다"):
@@ -2766,27 +2921,30 @@ export function rookiePosition(store: Pick<DataStore, 'season' | 'meta'>, m: Pla
   return 'IF';
 }
 
+/** 지명 신인의 천장 중심 (런, potential.ts drafteeCenter): 그 해 지명의 당시 평가 순위와 실제 커리어 고점(있으면) */
+export function drafteeCenterOf(store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'drafts'>>, m: PlayerMaster | null, d: DraftRow, entryYear: number,
+                                isPitcher: boolean, pos: string | null, view: LeagueView, career: () => CareerIndex, pp: EngineParams['potential'] = DEFAULT_PARAMS.potential): number {
+  const rank = draftRank(store.drafts?.[String(entryYear)] ?? [d], d) ?? Infinity;
+  const probe = m ? { id: m.id, isPitcher, pos, bat: null, pit: null, birthYear: null } as unknown as SimPlayer : null;
+  return drafteeCenter({ rank, univ: d.univ, entryYear }, probe ? realPeakRuns(probe, career(), store, view.ctx) : null, pp);
+}
+
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
-                            entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'>, career: () => CareerIndex): LeaguePlayer {
+                            entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'> & Partial<Pick<DataStore, 'drafts'>>, career: () => CareerIndex,
+                            pp: EngineParams['potential'] = DEFAULT_PARAMS.potential): LeaguePlayer {
   const m = matchDraftee(store, d, entryYear, league);
   const isPitcher = m ? masterIsPitcher(m, career) : d.pos === 'P';
   const pos = isPitcher ? null : rookiePosition(store, m, entryYear, d.pos);
-  const lastData = Math.max(...store.meta.years);
-  let potential: number;
-  if (m) {
-    const probe = { id: m.id, isPitcher, pos, bat: null, pit: null, birthYear: null } as unknown as SimPlayer;
-    potential = realPeakRuns(probe, career(), store, view.ctx) ?? rng.range(...NEVER_POTENTIAL);
-  } else if (d.games === 0 && entryYear <= lastData - 2) {
-    potential = rng.range(...NEVER_POTENTIAL);
-  } else {
-    const f = (index + 0.5) / DRAFT_POOL;
-    potential = -10 + DRAFT_POTENTIAL_SCALE * (-Math.log(Math.min(1, f))) ** 1.2 + (rng.next() + rng.next() - 1) * 12;
-  }
+  const id = m?.id ?? `d${entryYear}-${index + 1}`;
+  const center = drafteeCenterOf(store, m, d, entryYear, isPitcher, pos, view, career, pp);
   const age = m ? entryYear - (m.birthYear ?? estimatedBirthYear(m)) : d.univ ? 22 : 18;
-  const start = Math.max(-15, potential - growthRoom(age) * rng.range(0.7, 1.3));
+  const abroad = d.kind === '해외' || (d.drafted !== undefined && entryYear - d.drafted >= 3 && !d.univ);
+  const { path, years } = entryPathOf(m?.school ?? (d.univ ? 'UNIV' : 'HS'), age, m ? 19 : 18, abroad);
+  const start = Math.max(-15, center - entryGap(growthRoom(18), years, path) * rng.range(0.7, 1.3));
+  const potential = drafteeCeiling(id, center, start, age + 1, entryYear, league.seed, pp);
   const p = makeVirtual(league, view, rng, taken, {
     foreign: false, asia: false, age, runs: start, potential,
-    real: true, name: m?.name ?? d.name, isPitcher, pos, id: m?.id ?? `d${entryYear}-${index + 1}`,
+    real: true, name: m?.name ?? d.name, isPitcher, pos, id,
     birthYear: m ? m.birthYear ?? estimatedBirthYear(m) : undefined, bats: m?.bats, throws: m?.throws, underhand: m?.underhand,
     starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
   }, entryYear - 1);
@@ -2794,7 +2952,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
   // 겸업 재능 (league/twoway.ts): 실제 지명 표기가 투타겸업 (예: 하현승 2027 키움 1순위)
   if (d.twoWay) p.twoWayTalent = true;
   if (m && !m.birthYear) p.birthYearEstimated = true;
-  p.scoutPotential = scoutView(league, potential, rng);
+  rng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
   view.ctx.potential?.set(p.id, aiPotential(league, p));
   p.contract = { kind: 'rookie', salary: rookieSalary(entryYear, league), until: entryYear };
   // 해외 프로에서 뛰다 들어온 선수 (해외파 특별지명, 해외 진출 뒤 늦게 입단): 신인상 자격이 없고 다시 포스팅을 요청하지 않는다
@@ -2835,7 +2993,12 @@ interface VirtualSpec {
   starter?: boolean;
   /** 실존 선수의 언더·사이드 여부 (가상 선수는 makeVirtual이 실제 비율로 정한다) */
   underhand?: boolean;
+  /** 제구형 투수 (외국인 일본 지역 후보, scoutfx.ts): 삼진·볼넷을 함께 낮추고 가치는 skillForRuns가 다시 맞춘다 */
+  control?: boolean;
 }
+
+/** 제구형 투수의 삼진·볼넷 배율 (임시값) */
+const CONTROL_SKILL = { so: 0.92, bb: 0.8 };
 
 /**
  * 가상 국내 투수가 언더·사이드일 확률 (투구손별). 하드힛 투수 classic 2010~2025 이닝 몫: 우완 중 15.4%, 좌완 중 0.4% (임시값)
@@ -2888,8 +3051,11 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     p.underhand = true;
     p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so, bb: p.pit.bb * UNDERHAND_SKILL.bb };
   }
+  if (spec.control && p.pit) p.pit = { ...p.pit, so: p.pit.so * CONTROL_SKILL.so, bb: p.pit.bb * CONTROL_SKILL.bb };
   Object.assign(p, skillForRuns(p, spec.runs, view.ctx, nextYear));
   p.potential = Math.max(spec.runs, spec.potential ?? spec.runs + 4 * rng.next());
+  // 숨은 성장 성향 (잠재력 v2, potential.ts): 선수별 시드라 공유 난수 흐름을 바꾸지 않는다
+  p.drive = driveOf(league.seed, p.id);
   league.players.push(p);
   const sim = { ...asSim(p, view.ctx.world.league, nextYear), idx: 2_000_000 + league.nextVirtualId, name: p.name, foreign: p.foreign, teamIdx: -1 };
   view.sim.set(p.id, sim);

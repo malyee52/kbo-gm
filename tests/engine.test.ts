@@ -86,9 +86,15 @@ describe('월드 구성 (2025년)', () => {
 
   it('능력치에 비정상 값이 없다', () => {
     for (const p of world.players) {
-      // 수비 가능 자리·비상 포수·포수 도루 저지(능력치 v2 16-3)는 숫자 칸이 아니거나 음수일 수 있다
-      const { def, plateRes, playable: _pl, emC: _e, cArm, ...rest } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number>; plateRes?: Record<string, number>; playable?: string[]; emC?: true; cArm?: number };
+      // 수비 가능 자리·비상 포수·포수 도루 저지(능력치 v2 16-3)는 숫자 칸이 아니거나 음수일 수 있다.
+      // 주루·작전·포수·투수 짝·어깨 손잡이(16-3c·16-3d)는 리그 대비 값이라 음수일 수 있다
+      // 수비 재능 T(defTalent, 16-4)는 자리별 숫자 묶음, 수비 고치기로 연 자리(defEdit)는 목록이다
+      const { def, plateRes, playable: _pl, emC: _e, cArm, defTalent, defEdit: _de, ...all } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number>; plateRes?: Record<string, number>; playable?: string[]; emC?: true; cArm?: number; defTalent?: Record<string, number>; defEdit?: string[] };
       if (cArm !== undefined) expect(Number.isFinite(cArm), `${p.name} cArm`).toBe(true);
+      for (const [k, v] of Object.entries(defTalent ?? {})) expect(Number.isFinite(v), `${p.name} defTalent.${k}`).toBe(true);
+      const KNOBS = ['sbStart', 'sbJudge', 'runIQ', 'bunting', 'cBlock', 'cFrame', 'arm', 'hold', 'quick'];
+      for (const k of KNOBS) if (all[k] !== undefined) expect(Number.isFinite(all[k]), `${p.name} ${k}`).toBe(true);
+      const rest = Object.fromEntries(Object.entries(all).filter(([k]) => !KNOBS.includes(k)));
       // 사슬 실측 몫(능력치 v2 16-1)은 로짓 차라 음수일 수 있다
       for (const [k, v] of Object.entries(plateRes ?? {})) expect(Number.isFinite(v), `${p.name} plateRes.${k}`).toBe(true);
       for (const [k, v] of Object.entries(rest)) {

@@ -16,6 +16,8 @@
 평판 CSV에는 근거 문장을 넣지 않는다 (실존 선수 서술 문장, 라이선스). 등급·시기·출처 문서 제목만 넣는다.
 평판의 시기 글은 적힌 연도만 연도 범위로 바꾼다 ('데뷔 초'·'20대'·'고교 시절' 같은 말은 버리고, 연도가 없으면 통산으로 본다).
 시기 글이 '고교 시절'뿐인 평판 줄은 버린다 (프로 수비 근거가 아님, 2026-10-23 클사장 결정).
+어깨 (능력치 v2 12.6·결정 28, 16-3b 자료 단계): 근거 요약의 어깨 낱말을 ARM_GOOD·ARM_BAD로 갈라 '어깨' 열(1 좋음, -1 나쁨, 0 없음·둘 다)에 담는다.
+  낱말은 어깨 힘만 본다 ('송구 불안' 같은 정확도, '어깨 부상'은 넣지 않는다). 시기는 그 평판 줄의 시기를 따른다. 낱말 목록은 임시값.
 """
 import csv
 import json
@@ -37,6 +39,9 @@ OUT_REP = ROOT / 'data-src' / '수비평판.csv'
 
 DEF_SOURCE = 'KBO 공식 사이트 수비 기록 (사용자 수집)'
 POS_KR = {'포수': 'C', '1루수': '1B', '2루수': '2B', '3루수': '3B', '유격수': 'SS', '좌익수': 'LF', '중견수': 'CF', '우익수': 'RF'}
+# 어깨 낱말 (임시값). 문장은 저장소에 넣지 않고 갈린 값만 넣는다
+ARM_GOOD = re.compile(r'강견|어깨가 (매우 |아주 |굉장히 )?(강|좋)|강한 어깨|좋은 어깨|강한 송구|송구(력|가) (매우 |아주 )?(강|좋|뛰어)|레이저|대포알')
+ARM_BAD = re.compile(r'약견|어깨가 (매우 |많이 )?(약|좋지 않|나쁘)|약한 어깨|송구력이 (매우 |많이 )?(약|좋지 않|나쁘)')
 REP_POS = ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'IF', 'OF', '전반')
 REP_LEVEL = {'매우 좋음': 2, '좋음': 1, '보통': 0, '나쁨': -1, '매우 나쁨': -2}
 
@@ -242,10 +247,12 @@ def build_reputation(players):
         a, b, used = period_of(r['시기'])
         if r['시기'].strip() not in ('', '통산') and not used:
             skipped['연도 없는 시기 글이라 통산으로 봄'] += 1
+        text = r.get('근거 요약') or ''
+        arm = (1 if ARM_GOOD.search(text) else 0) - (1 if ARM_BAD.search(text) else 0)
         title = ('나무위키: ' + r['나무위키 출처']) if r['나무위키 출처'] else ('위키백과: ' + r['위키백과 출처'])
         out.append({'선수ID': pid, '이름': r['이름'], '자리': r['자리'], '평판': r['평판'], '수준': REP_LEVEL[r['평판']],
                     '시기_시작': a if a is not None else '', '시기_끝': b if b is not None else '', '시기_근거': used or '통산',
-                    '출처': title})
+                    '어깨': arm, '출처': title})
     out.sort(key=lambda x: (x['선수ID'], x['자리'], x['시기_시작'] or 0))
     return out, skipped
 
@@ -269,8 +276,10 @@ def main():
     print(f'수비 이닝 {len(rows):,}행 (원본 {sum(raw_n.values()):,}행, 투수 행 제외), 2004년 원본 {raw_n[2004]}행 → {OUT_DEF}')
     print('  선수 ID 짝: ' + ', '.join(f'{k} {v:,}' for k, v in why.most_common()))
     rep, skipped = build_reputation(players)
-    write_csv(OUT_REP, rep, ['출처', '선수ID', '이름', '자리', '평판', '수준', '시기_시작', '시기_끝', '시기_근거'])
+    write_csv(OUT_REP, rep, ['출처', '선수ID', '이름', '자리', '평판', '수준', '시기_시작', '시기_끝', '시기_근거', '어깨'])
     print(f'수비 평판 {len(rep):,}행 ({len({r["선수ID"] for r in rep}):,}명) → {OUT_REP}' + ''.join(f', {k} {v}행' for k, v in skipped.items()))
+    arm = Counter(r['어깨'] for r in rep)
+    print(f'  어깨 낱말: 좋음 {arm[1]}행 ({len({r["선수ID"] for r in rep if r["어깨"] == 1})}명), 나쁨 {arm[-1]}행 ({len({r["선수ID"] for r in rep if r["어깨"] == -1})}명)')
 
 
 if __name__ == '__main__':

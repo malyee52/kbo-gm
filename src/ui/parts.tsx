@@ -1,34 +1,41 @@
 // 화면 공통 부품 (2026-10-23 UI 2단계 U2-1, 기획안 1.3): 등급 칸, 리그 평균 대비, 짐작 문구 칸, 없음 표시, 공통 표.
-// 계산은 compare.ts(리그 대비)·table.ts(정렬·거르기·열 고르기·표 보기 저장)·grades.ts(잠재 범위)에 두고 여기서는 그리기만 한다.
+// 계산은 compare.ts(리그 대비)·table.ts(정렬·거르기·열 고르기·표 보기 저장)·league/scout.ts(스카우트 추측)에 두고 여기서는 그리기만 한다.
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Grade, gradeClass, useGame } from './context';
-import { potentialText, potentialView, type PotentialView } from './grades';
-import { activeLevel, SCOUT_NOISE } from '../league/finance';
 import { topPercent, vsMark } from './compare';
+import { guessText, type GuessSet, type GuessView } from '../league/scout';
 import { EMPTY_VIEW, filterRows, loadView, nextSort, saveView, sortRows, toggleColumn, toggleGroup, visibleColumns, type Column, type TableView } from './table';
 
 /**
- * 등급 칸: 이름 | 막대 | 숫자. 상세 모드에서는 잠재(범위)·지난 시즌 대비 변화·관련 기록을 뒤에 붙인다.
+ * 등급 칸: 이름 | 막대 | 숫자. 상세 모드에서는 지난 시즌 대비 변화·관련 기록을 뒤에 붙인다.
+ * v가 스카우트 추측(GuessView)이면 막대는 아래 끝까지 칠하고 범위만큼 흐리게 더 칠한다 (능력치 v2 17.7 ①).
  * 등급 낱말("좋음" 등)은 쓰지 않는다 (결정 2: 요약은 능력치 숫자만, 기준 없는 낱말 빼기)
  */
-export function GradeBar({ label, v, title, pot, delta, note }: {
-  label: ReactNode; v: number | null; title?: string;
-  /** 잠재 글자 ("55~65"). 상세에서만 넘긴다 */
-  pot?: string | null;
+export function GradeBar({ label, v, title, delta, note }: {
+  label: ReactNode; v: number | GuessView | null; title?: string;
   /** 지난 오프시즌 대비 (+3 / −2). 상세에서만 */
   delta?: number | null;
   /** 관련 결과 기록 (상세에서만) */
   note?: ReactNode;
 }) {
-  const extra = pot !== undefined || delta !== undefined || note !== undefined;
+  const extra = delta !== undefined || note !== undefined;
+  const w = (x: number) => `${((Math.min(80, Math.max(20, x)) - 20) / 60) * 100}%`;
+  const g = v === null || typeof v === 'number' ? null : v;
+  const one = typeof v === 'number' ? v : g?.kind === 'one' ? g.v : null;
   return (
     <div className={`gbar${extra ? ' gbar-x' : ''}`} title={title}>
       <span>{label}</span>
-      <span className="track" aria-hidden><i className={gradeClass(v)} style={{ width: `${v === null ? 0 : ((Math.min(80, v) - 20) / 60) * 100}%` }} /></span>
-      <Grade v={v} />
+      {g?.kind === 'range' ? (
+        <span className="track range" aria-hidden>
+          <i className={gradeClass(g.mid)} style={{ width: w(g.lo) }} />
+          <i className={`rng ${gradeClass(g.mid)}`} style={{ width: `calc(${w(g.hi)} - ${w(g.lo)})` }} />
+        </span>
+      ) : (
+        <span className="track" aria-hidden><i className={gradeClass(one)} style={{ width: one === null ? 0 : w(one) }} /></span>
+      )}
+      {g ? <GuessGrade v={g} /> : <Grade v={one} />}
       {extra && (
         <span className="gbar-more small">
-          {pot !== undefined && <span title="잠재 (스카우트 짐작, 범위 밖일 수도 있다)">{pot === null ? <Missing /> : <>잠재 {pot}</>}</span>}
           {delta !== undefined && <Delta v={delta} />}
           {note !== undefined && <span className="muted">{note}</span>}
         </span>
@@ -38,27 +45,52 @@ export function GradeBar({ label, v, title, pot, delta, note }: {
 }
 
 /**
- * 잠재 표시 규칙 (결정 5, 모든 화면): 27세 이하 범위, 28~30세 숫자 하나, 31세 이상 숨김.
- * 스카우트 오차는 우리 구단 스카우트 투자 단계. age는 그 화면이 쓰는 나이 (오프시즌은 다음 시즌 나이)
+ * 갈래 추측 셋 (능력치 v2 17.6): 목록의 종합·잠재 열 자리. 타자 컨택·파워·선구, 투수 구위·제구·체력을 우리 스카우트 팀의 추측 범위로.
+ * 시즌 중은 GameShell의 진짜 화면 등급, 오프시즌은 다음 시즌 기준 등급(session.offGrades)을 거친다. 등급이 없는 선수는 null.
+ * 화면은 진짜 등급(grades)을 직접 그리지 않고 늘 이것을 거친다 (tests/hidden-values.test.ts)
  */
-export function usePotentialOf(): (p: { id: string; potential: number; scoutPotential?: number }, age: number | null) => PotentialView {
-  const { session } = useGame();
-  const noise = SCOUT_NOISE[activeLevel(session.league, session.teamIdx, 'scout')];
-  const seed = session.league.seed;
-  const year = session.year;
-  return (p, age) => potentialView(p, age, { seed, noise, year });
+export interface SeenGrades {
+  /** 화면 갈래 하나의 추측 (key = contact·power·eye·speed·stuff·control·hrSuppression·stamina·reliefStamina·defense). tg를 주면 그 진짜 등급으로 */
+  grade(id: string, key: string, tg?: number | null): GuessView | null;
+  /** 목록 칸의 갈래 추측 셋 */
+  set(id: string): GuessSet | null;
 }
 
-/** 정렬·거르기용 잠재 등급: 범위는 가운데(짐작값), 숨김은 null */
-export function potentialSortValue(v: PotentialView): number | null {
-  return !v ? null : v.kind === 'one' ? v.v : v.guess;
+export function useSeen(): SeenGrades {
+  const { session, grades } = useGame();
+  const g = session.phase === 'season' ? grades : session.offGrades();
+  return {
+    grade: (id, key, tg) => {
+      const v = tg !== undefined ? tg : ((g.batters.get(id) ?? g.pitchers.get(id)) as Record<string, number | null> | undefined)?.[key];
+      return v === null || v === undefined ? null : session.guessGrade(id, key, v);
+    },
+    set: (id) => session.guessSet(id, g),
+  };
 }
 
-/** 표 안 잠재 칸. 범위는 가운데(짐작값) 색으로 칠한다 */
-export function PotCell({ v }: { v: PotentialView }) {
-  if (!v) return <span className="muted" title="31세 이상은 잠재를 보이지 않습니다">-</span>;
+/** 추측 한 칸: "55~65" 또는 "61". 범위는 가운데값 색, "추측" 풀이 */
+export function GuessGrade({ v }: { v: GuessView | null | undefined }) {
+  if (!v) return <Grade v={null} />;
   if (v.kind === 'one') return <Grade v={v.v} />;
-  return <span className={`grade pot-range ${gradeClass(v.guess)}`} title="스카우트 짐작 범위 (실제 값이 범위 밖일 수도 있다)">{potentialText(v)}</span>;
+  return <span className={`grade pot-range ${gradeClass(v.mid)}`} title="스카우트 추측 범위 (실제 값이 범위 밖일 수도 있다)">{guessText(v)}</span>;
+}
+
+/** 표 안 갈래 추측 셋: "컨 55~65 파 60 선 45~55" */
+export function GuessCell({ g }: { g: GuessSet | null | undefined }) {
+  if (!g) return <Missing why="기록 없음" />;
+  return (
+    <span className="guess-set" title={g.items.map((it) => `${it.label} ${guessText(it.view)}`).join(' · ') + ' (스카우트 추측)'}>
+      {g.items.map((it) => <span key={it.key}><span className="muted small">{it.short}</span><GuessGrade v={it.view} /></span>)}
+    </span>
+  );
+}
+
+/** 공통 표 열: 갈래 추측 셋 (정렬은 가운데값 평균) */
+export function guessColumn<R>(get: (r: R) => GuessSet | null | undefined, extra?: Partial<Column<R>>): Column<R> {
+  return {
+    key: 'guess', label: '능력 추측', brief: true, title: '스카우트 추측: 타자 컨택·파워·선구, 투수 구위·제구·체력. 정렬은 가운데값 평균',
+    value: (r) => get(r)?.sort ?? null, cell: (r) => <GuessCell g={get(r)} />, ...extra,
+  };
 }
 
 /** 지난 시즌 대비 변화 (+3 / −2 / 0). null은 비교할 값 없음 */
