@@ -38,7 +38,8 @@ describe('퓨처스리그', () => {
 
   it('시즌 내내 1군에 있던 주전은 퓨처스 기록이 거의 없고, 2군 선수는 있다', () => {
     const f = full.futures();
-    const regulars = full.world.players.filter((p) => !p.isPitcher && full.season.bat[p.idx].pa >= 450);
+    // 외국인은 뺀다: 외국인 1군 등록 한도 때문에 주전 외국인 타자도 외국인 투수가 올라온 날은 2군에 머문다 (2026-10-23 fut-test 두산 톰프슨 468타석·퓨처스 114타석)
+    const regulars = full.world.players.filter((p) => !p.isPitcher && !p.foreign && full.season.bat[p.idx].pa >= 450);
     expect(regulars.length).toBeGreaterThan(20);
     for (const p of regulars) expect(f.lines.get(p.idx)?.bat?.pa ?? 0).toBeLessThan(60);
     const minors = full.world.players.filter((p) => !p.isPitcher && full.season.bat[p.idx].pa === 0 && !p.foreign && (p.startAbsent ?? 0) === 0);

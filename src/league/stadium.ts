@@ -7,9 +7,14 @@
 //   만족도는 관중률과 스폰서 수입을 움직인다. 시즌 중 변화는 날짜와 함께 남겨, 하루씩 진행하든 한 번에 진행하든 관중 수입이 같다.
 // 수치는 모두 임시값.
 
-import { Rng } from '../engine';
-import { realParkAt, realParkOpening } from './ballparks';
+import type { ParkEvents, ParkSpec } from '../data/types';
+import {
+  applyDiff, DEFAULT_PARAMS, fenceBaseOf, fenceOfRow, fenceParkEvents, fenceSpecOf, fenceValid, gameParkOf, guessLogs, historyWallAt, homeParkId,
+  realParkNoOwn, realParkYear, Rng, type EngineParams, type Fence, type ParkLeagueRates, type ParkSource, type RealParkBasis, type SimTeam,
+} from '../engine';
+import { realParkAt, realParkOpening, realParkRename, realParkSpec } from './ballparks';
 import type { LeaguePlayer, LeagueState } from './types';
+import { wageIndex } from './salary';
 
 // ---- 구장
 
@@ -23,9 +28,21 @@ export interface StadiumProject {
   cost: number;
   /** 완공 뒤 수용 인원 */
   capacity: number;
-  /** 신구장 특성: 홈런 배율, 돔 (2026-10-14) */
+  /** 신구장 특성: 홈런 배율 (P6 전 주문만, 예전 저장), 돔 (2026-10-14) */
   hr?: number;
   dome?: boolean;
+  /** 신구장 펜스 제원과 착공 때 계산한 사건별 배율 (구장효과 기획안 6.5, P6). 개장 때 StadiumState로 옮긴다 */
+  fence?: Fence;
+  park?: ParkEvents;
+}
+
+export interface StadiumWork {
+  kind: 'remodel' | 'new' | 'fence' | 'wall' | 'wall-off';
+  /** 공사가 끝나 쓰이기 시작한 시즌 */
+  open: number;
+  cost: number;
+  fence?: Fence;
+  park?: ParkEvents;
 }
 
 export interface StadiumState {
@@ -35,14 +52,30 @@ export interface StadiumState {
   /** 지금 구장 개장 연도 (신구장을 지은 경우만) */
   opened?: number;
   project?: StadiumProject;
-  /** 지난 공사 기록 */
-  done?: { kind: 'remodel' | 'new'; open: number; cost: number }[];
+  /**
+   * 지난 공사 기록. 펜스 조정(fence)·가벽 설치(wall)·가벽 철거(wall-off)는 그 공사의 펜스와 배율도 남겨, 시즌마다 그 시즌에 쓰인 값을 찾는다
+   * (구장효과 기획안 6.7.5·6.8.7). 신구장(new)도 펜스를 고른 것은 배율을 남긴다 (뒤에 펜스를 조정해도 개장 시즌 값이 남게)
+   */
+  done?: StadiumWork[];
   /**
    * 구장 특성 (2026-10-14): 홈런 배율과 돔. 게임 안에서 지은 신구장만 1이 아니다.
-   * 원래 있던 구장은 선수 능력이 그 구장에서 낸 실제 기록에서 나와 구장 효과가 이미 들어 있으므로 1로 둔다 (두 번 세지 않게)
+   * 원래 있던 실제 구장의 효과는 득점 계수(parkRunFactor, meta.parkFactors)로 따로 넣고, 능력 산출이 그만큼 기록에서 걷어 낸다 (2026-10-22)
    */
   hr?: number;
   dome?: boolean;
+  /**
+   * 게임 안에서 지은 신구장의 펜스 제원과 사건별 배율 (구장효과 기획안 6장, P6). 착공 때 한 번 계산해 저장한다
+   * (회귀 계수·규칙이 바뀌어도 지은 구장의 효과는 그대로). 있으면 hr 대신 이것을 쓴다
+   */
+  fence?: Fence;
+  park?: ParkEvents;
+  /**
+   * 펜스 조정 공사(6.7)를 한 실제 구장도 fence·park에 지금 펜스와 조정 뒤 배율을 둔다 (실제 구장은 조정 전에는 비어 있다 = 자료 제원).
+   * fenceFrom = 새 펜스가 쓰인 첫 시즌 (펜스 조정·가벽 설치·제원 바꾸기·철거, 다음 공사까지 간격을 센다)
+   */
+  fenceFrom?: number;
+  /** 서 있는 가벽 (함께 쓰는 구장, 6.8): 가벽 제원, 그 구단 홈 경기 배율, 첫 시즌. 원래 펜스(fence·자료 제원)와 따로 둔다 */
+  wall?: { fence: Fence; park: ParkEvents; from: number };
   /** 구장 이름 (실제 구장 역사 ballparks.ts, 게임 안에서 지은 구장은 '새 구장') */
   name?: string;
   /** 실제 구장 자료가 확인되지 않은 값인가 (화면에 '확인 필요') */
@@ -51,13 +84,19 @@ export interface StadiumState {
   naming?: import('./naming').Naming;
 }
 
-/** 신구장 크기 (홈런 배율, 임시값). 작은 구장은 홈런이 늘고 큰 구장은 준다 */
+/**
+ * 신구장 펜스 예시값 셋 (구장효과 기획안 6.1, 임시값). 버튼을 누르면 칸이 채워진다. P6 전 조작 기록의 크기(size)도 이 제원으로 읽는다.
+ * 높이는 0.1m 단위 정수 (30 = 3.0m). AI 신구장은 '중립'
+ */
 export type ParkSize = 'hitter' | 'neutral' | 'pitcher';
-export const PARK_SIZES: Record<ParkSize, { label: string; hr: number }> = {
-  hitter: { label: '타자 친화 (작은 구장)', hr: 1.2 },
-  neutral: { label: '중립', hr: 1 },
-  pitcher: { label: '투수 친화 (큰 구장)', hr: 0.8 },
+export const FENCE_PRESETS: Record<ParkSize, { label: string; fence: Fence }> = {
+  hitter: { label: '타자 친화 (작은 구장)', fence: { l: 95, c: 120, r: 95, h: 25 } },
+  neutral: { label: '중립', fence: { l: 98, c: 122, r: 98, h: 30 } },
+  pitcher: { label: '투수 친화 (큰 구장)', fence: { l: 101, c: 125, r: 101, h: 35 } },
 };
+
+/** 펜스 제원 한 줄: "좌 96 · 중 121 · 우 99m, 높이 3m" */
+export const fenceText = (f: Fence) => `좌 ${f.l} · 중 ${f.c} · 우 ${f.r}m, 높이 ${f.h / 10}m`;
 /** 돔: 공사비 배율, 관중률 가산 (날씨 걱정 없는 쾌적함, 임시값) */
 export const DOME = { cost: 1.4, fill: 0.03 };
 
@@ -77,9 +116,46 @@ export function municipalChance(league: Pick<LeagueState, 'fans'>, team: number,
 export const AI_NEW_BELOW = 35;
 export const AI_NEW_AGE = 25;
 
-/** 경기에 쓰는 구장 특성 (world.ts SimTeam.park) */
+/** 신구장 특성: 홈런 배율 (P6 전에 지은 신구장만, 펜스 제원이 있으면 1), 돔 */
 export function parkFactor(s: StadiumState | undefined): { hr: number; dome: boolean } {
-  return { hr: s?.hr ?? 1, dome: !!s?.dome };
+  return { hr: s?.park ? 1 : s?.hr ?? 1, dome: !!s?.dome };
+}
+
+/** 구장 화면에 보이는 근거: 실제 구장 값의 근거(park.ts) + 게임 안 신구장·펜스 조정·가벽, 중립 */
+export type TeamParkBasis = RealParkBasis | 'built' | 'fence' | 'wall' | 'none';
+
+/**
+ * 그 해 그 구단 홈 구장의 경기 배율 (world.ts SimTeam.park, 구장 화면·세이버 보정이 같은 값을 읽는다).
+ * 고르는 순서 (구장효과 기획안 6.8.4): 게임 안 가벽 → 펜스 조정 → 게임 안 신구장 → 실제 구장 값 (engine/park.ts: 2015~ 실측, 그 전은 차이 방식·짐작,
+ * 마지막 실측 해 뒤는 실측 기간 평균·확정된 미래 구장 짐작, 해마다 평균 1) → 1. 게임 안 공사 값은 그 해 개막 전에 끝난 공사(done)에서 찾는다.
+ * franchises·lg = 그 해 리그 구단 계보와 리그 비율 (옛 해 평균 1 맞춤과 득점 계수에 쓴다). 중립이면 park가 undefined
+ */
+export function teamParkInfo(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
+                             lg: ParkLeagueRates, pp: EngineParams['park'] = DEFAULT_PARAMS.park): { park: SimTeam['park']; basis: TeamParkBasis } {
+  const w = worksAt(src, franchise, year, s);
+  if (w.wall) return { park: { hr: 1, ev: w.wall }, basis: 'wall' };
+  if (w.fence) return { park: { hr: 1, ev: w.fence }, basis: 'fence' };
+  if (w.built) return { park: w.built.park, basis: 'built' };
+  const v = w.touched ? realParkNoOwn(src, year, franchise, franchises, lg, pp)
+    : realParkYear(src, year, franchises, lg, pp).get(franchise);
+  const hr = parkFactor(s).hr;
+  const run = v?.run ?? 1;
+  return { park: hr !== 1 || run !== 1 ? { hr, ...(run !== 1 ? { run } : {}), ...(v?.ev ? { ev: v.ev } : {}) } : undefined, basis: v ? v.basis : 'none' };
+}
+
+/**
+ * 그 해 홈 구장이 돔인가 (우천 취소 없음, engine/weather.ts). 게임 안에서 옮긴 구장(opened)은 그 구장의 dome,
+ * 아직 옮기지 않았으면 그 해 실제 구장 (새 게임의 구장 상태에는 돔이 붙어 있지 않다: 2016~ 시작 고척)
+ */
+export function homeIsDome(s: StadiumState | undefined, franchise: string, year: number): boolean {
+  if (s?.dome) return true;
+  if (s?.opened !== undefined) return false;
+  return !!realParkAt(franchise, year)?.dome;
+}
+
+export function teamParkAt(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined, franchises: string[],
+                           lg: ParkLeagueRates, pp: EngineParams['park'] = DEFAULT_PARAMS.park): SimTeam['park'] {
+  return teamParkInfo(src, franchise, year, s, franchises, lg, pp).park;
 }
 
 /** 리모델링: 구단 부담 250억, 한 시즌 공사(그 시즌 관중석 20% 못 씀), 시설 +30, 좌석 +1,000 (임시값) */
@@ -155,18 +231,39 @@ export function installment(s: StadiumState | undefined, year: number): number {
 
 /** 공사를 잡고 착공금을 장부에 적는다 (다음 시즌 장부) */
 function startProject(league: LeagueState, team: number, offYear: number, kind: 'remodel' | 'new', years: number, cost: number, capacity: number,
-                      park?: { hr: number; dome: boolean }, delay = 0): void {
-  league.stadiums![team].project = { kind, start: offYear + 1 + delay, open: offYear + 1 + delay + years, cost, capacity, ...(park ? { hr: park.hr, ...(park.dome ? { dome: true } : {}) } : {}) };
+                      park?: { fence: Fence; dome: boolean }, delay = 0): void {
+  league.stadiums![team].project = {
+    kind, start: offYear + 1 + delay, open: offYear + 1 + delay + years, cost, capacity,
+    ...(park ? { ...(park.dome ? { dome: true } : {}), fence: { ...park.fence }, park: fenceParkEvents(park.fence, DEFAULT_PARAMS.park).ev } : {}),
+  };
   league.ledger.push({ year: offYear + 1, from: team, to: -1, amount: downPayment(cost), note: `${league.teams[team].name} 구장 ${kind === 'new' ? '신축' : '리모델링'} 착공금`, kind: 'stadium' });
 }
 
-/** 고를 수 있는 공사 (화면·주문 검사) */
-export function stadiumOptions(): { id: string; kind: 'remodel' | 'new'; label: string; cost: number; years: number; capacity: (now: number) => number }[] {
+export interface StadiumOption {
+  id: string;
+  kind: 'remodel' | 'new' | 'fence' | 'wall';
+  label: string;
+  cost: number;
+  /** 공사 시즌 (펜스 조정·가벽은 0 = 오프시즌 안에 끝남) */
+  years: number;
+  capacity: (now: number) => number;
+}
+
+/**
+ * 고를 수 있는 공사 (화면·주문 검사). wage = 착공하는 해의 연봉 상승 지수 (salary.ts wageIndex, 리모델링·신구장 공사비가 해마다 그만큼 오른다,
+ * 2026-10-22 사용자 결정. 펜스 조정·가벽 비용도 같은 규칙, 2026-10-24 클사장 결정, fenceWorkCost). at = 그 구단 펜스 공사 상황이면 화면에 보일 것만:
+ * 혼자 쓰는 구장은 펜스 조정, 함께 쓰는 구장은 가벽 설치, 가벽이 서 있으면(실제 역사의 가벽 포함) 가벽 철거 (6.7.5·6.8.7). 빼면 모두
+ */
+export function stadiumOptions(wage = 1, at?: Pick<FenceWorkState, 'kind' | 'wall' | 'history'>): StadiumOption[] {
+  const same = (now: number) => now;
   return [
-    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: REMODEL.cost, years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
+    { id: 'remodel', kind: 'remodel', label: '리모델링', cost: Math.round(REMODEL.cost * wage), years: REMODEL.years, capacity: (now) => now + REMODEL.capacity },
     ...NEW_PARK.options.map((o, i) => ({
-      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: o.cost, years: NEW_PARK.years, capacity: () => o.capacity,
+      id: `new-${i}`, kind: 'new' as const, label: `신구장 ${o.capacity.toLocaleString()}석`, cost: Math.round(o.cost * wage), years: NEW_PARK.years, capacity: () => o.capacity,
     })),
+    ...(!at || at.kind === 'fence' ? [{ id: 'fence', kind: 'fence' as const, label: '펜스 조정', cost: fenceWorkCost('fence', wage), years: 0, capacity: same }] : []),
+    ...(!at || at.kind === 'wall' ? [{ id: 'wall', kind: 'wall' as const, label: at?.wall ? '가벽 제원 바꾸기' : '가벽 설치', cost: fenceWorkCost('wall', wage), years: 0, capacity: same }] : []),
+    ...(!at || at.wall || at.history ? [{ id: 'wall-off', kind: 'wall' as const, label: '가벽 철거', cost: 0, years: 0, capacity: same }] : []),
   ];
 }
 
@@ -175,12 +272,15 @@ export function stadiumOptions(): { id: string; kind: 'remodel' | 'new'; label: 
  * cash: 지금 자금. 착공금만큼은 있어야 한다
  */
 export function orderStadium(league: LeagueState, team: number, offYear: number, id: string, cash: number,
-                             park: { size?: ParkSize; dome?: boolean; deal?: StadiumDeal } = {}): { ok: boolean; message: string } {
+                             park: { size?: ParkSize; fence?: Fence; dome?: boolean; deal?: StadiumDeal } = {}, src?: ParkSource): { ok: boolean; message: string } {
   const s = league.stadiums?.[team];
-  const opt = stadiumOptions().find((o) => o.id === id);
+  const opt = stadiumOptions(wageIndex(offYear + 1, league)).find((o) => o.id === id);
   if (!s || !opt) return { ok: false, message: '없는 공사입니다.' };
+  // 펜스 조정·가벽: 리모델링과 같은 오프시즌에도 할 수 있고, 신구장 공사가 잡혀 있으면 못 한다 (6.7.1)
+  if (opt.kind === 'fence' || opt.kind === 'wall') return orderFenceWork(league, team, offYear, id, cash, park.fence, src);
   if (s.project && s.project.open > offYear + 1) return { ok: false, message: '이미 공사가 잡혀 있습니다.' };
-  if (park.size !== undefined && !PARK_SIZES[park.size]) return { ok: false, message: '없는 구장 크기입니다.' };
+  if (park.size !== undefined && !FENCE_PRESETS[park.size]) return { ok: false, message: '없는 구장 크기입니다.' };
+  if (park.fence !== undefined && !fenceValid(park.fence, DEFAULT_PARAMS.park)) return { ok: false, message: '고를 수 없는 펜스 제원입니다.' };
   const isNew = opt.kind === 'new';
   const dome = isNew && !!park.dome;
   let cost = Math.round(opt.cost * (dome ? DOME.cost : 1));
@@ -200,10 +300,12 @@ export function orderStadium(league: LeagueState, team: number, offYear: number,
     }
   }
   const down = downPayment(cost);
-  const size = park.size ?? 'neutral';
-  startProject(league, team, offYear, opt.kind, opt.years, cost, opt.capacity(s.capacity), isNew ? { hr: PARK_SIZES[size].hr, dome } : undefined, delay);
+  // 펜스 제원: 고른 값, 없으면 예시값 (P6 전 조작 기록의 크기 size도 예시값으로 읽는다)
+  const fence = park.fence ?? FENCE_PRESETS[park.size ?? 'neutral'].fence;
+  startProject(league, team, offYear, opt.kind, opt.years, cost, opt.capacity(s.capacity), isNew ? { fence, dome } : undefined, delay);
   const eok = (v: number) => `${(v / 10000).toFixed(0)}억 원`;
-  const kind = isNew ? ` (${PARK_SIZES[size].label}${dome ? ', 돔' : ''})` : '';
+  const hrIdx = Math.round(fenceParkEvents(fence, DEFAULT_PARAMS.park).ev.hr * 100);
+  const kind = isNew ? ` (${fenceText(fence)}, 예상 홈런 지수 ${hrIdx}${dome ? ', 돔' : ''})` : '';
   const start = offYear + 1 + delay;
   return { ok: true, message: `${opt.label}${kind} 주문: ${start}~${start + opt.years - 1} 시즌 공사, ${start + opt.years} 시즌 개장. 구단 부담 ${eok(cost)} (착공금 ${eok(down)} 지금, 나머지는 공사 기간 결산 때 해마다 ${eok(yearlyPayment(cost, opt.years))}).${dealNote}` };
 }
@@ -223,17 +325,27 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
         s.capacity = p.capacity;
         s.quality = NEW_PARK.quality;
         s.opened = year + 1;
-        s.hr = p.hr ?? 1;
+        // 펜스를 고른 신구장(P6)은 착공 때 계산한 배율을 옮기고, 그 전 주문은 홈런 배율 하나
+        if (p.park) {
+          s.fence = p.fence;
+          s.park = p.park;
+          delete s.hr;
+        } else {
+          s.hr = p.hr ?? 1;
+        }
         if (p.dome) s.dome = true; else delete s.dome;
         s.name = `${league.teams[t].name} 새 구장`;
         delete s.unchecked;
+        // 옛 구장의 펜스 공사·가벽은 새 구장과 상관없다
+        delete s.wall;
       } else {
         s.capacity = p.capacity;
         s.quality = Math.min(90, s.quality + REMODEL.quality);
       }
-      (s.done ??= []).push({ kind: p.kind, open: p.open, cost: p.cost });
+      (s.done ??= []).push({ kind: p.kind, open: p.open, cost: p.cost, ...(p.kind === 'new' && p.fence && p.park ? { fence: p.fence, park: p.park } : {}) });
       delete s.project;
-      out.push(`${league.teams[t].name} ${p.kind === 'new' ? '신구장' : '리모델링한 구장'} ${year + 1} 시즌 개장 (${s.capacity.toLocaleString()}석)`);
+      const spec = p.kind === 'new' && p.fence && p.park ? `, ${fenceText(p.fence)}, 홈런 지수 ${Math.round(p.park.hr * 100)}` : '';
+      out.push(`${league.teams[t].name} ${p.kind === 'new' ? '신구장' : '리모델링한 구장'} ${year + 1} 시즌 개장 (${s.capacity.toLocaleString()}석${spec})`);
     }
     // 실제 구장 역사: 다음 시즌에 실제로 새 구장으로 옮긴 구단 (게임 안에서 공사를 잡았거나 지은 구단은 빼고)
     const real = realParkOpening(league.teams[t].franchise, year + 1);
@@ -245,23 +357,276 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
       if (real.dome) s.dome = true; else delete s.dome;
       if (real.checked) delete s.unchecked; else s.unchecked = true;
       out.push(`${league.teams[t].name}, ${year + 1} 시즌부터 ${real.name}${real.planned ? ' (실제 계획)' : ''} 사용 (${real.capacity.toLocaleString()}석${real.dome ? ', 돔' : ''})`);
+      // 실제로 다른 구장으로 옮기면 옛 구장의 펜스 조정·가벽은 걷히고 간격은 개장 해부터 다시 센다.
+      // 제원이 확정되지 않은 계획 구장(잠실 돔)은 쓰던 구장 제원을 그대로 쓰므로 이어 간다 (6.7.2, 결정 8)
+      const spec = realParkSpec(league.teams[t].franchise, year + 1);
+      const confirmed = !!spec && spec.confirmed === '출처 확인' && spec.fence.l != null && spec.fence.c != null && spec.fence.r != null;
+      if ((s.fence || s.wall) && (!real.planned || confirmed)) {
+        delete s.fence;
+        delete s.park;
+        delete s.wall;
+        s.fenceFrom = year + 1;
+      }
+    } else if (!(s.done ?? []).some((d) => d.kind === 'new')) {
+      // 자료(parks.json)에서 구장이 바뀌었지만 옮기는 해가 아닌 경우: 이름·확인 표시만 (시설·좌석·돔은 그대로, ballparks.ts)
+      const renamed = realParkRename(league.teams[t].franchise, year + 1);
+      if (renamed && renamed.name !== s.name) {
+        s.name = renamed.name;
+        if (renamed.checked) delete s.unchecked; else s.unchecked = true;
+      }
+    }
+    // 가벽이 서 있는 AI 구단 (플레이어가 떠난 구단): 다음 시즌부터 걷는다. AI 구장은 실측을 지킨다 (6.8.6)
+    if (t !== userTeam && s.wall) {
+      (s.done ??= []).push({ kind: 'wall-off', open: year + 1, cost: 0 });
+      delete s.wall;
+      out.push(`${league.teams[t].name}, ${s.name ?? '구장'} 가벽 철거 (${year + 1} 시즌부터 원래 펜스)`);
     }
     // AI 신구장: 오래되고 낡은 구장, 자금이 넉넉하면 (지자체 표준 분담, 중립 구장. 연고 시장이 크면 큰 구장)
     const age = year + 1 - (s.opened ?? realParkAt(league.teams[t].franchise, year)?.from ?? league.startYear);
     const bigMarket = (league.fans?.[t]?.level ?? 50) >= 60;
+    const wage = wageIndex(year + 1, league);
     const opt = NEW_PARK.options[bigMarket ? 1 : 0];
-    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= opt.cost * 1.5
+    const newCost = Math.round(opt.cost * wage);
+    const remodelCost = Math.round(REMODEL.cost * wage);
+    if (t !== userTeam && !s.project && s.quality < AI_NEW_BELOW && age >= AI_NEW_AGE && cashOf(t) >= newCost * 1.5
         && !realParkOpening(league.teams[t].franchise, year + 1 + NEW_PARK.years)) {
-      startProject(league, t, year, 'new', NEW_PARK.years, opt.cost, opt.capacity, { hr: 1, dome: false });
+      startProject(league, t, year, 'new', NEW_PARK.years, newCost, opt.capacity, { fence: FENCE_PRESETS.neutral.fence, dome: false });
       out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
       continue;
     }
-    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= REMODEL.cost * 1.5) {
-      startProject(league, t, year, 'remodel', REMODEL.years, REMODEL.cost, s.capacity + REMODEL.capacity);
+    if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= remodelCost * 1.5) {
+      startProject(league, t, year, 'remodel', REMODEL.years, remodelCost, s.capacity + REMODEL.capacity);
       out.push(`${league.teams[t].name}, ${year + 1} 시즌 구장 리모델링`);
     }
   }
   return out;
+}
+
+// ---- 펜스 조정 공사·가벽 (구장효과 기획안 6.7·6.8, 결정 10~13, P6b·P6c)
+
+/**
+ * 펜스 조정: 구단 부담 30억 원 일시불, 오프시즌 안에 끝나 다음 시즌 개막부터 새 펜스. 새 펜스가 쓰인 첫 시즌부터 5시즌이 지나야 다시 (임시값, 6.7.1).
+ * 가벽: 설치 10억 원 일시불 + 서 있는 시즌마다 조립·해체 4억 원 (5시즌이면 펜스 조정과 같은 30억, 임시값, 6.8.3)
+ */
+export const FENCE_WORK = { cost: 300_000, every: 5 };
+export const WALL = { install: 100_000, yearly: 40_000 };
+
+/**
+ * 그 해 펜스 조정·가벽 설치·가벽 조립·해체 비용 (만 원): 위 값(2026년 물가) × 그 해 연봉 상승 지수 wage (salary.ts wageIndex).
+ * 리모델링·신구장 공사비와 같은 규칙 (2026-10-24 클사장 결정). 설치·조정은 다음 시즌 해, 조립·해체는 그 시즌 해의 지수
+ */
+/** 억 원 글: 지수를 곱해 끝자리가 생기는 펜스·가벽 비용은 소수 한 자리까지 ("31.5억 원", "30억 원") */
+const eokText = (man: number) => `${Math.round(man / 1000) / 10}억 원`;
+
+export function fenceWorkCost(kind: 'fence' | 'wall' | 'wall-yearly', wage = 1): number {
+  return Math.round((kind === 'fence' ? FENCE_WORK.cost : kind === 'wall' ? WALL.install : WALL.yearly) * wage);
+}
+
+/** 그 해 실제로 쓰인 게임 안 구장 공사 (done에서 개막이 그 해 이전인 것, 기획안 6.8.4 값을 고르는 순서) */
+interface WorksAt {
+  /** 게임 안 신구장 값 (있으면 신구장) */
+  built?: { park: SimTeam['park'] };
+  fence?: ParkEvents;
+  wall?: ParkEvents;
+  /** 게임 안에서 펜스·가벽을 손댔다 → 실제 역사의 그 구단 가벽 행(X-존)을 따르지 않는다 (6.8.9) */
+  touched: boolean;
+}
+
+function worksAt(src: ParkSource, franchise: string, year: number, s: StadiumState | undefined): WorksAt {
+  const out: WorksAt = { touched: false };
+  const done = s?.done ?? [];
+  const built = done.some((d) => d.kind === 'new');
+  // 실제 구장 공사는 그 구장에만: 그 뒤 실제로 다른 구장(확정 제원이 있는 계획 구장 포함)으로 옮기면 걷힌다 (6.7.2 마지막 줄)
+  const home = !built && src.parks ? homeParkId(src.parks, franchise, year) : undefined;
+  const samePark = (open: number) => built || !src.parks || homeParkId(src.parks, franchise, open) === home;
+  for (const d of done) {
+    if (d.open > year) continue;
+    if (d.kind === 'new') {
+      // 펜스를 고른 신구장(P6)은 착공 때 계산한 배율, 그 전에 지은 신구장은 홈런 배율 하나
+      const park = d.park ?? s!.park;
+      const hr = parkFactor(s).hr;
+      out.built = { park: park ? { hr: 1, ev: park } : hr !== 1 ? { hr } : undefined };
+      delete out.fence;
+      delete out.wall;
+    } else if (d.kind === 'fence' && samePark(d.open)) {
+      out.fence = d.park;
+      delete out.wall;
+      out.touched = true;
+    } else if (d.kind === 'wall' && samePark(d.open)) {
+      out.wall = d.park;
+      out.touched = true;
+    } else if (d.kind === 'wall-off' && samePark(d.open)) {
+      delete out.wall;
+      out.touched = true;
+    }
+  }
+  return out;
+}
+
+/** 그 해 같은 실제 구장을 주 구장으로 쓰는 다른 구단 (함께 쓰는 구장, 6.8.5). 게임 안에서 신구장을 지은 구단은 혼자 쓴다 */
+export function sharedPartner(league: Pick<LeagueState, 'teams' | 'stadiums'>, team: number, year: number, src: ParkSource | undefined): number | undefined {
+  const builtBy = (t: number) => (league.stadiums?.[t]?.done ?? []).some((d) => d.kind === 'new' && d.open <= year);
+  if (!src?.parks || builtBy(team)) return undefined;
+  const id = homeParkId(src.parks, league.teams[team].franchise, year);
+  if (!id) return undefined;
+  const t = league.teams.findIndex((x, i) => i !== team && !builtBy(i) && homeParkId(src.parks!, x.franchise, year) === id);
+  return t >= 0 ? t : undefined;
+}
+
+/** 펜스 공사 상황 (화면·주문 검사). offYear 시즌이 끝난 오프시즌, 공사는 offYear + 1 시즌부터 */
+export interface FenceWorkState {
+  /** 할 수 있는 공사: 혼자 쓰면 펜스 조정, 함께 쓰면 가벽 */
+  kind: 'fence' | 'wall';
+  partner?: number;
+  /** 지금 펜스 (펜스 조정 뒤 값 / 신구장 / 실제 제원, 제원이 없으면 중립 예시값) */
+  now: Fence;
+  /** 실제 구장 제원 행 (원래 펜스, 게임 안 신구장이면 없음) */
+  row?: ParkSpec;
+  /** 서 있는 게임 안 가벽 */
+  wall?: Fence;
+  /** 실제 역사의 가벽(X-존)이 다음 시즌에 선다 (게임 안에서 손대지 않았을 때) */
+  history?: ParkSpec;
+  /** 펜스를 다시 바꿀 수 있는 첫 시즌 (간격) */
+  next?: number;
+  /** 지금 못 하는 까닭 (신구장 공사 중, 간격) */
+  block?: string;
+}
+
+export function fenceWorkState(league: Pick<LeagueState, 'teams' | 'stadiums'>, team: number, offYear: number, src: ParkSource | undefined,
+                               pp: EngineParams['park'] = DEFAULT_PARAMS.park): FenceWorkState {
+  const year = offYear + 1;
+  const s = league.stadiums?.[team];
+  const fr = league.teams[team].franchise;
+  const built = (s?.done ?? []).some((d) => d.kind === 'new');
+  const partner = sharedPartner(league, team, year, src);
+  const base = built ? undefined : fenceBaseOf(src ?? {}, fr, year, FENCE_PRESETS.neutral.fence, pp);
+  const real = base?.row ? fenceOfRow(base.row, pp) ?? undefined : undefined;
+  const w = worksAt(src ?? {}, fr, year, s);
+  const now = (built || w.fence) && s?.fence ? s.fence : real ?? FENCE_PRESETS.neutral.fence;
+  const history = !built && !w.touched && src?.parks ? historyWallAt(src.parks, fr, year) : undefined;
+  // 간격: 펜스가 바뀐 해(펜스 조정·가벽 설치·제원 바꾸기·철거, 게임 안 신구장 개장)부터 5시즌
+  const since = Math.max(s?.fenceFrom ?? -Infinity, built ? s?.opened ?? -Infinity : -Infinity);
+  const next = Number.isFinite(since) ? since + FENCE_WORK.every : undefined;
+  const block = s?.project?.kind === 'new' && s.project.open > year ? '신구장 공사 중에는 지금 구장의 펜스를 바꿀 수 없습니다.'
+    : next !== undefined && year < next ? `펜스는 ${FENCE_WORK.every}시즌마다 바꿀 수 있습니다. 다음은 ${next - 1} 시즌 뒤입니다.` : undefined;
+  return {
+    kind: partner !== undefined ? 'wall' : 'fence', ...(partner !== undefined ? { partner } : {}), now, ...(base?.row ? { row: base.row } : {}),
+    ...(s?.wall ? { wall: s.wall.fence } : {}), ...(history ? { history } : {}), ...(next !== undefined ? { next } : {}), ...(block ? { block } : {}),
+  };
+}
+
+const intIn = (x: number, [lo, hi]: [number, number]) => Number.isInteger(x) && x >= lo && x <= hi;
+
+/**
+ * 펜스 공사 계획 (주문 검사와 화면 미리 보기가 같은 함수): 거절이면 문구, 되면 새 배율과 비용.
+ * 펜스 조정(id 'fence'): 칸마다 지금 값 그대로이거나 고르는 범위 안. 가벽('wall'): 거리는 원래 펜스 이하(하한은 범위), 높이는 범위 안.
+ * 실제 구장은 차이 방식 = 조정 전 값(실측 기간 평균) × (새 제원 짐작 ÷ 원래 제원 짐작), 게임 안 신구장은 새 제원으로 다시 (6.7.2·6.8.4)
+ */
+export function planFenceWork(league: Pick<LeagueState, 'teams' | 'stadiums' | 'ruleShifts'>, team: number, offYear: number, id: 'fence' | 'wall', f: Fence | undefined,
+                              cash: number, src: ParkSource | undefined, pp: EngineParams['park'] = DEFAULT_PARAMS.park):
+  { ok: false; message: string } | { ok: true; park: ParkEvents; cost: number; fence: Fence; from: Fence } {
+  const st = fenceWorkState(league, team, offYear, src, pp);
+  if (id === 'fence' && st.kind === 'wall') return { ok: false, message: '함께 쓰는 구장은 펜스 대신 가벽을 세웁니다.' };
+  if (id === 'wall' && st.kind === 'fence') return { ok: false, message: '혼자 쓰는 구장은 가벽 대신 펜스 조정을 합니다.' };
+  if (st.block) return { ok: false, message: st.block };
+  if (!f) return { ok: false, message: '고를 수 없는 펜스 제원입니다.' };
+  const R = pp.specFit.range;
+  const hRange: [number, number] = [Math.round(R.height[0] * 10), Math.round(R.height[1] * 10)];
+  const hOk = (h: number) => intIn(h, hRange) && h % 5 === 0;
+  const from = id === 'wall' ? st.wall ?? st.now : st.now;
+  if (id === 'fence') {
+    const ok = (k: 'l' | 'c' | 'r') => f[k] === st.now[k] || intIn(f[k], k === 'c' ? R.center : R.side);
+    if (!ok('l') || !ok('c') || !ok('r') || !(f.h === st.now.h || hOk(f.h))) return { ok: false, message: '고를 수 없는 펜스 제원입니다.' };
+    if (f.l === st.now.l && f.c === st.now.c && f.r === st.now.r && f.h === st.now.h) return { ok: false, message: '바뀌는 펜스가 없습니다.' };
+  } else {
+    // 가벽은 원래 펜스(실제 제원) 앞에 세운다
+    if (f.l > st.now.l || f.c > st.now.c || f.r > st.now.r) return { ok: false, message: '가벽은 원래 펜스보다 안쪽에만 세울 수 있습니다.' };
+    const ok = (k: 'l' | 'c' | 'r') => f[k] === st.now[k] || intIn(f[k], k === 'c' ? R.center : R.side);
+    if (!ok('l') || !ok('c') || !ok('r') || !hOk(f.h)) return { ok: false, message: '고를 수 없는 펜스 제원입니다.' };
+    if (f.l === st.now.l && f.c === st.now.c && f.r === st.now.r) return { ok: false, message: '줄어드는 펜스 거리가 없습니다.' };
+    if (st.wall && f.l === st.wall.l && f.c === st.wall.c && f.r === st.wall.r && f.h === st.wall.h) return { ok: false, message: '바뀌는 펜스가 없습니다.' };
+  }
+  const cost = fenceWorkCost(id, wageIndex(offYear + 1, league));
+  if (cash < cost) return { ok: false, message: `자금이 모자랍니다. ${eokText(cost)}은 있어야 합니다.` };
+  const s = league.stadiums?.[team];
+  let park: ParkEvents;
+  if ((s?.done ?? []).some((d) => d.kind === 'new')) {
+    park = fenceParkEvents(f, pp).ev;
+  } else {
+    const b = fenceBaseOf(src ?? {}, league.teams[team].franchise, offYear + 1, FENCE_PRESETS.neutral.fence, pp);
+    park = applyDiff(b.base, guessLogs(fenceSpecOf(f, b.row, pp), pp)!, b.ref, pp);
+  }
+  return { ok: true, park, cost, fence: { ...f }, from };
+}
+
+/** 펜스 바뀐 칸: "좌 101 → 99m · 중 122 → 120m · 우 101m 그대로 · 높이 3.3m 그대로" */
+export function fenceChangeText(from: Fence, to: Fence): string {
+  const d = (label: string, a: number, b: number, unit = 'm') => (a === b ? `${label} ${a}${unit} 그대로` : `${label} ${a} → ${b}${unit}`);
+  return [d('좌', from.l, to.l), d('중', from.c, to.c), d('우', from.r, to.r), d('높이', from.h / 10, to.h / 10)].join(' · ');
+}
+
+/** 그 해 홈런 배율 (소식의 "홈런 지수 전 → 후") */
+function hrOf(park: SimTeam['park']): number {
+  return gameParkOf(park, DEFAULT_PARAMS.park).hr;
+}
+
+/** 펜스 조정·가벽 주문 (orderStadium). 공사 시즌이 없어 StadiumProject를 쓰지 않고 바로 StadiumState를 고친다 (6.7.5) */
+function orderFenceWork(league: LeagueState, team: number, offYear: number, id: string, cash: number, f: Fence | undefined,
+                        src: ParkSource | undefined): { ok: boolean; message: string } {
+  const s = league.stadiums![team];
+  const year = offYear + 1;
+  const name = league.teams[team].name;
+  const parkName = s.name ?? '구장';
+  const frs = league.teams.map((t) => t.franchise);
+  const lg = { rates: { s1: 0, d2: 0, t3: 0, hr: 0 }, rpa: 0 };
+  const hrNow = () => hrOf(teamParkInfo(src ?? {}, league.teams[team].franchise, year, s, frs, lg).park);
+  if (id === 'wall-off') {
+    const st = fenceWorkState(league, team, offYear, src);
+    if (!s.wall && !st.history) return { ok: false, message: '철거할 가벽이 없습니다.' };
+    const before = hrNow();
+    const mine = !!s.wall;
+    (s.done ??= []).push({ kind: 'wall-off', open: year, cost: 0 });
+    delete s.wall;
+    // 실제 역사의 가벽(X-존)은 플레이어가 고른 공사가 아니라 간격을 세지 않는다 (6.8.9)
+    if (mine) s.fenceFrom = year;
+    return { ok: true, message: `${name}, ${parkName} 가벽 철거 (${year} 시즌부터 원래 펜스, 홈런 지수 ${Math.round(before * 100)} → ${Math.round(hrNow() * 100)}).${mine ? '' : ' 실제 역사의 가벽을 더는 따르지 않습니다.'}` };
+  }
+  const plan = planFenceWork(league, team, offYear, id as 'fence' | 'wall', f, cash, src);
+  if (!plan.ok) return plan;
+  const before = hrNow();
+  const built = (s.done ?? []).some((d) => d.kind === 'new');
+  const done = (s.done ??= []);
+  // 예전 저장의 신구장 기록에 배율이 없으면 지금 배율을 남긴다 (조정 전 시즌 값이 바뀌지 않게)
+  for (const d of done) if (d.kind === 'new' && !d.park && s.park) Object.assign(d, { park: s.park, ...(s.fence ? { fence: s.fence } : {}) });
+  done.push({ kind: id as 'fence' | 'wall', open: year, cost: plan.cost, fence: plan.fence, park: plan.park });
+  s.fenceFrom = year;
+  if (id === 'fence') {
+    s.fence = plan.fence;
+    s.park = plan.park;
+    delete s.wall;
+  } else {
+    s.wall = { fence: plan.fence, park: plan.park, from: year };
+  }
+  const note = id === 'fence' ? '구장 펜스 조정' : '가벽 설치';
+  league.ledger.push({ year, from: team, to: -1, amount: plan.cost, note: `${name} ${note}`, kind: 'stadium' });
+  const after = Math.round(hrNow() * 100);
+  const hr = `홈런 지수 ${Math.round(before * 100)} → ${after}`;
+  if (id === 'fence') return { ok: true, message: `${name}, ${parkName} 펜스 조정 (${fenceChangeText(plan.from, plan.fence)}, ${hr}), ${year} 시즌부터. 구단 부담 ${eokText(plan.cost)}.${built ? '' : ' 실측 구장 효과에 펜스가 바뀐 만큼의 짐작을 곱합니다.'}` };
+  const partner = sharedPartner(league, team, year, src);
+  return { ok: true, message: `${name}, ${parkName}에 가벽 설치 (${fenceChangeText(plan.from, plan.fence)}, ${name} 홈 경기 ${hr}), ${year} 시즌부터.${partner !== undefined ? ` ${league.teams[partner].name} 홈 경기는 그대로.` : ''} 설치 ${eokText(plan.cost)}, 가벽이 서 있는 시즌마다 ${eokText(fenceWorkCost('wall-yearly', wageIndex(year, league)))} (해마다 연봉 지수만큼 오른다).` };
+}
+
+/** 개막 때 (league.year = 새 시즌): 가벽이 서 있는 구단의 조립·해체 비용을 장부에 (6.8.3). 우리 구단 소식 문장 */
+export function openWalls(league: LeagueState, userTeam: number): string[] {
+  const news: string[] = [];
+  for (let t = 0; t < (league.stadiums?.length ?? 0); t++) {
+    const w = league.stadiums![t].wall;
+    if (!w || w.from > league.year) continue;
+    const cost = fenceWorkCost('wall-yearly', wageIndex(league.year, league));
+    league.ledger.push({ year: league.year, from: t, to: -1, amount: cost, note: `${league.teams[t].name} 가벽 조립·해체`, kind: 'stadium' });
+    if (t === userTeam) news.push(`가벽 조립·해체 비용 ${eokText(cost)} (${league.year} 시즌)`);
+  }
+  return news;
 }
 
 // ---- 팬덤

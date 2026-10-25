@@ -58,7 +58,8 @@ describe('판타지 협상', () => {
     const info = g.reproInfo();
     const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
     expect(roundTrip(r.toSave().league)).toEqual(roundTrip(g.toSave().league));
-    expect(r.world.players.find((p) => p.id === give.id)!.teamIdx).toBe(ai);
+    // 성사 뒤 20일 안에 AI 구단끼리 다시 트레이드할 수 있어(16-5b neg-1: KT → 7번 구단) 상대 구단이 아니라 원본 판의 소속과 견준다
+    expect(r.world.players.find((p) => p.id === give.id)!.teamIdx).toBe(g.world.players.find((p) => p.id === give.id)!.teamIdx);
   }, 600_000);
 
   it('보통 게임에는 호감이 없다 (평가가 그대로)', () => {

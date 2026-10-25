@@ -1,16 +1,24 @@
 // 가을야구 (M7): 대진표, 시리즈별 경기 결과, 박스스코어. 진행은 위쪽 버튼으로 한 경기씩.
+// 양대 리그 해(1999·2000)는 두 갈래 대진: 준플레이오프 → 플레이오프 둘 나란히 → 한국시리즈 (일정 개편 기획안 10.5)
 import { useState } from 'react';
 import { FlowNext } from '../FlowNext';
 import { formatDate } from '../../game/calendar';
-import { currentSeries, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, stillAlive, type SeriesGame, type SeriesRound } from '../../league/postseason';
+import {
+  currentSeries, nodeSides, postseasonLines, psLineText, ROUND_LABEL, roundsFor, RULES, seedName, semiCheckText, semiSkipText, stillAlive,
+  type BracketNode, type RoundRule, type SeriesGame, type SeriesResult, type SeriesRound,
+} from '../../league/postseason';
 import { PlayerLink, TeamName, useGame } from '../context';
-import { BoxView } from './Schedule';
+import { BoxView } from '../BoxScore';
+import { useShell } from '../shell';
 
-/** 진출 팀 수에 맞는 대진 설명 (1988년까지 2팀, 2014년까지 4팀, 2015년부터 5팀) */
-function bracketText(n: number): string {
+/**
+ * 진출 팀 수에 맞는 대진 설명 (1985년까지 2팀, 1988년까지 3팀, 2014년까지 4팀, 2015년부터 5팀).
+ * ruleOf: 그 해 라운드 규칙 (시리즈 승수 연표, postseason.ts yearRoundRule). 없으면 RULES
+ */
+function bracketText(n: number, ruleOf: (r: SeriesRound) => RoundRule | undefined): string {
   const rounds = roundsFor(n);
   const desc = (r: SeriesRound, i: number): string => {
-    const rule = RULES[r];
+    const rule = ruleOf(r) ?? RULES[r];
     const high = n - 1 - i; // 이 라운드의 상위 시드 순위 (postseason.ts openSeries와 같은 규칙)
     const len = r === 'wc' ? `${high}위 ${rule.highHeadStart}승 어드밴티지, 최대 ${rule.maxGames}경기` : `${rule.need * 2 - 1}전 ${rule.need}선승`;
     return i === 0 ? `${high}위 대 ${n}위 ${ROUND_LABEL[r]}(${len})` : `${ROUND_LABEL[r]}(${high}위, ${len})`;
@@ -18,8 +26,17 @@ function bracketText(n: number): string {
   return rounds.map(desc).join(' → ') + '. ';
 }
 
+/** 양대 리그 해의 대진 규칙 설명 (기획안 10.5) */
+function twoLeagueText(bracket: BracketNode[]): string {
+  const semi = bracket.some((x) => x.round === 'semi')
+    ? '준플레이오프(한 리그 3위 대 다른 리그 2위, 3전 2선승: 1차전 2위 팀 홈, 2차전 3위 팀 홈, 3차전 잠실 중립. 이긴 팀이 2위 자리) → ' : '';
+  return `${semi}플레이오프 둘(드림 1위 대 매직 2위, 매직 1위 대 드림 2위, 7전 4선승 2-3-2: 리그 1위가 1·2·6·7차전 홈) → `
+    + '한국시리즈(7전 4선승, 통합 승률 상위 팀이 1·2차전 홈. 두 팀 모두 서울 구단이 아니면 2-2-3에 5~7차전 잠실 중립, 서울 구단이 있으면 2-3-2). ';
+}
+
 export function Postseason() {
   const { session, go } = useGame();
+  const { density } = useShell();
   const st = session.postseason;
   const last = session.league.lastSeason?.postseason;
   const [sel, setSel] = useState<{ round: number; game: number } | null>(null);
@@ -37,10 +54,45 @@ export function Postseason() {
   // 진행 상태가 있으면 그것을 (박스스코어 포함), 없으면 결산 때 남긴 결과를 보여 준다
   const seeds = st?.seeds ?? last!.seeds;
   const series = st?.series ?? last!.series;
+  const semiSkip = st ? st.semiSkip : last?.semiSkip;
+  const view = { seeds, seedLabels: st?.seedLabels ?? last?.seedLabels, bracket: st?.bracket ?? last?.bracket, series };
+  const bracket = view.bracket;
+  const teamName = (t: number) => session.world.teams[t]?.name ?? '';
   const cur = st ? currentSeries(st) : null;
   const done = st ? st.done : true;
   const champion = done ? series[series.length - 1].winner : -1;
   const selGame: SeriesGame | undefined = sel ? series[sel.round]?.games[sel.game] : undefined;
+
+  const seriesPanel = (x: SeriesResult, ri: number) => (
+    <section key={ri} className={`panel${x.high === me || x.low === me ? ' mine' : ''}`}>
+      <h2>
+        {ROUND_LABEL[x.round]}{' '}
+        <span className="muted small">
+          {bracket ? seedName(view, x.high, teamName) : <TeamName idx={x.high} />} {x.winsHigh} - {x.winsLow} {bracket ? seedName(view, x.low, teamName) : <TeamName idx={x.low} />}
+          {x.round === 'wc' && ` (4위 ${RULES.wc.highHeadStart}승 포함)`}
+          {x.winner >= 0 ? <> · <TeamName idx={x.winner} /> {x.round === 'ks' ? '우승' : '진출'}</> : ' · 진행 중'}
+        </span>
+      </h2>
+      {x.mvp && <p className="small">시리즈 MVP <strong>{x.mvp.name}</strong> (<TeamName idx={x.mvp.team} />) · {x.mvp.line}</p>}
+      {x.games.length === 0 ? <p className="muted small">아직 경기를 치르지 않았습니다.</p> : (
+        <table>
+          <thead><tr><th>경기</th><th className="l">날짜</th><th className="l">원정</th><th>점수</th><th className="l">홈</th><th /></tr></thead>
+          <tbody>
+            {x.games.map((g, gi) => (
+              <tr key={gi} className={sel?.round === ri && sel.game === gi ? 'me' : ''}>
+                <td>{gi + 1}차전</td>
+                <td className="l small">{formatDate(year, g.day)}</td>
+                <td className="l"><TeamName idx={g.away} /></td>
+                <td><strong>{g.awayRuns} - {g.homeRuns}</strong>{g.innings > 9 ? <span className="muted small"> ({g.innings}회)</span> : ''}{g.homeRuns === g.awayRuns ? ' 무' : ''}</td>
+                <td className="l"><TeamName idx={g.home} />{g.neutral && <span className="muted small"> (잠실 중립)</span>}</td>
+                <td>{g.box && <button type="button" className="small-btn" onClick={() => setSel({ round: ri, game: gi })}>박스스코어</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
 
   return (
     <div className="stack">
@@ -60,55 +112,56 @@ export function Postseason() {
 
       <section className="panel">
         <h2>대진</h2>
-        <p className="small">{seeds.map((t, i) => <span key={t} className={t === me ? 'me-text' : ''}>{i > 0 && ' · '}{i + 1}위 <TeamName idx={t} /></span>)}</p>
-        <p className="muted small">
-          {bracketText(seeds.length)}
-          시리즈 길이·어드밴티지는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다.
-        </p>
+        <p className="small">{seeds.map((t, i) => <span key={t} className={t === me ? 'me-text' : ''}>{i > 0 && ' · '}{view.seedLabels?.[i] ?? `${i + 1}위`} <TeamName idx={t} /></span>)}</p>
+        {bracket ? (
+          <>
+            {st?.semiCheck && <p className="small">{semiCheckText(st, teamName)}</p>}
+            <ul className="small">
+              {bracket.map((node, i) => {
+                const x = series.find((s) => s.node === i);
+                const [h, l] = nodeSides(view, i, teamName);
+                return <li key={i}>{ROUND_LABEL[node.round]}: {h} 대 {l}{x ? (x.winner >= 0 ? ` → ${teamName(x.winner)}` : ' (진행 중)') : ' (대기)'}</li>;
+              })}
+            </ul>
+            <p className="muted small">
+              {twoLeagueText(bracket)}
+              무승부가 나면 더 치르는 경기 수는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다. 중립 경기는 상위 팀 홈으로 계산합니다.
+            </p>
+          </>
+        ) : (
+          <p className="muted small">
+            {semiSkip && <>{semiSkipText({ semiSkip }, teamName, session.world.rules.semiSkipGap ?? 3.5)} </>}
+            {bracketText(seeds.length, (r) => series.find((x) => x.round === r)?.rule ?? st?.roundRules?.[r])}
+            와일드카드 어드밴티지와 무승부 때 더 치르는 경기 수는 임시값입니다. 무승부는 승수에 넣지 않고, 경기 수 한도까지 승부가 안 나면 상위 팀이 올라갑니다.
+          </p>
+        )}
       </section>
 
-      {series.map((x, ri) => (
-        <section key={x.round} className={`panel${x.high === me || x.low === me ? ' mine' : ''}`}>
-          <h2>
-            {ROUND_LABEL[x.round]}{' '}
-            <span className="muted small">
-              <TeamName idx={x.high} /> {x.winsHigh} - {x.winsLow} <TeamName idx={x.low} />
-              {x.round === 'wc' && ` (4위 ${RULES.wc.highHeadStart}승 포함)`}
-              {x.winner >= 0 ? <> · <TeamName idx={x.winner} /> {x.round === 'ks' ? '우승' : '진출'}</> : ' · 진행 중'}
-            </span>
-          </h2>
-          {x.mvp && <p className="small">시리즈 MVP <strong>{x.mvp.name}</strong> (<TeamName idx={x.mvp.team} />) · {x.mvp.line}</p>}
-          {x.games.length === 0 ? <p className="muted small">아직 경기를 치르지 않았습니다.</p> : (
-            <table>
-              <thead><tr><th>경기</th><th className="l">날짜</th><th className="l">원정</th><th>점수</th><th className="l">홈</th><th /></tr></thead>
-              <tbody>
-                {x.games.map((g, gi) => (
-                  <tr key={gi} className={sel?.round === ri && sel.game === gi ? 'me' : ''}>
-                    <td>{gi + 1}차전</td>
-                    <td className="l small">{formatDate(year, g.day)}</td>
-                    <td className="l"><TeamName idx={g.away} /></td>
-                    <td><strong>{g.awayRuns} - {g.homeRuns}</strong>{g.innings > 9 ? <span className="muted small"> ({g.innings}회)</span> : ''}{g.homeRuns === g.awayRuns ? ' 무' : ''}</td>
-                    <td className="l"><TeamName idx={g.home} /></td>
-                    <td>{g.box && <button type="button" className="small-btn" onClick={() => setSel({ round: ri, game: gi })}>박스스코어</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+      {groups(series, !!bracket).map((group, gi) => (
+        <div key={gi} className={group.length > 1 ? 'two' : 'stack'}>
+          {group.map((ri) => seriesPanel(series[ri], ri))}
+        </div>
       ))}
-
       {st && <PostseasonLeaders games={series.flatMap((x) => x.games)} />}
 
       {selGame?.box && (
         <BoxView
           log={{ day: selGame.day, home: selGame.home, away: selGame.away, homeRuns: selGame.homeRuns, awayRuns: selGame.awayRuns, innings: selGame.innings, win: null, loss: null, save: null }}
           box={selGame.box}
+          full={density === 'full'}
         />
       )}
       {!st && last && <p className="muted small">결산 뒤에는 박스스코어 없이 결과만 남습니다.</p>}
     </div>
   );
+}
+
+/** 시리즈 묶음 (series 색인): 사다리는 하나씩, 대진은 같은 라운드 플레이오프 둘을 나란히 */
+function groups(series: SeriesResult[], bracket: boolean): number[][] {
+  const idx = series.map((_, i) => i);
+  if (!bracket) return idx.map((i) => [i]);
+  const order: SeriesRound[] = ['semi', 'po', 'ks'];
+  return order.map((r) => idx.filter((i) => series[i].round === r).sort((a, b) => series[a].node! - series[b].node!)).filter((g) => g.length);
 }
 
 /** 가을야구 개인 기록 (박스스코어로 합친 것, 결산 전까지) */

@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine, Season, worldForYear, type BatLine, type PitLine } from '../src/engine';
-import { babip, fip, iso, leagueBase, lobPct, woba, wraa, wrcPlus } from '../src/game/saber';
+import { babip, fip, iso, leagueBase, lobPct, realLeagueBase, woba, wraa, wrcPlus } from '../src/game/saber';
 import { era } from '../src/game/stats';
 
 let bat: BatLine[];
@@ -58,5 +58,19 @@ describe('세이버 기록', () => {
     expect(Number.isNaN(woba(emptyBatLine()))).toBe(true);
     expect(Number.isNaN(wrcPlus(emptyBatLine(), lg))).toBe(true);
     expect(Number.isNaN(fip(emptyPitLine(), lg))).toBe(true);
+  });
+});
+
+describe('실제 시즌의 리그 기준 (선수 상세 세이버 지표, 2026-10-22)', () => {
+  it('리그 합계를 한 타자·투수로 보면 wRC+ 100, FIP = 리그 평균자책', () => {
+    const store = loadDataStore();
+    for (const y of [1985, 2012, 2025]) {
+      const L = store.season(y)!.league;
+      const lg = realLeagueBase(L);
+      const b: BatLine = { ...emptyBatLine(), pa: L.pa, ab: L.ab, h: L.h, d: L.d, t: L.t, hr: L.hr, bb: L.bb, hbp: L.hbp, so: L.so, sf: L.sf };
+      expect(wrcPlus(b, lg)).toBeCloseTo(100, 6);
+      const p: PitLine = { ...emptyPitLine(), outs: L.outs, hr: L.hrAllowed, bb: L.bb, hbp: L.hbp, so: L.so, er: L.er };
+      expect(fip(p, lg)).toBeCloseTo(era(p), 6);
+    }
   });
 });

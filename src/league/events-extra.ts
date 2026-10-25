@@ -1,10 +1,11 @@
 // 무작위 이벤트 확장 (2026-10-12 사용자: "이벤트 100종 이상 추가해, 처음 이야기했던 것과 달리 부정적인 이벤트도 넣어").
-// 종류: 컨디션 · 부상·건강 · 재정 · 팬·관중 · 언론·평판 · 프런트 운영 · 육성 · 리그·날씨.
+// 종류: 경기력·컨디션 · 부상·건강 · 재정 · 팬·관중 · 언론·평판 · 프런트 운영 · 육성 · 리그·날씨.
 // 실존 선수에게 붙는 일은 시뮬레이션 안에서 생기는 일(부상·피로·경기력)과 중립적인 제안까지만 쓴다.
 // 사람의 잘못·사생활로 읽힐 수 있는 일은 실명 없이(선수단·관계자) 쓴다. 효과 크기는 모두 임시값.
 
 import type { Rng } from '../engine';
 import type { EventChoice, EventContext, EventDef, EventPlayer, PendingEvent } from './events';
+import type { LeaguePlayer } from './types';
 
 type V = PendingEvent['vars'];
 const eok = (man: number) => `${(man / 10000).toFixed(1)}억 원`;
@@ -28,9 +29,12 @@ const foreigners = (c: EventContext) => c.players.filter((p) => p.foreign);
 const regulars = (c: EventContext) => c.players.filter((p) => p.pa >= 40 || p.outs >= 30);
 const pick = <T>(xs: T[], rng: Rng): T => xs[rng.int(xs.length)];
 const who = (p: EventPlayer) => ({ id: p.id, name: p.name });
-const prospects = (c: EventContext) => c.roster
-  .filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving')
-  .sort((a, b) => b.potential - a.potential || a.id.localeCompare(b.id));
+/** 2군 유망주 (24세 이하, 우리 스카우트 가치 높은 순. 진짜 잠재 순이면 이벤트 대상으로 숨은 값이 드러난다). events.ts도 쓴다 */
+export function prospects(c: EventContext): LeaguePlayer[] {
+  const list = c.roster.filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving');
+  const v = new Map(list.map((p) => [p.id, c.seenValue(p)]));
+  return list.sort((a, b) => v.get(b.id)! - v.get(a.id)! || a.id.localeCompare(b.id));
+}
 const losing = (c: EventContext) => c.rank >= c.teams - 2 || c.streak <= -4;
 
 // ---- 공통 효과
@@ -44,19 +48,40 @@ const pay = (label: string, k: string, extra: string, fx: (c: EventContext, v: V
 const amt = (lo: number, hi: number) => (_c: EventContext, rng: Rng): V => ({ cost: Math.round(rng.range(lo, hi) / 1000) * 1000 });
 
 export const EXTRA_EVENTS: EventDef[] = [
-  // ======== 컨디션·경기력 (15)
+  // ======== 경기력·컨디션 (15)
   { id: 'x-team-flu', title: '선수단 감기 확산', weight: 5,
     text: () => '환절기 감기가 선수단에 번지고 있습니다. 몇몇 주전은 목소리가 잠겼습니다.',
     choices: [
-      ch('그대로 경기한다', `7일 동안 팀 경기력 ${ed(-0.02)}`, (c) => { c.addForm(-0.02, 7, '감기 확산'); return '선수단이 감기를 안고 뛰고 있습니다.'; }),
-      ch('증상 있는 선수는 쉬게 한다', `3일 동안 팀 경기력 ${ed(-0.01)}, 그 뒤 회복`, (c) => { c.addForm(-0.01, 3, '감기 관리'); return '아픈 선수들을 먼저 쉬게 했습니다.'; }),
+      // 몸 상태 계열이라 컨디션 사건 (엔진 2 12단계, 크기 −0.5 × 0.04 = 예전 경기력 −0.02와 같다. 임시값)
+      ch('그대로 경기한다', '7일 동안 선수단 컨디션 하락 (감기)', (c) => { c.addCond(-0.5, 7, '감기'); return '선수단이 감기를 안고 뛰고 있습니다.'; }),
+      ch('증상 있는 선수는 쉬게 한다', '3일 동안 선수단 컨디션 조금 하락 (감기), 그 뒤 회복', (c) => { c.addCond(-0.25, 3, '감기'); return '아픈 선수들을 먼저 쉬게 했습니다.'; }),
     ] },
   { id: 'x-food-poison', title: '원정 숙소 단체 배탈', weight: 3,
     vars: amt(5000, 12000),
     text: () => '원정 숙소에서 먹은 음식 탓에 선수단 여럿이 배탈이 났습니다.',
     choices: [
-      ch('참고 뛴다', `5일 동안 팀 경기력 ${ed(-0.025)}`, (c) => { c.addForm(-0.025, 5, '단체 배탈'); return '선수들이 힘겹게 경기를 치르고 있습니다.'; }),
-      pay('식단 업체를 바꾸고 회복을 지원한다', 'cost', `5일 동안 팀 경기력 ${ed(-0.01)}`, (c) => { c.addForm(-0.01, 5, '배탈 회복'); return '회복 식단을 붙였습니다.'; }, '배탈 회복 지원'),
+      // 몸 상태 계열이라 컨디션 사건 (2026-10-22 사용자, 크기는 예전 경기력 −0.025·−0.01과 같게. 임시값)
+      ch('참고 뛴다', '5일 동안 선수단 컨디션 하락 (배탈)', (c) => { c.addCond(-0.625, 5, '배탈'); return '선수들이 힘겹게 경기를 치르고 있습니다.'; }),
+      pay('식단 업체를 바꾸고 회복을 지원한다', 'cost', '5일 동안 선수단 컨디션 조금 하락 (배탈)', (c) => { c.addCond(-0.25, 5, '배탈'); return '회복 식단을 붙였습니다.'; }, '배탈 회복 지원'),
+    ] },
+  // 선수 한 명의 몸 상태 사건 (2026-10-22 사용자: 몸살·컨디션 난조를 새로 만든다, 실존 선수 허용 사건, 크기는 감기와 같은 정도. 임시값)
+  { id: 'x-body-ache', title: '주전 몸살', weight: 4, when: (c) => regulars(c).length > 0,
+    vars: (c, rng) => who(pick(regulars(c), rng)),
+    text: (_c, v) => `${str(v, 'name')} 선수가 몸살 기운을 호소합니다.`,
+    choices: [
+      ch('그대로 출전시킨다', '5일 동안 그 선수 컨디션 하락 (몸살)', (c, v) => { c.addCond(-0.5, 5, '몸살', { player: str(v, 'id') }); return '몸살을 안고 경기에 나섭니다.'; }),
+      ch('이틀 쉬게 한다', '2일 결장, 그 뒤 3일 동안 그 선수 컨디션 조금 하락 (몸살)', (c, v) => {
+        c.rest(str(v, 'id'), 2); c.addCond(-0.25, 3, '몸살', { player: str(v, 'id'), delay: 2 }); return '이틀 동안 푹 쉬게 했습니다.';
+      }),
+    ] },
+  { id: 'x-cond-slump', title: '컨디션 난조', weight: 4, when: (c) => regulars(c).length > 0,
+    vars: (c, rng) => ({ ...who(pick(regulars(c), rng)), cost: 2000 }),
+    text: (_c, v) => `${str(v, 'name')} 선수가 요즘 몸이 무겁다고 털어놓았습니다.`,
+    choices: [
+      ch('스스로 회복하게 둔다', '7일 동안 그 선수 컨디션 하락 (컨디션 난조)', (c, v) => { c.addCond(-0.5, 7, '컨디션 난조', { player: str(v, 'id') }); return '스스로 몸을 추스르기로 했습니다.'; }),
+      pay('트레이닝 파트가 따로 관리한다', 'cost', '4일 동안 그 선수 컨디션 조금 하락 (컨디션 난조)', (c, v) => {
+        c.addCond(-0.25, 4, '컨디션 난조', { player: str(v, 'id') }); return '트레이너가 회복 일정을 짰습니다.';
+      }, '컨디션 관리'),
     ] },
   { id: 'x-travel-delay', title: '원정 이동 지연', weight: 5,
     vars: amt(10000, 25000),
@@ -172,7 +197,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: (_c, v) => `${str(v, 'name')} 선수가 허리 통증을 호소했습니다.`,
     choices: [
       ch('5일 쉬게 한다', '5일 결장', (c, v) => { c.rest(str(v, 'id'), 5); return '닷새 동안 관리합니다.'; }),
-      ch('관리하며 출전시킨다', `14일 동안 그 선수 경기력 ${ed(-0.03)}`, (c, v) => { c.addForm(-0.03, 14, '허리 통증', { player: str(v, 'id') }); return '컨디션을 보며 내보냅니다.'; }),
+      ch('관리하며 출전시킨다', `14일 동안 그 선수 경기력 ${ed(-0.03)}`, (c, v) => { c.addForm(-0.03, 14, '허리 통증', { player: str(v, 'id') }); return '몸 상태를 보며 내보냅니다.'; }),
     ] },
   { id: 'x-hbp-bruise', title: '몸에 맞는 공 후유증', weight: 4, when: (c) => hitters(c).length > 3,
     vars: (c, rng) => who(pick(hitters(c), rng)),
@@ -534,7 +559,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     vars: amt(8000, 12000),
     text: () => '베테랑 스카우트가 다른 구단의 제안을 받았습니다.',
     choices: [
-      ch('보낸다', '유망주 한 명 잠재력 −1', (c) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, -1); return '스카우트가 떠났습니다. 유망주 관리에 빈틈이 생겼습니다.'; }),
+      ch('보낸다', '유망주 한 명 성장 여지가 조금 좁아진다', (c) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, -1); return '스카우트가 떠났습니다. 유망주 관리에 빈틈이 생겼습니다.'; }),
       pay('대우를 올려 붙잡는다', 'cost', '영향 없음', () => '스카우트가 남기로 했습니다.', '스카우트 연봉 인상'),
     ] },
   { id: 'x-data-team', title: '데이터팀 확충 제안', weight: 3,
@@ -555,8 +580,8 @@ export const EXTRA_EVENTS: EventDef[] = [
     vars: amt(25000, 35000),
     text: () => '2군 훈련장 시설이 낡아 부상 위험이 있다는 보고가 올라왔습니다.',
     choices: [
-      ch('미룬다', '유망주 한 명 잠재력 −1', (c) => { const p = prospects(c)[1] ?? prospects(c)[0]; if (p) c.addPotential(p.id, -1); return '보수를 미뤘습니다.'; }),
-      pay('보수한다', 'cost', '유망주 두 명 잠재력 +1', (c) => { for (const p of prospects(c).slice(0, 2)) c.addPotential(p.id, 1); return '2군 시설을 새로 단장했습니다.'; }, '2군 시설 보수'),
+      ch('미룬다', '유망주 한 명 성장 여지가 조금 좁아진다', (c) => { const p = prospects(c)[1] ?? prospects(c)[0]; if (p) c.addPotential(p.id, -1); return '보수를 미뤘습니다.'; }),
+      pay('보수한다', 'cost', '유망주 두 명 성장 여지가 조금 넓어진다', (c) => { for (const p of prospects(c).slice(0, 2)) c.addPotential(p.id, 1); return '2군 시설을 새로 단장했습니다.'; }, '2군 시설 보수'),
     ] },
   { id: 'x-front-conflict', title: '프런트 내부 갈등', weight: 3,
     vars: amt(4000, 6000),
@@ -619,49 +644,49 @@ export const EXTRA_EVENTS: EventDef[] = [
     vars: (c, rng) => { const p = pick(prospects(c).slice(0, 5), rng); return { id: p.id, name: p.name }; },
     text: (_c, v) => `2군 코치진이 ${str(v, 'name')} 선수가 최근 눈에 띄게 좋아졌다고 보고했습니다.`,
     choices: [
-      ch('지켜본다', '그 선수 잠재력 +1', (c, v) => { c.addPotential(str(v, 'id'), 1); return '꾸준히 지켜보기로 했습니다.'; }),
-      ch('특별 프로그램을 붙인다', '반반: 그 선수 잠재력 +3 / +0', (c, v, rng) => { if (rng.chance(0.5)) { c.addPotential(str(v, 'id'), 3); return '프로그램이 잘 맞았습니다.'; } return '아직 큰 변화는 없습니다.'; }),
+      ch('지켜본다', '그 선수 성장 여지가 조금 넓어진다', (c, v) => { c.addPotential(str(v, 'id'), 1); return '꾸준히 지켜보기로 했습니다.'; }),
+      ch('특별 프로그램을 붙인다', '반반: 그 선수 성장 여지가 크게 넓어진다 / 그대로', (c, v, rng) => { if (rng.chance(0.5)) { c.addPotential(str(v, 'id'), 3); return '프로그램이 잘 맞았습니다.'; } return '아직 큰 변화는 없습니다.'; }),
     ] },
   { id: 'x-prospect-slump', title: '유망주의 깊은 부진', weight: 4, when: (c) => prospects(c).length > 0,
     vars: (c, rng) => { const p = pick(prospects(c).slice(0, 6), rng); return { id: p.id, name: p.name, cost: 3000 }; },
     text: (_c, v) => `${str(v, 'name')} 선수가 2군에서도 긴 부진에 빠졌습니다.`,
     choices: [
-      ch('스스로 이겨 내게 둔다', '그 선수 잠재력 −2', (c, v) => { c.addPotential(str(v, 'id'), -2); return '부진이 길어지고 있습니다.'; }),
+      ch('스스로 이겨 내게 둔다', '그 선수 성장 여지가 좁아진다', (c, v) => { c.addPotential(str(v, 'id'), -2); return '부진이 길어지고 있습니다.'; }),
       pay('전문 상담을 붙인다', 'cost', '영향 없음', () => '상담 뒤 조금씩 안정을 찾고 있습니다.', '유망주 상담'),
     ] },
   { id: 'x-farm-manager-clash', title: '2군 감독과 의견 충돌', weight: 3, when: (c) => prospects(c).length > 0,
     text: () => '2군 감독이 유망주 기용 방식을 두고 프런트와 다른 의견을 냈습니다.',
     choices: [
-      ch('2군 감독 뜻에 맡긴다', '유망주 한 명 잠재력 +1, 구단주 신뢰도 −1', (c) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, 1); c.addTrust(-1); return '현장의 판단을 존중했습니다.'; }),
-      ch('프런트 방침대로 간다', '반반: 유망주 한 명 잠재력 +1 / −1', (c, _v, rng) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, rng.chance(0.5) ? 1 : -1); return '프런트 방침대로 운영합니다.'; }),
+      ch('2군 감독 뜻에 맡긴다', '유망주 한 명 성장 여지가 조금 넓어진다, 구단주 신뢰도 −1', (c) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, 1); c.addTrust(-1); return '현장의 판단을 존중했습니다.'; }),
+      ch('프런트 방침대로 간다', '반반: 유망주 한 명 성장 여지가 조금 넓어진다 / 조금 좁아진다', (c, _v, rng) => { const p = prospects(c)[0]; if (p) c.addPotential(p.id, rng.chance(0.5) ? 1 : -1); return '프런트 방침대로 운영합니다.'; }),
     ] },
   { id: 'x-japan-camp', title: '해외 교육리그 초청', weight: 3, when: (c) => prospects(c).length >= 2,
     vars: amt(12000, 18000),
     text: () => '해외 구단이 유망주 교육리그에 우리 선수 둘을 초청했습니다.',
     choices: [
       none('사양한다'),
-      pay('보낸다', 'cost', '유망주 두 명 잠재력 +2', (c) => { for (const p of prospects(c).slice(0, 2)) c.addPotential(p.id, 2); return '두 선수가 교육리그를 다녀왔습니다.'; }, '교육리그 파견'),
+      pay('보낸다', 'cost', '유망주 두 명 성장 여지가 넓어진다', (c) => { for (const p of prospects(c).slice(0, 2)) c.addPotential(p.id, 2); return '두 선수가 교육리그를 다녀왔습니다.'; }, '교육리그 파견'),
     ] },
   { id: 'x-pitching-lab', title: '피칭 랩 도입 제안', weight: 3,
     vars: amt(15000, 25000),
     text: () => '투구 동작을 정밀하게 분석하는 피칭 랩을 들이자는 제안입니다.',
     choices: [
       none('보류한다'),
-      pay('도입한다', 'cost', '젊은 투수 두 명 잠재력 +2', (c) => { for (const p of prospects(c).filter((x) => x.isPitcher).slice(0, 2)) c.addPotential(p.id, 2); return '젊은 투수들이 피칭 랩에서 훈련을 시작했습니다.'; }, '피칭 랩'),
+      pay('도입한다', 'cost', '젊은 투수 두 명 성장 여지가 넓어진다', (c) => { for (const p of prospects(c).filter((x) => x.isPitcher).slice(0, 2)) c.addPotential(p.id, 2); return '젊은 투수들이 피칭 랩에서 훈련을 시작했습니다.'; }, '피칭 랩'),
     ] },
   { id: 'x-swing-change', title: '유망주 타격 폼 수정', weight: 3, when: (c) => prospects(c).some((p) => !p.isPitcher),
     vars: (c) => { const p = prospects(c).find((x) => !x.isPitcher)!; return { id: p.id, name: p.name }; },
     text: (_c, v) => `타격 코치가 ${str(v, 'name')} 선수의 타격 폼을 크게 바꾸자고 제안했습니다.`,
     choices: [
       none('지금 폼을 유지한다'),
-      ch('바꾼다', '반반: 그 선수 잠재력 +3 / −1', (c, v, rng) => { const up = rng.chance(0.5); c.addPotential(str(v, 'id'), up ? 3 : -1); return up ? '새 폼이 잘 맞습니다.' : '새 폼에 적응하지 못하고 있습니다.'; }),
+      ch('바꾼다', '반반: 그 선수 성장 여지가 크게 넓어진다 / 조금 좁아진다', (c, v, rng) => { const up = rng.chance(0.5); c.addPotential(str(v, 'id'), up ? 3 : -1); return up ? '새 폼이 잘 맞습니다.' : '새 폼에 적응하지 못하고 있습니다.'; }),
     ] },
   { id: 'x-overtraining', title: '유망주 과훈련 우려', weight: 3, when: (c) => prospects(c).length > 0,
     vars: (c) => { const p = prospects(c)[0]; return { id: p.id, name: p.name }; },
     text: (_c, v) => `${str(v, 'name')} 선수가 밤늦게까지 혼자 훈련한다는 보고입니다. 과훈련이 걱정됩니다.`,
     choices: [
       ch('훈련량을 조절시킨다', '영향 없음', () => '코치진이 훈련량을 조절했습니다.'),
-      ch('의욕을 존중한다', '반반: 그 선수 잠재력 +1 / −3', (c, v, rng) => { const up = rng.chance(0.5); c.addPotential(str(v, 'id'), up ? 1 : -3); return up ? '노력이 결실을 맺고 있습니다.' : '몸에 탈이 나 한동안 쉬어야 했습니다.'; }),
+      ch('의욕을 존중한다', '반반: 그 선수 성장 여지가 조금 넓어진다 / 크게 좁아진다', (c, v, rng) => { const up = rng.chance(0.5); c.addPotential(str(v, 'id'), up ? 1 : -3); return up ? '노력이 결실을 맺고 있습니다.' : '몸에 탈이 나 한동안 쉬어야 했습니다.'; }),
     ] },
   { id: 'x-interpreter', title: '외국인 선수 통역 문제', weight: 3, when: (c) => foreigners(c).length > 0,
     vars: amt(4000, 6000),

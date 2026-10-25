@@ -98,7 +98,7 @@ export function Awards() {
           <tbody>
             {aw.goldenGlove.map((x, i) => (
               <tr key={i} className={x.winner.team === me ? 'me' : ''}>
-                <td className="l">{GG_LABEL[x.pos]}</td>
+                <td className="l" title={GG_LABEL[x.pos]}>{x.pos === 'P' ? '투수' : x.pos}</td>
                 <td className="l"><Name w={x.winner} /></td>
                 <td className="l"><Team w={x.winner} /></td>
                 <td className="l small">{x.winner.line}</td>

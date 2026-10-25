@@ -1,5 +1,5 @@
 // 자유 모드 (AI 진행, 2026-10-13 사용자 결정): 플레이어가 무엇이든 글로 하겠다고 하면 AI 게임 마스터가 판정하고, 그 결과를 실제 게임 조작(FreeOp)으로 낸다.
-// 사용자 결정: 바꿀 수 있는 범위는 거의 전부(트레이드·이동·방출·영입·가상 선수 만들기·모든 선수의 능력·잠재력·컨디션·계약·자금·구단주·팬, 다른 구단끼리도).
+// 사용자 결정: 바꿀 수 있는 범위는 거의 전부(트레이드·이동·방출·영입·가상 선수 만들기·모든 선수의 능력·잠재력·경기력·계약·자금·구단주·팬, 다른 구단끼리도).
 // 판단에 안전망은 두지 않는다 (AI가 정하면 그대로). 경기는 엔진이 시뮬레이션한다.
 // 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)도 데려올 수 있다 (사용자: "자유 모드의 목적이 그거야"). 실존 선수 규칙은 지시문에서 뺐다 (prompts.ts)
 // 조작은 이름 대신 id로 바꿔 이야기 기록(FantasyEntry.ops)에 남기고, 재현·불러오기 때는 AI 없이 그대로 다시 적용한다 (session.applyFreeOps).
@@ -16,11 +16,10 @@ import { sanitizeEffects, type FantasyEffect } from './effects';
 import type { FantasyEntry } from './types';
 import { duePromises, parseDue, promisesContext, type PromiseDraft, type PromiseSettle } from './promises';
 import type { DataStore } from '../data/types';
-import { currentRuns } from '../ai/value';
-import { asSim } from '../league/growth';
+import { guessSetText } from '../league/scout';
 import { changedRules, clampRule, foreignPostingOn, ruleDate, ruleOf, RULE_DEFS, type RuleKey } from '../league/rules';
 import { ownedPicks, pickOwner, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../league/picks';
-import { capPayroll, salaryCap } from '../league/salary';
+import { foreignCap, salaryCap, teamCapPayroll } from '../league/salary';
 import { cashOf } from '../league/finance';
 import { pickTradeAllowed } from '../league/difficulty';
 import { STAGES, STAGE_LABEL } from '../league/offseason';
@@ -43,7 +42,7 @@ export type FreeOp =
   | { op: 'contract'; player: string; salary: number; years: number }
   /** 다른 구단 자금 (만 원) */
   | { op: 'teamCash'; team: number; amount: number }
-  /** 판타지 효과 (신뢰·팬·자금·관중·컨디션·휴식 등, 상한 넉넉히) */
+  /** 판타지 효과 (신뢰·팬·자금·관중·경기력·휴식 등, 상한 넉넉히) */
   | { op: 'effect'; effect: FantasyEffect }
   /** 지명권 주인을 바꾼다 (draft 입단 연도, round 라운드, from 원래 구단, to 새 주인) */
   | { op: 'pick'; draft: number; round: number; from: number; to: number }
@@ -74,7 +73,7 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"teamCash","team":"구단 이름","amount":억 원} 다른 구단 자금
 - {"op":"trust","delta":정수} 구단주 신뢰 (0~100 안에서)
 - {"op":"fans","delta":정수} 우리 팬 만족도
-- {"op":"teamForm","side":"bat|pit|all","edge":−0.05~0.05,"days":1~60} 우리 선수단 컨디션 (시즌 중)
+- {"op":"teamForm","side":"bat|pit|all","edge":−0.05~0.05,"days":1~60} 우리 선수단 경기력 (시즌 중)
 - {"op":"playerForm","player":"우리 선수 이름","edge":−0.05~0.05,"days":1~60} (시즌 중)
 - {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)
 - {"op":"pick","draft":입단 연도,"round":라운드,"from":"원래 구단 이름","to":"새 주인 구단 이름"} 신인 지명권을 넘긴다 ([지명권]의 남은 지명권만)
@@ -116,13 +115,11 @@ due는 "2026-08-15", "시즌 끝", "오프시즌", "다음 시즌", "30일 뒤" 
 
 function rosterTable(g: GameSession, team: number, n: number): string {
   const year = g.phase === 'season' ? g.world.year : g.year + 1;
-  const ctx = g.values;
+  // 플레이어가 보는 것(우리 스카우트 팀의 추측)만 넘긴다 (능력치 v2 17.6: LLM이 진짜 능력·잠재 숫자를 흘리지 않게)
+  const grades = g.currentGrades();
   const lp = g.league.players.filter((p) => teamOfNow(g, p) === team);
-  const rows = lp.map((p) => {
-    const runs = currentRuns(asSim(p, ctx.world.league, year), ctx);
-    return { p, runs };
-  }).sort((a, b) => b.runs - a.runs).slice(0, n);
-  return rows.map(({ p, runs }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력${gradeOfRuns(runs, year)} 잠재${gradeOfRuns(p.potential, year)} 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
+  const rows = lp.map((p) => ({ p, runs: g.seenRuns(p.id) })).sort((a, b) => b.runs - a.runs).slice(0, n);
+  return rows.map(({ p }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력 추측(${guessSetText(g.guessSet(p.id, grades))}) 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
 }
 
 /** 지금 소속 (시즌 중에는 월드, 오프시즌에는 리그) */
@@ -151,10 +148,10 @@ export function rulesContext(g: GameSession, store: Store): string {
     lines.push(`- 지금: ${g.year} 오프시즌 (${g.offseason ? STAGE_LABEL[g.offseason.stage] : ''} 단계). 다음 시즌 ${year}`);
   }
   const fr = foreignRuleFor(g, store, year);
-  lines.push(`- 외국인: 보유 ${fr.regular}명${fr.asia ? ` + 아시아쿼터 ${fr.asia}명` : ''}, 신규 계약 상한 ${dollar(ruleOf(L, 'foreignNewCap'))}, 아시아쿼터 신규 상한 ${dollar(ruleOf(L, 'asiaNewCap'))}, 총액 상한 ${dollar(ruleOf(L, 'foreignTotalCap'))}, 시즌 중 교체 ${ruleOf(L, 'foreignSwaps')}번. 외국인 선수는 구단 간 트레이드 불가`);
+  lines.push(`- 외국인: 보유 ${fr.regular}명${fr.asia ? ` + 아시아쿼터 ${fr.asia}명` : ''}, 신규 계약 상한 ${dollar(foreignCap(L, 'foreignNewCap', year))}, 아시아쿼터 신규 상한 ${dollar(foreignCap(L, 'asiaNewCap', year))}, 총액 상한 ${dollar(foreignCap(L, 'foreignTotalCap', year))}, 시즌 중 교체 ${ruleOf(L, 'foreignSwaps')}번. 외국인 선수는 구단 간 트레이드 불가`);
   lines.push(`- 외국인 포스팅: ${foreignPostingOn(L) ? '켜짐 (KBO 외국인 선수도 해외 구단 요청으로 포스팅, 원소속 구단이 이적료를 받음)' : '꺼짐 (실제 KBO처럼 없음. 켜려면 rule foreignPosting 1)'}`);
   const cap = salaryCap(year, L);
-  lines.push(`- 샐러리캡: ${cap === null ? (ruleOf(L, 'capScale') <= 0 ? '폐지됨' : '아직 없음 (2023년 도입)') : `${won(cap)} (연봉 상위 ${ruleOf(L, 'capTopN')}명, 외국인·신인 제외). 우리 구단 지금 ${won(capPayroll(L.players, g.teamIdx, ruleOf(L, 'capTopN')))}. 초과 제재금 배율 ${ruleOf(L, 'capFineScale')}, 3회 초과 때 1라운드 지명 ${ruleOf(L, 'capPickDrop')}자리 강등`}`);
+  lines.push(`- 샐러리캡: ${cap === null ? (ruleOf(L, 'capScale') <= 0 ? '폐지됨' : '아직 없음 (2023년 도입)') : `${won(cap)} (연봉 상위 ${ruleOf(L, 'capTopN')}명, 외국인·신인 제외). 우리 구단 지금 ${won(teamCapPayroll(L, g.teamIdx, L.year))}. 초과 제재금 배율 ${ruleOf(L, 'capFineScale')}, 3회 초과 때 1라운드 지명 ${ruleOf(L, 'capPickDrop')}자리 강등`}`);
   lines.push(`- 트레이드: 한쪽 ${ruleOf(L, 'maxPerSide')}명까지, 지명권 ${pickTradeAllowed(L, g.year, 2020) ? `한 번에 ${ruleOf(L, 'maxPicksPerTrade')}장까지 거래 가능 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지)` : '거래 불가 (이 시대 규정)'}. 현금 트레이드 가능`);
   lines.push(`- FA: 오프시즌 외부 FA ${ruleOf(L, 'maxFaSignings')}명까지. 비FA 다년 계약 최대 ${ruleOf(L, 'extMaxYears')}년`);
   lines.push(`- 선수단: 소속 정원 ${ruleOf(L, 'orgLimit')}명, 육성선수 ${ruleOf(L, 'devLimit')}명 (${ruleOf(L, 'devMaxAge')}세 이하). 포스트시즌 연장 ${ruleOf(L, 'postseasonMaxInnings')}회까지`);

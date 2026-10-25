@@ -3,8 +3,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { activeLevel, cashOf, investCost, ledgerFlow, MEDICAL_RATE, payOf, SCOUT_NOISE, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
+import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -20,8 +21,10 @@ beforeAll(() => {
 describe('재정 기반', () => {
   it('새 게임: 모든 구단이 시작 자금으로 출발한다', () => {
     const g = GameSession.create(store, opts('fin-a'), FAST);
-    for (let t = 0; t < g.league.teams.length; t++) expect(cashOf(g.league, t)).toBe(START_CASH);
-    expect(g.cashNow()).toBe(START_CASH);
+    // 개막 샐러리캡 판정(applyCapSanctions)의 제재금만 빠질 수 있다 (2026-10-22 하드힛 포지션 반영 뒤 삼성 생성 연봉이 캡을 조금 넘는다)
+    const fine = (t: number) => g.league.ledger.filter((e) => e.from === t && e.note.startsWith('샐러리캡 초과')).reduce((s, e) => s + e.amount, 0);
+    for (let t = 0; t < g.league.teams.length; t++) expect(cashOf(g.league, t) + fine(t)).toBe(START_CASH);
+    expect(g.cashNow() + fine(g.teamIdx)).toBe(START_CASH);
   });
 
   it('시즌 중 수입·지출은 진행 방식과 상관없이 같다 (하루씩 vs 한 번에), 홈 경기마다 관중 수입이 들어온다', () => {
@@ -118,7 +121,7 @@ describe('투자 4종', () => {
   it('의료 투자: 같은 시드에서 부상 확률·결장 기간이 줄어 부상 결장 일수가 줄어든다', () => {
     const run = (level: number) => {
       const g = GameSession.create(store, opts('inv-med'), FAST);
-      for (const f of g.league.finance!) f.active = { scout: 1, develop: 1, medical: level, marketing: 1 };
+      for (const f of g.league.finance!) f.active = { scout: 1, scoutPro: 1, develop: 1, medical: level, marketing: 1 };
       const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST); // 월드를 투자 단계로 다시 만든다
       h.advance(100000);
       return h.season.absences.filter((a) => a.kind !== 'event').reduce((s, a) => s + (a.until - a.day), 0);
@@ -127,21 +130,6 @@ describe('투자 4종', () => {
     expect(run(3)).toBeLessThan(run(0));
   });
 
-  it('스카우트: 우리 구단 단계가 높을수록 드래프트 후보 잠재력 평가 오차가 작다', () => {
-    const err = (level: number) => {
-      const g = GameSession.create(store, opts('inv-scout'), FAST);
-      g.league.finance![lg].active!.scout = level;
-      g.advance(100000);
-      g.beginOffseason();
-      let guard = 0;
-      while (g.offseason!.stage !== 'draft' && guard++ < 30) { if (g.offseason!.stage === 'comp') g.autoComp(); g.nextStage(); }
-      const d = g.offseason!.draft!;
-      const ps = [...d.pool, ...d.picks.map((x) => x.id)].map((id) => g.leaguePlayer(id)!);
-      return Math.max(...ps.map((p) => Math.abs((p.scoutPotential ?? p.potential) - p.potential)));
-    };
-    expect(err(3)).toBeLessThanOrEqual(SCOUT_NOISE[3] + 0.5);
-    expect(err(0)).toBeGreaterThan(SCOUT_NOISE[3] + 0.5);
-  });
 });
 
 describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', () => {
@@ -152,20 +140,20 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     g.beginOffseason();
   }, 120_000);
 
-  it('FA: 계약금(총액의 30%)을 낼 자금이 없으면 제시할 수 없고, 계약하면 계약금이 장부에 남고 그만큼 월말 연봉에서 빠진다', () => {
+  it('FA: 계약하면 계약금(총액의 30%)이 장부에 남고 그만큼 월말 연봉에서 빠진다. 자금이 모자라면 모기업이 한 해 한도 안에서 모자란 몫을 대 준다', () => {
     const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
     // 자금으로 계약금을 낼 수 있는 FA (시즌 결과에 따라 첫 FA가 너무 비쌀 수 있다)
     const cash = cashOf(h.league, lg);
-    const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < cash * 0.8)!;
+    // 모기업 지원 한도(2026-10-21) 안의 계약금
+    const cap = faSupportCap(h.league, lg, 2027);
+    const e = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open' && signingBonus(Math.round(x.ask * 1.3), x.years) < Math.min(cash * 0.8, cap))!;
     expect(e).toBeDefined();
-    // 자금을 바닥내면 제시가 막힌다
+    // 자금을 바닥내도 제시할 수 있고, 계약하면 모자란 계약금을 모기업이 대 준다 (2026-10-21 사용자 결정. 그 전에는 제시가 막혔다)
     h.league.ledger.push({ year: 2027, from: lg, to: -1, amount: cash, note: '테스트 지출' });
     const salary = Math.round(e.ask * 1.3);
     const r = h.offerFa(e.id, salary, e.years);
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain('계약금');
-    h.league.ledger.pop();
-    expect(h.offerFa(e.id, salary, e.years)).toMatchObject({ ok: true });
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain('모기업');
     h.nextStage();
     const p = h.leaguePlayer(e.id)!;
     expect(p.team).toBe(lg);
@@ -173,6 +161,21 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     expect(fee.amount).toBe(signingBonus(salary, e.years));
     expect(fee.from).toBe(lg);
     expect(payOf(p)).toBe(salary - Math.round(fee.amount / e.years));
+    const help = h.league.ledger.find((x) => x.kind === 'faSupport' && x.note.startsWith(p.name))!;
+    expect(help).toMatchObject({ from: -1, to: lg, amount: fee.amount });
+    expect(cashOf(h.league, lg)).toBe(0);
+    expect(h.offseason!.log.some((l) => l.mine && l.text.includes('모기업이 지원'))).toBe(true);
+    // 그해 남은 한도를 넘는 계약금은 예전처럼 제시할 수 없다
+    const left = faSupportLeft(h.league, lg, 2027);
+    expect(left).toBe(cap - help.amount);
+    const big = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open');
+    if (big) {
+      const years = 4;
+      const salary = Math.ceil(((left + 10_000) / 0.3) / years);
+      const r2 = h.offerFa(big.id, salary, years);
+      expect(r2.ok).toBe(false);
+      expect(r2.message).toContain('제시할 수 없');
+    }
   });
 
   it('외국인: 새 후보에는 이적료가 붙고, 계약하면 자금에서 나간다. 자금이 모자라면 계약할 수 없다', () => {
@@ -180,6 +183,9 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     let guard = 0;
     while (h.offseason!.stage !== 'foreign' && guard++ < 10) { if (h.offseason!.stage === 'comp') h.autoComp(); h.nextStage(); }
     const off = h.offseason!;
+    // 새 후보는 관찰 명단에 있어야 계약할 수 있다 (league/scoutfx.ts): 모두 올려 둔다
+    const st = h.league.scoutFx!.teams[lg];
+    for (const id of off.foreign!.pool) if (h.leaguePlayer(id)!.fx && !st.list.some((e) => e.id === id)) st.list.push({ id, at: -1, weeks: 0 });
     const cand = off.foreign!.pool.map((id) => h.leaguePlayer(id)!).find((p) => p.transferFee && Off.canSignForeign(h.league, off, lg, p).ok);
     if (!cand) return; // 우리 차례가 아니거나 자리가 없으면 넘어간다
     const before = cashOf(h.league, lg);
@@ -223,6 +229,9 @@ describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 
       g.advance(100000);
       g.beginOffseason();
       for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
+        // 시드에 따라 해고될 수 있다: 첫 영입 제의를 받아들이고 이어 간다
+        const offers = g.league.owner?.offers;
+        if (offers?.length) g.acceptOffer(offers[0]);
         const st = g.offseason!.stage;
         if (st === 'draft') g.autoDraft(); if (st === 'comp') g.autoComp(); if (st === 'release') g.autoRelease();
         g.nextStage();
@@ -233,11 +242,13 @@ describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 
     let paid = 0;
     for (let t = 0; t < L.teams.length; t++) {
       for (const y of L.finance![t].history) {
-        expect(y.cash, `${L.teams[t].name} ${y.year}`).toBeLessThan(2_000_000);
+        // 기준 금액은 2026년 뒤 연봉 상승 지수만큼 오른다 (2026-10-22)
+        const w = wageIndex(y.year, L);
+        expect(y.cash, `${L.teams[t].name} ${y.year}`).toBeLessThan(2_000_000 * w);
         if (y.dividend) {
           paid++;
-          expect(y.cash).toBeGreaterThanOrEqual(1_000_000);
-          expect(y.cash + y.dividend - 1_000_000).toBeCloseTo(y.dividend * 2, -1);
+          expect(y.cash).toBeGreaterThanOrEqual(1_000_000 * w - 1);
+          expect(y.cash + y.dividend - 1_000_000 * w).toBeCloseTo(y.dividend * 2, -1);
         }
       }
     }

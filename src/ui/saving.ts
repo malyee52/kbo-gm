@@ -1,16 +1,16 @@
 // 화면에서 쓰는 저장 도우미: 세션 → 저장 기록, 파일 이름.
 import { formatDate } from '../game/calendar';
 import type { GameSession, ReproInfo } from '../game/session';
+import { rankText } from '../game/rank';
 import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord, getSave } from '../game/storage';
 
 export function summaryOf(s: GameSession): string {
   if (s.phase === 'offseason') {
-    const rank = s.league.lastSeason ? s.league.lastSeason.standings.indexOf(s.teamIdx) + 1 : 0;
-    return `오프시즌${rank ? ` · 지난 시즌 ${rank}위` : ''}`;
+    const rank = rankText(s, s.teamIdx);
+    return `오프시즌${rank ? ` · 지난 시즌 ${rank}` : ''}`;
   }
   const t = s.season.teams[s.teamIdx];
-  const rank = s.season.standings().indexOf(s.teamIdx) + 1;
-  return t.g === 0 ? '개막 전' : `${t.w}승 ${t.l}패 ${t.t}무 · ${rank}위`;
+  return t.g === 0 ? '개막 전' : `${t.w}승 ${t.l}패 ${t.t}무 · ${rankText(s, s.teamIdx)}`;
 }
 
 export function recordOf(s: GameSession, slot: string): SaveRecord {
@@ -64,13 +64,13 @@ export function reproOf(s: GameSession): ReproReport {
 
 /** 저장 기록이 그 시즌 종료(또는 오프시즌) 상태인지. 지난 시즌의 "정규시즌 종료" 소식은 세지 않는다 */
 export function isSeasonDone(s: Pick<SaveRecord, 'year' | 'data'>): boolean {
-  if (s.data.format === 2 && s.data.phase === 'offseason') return true;
+  if (s.data.format === 3 && s.data.phase === 'offseason') return true;
   return s.data.news.some((n) => (n.year ?? s.year) === s.year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
 }
 
 /** 저장 목록에 보여줄 진행 시점 */
 export function whenText(rec: Pick<SaveRecord, 'year' | 'day' | 'data'>, done: boolean): string {
-  if (rec.data.format === 2 && rec.data.phase === 'offseason') return `${rec.year} 오프시즌`;
+  if (rec.data.format === 3 && rec.data.phase === 'offseason') return `${rec.year} 오프시즌`;
   if (done) return `${rec.year} 시즌 종료`;
   return formatDate(rec.year, rec.day, true);
 }

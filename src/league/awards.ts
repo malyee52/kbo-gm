@@ -2,6 +2,7 @@
 // 시뮬레이션 기록으로 정한다. 투표가 없으므로 기준은 종합 가치(WAR 근사)와 KBO 규정타석·규정이닝이다. 가중치는 임시값.
 import { lineTeam } from '../engine/types';
 import { defenseAt } from '../engine/defense';
+import { assignSlots } from '../engine/team';
 import type { Season } from '../engine/season';
 import type { BatLine, PitLine, SimPlayer, World } from '../engine/types';
 import { fip, leagueBase, wraa, type LeagueBase } from '../game/saber';
@@ -66,14 +67,22 @@ function mainPos(p: SimPlayer): string {
   return p.pos ?? 'DH';
 }
 
-function batWar(p: SimPlayer, b: BatLine, lg: LeagueBase, teamGames: number): number {
+/** defShare: 수비 런을 이만큼만 센다 (MVP 점수는 MVP_DEF_SHARE) */
+function batWar(p: SimPlayer, b: BatLine, lg: LeagueBase, teamGames: number, defShare = 1): number {
   const pos = mainPos(p);
   const off = wraa(b, lg);
   const rep = REPL_BAT_PER_PA * b.pa;
   const adj = (POS_ADJ[pos] ?? 0) * (b.pa / 650);
-  const def = pos === 'DH' ? 0 : defenseAt(p, pos) * Math.min(1, b.g / teamGames);
+  const def = pos === 'DH' ? 0 : defenseAt(p, pos) * Math.min(1, b.g / teamGames) * defShare;
   return (off + rep + adj + def) / RUNS_PER_WIN;
 }
+
+/**
+ * MVP 점수 (첫 시즌 밸런스 3차, 2026-10-25 사용자 물음 3 ①, 임시값): 시즌 가치(수비 런은 반만) + 타이틀 하나당 0.8승.
+ * 예전(가치 + 타이틀 0.3, 수비 그대로)에는 1995 유격수·2루수가 6~8홈런 40타점 안팎으로 MVP가 됐다. 실제 투표는 타이틀·홈런·타점을 크게 본다
+ */
+const MVP_TITLE_WEIGHT = 0.8;
+const MVP_DEF_SHARE = 0.5;
 
 function pitWar(p: PitLine, lg: LeagueBase, lgEra: number): number {
   if (p.outs === 0) return 0;
@@ -133,7 +142,7 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   const qualPa = Math.ceil(3.1 * teamGames);
   const qualOuts = 3 * teamGames;
 
-  type Cand = { sp: SimPlayer; b: BatLine; p: PitLine; war: number; bat: boolean };
+  type Cand = { sp: SimPlayer; b: BatLine; p: PitLine; war: number; bat: boolean; mvpWar: number };
   const cands: Cand[] = [];
   for (const sp of world.players) {
     const b = season.bat[sp.idx];
@@ -141,7 +150,9 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
     if (b.pa === 0 && p.bf === 0) continue;
     const bw = b.pa > 0 && !sp.isPitcher ? batWar(sp, b, lg, teamGames) : 0;
     const pw = pitWar(p, lg, lgEra);
-    cands.push({ sp, b, p, war: (sp.isPitcher ? pw : bw) + twoWayWar(sp, b, p, lg, lgEra, teamGames), bat: !sp.isPitcher });
+    const two = twoWayWar(sp, b, p, lg, lgEra, teamGames);
+    const mw = b.pa > 0 && !sp.isPitcher ? batWar(sp, b, lg, teamGames, MVP_DEF_SHARE) : 0;
+    cands.push({ sp, b, p, war: (sp.isPitcher ? pw : bw) + two, bat: !sp.isPitcher, mvpWar: (sp.isPitcher ? pw : mw) + two });
   }
   const win = (c: Cand): AwardWinner => ({
     id: c.sp.id, name: c.sp.name, team: lineTeam(c.sp), war: Math.round(c.war * 100) / 100,
@@ -178,10 +189,10 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   // 승률: 10승 이상
   title('wpct', '승률', pits.filter((c) => c.p.w >= 10), (c) => c.p.w / (c.p.w + c.p.l), f3);
 
-  // ---- MVP: 종합 가치 + 타이틀 하나당 0.3 (투표가 타이틀을 중시하는 경향, 임시값)
+  // ---- MVP: 종합 가치(수비는 반만) + 타이틀 하나당 0.8 (투표가 타이틀을 중시하는 경향, 임시값, MVP_TITLE_WEIGHT)
   const titleCount = new Map<string, number>();
   for (const t of titles) for (const w of t.winners) titleCount.set(w.id, (titleCount.get(w.id) ?? 0) + 1);
-  const mvpScore = (c: Cand) => c.war + 0.3 * (titleCount.get(c.sp.id) ?? 0);
+  const mvpScore = (c: Cand) => c.mvpWar + MVP_TITLE_WEIGHT * (titleCount.get(c.sp.id) ?? 0);
   const regular = cands.filter((c) => (c.bat ? c.b.pa >= qualPa : c.p.outs >= qualOuts || c.p.sv >= 20));
   const mvp = regular.length ? win(regular.reduce((a, b) => (mvpScore(b) > mvpScore(a) ? b : a))) : null;
 
@@ -196,13 +207,17 @@ export function seasonAwards(world: World, season: Season, league: LeagueState, 
   const rookie = rookies.length ? win(rookies.reduce((a, b) => (b.war > a.war ? b : a))) : null;
 
   // ---- 골든글러브: 부문별 종합 가치 1위 (외야 3명). 수비수는 그 자리에서 팀 경기의 절반 이상, 지명타자는 규정타석의 2/3 이상, 투수는 규정이닝 또는 20세이브
+  // 지명타자 부문: 주 포지션이 지명타자인 선수와 시즌 끝 1군 최적 배정에서 지명타자 자리에 서는 선수 (경기별 수비 자리는 기록하지 않는다).
+  // 하드힛 주 포지션(2026-10-22)에는 지명타자가 없어서, 지명타자를 주로 맡는 타자도 주 포지션은 수비 자리다. 이 선수들은 수비 부문에서 뺀다
+  const teamDh = new Set(season.teamSeasons.flatMap((_, t) => assignSlots(season.activeAt(t).hitters).filter((x) => x.slot === 'DH').map((x) => x.p.idx)));
+  const isDh = (c: Cand) => mainPos(c.sp) === 'DH' || teamDh.has(c.sp.idx);
   const goldenGlove: SeasonAwards['goldenGlove'] = [];
   for (const pos of GG_ORDER) {
     let pool: Cand[];
     if (pos === 'P') pool = pits.filter((c) => c.p.outs >= qualOuts || c.p.sv >= 20);
-    else if (pos === 'DH') pool = bats.filter((c) => mainPos(c.sp) === 'DH' && c.b.pa >= qualPa * (2 / 3));
-    else if (pos === 'OF') pool = bats.filter((c) => ['LF', 'CF', 'RF'].includes(mainPos(c.sp)) && c.b.g >= teamGames / 2);
-    else pool = bats.filter((c) => mainPos(c.sp) === pos && c.b.g >= teamGames / 2);
+    else if (pos === 'DH') pool = bats.filter((c) => isDh(c) && c.b.pa >= qualPa * (2 / 3));
+    else if (pos === 'OF') pool = bats.filter((c) => !isDh(c) && ['LF', 'CF', 'RF'].includes(mainPos(c.sp)) && c.b.g >= teamGames / 2);
+    else pool = bats.filter((c) => !isDh(c) && mainPos(c.sp) === pos && c.b.g >= teamGames / 2);
     const sorted = [...pool].sort((a, b) => b.war - a.war);
     for (const c of sorted.slice(0, pos === 'OF' ? 3 : 1)) goldenGlove.push({ pos, winner: win(c) });
   }

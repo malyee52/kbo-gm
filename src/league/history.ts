@@ -7,6 +7,7 @@
 
 import { batWarOf, pitWarOf, realEnv, realEnvOf, warSummary } from './war';
 import type { DataStore } from '../data/types';
+import { divisionsOf } from '../data/schedule';
 import type { LeaguePlayer, LeagueState, SeasonLine } from './types';
 
 /** 게임 안 통산 (타격: BatLine 키 순서, 투구: PitLine 키 순서의 합) */
@@ -54,8 +55,8 @@ export interface YearRecord {
 
 // BatLine: g, pa, ab, r, h, d, t, hr, rbi, bb, hbp, so, sb, cs, gdp, sf, sac
 const B = { g: 0, pa: 1, ab: 2, r: 3, h: 4, d: 5, t: 6, hr: 7, rbi: 8, bb: 9, hbp: 10, so: 11, sb: 12, cs: 13 } as const;
-// PitLine: g, gs, w, l, sv, outs, bf, h, hr, bb, hbp, so, r, er
-const P = { g: 0, gs: 1, w: 2, l: 3, sv: 4, outs: 5, bf: 6, h: 7, hr: 8, bb: 9, hbp: 10, so: 11, r: 12, er: 13, hld: 14 } as const;
+// PitLine: g, gs, w, l, sv, outs, bf, h, hr, bb, hbp, so, r, er, hld, qs, bsv
+const P = { g: 0, gs: 1, w: 2, l: 3, sv: 4, outs: 5, bf: 6, h: 7, hr: 8, bb: 9, hbp: 10, so: 11, r: 12, er: 13, hld: 14, qs: 15, bsv: 16 } as const;
 
 export interface CareerBat { g: number; pa: number; ab: number; r: number; h: number; d: number; t: number; hr: number; rbi: number; bb: number; so: number; sb: number }
 export interface CareerPit { g: number; gs: number; w: number; l: number; sv: number; outs: number; so: number; er: number; bb: number; h: number }
@@ -106,7 +107,7 @@ export function archiveDeparting(league: LeagueState, year: number): void {
   const retired = new Set((league.retired ?? []).filter((r) => r.year === year).map((r) => r.id));
   league.archive ??= [];
   for (const p of league.players) {
-    if (p.team >= 0 || p.team === -2 || !p.history.some((h) => h.bat || h.pit)) continue; // 해외(−2)는 리그 명단에 남는다. 1군 기록이 하나도 없으면 남길 것이 없다
+    if (p.team >= 0 || p.team === -2 || p.freeAgent || !p.history.some((h) => h.bat || h.pit)) continue; // 계약하지 못한 FA(freeAgent)는 시즌 중 자유계약으로 남는다 // 해외(−2)는 리그 명단에 남는다. 1군 기록이 하나도 없으면 남길 것이 없다
     league.archive.push(archiveOf(league, p, retired.has(p.id) ? 'retired' : 'left'));
   }
 }
@@ -201,6 +202,28 @@ export function realYearbook(store: Store, before: number): YearRecord[] {
 /** 연표 전체 (시작 전 실제 + 게임 안), 연도 순 */
 export function yearbook(league: LeagueState, store: Store): YearRecord[] {
   return [...realYearbook(store, league.startYear), ...(league.yearbook ?? [])].sort((a, b) => a.year - b.year);
+}
+
+/** 연표 한 해에서 구단의 리그 자리 (양대 리그 해만) */
+export interface YearLeague { league: string; rank: number }
+
+/**
+ * 연표 한 해의 리그 자리 (양대 리그 해 1999·2000, 일정 개편 기획안 10.6): y.teams와 같은 순서로 리그 이름과 리그 안 순위.
+ * 저장하지 않고 YearTeam.franchise + 연도로 그 해 시즌 자료의 league 칸에서 다시 계산한다 (게임 안 시즌도 그 해 계보가 남아 있어 같은 계산).
+ * y.teams가 통합 순위 순이라 리그 안 순위는 그 부분열 순서다. 단일 리그 해, 그 해 자료가 없거나 계보가 맞지 않으면 null
+ */
+export function yearLeagues(store: Pick<DataStore, 'season'>, y: Pick<YearRecord, 'year' | 'teams'>): YearLeague[] | null {
+  const d = divisionsOf(store.season(y.year), y.teams.map((t) => t.franchise));
+  if (!d) return null;
+  const out: YearLeague[] = y.teams.map(() => ({ league: '', rank: 0 }));
+  d.teams.forEach((ts, k) => ts.forEach((i, r) => { out[i] = { league: d.names[k], rank: r + 1 }; }));
+  return out;
+}
+
+/** 연표 한 줄의 i번째(통합 순위 순) 구단 순위 문장: 양대 리그 해 "드림 2위", 다른 해 "3위" */
+export function yearPlaceLabel(leagues: YearLeague[] | null, i: number): string {
+  const x = leagues?.[i];
+  return x ? `${x.league} ${x.rank}위` : `${i + 1}위`;
 }
 
 /** 시작 전 실제 통산 (선수 id → 합계). 같은 store·시작 연도면 한 번만 계산한다 */
@@ -421,17 +444,40 @@ export interface FranchiseHistory {
   worst: { year: number; name: string; w: number; l: number; t: number } | null;
 }
 
-/** 구단 계보별 역사 (연표에서). 가을야구 진출은 그 해 규정의 진출 구단 수 안의 정규시즌 순위 */
+/**
+ * 양대 리그 해의 가을야구 진출 (y.teams 색인): 게임 안 시즌은 치른 시리즈의 구단, 실제 시즌은 각 리그 1·2위 + 다른 리그 2위보다
+ * 승률(무승부 제외)이 높은 3위 (준플레이오프, 기획안 10.5. 실제 1999·2000은 승률이 같은 경우가 없어 동률 규칙은 쓰지 않는다)
+ */
+function twoLeaguePostseason(y: YearRecord, lg: YearLeague[]): Set<number> {
+  if (y.series?.length) {
+    const fr = new Set(y.series.flatMap((x) => [x.a, x.b]));
+    return new Set(y.teams.flatMap((t, i) => (fr.has(t.franchise) ? [i] : [])));
+  }
+  const pct = (i: number) => y.teams[i].w / Math.max(1, y.teams[i].w + y.teams[i].l);
+  const at = (league: string, rank: number) => lg.findIndex((x) => x.league === league && x.rank === rank);
+  const out = new Set(lg.flatMap((x, i) => (x.rank <= 2 ? [i] : [])));
+  for (const league of new Set(lg.map((x) => x.league))) {
+    const third = at(league, 3);
+    const other = lg.find((x) => x.league !== league)?.league;
+    const second = other === undefined ? -1 : at(other, 2);
+    if (third >= 0 && second >= 0 && pct(third) > pct(second)) out.add(third);
+  }
+  return out;
+}
+
+/** 구단 계보별 역사 (연표에서). 가을야구 진출은 그 해 규정의 진출 구단 수 안의 정규시즌 순위 (양대 리그 해는 실제 진출 규칙) */
 export function franchiseHistory(league: LeagueState, store: Store): FranchiseHistory[] {
   const out = new Map<string, FranchiseHistory>();
   for (const y of yearbook(league, store)) {
     const cut = Number(store.meta.rules[String(y.year)]?.postseasonTeams ?? store.meta.rules[String(Math.max(...store.meta.years))].postseasonTeams);
+    const lg = yearLeagues(store, y);
+    const two = lg ? twoLeaguePostseason(y, lg) : null;
     y.teams.forEach((t, i) => {
       let f = out.get(t.franchise);
       if (!f) out.set(t.franchise, (f = { franchise: t.franchise, name: t.name, titles: [], runnerUps: [], postseasons: 0, seasons: 0, best: null, worst: null }));
       f.name = t.name;
       f.seasons++;
-      if (i < cut) f.postseasons++;
+      if (two ? two.has(i) : i < cut) f.postseasons++;
       if (y.champion === t.name) f.titles.push(y.year);
       if (y.runnerUp === t.name) f.runnerUps.push(y.year);
       const pct = t.w / Math.max(1, t.w + t.l);

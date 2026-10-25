@@ -11,6 +11,10 @@ import { dirname } from 'node:path';
 import { loadDataStore } from '../src/data/loadNode';
 import type { SeasonData } from '../src/data/types';
 import { calibrate, DEFAULT_PARAMS, Rng, simulateSeason, winPct, worldForYear, type EngineParams, type World } from '../src/engine';
+import { installCalCache } from './calCache';
+
+// 환경 맞춤 디스크 캐시: 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다 (결과는 같다. 끄기 KBO_CAL_CACHE=0)
+installCalCache();
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -21,6 +25,8 @@ const years = (arg('years') ?? '2025').split(',').map(Number);
 const nSeasons = Number(arg('seasons') ?? 300);
 const params: EngineParams = { ...DEFAULT_PARAMS, ...(arg('params') ? JSON.parse(arg('params')!) : {}) };
 const outPath = arg('out');
+/** --engine A: 모든 경기를 A 해결기(공 단위)로 (엔진 2 17단계 A 리그 검증). 환경 맞춤은 B 그대로 (기획안 3.6.1) */
+const engine = arg('engine') === 'A' ? 'A' as const : undefined;
 /** actual이면 선수별 출전 가능 기간을 그 해 실제 출전량에 맞춘다 */
 const usage = arg('usage') ?? 'random';
 
@@ -51,8 +57,8 @@ const LABELS: [keyof Metrics, string, number, 'emergent' | 'calibrated' | 'usage
   ['runs', '팀 경기당 득점', 2, 'emergent'],
   ['era', '평균자책', 2, 'emergent'],
   ['unearned', '비자책 실점 비율', 3, 'emergent'],
-  ['gdp', '타석당 병살', 4, 'emergent'],
-  ['sf', '타석당 희생플라이', 4, 'emergent'],
+  ['gdp', '타석당 병살 (온전한 구단)', 4, 'emergent'],
+  ['sf', '타석당 희생플라이 (온전한 구단)', 4, 'emergent'],
   ['sac', '타석당 희생번트', 4, 'emergent'],
   ['sb', '팀 경기당 도루', 2, 'emergent'],
   ['tie', '무승부 비율', 3, 'emergent'],
@@ -81,6 +87,23 @@ function topShare(values: number[], k: number): number {
   return total > 0 ? s.slice(0, k).reduce((a, b) => a + b, 0) / total : 0;
 }
 
+/**
+ * 타석당 병살·희생플라이: 기록이 온전한 구단만으로 (엔진 2 13단계, 기획안 4장 '시대별 주루·병살' 임시 방법).
+ * 2007년 이전에는 한 구단 타자 기록 전체에 병살·희생플라이가 빈 해가 있어(1985 청보, 1995 쌍방울·태평양) 리그 합계가 작게 잡힌다.
+ * 빈 값(null)이 타석의 1% 넘는 구단은 뺀다. 빠진 구단이 없으면 리그 값과 같다
+ */
+function completeRates(s: SeasonData): { gdp: number; sf: number } {
+  const by = new Map<string, { pa: number; gdp: number; sf: number; miss: number }>();
+  for (const r of s.bat) {
+    const t = by.get(r.team) ?? by.set(r.team, { pa: 0, gdp: 0, sf: 0, miss: 0 }).get(r.team)!;
+    t.pa += r.pa; t.gdp += r.gdp ?? 0; t.sf += r.sf ?? 0;
+    if (r.gdp === null || r.sf === null) t.miss += r.pa;
+  }
+  let pa = 0, gdp = 0, sf = 0;
+  for (const t of by.values()) if (t.miss <= 0.01 * t.pa) { pa += t.pa; gdp += t.gdp; sf += t.sf; }
+  return pa > 0 ? { gdp: gdp / pa, sf: sf / pa } : { gdp: s.league.gdpPerPa, sf: s.league.sfPerPa };
+}
+
 function actualMetrics(s: SeasonData, pitcherIds: Set<string>): Metrics {
   const L = s.league;
   let hw = 0;
@@ -95,10 +118,11 @@ function actualMetrics(s: SeasonData, pitcherIds: Set<string>): Metrics {
   const byTeamOuts = new Map<string, number[]>();
   for (const r of s.pit) (byTeamOuts.get(r.team) ?? byTeamOuts.set(r.team, []).get(r.team)!).push(r.outs);
   const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const full = completeRates(s);
   return {
     avg: L.avg, runs: L.runsPerTeamGame, era: L.era, unearned: 1 - L.er / L.runsAllowed,
     s1: L.rates.s1, d2: L.rates.d2, t3: L.rates.t3, hr: L.rates.hr, bb: L.rates.bb, so: L.rates.so,
-    gdp: L.gdpPerPa, sf: L.sfPerPa, sac: L.sacPerPa, sb: L.sb / L.teamGames,
+    gdp: full.gdp, sf: full.sf, sac: L.sacPerPa, sb: L.sb / L.teamGames,
     tie: s.teams.reduce((a, t) => a + t.t, 0) / L.teamGames, home: hw / (hw + hl),
     sd: sd(s.teams.map((t) => t.w / (t.w + t.l))),
     top9: mean([...byTeamPa.values()].map((v) => topShare(v, 9))),
@@ -112,7 +136,7 @@ function simMetrics(world: World, n: number, seedBase: string): { mean: Metrics;
   const rows: Metrics[] = [];
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
-    const r = simulateSeason(world, params, `${seedBase}-${i}`, { cal });
+    const r = simulateSeason(world, params, `${seedBase}-${i}`, { cal, ...(engine ? { engine } : {}) });
     const T = r.totals;
     const teamGames = T.games * 2;
     const decided = T.games - T.ties;
@@ -148,7 +172,7 @@ const say = (s = '') => {
 
 say(`# 엔진 검증 결과`);
 say();
-say(`시즌당 ${nSeasons}회 반복. 차이는 (시뮬 − 실제) ÷ 실제.`);
+say(`시즌당 ${nSeasons}회 반복. 차이는 (시뮬 − 실제) ÷ 실제.${engine ? ' 모든 경기 A 해결기 (공 단위).' : ''}`);
 say();
 const summary: { year: number; diffs: Record<string, number> }[] = [];
 for (const year of years) {

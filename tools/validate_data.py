@@ -5,9 +5,10 @@
 사용법:  python3 tools/validate_data.py [데이터 폴더]
 오류가 있으면 종료 코드 1. 경고는 알려진 공백을 수로 보여 주는 용도이며 실패로 치지 않는다.
 """
+import csv
 import json
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +21,95 @@ warn = warnings.append
 
 def load(p):
     return json.loads(p.read_text(encoding='utf-8'))
+
+
+# 하드힛 구장 구성표(data-src/hardhit_derived/park_components.csv)의 구장 이름 → 구장 ID. 제2구장 포항·울산은 엔진에 없다
+HARDHIT_PARKS = {'잠실': 'jamsil', '대구': 'lionspark', '인천': 'munhak', '부산': 'sajik', '대전': 'ballpark', '수원': 'suwon',
+                 '창원': 'changwon', '광주': 'champions', '고척': 'gocheok'}
+HARDHIT_TEAMS = {'키움': '히어로즈'}
+FENCE_KEYS = ('l', 'lc', 'c', 'rc', 'r')
+
+
+def check_parks(parks, meta):
+    """parks.json (구장효과 기획안 7.4): 범위, 기간 겹침, 변경 열, 계보 행, 구단별 주 구장, 하드힛 구장 이름"""
+    specs, use = parks['specs'], parks['use']
+    ids = {s['id'] for s in specs}
+    fence_of = lambda s: tuple(s['fence'][k] for k in FENCE_KEYS) + (s['height']['lr'], s['height']['c'])
+    for s in specs:
+        for k, v in s['fence'].items():
+            if v is not None and not 85 <= v <= 130:
+                err(f'구장 {s["id"]} {s["from"]}: 펜스 {k} {v}m가 85~130m 밖')
+        for k, v in s['height'].items():
+            if v is not None and not 1 <= v <= 8:
+                err(f'구장 {s["id"]} {s["from"]}: 펜스 높이 {k} {v}m가 1~8m 밖')
+        if s['change'] not in ('없음', '펜스', '리모델링'):
+            err(f'구장 {s["id"]} {s["from"]}: 변경 {s["change"]!r}는 없음 / 펜스 / 리모델링이 아님')
+        if s['change'] == '리모델링' and '리모델링' not in (s['note'] or ''):
+            warn(f'구장 {s["id"]} {s["from"]}: 변경 = 리모델링인데 비고에 근거가 없음')
+    # 구장마다 공용 행(계보 빈 행)은 기간이 겹치지 않고, 변경 = 펜스면 앞 행과 펜스 칸이 다르고 없음이면 같다
+    base = defaultdict(list)
+    for s in specs:
+        if not s['franchise']:
+            base[s['id']].append(s)
+    for pid, ss in base.items():
+        ss.sort(key=lambda s: s['from'])
+        for a, b in zip(ss, ss[1:]):
+            if b['from'] <= (a['to'] or 9999):
+                err(f'구장 {pid}: 제원 기간이 겹침 ({a["from"]}~{a["to"]}, {b["from"]}~)')
+            if b['change'] == '펜스' and fence_of(a) == fence_of(b):
+                err(f'구장 {pid} {b["from"]}: 변경 = 펜스인데 앞 행과 펜스 칸이 같음')
+            if b['change'] == '없음' and fence_of(a) != fence_of(b):
+                err(f'구장 {pid} {b["from"]}: 변경 = 없음인데 앞 행과 펜스 칸이 다름')
+    cover = lambda pid, y: next((s for s in base.get(pid, ()) if s['from'] <= y <= (s['to'] or 9999)), None)
+    # 계보 행(그 구단 홈 경기에만 쓰는 제원)은 같은 구장·같은 해에 공용 행이 있고, 펜스 칸이 공용 행과 달라야 한다
+    for s in specs:
+        if s['franchise']:
+            for y in range(s['from'], (s['to'] or s['from']) + 1):
+                b = cover(s['id'], y)
+                if not b:
+                    err(f'구장 {s["id"]} {y}: 계보 {s["franchise"]} 행만 있고 공용 행이 없음')
+                elif s['change'] == '펜스' and fence_of(b) == fence_of(s):
+                    err(f'구장 {s["id"]} {y}: 계보 {s["franchise"]} 행이 공용 행과 펜스 칸이 같음')
+    spans = defaultdict(list)
+    for u in use:
+        if u['park'] not in ids:
+            err(f'구장 사용 {u["franchise"]}: 구장 표에 없는 구장 {u["park"]}')
+        if u['kind'] not in ('주', '계획'):
+            err(f'구장 사용 {u["franchise"]} {u["park"]}: 구분 {u["kind"]!r}는 주 / 계획이 아님')
+        if u['kind'] == '주':
+            spans[u['franchise']].append((u['from'], u['to'] or 9999, u['park']))
+    for fr, ss in spans.items():
+        ss.sort()
+        for (a1, b1, _), (a2, _, _) in zip(ss, ss[1:]):
+            if a2 <= b1:
+                err(f'구장 사용 {fr}: 주 구장 기간이 겹침 ({a1}~{b1}, {a2}~)')
+    last = max(meta['years'])
+    hardhit = defaultdict(set)  # 구장 ID → 구성표에 나온 계보 (2022~2025 묶음)
+    comp = ROOT / 'data-src' / 'hardhit_derived' / 'park_components.csv'
+    if comp.exists():
+        with comp.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                if r['구장'] in HARDHIT_PARKS:
+                    # 팀 칸은 'LG/두산'처럼 여럿이고 키움은 계보 이름(히어로즈)과 다르다
+                    hardhit[HARDHIT_PARKS[r['구장']]].update(HARDHIT_TEAMS.get(x, x) for x in r['팀'].split('/'))
+                elif r['구장'] not in ('포항', '울산'):
+                    err(f'하드힛 구장 구성표: 구장 ID를 모르는 구장 {r["구장"]}')
+    # 실측 구장: 구성표(2022~2025 묶음)의 구장은 묶음 마지막 해 그 구단들의 주 구장이어야 한다 (대전은 2025 볼파크 반 시즌)
+    for pid, frs in hardhit.items():
+        for fr in frs:
+            on = [p for a, b, p in spans.get(fr, ()) if a <= 2025 <= b]
+            if on != [pid]:
+                err(f'하드힛 구장 구성표 {pid}: {fr}의 2025 주 구장이 {on}')
+    for y in meta['years']:
+        for t in load(DATA / 'seasons' / f'{y}.json')['teams']:
+            fr = t['franchise']
+            on = [p for a, b, p in spans.get(fr, ()) if a <= int(y) <= b]
+            if not on:
+                warn(f'구장 사용 {y} {t["name"]}: 주 구장 없음')
+                continue
+            if int(y) <= last and not cover(on[0], int(y)):
+                err(f'구장 {on[0]} {y}: {t["name"]}의 주 구장인데 그 해 제원 행이 없음')
+
 
 
 def main():
@@ -151,11 +241,25 @@ def main():
                     continue
                 if not pl.get('foreign'):
                     err(f'외국인 개막 명단 {y} {t}: {pl["name"]}은(는) 외국인이 아님')
-                if team_of.get(x['id']) != t:
+                # 시즌 중 이적한 개막 선수는 기록소속 열에 그 해 기록 소속을 적는다 (월드는 개막 구단에서 시작)
+                if team_of.get(x['id']) != x.get('recordTeam', t):
                     err(f'외국인 개막 명단 {y} {t}: {pl["name"]}의 {y}년 기록 소속이 {team_of.get(x["id"])}')
+                elif x.get('recordTeam'):
+                    warn(f'외국인 개막 명단 {y} {t}: {pl["name"]}은(는) 개막 구단과 기록 소속({x["recordTeam"]})이 다름 (시즌 중 이적, 개막 구단에서 시작)')
                 unconfirmed += not x.get('confirmed')
         if unconfirmed:
-            warn(f'외국인 개막 명단 {y}: 미확인 {unconfirmed}명 (출전량·이름으로 추정한 값)')
+            warn(f'외국인 개막 명단 {y}: 미확인 {unconfirmed}명 (출전량·이름으로 추정했거나 개막 선수 대신 넣은 값)')
+
+    # 아시아쿼터 국적: 아시아축구연맹(AFC) 회원국 국적만 (KBO 아시아쿼터 규정). 국적을 적은 행만 본다
+    foreign_csv = ROOT / 'data-src' / '외국인_개막명단.csv'
+    if foreign_csv.exists():
+        import csv
+        AFC = {'JPN', 'TPE', 'AUS', 'CHN', 'HKG', 'PHI', 'INA', 'THA', 'VIE', 'MAS', 'SGP', 'IND', 'PAK', 'SRI', 'MGL', 'UZB', 'KAZ', 'IRN', 'GUM'}
+        with foreign_csv.open(encoding='utf-8-sig', newline='') as f:
+            for r in csv.DictReader(f):
+                codes = (r.get('국적코드') or '').split()
+                if r['구분'] == '아시아쿼터' and codes and not any(c in AFC for c in codes):
+                    err(f'외국인 개막 명단 {r["연도"]} {r["구단"]}: 아시아쿼터 {r["선수명"]}의 국적 {r.get("국적")}이 아시아 국가가 아님')
 
     # ---- 신인 지명 (drafts.json, baseballchart.kr 원본)
     drafts_path = DATA / 'drafts.json'
@@ -197,10 +301,289 @@ def main():
                 warn(f'특수능력: 한 선수에 능력 {len(v)}개')
         warn(f'특수능력: {len(table)}명 (기준은 tools/suggest_traits.py, 수정은 data-src/특수능력.csv)')
 
+    # ---- 규칙 변경 (rule_changes.json): 연도 범위, 날짜 형식, 값 목록, 게임 규칙 키, 공인구 검사 날짜 순서, 실존 선수 이름
+    rules_path = DATA / 'rule_changes.json'
+    if rules_path.exists():
+        import re
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_data import RULE_CAT, RULE_EFFECT, RULE_STATUS, RULE_KEYS  # noqa: E402
+        rc = load(rules_path)
+        # 세 글자 이상 이름만 견준다 (두 글자 이름은 보통 낱말과 겹친다)
+        names = {p['name'] for p in players if len(p.get('name') or '') >= 3}
+        date_ok = re.compile(r'^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$')
+
+        def text_check(where, *texts):
+            for t in texts:
+                for n in names:
+                    if t and n in t:
+                        err(f'{where}: 실존 선수 이름 "{n}"이 문구에 있음')
+
+        for it in rc['items']:
+            where = f'규칙 변경 {it.get("year")} {it.get("title")}'
+            if not 1982 <= it['year'] <= 2027:
+                err(f'{where}: 연도 범위 밖')
+            if 'date' in it and not date_ok.match(it['date']):
+                err(f'{where}: 날짜 형식(MM-DD) 아님 {it["date"]}')
+            if it['cat'] not in RULE_CAT.values() or it['effect'] not in RULE_EFFECT.values() or it['status'] not in RULE_STATUS.values():
+                err(f'{where}: 분류·반영·확인 값 이상')
+            if 'key' in it and it['key'] not in RULE_KEYS:
+                err(f'{where}: 게임 규칙 키가 아님 {it["key"]}')
+            text_check(where, it['title'], it.get('before'), it.get('after'), it.get('note'), it.get('simplified'))
+        for b in rc['ball']:
+            where = f'공인구 {b["year"]}'
+            if 'range' in b and not b['range'][0] < b['range'][1]:
+                err(f'{where}: 기준 범위 순서')
+            dated = [t['date'] for t in b.get('tests', []) if 'date' in t]
+            for d in dated:
+                if not date_ok.match(d):
+                    err(f'{where}: 날짜 형식(MM-DD) 아님 {d}')
+            if dated != sorted(dated):
+                err(f'{where}: 검사 날짜가 차수 순서와 다름')
+            rounds = [t['round'] for t in b.get('tests', [])]
+            if rounds != sorted(rounds):
+                err(f'{where}: 검사 차수 순서')
+            if not any(x.get('range') for x in rc['ball'] if x['year'] <= b['year']):
+                err(f'{where}: 앞선 기준 범위가 없음')
+            text_check(where, b.get('note'), *(t.get('note') for t in b.get('tests', [])))
+        warn(f'규칙 변경: {len(rc["items"])}건 (조사값 {sum(1 for it in rc["items"] if it["status"] == "research")}건), 공인구 {len(rc["ball"])}개 연도')
+
     # ---- 특별 엔트리 (새 게임에서 빼는 선수, 규칙으로 고른 값이라 확인용으로 보여 준다)
     for y, ids in sorted(meta.get('specialEntries', {}).items()):
         if int(y) >= 2015:
             warn(f'특별 엔트리로 보고 새 게임에서 뺌 {y}: ' + ', '.join(by_id[i]['name'] for i in ids if i in by_id))
+
+    # ---- 수상·구장 (awards.json, parks.json: 나무위키 덤프 가공값)
+    if (DATA / 'awards.json').exists():
+        for a in load(DATA / 'awards.json')['awards']:
+            if a['id'] and a['id'] not in by_id:
+                err(f'수상 {a["year"]} {a["award"]} {a["name"]}: 없는 선수 ID {a["id"]}')
+    if (DATA / 'parks.json').exists():
+        check_parks(load(DATA / 'parks.json'), meta)
+
+    # ---- 수비 이닝·평판 (defense.json, 능력치 v2 16-3a: tools/build_defense.py → build_data.py --defense-only)
+    if (DATA / 'defense.json').exists():
+        dj = load(DATA / 'defense.json')
+        f = dj['fields']
+        ig, igs, io = f.index('g'), f.index('gs'), f.index('outs')
+        n_pos = 0
+        for pid, ys in dj['players'].items():
+            if pid not in by_id:
+                err(f'수비: 없는 선수 ID {pid}')
+            for y, v in ys.items():
+                if not dj['from'] <= int(y) <= dj['to']:
+                    err(f'수비 {pid} {y}: 연도가 {dj["from"]}~{dj["to"]} 밖')
+                if not 0 <= v['nd'] <= v['pa']:
+                    err(f'수비 {pid} {y}: 수비 없는 타석 {v["nd"]}가 0~타석 {v["pa"]} 밖')
+                for pos, a in v.get('p', {}).items():
+                    n_pos += 1
+                    if pos not in ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'):
+                        err(f'수비 {pid} {y}: 모르는 자리 {pos}')
+                    if not 0 <= a[igs] <= a[ig]:
+                        err(f'수비 {pid} {y} {pos}: 선발 {a[igs]}이 0~출장 {a[ig]} 밖')
+                    # 한 경기 18이닝까지 (2008년 무제한 연장 포함 여유). 출장이 없는데 이닝이 있으면 오류
+                    if a[io] > a[ig] * 18 * 3:
+                        err(f'수비 {pid} {y} {pos}: 이닝 {a[io] / 3:.1f}이 출장 {a[ig]}경기 × 18 넘음')
+        rows_2004 = 0
+        src_csv = ROOT / 'data-src' / '수비이닝.csv'
+        if src_csv.exists():
+            import csv
+            with src_csv.open(encoding='utf-8-sig', newline='') as fh:
+                rows_2004 = sum(1 for r in csv.DictReader(fh) if r['연도'] == '2004')
+            # 2004년 보완 원본 540행 중 야수 행 (투수 164행 제외). 원본 540행은 build_defense.py가 확인한다
+            if rows_2004 != 376:
+                err(f'수비 이닝 2004년 야수 {rows_2004}행 (보완 원본 540행의 야수 376행이어야 함)')
+        for pid, reps in dj['rep'].items():
+            if pid not in by_id:
+                err(f'수비 평판: 없는 선수 ID {pid}')
+            for pos, lvl, a, b in reps:
+                if pos not in ('C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'IF', 'OF', '전반') or lvl not in (-2, -1, 0, 1, 2):
+                    err(f'수비 평판 {pid}: 자리·수준 {pos} {lvl}')
+                if (a is None) != (b is None) or (a is not None and a > b):
+                    err(f'수비 평판 {pid} {pos}: 시기 {a}~{b}')
+        warn(f'수비: 선수 {len(dj["players"]):,}명 · 자리-해 {n_pos:,}칸 ({dj["from"]}~{dj["to"]}, 2004년 야수 {rows_2004}행), '
+             f'평판 {sum(len(v) for v in dj["rep"].values()):,}줄 ({len(dj["rep"]):,}명)')
+
+    # ---- 구종 (pitches.json, 능력치 v2 16-1a·16-1b: tools/build_pitches.py → build_data.py --pitches-only)
+    if (DATA / 'pitches.json').exists():
+        pj = load(DATA / 'pitches.json')
+        f = pj['fields']
+        isp, iu, i_n, irv = f.index('speed'), f.index('usage'), f.index('n'), f.index('rv')
+        n_rows = both = only_ars = only_rv = 0
+        slow = []
+        for pid, ys in pj['players'].items():
+            if pid not in by_id:
+                err(f'구종: 없는 선수 ID {pid}')
+            elif 'P' not in by_id[pid].get('kind', ''):
+                err(f'구종 {pid} {by_id[pid]["name"]}: 투수(kind P·BP)가 아님')
+            for y, pt in ys.items():
+                if not pj['from'] <= int(y) <= pj['to']:
+                    err(f'구종 {pid} {y}: 연도가 {pj["from"]}~{pj["to"]} 밖')
+                u = [v[iu] for v in pt.values() if v[iu] is not None]
+                # 사용률은 그 투수·시즌의 구종 사용률 문자열에서 나온다: 합 100 ± 1 (같은 이름 둘이 합쳐진 묶음은 빌드가 뺐다)
+                if u and abs(sum(u) - 100) > 1:
+                    err(f'구종 {pid} {y}: 사용률 합 {sum(u):.1f}')
+                for t, v in pt.items():
+                    n_rows += 1
+                    if t not in ('포심', '투심', '싱커', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼'):
+                        err(f'구종 {pid} {y}: 모르는 구종 {t}')
+                    sp = v[isp]
+                    if sp is not None and not 60 <= sp <= 170:
+                        err(f'구종 {pid} {y} {t}: 구속 {sp}')
+                    elif sp is not None and not 100 <= sp <= 165:
+                        slow.append(f'{by_id.get(pid, {}).get("name", pid)} {y} {t} {sp}')
+                    if v[i_n] is not None and v[i_n] < 10:
+                        err(f'구종 {pid} {y} {t}: 투구수 {v[i_n]} (원본은 10구 이상만)')
+                    has_ars, has_rv = sp is not None or v[iu] is not None, v[irv] is not None
+                    both += has_ars and has_rv
+                    only_ars += has_ars and not has_rv
+                    only_rv += has_rv and not has_ars
+        warn(f'구종: 선수 {len(pj["players"]):,}명 · {n_rows:,}행 ({pj["from"]}~{pj["to"]}), 구종 데이터·가치 짝 {both:,}행 · 데이터만 {only_ars:,}행 · '
+             f'가치만 {only_rv:,}행. 못 맞춘 원본 행은 reports/pitches-unmatched.md')
+        if slow:
+            warn(f'구종: 구속 100 미만·165 초과 {len(slow)}행 (야수 등판·느린 커브로 보임): ' + ', '.join(slow))
+        base = pj['prior']['rv']['baseRows']
+        warn('구종 가치 기준 행 (투구수 300 이상): ' + ', '.join(f'{k} {v:,}' for k, v in base.items()))
+        # 위키 구종 (16-1b): 선수 ID가 투수, 표준 이름이 목록 안, 선수별 순서 1..k 겹침 없음 (빌드가 순서대로 실으므로 원본 CSV로 본다)
+        wiki = pj['wiki']
+        std = ('포심', '투심', '싱커', '커터', '슬라이더', '스위퍼', '커브', '체인지업', '포크', '너클볼', '기타')
+        for pid, w in wiki['players'].items():
+            if pid not in by_id or 'P' not in by_id[pid].get('kind', ''):
+                err(f'위키 구종: 투수가 아닌 선수 ID {pid}')
+            for t, ni, main_, a, b in w['p']:
+                if t not in std:
+                    err(f'위키 구종 {pid}: 표준 이름 밖 {t}')
+                if not 0 <= ni < len(wiki['names']):
+                    err(f'위키 구종 {pid}: 원문 색인 {ni}')
+                if a is not None and b is not None and a > b:
+                    err(f'위키 구종 {pid} {t}: 시기 {a}~{b}')
+        src_csv = ROOT / 'data-src' / '위키_구종.csv'
+        if src_csv.exists():
+            import csv
+            orders = defaultdict(list)
+            with src_csv.open(encoding='utf-8-sig', newline='') as fh:
+                for r in csv.DictReader(fh):
+                    orders[r['선수ID']].append(int(r['순서']))
+            for pid, o in orders.items():
+                if sorted(o) != list(range(1, len(o) + 1)):
+                    err(f'위키 구종 {pid}: 순서 {sorted(o)}')
+        # 실측 대조 (보고만, 15.6): 둘 다 있는 투수에서 위키 재현율·정확도·순위 상관. 싱커는 양쪽 모두 투심으로 센다
+        as_two = lambda t: '투심' if t == '싱커' else t  # noqa: E731
+        hit_r = all_r = hit_p = all_p = 0
+        rhos = []
+        for pid, w in wiki['players'].items():
+            ys = pj['players'].get(pid)
+            if not ys:
+                continue
+            share = defaultdict(list)
+            for pt in ys.values():
+                for t, v in pt.items():
+                    if v[iu] is not None:
+                        share[as_two(t)].append(v[iu])
+            if not share:
+                continue
+            seasons = max(len(v) for v in share.values())
+            meas = {t: sum(v) / seasons for t, v in share.items()}
+            wl = list(dict.fromkeys(as_two(t) for t, *_ in w['p']))
+            for t, s in meas.items():
+                if s >= 5:
+                    all_r += 1
+                    hit_r += t in wl
+            for t in wl:
+                all_p += 1
+                hit_p += t in meas
+            common = [t for t in wl if t in meas]
+            if len(common) >= 3:
+                k = len(common)
+                rw = {t: i for i, t in enumerate(common)}
+                rm = {t: i for i, t in enumerate(sorted(common, key=lambda t: -meas[t]))}
+                rhos.append(1 - 6 * sum((rw[t] - rm[t]) ** 2 for t in common) / (k * (k * k - 1)))
+        if all_r and all_p:
+            warn(f'위키 구종: {len(wiki["players"]):,}명. 실측 대조 (싱커 = 투심) 재현율 {100 * hit_r / all_r:.1f}% · 정확도 {100 * hit_p / all_p:.1f}% · '
+                 f'순위 상관 {sum(rhos) / len(rhos):.3f} (공통 구종 3개 이상 {len(rhos)}명)')
+
+    # ---- 일정 규칙 (schedule.json, data-src/일정규칙.csv): 시즌 자료와 경기 수·구단 수가 맞는지, 날짜가 말이 되는지
+    schedule_path = DATA / 'schedule.json'
+    if schedule_path.exists():
+        import datetime as dt
+        sched = load(schedule_path)
+        status_ok = ('확인', '조사값', '출처 갈림', '미확인', '임시값')
+
+        def day(y, md):
+            try:
+                return dt.date(y, int(md[:2]), int(md[3:]))
+            except ValueError:
+                err(f'일정 규칙 {y}: 없는 날짜 {md}')
+                return None
+
+        for y in meta['years']:
+            r = sched['years'].get(str(y))
+            if not r:
+                err(f'일정 규칙: {y}년 줄 없음')
+                continue
+            teams = load(DATA / 'seasons' / f'{y}.json')['teams']
+            if r.get('teams') != len(teams):
+                err(f'일정 규칙 {y}: 구단 수 {r.get("teams")} ≠ 시즌 자료 {len(teams)}')
+            games = {t['g'] for t in teams}
+            # 진행 중인 시즌은 아직 다 치르지 않은 구단이 있다
+            if (max(games) if y in meta.get('inProgress', []) else games) != (r['games'] if y in meta.get('inProgress', []) else {r['games']}):
+                err(f'일정 규칙 {y}: 팀당 경기 {r["games"]} ≠ 시즌 자료 {sorted(games)}')
+            if 'vsOther' in r:
+                size = Counter(t.get('league') for t in teams)
+                for t in teams:
+                    same = size[t.get('league')] - 1
+                    if r['vs'] * same + r['vsOther'] * (len(teams) - 1 - same) != r['games']:
+                        err(f'일정 규칙 {y}: 같은 리그 {r["vs"]}×{same} + 다른 리그 {r["vsOther"]}×{len(teams) - 1 - same} ≠ {r["games"]} ({t["name"]})')
+            elif r['vs'] * (len(teams) - 1) != r['games']:
+                err(f'일정 규칙 {y}: 상대별 {r["vs"]} × {len(teams) - 1} ≠ 팀당 {r["games"]}')
+            if r['unscheduled'] and r['unscheduled'] % (len(teams) - 1):
+                warn(f'일정 규칙 {y}: 미편성 {r["unscheduled"]}이 상대 수 {len(teams) - 1}의 배수가 아님')
+            op = day(y, r['opening'])
+            if op and op.weekday() != 5 and y != 2020:
+                warn(f'일정 규칙 {y}: 개막 {r["opening"]}이 토요일이 아님 ({"월화수목금토일"[op.weekday()]}요일)')
+            for k in ('endRef', 'endRef2', 'postseasonStart', 'remainingFrom', 'allStar'):
+                d = r.get(k) and day(y, r[k])
+                if d and op and d <= op:
+                    err(f'일정 규칙 {y}: {k} {r[k]}이 개막보다 이름')
+            # 2연전기 (S33L2는 해마다 실제 시작일, 2020은 끝 날도)
+            tf, tt = r.get('twoGameFrom'), r.get('twoGameTo')
+            if r['frame'] == 'S33L2' and (not tf or tf == 'allStar'):
+                err(f'일정 규칙 {y}: S33L2 해에 2연전 시작일(MM-DD)이 없음')
+            if tf and tf != 'allStar':
+                a, z = day(y, tf), tt and day(y, tt)
+                end = day(y, r['endRef']) if r.get('endRef') else None
+                if a and (op and a <= op or end and a >= end):
+                    err(f'일정 규칙 {y}: 2연전 시작 {tf}이 개막~종료 밖')
+                if z and a and z <= a:
+                    err(f'일정 규칙 {y}: 2연전 끝 {tt}이 시작 {tf}보다 이름')
+            prev = None
+            for b in r['breaks'] + r['dhBan']:
+                a, z = day(y, b['from']), day(y, b['to'])
+                if a and z and a > z:
+                    err(f'일정 규칙 {y}: 기간 {b["from"]}~{b["to"]}이 거꾸로')
+            for b in r['breaks']:
+                a, z = day(y, b['from']), day(y, b['to'])
+                if a and op and a <= op:
+                    err(f'일정 규칙 {y}: 쉬는 기간 {b["from"]}이 개막 전')
+                if prev and a and a <= prev:
+                    err(f'일정 규칙 {y}: 쉬는 기간이 겹치거나 순서가 틀림 ({b["from"]})')
+                prev = z
+            if r.get('allStar'):
+                s = day(y, r['allStar'])
+                if s and not any(day(y, b['from']) <= s <= day(y, b['to']) for b in r['breaks']):
+                    err(f'일정 규칙 {y}: 올스타 날 {r["allStar"]}이 쉬는 기간 밖')
+            if r['status'] not in status_ok:
+                err(f'일정 규칙 {y}: 확인 값 {r["status"]}')
+        f = sched.get('future')
+        if not f or f.get('from') != meta['years'][-1] + 1:
+            err(f'일정 규칙: 자료 없는 해 줄이 {meta["years"][-1] + 1}년부터가 아님')
+        else:
+            for k in ('opening', 'allStar'):
+                if not isinstance(f.get(k), dict):
+                    err(f'일정 규칙 {f["from"]}~: {k}이 요일 규칙이 아님')
+            if 'allStarBreak' not in f:
+                err(f'일정 규칙 {f["from"]}~: 올스타 휴식 규칙 없음')
+        n = Counter(r['status'] for r in sched['years'].values())
+        warn('일정 규칙: 확인 상태 ' + ', '.join(f'{k} {v}' for k, v in sorted(n.items())) + ' (data-src/일정규칙.csv)')
 
     print(f'검사 대상: 선수 {len(players):,}명, 시즌 {len(meta["years"])}개')
     print(f'경고 {len(warnings)}건')

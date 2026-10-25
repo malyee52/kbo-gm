@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { computeGrades, DEFAULT_PARAMS, generateSchedule, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
+import { computeGrades, DEFAULT_PARAMS, isNoGame, planForWorld, Rng, simulateSeason, worldForYear, type SeasonResult, type World } from '../src/engine';
 import { assignLineup, newPlayerStates, refreshActive, type TeamSeason } from '../src/engine/team';
+import { spreadPlan } from '../src/engine/schedule';
 
 let store: DataStore;
 let world: World;
@@ -39,10 +40,10 @@ describe('난수', () => {
 });
 
 describe('일정', () => {
-  // 시대별 구단 수와 팀당 경기 수 (자료집 시즌구조 시트)
+  // 시대별 구단 수와 팀당 경기 수 (자료집 시즌구조 시트). 연전 틀이 없는 해의 일정 (spreadPlan)
   const cases: [number, number][] = [[6, 80], [6, 100], [6, 110], [7, 108], [7, 120], [8, 126], [8, 132], [8, 133], [9, 128], [10, 144]];
   it.each(cases)('%i구단 %i경기: 모든 팀이 정확히 그만큼 치른다', (n, g) => {
-    const days = generateSchedule(n, g, new Rng(`s${n}-${g}`));
+    const { days } = spreadPlan({ opening: '2025-03-22', breaks: [] }, n, g, new Rng(`s${n}-${g}`));
     const played = new Array(n).fill(0);
     const home = new Array(n).fill(0);
     for (const day of days) {
@@ -61,10 +62,11 @@ describe('일정', () => {
     for (const h of home) expect(Math.abs(h - g / 2)).toBeLessThanOrEqual(n); // 홈·원정이 크게 치우치지 않는다
   });
 
-  it('상대별 경기 수가 같다 (10구단 144경기 = 상대당 16경기)', () => {
-    const days = generateSchedule(10, 144, new Rng('pairs'));
+  it('상대별 경기 수가 같다 (2025년 월드: 10구단 144경기 = 상대당 16경기)', () => {
+    const { days } = planForWorld(world, new Rng('pairs'));
     const m = new Map<string, number>();
     for (const day of days) for (const g of day) {
+      if (isNoGame(g.rainInning)) continue; // 노게임은 다시 치르는 경기가 따로 있다
       const k = [g.home, g.away].sort((a, b) => a - b).join('-');
       m.set(k, (m.get(k) ?? 0) + 1);
     }
@@ -84,7 +86,17 @@ describe('월드 구성 (2025년)', () => {
 
   it('능력치에 비정상 값이 없다', () => {
     for (const p of world.players) {
-      const { def, ...rest } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number> };
+      // 수비 가능 자리·비상 포수·포수 도루 저지(능력치 v2 16-3)는 숫자 칸이 아니거나 음수일 수 있다.
+      // 주루·작전·포수·투수 짝·어깨 손잡이(16-3c·16-3d)는 리그 대비 값이라 음수일 수 있다
+      // 수비 재능 T(defTalent, 16-4)는 자리별 숫자 묶음, 수비 고치기로 연 자리(defEdit)는 목록이다
+      const { def, plateRes, playable: _pl, emC: _e, cArm, defTalent, defEdit: _de, ...all } = (p.bat ?? p.pit) as unknown as Record<string, number> & { def?: Record<string, number>; plateRes?: Record<string, number>; playable?: string[]; emC?: true; cArm?: number; defTalent?: Record<string, number>; defEdit?: string[] };
+      if (cArm !== undefined) expect(Number.isFinite(cArm), `${p.name} cArm`).toBe(true);
+      for (const [k, v] of Object.entries(defTalent ?? {})) expect(Number.isFinite(v), `${p.name} defTalent.${k}`).toBe(true);
+      const KNOBS = ['sbStart', 'sbJudge', 'runIQ', 'bunting', 'cBlock', 'cFrame', 'arm', 'hold', 'quick'];
+      for (const k of KNOBS) if (all[k] !== undefined) expect(Number.isFinite(all[k]), `${p.name} ${k}`).toBe(true);
+      const rest = Object.fromEntries(Object.entries(all).filter(([k]) => !KNOBS.includes(k)));
+      // 사슬 실측 몫(능력치 v2 16-1)은 로짓 차라 음수일 수 있다
+      for (const [k, v] of Object.entries(plateRes ?? {})) expect(Number.isFinite(v), `${p.name} plateRes.${k}`).toBe(true);
       for (const [k, v] of Object.entries(rest)) {
         expect(Number.isFinite(v), `${p.name} ${k}`).toBe(true);
         expect(v, `${p.name} ${k}`).toBeGreaterThanOrEqual(0);

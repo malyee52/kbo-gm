@@ -9,7 +9,7 @@
 
 import { Rng } from '../engine';
 import type { LeaguePlayer, LeagueState } from './types';
-import { EXTRA_EVENTS } from './events-extra';
+import { EXTRA_EVENTS, prospects } from './events-extra';
 
 /** 하루 확률의 처음 값, 하루마다 오르는 폭, 최대 */
 // 2026-10-12 이벤트를 127종으로 늘리며 조금 잦게 (한 시즌 무작위 이벤트 약 10 → 14번, 임시값)
@@ -46,7 +46,7 @@ export interface EventLog {
 }
 
 /**
- * 며칠 동안 경기력을 바꾸는 효과 (컨디션). 타석마다 타자에게 유리한 정도(edge)에 더한다 (engine/game.ts).
+ * 며칠 동안 경기력을 바꾸는 효과 (경기력). 타석마다 타자에게 유리한 정도(edge)에 더한다 (engine/game.ts).
  * 크기 비교: 홈 이점 0.013, 좌우 상성 0.035. 세션이 날마다 이 목록으로 선수별 값을 만든다 (formToday)
  */
 export interface FormBuff {
@@ -62,6 +62,23 @@ export interface FormBuff {
   note: string;
 }
 
+/**
+ * 며칠 동안 선수 컨디션을 내리는 몸 상태 사건 (감기·몸살·배탈·컨디션 난조, 엔진 2 12단계, docs/컨디션_기획안.md 1.3).
+ * 흐름(engine/condition.ts)에 더한다. 화면에는 "나쁨 · 감기"처럼 사유만 보이고 숫자는 없다. 실존 선수에게도 쓰는 허용 사건이다
+ */
+export interface CondBuff {
+  team: number;
+  year: number;
+  from: number;
+  until: number;
+  /** 한 선수만 (선수 id). 없으면 구단 전체 */
+  player?: string;
+  /** 컨디션에 더하는 값 (음수, −1~0) */
+  value: number;
+  /** 화면 사유 (감기·몸살·배탈·컨디션 난조) */
+  reason: string;
+}
+
 export interface EventState {
   /** 오늘 확률 */
   chance: number;
@@ -70,6 +87,8 @@ export interface EventState {
   buffs: FillBuff[];
   /** 경기력 효과 (2026-10-11 추가, 예전 저장에는 없다) */
   forms?: FormBuff[];
+  /** 컨디션 사건 (엔진 2 12단계, 예전 저장에는 없다) */
+  conds?: CondBuff[];
 }
 
 export function ensureEvents(league: LeagueState): EventState {
@@ -89,11 +108,15 @@ export interface EventContext {
   /** 지금 순위 (1부터)와 구단 수 */
   rank: number;
   teams: number;
+  /** 순위 문장 ("3위", 양대 리그 해는 "드림 2위"). 없으면 rank로 */
+  rankLabel?: string;
   winPct: number;
   /** 지금 자금 (만 원) */
   cash: number;
   /** 우리 구단 선수 (개막 때 리그 상태 기준) */
   roster: LeaguePlayer[];
+  /** 우리 스카우트 가치 (런, 추측 지금 + 추측 격차 × 나이 몫, scout.ts seenValue). 유망주를 고르는 순서 (진짜 잠재는 보지 않는다) */
+  seenValue(p: LeaguePlayer): number;
   addCash(amount: number, note: string): void;
   addTrust(delta: number): void;
   addFill(fill: number, days: number, note: string): void;
@@ -108,8 +131,10 @@ export interface EventContext {
   hasRival: boolean;
   /** 트레이드 마감 전인가 */
   tradeOpen: boolean;
-  /** 컨디션 효과. delay일 뒤부터 days일 동안 */
+  /** 경기력 효과. delay일 뒤부터 days일 동안 */
   addForm(edge: number, days: number, note: string, opts?: { player?: string; side?: 'bat' | 'pit' | 'all'; delay?: number }): void;
+  /** 컨디션 사건 (몸 상태 계열만). delay일 뒤부터 days일 동안 우리 선수단(또는 한 선수)의 컨디션에 value를 더한다 */
+  addCond(value: number, days: number, reason: string, opts?: { player?: string; delay?: number }): void;
   /** 구원 투수(또는 투수 전체) 피로를 없앤다 */
   restPitchers(all?: boolean): void;
   /** 그 선수를 오늘부터 days일 쉬게 한다 (결장) */
@@ -172,17 +197,14 @@ function slumping(c: EventContext): EventPlayer | undefined {
 function workhorse(c: EventContext): EventPlayer | undefined {
   return c.players.filter((p) => p.isPitcher && p.starter && p.outs >= 300).sort((a, b) => b.outs - a.outs || a.id.localeCompare(b.id))[0];
 }
-/** 지친 구원진: 구원 투수 피로 합이 5 이상 (하루 회복 뒤 값이라 작다. 2026 시즌 상위 10% 안팎의 날) */
+/**
+ * 지친 구원진: 구원 투수 피로(공 수, 하루 회복 뒤) 합이 125 이상. 2026 시즌 2시드에서 구단·날짜별 합의 백분위 90이 127
+ * (엔진 2 4단계에서 피로 단위가 타자 수 → 공 수로 바뀌어 다시 잼, 2026-10-22)
+ */
 function bullpenTired(c: EventContext): boolean {
-  return c.players.filter((p) => p.isPitcher && !p.starter).reduce((s, p) => s + p.fatigue, 0) >= 5;
+  return c.players.filter((p) => p.isPitcher && !p.starter).reduce((s, p) => s + p.fatigue, 0) >= 125;
 }
 const num = (v: PendingEvent['vars'], k: string) => Number(v[k]);
-
-/** 2군 유망주 (24세 이하, 잠재력 높은 순) */
-function prospects(c: EventContext): LeaguePlayer[] {
-  return c.roster.filter((p) => !p.foreign && p.birthYear !== null && c.year - p.birthYear <= 24 && p.military?.state !== 'serving')
-    .sort((a, b) => b.potential - a.potential || a.id.localeCompare(b.id));
-}
 
 export const EVENTS: EventDef[] = [
   {
@@ -199,7 +221,7 @@ export const EVENTS: EventDef[] = [
     id: 'parent-bonus', title: '모기업 격려금', weight: 4,
     when: (c) => c.rank <= 3,
     vars: (_c, rng) => ({ amount: Math.round(80_000 + rng.range(0, 70_000)) }),
-    text: (c, v) => `${c.rank}위로 순항하자 모기업이 ${eok(num(v, 'amount'))}의 격려금을 보내겠다고 합니다. 받으면 구단주의 기대도 함께 높아집니다.`,
+    text: (c, v) => `${c.rankLabel ?? `${c.rank}위`}로 순항하자 모기업이 ${eok(num(v, 'amount'))}의 격려금을 보내겠다고 합니다. 받으면 구단주의 기대도 함께 높아집니다.`,
     choices: [
       { label: '감사히 받는다', note: (_c, v) => `자금 +${eok(num(v, 'amount'))}`, apply: (c, v) => { c.addCash(num(v, 'amount'), '모기업 격려금'); return '격려금을 받았습니다.'; } },
       { label: '성적으로 보답하겠다며 사양한다', note: () => '구단주 신뢰도 +3', apply: (c) => { c.addTrust(3); return '구단주가 단장의 태도를 높이 샀습니다.'; } },
@@ -231,7 +253,7 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `해외 구단이 교류 연수를 제안했습니다. 육성 파트는 ${v.name} 선수를 추천합니다. 비용은 ${eok(num(v, 'cost'))}입니다.`,
     choices: [
       { label: '보내지 않는다', note: () => '변화 없음', apply: () => '연수 제안을 사양했습니다.' },
-      { label: '보낸다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 잠재력 +2~4`,
+      { label: '보낸다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 성장 여지가 넓어진다`,
         apply: (c, v, rng) => {
           c.addCash(-num(v, 'cost'), '유망주 해외 연수');
           const p = c.league.players.find((x) => x.id === v.id);
@@ -270,7 +292,7 @@ export const EVENTS: EventDef[] = [
   {
     id: 'media-criticism', title: '언론의 비판 기사', weight: 5,
     when: (c) => c.rank > Math.ceil(c.teams / 2),
-    text: (c) => `${c.rank}위에 머문 ${c.teamName}의 운영을 비판하는 기사가 나왔습니다. 구단주도 기사를 읽었습니다.`,
+    text: (c) => `${c.rankLabel ?? `${c.rank}위`}에 머문 ${c.teamName}의 운영을 비판하는 기사가 나왔습니다. 구단주도 기사를 읽었습니다.`,
     choices: [
       { label: '대응하지 않는다', note: () => '구단주 신뢰도 −1', apply: (c) => { c.addTrust(-1); return '조용히 넘어갔습니다.'; } },
       { label: '단장이 직접 인터뷰로 설명한다', note: () => '반반: 신뢰도 +3 / −4',
@@ -313,12 +335,12 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `스카우트 팀이 ${v.name} 선수에게 전담 코치를 붙이면 크게 성장할 수 있다고 보고했습니다. 비용은 ${eok(num(v, 'cost'))}입니다.`,
     choices: [
       { label: '지켜본다', note: () => '변화 없음', apply: () => '지금은 지켜보기로 했습니다.' },
-      { label: '전담 코치를 붙인다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 잠재력 +2`,
+      { label: '전담 코치를 붙인다', note: (_c, v) => `자금 −${eok(num(v, 'cost'))}, ${v.name} 성장 여지가 조금 넓어진다`,
         apply: (c, v) => { c.addCash(-num(v, 'cost'), '유망주 전담 코치'); const p = c.league.players.find((x) => x.id === v.id); if (p) p.potential += 2; return `${v.name} 선수에게 전담 코치를 붙였습니다.`; } },
     ],
   },
 
-  // ---- 경기에 영향을 주는 이벤트 (컨디션·휴식·트레이드). 2026-10-11 사용자 요청
+  // ---- 경기에 영향을 주는 이벤트 (경기력·휴식·트레이드). 2026-10-11 사용자 요청
   {
     id: 'team-meeting', title: '연패 탈출 대책', weight: 14,
     when: (c) => c.streak <= -3,
@@ -445,7 +467,7 @@ export const EVENTS: EventDef[] = [
     text: (_c, v) => `코칭스태프가 베테랑 선수들과 ${v.an}·${v.bn} 선수를 묶어 멘토링 조를 짜자고 합니다. 베테랑들의 훈련 시간이 줄어듭니다.`,
     choices: [
       { label: '하지 않는다', note: () => '변화 없음', apply: () => '지금 체제를 유지합니다.' },
-      { label: '멘토링 조를 짠다', note: (_c, v) => `${v.an}·${v.bn} 잠재력 +1, 10일 동안 팀 경기력 −0.5`,
+      { label: '멘토링 조를 짠다', note: (_c, v) => `${v.an}·${v.bn} 성장 여지가 조금 넓어진다, 10일 동안 팀 경기력 −0.5`,
         apply: (c, v) => {
           for (const id of [v.a, v.b]) { const p = c.league.players.find((x) => x.id === id); if (p) p.potential += 1; }
           c.addForm(-0.005, 10, '멘토링'); return '젊은 선수들이 베테랑에게서 많이 배우고 있습니다.';
@@ -504,7 +526,7 @@ export function fillBuff(league: Pick<LeagueState, 'events'>, team: number, year
   return s;
 }
 
-/** 그날(day) 선수별 컨디션 값. 효과가 없으면 null (엔진이 아무것도 하지 않는다) */
+/** 그날(day) 선수별 경기력 값. 효과가 없으면 null (엔진이 아무것도 하지 않는다) */
 export function formToday(league: Pick<LeagueState, 'events'>, year: number, day: number,
                           players: { idx: number; id: string; teamIdx: number; isPitcher: boolean }[]): Float64Array | null {
   const act = (league.events?.forms ?? []).filter((f) => f.year === year && day >= f.from && day < f.until);
@@ -521,4 +543,24 @@ export function formToday(league: Pick<LeagueState, 'events'>, year: number, day
     }
   }
   return out;
+}
+
+/** 그날(day) 선수별 컨디션 사건 값과 사유 (가장 크게 내리는 사건의 사유). 사건이 없으면 null */
+export function condToday(league: Pick<LeagueState, 'events'>, year: number, day: number,
+                          players: { idx: number; id: string; teamIdx: number }[]): { value: Float64Array; reason: Map<number, string> } | null {
+  const act = (league.events?.conds ?? []).filter((f) => f.year === year && day >= f.from && day < f.until);
+  if (!act.length) return null;
+  const value = new Float64Array(players.length);
+  const reason = new Map<number, string>();
+  const worst = new Map<number, number>();
+  const add = (idx: number, f: CondBuff) => {
+    value[idx] += f.value;
+    if (f.value < (worst.get(idx) ?? 0)) { worst.set(idx, f.value); reason.set(idx, f.reason); }
+  };
+  const byId = new Map(players.map((p) => [p.id, p]));
+  for (const f of act) {
+    if (f.player) { const p = byId.get(f.player); if (p) add(p.idx, f); continue; }
+    for (const p of players) if (p.teamIdx === f.team) add(p.idx, f);
+  }
+  return { value, reason };
 }

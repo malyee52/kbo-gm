@@ -6,7 +6,7 @@ import { GameSession } from '../src/game/session';
 import { freeAction, freeContext, gradeOfRuns, resolveOps, runsForGrade } from '../src/fantasy/free';
 import { currentRuns } from '../src/ai/value';
 import { cashOf } from '../src/league/finance';
-import { defenseAt } from '../src/engine';
+import { defenseAt, defenseGrade } from '../src/engine';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -97,7 +97,7 @@ describe('자유 모드', () => {
     const sp = g.world.players.find((p) => p.name === '선동열')!;
     expect(gradeOfRuns(currentRuns(sp, g.values), 2000)).toBeGreaterThanOrEqual(70);
     expect(g.registered().some((p) => p.idx === sp.idx)).toBe(true);
-    g.advance(30);
+    g.advance(40); // 30일이면 세이브 기회가 적은 해에 등판 5번에 걸린다 (16-3 수비 v2 뒤)
     expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
     expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
   }, 300_000);
@@ -111,7 +111,7 @@ describe('자유 모드', () => {
     expect(sp.pos).toBe('3B');
     expect(defenseAt(sp, 'SS')).toBeLessThan(defenseAt(sp, '3B') - 5);
     expect(defenseAt(sp, 'CF')).toBeLessThan(defenseAt(sp, '3B') - 5);
-    expect(defenseAt(sp, 'C')).toBeLessThan(-30);
+    expect(defenseGrade(defenseAt(sp, 'C'))).toBe(20); // 능력치 v2: 안 해 본 자리는 등급 20 (16.4)
   }, 120_000);
 
   it('만든 선수의 국적·병역: 외국 이름은 외국인, 28세 이상 국내 선수는 병역 마침, 리그 밖 선수는 입대하지 않는다', () => {
@@ -138,7 +138,9 @@ describe('자유 모드', () => {
   }, 600_000);
 
   it('입단 예약·단장 노트: 2000년에 후원한 그레인키(1983년생)는 만 17세 이후 정한 해 개막 때 실제로 들어온다', () => {
-    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe', fantasy: { free: true } }, FAST);
+    // 2001 시즌 뒤 해고되면 개막을 못 해 입단이 시험되지 않는다. 예전에는 엔진이 바뀌어 해고될 때마다 시드를 바꿨다 (pipe → … → pipe-7, 2026-10-21~10-23).
+    // 2026-10-24 시험 속도 카드: 결산 앞에서 신뢰도를 100으로 올려 해고를 막는다 (이 시험은 해고가 아니라 입단 예약을 본다)
+    const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'pipe-7', fantasy: { free: true } }, FAST);
     const team = g.league.teams[0].name;
     const { ops, dropped } = resolveOps(g, [
       { op: 'future', name: '잭 그레인키', team, pos: 'P', role: 'SP', birthYear: 1983, joinYear: 2002, now: 50, potential: 75 },
@@ -153,6 +155,7 @@ describe('자유 모드', () => {
     expect(freeContext(g, store)).toContain('[입단 예약]');
     for (let y = 2000; y < 2002; y++) {
       g.advance(100000);
+      g.owner.trust = 100;
       g.beginOffseason();
       for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
         const st = g.offseason!.stage;

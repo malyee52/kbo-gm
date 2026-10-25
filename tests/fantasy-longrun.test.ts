@@ -63,7 +63,9 @@ describe('자유 모드 여러 시즌', () => {
       g.advance(12);
       // 시즌 중: 다른 구단 에이스 데려오기, 가상 유망주 만들기, 능력 바꾸기, 규정, 지명권, 입단 예약
       const rival = g.league.teams.findIndex((t, i) => i !== g.teamIdx && t.name === (s % 2 ? '삼성' : 'KIA'));
-      const ace = g.world.teams[rival].org.filter((p) => p.isPitcher && !p.foreign).sort((a, b) => b.value - a.value)[0];
+      // 이름으로 찾으므로 같은 구단에 같은 이름이 둘이면(2027 삼성 이승민 · 신인 이승민) 이름 조작이 빠진다: 이름이 하나뿐인 선수 중에서 고른다 (2026-10-24)
+      const sameName = (n: string) => g.world.teams[rival].org.filter((q) => q.name === n).length;
+      const ace = g.world.teams[rival].org.filter((p) => p.isPitcher && !p.foreign && sameName(p.name) === 1).sort((a, b) => b.value - a.value)[0];
       const name = NAMES[s];
       created.push(name);
       apply(`${year} 시즌 중`, [
@@ -74,6 +76,9 @@ describe('자유 모드 여러 시즌', () => {
         { op: 'pick', draft: year + 2, round: 1, from: g.league.teams[rival].name, to: 'LG' },
         { op: 'future', name: FUTURE[s], team: 'LG', pos: 'P', role: 'SP', birthYear: year - 18, joinYear: year + 1, now: 50, potential: 70 },
         { op: 'teamCash', team: g.league.teams[rival].name, amount: 30 },
+        // 구단주 신뢰: 해고되면 오프시즌이 제의 수락에서 멈춘다. 2026-10-21 입대 규칙(상무 정원·현역)을 만들다 결과가 바뀌어
+        // 이 시드의 LG가 3년째(2028) 해고됐다. 시험하려는 것이 해고가 아니라서 신뢰를 올려 둔다 (조작 기록에 남아 재현된다)
+        { op: 'trust', delta: 15 },
       ]);
       // 이름은 그때 리그에서 찾으므로, 방금 만든 선수는 다음 판정에서 고친다
       apply(`${year} 능력`, [{ op: 'ability', player: name, potential: 76 }]);

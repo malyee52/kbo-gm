@@ -1,12 +1,32 @@
-// 한 경기 시뮬레이션. 타석 단위로 결과를 뽑고 주자·아웃·득점을 진행한다.
+// 한 경기 시뮬레이션: 경기 상태(state.ts)를 만들고 반 이닝·타석을 차례로 진행한다.
+// 타석은 공통 규칙(감독 판단 manager.ts, 주루·진루 rules.ts)과 해결기(resolver.ts)로 푼다 (docs/경기엔진2_기획안.md 3.2).
 
+import type { PlateContext } from './pa';
 import type { Rates } from '../data/types';
+import type { BallTally } from './battedball';
+import { availableRelievers, bringIn, enterPitcher, maybeChangePitcher, maybeOnePoint, tallySaveEntry, wantInfieldIn, wantIntentionalWalk, type PenTally } from './manager';
+import { Ev, paRates, type GamePark, type PaRates } from './pa';
+import { gameParkOf } from './park';
 import type { EngineParams } from './params';
+import { B0, drawInPlay, type PaResolver } from './resolver';
+import { End, foldFrom, type SolvedChain } from './chain';
+import { applyPitch, drawPitch, newCount, type Count, type PitchCode } from './pitch';
+import { aimedOutcome, aiType, drawOutcome, labelPitch, newAim, O, pitchJoint, rememberAim, type ArsenalPitch, type PitchJoint, type PitchZone } from './arsenal';
+import { arsenalFor } from '../data/pitches';
+import type { Situation } from './traits';
 import type { Rng } from './rng';
-import { defenseAt } from './defense';
-import { assignSlots, currentFatigue, FATIGUE_AVAILABLE_BELOW, needsRest, type PlayerStates, type Slot, type TeamSeason } from './team';
-import { fatigueScale, traitEdge, type Situation } from './traits';
-import type { BatLine, LeagueEnv, PitLine, PitSkill, SimPlayer } from './types';
+import { abortPlateAppearance, addPitches, applyPlateAppearance, autoBunt, beginPlateAppearance, buntPitches, manualIntentionalWalk, orderedBunt, orderedSteal, pickoff, steals, stealOne, stealPct, wantPitchout, wildPitch, type RunTally } from './rules';
+import { earnsSave, fieldDefense, fielderAt, fieldSlots, GameState, isSaveSituation, substitute, tyingRunNear, type GameSub, type PitcherInGame, type Side } from './state';
+import { aiDefense, aiLateDefense, orderedDefSub, pickPinchHitter, pickPinchRunner, replaceInjured } from './subs';
+import { currentBody, currentFatigue, currentOveruse, type PlayerStates, type Slot, type TeamSeason } from './team';
+import { drawInjury, hitterAgeFactor, injuryProneness, type AbsenceKind, type InjuryCause, type InjuryPart } from './injury';
+import { injuryScale } from './traits';
+import { isNoGame } from './weather';
+import type { BatLine, LeagueEnv, PitLine, SimPlayer } from './types';
+
+export { BUNT_SUCCESS, emptyRunTally, type RunTally } from './rules';
+export { bullpenOrder, emptyPenTally, type PenTally } from './manager';
+export { errorRateOf, type GameSub } from './state';
 
 /** 시즌 전체 리그 합계 (검증용) */
 export interface LeagueCounters {
@@ -34,12 +54,14 @@ export interface LeagueCounters {
   roe: number;
   outsOnBases: number;
   wildPitches: number;
+  /** 투구 수 (엔진 2 3단계) */
+  pitches: number;
 }
 
 export function emptyLeagueCounters(): LeagueCounters {
   return {
     games: 0, ties: 0, extraInningGames: 0, homeWins: 0, pa: 0, ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, hbp: 0, so: 0,
-    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0,
+    r: 0, er: 0, outs: 0, gdp: 0, sf: 0, sac: 0, sb: 0, cs: 0, roe: 0, outsOnBases: 0, wildPitches: 0, pitches: 0,
   };
 }
 
@@ -49,7 +71,10 @@ export interface GameContext {
   /** 환경 맞춤 계수 (사건별). 타자 쪽 비율에 곱한다 */
   cal: Rates;
   params: EngineParams;
+  /** 최대 이닝. 0 = 무제한 (승부가 날 때까지) */
   maxInnings: number;
+  /** 시간 제한 흉내 (params.timeLimit의 그 해 값). 없으면 시간 제한 없음 */
+  timeLimit?: { from: number; end: number };
   day: number;
   rng: Rng;
   states: PlayerStates;
@@ -58,22 +83,97 @@ export interface GameContext {
   totals: LeagueCounters;
   /** 포스트시즌 경기인가 (숨겨진 특수능력 '가을 사나이'용). 없으면 정규시즌 */
   postseason?: boolean;
+  /** 정규시즌 더블헤더 몇 차전 (일정 개편 기획안 4.6). 없으면 더블헤더가 아닌 경기. 더블헤더 이닝 규정은 엔진 2 14단계가 본다 */
+  dh?: 1 | 2;
   /** 선발 한계 배율 (시대별, eras.ts). 없으면 1 */
   startLimitScale?: number;
-  /** 선수별 컨디션 (선수 색인, 무작위 이벤트 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
+  /** AI 감독의 투구 수 기준 (선발, 구원). 시즌마다 managerNorms로 정한다. 없으면 그 투수의 한계 투구 수(몸 상태 뺀 값) */
+  planNorms?: { starter: number; relief: number };
+  /** 모든 도루 성공률에 더하는 값 = 그 해 리그 도루 성공률 − 선수 성공률 평균 (sbShiftOf). 없으면 0 */
+  sbShift?: number;
+  /** 선수별 경기력 (선수 색인, 무작위 이벤트·코치·캠프 효과, league/events.ts). 타자는 +면 유리, 투수는 +면 투수가 유리. 없으면 0 */
   form?: Float64Array;
+  /** 선수별 컨디션 사건 값 (선수 색인, 감기·몸살 같은 몸 상태 이벤트, league/events.ts condToday). 흐름(states.cond)에 더한다. 없으면 0 */
+  condEvent?: Float64Array;
   /** 있으면 이 경기의 타석·주루·교체를 차례로 남긴다 (중계 화면). 난수를 더 쓰지 않아 결과는 같다 */
   plays?: Play[] | null;
   /** 직접 지휘 (경기 개입): 이 구단의 타석마다 지휘자에게 묻는다. 고른 것이 '자동'이면 AI 감독과 똑같이 진행한다 */
   command?: GameCommand | null;
   /** 수비수별 실책 수 (선수 색인). 없으면 남기지 않는다 */
   errors?: number[];
+  /** 수비수별 자리 아웃 수 (선수 색인 × 8 + FIELD_POS 순서 C…RF, 능력치 v2 12.9). 없으면 세지 않는다 */
+  defOuts?: Int32Array;
+  /** 인플레이 타구 집계 (검증 도구용, battedball.ts). 없으면 세지 않는다. 난수를 쓰지 않아 결과는 같다 */
+  balls?: BallTally;
+  /** 주루·작전 집계 (검증 도구용, 엔진 2 8단계) */
+  running?: RunTally;
+  /** AI 감독 2 집계 (검증 도구용, 엔진 2 10단계): 고의4구·전진 수비·원포인트·세이브 상황 등판과 블론 */
+  pen?: PenTally;
+  /** 고의4구를 공 없이 하나 (자동 고의4구, eras.ts AUTO_IBB_YEAR 이후). false면 공 4개를 실제로 던진다. 없으면 자동 */
+  autoIbb?: boolean;
+  /** 포수 프레이밍이 작동하나 (자동 볼 판정 전 해, eras.ts ABS_YEAR, 능력치 v2 16-3). 없으면 작동 안 함 */
+  framing?: boolean;
+  /** 좌우 4칸 집계 (엔진 2 9단계 점검 도구만): 'LL'(좌타·좌투) 'LR' 'RL' 'RR' → 타석 결과 수. 양타는 투수 반대 손. 없으면 세지 않는다 */
+  splits?: Record<string, Partial<Record<PlayKind, number>>>;
+  /** 타석을 끝내는 해결기. 없으면 B0 (엔진 1의 타석 뽑기) */
+  resolver?: PaResolver;
+  /**
+   * 'A'면 타석을 공 하나씩 끝낸다 (A 해결기, pitch.ts, 엔진 2 17단계): 직접 지휘하는 경기와 A 검증. 해결기(B)와 같은 사슬을 쓴다
+   * (사슬이 없는 해결기 B0이면 B로). 없으면 B (resolver)
+   */
+  engine?: 'A';
+  /** 있으면 경기 중 부상을 뽑아 여기에 남긴다 (정규시즌, Season이 경기마다 비운다). 없으면 경기 중 부상이 없다 (가을야구·올스타전·시험) */
+  injuries?: GameInjury[];
+  /** 선수별 실제 한계 투구 수 배율 (선수 색인, 기획안 4.6, Season이 리그 시드로 만든다). 없으면 1 */
+  realLimitScale?: Float32Array;
+  /** 볼카운트 사슬 능력 (능력치 v2 16-1, Season이 만든다). 있으면 삼진·볼넷·사구와 투구 수를 칸 함수로 낸다. 없으면 예전 길 (결과 비율 → 손잡이 풀기) */
+  plate?: PlateContext;
+  /** 투수 구종 (엔진 2 20-1단계, World.arsenals). A 해결기만 쓴다. 없거나 답이 없으면 선수 ID로 정한 리그 평균 꼴 (data/pitches.ts arsenalFor) */
+  arsenal?: (p: SimPlayer) => ArsenalPitch[] | undefined;
+  /**
+   * 경기 중 비 (일정 개편 기획안 4.7, 8장 10단계): 이 회(말 공격까지)를 마치고 멈춘다. 5~8회면 강우 콜드(그때 점수로 끝, 기록은 남는다),
+   * 1~4회면 노게임(기록·집계를 경기 전으로 되돌리고 피로·부상만 남긴다). 없으면 끝까지 치른다.
+   * 임시 단순화: 온 이닝을 마친 뒤에만 멈춘다. 실제 규정의 "5회초 끝에 홈 팀이 앞서면 성립(4.5회)"은 두지 않는다 (2026-10-23 클사장 정함)
+   */
+  rainInning?: number;
+}
+
+/** 경기 중 부상 한 건 (엔진 2 11단계). 다음 날부터 days일 결장 */
+export interface GameInjury {
+  idx: number;
+  cause: InjuryCause;
+  /** 혹사로 생긴 부상 (혹사지수로 더해진 몫, 실제 한계를 넘긴 공) */
+  overuse?: true;
+  kind: Exclude<AbsenceKind, 'event'>;
+  days: number;
+  part: InjuryPart;
 }
 
 /** 직접 지휘하는 구단과 판단 함수 (game/session.ts가 조작 기록·미리보기로 채운다) */
 export interface GameCommand {
   team: number;
   decide: (req: CommandRequest) => CommandChoice;
+  /**
+   * 그날 이 경기를 지휘하나 (더블헤더 차전: 2차전이면 2). 없으면 우리 경기 모두. 지휘하는 경기만 A 해결기로 치르고 묻는다 (엔진 2 17단계):
+   * 더블헤더 날 한 차전만 지휘하면 다른 차전은 지휘하지 않은 경기(B)와 같다
+   */
+  covers?: (dh?: 1 | 2) => boolean;
+  /** 그 경기(더블헤더 차전)의 지휘 방식 (엔진 2 18단계). 없거나 undefined면 처음부터 끝까지 지휘한다 (A) */
+  mode?: (dh?: 1 | 2) => CommandMode | undefined;
+}
+
+/** 한 경기 지휘 방식 (엔진 2 18단계, docs/경기엔진2_기획안.md 3.8) */
+export interface CommandMode {
+  /**
+   * B → A 끼어들기 (위기 멈춤, 기획안 7장 결정 6): 지휘 없이(B, 지휘하지 않은 경기와 똑같이) 시작해 우리 경기의 타석 경계마다 묻고,
+   * true인 경계부터 지휘한다 (A, 난수는 경기 줄기의 a@k). k는 타석 경계 번호 (0부터), req.n은 0. 묻기만 하고 난수·상태를 건드리지 않는다
+   */
+  takeover?: (req: CommandRequest, k: number) => boolean;
+  /**
+   * A → B 넘기기 ("빠르게 끝내기", 결정 5): 이 물음 번호부터 묻지 않고 남은 경기를 B로 (난수는 경기 줄기의 b@번호).
+   * 공 사이 물음이면 그 카운트에서 남은 타석을 접는다 (chain.ts foldFrom)
+   */
+  handoff?: number;
 }
 
 /** 지휘자에게 묻는 순간 (우리 공격 또는 우리 수비의 타석 직전) */
@@ -81,8 +181,11 @@ export interface CommandRequest {
   /** 이 경기에서 몇 번째 물음인가 (0부터) */
   n: number;
   side: 'bat' | 'field';
-  /** run 주자 작전(투구 전: 대주자·도루), bat 타격 작전(도루 뒤: 대타·대주자·강공·번트), field 수비 */
-  step: 'run' | 'bat' | 'field';
+  /**
+   * run 주자 작전(투구 전: 대주자·도루·히트앤드런), bat 타격 작전(도루 뒤: 대타·대주자·강공·번트), field 수비(투수·고의4구·전진 수비·피치아웃·대수비),
+   * pitch 공 사이 (A 해결기, 공마다: 공격은 대주자·도루·히트앤드런, 수비는 투수 교체·고의4구)
+   */
+  step: 'run' | 'bat' | 'field' | 'pitch';
   inn: number;
   top: boolean;
   outs: number;
@@ -93,45 +196,65 @@ export interface CommandRequest {
   /** 다음 타자 (대타 판단용) */
   onDeck: number;
   pitcher: number;
-  /** 지금 투수가 상대한 타자 수, 내준 점수 */
+  /** 지금 투수가 상대한 타자 수, 내준 점수, 이 경기 투구 수 */
   pitcherBf: number;
   pitcherRuns: number;
+  pitcherPitches: number;
+  /** 공 사이 물음(pitch)의 카운트 [볼, 스트라이크]와 이 타석에 던진 공 기호 (pitch.ts PitchCode) */
+  count?: [number, number];
+  seq?: string;
+  /** 공 사이 물음: 이 타석에 던진 공의 구종·코스 (seq와 같은 순서, 고의4구 공·히트앤드런 공은 빈 낱말, 엔진 2 20단계) */
+  pt?: string[];
+  pz?: string[];
+  /** 우리 수비의 공 사이 물음: 지금 투수의 구종 (비율 높은 순, 구종·코스 지시 칸, 20-3단계) */
+  arsenal?: ArsenalPitch[];
   /** 우리 라인업 (타순) */
   lineup: number[];
   /** 우리 공격: 대타·대주자로 쓸 수 있는 선수 */
   bench: number[];
   /** 우리 수비: 지금 올릴 수 있는 구원 투수 */
   bullpen: number[];
+  /** 우리 수비 물음(field): 대수비로 쓸 수 있는 벤치 야수 */
+  fieldBench?: number[];
+  /** 우리 수비 물음(field): 라인업 순서대로 수비 자리 (대수비 화면용, 지명타자는 'DH') */
+  fieldSlots?: Slot[];
   /** 지금까지의 중계 기록 */
   plays: Play[];
+  /** 더블헤더 2차전이면 2 (지휘자가 같은 날 두 경기를 가린다, GameContext.dh). 그 밖에는 없다 */
+  dh?: 2;
 }
 
 /**
- * 지휘 선택. 비우면 자동(AI 감독).
- * 주자 작전(run, 1루 주자가 있고 2루가 비었을 때만 묻는다): pr 대주자, steal go 도루 시도·hold 도루 안 함.
- * 타격 작전(bat, 도루가 끝난 뒤): ph 대타(지금 타자 대신), pr 대주자, tactic swing 강공(번트 없음)·bunt 희생번트.
- * 수비: pitcher 투수 교체, keep 지금 투수 유지(자동 교체 안 함), walk 고의4구.
+ * 지휘 선택. 항목마다 값이 없으면 자동(그 일은 AI 감독이 한다), 값이 있으면 고른 대로 (엔진 2 17단계 정리: 지휘하는 구단의 대타·대주자·대수비도
+ * 그 항목이 자동일 때만 AI 감독이 한다).
+ * 주자 작전(run, 1루 주자가 있고 2루가 비었을 때만 묻는다): pr 대주자(null = 대주자 없음), steal go 도루 시도·hold 도루 안 함·hnr 히트앤드런.
+ * 타격 작전(bat, 도루가 끝난 뒤): ph 대타(지금 타자 대신, −1 = 대타 없음), pr 대주자, tactic swing 강공(번트 없음)·bunt 희생번트.
+ * 수비(field): pitcher 투수 교체, keep 지금 투수 유지(자동 교체 안 함), walk 고의4구(false = 승부), infield 전진 수비(in)·정상(back),
+ * pitchout 피치아웃(false = 안 함), def 대수비(out 대신 in, null = 대수비 없음).
+ * 공 사이(pitch, A 해결기): 공격은 pr·steal go(앞 주자 도루)·hnr, 수비는 pitcher·walk·pitch(구종·코스).
  * (2026-10-12 사용자: 도루는 타석과 별개이고 도루 뒤에 번트도 할 수 있다 → 주자 작전과 타격 작전을 나눴다)
  */
 export interface CommandChoice {
   ph?: number;
-  pr?: { base: 0 | 1 | 2; idx: number };
-  steal?: 'go' | 'hold';
+  pr?: { base: 0 | 1 | 2; idx: number } | null;
+  steal?: 'go' | 'hold' | 'hnr';
   /** 'steal'은 예전 기록 호환 (도루 시도로 본다) */
   tactic?: 'swing' | 'steal' | 'bunt';
   pitcher?: number;
   keep?: boolean;
   walk?: boolean;
+  infield?: 'in' | 'back';
+  pitchout?: boolean;
+  def?: { out: number; in: number } | null;
+  /** 공 사이(pitch) 수비: 이 공의 구종·코스 지시 (엔진 2 20-3단계). 항목마다 없으면 AI 포수 (구종은 볼 배합, 코스는 구종대로) */
+  pitch?: { type?: string; zone?: PitchZone };
 }
-
-/** 지휘한 희생번트가 성공할 확률 (임시값) */
-export const BUNT_SUCCESS = 0.85;
 
 /**
  * 중계 기록 한 줄. SO 삼진, BB 볼넷, HBP 몸에 맞는 공, HR·3B·2B·1B 안타, E 실책 출루, GDP 병살, GO 땅볼 아웃, FO 뜬공 아웃,
- * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자
+ * SF 희생플라이, SAC 희생번트, SB 도루, CS 도루 실패, WP 폭투·포일·보크, PC 투수 교체, IBB 고의4구, BF 번트 실패, PH 대타, PR 대주자, DEF 대수비
  */
-export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR';
+export type PlayKind = 'SO' | 'BB' | 'HBP' | 'HR' | '3B' | '2B' | '1B' | 'E' | 'GDP' | 'GO' | 'FO' | 'SF' | 'SAC' | 'SB' | 'CS' | 'WP' | 'PO' | 'PC' | 'IBB' | 'BF' | 'PH' | 'PR' | 'DEF';
 
 export interface Play {
   inn: number;
@@ -151,60 +274,12 @@ export interface Play {
   runs: number;
   /** 실책(E)을 한 수비수 (선수 색인) */
   fielder?: number;
-}
-
-interface PitcherInGame {
-  p: SimPlayer;
-  skill: PitSkill;
-  line: PitLine;
-  bf: number;
-  runs: number;
-  outs: number;
-  limit: number;
-  isStarter: boolean;
-  /** 등판 시점의 점수 차 (자기 팀 기준) */
-  enteredLead: number;
-}
-
-interface Runner {
-  p: SimPlayer;
-  resp: PitcherInGame;
-  earned: boolean;
-}
-
-interface Side {
-  ts: TeamSeason;
-  lineup: SimPlayer[];
-  spot: number;
-  runs: number;
-  pitcher: PitcherInGame;
-  staff: PitcherInGame[];
-  usedIdx: Set<number>;
-  isHome: boolean;
-  /** 라인업 가치의 중앙값 (희생번트를 누가 대는지 정할 때 쓴다) */
-  medianValue: number;
-  /** 수비 8명의 수비 런 합 (defense.ts) */
-  def: number;
-  /** 포수의 수비 런 */
-  catcherDef: number;
-  /** 실책 배율 (수비수별 실책률을 타구 몫으로 가중한 합, 평균 수비진 ≈ 1) */
-  errMult: number;
-  /** 실책이 났을 때 누가 했나 고르는 몫 (선수 색인, 타구 몫 × 실책률) */
-  errBy: { idx: number; w: number }[];
-  /** 교체로 빠진 선수 (다시 나올 수 없다) */
-  removed: Set<number>;
-  /** 지금 수비 위치 (선수 색인 → 자리). 대타·대주자는 바꾼 선수의 자리를 그대로 받는다 */
-  slots: Map<number, Slot>;
-  /** 경기 중 들어온 타자 (박스스코어: 타순 자리, 대타·대주자) */
-  subs: GameSub[];
-}
-
-/** 경기 중 교체로 들어온 타자 (직접 지휘의 대타·대주자) */
-export interface GameSub {
-  idx: number;
-  /** 타순 자리 (0~8) */
-  order: number;
-  kind: 'PH' | 'PR';
+  /** A 해결기로 끝낸 타석의 공 기호 (pitch.ts PitchCode, 첫 공부터)와 그 뒤 투수의 경기 투구 수 */
+  seq?: string;
+  np?: number;
+  /** 그 공들의 구종·코스 (seq와 같은 순서, 빈 낱말 = 없음. 엔진 2 20단계) */
+  pt?: string[];
+  pz?: string[];
 }
 
 export interface GameResult {
@@ -223,640 +298,712 @@ export interface GameResult {
   /** 경기 중 들어온 대타·대주자 (들어온 순서) */
   homeSubs: GameSub[];
   awaySubs: GameSub[];
-}
-
-const enum Ev { SO, BB, HBP, HR, S1, D2, T3, OUT }
-
-const clampRate = (x: number) => (x < 0.0005 ? 0.0005 : x > 0.6 ? 0.6 : x);
-
-/** 승산비 결합: 타자 비율과 투수 비율을 리그 평균 기준으로 합친다 */
-function combine(batRate: number, pitRate: number, lg: number): number {
-  const b = clampRate(batRate);
-  const p = clampRate(pitRate);
-  const o = ((b / (1 - b)) * (p / (1 - p))) / (lg / (1 - lg));
-  return o / (1 + o);
-}
-
-const STARTER_LIMIT_SCALE = 1.08;
-/** 어제 던진 필승조를 오늘 아낄 확률 (임시값, 상위 구원 투수 시즌 등판 80경기 안팎에 맞춤) */
-const SPARE_YESTERDAY = 0.4;
-
-function enterPitcher(p: SimPlayer, isStarter: boolean, lead: number, ctx: GameContext): PitcherInGame {
-  const skill = p.pit!;
-  const line = ctx.pit[p.idx];
-  line.g++;
-  if (isStarter) line.gs++;
-  // 선발 한계는 기록으로 추정한 체력보다 조금 길게 (체력 추정이 평균 쪽으로 당겨져 있어 실제 선발 타자 수 23.4명에 맞춤, 임시값)
-  const base = isStarter ? skill.stamina * STARTER_LIMIT_SCALE * (ctx.startLimitScale ?? 1) : skill.reliefStint;
-  return { p, skill, line, bf: 0, runs: 0, outs: 0, limit: base * ctx.rng.range(0.82, 1.18), isStarter, enteredLead: lead };
-}
-
-/** 직접 정한 롱릴리프가 이른 이닝에 나왔을 때 한계 타자 수 배율 (임시값) */
-const LONG_RELIEF_STRETCH = 1.6;
-
-/** 쓸 수 있는 구원 투수: 이번 경기에 안 나왔고, 쉴 만큼 쉬었고, 3연투가 아닌 투수 */
-function availableRelievers(fld: Side, ctx: GameContext): SimPlayer[] {
-  const st = ctx.states;
-  return fld.ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx)
-    && currentFatigue(st, p.idx, ctx.day) < FATIGUE_AVAILABLE_BELOW && !needsRest(st, p.idx, ctx.day));
-}
-
-/**
- * 구원 투수 고르기 (2026-10-08 사용자 지적 "투수 교체가 비현실적"으로 다시 짬).
- * 역할: 마무리, 필승조(SU), 추격조(역할 없음), 롱릴리프(LR), 패전조(MOP).
- * 플레이어가 기용표에서 불펜 역할을 정했으면 그대로(2026-10-12), 아니면 불펜을 좋은 순으로 줄 세워
- * 좋은 순 1·2번째를 필승조(8회·7회 셋업), 나머지를 추격조로 본다 (롱릴리프는 그중 가장 길게 던지는 투수).
- * 역할 나누기와 점수 차 기준은 임시값.
- */
-function pickReliever(fld: Side, lead: number, inning: number, ctx: GameContext): SimPlayer | null {
-  const { ts } = fld;
-  const st = ctx.states;
-  const pool = availableRelievers(fld, ctx);
-  if (pool.length === 0) {
-    // 쉴 만큼 쉰 투수가 없으면 덜 지친 투수부터 (3연투는 마지막까지 미룬다)
-    const rest = ts.bullpen.filter((p) => !fld.usedIdx.has(p.idx));
-    if (rest.length === 0) return null;
-    const cost = (p: SimPlayer) => currentFatigue(st, p.idx, ctx.day) + (needsRest(st, p.idx, ctx.day) ? 100 : 0);
-    return rest.reduce((a, b) => (cost(b) < cost(a) ? b : a));
-  }
-  const closer = ts.closer;
-  const closerOk = !!closer && pool.includes(closer);
-  // 마무리: 9회 이후 3점 차 이내 리드, 또는 9회 이후 동점(홈은 끝내기를 기다리며, 원정은 연장)
-  if (closerOk && inning >= 9 && lead >= 0 && lead <= 3) return closer;
-  // 불펜 서열: 좋은 순 (value가 낮을수록 좋다). 마무리는 빼고
-  const order = ts.bullpen.filter((p) => p !== closer).sort((a, b) => a.value - b.value);
-  const avail = order.filter((p) => pool.includes(p));
-  if (avail.length === 0) return closerOk ? closer : null;
-  const rank = (p: SimPlayer) => order.indexOf(p);
-  // 역할: 직접 정한 기용표에 있으면 그것. 역할을 하나라도 정했으면 나머지는 추격조, 아무것도 안 정했으면 서열 1·2번째가 필승조
-  const pen = ts.manual && ts.plan?.pen && Object.keys(ts.plan.pen).length ? ts.plan.pen : null;
-  const role = (p: SimPlayer): 'SU' | 'LR' | 'MOP' | 'MR' => (pen ? pen[p.idx] ?? 'MR' : rank(p) < 2 ? 'SU' : 'MR');
-  const of = (...rs: string[]) => avail.filter((p) => rs.includes(role(p)));
-  const close = lead >= -2 && lead <= 3; // 이기고 있거나 근소하게 지는 접전
-  const late = inning >= 7;
-  if (late && close && lead >= 0) {
-    // 필승조: 8회 이후는 1번 셋업, 7회는 2번 셋업부터. 필승조가 다 지쳤으면 추격조 → 롱릴리프 → 패전조
-    // 필승조 안의 순서는 지친 투수까지 포함한 서열 (7회에 1번 셋업이 지쳐 있어도 2번 셋업부터 쓰는 것은 같다)
-    const suAll = order.filter((p) => role(p) === 'SU');
-    const want = inning >= 8 ? 0 : 1;
-    const su = of('SU');
-    const main = [...su.filter((p) => suAll.indexOf(p) >= want), ...of('MR'), ...of('LR'), ...of('MOP')];
-    const list = main.length ? main : su;
-    // 어제 던졌으면 확률적으로 아끼고 다음 투수를 쓴다
-    const pick = list.find((p) => st.fatigueDay[p.idx] !== ctx.day - 1 || !ctx.rng.chance(SPARE_YESTERDAY));
-    return pick ?? list[0];
-  }
-  if (late && close) {
-    // 근소하게 지는 후반: 필승조는 아끼고 추격조부터
-    return of('MR')[0] ?? of('LR')[0] ?? of('MOP')[0] ?? avail[avail.length - 1];
-  }
-  if (inning <= 5) {
-    // 이른 강판: 롱릴리프. 정하지 않았으면 필승조를 뺀 투수 중 가장 길게 던질 투수
-    const lr = of('LR');
-    const cands = lr.length ? lr : of('MR', 'MOP').length ? of('MR', 'MOP') : avail;
-    return cands.reduce((a, b) => (b.pit!.reliefStint > a.pit!.reliefStint ? b : a));
-  }
-  // 점수 차가 큰 경기나 중반: 패전조. 정하지 않았으면 필승조를 빼고 아래쪽에서 고른다
-  const mop = of('MOP');
-  const cands = mop.length ? mop : of('MR', 'LR').length ? of('MR', 'LR') : avail;
-  return cands[ctx.rng.int(cands.length)];
-}
-
-/**
- * 투수 교체 판단. 타석마다 부르지만, 감독처럼 이닝 시작에 바꾸는 것이 기본이다.
- * 이닝 중간에는 한계를 크게 넘었거나 이번 이닝에 무너질 때만 바꾼다. 기준값은 임시값 (실제 2025 KBO의 선발 이닝·구원 이닝에 맞춤).
- * start: 반 이닝의 첫 타석. halfRuns: 이번 반 이닝에 내준 점수
- */
-function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEmpty: boolean, start: boolean, halfRuns: number, ctx: GameContext): void {
-  const pg = fld.pitcher;
-  const lead = fld.runs - bat.runs;
-  const closer = fld.ts.closer;
-  let pull = false;
-  if (pg.isStarter) {
-    if (start) {
-      // 이닝 시작: 한 이닝을 더 못 버티거나, 이미 많이 내줬으면 내린다
-      pull = pg.bf + 2 >= pg.limit || pg.runs >= 6 || (pg.runs >= 5 && inning <= 4);
-    } else {
-      pull = pg.bf >= pg.limit + 4 // 한계를 크게 넘김
-        || (pg.bf >= pg.limit && !basesEmpty) // 한계를 넘긴 뒤 주자를 내보냄
-        || pg.runs >= 7
-        || (halfRuns >= 3 && !basesEmpty && (pg.runs >= 4 || pg.bf >= pg.limit - 3)) // 이번 이닝 무너짐
-        || (pg.runs >= 5 && inning <= 3 && !basesEmpty); // 초반 대량 실점
-    }
-  } else if (pg.p === closer) {
-    // 마무리는 경기를 끝내게 둔다. 크게 흔들릴 때만
-    pull = !start && (pg.runs >= 3 || pg.bf >= pg.limit + 4);
-  } else if (start) {
-    // 구원: 다음 이닝(타자 약 4명)을 맡기에 모자라면 이닝 시작에 바꾼다
-    pull = pg.bf + 3 >= pg.limit || pg.runs >= 3;
-  } else {
-    pull = pg.runs >= 3 || pg.bf >= pg.limit + 3 || (halfRuns >= 2 && !basesEmpty && Math.abs(lead) <= 2 && inning >= 7);
-  }
-  // 9회 세이브 상황에서 마무리가 쉬었으면 이닝 시작에 마무리로
-  if (!pull && start && inning >= 9 && lead >= 1 && lead <= 3 && closer && pg.p !== closer && availableRelievers(fld, ctx).includes(closer)) pull = true;
-  if (!pull) return;
-  const next = pickReliever(fld, lead, inning, ctx);
-  if (!next) return;
-  fld.usedIdx.add(next.idx);
-  fld.pitcher = enterPitcher(next, false, lead, ctx);
-  // 직접 정한 롱릴리프가 이른 이닝에 나오면 평소보다 길게 맡긴다 (임시값). AI 감독 배치에는 쓰지 않는다
-  if (inning <= 6 && fld.ts.manual && fld.ts.plan?.pen?.[next.idx] === 'LR') fld.pitcher.limit *= LONG_RELIEF_STRETCH;
-  fld.staff.push(fld.pitcher);
-}
-
-function platoonEdge(b: SimPlayer, p: SimPlayer, size: number): number {
-  if (!b.bats || !p.throws) return 0;
-  if (b.bats === 'S') return size;
-  return b.bats === p.throws ? -size : size;
-}
-
-/** 선발 라인업의 수비 위치 (선수 색인 → 자리) */
-function fieldSlots(ts: TeamSeason, lineup: SimPlayer[]): Map<number, Slot> {
-  const slots = ts.field && lineup.every((p) => ts.field!.has(p.idx))
-    ? lineup.map((p) => ({ p, slot: ts.field!.get(p.idx)! }))
-    : assignSlots(lineup);
-  return new Map(slots.map(({ p, slot }) => [p.idx, slot]));
-}
-
-/**
- * 실책 날 타구가 그 자리로 가는 몫 (실책 출루 기준, 임시값): 내야 땅볼·송구가 대부분, 1루는 송구를 받는 쪽이라 적다.
- * 2026-10-13 사용자 "수비 능력치에 따른 실책 비율": 전에는 팀 수비 합으로만 실책 출루 확률을 줄였다
- */
-const ERROR_SHARE: Partial<Record<Slot, number>> = { SS: 0.2, '3B': 0.17, '2B': 0.17, '1B': 0.12, C: 0.04, LF: 0.1, CF: 0.1, RF: 0.1 };
-/** 수비 1런당 실책률 변화 (지수, 임시값): +10런이면 0.64배, −10런이면 1.57배 (실제 리그 정상급 유격수 한 해 실책 10개 안팎 ↔ 약한 수비 20개 넘음) */
-const ERROR_PER_RUN = 0.045;
-export const errorRateOf = (runs: number) => Math.min(2.5, Math.max(0.4, Math.exp(-ERROR_PER_RUN * runs)));
-/** 리그 실책 수를 예전(팀 수비 합 방식)과 같게 맞추는 배율 (2025 두 시드로 잼: 수비수별로 바꾸니 약 8% 많았다) */
-const ERROR_NORM = 0.93;
-
-/** 수비 배치에서 팀 수비 런, 포수 수비 런, 실책 배율 */
-function fieldDefense(lineup: SimPlayer[], slots: Map<number, Slot>): { def: number; catcherDef: number; errMult: number; errBy: { idx: number; w: number }[] } {
-  let def = 0;
-  let catcherDef = 0;
-  let errMult = 0;
-  const errBy: { idx: number; w: number }[] = [];
-  for (const p of lineup) {
-    const slot = slots.get(p.idx);
-    if (!slot) continue;
-    const r = defenseAt(p, slot);
-    def += r;
-    if (slot === 'C') catcherDef = r;
-    const share = ERROR_SHARE[slot] ?? 0;
-    if (share > 0) {
-      const w = share * errorRateOf(r);
-      errMult += w;
-      errBy.push({ idx: p.idx, w });
-    }
-  }
-  return { def, catcherDef, errMult: (errMult || 1) * ERROR_NORM, errBy };
-}
-
-/**
- * 대타·대주자: 타순 order 자리의 선수를 바꾼다. 들어온 선수는 나간 선수의 수비 자리를 맡고(포수 자리에 포수가 아니면 수비력이 떨어진다),
- * 다음 수비부터 팀 수비력에 반영된다 (2026-10-12 직접 지휘 마무리)
- */
-function substitute(side: Side, order: number, inP: SimPlayer, kind: 'PH' | 'PR'): void {
-  const outP = side.lineup[order];
-  const slot = side.slots.get(outP.idx);
-  side.lineup[order] = inP;
-  side.removed.add(outP.idx);
-  side.slots.delete(outP.idx);
-  if (slot) side.slots.set(inP.idx, slot);
-  Object.assign(side, fieldDefense(side.lineup, side.slots));
-  side.subs.push({ idx: inP.idx, order, kind });
-}
-
-/** 주자·이닝·점수 상황 (숨겨진 특수능력 판정용) */
-type PaState = Pick<Situation, 'runnersOn' | 'scoring' | 'late'>;
-const NO_STATE: PaState = { runnersOn: false, scoring: false, late: false };
-
-/** fieldDef: 수비하는 팀의 수비 런 합. 좋을수록 인플레이 안타가 아웃이 된다 */
-function samplePlateAppearance(b: SimPlayer, pg: PitcherInGame, batIsHome: boolean, ctx: GameContext, fieldDef = 0, state: PaState = NO_STATE, parkHr = 1): Ev {
-  const { league: lg, cal, params } = ctx;
-  const bs = b.bat!;
-  const ps = pg.skill;
-  // 타자에게 유리한 정도: 좌우 상성 + 홈 이점 + 숨겨진 특수능력 (둘 다 없으면 0)
-  const edge = platoonEdge(b, pg.p, params.platoon) + (batIsHome ? params.homeEdge : -params.homeEdge)
-    + (b.traits || pg.p.traits ? traitEdge(b, pg.p, { ...state, postseason: !!ctx.postseason, home: batIsHome }, params.traits) : 0)
-    + (ctx.form ? ctx.form[b.idx] - ctx.form[pg.p.idx] : 0);
-  // 투수 피로: 한계를 넘긴 타자 수에 비례
-  const over = pg.bf - pg.limit;
-  const fat = over > 0 ? Math.min(0.3, over * params.fatiguePerBatter * fatigueScale(pg.p, params.traits)) : 0;
-  const up = 1 + edge;
-  const down = 1 - edge;
-  const worse = 1 + fat;
-
-  const pSo = combine(bs.so * cal.so * lg.so * down, ps.so * lg.so * (1 - fat), lg.so);
-  const pBb = combine(bs.bb * cal.bb * lg.bb * up, ps.bb * lg.bb * worse, lg.bb);
-  const pHbp = combine(bs.hbp * cal.hbp * lg.hbp, ps.hbp * lg.hbp, lg.hbp);
-  // 홈 구장 특성 (게임 안에서 지은 신구장만 1이 아니다, league/stadium.ts): 양 팀 타자 모두에게
-  const pHr = combine(bs.hr * cal.hr * lg.hr * up * parkHr, ps.hr * lg.hr * worse, lg.hr);
-  const hitP = ps.hit * worse * Math.max(0.5, 1 - fieldDef * params.defenseHitPerRun);
-  const pS1 = combine(bs.s1 * cal.s1 * lg.s1 * up, hitP * lg.s1, lg.s1);
-  const pD2 = combine(bs.d2 * cal.d2 * lg.d2 * up, hitP * lg.d2, lg.d2);
-  const pT3 = combine(bs.t3 * cal.t3 * lg.t3 * up, hitP * lg.t3, lg.t3);
-
-  const sum = pSo + pBb + pHbp + pHr + pS1 + pD2 + pT3;
-  const scale = sum > 0.93 ? 0.93 / sum : 1;
-  let u = ctx.rng.next() / scale;
-  if ((u -= pSo) < 0) return Ev.SO;
-  if ((u -= pBb) < 0) return Ev.BB;
-  if ((u -= pHbp) < 0) return Ev.HBP;
-  if ((u -= pHr) < 0) return Ev.HR;
-  if ((u -= pS1) < 0) return Ev.S1;
-  if ((u -= pD2) < 0) return Ev.D2;
-  if ((u -= pT3) < 0) return Ev.T3;
-  return Ev.OUT;
+  /** 경기 중 비로 멈춘 경기: 강우 콜드(innings = 멈춘 회) 또는 노게임(기록 없음, 승패·세이브 없음) */
+  rain?: 'cold' | 'nogame';
 }
 
 export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup: SimPlayer[], awayLineup: SimPlayer[],
                              homeStarter: SimPlayer, awayStarter: SimPlayer, ctx: GameContext): GameResult {
-  const { params, rng, totals } = ctx;
   if (homeLineup.length !== 9 || awayLineup.length !== 9) {
     throw new Error(`라인업은 9명이어야 합니다 (홈 ${homeLineup.length}명, 원정 ${awayLineup.length}명)`);
   }
+  // 노게임이 될 경기는 기록·집계를 경기 전 모습으로 잡아 둔다 (온 이닝 끝에서만 멈추므로 점수와 무관하게 미리 안다)
+  const noGame = isNoGame(ctx.rainInning);
+  const before = noGame ? snapshotRecords(ctx) : null;
   const mkSide = (ts: TeamSeason, lineup: SimPlayer[], starter: SimPlayer, isHome: boolean): Side => {
     const pitcher = enterPitcher(starter, true, 0, ctx);
     // 감독 작전: 선발을 일찍(작으면)·늦게 바꾸는 정도 (league/managers.ts). 난수를 더 쓰지 않는다
-    if (ts.tactics) pitcher.limit *= ts.tactics.hook;
+    if (ts.tactics) pitcher.plan *= ts.tactics.hook;
     for (const p of lineup) ctx.bat[p.idx].g++;
     const vals = lineup.map((p) => p.value).sort((a, b) => a - b);
     const medianValue = vals[vals.length >> 1] ?? 0;
     const slots = fieldSlots(ts, lineup);
-    const fd = fieldDefense(lineup, slots);
-    return { ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, removed: new Set(), slots, subs: [] };
+    const defZero = ctx.env.defZero !== undefined ? (ctx.env.defZero - 50) / 2 : 0;
+    const fd = fieldDefense(lineup, slots, defZero);
+    return {
+      ts, lineup: [...lineup], spot: 0, runs: 0, pitcher, staff: [pitcher], usedIdx: new Set([starter.idx]), isHome, medianValue, ...fd, defZero, removed: new Set(), slots, subs: [],
+      starters: lineup.map((p) => ({ p, slot: slots.get(p.idx) })),
+    };
   };
   const home = mkSide(homeTs, homeLineup, homeStarter, true);
-  const parkHr = homeTs.team.park?.hr ?? 1;
+  // 홈 구장 사건별 배율: 실제 구장 표가 있으면 그 배율(좌타·우타 포함), 없으면 득점 계수 f를 지수로 나눈다.
+  // 게임 안에서 지은 신구장의 홈런 배율(hr)은 곱한다 (park.ts)
+  const park: GamePark = gameParkOf(homeTs.team.park, ctx.params.park);
   const away = mkSide(awayTs, awayLineup, awayStarter, false);
-
-  // 승리·패전 후보: 리드를 잡은 시점의 투수와 그 점수를 내준 투수. 동점이 되면 지운다
-  const rec: { win: PitcherInGame | null; loss: PitcherInGame | null; leader: Side | null } = { win: null, loss: null, leader: null };
-  // 2아웃에서 실책이 나오면 그 이닝의 이후 실점은 비자책
-  let halfUnearned = false;
-  // 직접 지휘 물음 번호
-  let cmdN = 0;
-
-  const score = (bat: Side, fld: Side, runner: Runner, batterLine: BatLine | null) => {
-    const before = bat.runs - fld.runs;
-    bat.runs++;
-    totals.r++;
-    ctx.bat[runner.p.idx].r++;
-    if (batterLine) batterLine.rbi++;
-    runner.resp.runs++;
-    runner.resp.line.r++;
-    if (runner.earned && !halfUnearned && !rng.chance(ctx.env.unearnedRun)) {
-      runner.resp.line.er++;
-      totals.er++;
-    }
-    const after = before + 1;
-    if (before <= 0 && after > 0) {
-      rec.win = bat.pitcher;
-      rec.loss = runner.resp;
-      rec.leader = bat;
-    } else if (after === 0) {
-      rec.win = null;
-      rec.loss = null;
-      rec.leader = null;
-    }
-  };
-
-  /** 공격 반 이닝. 끝내기면 true */
-  const playHalf = (bat: Side, fld: Side, inning: number): boolean => {
-    let outs = 0;
-    let first = true;
-    const runsAtStart = bat.runs;
-    halfUnearned = false;
-    const bases: (Runner | null)[] = [null, null, null];
-    const walkOff = () => bat.isHome && inning >= 9 && bat.runs > fld.runs;
-    const out = (n: number) => {
-      outs += n;
-      fld.pitcher.outs += n;
-      fld.pitcher.line.outs += n;
-      totals.outs += n;
-    };
-    const plays = ctx.plays;
-    let errFielder = -1;
-    const note = (kind: PlayKind, who: number, pit: number, r0: number) => {
-      plays?.push({
-        inn: inning, top: !bat.isHome, kind, bat: who, pit, outs: Math.min(3, outs),
-        bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1], away: away.runs, home: home.runs, runs: bat.runs - r0,
-        ...(kind === 'E' && errFielder >= 0 ? { fielder: errFielder } : {}),
-      });
-    };
-
-    const cmd = ctx.command;
-    const ask = (side: 'bat' | 'field', step: 'run' | 'bat' | 'field' = side): CommandChoice => cmd!.decide({
-      n: cmdN++, side, step, inn: inning, top: !bat.isHome, outs, bases: [bases[0]?.p.idx ?? -1, bases[1]?.p.idx ?? -1, bases[2]?.p.idx ?? -1],
-      away: away.runs, home: home.runs, batter: bat.lineup[bat.spot].idx, onDeck: bat.lineup[(bat.spot + 1) % 9].idx,
-      pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs,
-      lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
-      bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
-      bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
-      plays: plays ? plays.slice() : [],
-    });
-
-    while (outs < 3) {
-      // 직접 지휘: 우리 수비면 투수 교체·유지·고의4구, 우리 공격이면 대타·대주자·작전
-      const fc = cmd && fld.ts.team.idx === cmd.team ? ask('field') : null;
-      const was = fld.pitcher;
-      const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
-      if (next) {
-        fld.usedIdx.add(next.idx);
-        fld.pitcher = enterPitcher(next, false, fld.runs - bat.runs, ctx);
-        fld.staff.push(fld.pitcher);
-      } else if (!fc?.keep) {
-        maybeChangePitcher(fld, bat, inning, !bases[0] && !bases[1] && !bases[2], first, bat.runs - runsAtStart, ctx);
-      }
-      if (plays && fld.pitcher !== was) note('PC', -1, fld.pitcher.p.idx, bat.runs);
-      first = false;
-      const pg = fld.pitcher;
-      const ours = !!cmd && bat.ts.team.idx === cmd.team;
-      const bench = (idx: number | undefined) => (idx === undefined ? undefined
-        : bat.ts.hitters.find((p) => p.idx === idx && !bat.lineup.includes(p) && !bat.removed.has(p.idx)));
-      const pinchRun = (c: CommandChoice | null) => {
-        const runnerIn = bench(c?.pr?.idx);
-        const old = c?.pr ? bases[c.pr.base] : null;
-        if (!runnerIn || !old) return;
-        const slot = bat.lineup.indexOf(old.p);
-        if (slot >= 0) substitute(bat, slot, runnerIn, 'PR');
-        else bat.removed.add(old.p.idx);
-        bases[c!.pr!.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
-        ctx.bat[runnerIn.idx].g++;
-        note('PR', runnerIn.idx, pg.p.idx, bat.runs);
-      };
-
-      // 주자 작전 (투구 전, 도루할 수 있을 때만): 대주자, 도루
-      const rc = ours && bases[0] && !bases[1] ? ask('bat', 'run') : null;
-      pinchRun(rc);
-      const steal = rc?.steal ?? (rc?.tactic === 'steal' ? 'go' : undefined);
-
-      // 도루: 1루 주자, 2루가 비었을 때 (지휘: go면 반드시, hold면 안 한다, 아니면 감독 판단)
-      const r1 = bases[0];
-      if (r1 && !bases[1] && (steal === 'go' || (steal === undefined && rng.chance(r1.p.bat!.sbAtt * params.stealScale * (bat.ts.tactics?.steal ?? 1))))) {
-        const line = ctx.bat[r1.p.idx];
-        if (rng.chance(r1.p.bat!.sbPct - fld.catcherDef * params.catcherStealPerRun)) {
-          line.sb++;
-          totals.sb++;
-          bases[1] = r1;
-          bases[0] = null;
-          note('SB', r1.p.idx, pg.p.idx, bat.runs);
-        } else {
-          line.cs++;
-          totals.cs++;
-          bases[0] = null;
-          out(1);
-          note('CS', r1.p.idx, pg.p.idx, bat.runs);
-          if (outs >= 3) break;
-        }
-      }
-
-      // 폭투·포일·보크: 주자 전원 한 베이스씩
-      if ((bases[0] || bases[1] || bases[2]) && rng.chance(ctx.env.wildPitch * Math.max(0.3, 1 - fld.catcherDef * params.catcherWildPitchPerRun))) {
-        totals.wildPitches++;
-        const r0 = bat.runs;
-        if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
-        if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-        if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
-        note('WP', -1, pg.p.idx, r0);
-        if (walkOff()) return true;
-      }
-
-      // 타격 작전 (도루가 끝난 뒤): 대타, 대주자, 강공·번트
-      const bc = ours ? ask('bat', 'bat') : null;
-      pinchRun(bc);
-      const hitter = bench(bc?.ph);
-      if (hitter) {
-        substitute(bat, bat.spot, hitter, 'PH');
-        ctx.bat[hitter.idx].g++;
-        note('PH', hitter.idx, pg.p.idx, bat.runs);
-      }
-      const tactic = bc?.tactic === 'steal' ? undefined : bc?.tactic;
-
-      const batter = bat.lineup[bat.spot];
-      bat.spot = (bat.spot + 1) % 9;
-      const bl = ctx.bat[batter.idx];
-      bl.pa++;
-      totals.pa++;
-      pg.bf++;
-      pg.line.bf++;
-
-      // 지휘한 희생번트: 2아웃 전, 주자가 있을 때. 실패하면 타자만 아웃
-      if (tactic === 'bunt' && outs < 2 && (bases[0] || bases[1] || bases[2]) && !fc?.walk) {
-        if (rng.chance(BUNT_SUCCESS)) {
-          bl.sac++;
-          totals.sac++;
-          out(1);
-          const r0 = bat.runs;
-          if (bases[2] && outs < 3) { score(bat, fld, bases[2], bl); bases[2] = null; }
-          if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-          if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
-          note('SAC', batter.idx, pg.p.idx, r0);
-          if (walkOff()) return true;
-        } else {
-          bl.ab++; totals.ab++;
-          out(1);
-          note('BF', batter.idx, pg.p.idx, bat.runs);
-        }
-        continue;
-      }
-      // 희생번트: 무사, 주자 1루 또는 2루, 3루는 비었을 때. 약한 타자가 주로 댄다
-      if (!tactic && !fc?.walk && outs === 0 && !bases[2] && (bases[0] || bases[1]) && ctx.env.sac > 0) {
-        const weak = batter.value < bat.medianValue ? 1.6 : 0.4;
-        if (rng.chance(ctx.env.sac * params.sacBuntScale * weak * (bat.ts.tactics?.bunt ?? 1))) {
-          bl.sac++;
-          totals.sac++;
-          out(1);
-          if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-          if (bases[0]) { bases[1] = bases[0]; bases[0] = null; }
-          note('SAC', batter.idx, pg.p.idx, bat.runs);
-          continue;
-        }
-      }
-      const ev = fc?.walk ? Ev.BB : samplePlateAppearance(batter, pg, bat.isHome, ctx, fld.def, {
-        runnersOn: !!(bases[0] || bases[1] || bases[2]), scoring: !!(bases[1] || bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2,
-      }, parkHr);
-      const me: Runner = { p: batter, resp: pg, earned: true };
-      const r0 = bat.runs;
-      let kind: PlayKind = ev === Ev.SO ? 'SO' : ev === Ev.BB ? (fc?.walk ? 'IBB' : 'BB') : ev === Ev.HBP ? 'HBP' : ev === Ev.HR ? 'HR' : ev === Ev.T3 ? '3B' : ev === Ev.D2 ? '2B' : ev === Ev.S1 ? '1B' : 'GO';
-      const speedAdj = (r: Runner) => (r.p.bat!.speed - 0.5) * 0.3;
-      const twoOut = outs === 2 ? params.twoOutBonus : 0;
-      /** 추가 진루 시도: 성공이면 true, 주루사면 아웃을 올리고 false */
-      const tryAdvance = (): boolean => {
-        if (!rng.chance(params.outOnAdvance)) return true;
-        totals.outsOnBases++;
-        out(1);
-        return false;
-      };
-
-      switch (ev) {
-        case Ev.SO:
-          bl.ab++; bl.so++; pg.line.so++; totals.ab++; totals.so++;
-          out(1);
-          break;
-        case Ev.BB:
-        case Ev.HBP: {
-          if (ev === Ev.BB) { bl.bb++; pg.line.bb++; totals.bb++; } else { bl.hbp++; pg.line.hbp++; totals.hbp++; }
-          if (bases[0]) {
-            if (bases[1]) {
-              if (bases[2]) score(bat, fld, bases[2], bl);
-              bases[2] = bases[1];
-            }
-            bases[1] = bases[0];
-          }
-          bases[0] = me;
-          break;
-        }
-        case Ev.HR:
-          bl.ab++; bl.h++; bl.hr++; pg.line.h++; pg.line.hr++; totals.ab++; totals.h++; totals.hr++;
-          for (let i = 2; i >= 0; i--) {
-            const r = bases[i];
-            if (r) score(bat, fld, r, bl);
-            bases[i] = null;
-          }
-          score(bat, fld, me, bl);
-          break;
-        case Ev.T3:
-          bl.ab++; bl.h++; bl.t++; pg.line.h++; totals.ab++; totals.h++; totals.t++;
-          for (let i = 2; i >= 0; i--) {
-            const r = bases[i];
-            if (r) score(bat, fld, r, bl);
-            bases[i] = null;
-          }
-          bases[2] = me;
-          break;
-        case Ev.D2: {
-          bl.ab++; bl.h++; bl.d++; pg.line.h++; totals.ab++; totals.h++; totals.d++;
-          if (bases[2]) { score(bat, fld, bases[2], bl); bases[2] = null; }
-          if (bases[1]) { score(bat, fld, bases[1], bl); bases[1] = null; }
-          const f = bases[0];
-          if (f) {
-            bases[0] = null;
-            if (rng.chance(params.firstToHomeOnDouble + twoOut + speedAdj(f))) {
-              if (tryAdvance()) score(bat, fld, f, bl);
-            } else bases[2] = f;
-          }
-          bases[1] = me;
-          break;
-        }
-        case Ev.S1: {
-          bl.ab++; bl.h++; pg.line.h++; totals.ab++; totals.h++;
-          if (bases[2]) { score(bat, fld, bases[2], bl); bases[2] = null; }
-          const s = bases[1];
-          if (s) {
-            bases[1] = null;
-            if (rng.chance(params.secondToHomeOnSingle + twoOut + speedAdj(s))) {
-              if (tryAdvance()) score(bat, fld, s, bl);
-            } else bases[2] = s;
-          }
-          const f = bases[0];
-          if (f) {
-            bases[0] = null;
-            if (!bases[2] && outs < 3 && rng.chance(params.firstToThirdOnSingle + twoOut * 0.5 + speedAdj(f))) {
-              if (tryAdvance()) bases[2] = f;
-            } else bases[1] = f;
-          }
-          bases[0] = me;
-          break;
-        }
-        default: {
-          // 인플레이 아웃이 될 타구
-          bl.ab++; totals.ab++;
-          if (rng.chance(ctx.env.roe * fld.errMult)) {
-            // 실책 출루: 그 타구를 받은 수비수의 실책률로 (fieldDefense). 주자는 한 베이스씩, 타자 주자는 비자책
-            totals.roe++;
-            kind = 'E';
-            let u = rng.next() * fld.errBy.reduce((s, x) => s + x.w, 0);
-            errFielder = fld.errBy.find((x) => (u -= x.w) < 0)?.idx ?? fld.errBy.at(-1)?.idx ?? -1;
-            if (errFielder >= 0 && ctx.errors) ctx.errors[errFielder] = (ctx.errors[errFielder] ?? 0) + 1;
-            me.earned = false;
-            if (outs === 2) halfUnearned = true;
-            if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
-            if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-            if (bases[0]) { bases[1] = bases[0]; }
-            bases[0] = me;
-            break;
-          }
-          if (rng.chance(params.groundBallShare)) {
-            // 땅볼
-            if (bases[0] && outs < 2) {
-              if (rng.chance(params.doublePlay)) {
-                bl.gdp++; totals.gdp++;
-                kind = 'GDP';
-                out(2);
-                bases[0] = null;
-                if (outs < 3) {
-                  if (bases[2]) { score(bat, fld, bases[2], null); bases[2] = null; }
-                  if (bases[1]) { bases[2] = bases[1]; bases[1] = null; }
-                }
-              } else {
-                out(1);
-                if (bases[2] && rng.chance(params.groundOutScores)) { score(bat, fld, bases[2], bl); bases[2] = null; }
-                if (bases[1] && !bases[2]) { bases[2] = bases[1]; bases[1] = null; }
-                // 절반은 선행 주자 포스아웃(타자 1루), 절반은 타자 아웃(주자 2루)
-                if (rng.chance(0.5)) bases[0] = me;
-                else if (!bases[1]) { bases[1] = bases[0]; bases[0] = null; }
-              }
-            } else {
-              out(1);
-              if (outs < 3) {
-                if (bases[2] && rng.chance(params.groundOutScores)) { score(bat, fld, bases[2], bl); bases[2] = null; }
-                if (bases[1] && !bases[2] && rng.chance(0.55)) { bases[2] = bases[1]; bases[1] = null; }
-              }
-            }
-          } else {
-            // 뜬공
-            kind = 'FO';
-            out(1);
-            if (outs < 3) {
-              const t = bases[2];
-              if (t && rng.chance(params.sacFly + speedAdj(t))) {
-                score(bat, fld, t, bl);
-                bases[2] = null;
-                bl.ab--; totals.ab--; bl.sf++; totals.sf++;
-                kind = 'SF';
-              }
-              if (bases[1] && !bases[2] && rng.chance(0.2)) { bases[2] = bases[1]; bases[1] = null; }
-            }
-          }
-        }
-      }
-      note(kind, batter.idx, pg.p.idx, r0);
-      if (walkOff()) return true;
-    }
-    return false;
-  };
+  const st = new GameState(ctx, home, away, park);
+  // 지휘 방식 (엔진 2 18단계): 끼어들기면 지휘 없이 B로 시작하고, 넘기기 물음 번호를 잡아 둔다
+  const mode = ctx.command?.mode?.(ctx.dh);
+  if (mode?.takeover) {
+    st.cmdWatch = { cmd: ctx.command!, takeover: mode.takeover, k: 0 };
+    ctx.command = null;
+    ctx.engine = undefined;
+  }
+  st.cmdHandoff = mode?.handoff ?? -1;
 
   let inning = 0;
   const lineScore = { away: [] as number[], home: [] as number[] };
+  const tl = ctx.timeLimit;
+  let timeRng: Rng | null = null;
   for (;;) {
     inning++;
     const a0 = away.runs;
-    playHalf(away, home, inning);
+    playHalf(st, away, home, inning);
     lineScore.away.push(away.runs - a0);
+    if (ctx.pen && inning >= 7) ctx.pen.lateRuns += away.runs - a0;
     if (inning >= 9 && home.runs > away.runs) {
       lineScore.home.push(-1);
       break;
     }
     const h0 = home.runs;
-    const walkOff = playHalf(home, away, inning);
+    const walkOff = playHalf(st, home, away, inning);
     lineScore.home.push(home.runs - h0);
+    if (ctx.pen && inning >= 7) ctx.pen.lateRuns += home.runs - h0;
     if (walkOff) break;
+    // 경기 중 비: 그 회를 마치고 멈춘다 (1~8회라 끝내기·9회 판정보다 먼저 온다)
+    if (ctx.rainInning && inning >= ctx.rainInning) break;
     if (inning >= 9 && home.runs !== away.runs) break;
-    if (inning >= ctx.maxInnings) break;
+    if (ctx.maxInnings > 0 && inning >= ctx.maxInnings) break; // 0 = 무제한 (2008 끝장승부)
+    // 시간 제한 흉내: 여기까지 오면 동점이다. 따로 둔 줄기에서만 뽑아 경기 난수 흐름은 그대로다
+    if (tl && inning >= tl.from && (timeRng ??= ctx.rng.fork('time')).chance(tl.end)) break;
   }
+  if (ctx.running) for (const side of [home, away]) for (const s of side.subs) ctx.running[s.kind === 'PH' ? 'ph' : s.kind === 'PR' ? 'pr' : 'def']++;
+  const res = finishGame(st, inning, lineScore);
+  if (!ctx.rainInning) return res;
+  if (!before) return { ...res, rain: 'cold' };
+  // 노게임: 피로·혹사·선발일(finishGame이 states에 남긴 것)과 경기 중 부상(ctx.injuries)은 그대로, 기록·집계만 되돌린다
+  restoreRecords(ctx, before);
+  return { ...res, win: null, loss: null, save: null, rain: 'nogame' };
+}
 
-  // ---- 경기 뒤 처리
-  totals.games++;
-  if (inning > 9) totals.extraInningGames++;
-  const st = ctx.states;
+/** 노게임 때 되돌릴 기록·집계 (선수별 기록은 객체를 그대로 두고 값만 되돌린다: 경기 중 PitcherInGame.line이 같은 객체를 가리킨다) */
+interface RecordSnapshot {
+  bat: BatLine[];
+  pit: PitLine[];
+  totals: LeagueCounters;
+  errors?: number[];
+  /** 자리별 수비 아웃 (능력치 v2 16-3b ctx.defOuts) */
+  defOuts?: Int32Array;
+  tallies: Partial<Pick<GameContext, 'balls' | 'running' | 'pen' | 'splits'>>;
+}
+
+const TALLIES = ['balls', 'running', 'pen', 'splits'] as const;
+
+function snapshotRecords(ctx: GameContext): RecordSnapshot {
+  const tallies: RecordSnapshot['tallies'] = {};
+  for (const k of TALLIES) if (ctx[k]) (tallies as Record<string, unknown>)[k] = structuredClone(ctx[k]);
+  return {
+    bat: ctx.bat.map((l) => ({ ...l })), pit: ctx.pit.map((l) => ({ ...l })), totals: { ...ctx.totals },
+    ...(ctx.errors ? { errors: ctx.errors.slice() } : {}), ...(ctx.defOuts ? { defOuts: ctx.defOuts.slice() } : {}), tallies,
+  };
+}
+
+function restoreInto(target: object, snap: object): void {
+  const t = target as Record<string, unknown>;
+  for (const k of Object.keys(t)) if (!(k in snap)) delete t[k];
+  Object.assign(t, snap);
+}
+
+function restoreRecords(ctx: GameContext, s: RecordSnapshot): void {
+  s.bat.forEach((l, i) => Object.assign(ctx.bat[i], l));
+  s.pit.forEach((l, i) => Object.assign(ctx.pit[i], l));
+  Object.assign(ctx.totals, s.totals);
+  if (ctx.errors && s.errors) {
+    ctx.errors.length = s.errors.length;
+    s.errors.forEach((v, i) => { ctx.errors![i] = v; });
+  }
+  if (ctx.defOuts && s.defOuts) ctx.defOuts.set(s.defOuts);
+  for (const k of TALLIES) if (ctx[k] && s.tallies[k]) restoreInto(ctx[k]!, s.tallies[k]!);
+}
+
+/**
+ * 직접 지휘자에게 묻는다. 지휘하지 않는 동안(끼어들기 전, 넘긴 뒤)은 빈 선택(자동).
+ * 넘기기 물음 번호(CommandMode.handoff)에 오면 묻지 않고 지휘를 그만둔다: 남은 경기는 B, 난수는 경기 줄기의 b@번호
+ */
+function ask(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'] = side, cnt?: Count): CommandChoice {
+  const { ctx } = st;
+  const cmd = ctx.command;
+  if (!cmd) return {};
+  if (st.cmdN === st.cmdHandoff) {
+    ctx.command = null;
+    ctx.engine = undefined;
+    ctx.rng = ctx.rng.fork(`b@${st.cmdN}`);
+    return {};
+  }
+  return cmd.decide(commandRequest(st, side, step, st.cmdN++, cnt));
+}
+
+/** 끼어들기 (CommandMode.takeover): 우리 경기의 타석 경계마다 묻고, 그러자고 하면 그 자리부터 지휘한다 (A, 난수는 경기 줄기의 a@k) */
+function checkTakeover(st: GameState): void {
+  const w = st.cmdWatch!;
+  const { ctx } = st;
+  const side = st.bat.ts.team.idx === w.cmd.team ? 'bat' : 'field';
+  const k = w.k++;
+  if (!w.takeover(commandRequest(st, side, side, st.cmdN), k)) return;
+  st.cmdWatch = null;
+  ctx.command = w.cmd;
+  ctx.engine = 'A';
+  ctx.rng = ctx.rng.fork(`a@${k}`);
+}
+
+/** 지휘자에게 보이는 지금 상황 (난수·상태를 건드리지 않는다) */
+function commandRequest(st: GameState, side: 'bat' | 'field', step: CommandRequest['step'], n: number, cnt?: Count): CommandRequest {
+  const { bat, fld, ctx } = st;
+  const plays = ctx.plays;
+  // 공 사이 물음은 타석을 시작한 뒤라 타순이 이미 다음 타자로 넘어가 있다 (beginPlateAppearance)
+  const spot = step === 'pitch' ? (bat.spot + 8) % 9 : bat.spot;
+  return {
+    n, side, step, inn: st.inning, top: !bat.isHome, outs: st.outs, bases: st.baseIdx(),
+    away: st.away.runs, home: st.home.runs, batter: bat.lineup[spot].idx, onDeck: bat.lineup[(spot + 1) % 9].idx,
+    pitcher: fld.pitcher.p.idx, pitcherBf: fld.pitcher.bf, pitcherRuns: fld.pitcher.runs, pitcherPitches: fld.pitcher.pitches,
+    ...(cnt ? { count: [cnt.b, cnt.s] as [number, number], seq: cnt.seq, pt: [...(cnt.pt ?? [])], pz: [...(cnt.pz ?? [])] } : {}),
+    ...(cnt && side === 'field' ? { arsenal: [...arsenalOf(ctx, fld.pitcher.p)].sort((a, b) => b.share - a.share) } : {}),
+    lineup: (side === 'bat' ? bat : fld).lineup.map((p) => p.idx),
+    bench: side === 'bat' ? bat.ts.hitters.filter((p) => !bat.lineup.includes(p) && !bat.removed.has(p.idx)).map((p) => p.idx) : [],
+    bullpen: side === 'field' ? availableRelievers(fld, ctx).map((p) => p.idx) : [],
+    ...(side === 'field' && step === 'field' ? { fieldBench: fld.ts.hitters.filter((p) => !p.isPitcher && !fld.lineup.includes(p) && !fld.removed.has(p.idx)).map((p) => p.idx),
+      fieldSlots: fld.lineup.map((p) => fld.slots.get(p.idx) ?? 'DH') } : {}),
+    plays: plays ? plays.slice() : [],
+    ...(ctx.dh === 2 ? { dh: 2 as const } : {}),
+  };
+}
+
+/** 공격 반 이닝. 끝내기면 true */
+function playHalf(st: GameState, bat: Side, fld: Side, inning: number): boolean {
+  st.startHalf(bat, fld, inning);
+  const { ctx } = st;
+  if (ctx.pen && inning >= 7) {
+    ctx.pen.lateHalf++;
+    ctx.pen.lateLead[Math.max(-4, Math.min(4, fld.runs - bat.runs)) + 4]++;
+  }
+  const resolver = ctx.resolver ?? B0;
+  // AI 감독 수비 교체 (엔진 2 9단계): 대타·대주자 뒤 수비 위치 다시 정하기, 후반 리드 때 대수비.
+  // 지휘하는 수비의 대수비는 반 이닝 첫 물음에서 (그 항목이 자동일 때만)
+  aiDefense(st, fld, bat, !(ctx.command && fld.ts.team.idx === ctx.command.team));
+  let first = true;
+
+  while (st.outs < 3) {
+    // 끼어들기·넘기기 (엔진 2 18단계)로 지휘 여부가 경기 중에 바뀐다
+    if (st.cmdWatch) checkTakeover(st);
+    const cmd = ctx.command;
+    // 직접 지휘 (엔진 2 17단계 정리): 물음의 항목마다 '자동'(값 없음)이면 AI 감독이, 고르면 고른 대로 한다 (CommandChoice).
+    // 우리 수비면 투수 교체·유지, 고의4구, 전진 수비, 피치아웃, 대수비
+    const fcAsk = !!cmd && fld.ts.team.idx === cmd.team;
+    const fc = fcAsk ? ask(st, 'field') : null;
+    const was = fld.pitcher;
+    const next = fc?.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === fc.pitcher) : undefined;
+    if (next) bringIn(fld, next, fld.runs - bat.runs, ctx);
+    else if (!fc?.keep || fld.pitcher.injured) {
+      maybeChangePitcher(fld, bat, inning, st.basesEmpty, first, bat.runs - st.runsAtStart, ctx);
+      // 좌우 원포인트 (엔진 2 10단계): 바꾸지 않았으면 좌타 강타자에 좌완 구원
+      if (fld.pitcher === was) maybeOnePoint(fld, bat, inning, ctx);
+    }
+    // 대수비: 지휘하는 수비는 반 이닝 첫 물음의 대수비 항목이 자동일 때만 AI 감독이 한다 (aiDefense에서 미룬 몫)
+    if (fcAsk && first && fc!.def === undefined) aiLateDefense(st, fld, bat);
+    if (fc?.def) orderedDefSub(st, fld, fc.def.out, fc.def.in);
+    pitcherEntered(st, was);
+    first = false;
+    const ours = !!cmd && bat.ts.team.idx === cmd.team;
+    const bench = (idx: number | undefined) => (idx === undefined || idx < 0 ? undefined
+      : bat.ts.hitters.find((p) => p.idx === idx && !bat.lineup.includes(p) && !bat.removed.has(p.idx)));
+    const pinchRun = (c: CommandChoice | null) => runnerSub(st, c?.pr ?? undefined);
+
+    // AI 감독 대주자·대타 (엔진 2 9단계, subs.ts): 투구 전에. 지휘하는 공격은 아래 물음의 항목이 자동일 때만
+    if (!ours) {
+      const aiPr = pickPinchRunner(st);
+      if (aiPr) pinchRun({ pr: { base: aiPr[0], idx: aiPr[1].idx } });
+      const aiPh = pickPinchHitter(st);
+      if (aiPh) pinchHit(st, aiPh);
+    }
+
+    // 주자 작전 (투구 전, 도루할 수 있을 때만: 1루 주자·2루 빔 또는 2루 주자·3루 빔): 대주자, 도루·히트앤드런
+    const rc = ours && ((st.bases[0] && !st.bases[1]) || (st.bases[1] && !st.bases[2])) ? ask(st, 'bat', 'run') : null;
+    pinchRun(rc);
+    if (rc && rc.pr === undefined) aiPinchRun(st);
+    const steal = rc?.steal ?? (rc?.tactic === 'steal' ? 'go' : undefined);
+    // 견제사, 피치아웃, 히트앤드런 → 도루 (엔진 2 8단계). 지휘하는 쪽은 고른 대로 (피치아웃은 우리 수비, 히트앤드런은 우리 공격)
+    if (pickoff(st)) break;
+    const po = fc?.pitchout !== undefined ? fc.pitchout && pitchoutOk(st) : wantPitchout(st);
+    if (po) addPitches(ctx, fld.pitcher, 1);
+    let going = false;
+    if (steal === 'go' && !(st.bases[0] && !st.bases[1])) {
+      // 2루 주자의 3루 도루·이중 도루 (지휘). 1루 주자의 2루 도루는 아래 steals (피치아웃과 함께)
+      if (orderedSteal(st)) break;
+    } else if (steal === 'hnr' ? hnrOk(st) : steal === undefined && hitAndRun(st)) {
+      // 타자는 첫 공에 반드시 휘두른다 (피치아웃이면 못 맞힌다): 헛스윙이면 주자는 도루, 파울이면 돌아가고, 인플레이면 그 공으로 타석이 끝난다
+      const sw = ctx.params.run.hnrSwing;
+      const u = ctx.rng.next() * (sw[0] + sw[1] + sw[2]);
+      if (po || u < sw[0]) {
+        if (ctx.running) ctx.running.hnrMiss++;
+        if (!po) addPitches(ctx, fld.pitcher, 1);
+        if (stealOne(st, 0, stealPct(st, st.bases[0]!, false, ctx.params.run.hnrMissPct + (po ? ctx.params.run.pitchoutPct : 0)))) break;
+      } else if (u < sw[0] + sw[1]) {
+        if (ctx.running) ctx.running.hnrFoul++;
+        addPitches(ctx, fld.pitcher, 1);
+      } else {
+        if (ctx.running) ctx.running.hnrInPlay++;
+        going = true;
+      }
+    } else if (steals(st, steal === 'hnr' ? 'hold' : steal, po)) break;
+    if (wildPitch(st)) return true;
+
+    // 타격 작전 (도루가 끝난 뒤): 대타, 대주자, 강공·번트
+    const bc = ours ? ask(st, 'bat', 'bat') : null;
+    pinchRun(bc);
+    if (bc && !rc && bc.pr === undefined) aiPinchRun(st);
+    const hitter = bench(bc?.ph);
+    if (hitter) pinchHit(st, hitter);
+    else if (bc && bc.ph === undefined) {
+      const aiPh = pickPinchHitter(st);
+      if (aiPh) pinchHit(st, aiPh);
+    }
+    const tactic = bc?.tactic === 'steal' ? undefined : bc?.tactic;
+    // 고의4구 (지휘, 또는 AI 감독 엔진 2 10단계)와 전진 수비. 자동 고의4구 전 시대는 공 4개를 실제로 던진다 (타석이 끝나기 전 폭투로 끝내기면 타석 없음)
+    const walk = fc?.walk !== undefined ? fc.walk : !going && wantIntentionalWalk(st);
+    st.infieldIn = !walk && (fc?.infield !== undefined ? fc.infield === 'in' && infieldInOk(st) : wantInfieldIn(st));
+    if (walk && ctx.autoIbb === false && manualIntentionalWalk(st, fld.pitcher)) return true;
+
+    const { batter, bl, pg } = beginPlateAppearance(st);
+    const sit = { runnersOn: !st.basesEmpty, scoring: !!(st.bases[1] || st.bases[2]), late: inning >= 7 && Math.abs(bat.runs - fld.runs) <= 2 };
+    // 히트앤드런 첫 공 인플레이: 그 공으로 타석이 끝난다 (그 사이 지휘로 대타·번트·고의4구를 골랐으면 작전은 풀린다)
+    if (going && !tactic && !walk && !hitter) {
+      const rates = paRates(batter, pg, bat.isHome, ctx, { ...sit, runnersOn: true, scoring: false }, st.park, ctx.framing ? fld.catcherFrame : 0);
+      addPitches(ctx, pg, 1);
+      const r0 = bat.runs;
+      const kind = applyPlateAppearance(st, drawInPlay(rates, ctx.rng), batter, bl, pg, false, rates, st.bases[0] !== null);
+      if (ctx.splits) tallySplit(ctx.splits, batter, pg.p, kind);
+      st.note(kind, batter.idx, pg.p.idx, r0);
+      if (ctx.injuries) inGameInjury(st, batter, pg, kind);
+      if (st.walkOff()) return true;
+      continue;
+    }
+    // 지휘한 번트: 2아웃 전, 주자가 있을 때 (3루 주자가 있으면 스퀴즈)
+    if (tactic === 'bunt' && st.outs < 2 && !st.basesEmpty && !walk) {
+      if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
+      if (orderedBunt(st, batter, bl, pg)) return true;
+      continue;
+    }
+    // 감독 판단 번트 (희생번트·스퀴즈). 번트 타석 투구 수는 HF 투구 자료 (투구 수를 세지 않는 해결기는 0)
+    const bunted = !tactic && !walk ? autoBunt(st, batter, bl, pg) : null;
+    if (bunted !== null) {
+      if (resolver.inPlayPitches) addPitches(ctx, pg, buntPitches(st));
+      if (bunted) return true;
+      continue;
+    }
+
+    // 고의4구: 공은 위에서 던졌다 (자동 고의4구 시대는 공 없이)
+    let ev: Ev;
+    let rates: PaRates | null = null;
+    let mound = pg;
+    let intentional = walk;
+    let runnerGoing = false;
+    let extra: Pick<Play, 'seq' | 'np' | 'pt' | 'pz'> | undefined;
+    if (walk) ev = Ev.BB;
+    else {
+      rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park, ctx.framing ? fld.catcherFrame : 0);
+      const chain = ctx.engine === 'A' ? rates.chain ?? resolver.chainFor?.(rates) : undefined;
+      if (chain) {
+        // A 해결기 (엔진 2 17단계): 공 하나씩. 지휘하는 경기는 공 사이에 묻는다
+        const out = playPitches(st, batter, bl, pg, rates, chain, sit);
+        if (out === 'end') break;
+        if (out === 'walkoff') return true;
+        ({ ev, pg: mound, rates, intentional, going: runnerGoing } = out);
+        if (!out.folded) extra = { seq: out.seq, np: mound.pitches, pt: out.pt, pz: out.pz };
+      } else {
+        const res = resolver.resolve(rates, ctx.rng);
+        ev = res.ev;
+        addPitches(ctx, pg, res.pitches);
+      }
+    }
+    const r0 = bat.runs;
+    const kind = applyPlateAppearance(st, ev, batter, bl, mound, intentional, intentional ? null : rates, runnerGoing);
+    if (ctx.splits) tallySplit(ctx.splits, batter, mound.p, kind);
+    st.note(kind, batter.idx, mound.p.idx, r0, extra);
+    if (ctx.injuries) inGameInjury(st, batter, mound, kind);
+    if (st.walkOff()) return true;
+  }
+  return false;
+}
+
+/** 투수가 바뀌었으면 등판 기록 (세이브 상황은 등판 때 누상 주자까지 보고 정한다: 4점 이상 리드에 동점 주자가 누상·타석·대기 타석) */
+function pitcherEntered(st: GameState, was: PitcherInGame): void {
+  const { fld, bat, ctx } = st;
+  if (fld.pitcher === was) return;
+  const runners = st.bases.filter(Boolean).length;
+  fld.pitcher.saveSit = isSaveSituation(fld.pitcher.enteredLead, runners);
+  fld.pitcher.tyingNear = tyingRunNear(fld.pitcher.enteredLead, runners);
+  fld.pitcher.entryInning = st.inning;
+  if (ctx.pen) tallySaveEntry(fld, fld.pitcher, st.inning, runners, ctx);
+  if (ctx.plays) st.note('PC', -1, fld.pitcher.p.idx, bat.runs);
+}
+
+/** 대주자 (지휘 선택 또는 AI 감독): 그 베이스 주자 대신 벤치 선수 */
+function runnerSub(st: GameState, pr: { base: 0 | 1 | 2; idx: number } | undefined): void {
+  const { bat, fld, ctx } = st;
+  if (!pr) return;
+  const runnerIn = bat.ts.hitters.find((p) => p.idx === pr.idx && !bat.lineup.includes(p) && !bat.removed.has(p.idx));
+  const old = st.bases[pr.base];
+  if (!runnerIn || !old) return;
+  const slot = bat.lineup.indexOf(old.p);
+  if (slot >= 0) substitute(bat, slot, runnerIn, 'PR');
+  else bat.removed.add(old.p.idx);
+  st.bases[pr.base] = { p: runnerIn, resp: old.resp, earned: old.earned };
+  ctx.bat[runnerIn.idx].g++;
+  st.note('PR', runnerIn.idx, fld.pitcher.p.idx, bat.runs);
+}
+
+/** AI 감독 대주자 한 번 */
+function aiPinchRun(st: GameState): void {
+  const aiPr = pickPinchRunner(st);
+  if (aiPr) runnerSub(st, { base: aiPr[0], idx: aiPr[1].idx });
+}
+
+/** 대타: 지금 타자 대신 */
+function pinchHit(st: GameState, hitter: SimPlayer): void {
+  const { bat, fld, ctx } = st;
+  substitute(bat, bat.spot, hitter, 'PH');
+  ctx.bat[hitter.idx].g++;
+  st.note('PH', hitter.idx, fld.pitcher.p.idx, bat.runs);
+}
+
+/** 플레이어가 고른 히트앤드런을 걸 수 있나 (1루 주자, 2루 빔, 2아웃 전). 걸면 집계 */
+function hnrOk(st: GameState): boolean {
+  if (!st.bases[0] || st.bases[1] || st.outs >= 2) return false;
+  if (st.ctx.running) st.ctx.running.hnr++;
+  return true;
+}
+
+/** 플레이어가 고른 피치아웃을 할 수 있나 (1루 주자, 2루 빔). 하면 집계 */
+function pitchoutOk(st: GameState): boolean {
+  if (!st.bases[0] || st.bases[1]) return false;
+  if (st.ctx.running) st.ctx.running.pitchout++;
+  return true;
+}
+
+/** 플레이어가 고른 전진 수비를 할 수 있나 (3루 주자, 2아웃 전) */
+function infieldInOk(st: GameState): boolean {
+  return !!st.bases[2] && st.outs < 2;
+}
+
+/** A 해결기 타석 결과 */
+interface PitchOutcome {
+  ev: Ev;
+  /** 타석을 끝낸 투수 (공 사이 투수 교체가 있으면 새 투수) */
+  pg: PitcherInGame;
+  rates: PaRates | null;
+  intentional: boolean;
+  /** 히트앤드런으로 1루 주자가 뛰었다 */
+  going: boolean;
+  seq: string;
+  /** 공마다 구종·코스 (seq와 같은 순서) */
+  pt: string[];
+  pz: string[];
+  /** 타석 중간에 B로 넘겨 남은 공을 계산으로 접었다 (공 기호가 모자라 중계에 남기지 않는다) */
+  folded?: true;
+}
+
+/**
+ * A 해결기 한 타석 (엔진 2 17단계, docs/경기엔진2_기획안.md 3.4): 사슬을 공 하나씩 돌린다. 지휘하는 경기는 공마다 우리 쪽에 묻는다
+ * ('pitch' 물음: 공격은 대주자·도루·히트앤드런, 수비는 투수 교체·고의4구). AI 감독은 공 사이에 판단하지 않는다 (B와 같은 분포, 3.6.3).
+ * 피로는 B처럼 타석을 시작할 때의 확률표(타석 중간 시점의 투구 수)를 끝까지 쓴다. 공 사이 투수 교체만 새 투수의 확률표로 지금 카운트부터 잇는다.
+ * 도루 실패로 이닝이 끝나면 'end'(타석은 없던 일), 고의4구 공의 폭투로 끝내기면 'walkoff'
+ */
+function playPitches(st: GameState, batter: SimPlayer, bl: BatLine, pg0: PitcherInGame, rates0: PaRates, chain0: SolvedChain,
+                     sit: Pick<Situation, 'runnersOn' | 'scoring' | 'late'>): PitchOutcome | 'end' | 'walkoff' {
+  const { ctx, bat, fld } = st;
+  const cmd = ctx.command;
+  const asks = !!cmd && (bat.ts.team.idx === cmd.team || fld.ts.team.idx === cmd.team);
+  let pg = pg0;
+  let rates = rates0;
+  let chain = chain0;
+  const cnt = newCount();
+  cnt.pt = [];
+  cnt.pz = [];
+  // 구종 결합표 (엔진 2 20단계): 이 타석 사슬 칸을 구종별로 나눈 것. 투수가 바뀌면 다시
+  let joint: PitchJoint | null = null;
+  const jointOf = () => (joint ??= pitchJoint(chain.p, rates.called, inPlayOf(rates), arsenalOf(ctx, pg.p)));
+  const prng = () => (st.pitchRng ??= ctx.rng.fork('pitch'));
+  const label = (type = '', zone = '') => { cnt.pt!.push(type); cnt.pz!.push(zone); };
+  let aim: { type?: string; zone?: PitchZone } | undefined;
+  const done = (ev: Ev, extra: Partial<PitchOutcome> = {}): PitchOutcome => ({ ev, pg, rates, intentional: false, going: false, seq: cnt.seq, pt: cnt.pt!, pz: cnt.pz!, ...extra });
+  for (;;) {
+    if (asks) {
+      const side = bat.ts.team.idx === cmd!.team ? 'bat' : 'field';
+      const c = ask(st, side, 'pitch', cnt);
+      if (ctx.engine !== 'A') {
+        // A → B 넘기기 (엔진 2 18단계): 지금 카운트에서 남은 타석을 계산으로 접는다
+        const { end, pitches } = foldFrom(chain, cnt.b, cnt.s, ctx.rng);
+        addPitches(ctx, pg, pitches);
+        return done(end === End.K ? Ev.SO : end === End.W ? Ev.BB : end === End.H ? Ev.HBP : drawInPlay(rates, ctx.rng), { folded: true });
+      }
+      if (side === 'field') {
+        const next = c.pitcher !== undefined ? availableRelievers(fld, ctx).find((p) => p.idx === c.pitcher) : undefined;
+        if (next) {
+          // 공 사이 투수 교체: 이 타석은 새 투수 몫 (상대 타자 수를 옮긴다), 지금 카운트부터 새 투수의 확률표로
+          const was = fld.pitcher;
+          bringIn(fld, next, fld.runs - bat.runs, ctx);
+          pitcherEntered(st, was);
+          was.bf--;
+          was.line.bf--;
+          pg = fld.pitcher;
+          pg.bf++;
+          pg.line.bf++;
+          rates = paRates(batter, pg, bat.isHome, ctx, sit, st.park, ctx.framing ? fld.catcherFrame : 0);
+          chain = rates.chain ?? ctx.resolver?.chainFor?.(rates) ?? chain;
+          joint = null;
+        }
+        if (c.walk) {
+          // 공 사이 고의4구: 자동 고의4구 시대는 공 없이, 그 전은 남은 볼을 던진다 (폭투·포일 가능)
+          if (ctx.autoIbb === false) {
+            const n = 4 - cnt.b;
+            if (manualIntentionalWalk(st, pg, n)) { abortPlateAppearance(st, bl, pg); return 'walkoff'; }
+            cnt.seq += 'I'.repeat(n);
+            for (let i = 0; i < n; i++) label();
+          }
+          return done(Ev.BB, { intentional: true, rates: null });
+        }
+        aim = c.pitch && (c.pitch.type || c.pitch.zone) ? c.pitch : undefined;
+      } else {
+        runnerSub(st, c.pr ?? undefined);
+        if (c.steal === 'go') {
+          if (orderedSteal(st)) { abortPlateAppearance(st, bl, pg); return 'end'; }
+        } else if (c.steal === 'hnr' && hnrOk(st)) {
+          // 공 사이 히트앤드런: 타자는 이 공에 반드시 휘두른다 (헛스윙 → 주자 도루, 파울 → 돌아감, 인플레이 → 타석 끝)
+          const run = ctx.params.run;
+          const sw = run.hnrSwing;
+          const u = ctx.rng.next() * (sw[0] + sw[1] + sw[2]);
+          addPitches(ctx, pg, 1);
+          if (u < sw[0]) {
+            if (ctx.running) ctx.running.hnrMiss++;
+            cnt.seq += 'S';
+            label();
+            if (stealOne(st, 0, stealPct(st, st.bases[0]!, false, run.hnrMissPct))) { abortPlateAppearance(st, bl, pg); return 'end'; }
+            if (++cnt.s === 3) return done(Ev.SO);
+          } else if (u < sw[0] + sw[1]) {
+            if (ctx.running) ctx.running.hnrFoul++;
+            applyPitch(cnt, 'F');
+            label();
+          } else {
+            if (ctx.running) ctx.running.hnrInPlay++;
+            cnt.seq += 'X';
+            label();
+            return done(drawInPlay(rates, ctx.rng), { going: st.bases[0] !== null });
+          }
+          continue;
+        }
+      }
+    }
+    const cell = cnt.b * 3 + cnt.s;
+    let code: PitchCode;
+    let hit: Ev | undefined;
+    if (aim) {
+      // 구종·코스 지시 (엔진 2 20-3·20-4단계): 고른 구종(없으면 AI 배합)의 결과 비율 × 코스 × 예측 손해에서 난수 한 번. 맞힘이면 결과까지
+      const j = jointOf();
+      const want = aim.type;
+      const type = want && j.arsenal.some((a) => a.type === want) ? want : aiType(j, cell, prng());
+      const mem = (pg.aim ??= newAim());
+      const o = drawOutcome(aimedOutcome(j, cell, type, aim.zone, rates.pitPlate?.ctl ?? 0, mem), ctx.rng);
+      rememberAim(mem, type, aim.zone);
+      code = CODE_OF[o];
+      if (code === 'X') hit = EV_OF[o];
+      label(type, aim.zone ?? '');
+      aim = undefined;
+    } else {
+      code = drawPitch(chain, cnt.b, cnt.s, ctx.rng, rates.called);
+      // 지시 없는 공 (20-2단계): 결과는 위 그대로, 구종·코스는 그 결과가 났을 때의 조건부로 따로 줄기에서
+      if (code === 'X') hit = drawInPlay(rates, ctx.rng);
+      const l = labelPitch(jointOf(), cell, outsOf(code, hit), prng());
+      label(l.type, l.zone);
+    }
+    addPitches(ctx, pg, 1);
+    const end = applyPitch(cnt, code);
+    if (end === null) {
+      if (cnt.seq.length > 60) return done(Ev.OUT); // 안전장치 (파울이 끝없이 이어지는 일은 없다)
+      continue;
+    }
+    if (end === End.K) return done(Ev.SO);
+    if (end === End.W) return done(Ev.BB);
+    if (end === End.H) return done(Ev.HBP);
+    return done(hit!);
+  }
+}
+
+/** 투수 구종 (엔진 2 20-1단계): 월드가 준 것, 없으면 선수 ID로 정한 리그 평균 꼴 */
+function arsenalOf(ctx: GameContext, p: SimPlayer): ArsenalPitch[] {
+  return ctx.arsenal?.(p) ?? arsenalFor(undefined, p.id, 0);
+}
+
+/** 맞힌 공 뒤 결과 비율 [단타, 2루타, 3루타, 홈런, 아웃] (resolver.ts drawInPlay와 같은 몫) */
+function inPlayOf(r: PaRates): number[] {
+  const x = 1 / r.scale - r.so - r.bb - r.hbp;
+  const q = [r.s1 / x, r.d2 / x, r.t3 / x, r.hr / x];
+  return [...q, Math.max(0, 1 - q[0] - q[1] - q[2] - q[3])];
+}
+
+/** 결합표 결과 칸 → 공 기호, 맞힘 결과 */
+const CODE_OF: PitchCode[] = ['B', 'C', 'S', 'F', 'H', 'X', 'X', 'X', 'X', 'X'];
+const EV_OF: Partial<Record<number, Ev>> = { [O.X1]: Ev.S1, [O.X2]: Ev.D2, [O.X3]: Ev.T3, [O.HR]: Ev.HR, [O.OUT]: Ev.OUT };
+
+/** 공 기호(와 맞힘 결과) → 결합표 결과 칸 */
+function outsOf(code: PitchCode, hit: Ev | undefined): number[] {
+  switch (code) {
+    case 'B': return [O.B];
+    case 'C': return [O.C];
+    case 'S': return [O.S];
+    case 'T': return [O.C, O.S];
+    case 'F': return [O.F];
+    case 'H': return [O.H];
+    default: return [hit === Ev.S1 ? O.X1 : hit === Ev.D2 ? O.X2 : hit === Ev.T3 ? O.X3 : hit === Ev.HR ? O.HR : O.OUT];
+  }
+}
+
+/** 타자가 1루로 달린 타석 (주루 부상): 홈런·볼넷·삼진 등은 아니다 */
+const RAN = new Set<PlayKind>(['1B', '2B', '3B', 'E', 'GDP', 'GO', 'FO', 'SF']);
+
+/** 부상 확률 배율: 특수능력 '철인', 구단 의료 투자, 숨은 능력 '부상 경향' (지금은 1.00) */
+function injuryMult(p: SimPlayer, ts: TeamSeason, ctx: GameContext): number {
+  return injuryScale(p, ctx.params.traits) * (ts.team.injuryRate ?? 1) * injuryProneness(p);
+}
+
+/**
+ * 경기 중 부상 (엔진 2 11단계, docs/경기엔진2_기획안.md 3.10·4.6): 타석이 끝날 때 그 경기 난수를 한 번 뽑아 투구·주루·수비 부상을 함께 정한다.
+ * 투구: 지난번 판정 뒤 던진 공 수 × inGame.perPitch × (1 + 혹사 배율), 그리고 실제 한계를 넘긴 공 × overuse.overInjury (혹사 부상).
+ * 주루: 타자가 1루로 달린 타석. 수비: 인플레이 타구를 맡은 수비수. 다친 투수는 다음 타석 전에, 야수는 바로 바뀐다 (AI 감독).
+ * 한 경기에 한 선수는 한 번만 다친다. 정도·부위는 다친 뒤에만 뽑는다
+ */
+function inGameInjury(st: GameState, batter: SimPlayer, pg: PitcherInGame, kind: PlayKind): void {
+  const { ctx, bat, fld } = st;
+  const list = ctx.injuries!;
+  const ip = ctx.params.injury;
+  const g = ip.inGame;
+  const o = ip.overuse;
+  const n = pg.pitches - pg.injChecked;
+  const overN = o.on ? Math.max(0, pg.pitches - Math.max(pg.injChecked, pg.realLimit)) : 0;
+  pg.injChecked = pg.pitches;
+  const hurt = (p: SimPlayer) => list.some((x) => x.idx === p.idx);
+  const mPit = pg.injured || hurt(pg.p) ? 0 : injuryMult(pg.p, fld.ts, ctx);
+  const pPit = g.perPitch * n * mPit;
+  const pOver = (o.on ? pPit * o.injury * pg.overuse : 0) + o.overInjury * overN * mPit;
+  const pRun = RAN.has(kind) && !hurt(batter) ? g.perRun * injuryMult(batter, bat.ts, ctx) * hitterAgeFactor(batter.age) : 0;
+  const fIdx = st.ballSlot && kind !== 'HR' ? fielderAt(fld, st.ballSlot) : -1;
+  const fielder = fIdx < 0 ? null : fIdx === pg.p.idx ? pg.p : fld.lineup.find((p) => p.idx === fIdx) ?? null;
+  const pField = fielder && !hurt(fielder) && !(fielder === pg.p && pg.injured)
+    ? g.perField * injuryMult(fielder, fld.ts, ctx) * hitterAgeFactor(fielder.isPitcher ? null : fielder.age) : 0;
+  const total = pPit + pOver + pRun + pField;
+  if (total <= 0) return;
+  const u = ctx.rng.next();
+  if (u >= total) return;
+  const record = (p: SimPlayer, cause: InjuryCause, overuse: boolean) => {
+    const inj = drawInjury(ctx.rng, ip, p.isPitcher, cause);
+    list.push({ idx: p.idx, cause, ...(overuse ? { overuse: true as const } : {}), ...inj });
+  };
+  if (u < pPit + pOver) {
+    record(pg.p, 'pitch', u >= pPit);
+    pg.injured = true;
+  } else if (u < pPit + pOver + pRun) {
+    record(batter, 'run', false);
+    replaceInjured(st, bat, batter);
+  } else if (fielder) {
+    record(fielder, 'field', false);
+    if (fielder === pg.p) pg.injured = true;
+    else replaceInjured(st, fld, fielder);
+  }
+}
+
+/** 좌우 4칸 집계 한 타석 (점검 도구) */
+function tallySplit(splits: NonNullable<GameContext['splits']>, b: SimPlayer, p: SimPlayer, kind: PlayKind): void {
+  if (!b.bats || !p.throws) return;
+  const key = (b.bats === 'S' ? (p.throws === 'L' ? 'R' : 'L') : b.bats) + p.throws;
+  const t = (splits[key] ??= {});
+  t[kind] = (t[kind] ?? 0) + 1;
+}
+
+/**
+ * 히트앤드런 (AI 감독, 엔진 2 8단계): 1루 주자(2루 빔), 2아웃 전, 빠른 주자, 삼진이 적은 타자 (params.run, 임시값). 걸면 true
+ */
+function hitAndRun(st: GameState): boolean {
+  const { bases, bat, ctx } = st;
+  const run = ctx.params.run;
+  const r1 = bases[0];
+  const batter = bat.lineup[bat.spot];
+  if (!r1 || bases[1] || st.outs >= 2 || r1.p.bat!.speed < run.hnrSpeed || (batter.bat?.so ?? 1) > run.hnrContact) return false;
+  if (!ctx.rng.chance(run.hnr * (bat.ts.tactics?.steal ?? 1))) return false;
+  if (ctx.running) ctx.running.hnr++;
+  return true;
+}
+
+/**
+ * 혹사지수 쌓기 (기획안 4.6, 경기 뒤): 오늘까지 빠진 값 + 실제 한계를 넘긴 공 × overPitch + 연투 b2b·3연투 이상 b3b
+ * + 선발이 정해진 휴식보다 일찍 나온 날 수 × shortRest. 투구 피로 회복 배율도 새 값으로 (ps.streak은 오늘 등판을 넣은 값)
+ */
+function addOveruse(ps: PlayerStates, pg: PitcherInGame, side: Side, prevStart: number, ctx: GameContext): void {
+  const o = ctx.params.injury.overuse;
+  const i = pg.p.idx;
+  let v = currentOveruse(ps, i, ctx.day, o) + Math.max(0, pg.pitches - pg.realLimit) * o.overPitch;
+  if (ps.streak[i] === 2) v += o.b2b;
+  else if (ps.streak[i] >= 3) v += o.b3b;
+  if (pg.isStarter) {
+    const rest = side.ts.restDays ?? ctx.params.starterRestDays;
+    const gap = ctx.day - prevStart;
+    if (gap < rest) v += o.shortRest * (rest - gap);
+  }
+  ps.overuse[i] = v;
+  // 저장된 값(Float32)으로 계산해야 불러온 뒤에도 같다
+  ps.recoverMul[i] = 1 / (1 + o.recovery * ps.overuse[i]);
+}
+
+/**
+ * 승리 투수 (기록 규정, 엔진 2 14단계). record: 이긴 팀이 마지막으로 앞설 때 마운드에 있던 투수 (pitcher of record).
+ * - 선발은 5이닝(15아웃)을 채워야 승리. 못 채웠으면 구원 가운데 가장 길게 던진 투수 (같으면 실점이 적은, 그다음 먼저 나온 투수).
+ *   규정의 "가장 효과적인 구원"은 기록원 판단이라 아웃 수·실점으로 대신한다 (임시 규칙)
+ * - 구원이 짧고 나쁘게 던졌으면 (아웃 3개 미만에 2실점 이상) 뒤에 나와 1이닝 이상 무실점으로 리드를 지킨 구원에게 넘긴다
+ */
+function winningPitcher(winner: Side, record: PitcherInGame | null): PitcherInGame {
+  const relievers = winner.staff.filter((x) => !x.isStarter);
+  const longest = (list: PitcherInGame[]) => list.reduce<PitcherInGame | null>((b, x) => (!b || x.outs > b.outs || (x.outs === b.outs && x.runs < b.runs) ? x : b), null);
+  if (!record || (record.isStarter && record.outs < 15)) return longest(relievers) ?? winner.staff[0];
+  if (!record.isStarter && record.outs < 3 && record.runs >= 2) {
+    const after = relievers.slice(relievers.indexOf(record) + 1).filter((x) => x.outs >= 3 && x.runs === 0);
+    return longest(after) ?? record;
+  }
+  return record;
+}
+
+/** 경기 뒤 처리: 피로·선발 기록, 승리·패전·세이브·홀드 */
+function finishGame(st: GameState, inning: number, lineScore: GameResult['lineScore']): GameResult {
+  const { ctx, home, away, rec } = st;
+  ctx.totals.games++;
+  if (inning > 9) ctx.totals.extraInningGames++;
+  const ps = ctx.states;
+  const o = ctx.params.injury.overuse;
+  // 짧은 휴식 판정용: 이번 등판 전 마지막 선발일
+  const prevStart = new Map<number, number>();
+  for (const side of [home, away]) for (const pg of side.staff) if (pg.isStarter) prevStart.set(pg.p.idx, ps.lastStartDay[pg.p.idx]);
   for (const side of [home, away]) {
     for (const pg of side.staff) {
       const i = pg.p.idx;
-      if (pg.isStarter) st.lastStartDay[i] = ctx.day;
-      st.fatigue[i] = currentFatigue(st, i, ctx.day) + pg.bf;
-      st.streak[i] = st.fatigueDay[i] === ctx.day - 1 ? st.streak[i] + 1 : st.fatigueDay[i] === ctx.day ? Math.max(1, st.streak[i]) : 1;
-      st.fatigueDay[i] = ctx.day;
+      if (pg.isStarter) {
+        ps.lastStartDay[i] = ctx.day;
+        if (pg.outs >= 18 && pg.er <= 3) pg.line.qs++;
+      }
+      ps.fatigue[i] = currentFatigue(ps, i, ctx.day) + pg.pitches;
+      ps.streak[i] = ps.fatigueDay[i] === ctx.day - 1 ? ps.streak[i] + 1 : ps.fatigueDay[i] === ctx.day ? Math.max(1, ps.streak[i]) : 1;
+      if (o.on) addOveruse(ps, pg, side, prevStart.get(i) ?? -99, ctx);
+      ps.fatigueDay[i] = ctx.day;
+    }
+  }
+  // 야수 피로 (엔진 2 11단계): 선발 출전은 load(포수·지명타자 배율, 30세 넘으면 나이 몫, 연장이면 이닝 ÷ 9배), 교체 출전은 sub
+  const bp = ctx.params.body;
+  const long = Math.max(1, inning / 9);
+  for (const side of [home, away]) {
+    const add = (p: SimPlayer, load: number) => {
+      const age = 1 + bp.agePer * Math.max(0, (p.age ?? 30) - 30);
+      ps.body[p.idx] = Math.min(bp.cap, currentBody(ps, p.idx, ctx.day, bp) + load * age);
+      ps.bodyDay[p.idx] = ctx.day;
+    };
+    for (const { p, slot } of side.starters) if (!p.isPitcher) add(p, bp.load * (slot === 'C' ? bp.catcher : slot === 'DH' ? bp.dh : 1) * long);
+    for (const s of side.subs) {
+      const p = side.ts.hitters.find((x) => x.idx === s.idx);
+      if (p && !side.starters.some((x) => x.p === p)) add(p, bp.sub);
     }
   }
 
@@ -864,13 +1011,11 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
   let loss: number | null = null;
   let save: number | null = null;
   if (home.runs === away.runs) {
-    totals.ties++;
+    ctx.totals.ties++;
   } else {
     const winner = home.runs > away.runs ? home : away;
-    if (winner === home) totals.homeWins++;
-    let wp: PitcherInGame | null = rec.leader === winner ? rec.win : null;
-    // 선발은 5이닝을 채워야 승리. 못 채웠으면 첫 번째 구원에게
-    if (!wp || (wp.isStarter && wp.outs < 15)) wp = winner.staff.find((x) => !x.isStarter) ?? winner.staff[0];
+    if (winner === home) ctx.totals.homeWins++;
+    const wp = winningPitcher(winner, rec.leader === winner ? rec.win : null);
     wp.line.w++;
     win = wp.p.idx;
     const lp = rec.loss;
@@ -879,18 +1024,19 @@ export function simulateGame(homeTs: TeamSeason, awayTs: TeamSeason, homeLineup:
       loss = lp.p.idx;
     }
     const last = winner.staff[winner.staff.length - 1];
-    if (last !== wp && !last.isStarter && ((last.enteredLead >= 1 && last.enteredLead <= 3 && last.outs >= 1) || last.outs >= 9)) {
+    if (last !== wp && earnsSave(last)) {
       last.line.sv++;
       save = last.p.idx;
     }
   }
-  // 홀드 (2026-10-12): 3점 차 이내 리드에서 나온 구원 투수가 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면.
-  // 경기를 끝낸 투수와 승리 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다). 리드 유지는 자기 실점으로 근사
+  // 홀드 (2026-10-12, 엔진 2 14단계): 세이브 상황(isSaveSituation: 1~3점 리드, 또는 동점 주자가 누상·타석·대기 타석)에 나온 구원 투수가
+  // 아웃을 하나 이상 잡고 리드를 지킨 채 내려가면 (exitLead, 내려갈 때 리드. 남긴 주자가 뒤에 들어와도 홀드는 그대로).
+  // 경기를 끝낸 투수, 승리 투수, 블론 세이브를 한 투수는 받지 않는다. 진 팀 투수도 받을 수 있다 (리드는 뒤에 나온 투수가 잃었다)
   for (const side of [home, away]) {
     const fin = side.staff[side.staff.length - 1];
     for (const pg of side.staff) {
-      if (pg.isStarter || pg === fin || pg.p.idx === win) continue;
-      if (pg.enteredLead >= 1 && pg.enteredLead <= 3 && pg.outs >= 1 && pg.enteredLead - pg.runs > 0) pg.line.hld++;
+      if (pg.isStarter || pg === fin || pg.p.idx === win || pg.blown) continue;
+      if (pg.saveSit && pg.outs >= 1 && (pg.exitLead ?? 0) > 0) pg.line.hld++;
     }
   }
   return {

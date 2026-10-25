@@ -4,6 +4,7 @@
 // 시즌 중 수입·지출(관중 수입, 월말 연봉·운영비·투자비)은 경기 기록과 날짜에서 그때그때 계산하고(seasonFlows),
 // 결산(settleSeason) 때 항목별로 장부에 적는다. 그래서 하루씩 진행하든 한 번에 진행하든 금액이 같다.
 // 금액은 모두 2026년 돈(만 원). 화면에서만 그 해 물가(priceIndex)로 바꿔 보여 준다. 수치는 임시값.
+// 2026년 뒤에는 연봉과 함께 수입(객단가·중계권·스폰서·모기업 지원·우승 배당)·운영비·투자비·기준 자금이 연봉 상승 지수(salary.ts wageIndex)만큼 오른다 (2026-10-22).
 
 import { currentRuns, valueContext } from '../ai/value';
 import { Rng, type Season, type World } from '../engine';
@@ -19,6 +20,7 @@ import { coachPayroll } from './coaches';
 import { managerPayroll } from './managers';
 import { gmStyle } from './gm';
 import { settingsOf, userTeamOf } from './difficulty';
+import { wageIndex } from './salary';
 import {
   ensureFans, ensureStadiums, fanFill, fanLevel, fansSeasonEnd, fanSponsor, installment, seatsAt, stadiumFill, stadiumYearEnd, ticketScale,
 } from './stadium';
@@ -38,10 +40,20 @@ export const POSTSEASON_TICKET = 3.0;
 export const BROADCAST = 1_000_000;
 /** 스폰서·상품 기본액 (인기도 1일 때, 만 원). 2026-10-11 90억 → 75억 (사용자: 돈이 너무 넉넉하다) */
 export const SPONSOR_BASE = 750_000;
-/** 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원). 2026-10-11 200억 → 220억 */
-export const OPS_COST = 2_200_000;
+/**
+ * 운영비 (인건비·원정·구장·2군 운영, 한 해, 만 원). 2026-10-11 200억 → 220억 (재정 긴축).
+ * 2026-10-21 220억 → 202억: 긴축 뒤에 들어온 코치 시스템(84c8083)이 감독·코치 연봉(첫 시즌 구단 평균 약 18억)을
+ * 따로 떼어 내면서 운영비의 인건비를 줄이지 않아 두 번 냈다. 그 탓에 첫 시즌 결산 뒤 10구단 중 평균 4.8곳이 자금 0이 되어
+ * FA 계약금을 못 내고 자기 FA도 잡지 못했다 (reports/first-season-balance.md). 긴축 때 맞춘 지출 합으로 되돌린다
+ */
+export const OPS_COST = 2_020_000;
 /** 모기업 지원금 기본액 (등급별, 한 해, 만 원) */
 export const PARENT_BASE: Record<ParentGrade, number> = { A: 600_000, B: 450_000, C: 0 };
+/**
+ * 모기업 FA 계약금 지원의 한 해 한도 = 모기업 지원금 기본액(PARENT_BASE) × 이 비율 (2026-10-21 사용자 결정 "한도를 둔다", 비율은 임시값).
+ * A 30억 · B 22.5억 · C(모기업 없는 히어로즈) 0. 한도 전 10시드 첫 오프시즌에 한 구단이 최대 43.7억, 히어로즈가 18억을 받았다
+ */
+export const FA_SUPPORT_SHARE = 0.5;
 /** 구단 이름 스폰서 (모기업 없는 히어로즈, 한 해, 만 원) */
 export const NAMING_SPONSOR: Record<string, number> = { 히어로즈: 500_000 };
 /** 자금이 이만큼을 넘으면 모기업 지원금을 넘는 금액의 PARENT_CLAWBACK만큼 줄인다 (자금이 끝없이 쌓이지 않게) */
@@ -85,12 +97,20 @@ export const BALLPARK: Record<string, { capacity: number; market: number }> = {
 };
 const DEFAULT_PARK = { capacity: 18_000, market: 0 };
 
-export type InvestKind = 'scout' | 'develop' | 'medical' | 'marketing';
-export const INVEST_KINDS: InvestKind[] = ['scout', 'develop', 'medical', 'marketing'];
-export const INVEST_LABEL: Record<InvestKind, string> = { scout: '스카우트', develop: '육성 (2군·코치)', medical: '의료·트레이닝', marketing: '마케팅·구장' };
-/** 투자 단계별 연간 비용 (0~3단계, 만 원) */
+/**
+ * 투자 갈래. 스카우트는 셋으로 나뉜다 (능력치 v2 기획안 19.3, 사용자 2026-10-24 확정 Q12 ①): scout = 아마추어(드래프트·육성선수 보드),
+ * scoutPro = 프로(다른 구단·시장 선수 추측), 해외 파견은 단계가 아니라 파견마다 낸다 (scoutfx.ts). 장부에는 '스카우트비' 한 줄 (scouting)
+ */
+export type InvestKind = 'scout' | 'scoutPro' | 'develop' | 'medical' | 'marketing';
+export const INVEST_KINDS: InvestKind[] = ['scout', 'scoutPro', 'develop', 'medical', 'marketing'];
+export const SCOUT_KINDS: InvestKind[] = ['scout', 'scoutPro'];
+export const INVEST_LABEL: Record<InvestKind, string> = {
+  scout: '스카우트 (아마추어)', scoutPro: '스카우트 (프로)', develop: '육성 (2군·코치)', medical: '의료·트레이닝', marketing: '마케팅·구장',
+};
+/** 투자 단계별 연간 비용 (0~3단계, 만 원). 스카우트 두 갈래는 0·5억·12억·20억 (19.3 확정 Q13 ①, 크기는 임시값) */
 export const INVEST_COST: Record<InvestKind, number[]> = {
-  scout: [0, 100_000, 200_000, 350_000],
+  scout: [0, 50_000, 120_000, 200_000],
+  scoutPro: [0, 50_000, 120_000, 200_000],
   develop: [0, 150_000, 300_000, 500_000],
   medical: [0, 100_000, 200_000, 350_000],
   marketing: [0, 100_000, 250_000, 450_000],
@@ -98,10 +118,11 @@ export const INVEST_COST: Record<InvestKind, number[]> = {
 /** 마케팅 단계별 관중률 보정과 스폰서 배율 */
 export const MARKETING_FILL = [0, 0.03, 0.06, 0.09];
 export const MARKETING_SPONSOR = [1, 1.05, 1.1, 1.15];
-/** 스카우트: 우리 구단이 보는 후보 잠재력 평가 오차 (±런) */
-export const SCOUT_NOISE = [8, 6, 4, 2];
-/** 스카우트: AI 구단의 드래프트 판단 오차 배율 (난이도 오차에 곱한다) */
-export const AI_SCOUT_SCALE = [1.2, 1, 0.75, 0.5];
+/** 스카우트 단계(0~3)별 추측 폭 배율 (아마추어·프로 모두, 기획안 17.7 표, 임시값). scout.ts가 쓴다 */
+export const SCOUT_SCALE = [1, 0.8, 0.65, 0.5];
+/** 아마추어 스카우트 단계별 신인 천장 추측 폭 σ_천장 (등급, 19.2 확정 Q15 ①: 보드와 진짜 천장 상관 0.6 → 0.9) */
+export const CEIL_SIGMA = [12, 9, 6.5, 4.5];
+const scaleText = (i: number) => (i ? `−${Math.round((1 - SCOUT_SCALE[i]) * 100)}%` : '기본');
 /** 육성: DEVELOP_AGE(30세) 이하 성장 폭 배율 가산, 2군 유망주 출전 몫 가산 */
 export const DEVELOP_BONUS = [0, 0.06, 0.12, 0.2];
 export const DEVELOP_SHARE = [0, 0.05, 0.1, 0.15];
@@ -112,7 +133,8 @@ export const MEDICAL_RATE = [1, 0.92, 0.85, 0.78];
 export const MEDICAL_DAYS = [1, 0.93, 0.87, 0.8];
 /** 투자 효과 설명 (화면용) */
 export const INVEST_EFFECT: Record<InvestKind, string[]> = {
-  scout: SCOUT_NOISE.map((n, i) => `후보 잠재력 평가 오차 ±${n}${i ? '' : ' (기본)'}`),
+  scout: CEIL_SIGMA.map((n, i) => `신인 천장 추측 폭 ±${n}등급, 신인 능력 추측 범위 ${scaleText(i)}`),
+  scoutPro: SCOUT_SCALE.map((_, i) => `다른 구단·시장 선수 능력 추측 범위 ${scaleText(i)}`),
   develop: DEVELOP_BONUS.map((b, i) => (i ? `${DEVELOP_AGE}세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
   medical: MEDICAL_RATE.map((r, i) => (i ? `부상 확률 −${Math.round((1 - r) * 100)}%, 결장 기간 −${Math.round((1 - MEDICAL_DAYS[i]) * 100)}%` : '효과 없음')),
   marketing: MARKETING_FILL.map((f, i) => (i ? `관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}%` : '효과 없음')),
@@ -141,22 +163,25 @@ export interface FinanceYear {
   rescue: number;
   /** 모기업 환원 (결산 뒤 자금이 DIVIDEND_RESERVE를 넘은 몫의 일부, 수지에는 넣지 않는다) */
   dividend?: number;
+  /** 정규시즌 홈 관중 합과 홈 경기 수 (미래 규칙 변경의 흥행 신호, 2026-10-22. 예전 저장에는 없다) */
+  attendance?: number;
+  homeGames?: number;
 }
 
 export type FinanceKind =
-  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'champion'
-  | 'payroll' | 'foreign' | 'ops' | 'invest'
+  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
+  | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other';
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
-  parent: '모기업 지원금', rescue: '모기업 긴급 지원', champion: '우승 배당',
-  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자',
+  parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
+  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자', scouting: '스카우트비',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
-const startInvest = (): Record<InvestKind, number> => ({ scout: 1, develop: 1, medical: 1, marketing: 1 });
+const startInvest = (): Record<InvestKind, number> => ({ scout: 1, scoutPro: 1, develop: 1, medical: 1, marketing: 1 });
 
 /** 이번 시즌에 적용 중인 투자 단계 */
 export function activeLevel(league: Pick<LeagueState, 'finance'>, team: number, kind: InvestKind): number {
@@ -242,8 +267,11 @@ export interface MonthPoint {
 
 export interface SeasonFlows {
   items: Partial<Record<FinanceKind, number>>;
-  /** 홈 경기 관중 합 */
+  /** 홈 경기 관중 합 (가을야구 포함) */
   attendance: number;
+  /** 정규시즌 홈 관중 합 */
+  regular: number;
+  /** 정규시즌 홈 경기 수 */
   homeGames: number;
   months: MonthPoint[];
 }
@@ -254,7 +282,7 @@ export const marketOf = (league: LeagueState, team: number) => parkOf(league, te
 
 /** 월말에 나가는 연봉 (만 원, 한 해). 외국인은 달러를 환산하고, FA 계약금으로 미리 낸 몫은 뺀다 */
 export function payOf(p: LeaguePlayer): number {
-  if (p.foreign) return Math.round(p.contract.salary * WON_PER_USD);
+  if (p.foreign) return Math.round((p.contract.salary + (p.contract.bonus ?? 0)) * WON_PER_USD);
   return Math.max(0, p.contract.salary - (p.contract.prepaid ?? 0));
 }
 
@@ -305,22 +333,35 @@ function rosterAt(league: LeagueState, team: number, day: number, trades: TradeM
   return out;
 }
 
-/** 투자 연간 비용 합 */
-export function investCost(f: TeamFinance | undefined, planned = false): number {
+/** 투자 연간 비용 합. only를 주면 그 갈래만 (장부의 투자·스카우트비 나누기) */
+export function investCost(f: TeamFinance | undefined, planned = false, wage = 1, only?: (k: InvestKind) => boolean): number {
   if (!f) return 0;
   const lv = planned ? f.invest : f.active ?? f.invest;
-  return INVEST_KINDS.reduce((s, k) => s + INVEST_COST[k][lv[k] ?? 0], 0);
+  return INVEST_KINDS.filter((k) => !only || only(k)).reduce((s, k) => s + investCostOf(k, lv[k] ?? 0, wage), 0);
+}
+const isScoutKind = (k: InvestKind) => SCOUT_KINDS.includes(k);
+
+/** 투자 한 항목의 그 해 연간 비용 (INVEST_COST × 연봉 상승 지수, 10만 원 단위 아래는 반올림) */
+export function investCostOf(kind: InvestKind, level: number, wage = 1): number {
+  return Math.round((INVEST_COST[kind][level] * wage) / 10) * 10;
 }
 
-/** 개막 때 스타 보정 (리그 상위 30명 안의 선수 수 × 0.015, 최대 0.06). 시즌마다 한 번 계산해 둔다 */
-const starCache = new WeakMap<World, number[]>();
-function starBonus(world: World): number[] {
+/**
+ * 개막 때 스타 보정 (리그 상위 30명 안의 선수 수 × 0.015, 최대 0.06). 소속은 리그 상태(시즌 중에는 개막 때 모습)를 따른다.
+ * 예전에는 월드마다 처음 부른 때(시즌 첫 이벤트 등)의 월드 소속을 끝까지 써서, 불러온 게임(처음 부른 때가 다름)과
+ * 결산 관중 수입이 달라졌다 (2026-10-23). 캐시는 쓴 소속이 같을 때만 다시 쓴다
+ */
+const starCache = new WeakMap<World, { key: string; out: number[] }>();
+function starBonus(world: World, league: Pick<LeagueState, 'players'>): number[] {
+  const opening = new Map(league.players.map((p) => [p.id, p.team]));
+  const teams = world.players.map((p) => opening.get(p.id) ?? p.teamIdx);
+  const key = teams.join(',');
   const hit = starCache.get(world);
-  if (hit) return hit;
+  if (hit?.key === key) return hit.out;
   const ctx = valueContext(world);
-  const top = [...world.players].map((p) => ({ t: p.teamIdx, r: currentRuns(p, ctx) })).sort((a, b) => b.r - a.r).slice(0, 30);
+  const top = world.players.map((p, i) => ({ t: teams[i], r: currentRuns(p, ctx) })).sort((a, b) => b.r - a.r).slice(0, 30);
   const out = world.teams.map((_, t) => Math.min(0.06, 0.015 * top.filter((x) => x.t === t).length));
-  starCache.set(world, out);
+  starCache.set(world, { key, out });
   return out;
 }
 
@@ -376,15 +417,16 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const byMonth = new Map<number, number>();
   const addM = (day: number, v: number) => { const m = dateOf(year, day).month; byMonth.set(m, (byMonth.get(m) ?? 0) + v); };
   let attendance = 0;
+  let regular = 0;
   let homeGames = 0;
 
   // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로
   if (team < world.teams.length) {
-    const star = starBonus(world)[team] ?? 0;
+    const star = starBonus(world, league)[team] ?? 0;
     const park = league.stadiums?.[team];
     const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
     // 관중이 적은 시대는 객단가를 그만큼 올려 관중 수입 합을 시대와 상관없이 같게 (eraFillScale)
-    const ticket = (TICKET * ticketScale(park)) / eraFillScale(year);
+    const ticket = (TICKET * ticketScale(park) * wageIndex(year, league)) / eraFillScale(year);
     const w = new Array(world.teams.length).fill(0);
     const l = new Array(world.teams.length).fill(0);
     for (const g of season.log) {
@@ -393,6 +435,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
         const pct = w[team] + l[team] > 0 ? w[team] / (w[team] + l[team]) : 0.5;
         const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year, g.away));
         attendance += fans;
+        regular += fans;
         homeGames++;
         const v = Math.round(fans * ticket);
         add('gate', v);
@@ -405,7 +448,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       if (g.day >= upToDay || g.home !== team) continue;
       const fans = Math.round(cap * 0.97);
       attendance += fans;
-      const v = Math.round(fans * POSTSEASON_TICKET * ticketScale(park));
+      const v = Math.round(fans * POSTSEASON_TICKET * ticketScale(park) * wageIndex(year, league));
       add('postseason', v);
       addM(g.day, v);
     }
@@ -416,6 +459,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const pays = paydays(year, season.schedule.length);
   const fin = league.finance?.[team];
   const yearly = seasonIncome(league, world, team);
+  const wage = wageIndex(year, league);
   for (const pd of pays) {
     if (pd.day >= upToDay) break;
     const roster = rosterAt(league, team, pd.day, input.trades ?? []);
@@ -424,13 +468,14 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const n = pays.length;
     const parts: [FinanceKind, number][] = [
       ['payroll', -Math.round(dom / n)], ['foreign', -Math.round(fgn / n)],
-      ['ops', -Math.round((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) / n)], ['invest', -Math.round(investCost(fin) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
+      ['ops', -Math.round(((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wage) / n)], ['invest', -Math.round(investCost(fin, false, wage, (k) => !isScoutKind(k)) / n)],
+      ['scouting', -Math.round(investCost(fin, false, wage, isScoutKind) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
       ['broadcast', Math.round(yearly.broadcast / n)], ['parent', Math.round(yearly.parent / n)], ['sponsor', Math.round(yearly.sponsor / n)],
     ];
     for (const [k, v] of parts) { add(k, v); byMonth.set(pd.month, (byMonth.get(pd.month) ?? 0) + v); }
   }
   const months = pays.map((pd) => ({ day: pd.day, month: pd.month, net: byMonth.get(pd.month) ?? 0 }));
-  return { items, attendance, homeGames, months };
+  return { items, attendance, regular, homeGames, months };
 }
 
 /**
@@ -442,18 +487,19 @@ export function seasonIncome(league: LeagueState, world: World, team: number): {
   const futures = isFuturesTeam(league, team, year);
   const trust = league.owner?.team === team ? league.owner.trust : 50;
   const lastCash = league.finance?.[team]?.history.at(-1)?.cash ?? START_CASH;
-  const star = team < world.teams.length ? starBonus(world)[team] ?? 0 : 0;
+  const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
   return {
-    broadcast: futures ? 0 : BROADCAST,
-    parent: parentSupport(league, team, trust, lastCash),
-    sponsor: sponsorAmount(league, team, futures, 0.5, 0, star),
+    broadcast: futures ? 0 : Math.round(BROADCAST * wageIndex(year, league)),
+    parent: parentSupport(league, team, trust, lastCash, year),
+    sponsor: sponsorAmount(league, team, futures, 0.5, 0, star, year),
   };
 }
 
 /** 스폰서·상품 수입 (인기도 × 기본액 + 구단 이름 스폰서) */
-function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number): number {
+function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number, year: number): number {
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
-  return Math.round(SPONSOR_BASE * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + (NAMING_SPONSOR[league.teams[team].franchise] ?? 0);
+  const wage = wageIndex(year, league);
+  return Math.round(SPONSOR_BASE * wage * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
 }
 
 // ---- 결산
@@ -469,10 +515,11 @@ export function popularity(league: LeagueState, team: number, winPct: number, po
  * 모기업 지원금: 등급 기본액 × (0.85 + 0.003 × 신뢰도) − 전년 긴급 지원의 절반 − 쌓인 자금 회수분.
  * cash: 지원금을 받기 직전 자금
  */
-export function parentSupport(league: LeagueState, team: number, trust: number, cash: number): number {
-  const base = PARENT_BASE[parentGrade(league, team)];
+export function parentSupport(league: LeagueState, team: number, trust: number, cash: number, year = league.year): number {
+  const wage = wageIndex(year, league);
+  const base = PARENT_BASE[parentGrade(league, team)] * wage;
   const prevRescue = league.finance?.[team]?.history.at(-1)?.rescue ?? 0;
-  const clawback = Math.max(0, cash - PARENT_RESERVE) * PARENT_CLAWBACK;
+  const clawback = Math.max(0, cash - PARENT_RESERVE * wage) * PARENT_CLAWBACK;
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
   return Math.max(0, Math.round(base * inc * (0.85 + 0.003 * trust) - prevRescue / 2 - clawback));
 }
@@ -497,7 +544,9 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   ensureFinance(league);
   const end = Number.MAX_SAFE_INTEGER;
   const out: FinanceYear[] = [];
-  const stars = starBonus(world);
+  const stars = starBonus(world, league);
+  const wage = wageIndex(year, league);
+  const reserve = DIVIDEND_RESERVE * wage;
   for (let t = 0; t < league.teams.length; t++) {
     const flows = seasonFlows(input, t, end);
     const items = { ...flows.items };
@@ -505,8 +554,8 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     const pct = rec && rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5;
     const futures = isFuturesTeam(league, t, year);
     // 중계권·모기업 지원금은 시즌 중 월말에 다 받았다. 스폰서는 실제 인기도로 다시 매겨 차액을 정산한다
-    items.sponsor = sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0);
-    if (input.champion === t) items.champion = CHAMPION_BONUS;
+    items.sponsor = sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0, year);
+    if (input.champion === t) items.champion = Math.round(CHAMPION_BONUS * wage);
     const build = installment(league.stadiums?.[t], year);
     if (build) items.stadium = -build;
     for (const [k, v] of Object.entries(items) as [FinanceKind, number][]) {
@@ -517,7 +566,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
-    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'start' && k !== 'dividend') items[k] = other[k];
+    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'faSupport' && k !== 'start' && k !== 'dividend') items[k] = other[k];
     // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다
     if (other.stadium) items.stadium = other.stadium;
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
@@ -529,12 +578,12 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       cash = 0;
     }
     let dividend = 0;
-    if (cash > DIVIDEND_RESERVE) {
-      dividend = Math.round((cash - DIVIDEND_RESERVE) * DIVIDEND_SHARE);
+    if (cash > reserve) {
+      dividend = Math.round((cash - reserve) * DIVIDEND_SHARE);
       league.ledger.push({ year, from: t, to: -1, amount: dividend, note: `${year} 모기업 환원 (쌓인 자금)`, kind: 'dividend' });
       cash -= dividend;
     }
-    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}) };
+    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), attendance: flows.regular, homeGames: flows.homeGames };
     league.finance![t].history.push(y);
     out.push(y);
     // 팬 만족도 결산 (stadium.ts): 스폰서를 매긴 뒤에
@@ -543,6 +592,35 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
   league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
   return out;
+}
+
+/**
+ * FA 계약금 중 자금이 모자란 몫을 모기업이 대 준다 (2026-10-21 사용자: "대줘"). AI 구단·플레이어 구단 모두.
+ * 장부에 '모기업 지원 (FA 계약금)'으로 남기고 지원액을 돌려준다 (없으면 0).
+ * 구단주 평가와는 잇지 않는다: 결산 수지(net)와 긴급 지원(rescue)에 넣지 않는다
+ */
+export function coverFaBonus(league: LeagueState, team: number, bonus: number, year: number, who: string): number {
+  // 한도(faSupportLeft)는 제시할 때 검사한다. 같은 라운드에 여럿을 계약해 한도를 넘는 몫은 지원하지 않는다 (자금이 0 아래로 내려간다)
+  const need = Math.min(Math.round(bonus - Math.max(0, cashOf(league, team))), faSupportLeft(league, team, year));
+  if (need <= 0) return 0;
+  league.ledger.push({ year, from: -1, to: team, amount: need, note: `${who} FA 계약금 모기업 지원`, kind: 'faSupport' });
+  return need;
+}
+
+/** 그 해(장부 연도 = 계약한 오프시즌 다음 해) 모기업 FA 계약금 지원 한도 (만 원) */
+export function faSupportCap(league: LeagueState, team: number, year = league.year): number {
+  return Math.round(PARENT_BASE[parentGrade(league, team)] * FA_SUPPORT_SHARE * wageIndex(year, league));
+}
+
+/** 그 해 남은 모기업 FA 계약금 지원 (만 원) */
+export function faSupportLeft(league: LeagueState, team: number, year: number): number {
+  const used = league.ledger.reduce((s, e) => s + (e.kind === 'faSupport' && e.to === team && e.year === year ? e.amount : 0), 0);
+  return Math.max(0, faSupportCap(league, team, year) - used);
+}
+
+/** 계약금 bonus를 지금 자금 + 남은 모기업 지원으로 낼 수 있나 */
+export function canPayFaBonus(league: LeagueState, team: number, bonus: number, year: number): boolean {
+  return bonus <= Math.max(0, cashOf(league, team)) + faSupportLeft(league, team, year);
 }
 
 /** 적자 보전에 따른 구단주 신뢰도 변화 (−(메운 금액 ÷ 20억), 최대 −15). 흑자면 +2 */
@@ -558,7 +636,7 @@ export function setInvest(league: LeagueState, team: number, kind: InvestKind, l
   if (!INVEST_KINDS.includes(kind) || !Number.isInteger(level) || level < 0 || level > 3) return { ok: false, message: '투자 단계는 0~3입니다.' };
   ensureFinance(league);
   league.finance![team].invest[kind] = level;
-  return { ok: true, message: `${INVEST_LABEL[kind]} ${level}단계 (다음 시즌부터, 연 ${(INVEST_COST[kind][level] / 10000).toFixed(0)}억 원)` };
+  return { ok: true, message: `${INVEST_LABEL[kind]} ${level}단계 (다음 시즌부터, 연 ${(investCostOf(kind, level, wageIndex(league.year + 1, league)) / 10000).toFixed(0)}억 원)` };
 }
 
 /**
@@ -574,16 +652,17 @@ export function lockInvestments(league: LeagueState, userTeam: number): void {
       const r = st.indexOf(t);
       const n = st.length || 1;
       const plan = startInvest();
-      if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; }
+      // 스카우트 갈래 (19.3): 하위 ⅓은 아마추어 2, 상위 ⅓은 프로 2, 리빌딩 성향 아마추어 +1, 윈나우 성향 프로 +1 (해외 파견 +1번은 scoutfx.ts)
+      if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; plan.scoutPro = 2; }
       else if (r >= 0 && r >= (2 * n) / 3) { plan.scout = 2; plan.develop = 2; }
       // 단장 성향 (gm.ts)
       const style = gmStyle(league, t);
       if (style === 'develop') { plan.develop = Math.min(3, plan.develop + 1); plan.scout = Math.min(3, plan.scout + 1); }
-      if (style === 'winnow') plan.medical = Math.min(3, plan.medical + 1);
+      if (style === 'winnow') { plan.medical = Math.min(3, plan.medical + 1); plan.scoutPro = Math.min(3, plan.scoutPro + 1); }
       if (style === 'frugal') for (const k of Object.keys(plan) as InvestKind[]) plan[k] = Math.max(0, plan[k] - 1);
       const room = Math.max(0, cashOf(league, t) * 0.6);
-      const order: InvestKind[] = ['marketing', 'medical', 'scout', 'develop'];
-      for (let guard = 0; guard < 12 && investCost({ invest: plan, history: [] }, true) > room; guard++) {
+      const order: InvestKind[] = ['marketing', 'medical', 'scoutPro', 'scout', 'develop'];
+      for (let guard = 0; guard < 12 && investCost({ invest: plan, history: [] }, true, wageIndex(league.year, league)) > room; guard++) {
         const k = order.filter((x) => plan[x] > 0).sort((a, b) => plan[b] - plan[a])[0];
         if (!k) break;
         plan[k]--;

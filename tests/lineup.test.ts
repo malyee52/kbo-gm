@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import {
-  assignSlots, bestAssignment, computeGrades, DEFAULT_PARAMS, defenseAt, defenseGrade, LINEUP_SLOTS, makeDefense, moveRuns, Season, worldForYear,
+  assignSlots, bestAssignment, bullpenOrder, computeGrades, DEFAULT_PARAMS, defenseAt, defenseGrade, LINEUP_SLOTS, makeDefense, moveRuns, Season, worldForYear,
   type DepthPlan,
 } from '../src/engine';
 import { newPlayerStates, refreshActive, type TeamSeason } from '../src/engine/team';
@@ -64,14 +64,16 @@ describe('수비 능력', () => {
     }
   });
 
-  it('한 자리에서 400타석 넘게 뛴 주전은 그 자리 수비 등급이 35 이상이다 (최정 3루가 20으로 나온 문제의 회귀 시험)', () => {
+  it('한 자리에서 400타석 넘게 뛴 주전은 그 자리 수비 가능이고 등급이 20보다 높다 (최정 3루가 20으로 나온 문제의 회귀 시험, 능력치 v2: 근거가 나쁘면 20대도 된다)', () => {
     const world = worldForYear(store, 2026, FAST);
     const prev = new Map(store.season(2025)!.bat.map((r) => [r.id, r]));
     let n = 0;
     for (const p of world.players) {
       const r = prev.get(p.id);
       if (p.isPitcher || !r || r.pa < 400 || !r.pos || ['DH', 'IF', 'OF'].includes(r.pos)) continue;
-      expect(defenseGrade(defenseAt(p, r.pos)), `${p.name} ${r.pos}`).toBeGreaterThanOrEqual(35);
+      expect(p.bat!.playable, `${p.name} ${r.pos}`).toContain(r.pos);
+      // 화면 DH(수비 없는 몫 0.6 이상, 예: 최형우 2026 LF)는 지명타자 몫으로 바닥까지 내려간다 (기획안 13.7)
+      if (p.pos !== 'DH') expect(defenseGrade(defenseAt(p, r.pos)), `${p.name} ${r.pos}`).toBeGreaterThan(20);
       n++;
     }
     expect(n).toBeGreaterThan(30);
@@ -149,7 +151,8 @@ describe('기용표 (주전 자리, 선발·중계·마무리)', () => {
   it('불펜 역할: 필승조·롱릴리프·패전조를 정하면 그대로 쓰이고, 처음 하나 정해도 기존 필승조는 남는다 (2026-10-12 사용자 요청)', () => {
     const g = lgGame('pen-roles');
     const ts = g.activeTeam();
-    const pen = ts.bullpen.filter((p) => p !== ts.closer).sort((a, b) => a.value - b.value);
+    // AI 서열: 개막에는 지난 시즌 실제 쓰임 순, 시즌이 지나며 능력 순 (2026-10-22)
+    const pen = bullpenOrder(ts.bullpen.filter((p) => p !== ts.closer), g.season.day, FAST.penBlendDays);
     const [su1, su2] = pen;
     const worst = pen[pen.length - 1];
     const long = pen.slice(2, -1).sort((a, b) => b.pit!.reliefStint - a.pit!.reliefStint)[0];

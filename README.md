@@ -55,4 +55,7 @@ python3 tools/fit_regression.py                      # 능력 산출의 회귀 �
 
 - 기록은 KBO 공식 사이트를 수집한 공개 저장소와 보조 자료에서 가져왔다. 출처와 한계는 자료집 엑셀의 "안내", "출처", "데이터공백" 시트에 있다.
 - 두 저장소 모두 라이선스 표시가 없다. 공개 범위를 넓히기 전에 권리 문제를 다시 검토한다 (M9).
+- 기록 일부: 하드힛(https://hardhit.ai), 비상업적 이용. 원본은 공개하지 않고 가공값만 쓴다. 사용자가 유료 회원으로 직접 받은 CSV 원본(`data-src/hardhit/`)과 선수별 가공 파일(`data-src/hardhit_derived/`, `tools/hardhit_derive.py`)은 저장소에 올리지 않는다.
+- 투구 단위 리그 집계: slothman3878, "KBO Play-by-Play 2023-2026 (v0)" (Hugging Face https://huggingface.co/datasets/slothman3878/kbo_playbyplay, CC BY 4.0)를 가공. KBO·네이버와 무관한 비공식 자료 (`data-src/pbp_derived/README.md`).
+- 그 밖의 자료: 신인 지명(baseballchart.kr, CC BY-NC-SA 2.0 KR), 위키데이터·한국어 위키백과·나무위키, 구 스탯티즈 기록 기반 FM코리아 게시 자료(약관 미확인), visualbaseball.com 구종 자료(약관 미확인), KBO 공식 사이트 수비 기록(사용자 수집, 약관 미확인), 출처 미확인 참고값인 타구 유형·방향 리그 비율. 자료별 출처·라이선스·쓰는 곳은 [DATA_LICENSES.md](DATA_LICENSES.md).
 - KBO 및 각 구단과 관련이 없는 팬 프로젝트다.

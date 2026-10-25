@@ -1,13 +1,13 @@
 // 중계 문구와 경기 하이라이트 (2026-10-12 사용자 요청 "애니메이션": 경기 중계 화면, 경기 결과 하이라이트).
 // 엔진이 남긴 중계 기록(engine/game.ts Play)을 글로 옮긴다. 실존 선수는 기록 사실만 쓴다 (평가·수식어 없음).
-import type { Play, PlayKind } from '../engine';
+import { PITCH_TEXT, type Play, type PitchCode, type PlayKind } from '../engine';
 
 export type NameOf = (idx: number) => string;
 
 const KIND_TEXT: Record<PlayKind, string> = {
   SO: '삼진', BB: '볼넷', HBP: '몸에 맞는 공', HR: '홈런', '3B': '3루타', '2B': '2루타', '1B': '안타', E: '실책으로 출루',
-  GDP: '병살타', GO: '땅볼 아웃', FO: '뜬공 아웃', SF: '희생플라이', SAC: '희생번트', SB: '도루 성공', CS: '도루 실패', WP: '폭투로 주자 진루', PC: '투수 교체',
-  IBB: '고의4구', BF: '번트 실패', PH: '대타', PR: '대주자',
+  GDP: '병살타', GO: '땅볼 아웃', FO: '뜬공 아웃', SF: '희생플라이', SAC: '희생번트', SB: '도루 성공', CS: '도루 실패', WP: '폭투로 주자 진루', PO: '견제사', PC: '투수 교체',
+  IBB: '고의4구', BF: '번트 실패', PH: '대타', PR: '대주자', DEF: '대수비',
 };
 
 export const isHit = (k: PlayKind) => k === '1B' || k === '2B' || k === '3B' || k === 'HR';
@@ -21,13 +21,43 @@ export function homerLabel(runs: number): string {
 export function playText(p: Play, name: NameOf): string {
   if (p.kind === 'PC') return `투수 교체: ${name(p.pit)}`;
   if (p.kind === 'WP') return `폭투·포일${p.runs ? `, ${p.runs}점` : ''}`;
-  if (p.kind === 'PH' || p.kind === 'PR') return `${KIND_TEXT[p.kind]}: ${name(p.bat)}`;
+  if (p.kind === 'PH' || p.kind === 'PR' || p.kind === 'DEF') return `${KIND_TEXT[p.kind]}: ${name(p.bat)}`;
   const who = name(p.bat);
   if (p.kind === 'HR') return `${who} ${homerLabel(p.runs)}!`;
   const tail = p.runs > 0 ? ` (${p.runs}점)` : '';
   // 실책: 누가 했나 (2026-10-13 수비수별 실책)
   if (p.kind === 'E' && p.fielder !== undefined && p.fielder >= 0) return `${who} ${name(p.fielder)}의 실책으로 출루${tail}`;
   return `${who} ${KIND_TEXT[p.kind]}${tail}`;
+}
+
+/**
+ * 공 기호(engine/pitch.ts PitchCode, A 해결기)를 공마다 [던진 뒤 카운트, 기호]로 푼다.
+ * 볼·고의4구 볼은 볼 하나, 스트라이크는 하나, 파울은 2스트라이크 전에만 하나
+ */
+export function pitchCounts(seq: string): { code: PitchCode; before: [number, number]; after: [number, number] }[] {
+  let b = 0;
+  let s = 0;
+  return [...seq].map((ch) => {
+    const code = ch as PitchCode;
+    const before: [number, number] = [b, s];
+    if (code === 'B' || code === 'I') b++;
+    else if (code === 'C' || code === 'S' || code === 'T') s++;
+    else if (code === 'F' && s < 2) s++;
+    return { code, before, after: [Math.min(b, 4), Math.min(s, 3)] as [number, number] };
+  });
+}
+
+/** 이번 타석 공 목록: "1구 볼 (1-0)" … (카운트는 볼-스트라이크, 던진 뒤) */
+export function pitchList(seq: string): string[] {
+  return pitchCounts(seq).map((x, i) => `${i + 1}구 ${PITCH_TEXT[x.code]} (${x.after[0]}-${x.after[1]})`);
+}
+
+/** 타석 끝 공: "6구, 2-2에서 슬라이더 헛스윙" (A 해결기로 끝낸 타석만, 없으면 null. 구종은 엔진 2 20단계, 없으면 뺀다) */
+export function pitchNote(p: Play): string | null {
+  if (!p.seq) return null;
+  const last = pitchCounts(p.seq).at(-1)!;
+  const type = p.pt?.[p.seq.length - 1];
+  return `${p.seq.length}구, ${last.before[0]}-${last.before[1]}에서 ${type ? `${type} ` : ''}${PITCH_TEXT[last.code]}`;
 }
 
 export const inningLabel = (p: Pick<Play, 'inn' | 'top'>) => `${p.inn}회${p.top ? '초' : '말'}`;

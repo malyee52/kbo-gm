@@ -1,7 +1,7 @@
 // M3 첫 플레이 버전: 하루 단위 진행, 저장·불러오기, 엔트리 조작, 한 시즌 완주.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, Season, simulateSeason, worldForYear, type World } from '../src/engine';
+import { DEFAULT_PARAMS, OLD_SCHEDULE_SAVE, packSchedule, planForWorld, Rng, Season, simulateSeason, worldForYear, type SeasonSave, type World } from '../src/engine';
 import { dateOf } from '../src/game/calendar';
 import { GameSession, type GameSave } from '../src/game/session';
 
@@ -31,15 +31,20 @@ describe('하루 단위 진행과 저장 (엔진)', () => {
     ref.runToEnd();
 
     let s = Season.start(world2025, FAST, 'save-test', { cal, boxTeams: [3] });
+    // 저장의 일정 = 같은 시드로 새로 만든 일정 (일정 개편 기획안 6.2)
+    const fresh = packSchedule(planForWorld(world2025, new Rng('save-test')));
     for (const stop of [1, 7, 40, 95, 150]) {
       while (s.day < stop && !s.done) s.simulateDay();
-      s = Season.restore(world2025, FAST, roundTrip(s.toSave()));
+      const save = roundTrip(s.toSave());
+      expect(save.schedule).toEqual(fresh);
+      s = Season.restore(world2025, FAST, save);
     }
     s.runToEnd();
     expect(s.teams).toEqual(ref.teams);
     expect(s.bat).toEqual(ref.bat);
     expect(s.pit).toEqual(ref.pit);
     expect(s.totals).toEqual(ref.totals);
+    expect(Array.from(s.defOuts)).toEqual(Array.from(ref.defOuts));
     expect(s.log).toEqual(ref.log);
     expect([...s.boxes.entries()]).toEqual([...ref.boxes.entries()]);
   });
@@ -64,6 +69,13 @@ describe('하루 단위 진행과 저장 (엔진)', () => {
     const other = worldForYear(store, 2024, FAST);
     expect(() => Season.restore(other, FAST, save)).toThrow();
     expect(() => Season.restore(world2025, FAST, { ...save, roster: 'bad' })).toThrow(/데이터/);
+  });
+
+  it('일정 개편 이전 저장(시즌 형식 2)은 불러오지 않는다', () => {
+    const s = Season.start(world2025, { ...FAST, pilotSeasons: 0 }, 'old-schedule');
+    const { schedule: _, ...rest } = roundTrip(s.toSave());
+    const old = { ...rest, format: 2 } as unknown as SeasonSave;
+    expect(() => Season.restore(world2025, FAST, old)).toThrow(OLD_SCHEDULE_SAVE);
   });
 });
 
@@ -110,21 +122,25 @@ describe('한 시즌 완주 (2026년, 플레이어 구단 LG)', () => {
       expect(sum(box.lineScore.away)).toBe(x.awayRuns);
       expect(box.home.batters.reduce((s, b) => s + b.r, 0)).toBe(x.homeRuns);
       expect(box.away.pitchers.reduce((s, p) => s + p.r, 0)).toBe(x.homeRuns);
-      expect(box.home.batters).toHaveLength(9);
+      // 선발 9명 + 경기 중 교체 타자 (엔진 2 9단계부터 AI 감독도 대타·대주자·대수비를 쓴다)
+      expect(box.home.batters.filter((b) => !b.sub)).toHaveLength(9);
     }
   });
 
-  it('알림에 실존 선수의 결장 사유를 적지 않는다', () => {
+  // 엔진 2 11단계 (2026-10-22 사용자 결정): 부상은 실존 선수도 부위·정도를 쓴다. 부상이 아닌 사유(징계·사건)는 여전히 적지 않는다
+  it('알림에 실존 선수의 부상 아닌 결장 사유를 적지 않는다 (부상은 부위·정도를 쓴다)', () => {
     const absences = g.news.filter((n) => n.kind === 'absence');
-    for (const n of absences) expect(n.text).not.toMatch(/부상|골절|징계|음주|도박|폭행|사생활/);
+    for (const n of absences) expect(n.text).not.toMatch(/골절|징계|음주|도박|폭행|사생활|갈등/);
+    expect(absences.some((n) => /부상, (경미|중간 정도|심각)/.test(n.text))).toBe(true);
   });
 
-  it('시즌 일정이 달력 날짜로 3월 말에 시작해 10월 전에 끝난다', () => {
+  it('시즌 일정이 규칙 표의 개막일(3월 28일 토요일)에 시작하고 발표 일정의 월요일에는 경기가 없다 (월요일 경기는 우천 순연·잔여 경기)', () => {
     const first = dateOf(2026, 0);
     const last = dateOf(2026, g.season.schedule.length - 1);
-    expect(first.month).toBe(3);
-    expect(first.weekday).toBe(2); // 화요일 개막, 월요일 휴식
-    expect(last.month).toBeLessThan(10);
+    expect(g.season.plan.opening).toBe('2026-03-28');
+    expect([first.month, first.date, first.weekday]).toEqual([3, 28, 6]);
+    expect(last.month).toBeLessThan(11);
+    g.season.plan.planned.forEach((games, i) => { if (dateOf(2026, i).weekday === 1) expect(games).toEqual([]); });
   });
 });
 
@@ -241,6 +257,8 @@ describe('게임 저장·불러오기와 재현', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'bad' }, FAST);
     const s = g.toSave();
     expect(() => GameSession.load(store, { ...s, teamName: '없는팀' }, FAST)).toThrow(/구단/);
-    expect(() => GameSession.load(store, { ...s, format: 99 as 2 }, FAST)).toThrow(/형식/);
+    expect(() => GameSession.load(store, { ...s, format: 99 as 3 }, FAST)).toThrow(/형식/);
+    // 잠재력 v2(16-4) 전 세션 형식 2는 불러오지 않는다 (옛 저장 호환 안 함, 사용자 2026-10-24)
+    expect(() => GameSession.load(store, { ...s, format: 2 as 3 }, FAST)).toThrow(/형식 2/);
   });
 });

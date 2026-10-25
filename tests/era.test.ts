@@ -1,11 +1,14 @@
 // M8 과거 시대 확장: 시대별 제도 스위치, 구단 변화(명칭 변경·승계·창단), 1982년 시작 → 2026년 자동 진행 (완료 기준).
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
-import { DEFAULT_PARAMS, eraPitching, type EngineParams } from '../src/engine';
+import { DEFAULT_PARAMS, eraPitching, Season, type EngineParams } from '../src/engine';
+import { currentRuns } from '../src/ai/value';
 import { createLeague, estimatedBirthYear } from '../src/league/create';
-import { changeText, faEnabled, faServiceNeeded, foreignRule, teamChangesFor } from '../src/league/eras';
-import { expansionSlots, EXPANSION_MIN, EXPANSION_SPECIAL } from '../src/league/offseason';
+import { changeText, faEnabled, faFilingRankPerTeam, faServiceNeeded, foreignRule, teamChangesFor } from '../src/league/eras';
+import { beginOffseason, expansionSlots, EXPANSION_MIN, EXPANSION_SPECIAL, leagueView } from '../src/league/offseason';
+import { worldFromLeague } from '../src/league/world';
 import { GameSession } from '../src/game/session';
+import { faEligible } from '../src/league/salary';
 import { runYear } from '../tools/longsim';
 
 let store: DataStore;
@@ -16,27 +19,77 @@ beforeAll(() => {
 });
 
 describe('시대별 제도', () => {
-  it('FA는 1999 시즌 뒤부터, 자격 연차는 10 → 9(대졸 8) → 8(대졸 7)', () => {
+  it('FA는 1999 시즌 뒤부터, 자격 연차는 10(대졸도 10) → 9(대졸도 9, 2001 시즌 뒤) → 9(대졸 8, 2011 시즌 뒤) → 8(대졸 7)', () => {
     expect(faEnabled(1998)).toBe(false);
     expect(faEnabled(1999)).toBe(true);
+    // 도입 때 대졸 구분 없이 10 (나무위키 KBO FA 제도 각주 4, 뉴시스 2020-01-16, data-src/제도연표_보정.csv 26)
     expect(faServiceNeeded(1999, false)).toBe(10);
+    expect(faServiceNeeded(1999, true)).toBe(10);
+    expect(faServiceNeeded(2000, false)).toBe(10);
+    expect(faServiceNeeded(2000, true)).toBe(10);
+    expect(faServiceNeeded(2001, true)).toBe(9);
     expect(faServiceNeeded(2010, false)).toBe(9);
-    expect(faServiceNeeded(2010, true)).toBe(8);
+    expect(faServiceNeeded(2010, true)).toBe(9);
+    expect(faServiceNeeded(2011, true)).toBe(8);
+    expect(faServiceNeeded(2011, false)).toBe(9);
+    expect(faServiceNeeded(2021, true)).toBe(8);
+    expect(faServiceNeeded(2022, false)).toBe(8);
+    expect(faServiceNeeded(2022, true)).toBe(7);
     expect(faServiceNeeded(2023, false)).toBe(8);
     expect(faServiceNeeded(2023, true)).toBe(7);
+  });
+
+  it('대졸 1군 8시즌 선수: 2010 시즌 뒤는 FA가 아니고 2011 시즌 뒤는 FA (1-4, 자료집 "2012년 FA부터 대졸 8")', () => {
+    const { league } = createLeague(store, 2010, 'fa-univ', FAST);
+    const p0 = league.players.find((p) => !p.foreign && p.team >= 0)!;
+    const p = { ...p0, school: 'UNIV' as const, service: 8, faCount: 0, contract: { ...p0.contract, until: 2010 }, military: undefined };
+    expect(faEligible(p, 2010)).toBe(false);
+    expect(faEligible({ ...p, contract: { ...p.contract, until: 2011 } }, 2011)).toBe(true);
+    expect(faEligible({ ...p, school: 'HS' as const, contract: { ...p.contract, until: 2011 } }, 2011)).toBe(false);
+  });
+
+  it('등급제 전 FA 신청 기준: 1999~2010 시즌 뒤 구단 수 × 17위, 2011~2019 시즌 뒤 × 21위 안만 신청, 등급제(2020~)는 기준 없음', () => {
+    expect(faFilingRankPerTeam(1999)).toBe(17);
+    expect(faFilingRankPerTeam(2010)).toBe(17);
+    expect(faFilingRankPerTeam(2011)).toBe(21);
+    expect(faFilingRankPerTeam(2019)).toBe(21);
+    expect(faFilingRankPerTeam(2020)).toBeNull();
+    const { league } = createLeague(store, 2005, 'fa-file', FAST);
+    const world = worldFromLeague(structuredClone(league), store, FAST);
+    const season = Season.start(world, FAST, league.seed);
+    season.runToEnd();
+    const off = beginOffseason(league, world, season, store, -1, FAST);
+    const view = leagueView(league, store, FAST);
+    const runs = (id: string) => currentRuns(view.sim.get(id)!, view.ctx);
+    const all = league.players.filter((p) => p.team >= 0 && !p.foreign).map((p) => runs(p.id)).sort((a, b) => b - a);
+    const cutoff = all[17 * 8 - 1];
+    const filed = off.fa.entries.filter((e) => !e.returnee);
+    expect(filed.length).toBeGreaterThan(0);
+    for (const e of filed) expect(runs(e.id)).toBeGreaterThanOrEqual(cutoff);
+    // 기준 밖이라 신청하지 않은 자격 선수가 있다 (대체 선수 이상인데도)
+    const skipped = league.players.filter((p) => faEligible(p, off.year) && !filed.some((e) => e.id === p.id) && runs(p.id) >= 0 && runs(p.id) < cutoff);
+    expect(skipped.length).toBeGreaterThan(0);
   });
 
   it('외국인 한도는 연도별 규칙을 따른다: 1997년 0명, 1998년 2명, 2026년 3+아시아쿼터 1, 자료 밖 연도는 마지막 해 값', () => {
     expect(foreignRule(store.meta, 1997)).toEqual({ total: 0, asia: 0, regular: 0 });
     expect(foreignRule(store.meta, 1998)).toEqual({ total: 2, asia: 0, regular: 2 });
+    // 2001~2002 3명 보유, 2003년 2명으로 환원, 2014년 3명 (출처 확인, 보정 CSV 16)
+    expect(foreignRule(store.meta, 2002)).toEqual({ total: 3, asia: 0, regular: 3 });
+    expect(foreignRule(store.meta, 2003)).toEqual({ total: 2, asia: 0, regular: 2 });
+    expect(foreignRule(store.meta, 2013)).toEqual({ total: 2, asia: 0, regular: 2 });
+    expect(foreignRule(store.meta, 2014)).toEqual({ total: 3, asia: 0, regular: 3 });
+    expect(store.meta.rules['2008'].foreignLimitSource).toBe('confirmed');
     expect(foreignRule(store.meta, 2026)).toEqual({ total: 4, asia: 1, regular: 3 });
     expect(foreignRule(store.meta, 2040)).toEqual({ total: 4, asia: 1, regular: 3 });
   });
 
-  it('투수 기용: 1980년대는 4인 로테이션에 긴 선발, 2000년대는 5인', () => {
+  it('투수 기용: 1980년대는 4인 로테이션에 긴 선발, 2000년대는 5인 (2009년까지 선발을 조금 더 길게), 2010년부터 기본', () => {
     expect(eraPitching(1985).rotation).toBe(4);
     expect(eraPitching(1985).limitScale).toBeGreaterThan(1);
-    expect(eraPitching(2005)).toEqual({ rotation: 5, restDays: 5, limitScale: 1 });
+    expect(eraPitching(2005).rotation).toBe(5);
+    expect(eraPitching(2005).limitScale).toBeGreaterThan(1);
+    expect(eraPitching(2015)).toEqual({ rotation: 5, restDays: 5, limitScale: 1 });
   });
 
   it('생년 추정: 입단 연도에서 대졸 22세, 1991년 이전 23세, 그 뒤 19세', () => {
@@ -139,5 +192,5 @@ describe('M8 완료 기준: 1982년 시작 → 2026년까지 자동 진행', () 
     expect(Math.min(...seenFa)).toBeGreaterThanOrEqual(1999);
     expect(seenFa.length).toBeGreaterThan(0);
     expect(Math.min(...seenForeign)).toBe(1998);
-  }, 600_000);
+  }, 1_200_000); // 45시즌: 다른 작업과 겹친 PC에서 597초(한도 600초)까지 걸려 늘렸다 (2026-10-24)
 });

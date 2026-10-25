@@ -2,8 +2,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import {
-  absenceLabel, DEFAULT_PARAMS, eventLabel, isSpecificEvent, NEUTRAL_EVENTS, pickEvent, Rng, Season, SPECIFIC_EVENTS, worldForYear,
-  type EngineParams, type World,
+  absenceLabel, DEFAULT_PARAMS, eventLabel, INJURY_PARTS, isSpecificEvent, NEUTRAL_EVENTS, pickEvent, Rng, Season, SPECIFIC_EVENTS, worldForYear,
+  type EngineParams, type InjuryPart, type World,
 } from '../src/engine';
 import { agingDelta, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
 import { DECLINE_START_AGE } from '../src/engine';
@@ -13,6 +13,7 @@ import { careerIndex } from '../src/league/growth';
 import { worldFromLeague } from '../src/league/world';
 import { GameSession } from '../src/game/session';
 import { runYear, type YearMetrics } from '../tools/longsim';
+import { withoutRunSkills } from '../src/engine/runskills';
 
 let store: DataStore;
 const UNIT = { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 };
@@ -58,12 +59,23 @@ describe('실존 인물 규칙 (기획서 7장): 구체적 사건은 가상 선�
     for (const code of Object.keys(NEUTRAL_EVENTS) as (keyof typeof NEUTRAL_EVENTS)[]) expect(eventLabel(code, { real: true })).toBe(NEUTRAL_EVENTS[code].label);
   });
 
-  it('실존 선수의 결장 문구에는 부상 같은 사유가 없고, 가상 선수에게만 부상 정도를 쓴다', () => {
+  // 엔진 2 11단계 (2026-10-22 사용자 결정): 부상은 실존·가상 선수가 같은 문구 (부위·정도). 이탈 이벤트 규칙은 그대로
+  it('부상 문구는 실존·가상 선수가 같은 규칙이다 (부위·정도)', () => {
     for (const kind of ['minor', 'long', 'major'] as const) {
-      expect(absenceLabel({ kind }, { real: true }, true)).not.toMatch(/부상|골절/);
-      expect(absenceLabel({ kind }, {})).not.toMatch(/부상/);
-      expect(absenceLabel({ kind }, { real: false })).toMatch(/부상/);
+      for (const part of Object.keys(INJURY_PARTS) as InjuryPart[]) {
+        for (const out of [false, true]) {
+          const label = absenceLabel({ kind, part }, { real: false }, out);
+          expect(absenceLabel({ kind, part }, { real: true }, out)).toBe(label);
+          expect(absenceLabel({ kind, part }, {}, out)).toBe(label);
+          expect(label).toContain(`${INJURY_PARTS[part]} 부상`);
+        }
+      }
+      // 부위가 없는 예전 기록도 실존·가상이 같다
+      expect(absenceLabel({ kind }, { real: true })).toBe(absenceLabel({ kind }, { real: false }));
     }
+    expect(absenceLabel({ kind: 'long', part: 'hamstring' }, { real: true })).toBe('햄스트링 부상, 중간 정도');
+    // 이탈 이벤트는 실존 선수에게 사유 없이
+    expect(absenceLabel({ kind: 'event', event: 'suspension' }, { real: true })).toBe('1군 이탈');
   });
 
   it('중립 이벤트 문구에는 구체적 사유가 없다', () => {
@@ -164,7 +176,9 @@ describe('병역', () => {
 
   it('20대 실존 선수: 실제 자료(상무·경찰)가 없으면 기록이 1~2시즌 비었던 선수를 복무한 것으로 짐작한다', () => {
     const idx = careerIndex(store);
-    const { league } = createLeague(store, 2026, 'mil', NO_PILOT);
+    // 2026년은 20대 국내 선수 거의 모두에게 위키 병역 자료가 있어(2026-10-23) 짐작 경로를 보려면 위키 자료를 뺀다
+    const noWiki = { ...store, military: Object.fromEntries(Object.entries(store.military ?? {}).filter(([, r]) => r.src !== 'wiki')) };
+    const { league } = createLeague(noWiki, 2026, 'mil', NO_PILOT);
     const young = league.players.filter((p) => p.real && !p.foreign && p.birthYear && 2026 - p.birthYear < 29);
     const done = young.filter((p) => p.military?.state === 'done' && p.military.basis === 'estimate');
     const pending = young.filter((p) => p.military?.state === 'pending');
@@ -176,6 +190,20 @@ describe('병역', () => {
     for (const p of done.slice(0, 20)) {
       const years = [...new Set([...(idx.bat.get(p.id) ?? []), ...(idx.pit.get(p.id) ?? [])].map((x) => x.year))].filter((y) => y < 2026).sort();
       expect(years.some((y, i) => i > 0 && y - years[i - 1] >= 2), p.name).toBe(true);
+    }
+  });
+
+  it('위키 병역 자료: 실제 자료가 없는 선수만 위키로 정하고, 근거를 wiki로 남긴다', () => {
+    const { league } = createLeague(store, 2026, 'mil-wiki', NO_PILOT);
+    const wiki = league.players.filter((p) => p.military?.basis === 'wiki');
+    expect(wiki.length).toBeGreaterThan(100);
+    for (const p of wiki) expect(store.military?.[p.id]?.src, p.name).toBe('wiki');
+    // 실제 자료(상무·경찰 프로필, 금메달 명단)가 있는 선수에게는 위키 자료를 더하지 않는다
+    for (const r of Object.values(store.military ?? {})) if (r.src === 'wiki') expect(r.served ?? r.exempt).toBeTruthy();
+    // 복무를 마친 위키 선수의 복무 끝 해는 시작 연도 전이다 (전역한 해에 1군 기록이 있으면 그 앞 해로 당긴다)
+    for (const p of wiki.filter((x) => x.military?.state === 'done')) {
+      const end = store.military?.[p.id]?.served?.end;
+      if (end !== undefined) expect(end, p.name).toBeLessThan(2026);
     }
   });
 
@@ -213,7 +241,8 @@ describe('슬럼프', () => {
     const sp = w.players.find((x) => x.id === p.id)!;
     expect(sp.bat!.hr).toBeLessThan(before.hr);
     expect(p.bat).toEqual(before);
-    expect(worldFromLeague(league, store, DEFAULT_PARAMS, { form: false }).players.find((x) => x.id === p.id)!.bat).toEqual(before);
+    // 주루·작전 손잡이(능력치 v2 16-3)는 월드마다 나이로 다시 내는 값이라 리그 상태에 없다
+    expect(withoutRunSkills(worldFromLeague(league, store, DEFAULT_PARAMS, { form: false }).players.find((x) => x.id === p.id)!.bat)).toEqual(before);
   });
 });
 
@@ -240,8 +269,10 @@ describe('여러 시즌 연속 진행 (M6 완료 기준의 축소판: 4시즌, �
         expect(v, `${r.year} cal`).toBeGreaterThan(0.8);
         expect(v, `${r.year} cal`).toBeLessThan(1.25);
       }
-      expect(r.runs).toBeGreaterThan(4.73 * 0.9);
-      expect(r.runs).toBeLessThan(5.2 * 1.1);
+      // 2027년부터 시즌 반발계수로 홈런 목표가 흔들려(×0.65~×1.47) 득점 범위도 그만큼 움직인다 (홈런 배율의 0.4제곱, 2026-10-22)
+      const ball = r.ball.hrMul ** 0.4;
+      expect(r.runs).toBeGreaterThan(4.73 * 0.9 * Math.min(1, ball));
+      expect(r.runs).toBeLessThan(5.2 * 1.1 * Math.max(1, ball));
       expect(r.players, `${r.year} 소속 최대`).toBeLessThanOrEqual(68);
       expect(r.orgMin, `${r.year} 월드 최소 인원`).toBeGreaterThanOrEqual(40);
       expect(r.maxAge).toBeLessThanOrEqual(45);

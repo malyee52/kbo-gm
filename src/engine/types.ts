@@ -1,5 +1,8 @@
-import type { Hand, Rates, YearRules } from '../data/types';
-import type { Defense } from './defense';
+import type { Hand, ParkEvents, Rates, YearRules } from '../data/types';
+import type { Defense, FieldPos } from './defense';
+import type { BatPlate, PitPlate } from './plate';
+import type { ArsenalPitch } from './arsenal';
+import type { Divisions, YearScheduleRule } from '../data/schedule';
 
 /** 타자 능력: 타석 결과별 리그 대비 비율 (1.00 = 리그 평균) */
 export interface BatSkill {
@@ -18,8 +21,55 @@ export interface BatSkill {
   speed: number;
   /** 능력 산출에 쓴 가중 타석 수 */
   sample: number;
-  /** 포지션별 수비 런 (defense.ts). 없으면 주 포지션에서 옮긴 평균값 */
+  /**
+   * 타구 성향: 아웃 타구의 땅볼 승산에 곱하는 배율 (1 = 리그 평균, 클수록 땅볼형, 엔진 2 6단계). 타구 자료가 없어 병살 기록으로 추정한다
+   * (ratings.ts batGbOf). 없으면 1
+   */
+  gb?: number;
+  /** 타석당 투구 수 ÷ 그 해 리그 값 (D단계 가공값을 시즌 가중·평균 쪽으로 당긴 값, "끈질김"). 자료가 없으면 undefined (사슬 값 그대로) */
+  ppaRel?: number;
+  /**
+   * 볼카운트 사슬 실측 몫 (능력치 v2 16-1, plate.ts): 실측 능력 − 결과 기록으로 푼 능력. 시즌마다 사슬 능력 = 그때 결과 비율로 푼 값 + 이 몫이라
+   * 시작 때는 실측 그대로이고, 성장으로 비율이 바뀌면 그만큼 따라간다. 실측이 없으면 undefined (푼 값 그대로)
+   */
+  plateRes?: BatPlate;
+  /** 당겨치기 성향 (로짓, 0 = 리그 방향 비율, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  pull?: number;
+  /** 좌우 상성 크기 배율 (1 = 리그 params.platoon, 능력치 v2 16-2 자리). 자료가 없어 아직 채우지 않는다 */
+  platoon?: number;
+  /** 포지션별 수비 런 (defense.ts). 능력치 v2(16-3)는 (등급 − 50) ÷ 2 (fielding.ts). 없으면 주 포지션에서 옮긴 평균값 */
   def?: Defense;
+  /** 수비 가능 자리 (능력치 v2 16-3: 익숙함이 다 찬 자리, fielding.ts). 없으면 예전 문턱 (defense.ts playablePositions) */
+  playable?: FieldPos[];
+  /** 비상 포수 (14.2): 포수 수비 가능은 아니지만 직전 3시즌 포수 150이닝 이상. 정규 포수가 없을 때만 포수로 쓴다 */
+  emC?: true;
+  /** 익숙함이 다 차지 않은 자리의 수비 재능 T (등급 단위, 능력치 v2 16-4). 결산 때 익숙함 u가 바뀐 만큼 T × Δu로 등급을 옮긴다 (fielding.ts familiarityShift) */
+  defTalent?: Partial<Record<FieldPos, number>>;
+  /** 수비 고치기(16.4 다)로 수비 가능이 된 자리. 결산 때 수비 가능을 다시 볼 때도 남긴다 (16-3b) */
+  defEdit?: FieldPos[];
+  /** 포수 도루 저지 (런, 한 시즌당, 16-3). 없으면 포수 자리에서 수비 가능 포수 0 · 아니면 바닥 (state.ts fieldDefense) */
+  cArm?: number;
+  /**
+   * 주루·작전·포수 손잡이 (능력치 v2 16-3, 기획안 1.3·1.4). 모두 리그 대비 값이고 없거나 0이면 리그 평균 (앞 단계와 같은 결과).
+   * 도루 스타트: 도루 성공 확률 로짓에 더한다 (투수 퀵모션과 로짓 덧셈). 기록 성공률(sbPct)에 이미 든 몫 밖의 차이
+   */
+  sbStart?: number;
+  /** 도루 판단: 도루 시도 확률에 exp(값)을 곱한다 (투수 견제와 덧셈). 기록 시도율(sbAtt)에 이미 든 몫 밖의 차이 */
+  sbJudge?: number;
+  /** 주루 판단: 추가 진루 시도 확률 로짓에 더하고 주루사 확률 로짓에서 뺀다 (주력과 따로) */
+  runIQ?: number;
+  /** 번트·작전 수행: 번트 실패 몫(선행 주자 아웃·뜬공·병살, 스퀴즈 실패)에 exp(−값)을 곱한다 */
+  bunting?: number;
+  /** 포수 블로킹: 포수일 때 폭투·포일 확률에 exp(−값)을 곱한다 */
+  cBlock?: number;
+  /** 포수 프레이밍: 포수일 때 스윙 안 한 공의 스트라이크 판정 로짓에 더한다 (자동 판정 전 해만, eras.ts ABS_YEAR) */
+  cFrame?: number;
+  /**
+   * 어깨 (능력치 v2 16-3d, 기획안 12.6·결정 28): 선수 하나의 송구 힘 (자리마다 아님). 확률 단위 리그 대비 값으로, 외야로 간 타구에서 주자의
+   * 추가 진루 시도 확률(희생플라이, 2루 주자 태그업, 단타 1→3·2→홈, 2루타 1→홈)에서 빼고, 내야 땅볼 병살 확률에 (1 + play.armDp × 값)을 곱한다.
+   * v2 수비 선수(playable 있음)는 없으면 0 = 리그 평균. 예전 수비 선수는 외야 수비 런 × play.armPerRun을 그대로 쓴다 (state.ts fieldDefense)
+   */
+  arm?: number;
 }
 
 /** 투수 능력: 상대 타석 결과별 리그 대비 비율 (1.00 = 리그 평균, 삼진은 클수록 좋고 나머지는 작을수록 좋다) */
@@ -38,6 +88,18 @@ export interface PitSkill {
   startShare: number;
   /** 능력 산출에 쓴 가중 상대 타자 수 */
   sample: number;
+  /** 땅볼 성향: 아웃 타구의 땅볼 승산 배율 (1 = 리그 평균, 엔진 2 6단계). 타구 자료가 없어 피홈런 능력으로 추정한다 (ratings.ts pitGbOf). 없으면 1 */
+  gb?: number;
+  /** 상대 타석당 투구 수 ÷ 그 해 리그 값 ("투구 효율"의 역, D단계 가공값). 자료가 없으면 undefined */
+  ppaRel?: number;
+  /** 볼카운트 사슬 실측 몫 (BatSkill.plateRes와 같은 뜻) */
+  plateRes?: PitPlate;
+  /** 좌우 상성 크기 배율 (BatSkill.platoon과 같은 뜻, 자리만) */
+  platoon?: number;
+  /** 견제 (능력치 v2 16-3, 기획안 1.5): 1루 주자의 도루 시도 확률에 exp(−값), 견제사 확률에 exp(값). 없거나 0이면 리그 평균 */
+  hold?: number;
+  /** 퀵모션: 도루 성공 확률 로짓에서 뺀다 (주자 도루 스타트와 로짓 덧셈). 없거나 0이면 리그 평균 */
+  quick?: number;
 }
 
 export interface SimPlayer {
@@ -57,6 +119,10 @@ export interface SimPlayer {
   pit: PitSkill | null;
   /** 직전 시즌 세이브 수 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (자료집·하드힛 투구손 우언·좌언, 가상 투수는 생성 때). 표시용, 엔진 효과는 없다 (2026-10-22) */
+  underhand?: boolean;
+  /** 불펜 신뢰도 (ratings.ts penTrustOf): 지난 시즌 실제 쓰임으로 정한 시작 불펜 서열. 없으면 능력 순 (2026-10-22) */
+  penTrust?: number;
   /** 타자: 기대 타석 가치(클수록 좋음). 투수: 기대 실점 가치(작을수록 좋음) */
   value: number;
   /** 직전 기록이 없어 해당 시즌 기록으로 능력을 추정한 선수 */
@@ -79,12 +145,18 @@ export interface SimPlayer {
   reserve?: boolean;
   /** 개막부터 결장하는 일수 (지난 시즌에서 넘어온 부상, 병역 복귀 전 기간) */
   startAbsent?: number;
+  /** 방위병 (league/careers.ts, 1982~1994): 이 날(개막 뒤 일수) 전까지는 홈경기에만 나온다 */
+  homeOnlyUntil?: number;
   /** 이도류로 쓰는 선수의 반대쪽 능력 (투수의 타격 bat, 타자의 투구 pit). 있으면 refreshActive가 반대쪽 자리 후보에도 넣는다 */
   alt?: { bat?: BatSkill; pit?: PitSkill };
   /** 나이가 추정값 (생년 자료 없음, M8) */
   ageEstimated?: boolean;
   /** 숨겨진 특수능력 (traits.ts). 화면·AI·저장에 쓰지 않는다. 데이터에서 월드를 만들 때 붙는다 */
   traits?: readonly import('./traits').Trait[];
+  /** 숨은 능력 '부상 경향' (부상 확률 배율, 엔진 2 16단계에서 붙는다). 없으면 1.00 */
+  injuryProne?: number;
+  /** 개막 때 혹사지수 (지난 시즌에서 넘어온 값, league/offseason.ts). 없으면 0 */
+  overuseStart?: number;
 }
 
 export interface SimTeam {
@@ -96,8 +168,16 @@ export interface SimTeam {
   /** 의료·트레이닝 투자: 부상 확률 배율, 결장 기간 배율 (없으면 1, league/finance.ts) */
   injuryRate?: number;
   injuryDays?: number;
-  /** 홈 구장 특성 (league/stadium.ts parkFactor): 홈런 배율. 없으면 1 */
-  park?: { hr: number };
+  /**
+   * 홈 구장 특성: hr = 게임 안에서 지은 신구장의 홈런 배율 (league/stadium.ts parkFactor, 없으면 1),
+   * run = 실제 구장 득점 계수 (meta.parkFactors), ev = 실제 구장 사건별 배율 (meta.parkEvents, 있으면 run 대신 쓴다)
+   */
+  park?: { hr: number; run?: number; ev?: ParkEvents };
+  /** 창단 특례 (league/eras.ts expansionPerk): 1군 엔트리·외국인 1군 한도에 더하는 인원. 없으면 0 */
+  rosterBonus?: number;
+  foreignBonus?: number;
+  /** 홈 구장이 돔: 우천 취소·경기 중 비가 없다 (engine/weather.ts). 리그 상태 월드만 붙인다 (league/stadium.ts homeIsDome) */
+  dome?: boolean;
 }
 
 /** 한 시즌을 돌리는 데 필요한 모든 입력 */
@@ -111,6 +191,18 @@ export interface World {
   env: LeagueEnv;
   teams: SimTeam[];
   players: SimPlayer[];
+  /** 가상 선수 수비 근거 몫 B를 뽑는 분포 (16.4 가: 시작 연도 실존 주전의 본 자리 B, 오름차순). 리그 상태가 이어 받는다 */
+  defPool?: number[];
+  /** 그 해 정규시즌 일정 규칙 (schedule.json, 일정 개편 기획안 2장). 없으면 기본 개막일에 하루 한 경기씩 편다 (engine/schedule.ts planForWorld) */
+  schedule?: YearScheduleRule;
+  /** 개막 연전 홈 구단 (2015~ 지난 시즌 상위 5팀, 기획안 2.2). 없으면 시드로 */
+  openingHosts?: number[];
+  /** 양대 리그 나눔 (1999·2000 드림·매직, 일정 개편 기획안 10.2). 없으면 단일 리그. 엔진은 받은 묶음만 쓰고 저장하지 않는다 */
+  divisions?: Divisions;
+  /** 전년도 정규시즌 순위 (구단 색인, 1위부터). 양대 리그 해의 동률 규칙 ③에만 쓴다 (기획안 10.4). 나눔이 없는 해에는 붙이지 않는다 */
+  prevStandings?: number[];
+  /** 투수 구종 (엔진 2 20-1단계, data/pitches.ts arsenalFor): 선수 ID → 구종. 월드를 만들 때 자료에서 내고 저장하지 않는다. 없는 선수는 선수 ID로 정한 리그 평균 꼴 */
+  arsenals?: Record<string, ArsenalPitch[]>;
 }
 
 /** 타석 결과 비율 외에 시대마다 달라지는 값 */
@@ -121,8 +213,16 @@ export interface LeagueEnv {
   sac: number;
   /** 득점이 (타자 출루 외의 실책 때문에) 비자책으로 기록될 확률 */
   unearnedRun: number;
+  /** 그 해 리그 비자책 실점 비율 (엔진 2 14단계: 시대 표의 경기 안 몫으로 unearnedRun을 다시 낼 때, eras.ts eraEnv). 없으면 다시 내지 않는다 */
+  unearnedShare?: number;
   /** 주자가 있는 타석에서 폭투·포일·보크로 주자가 한 베이스씩 가는 확률 */
   wildPitch: number;
+  /** 그 해 아웃 타구 땅볼 몫의 승산 ÷ 기본값(params.groundBallShare)의 승산 (엔진 2 6단계). 없으면 1 */
+  gbOdds?: number;
+  /** 그 해 리그 도루 성공률 (엔진 2 9단계 앞, 도루 실패 2025 +11.5% 고침). 시즌 시작 때 선수 성공률 평균과의 차를 모든 도루에 더한다 (GameCtx.sbShift). 없으면 0 */
+  sbPct?: number;
+  /** 수비 영점 m (능력치 v2 16-3, 13.6): 시작 연도 리그 수비 이닝 가중 평균 등급. 엔진 수비 런 = (등급 − m) ÷ 2. 없으면 50 (예전과 같다) */
+  defZero?: number;
 }
 
 export interface BatLine {
@@ -162,6 +262,12 @@ export interface PitLine {
   er: number;
   /** 홀드 (2026-10-12 추가, 맨 뒤라 예전 저장의 배열에는 없다 → 0) */
   hld: number;
+  /** 퀄리티 스타트: 선발 6이닝 이상·3자책 이하 (2026-10-22 추가, 맨 뒤라 예전 저장에는 없다 → 0) */
+  qs: number;
+  /** 블론 세이브: 세이브 상황(1~3점 리드)에 나와 동점·역전을 허용 (2026-10-22 추가) */
+  bsv: number;
+  /** 투구 수 (엔진 2 3단계, 2026-10-22 추가. 기록·박스스코어에만 쓰고 피로·교체에는 아직 쓰지 않는다) */
+  np: number;
 }
 
 export interface TeamRecord {
@@ -186,7 +292,7 @@ export function lineTeam(p: Pick<SimPlayer, 'teamIdx' | 'formerTeam'>): number {
 }
 
 export function emptyPitLine(): PitLine {
-  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0 };
+  return { g: 0, gs: 0, w: 0, l: 0, sv: 0, outs: 0, bf: 0, h: 0, hr: 0, bb: 0, hbp: 0, so: 0, r: 0, er: 0, hld: 0, qs: 0, bsv: 0, np: 0 };
 }
 
 export function emptyTeamRecord(): TeamRecord {

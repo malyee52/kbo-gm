@@ -77,6 +77,9 @@ export const PIT_CATEGORIES: LeaderCategory<PitLine>[] = [
   { key: 'k9', label: '9이닝당 탈삼진', show: (p) => fixed2((p.so * 27) / Math.max(1, p.outs)), score: (p) => (p.outs > 0 ? (p.so * 27) / p.outs : -1), qualified: true },
   { key: 'wpct', label: '승률 (10승 이상)', show: (p) => (p.w + p.l > 0 ? rate3(p.w / (p.w + p.l)) : '-'), score: (p) => (p.w >= 10 ? p.w / (p.w + p.l) : -1) },
   { key: 'hld', label: '홀드', show: (p) => String(p.hld ?? 0), score: (p) => p.hld ?? 0 },
+  // 2026-10-22: 퀄리티 스타트·블론 세이브 (6×2 배치)
+  { key: 'qs', label: '퀄리티 스타트', show: (p) => String(p.qs ?? 0), score: (p) => p.qs ?? 0 },
+  { key: 'bsv', label: '블론 세이브', show: (p) => String(p.bsv ?? 0), score: (p) => p.bsv ?? 0 },
 ];
 
 export interface LeaderRow<L> {

@@ -68,6 +68,16 @@ export function teamColor(franchise: string, name?: string): string {
   return teamPalette(franchise, name).primary;
 }
 
+/**
+ * 다크 모드 구단 띠 (상태 줄·경기 카드의 색 띠). 보통은 밝힌 구단색(dark)이지만, 주색이 아주 어두워 밝힌 색이 거의 흰색인 구단
+ * (두산·KT 등)은 띠가 흰 막대로 보여 구단색이 사라진다. 그런 구단은 주색과 보조색을 반씩 칠한다 (테두리는 game.css)
+ */
+export function darkBand(t: TeamPalette): string {
+  const hex = t.dark.replace('#', '');
+  const ch = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return Math.min(...ch) >= 0xd8 ? `linear-gradient(90deg, ${t.primary} 0 55%, ${t.second} 55% 100%)` : t.dark;
+}
+
 /** 화면 틀·창에 내려 줄 CSS 변수. 받는 요소에는 class "tv"를 붙인다 (game.css가 밝은/다크 모드에 맞춰 --team·--accent를 고른다) */
 export function teamVars(franchise: string, name?: string): Record<string, string> {
   const t = teamPalette(franchise, name);
@@ -79,6 +89,7 @@ export function teamVars(franchise: string, name?: string): Record<string, strin
     '--team-tint-text': t.tintText,
     '--team-dark': t.dark,
     '--team-dark-tint': t.darkTint,
+    '--team-band-dark': darkBand(t),
     '--team-button': t.button ?? t.primary,
     '--team-button-on': t.buttonOn ?? t.on,
   };

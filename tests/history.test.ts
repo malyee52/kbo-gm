@@ -25,7 +25,9 @@ function finishOffseason(s: GameSession): void {
 beforeAll(() => {
   store = loadDataStore();
   lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
-  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'history' }, FAST);
+  // 시드 이력: history → history-2(2026-10-22) → history-3(2026-10-24, 게임 안 홈런 69개로 '1위는 이승엽' 시험이 깨짐).
+  // 2026-10-24 시험 속도 카드: 최다 홈런 시험이 게임 안 홈런 수와 관계없이 성립하게 고쳐 더는 시드를 바꾸지 않아도 된다
+  g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'history-3' }, FAST);
   g.advance(100000);
   g.beginOffseason();
   finishOffseason(g);
@@ -89,7 +91,11 @@ describe('통산 기록', () => {
 describe('단일 시즌 기록과 구단 역사', () => {
   it('시즌 최다 홈런 1위는 2003 이승엽 56개(실제), 게임 안 시즌 기록도 결산 때 들어온다', () => {
     const hr = seasonBests(g.league, store, 'hr', 10);
-    expect(hr[0]).toMatchObject({ name: '이승엽', year: 2003, value: 56 });
+    // 실제 최고 기록(2003 이승엽 56개)이 들어 있고, 1위는 그것과 게임 안 최고 중 큰 값 (게임 안 시즌이 56개를 넘길 수 있다)
+    expect(hr).toContainEqual(expect.objectContaining({ name: '이승엽', year: 2003, value: 56 }));
+    const gameTop = Math.max(0, ...g.league.seasonBests!.hr.map((e) => e.value));
+    expect(hr[0].value).toBe(Math.max(56, gameTop));
+    for (let i = 1; i < hr.length; i++) expect(hr[i - 1].value).toBeGreaterThanOrEqual(hr[i].value);
     expect(g.league.seasonBests!.hr.every((e) => e.year === 2026)).toBe(true);
     expect(g.league.seasonBests!.hr.length).toBeGreaterThan(0);
     const era = seasonBests(g.league, store, 'era', 5);

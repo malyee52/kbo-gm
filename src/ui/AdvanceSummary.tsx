@@ -7,6 +7,7 @@ import type { GameSession } from '../game/session';
 import type { Attention, AttentionKind } from '../game/stops';
 import type { Screen } from './context';
 import { fixed2, ipText, ops, rate3 } from '../game/stats';
+import { placeLabel, seasonPlace } from '../game/rank';
 import { PlayerLink, useGame, useWon } from './context';
 import { teamVars } from './teams';
 import { GameCast } from './GameCast';
@@ -23,6 +24,8 @@ export interface AdvanceSnapshot {
   rank: number;
   /** 개막 전(0경기)에 찍었으면 rank는 지난 시즌 최종 순위 (모두 0승 0패라 진행 직전 순위가 의미 없다, 2026-10-12 사용자) */
   rankFromLastSeason?: boolean;
+  /** 순위 문장 ("3위", 양대 리그 해는 "드림 2위"). 예전 스냅숏에는 없다 */
+  rankLabel?: string;
   cash: number;
   news: number;
   articles: number;
@@ -36,7 +39,8 @@ export function takeSnapshot(session: GameSession): AdvanceSnapshot {
   const r = s.teams[me];
   return {
     year: session.world.year, day: s.day, w: r.w, l: r.l, t: r.t,
-    ...(r.g === 0 && session.lastSeasonRank() ? { rank: session.lastSeasonRank()!, rankFromLastSeason: true } : { rank: s.standings().indexOf(me) + 1 }),
+    ...(r.g === 0 && session.lastSeasonPlace() ? { rank: session.lastSeasonPlace()!.rank, rankLabel: placeLabel(session.lastSeasonPlace()!), rankFromLastSeason: true }
+      : { rank: seasonPlace(s, me).rank, rankLabel: placeLabel(seasonPlace(s, me)) }),
     cash: session.cashNow(), news: session.news.length, articles: session.league.articles?.length ?? 0,
     bat: new Map(session.team.org.map((p) => [p.idx, { ...s.bat[p.idx] }])),
     pit: new Map(session.team.org.map((p) => [p.idx, { ...s.pit[p.idx] }])),
@@ -51,7 +55,7 @@ function diff<T extends object>(now: T, before: T | undefined): T {
   return out as T;
 }
 
-const NEWS_KINDS = new Set(['trade', 'event', 'absence', 'return', 'owner', 'callup']);
+const NEWS_KINDS = new Set(['trade', 'event', 'absence', 'return', 'owner', 'callup', 'watch']);
 
 /** 멈춘 까닭별 제목과 바로 갈 화면 (멈춤 설정 stops.ts) */
 const STOP_INFO: Record<AttentionKind, { title: string; go: Screen; button: string }> = {
@@ -83,7 +87,9 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
   const w = r.w - snap.w;
   const l = r.l - snap.l;
   const t = r.t - snap.t;
-  const rank = s.standings().indexOf(me) + 1;
+  // 양대 리그 해는 리그 안 순위 (기획안 10.4)
+  const place = seasonPlace(s, me);
+  const rank = place.rank;
   const endDay = Math.min(s.day, s.schedule.length) - 1;
 
   // 그 기간 우리 선수 기록
@@ -140,9 +146,9 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
           <div className="stat"><span className="stat-label">이 기간 성적</span><strong className="stat-value">{w}승 {l}패{t ? ` ${t}무` : ''}</strong></div>
           <div className="stat">
             <span className="stat-label">순위</span>
-            <strong className="stat-value">{rank}위</strong>
+            <strong className="stat-value">{placeLabel(place)}</strong>
             <span className={`small ${rank < snap.rank ? 'up' : rank > snap.rank ? 'down' : 'muted'}`}>
-              {rank < snap.rank ? `▲${snap.rank - rank}` : rank > snap.rank ? `▼${rank - snap.rank}` : '변동 없음'} ({snap.rankFromLastSeason ? '지난 시즌' : '전'} {snap.rank}위)
+              {rank < snap.rank ? `▲${snap.rank - rank}` : rank > snap.rank ? `▼${rank - snap.rank}` : '변동 없음'} ({snap.rankFromLastSeason ? '지난 시즌' : '전'} {snap.rankLabel ?? `${snap.rank}위`})
             </span>
           </div>
           <div className="stat"><span className="stat-label">시즌 성적</span><strong className="stat-value">{r.w}승 {r.l}패 {r.t}무</strong></div>
@@ -178,7 +184,7 @@ export function AdvanceSummary({ snap, attention = [], onClose }: { snap: Advanc
                 return (
                   <li key={g.key}>
                     <span className={`res res-${res}`}>{res}</span> <span className="muted">{g.label ?? shortDate(year, g.day)}</span> {home ? 'vs' : '@'} {teamName(home ? g.away : g.home)} <strong>{mine}:{theirs}</strong>
-                    {g.plays && <button type="button" className="link" onClick={() => setCast(g)}>중계</button>}
+                    {(g.plays || g.box) && <button type="button" className="link" onClick={() => setCast(g)}>경기 결과</button>}
                     {hs.length > 0 && <div className="muted">{hs.map((m) => m.text).join(' · ')}</div>}
                   </li>
                 );

@@ -14,7 +14,7 @@ import type { Manager, ManagerChange } from './managers';
 import type { AiTradeRecord, GmStyle } from './gm';
 import type { AbroadState } from './overseas';
 import type { DifficultySettings } from './difficulty';
-import type { BatSkill, PitSkill, TeamRecord } from '../engine';
+import type { BatSkill, DivisionTable, PitSkill, TeamRecord } from '../engine';
 import type { Hand } from '../data/types';
 import type { Difficulty, OwnerState } from './owner';
 import type { PostseasonResult } from './postseason';
@@ -41,6 +41,11 @@ export interface Contract {
   until: number;
   /** FA 계약금으로 미리 낸 한 해 몫 (만 원). 월말 연봉에서 빠진다 (finance.ts, 샐러리캡 계산은 salary 그대로) */
   prepaid?: number;
+  /**
+   * 외국인 계약금 (달러). 그 계약 시즌에 연봉과 함께 나가고, 외국인 금액 상한은 연봉 + 계약금으로 본다 (salary.ts foreignContractTotal,
+   * 사용자 조사 2026-10-22). 지금은 실제 계약 자료(외국인_개막명단.csv)가 있는 선수만 있다 (생성식 계약은 연봉에 다 넣는다)
+   */
+  bonus?: number;
 }
 
 export interface LeaguePlayer {
@@ -58,12 +63,19 @@ export interface LeaguePlayer {
   twoWayTalent?: boolean;
   /** 육성선수: 정원(ORG_LIMIT) 밖, 1군에 못 나간다. 5월 1일~7월 31일에 정식 등록 (offseason.ts·session.ts) */
   dev?: boolean;
+  /**
+   * 계약하지 못한 FA (team = -1, 2026-10-21 사용자: "그걸 이제 육성선수나 2차드랩으로 만들어야지"). since = 미계약이 된 오프시즌, from = 원 소속.
+   * 그 오프시즌 2차 드래프트 지명·육성선수 계약 후보가 되고, 남으면 다음 시즌 중 자유계약 선수(market)로 남는다. 그 시즌도 계약하지 못하면 은퇴 (offseason.ts)
+   */
+  freeAgent?: { since: number; from: number };
   /** 그 해 시즌 중 시장의 선수 (team = -1, market.ts). 시즌 월드에 소속 없이 들어와 시즌 중 영입할 수 있다 */
   market?: number;
   /** 자유 모드의 빈 자리 (그 해, src/fantasy/free.ts): 시즌 중 AI가 새 선수를 만들 때 채워 쓴다. 쓰기 전에는 어디에도 보이지 않는다 */
   reserve?: number;
   /** 시장에 나오는 때 (시즌의 몫 0~1). 실제 시즌 중 교체 외국인은 실제로 들어온 무렵부터 (create.ts, market.ts) */
   marketFrom?: number;
+  /** 파견으로만 찾을 수 있는 가상 외국인 후보: 지역과 시장에 머무는 주 (scoutfx.ts, 기획안 19.4). 관찰 명단에 있는 구단만 보고 계약한다 */
+  fx?: import('./scoutfx').FxWindow;
   /** 넘겨받은 지명권으로 입단한 선수: 이 시즌에는 트레이드할 수 없다 (picks.ts) */
   noTradeYear?: number;
   id: string;
@@ -85,10 +97,27 @@ export interface LeaguePlayer {
   /** 지금 능력 (리그 대비 비율). 성장 판정 때 바뀐다 */
   bat: BatSkill | null;
   pit: PitSkill | null;
-  /** 잠재력: 전성기에 도달할 수 있는 한 시즌 기여 (대체 선수 대비 런, 주전 출전 기준) */
+  /**
+   * 잠재력(숨은 천장 PA): 전성기에 도달할 수 있는 한 시즌 기여 (대체 선수 대비 런, 주전 출전 기준). 리그를 만들 때·입단 때 한 번 뽑고(league/potential.ts)
+   * 지금 능력은 이 위로 자라지 않는다 (능력치 v2 기획안 17.2)
+   */
   potential: number;
-  /** 스카우트 평가 잠재력 (가상 신인만. 실제 잠재력 대신 화면과 AI 지명에 쓴다) */
-  scoutPotential?: number;
+  /**
+   * 숨은 성장 성향 d (−1~1, 기획안 17.4 ②): 성장 속도와 천장 도달 몫에만 쓴다. 화면·알림·기사·AI 가치 어디에도 쓰지 않는다.
+   * 없으면 0으로 본다 (가상 판정)
+   */
+  drive?: number;
+  /**
+   * 갈래 천장 P_c (능력치 v2 16-4a, league/branches.ts): 종합 천장(potential)을 갈래로 나눈 능력 비율. 리그를 만들 때(실존 선수는 고점 시즌 모양)
+   * 또는 첫 성장 판정 때 만들고, 종합 천장이 바뀌면 같은 모양으로 다시 맞춘다. 숨은 값 (화면·AI 가치·알림에 안 씀)
+   */
+  ceil?: import('./branches').BranchCeiling;
+  /** 훈련으로 쌓은 자라지 않는 능력 등급 (16-4c, league/training.ts). 월드를 만들 때 그 나이 평균 + 15까지 더한다 */
+  drill?: Partial<Record<import('./training').DrillKnob, number>>;
+  /** 수비 자리 훈련 익힘 m (0~1, 16-4c). 0.5 이상이면 그 자리 익숙함이 다 찬다 (engine/fielding.ts familiarity train) */
+  drillPos?: Partial<Record<import('../engine').FieldPos, number>>;
+  /** 시기 τ (해, 숨은 값, 16-4a): 성장이 몰리는 나이를 당기거나 민다. 없으면 시드로 다시 뽑는다 (branches.ts timingOf) */
+  timing?: number;
   /** 직전 기록이 없어 그 해 기록으로 능력을 추정한 선수 (첫 시즌만) */
   estimated: boolean;
   /** 소속 구단 색인. -1 = 무소속 (방출, 미계약 FA) */
@@ -100,6 +129,10 @@ export interface LeaguePlayer {
   lastFaYear: number | null;
   /** 직전 시즌 세이브 (마무리 지정용) */
   lastSaves: number;
+  /** 언더·사이드 투수 (실존은 자료, 가상 투수는 생성 때 실제 비율로). 없으면 정통파 (2026-10-22) */
+  underhand?: boolean;
+  /** 불펜 신뢰도 (engine/ratings.ts penTrustOf). 없으면 0 = 능력 순 (2026-10-22 추가, 예전 저장에는 없다) */
+  penTrust?: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
   /** 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다 */
@@ -115,6 +148,8 @@ export interface LeaguePlayer {
   startAbsent?: number;
   /** 개막부터 결장하는 까닭 */
   startAbsentReason?: 'injury' | 'military';
+  /** 다음 시즌 개막 때 혹사지수 (엔진 2 11단계, 기획안 4.6: 시즌 끝 값 × overuse.offseason). 숨김 값, 화면에 쓰지 않는다 */
+  overuse?: number;
   /** 부상 이력 (게임 안에서 치른 시즌만, 장기·큰 부상) */
   injuries?: InjuryLine[];
   /** 생년이 자료에 없어 입단 연도로 가늠한 값 (M8). 화면에는 "약 N세" */
@@ -126,6 +161,8 @@ export type MilitaryState =
   | 'pending'
   /** 복무 중 (월드에서 빠진다) */
   | 'serving'
+  /** 방위병 복무 중 (1994년 입대까지, careers.ts): 리그에 남아 홈경기에만 나온다 */
+  | 'homeOnly'
   /** 마침 (또는 시작 때 마친 것으로 본 선수) */
   | 'done'
   /** 면제 (아시안게임 금메달 등) */
@@ -137,9 +174,14 @@ export interface Military {
   enlisted?: number;
   /** 복무 중일 때: 복귀하는 시즌 */
   returnYear?: number;
-  /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), estimate = 나이·1군 기록 공백으로 짐작 */
-  basis?: 'record' | 'estimate';
-  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달') */
+  /** 복귀하는 시즌의 개막 뒤 복귀 일수 (0 = 개막 전). 없으면 MILITARY_RETURN_DAY (시작 자료의 복무, 2026-10-21 전 저장) */
+  returnDay?: number;
+  /** 복무 형태 (careers.ts ServiceKind): unit = 군 야구단(상무·경찰), active = 현역, reserve = 보충역. 없으면 unit (예전 저장·시작 자료) */
+  kind?: 'unit' | 'active' | 'reserve';
+  /** 시작 때 정한 상태의 근거: record = 실제 자료(military.json), wiki = 위키백과·나무위키 병역 칸(military.json의 src 'wiki'),
+   *  estimate = 나이·1군 기록 공백으로 짐작 */
+  basis?: 'record' | 'wiki' | 'estimate';
+  /** 근거 설명 (예: '상무', '2026 아이치·나고야 아시안게임 금메달'). 군 야구단 복무 중이면 '상무'·'경찰' */
   note?: string;
 }
 
@@ -147,6 +189,8 @@ export interface InjuryLine {
   year: number;
   kind: 'long' | 'major';
   days: number;
+  /** 부위 (엔진 2 11단계부터) */
+  part?: import('../engine').InjuryPart;
   /** 시즌 끝까지 이어졌는가 */
   seasonOut: boolean;
 }
@@ -177,6 +221,10 @@ export interface SeasonLine {
   /** 가을야구 성적: postseason.ts PS_BAT_KEYS / PS_PIT_KEYS 순서 (2026-10-12부터) */
   pbat?: number[];
   ppit?: number[];
+  /** 1군 자리별 수비 이닝 (C / 1B / 2B / 3B / SS / LF / CF / RF, 대수비 포함, 반올림 정수. 능력치 v2 12.9·15.2, 2026-10-24부터) */
+  def?: number[];
+  /** 퓨처스(2군) 자리별 수비 이닝 (def와 같은 꼴, 모형이 정한 값. 능력치 v2 15.2) */
+  fdef?: number[];
 }
 
 export interface LeagueTeam {
@@ -208,7 +256,9 @@ export interface LeagueState {
   teams: LeagueTeam[];
   players: LeaguePlayer[];
   /** 막 끝난 시즌의 구단 성적 (드래프트 순서·성향 판정용) */
-  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; postseason?: PostseasonResult } | null;
+  /** hr: 리그 전체 홈런 ("달라지는 규칙"의 지난 시즌 한 줄, 2026-10-22부터. 예전 저장에는 없다) */
+  /** divisions: 양대 리그 해(1999·2000)의 리그별 최종 순위 (Season.divisionStandings, 2026-10-23 추가. 예전 저장·단일 리그 해에는 없다) */
+  lastSeason: { year: number; teams: TeamRecord[]; standings: number[]; divisions?: DivisionTable[]; postseason?: PostseasonResult; hr?: number } | null;
   /** 구장 (stadium.ts, 구단 색인) */
   stadiums?: import('./stadium').StadiumState[];
   /** 팬 만족도 (stadium.ts, 구단 색인) */
@@ -220,6 +270,10 @@ export interface LeagueState {
   ledger: LedgerEntry[];
   /** 가상 선수 일련번호 */
   nextVirtualId: number;
+  /** 수비 영점 m (능력치 v2 16-3, 13.6): 시작 때 한 번 재고 장기 진행 내내 고정. 없으면 예전 수비 (영점 50) */
+  defZero?: number;
+  /** 가상 선수 수비 근거 몫 B 분포 (16.4 가, World.defPool). 있으면 가상 선수 수비를 v2 길(fielding.ts virtualDefense)로 만든다 */
+  defPool?: number[];
   /** 은퇴한 선수 (M6) */
   retired?: RetiredRecord[];
   // ---- M7 (없으면 기본값. M6 이전 저장 호환)
@@ -235,6 +289,18 @@ export interface LeagueState {
   owner?: OwnerState;
   /** 구단별 샐러리캡 연속 초과 횟수 */
   capStrikes?: number[];
+  /**
+   * 플레이어가 고른 프랜차이즈 예외 선수 id (구단 색인, salary.ts franchiseTag). 없거나 자격이 없어지면 연봉 최고 자격 선수를 자동 지정한다.
+   * 2026-10-22부터, 예전 저장에는 없다 (모두 자동 지정)
+   */
+  franchiseTags?: (string | null)[];
+  /** 미래 규칙 변경 ② (2028~, league/futureRules.ts): 바뀐 기록과 결산 때 남긴 신호. 2026-10-22부터, 예전 저장에는 없다 (변경 없음) */
+  ruleShifts?: import('./futureRules').RuleShift[];
+  ruleSignals?: import('./futureRules').RuleSignal[];
+  /** 구단 투표 단장 회의 기록 (가결·부결 모두, ai/vote.ts·league/ruleVote.ts). 2026-10-23부터, 예전 저장에는 없다 */
+  ruleVotes?: import('../ai/vote').RuleVoteRecord[];
+  /** 구단별 샐러리캡 하한(2027~) 연속 미달 횟수 (owner.ts applyFloorSanctions). 예전 저장에는 없다 */
+  floorStrikes?: number[];
   /** 구단별 지명권 하락 제재가 걸린 시즌 (그 시즌 뒤 드래프트에 적용) */
   draftPenalty?: (number | null)[];
   /** 구단별 재정 상태: 투자 단계, 지난 결산 (2026-10-11 재정 상세형). 자금은 장부의 합 */
@@ -245,6 +311,8 @@ export interface LeagueState {
   archive?: ArchivedPlayer[];
   /** 게임 안 시즌의 리그 환경 (war.ts, 결산 때). 시즌 가치(WAR)를 다시 계산할 때 쓴다. 예전 저장에는 없다 (그 해 실제 자료로 대신) */
   seasonEnv?: Record<string, import('./war').WarEnv>;
+  /** 게임 안 시즌의 세이버 리그 기준값 (game/saber.ts leagueBase, 결산 때). 선수 상세의 지난 시즌 wRC+·FIP. 예전 저장에는 없다 (2026-10-22) */
+  seasonSaber?: Record<string, { woba: number; runsPerPa: number; fipConst: number }>;
   /** 게임 안 시즌의 연표: 순위·우승·준우승 (history.ts) */
   yearbook?: YearRecord[];
   /** 게임 안 시즌의 단일 시즌 기록 부문별 상위 (history.ts) */
@@ -275,6 +343,8 @@ export interface LeagueState {
   aiTrades?: AiTradeRecord[];
   /** 시즌 중 방출·영입 (market.ts) */
   marketMoves?: import('./market').MarketMove[];
+  /** 외국인 스카우트 파견·관찰 명단 (그 시기 것만, scoutfx.ts) */
+  scoutFx?: import('./scoutfx').ScoutFxState;
   /**
    * 이벤트(AI 구단의 트레이드 제안)를 받아들여 이뤄진 우리 트레이드 (선수 ID). 조작 기록에는 'event'로만 남아
    * 불러오기 때 그해 트레이드 목록(연봉 귀속)을 다시 만들려면 따로 적어 둬야 한다 (2026-10-12)
@@ -295,6 +365,11 @@ export interface LeagueState {
   reputation?: import('./reputation').RepState;
   /** 플레이어가 고른 다음 시즌 캠프 (year = 그 시즌) */
   campPlan?: { year: number; pick: import('./camp').CampPick };
-  /** 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권 */
+  /**
+   * 창단 구단 (M8): 첫 시즌 뒤 두 번째 드래프트까지 추가 지명권, 1군 첫 두 시즌 창단 특례 (eras.ts expansionPerk).
+   * 시작 때 이미 1군인 구단도 특례 기간이 남았으면 넣는다 (create.ts, 2026-10-23)
+   */
   expansions?: { team: number; firstYear: number }[];
+  /** 집중 훈련 (16-4c, league/training.ts): 선수 ID → 훈련. 플레이어 구단만 담는다 (AI 구단은 결산 때 규칙으로 정함) */
+  training?: Record<string, import('./training').TrainingPlan>;
 }
