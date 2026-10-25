@@ -219,7 +219,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   // 시작 전 드래프트에서 지명한 선수(나성범 등)는 아래 보충에서 이 구단으로 들어간다
   const futures = addFuturesTeams(league, store, startYear);
   const recordedIds = new Set(league.players.map((p) => p.id));
-  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx)
+  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx, params.potential)
     + addAbroadAtStart(league, store, startYear, params, special, toLeague, idx)
     + addAbsentVeterans(league, store, startYear, params, special, toLeague)
     + addLateDebuts(league, store, ctx, startYear, idx);
@@ -250,7 +250,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
  * 같은 이름이 같은 구단에 이미 있으면 넣지 않는다 (1군에 올라온 신인). 넣은 수를 돌려준다.
  */
 function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, seed: string,
-                              idx: CareerIndex): number {
+                              idx: CareerIndex, pp: EngineParams['potential']): number {
   const rows = (store.drafts?.[String(startYear)] ?? []).filter((d) => d.kind !== '원년 멤버' && d.games === 0);
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
@@ -263,7 +263,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   for (const d of rows) {
     const t = teamIdx.get(d.team);
     if (t === undefined || have.has(`${t}/${d.name}`)) continue;
-    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx);
+    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx, pp);
     p.team = t;
     p.military = { state: 'pending' };
     n++;

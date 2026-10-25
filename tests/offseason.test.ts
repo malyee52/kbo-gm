@@ -10,7 +10,7 @@ import {
   ASIA_NEW_CAP, COMPENSATION, FA_COMP, faEligible, faGrade, foreignContractTotal, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, foreignTeamCap, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
 } from '../src/league/salary';
 import { careerIndex } from '../src/league/growth';
-import { ageWidth, draftIndex, gradeRuns, rankCenterRuns, runsPerGrade, sampleScale, triangular } from '../src/league/potential';
+import { ageWidth, draftIndex, rankCenterRuns, runsPerGrade, sampleScale, triangular } from '../src/league/potential';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
 
 let store: DataStore;
@@ -321,7 +321,7 @@ describe('오프시즌 단계 (2026 → 2027)', () => {
     expect(info.entryYear).toBe(2006);
     expect(centerOf(ryu)).toBeGreaterThan(rankCenterRuns(info) + 3); // 실제 전성기 쪽으로 당겨짐
     // 1군에 오르지 못한 과거 지명자는 당기지 않는다: 중심이 순위 표 값 그대로 (z ≥ 0이면 천장이 지금 능력에 붙지 않는다)
-    const table = [44, 45, 46, 47, 50, 51, 53].map((g) => gradeRuns(g, 2006));
+    const table = [0, 5, 10, 20, 40, 80].map((rank) => rankCenterRuns({ rank, univ: false, entryYear: 2006 })); // 16-5b: 구간마다 가상 신인 분위 값
     const ids = [...h.offseason!.draft!.pool, ...h.offseason!.draft!.picks.map((x) => x.id)];
     const never = ids.map((id) => h.leaguePlayer(id)!).filter((p) => p.id.startsWith('d2006-') && zOf(p) >= 0);
     expect(never.length).toBeGreaterThan(0);

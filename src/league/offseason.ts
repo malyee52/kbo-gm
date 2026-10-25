@@ -26,7 +26,7 @@ import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenVal
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
-import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf } from './potential';
+import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, VIRTUAL_POOL } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
   type CareerNews,
@@ -99,11 +99,11 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
- * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5
  */
 export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
-/** 드래프트 풀 인원 (임시값) */
-const DRAFT_POOL = 150;
+/** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
+const DRAFT_POOL = VIRTUAL_POOL;
 /** 외국인 재계약 기준 (런, 임시값) */
 const FOREIGN_KEEP_RUNS = 12;
 /** 3명 총액 상한 안에 이만큼도 남지 않으면 재계약하지 않는다 (달러, 임시값) */
@@ -2059,13 +2059,13 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
   const real = draftPool(store, year + 1);
   let ci: CareerIndex | null = null;
   real.forEach((d, i) => {
-    const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)));
+    const p = makeDraftee(league, view, rng, taken, d, i, year + 1, store, () => (ci ??= careerIndex(store)), params.potential);
     pool.push(p.id);
   });
   // 실제 육성선수 계약 신인: 드래프트에는 안 나오고 정원 정리 때 육성선수로 데려올 수 있다 (devPool). 지명 난수와 따로 굴린다
   const devRows = (store.drafts?.[String(year + 1)] ?? []).filter((d) => d.kind === '육성선수');
   const devRng = new Rng(`${league.seed}/dev-rookies/${year}`);
-  off.devExtra = devRows.map((d, i) => makeDraftee(league, view, devRng, taken, d, real.length + i, year + 1, store, () => (ci ??= careerIndex(store))).id);
+  off.devExtra = devRows.map((d, i) => makeDraftee(league, view, devRng, taken, d, real.length + i, year + 1, store, () => (ci ??= careerIndex(store)), params.potential).id);
   // 드래프트 미지명 입단 테스트 선수 (가상): 실제 육성 계약 자료가 모자란 만큼. 대부분 1군감이 아니지만 가끔 늦게 피는 선수가 있다 (임시값)
   for (let i = devRows.length; i < DEV_TRYOUTS; i++) {
     const univ = devRng.chance(0.5);
@@ -2923,24 +2923,25 @@ export function rookiePosition(store: Pick<DataStore, 'season' | 'meta'>, m: Pla
 
 /** 지명 신인의 천장 중심 (런, potential.ts drafteeCenter): 그 해 지명의 당시 평가 순위와 실제 커리어 고점(있으면) */
 export function drafteeCenterOf(store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'drafts'>>, m: PlayerMaster | null, d: DraftRow, entryYear: number,
-                                isPitcher: boolean, pos: string | null, view: LeagueView, career: () => CareerIndex): number {
+                                isPitcher: boolean, pos: string | null, view: LeagueView, career: () => CareerIndex, pp: EngineParams['potential'] = DEFAULT_PARAMS.potential): number {
   const rank = draftRank(store.drafts?.[String(entryYear)] ?? [d], d) ?? Infinity;
   const probe = m ? { id: m.id, isPitcher, pos, bat: null, pit: null, birthYear: null } as unknown as SimPlayer : null;
-  return drafteeCenter({ rank, univ: d.univ, entryYear }, probe ? realPeakRuns(probe, career(), store, view.ctx) : null);
+  return drafteeCenter({ rank, univ: d.univ, entryYear }, probe ? realPeakRuns(probe, career(), store, view.ctx) : null, pp);
 }
 
 export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, d: DraftRow, index: number,
-                            entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'> & Partial<Pick<DataStore, 'drafts'>>, career: () => CareerIndex): LeaguePlayer {
+                            entryYear: number, store: Pick<DataStore, 'players' | 'meta' | 'season'> & Partial<Pick<DataStore, 'drafts'>>, career: () => CareerIndex,
+                            pp: EngineParams['potential'] = DEFAULT_PARAMS.potential): LeaguePlayer {
   const m = matchDraftee(store, d, entryYear, league);
   const isPitcher = m ? masterIsPitcher(m, career) : d.pos === 'P';
   const pos = isPitcher ? null : rookiePosition(store, m, entryYear, d.pos);
   const id = m?.id ?? `d${entryYear}-${index + 1}`;
-  const center = drafteeCenterOf(store, m, d, entryYear, isPitcher, pos, view, career);
+  const center = drafteeCenterOf(store, m, d, entryYear, isPitcher, pos, view, career, pp);
   const age = m ? entryYear - (m.birthYear ?? estimatedBirthYear(m)) : d.univ ? 22 : 18;
   const abroad = d.kind === '해외' || (d.drafted !== undefined && entryYear - d.drafted >= 3 && !d.univ);
   const { path, years } = entryPathOf(m?.school ?? (d.univ ? 'UNIV' : 'HS'), age, m ? 19 : 18, abroad);
   const start = Math.max(-15, center - entryGap(growthRoom(18), years, path) * rng.range(0.7, 1.3));
-  const potential = drafteeCeiling(id, center, start, age + 1, entryYear, league.seed);
+  const potential = drafteeCeiling(id, center, start, age + 1, entryYear, league.seed, pp);
   const p = makeVirtual(league, view, rng, taken, {
     foreign: false, asia: false, age, runs: start, potential,
     real: true, name: m?.name ?? d.name, isPitcher, pos, id,
