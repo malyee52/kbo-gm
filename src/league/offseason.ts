@@ -962,7 +962,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     if (!faEligible(p, year)) continue;
     const sp = view.sim.get(p.id)!;
     const age = ageIn(p, year + 1);
-    const years = faYears(age);
+    const years = faYears(age, currentRuns(sp, view.ctx));
     let sum = 0;
     for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
     const ask = marketSalary(sum / years, view.wage, view.minPay);
@@ -977,7 +977,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     const p = league.players.find((x) => x.id === id && x.team === -1);
     const sp = p && view.sim.get(p.id);
     if (!p || !sp) continue;
-    const years = faYears(ageIn(p, year + 1));
+    const years = faYears(ageIn(p, year + 1), currentRuns(sp, view.ctx));
     let sum = 0;
     for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
     const ask = marketSalary(sum / years, view.wage, view.minPay);
@@ -1125,25 +1125,28 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     off.fa.round++;
     return;
   }
-  // 마지막 라운드 뒤 (임시 규칙): AI 구단마다 1년 계약으로 자기 평가액을 내고(원 소속이 아니면 보상금만큼 깎임),
-  // 가장 높은 구단과 요구액의 80% 이내(최저 연봉 이상)에서 계약한다. 어느 구단에도 전력 이득이 없으면 무적 선수가 되어 리그를 떠난다.
+  // 마지막 라운드 뒤 (임시 규칙): AI 구단마다 요구 기간으로 자기 평가액(기간 평균 이득, 원 소속이 아니면 보상금을 기간으로 나눈 만큼 깎임)을 내고,
+  // 가장 높은 구단과 요구액의 80% 이내(최저 연봉 이상)에서 계약한다. 그 기간에 낼 구단이 없으면 한 해씩 줄여 1년까지 본다.
+  // 어느 구단에도 전력 이득이 없으면 무적 선수가 된다. (2026-10-26 전에는 늘 1년이라 FA의 절반 가까이가 1년 계약이었다)
   for (const e of off.fa.entries) {
     if (e.status !== 'open') continue;
     const p = players.get(e.id)!;
     const sp = view.sim.get(e.id)!;
     let best: FaOffer | null = null;
-    for (let t = 0; t < league.teams.length; t++) {
-      if (t === off.userTeam || isFuturesTeam(league, t, off.year + 1)) continue;
-      const home = t === e.from;
-      if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
-      const gain = signingGain(view, t, sp, 1, tendency[t], home);
-      if (gain <= 0) continue;
-      const worth = marketSalary(gain / FA_WILLINGNESS, view.wage, view.minPay) - (home ? 0 : COMPENSATION[e.grade] * e.prevSalary);
-      if (!home && worth < view.minPay) continue;
-      const salary = Math.max(view.minPay, Math.round(Math.min(e.ask * 0.8, worth)));
-      if (limits[t] !== null && teamCapPayroll(league, t, off.year + 1) - (home ? capShareOf(league, t, off.year + 1, p) : 0) + salary > limits[t]!) continue;
-      if (!canPayFaBonus(league, t, signingBonus(salary, 1), off.year + 1)) continue;
-      if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years: 1 };
+    for (let years = e.years; years >= 1 && !best; years--) {
+      for (let t = 0; t < league.teams.length; t++) {
+        if (t === off.userTeam || isFuturesTeam(league, t, off.year + 1)) continue;
+        const home = t === e.from;
+        if (!home && off.fa.signings[t] >= ruleOf(league, 'maxFaSignings')) continue;
+        const gain = signingGain(view, t, sp, years, tendency[t], home);
+        if (gain <= 0) continue;
+        const worth = marketSalary(gain / years / FA_WILLINGNESS, view.wage, view.minPay) - (home ? 0 : (COMPENSATION[e.grade] * e.prevSalary) / years);
+        if (!home && worth < view.minPay) continue;
+        const salary = Math.max(view.minPay, Math.round(Math.min(e.ask * 0.8, worth)));
+        if (limits[t] !== null && teamCapPayroll(league, t, off.year + 1) - (home ? capShareOf(league, t, off.year + 1, p) : 0) + salary > limits[t]!) continue;
+        if (!canPayFaBonus(league, t, signingBonus(salary, years), off.year + 1)) continue;
+        if (!best || salary * (home ? 1.05 : 1) > best.salary * (best.team === e.from ? 1.05 : 1)) best = { team: t, salary, years };
+      }
     }
     if (best) {
       signFa(league, off, e, best, FA_ROUNDS + 1, view);
