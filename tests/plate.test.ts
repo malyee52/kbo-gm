@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Rng, worldForYear } from '../src/engine';
-import { plateContext } from '../src/engine/pa';
+import { batBallOf, pitBallOf, plateContext } from '../src/engine/pa';
+import { ballMix, batTarget, pitTarget } from '../src/engine/angle';
 import { cellProbs, End, endFrom, solveKnobs } from '../src/engine/chain';
 import { chainShapeFor } from '../src/engine/params';
 import {
@@ -128,6 +129,43 @@ describe('결과 기록으로 푸는 길과 실측', () => {
     const grown = { ...one.bat!, so: one.bat!.so * 0.8 };
     const moved = addBat(solvedBatPlate(grown, lg, lp, pp), one.bat!.plateRes);
     expect(moved.con).toBeGreaterThan(ctx.bat[one.idx].con);
+  });
+});
+
+describe('사슬 실측 몫은 삼진·볼넷만 바꾼다 (2026-10-25 홈런 원인 점검)', () => {
+  it('2026 시작 월드: 실측이 있는 선수도 리그 평균 상대 타석당 단타·2루타·3루타·홈런이 실측 몫 없을 때와 같다 (1e-9)', () => {
+    const world = worldForYear(store, 2026);
+    const ctx = plateContext(world.players, world.league, DEFAULT_PARAMS, 2026);
+    const lg = world.league;
+    const lp = lpFor(2026);
+    let bat = 0;
+    let pit = 0;
+    let moved = 0;
+    for (const p of world.players) {
+      if (p.bat?.plateRes) {
+        const side = batBallOf(ctx, p);
+        const q = ballMix(ctx.ball!.lb, side.theta, side.k, side.shift, null, null).q;
+        const x = plateChain(lp, ctx.bat[p.idx], ZERO_PIT).e[3];
+        const x0 = plateChain(lp, solvedBatPlate(p.bat, lg, lp, pp), ZERO_PIT).e[3];
+        const want = batTarget(p.bat, lg);
+        for (let o = 1; o < 5; o++) expect(Math.abs(x * q[o] - x0 * want[o]), `${p.name} ${o}`).toBeLessThan(1e-9);
+        if (Math.abs(x / x0 - 1) > 0.03) moved++;
+        bat++;
+      }
+      if (p.pit?.plateRes) {
+        const side = pitBallOf(ctx, p);
+        const q = ballMix(ctx.ball!.lb, side.theta, 1, null, side.shift, null).q;
+        const x = plateChain(lp, ZERO_BAT, ctx.pit[p.idx]).e[3];
+        const x0 = plateChain(lp, ZERO_BAT, solvedPitPlate(p.pit, lg, lp)).e[3];
+        const want = pitTarget(p.pit, lg);
+        for (let o = 1; o < 5; o++) expect(Math.abs(x * q[o] - x0 * want[o]), `${p.name} ${o}`).toBeLessThan(1e-9);
+        pit++;
+      }
+    }
+    expect(bat).toBeGreaterThan(200);
+    expect(pit).toBeGreaterThan(200);
+    // 실측 몫이 맞힌 공 수를 3% 넘게 바꾸는 선수가 있어야 이 시험이 뜻이 있다 (김도영 약 +8%)
+    expect(moved).toBeGreaterThan(10);
   });
 });
 

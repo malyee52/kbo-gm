@@ -34,7 +34,11 @@ export function eraPitching(year: number): EraPitching {
   // 2026-10-12: 선발·구원을 겸한 에이스가 로테이션에 들어가며(engine/params.ts STARTER_SHARE) 이닝 상위 5명 비중이 실제보다 높아져 1.3 → 1.2, 1.1 → 1.0
   if (year <= 1989) return { rotation: 4, restDays: 4, limitScale: 1.2 };
   if (year <= 1994) return { rotation: 4, restDays: 4, limitScale: 1.0 };
-  if (year <= 1999) return { rotation: 5, restDays: 5, limitScale: 1.05 };
+  // 2026-10-25 첫 시즌 밸런스 2차: 1995·2001·2005 이닝 상위 5명 비중이 실제보다 9.7·12.3·8.2% 낮아(validate 20시즌) 에이스 이닝·다승·탈삼진 1위가
+  // 실제보다 크게 모자랐다 (2001 이닝 1위 시뮬 161 대 실제 234). 1.05 → 1.25, 2000~2009는 1 → 1.2·1.1 (득점 차이는 ±1.2% 안 그대로)
+  if (year <= 1999) return { rotation: 5, restDays: 5, limitScale: 1.25 };
+  if (year <= 2004) return { rotation: 5, restDays: 5, limitScale: 1.2 };
+  if (year <= 2009) return { rotation: 5, restDays: 5, limitScale: 1.1 };
   return { rotation: 5, restDays: 5, limitScale: 1 };
 }
 

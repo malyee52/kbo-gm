@@ -103,12 +103,30 @@ function ballOf(pl: PlateContext, gbOdds: number): NonNullable<PlateContext['bal
   return pl.ball;
 }
 
+/**
+ * 사슬 실측 몫(plateRes)이 바꾼 맞힌 공 수 배율: 리그 평균 상대 실측 사슬의 맞힌 공 ÷ 결과 기록으로 푼 사슬의 맞힌 공. 실측이 없으면 1.
+ * 타구 갈래 손잡이를 이 배율로 풀어, 실측 몫이 삼진·볼넷을 바꿔도 홈런·안타의 타석당 비율은 기록대로 둔다 (2026-10-25 사용자, 홈런 원인 점검:
+ * 피해 가기를 당하는 거포는 실측 볼넷이 기록보다 적고, 그만큼 늘어난 맞힌 공이 기록의 맞힌 공당 비율로 홈런이 되어 김도영 홈런률이 약 19% 부풀었다)
+ */
+function batContactOf(pl: PlateContext, p: SimPlayer): number {
+  if (!p.bat?.plateRes) return 1;
+  const solved = plateChain(pl.lp, solvedBatPlate(p.bat, pl.league, pl.lp, pl.params.plate), ZERO_PIT).e[3];
+  return solved > 0 ? plateChain(pl.lp, batPlateOf(pl, p), ZERO_PIT).e[3] / solved : 1;
+}
+
+/** 투수 쪽 맞힌 공 수 배율 (batContactOf와 같은 셈, 리그 평균 타자 상대) */
+function pitContactOf(pl: PlateContext, p: SimPlayer): number {
+  if (!p.pit?.plateRes) return 1;
+  const solved = plateChain(pl.lp, ZERO_BAT, solvedPitPlate(p.pit, pl.league, pl.lp)).e[3];
+  return solved > 0 ? plateChain(pl.lp, ZERO_BAT, pitPlateOf(pl, p)).e[3] / solved : 1;
+}
+
 /** 선수의 타자 타구 갈래 손잡이 (능력 객체가 바뀌었으면 다시 푼다) */
 export function batBallOf(pl: PlateContext, p: SimPlayer, gbOdds = 1): BallSide {
   const c = ballOf(pl, gbOdds);
   if (c.batSrc[p.idx] !== p.bat || c.bat[p.idx] === undefined) {
     c.batSrc[p.idx] = p.bat;
-    c.bat[p.idx] = batBallSide(p.bat!, pl.league, c.lb, pl.params);
+    c.bat[p.idx] = batBallSide(p.bat!, pl.league, c.lb, pl.params, batContactOf(pl, p));
   }
   return c.bat[p.idx];
 }
@@ -118,7 +136,7 @@ export function pitBallOf(pl: PlateContext, p: SimPlayer, gbOdds = 1): BallSide 
   const c = ballOf(pl, gbOdds);
   if (c.pitSrc[p.idx] !== p.pit || c.pit[p.idx] === undefined) {
     c.pitSrc[p.idx] = p.pit;
-    c.pit[p.idx] = pitBallSide(p.pit!, pl.league, c.lb, pl.params);
+    c.pit[p.idx] = pitBallSide(p.pit!, pl.league, c.lb, pl.params, pitContactOf(pl, p));
   }
   return c.pit[p.idx];
 }

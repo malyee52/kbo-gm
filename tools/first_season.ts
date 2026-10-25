@@ -4,13 +4,14 @@
 // 우리 구단도 AI에게 맡긴다 (challenge_odds.ts와 같은 방식: 이벤트는 첫 선택지로 자동, 오프시즌은 자동 진행).
 //
 // 실행: npx tsx tools/first_season.ts [--year 2026] [--team 0] [--basis season|prior] [--seeds s01,...,s10 | --n 10] [--out reports/first-season.md] [--json out.json]
+//       표만 다시: npx tsx tools/first_season.ts --year 2026 --from out.json[,out2.json] --out …
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, winPct } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { capPayroll, salaryCap } from '../src/league/salary';
+import { salaryCap, teamCapPayroll } from '../src/league/salary';
 import { isServing } from '../src/league/careers';
 import { cashOf } from '../src/league/finance';
 import { seasonWar } from '../src/league/awards';
@@ -221,7 +222,8 @@ export function runSeed(store: ReturnType<typeof loadDataStore>, year: number, t
   if (!o.ok) throw new Error(o.message);
   const L2 = g.league;
   const cap = salaryCap(year + 1, L2);
-  const shares = L2.teams.map((_, i) => (cap ? capPayroll(L2.players, i) / cap : 0));
+  // 캡 합계는 판정과 같은 셈 (상위 capTopN명·프랜차이즈 예외 50%, salary.ts teamCapPayroll)
+  const shares = L2.teams.map((_, i) => (cap ? teamCapPayroll(L2, i, year + 1) / cap : 0));
   const cash = w.teams.map((t) => g.cashNow(t.idx));
   const sizes = L2.teams.map((_, i) => L2.players.filter((p) => p.team === i && !isServing(p) && !p.dev).length);
   const retired = (L2.retired ?? []).filter((r) => r.year === year);
@@ -316,6 +318,21 @@ export function repeatStars(rs: SeedResult[], store: ReturnType<typeof loadDataS
   return ['| 선수 | 구단 | 나이 | 투타 | 구분 | 받은 것 (횟수/' + rs.length + ') | 시뮬 가치 (상위 30 든 시드 평균) | 실제 ' + (year - 1) + ' 가치 | 실제 ' + year + ' 가치 |', '|---|---|---|---|---|---|---|---|---|', ...rows.map((r) => r.line)].join('\n');
 }
 
+/** 실제 시즌 개인 1위 (같은 선수의 여러 구단 줄은 합친다. 타율·평균자책은 규정 타석·이닝) */
+function realTop(sd: NonNullable<ReturnType<ReturnType<typeof loadDataStore>['season']>>): SeedResult['top'] {
+  const bat = new Map<string, { pa: number; ab: number; h: number; hr: number; rbi: number }>();
+  for (const r of sd.bat) { const x = bat.get(r.id) ?? { pa: 0, ab: 0, h: 0, hr: 0, rbi: 0 }; x.pa += r.pa; x.ab += r.ab; x.h += r.h; x.hr += r.hr; x.rbi += r.rbi; bat.set(r.id, x); }
+  const pit = new Map<string, { w: number; sv: number; so: number; er: number; outs: number; hld: number }>();
+  for (const r of sd.pit) { const x = pit.get(r.id) ?? { w: 0, sv: 0, so: 0, er: 0, outs: 0, hld: 0 }; x.w += r.w; x.sv += r.sv; x.so += r.so; x.er += r.er; x.outs += r.outs; x.hld += r.hld ?? 0; pit.set(r.id, x); }
+  const B = [...bat.values()], P = [...pit.values()];
+  const q = B.filter((b) => b.pa >= sd.games * 3.1 && b.ab > 0), e = P.filter((p) => p.outs >= sd.games * 3);
+  return {
+    hr: Math.max(...B.map((b) => b.hr)), rbi: Math.max(...B.map((b) => b.rbi)), avg: Math.max(0, ...q.map((b) => b.h / b.ab)),
+    w: Math.max(...P.map((p) => p.w)), sv: Math.max(...P.map((p) => p.sv)), so: Math.max(...P.map((p) => p.so)),
+    era: Math.min(99, ...e.map((p) => (p.er * 27) / p.outs)), hld: Math.max(...P.map((p) => p.hld)),
+  };
+}
+
 export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnType<typeof loadDataStore>['season']>): string {
   const out: string[] = [];
   const n = rs.length;
@@ -328,8 +345,17 @@ export function report(rs: SeedResult[], year: number, real?: ReturnType<ReturnT
     ['팀 경기당 득점', (r) => r.rpg, 2], ['팀당 홈런', (r) => r.hrPerTeam, 1], ['팀당 도루', (r) => r.sbPerTeam, 1], ['볼넷%', (r) => r.bbPct * 100, 1], ['삼진%', (r) => r.soPct * 100, 1],
   ];
   for (const [k, fn, d] of rows) out.push(`| ${k} | ${stat(rs.map(fn), d)} |`);
-  out.push('', '### 개인 1위 수치 (평균, 범위)\n', '| 부문 | 값 |', '|---|---|');
-  for (const k of ['hr', 'rbi', 'avg', 'w', 'sv', 'so', 'era', 'hld'] as const) out.push(`| ${k} | ${stat(rs.map((r) => r.top[k]), k === 'avg' ? 3 : k === 'era' ? 2 : 1)} |`);
+  if (real) {
+    const ws = real.teams.map((t) => (t.w + t.l ? t.w / (t.w + t.l) : 0.5));
+    const m = ws.reduce((a, b) => a + b, 0) / ws.length;
+    out.push(`| (실제 ${year} 승률 표준편차) | ${f(Math.sqrt(ws.reduce((a, b) => a + (b - m) ** 2, 0) / ws.length))} |`);
+  }
+  const rTop = real ? realTop(real) : undefined;
+  out.push('', '### 개인 1위 수치 (평균, 범위)\n', `| 부문 | 값 | 실제 ${year} |`, '|---|---|---|');
+  for (const k of ['hr', 'rbi', 'avg', 'w', 'sv', 'so', 'era', 'hld'] as const) {
+    const d = k === 'avg' ? 3 : k === 'era' ? 2 : 1;
+    out.push(`| ${k} | ${stat(rs.map((r) => r.top[k]), d)} | ${rTop ? f(rTop[k], d) : '-'} |`);
+  }
   out.push('', '### 타이틀·시상 수상자 (시드별, 반복 횟수)\n', '| 부문 | 수상자 (횟수/시드) |', '|---|---|');
   const labels = [...new Set(rs.flatMap((r) => Object.keys(r.titles)))];
   for (const l of labels) out.push(`| ${l} | ${counts(rs.map((r) => (r.titles[l] ? `${r.titles[l].name}(${r.titles[l].team}) ${r.titles[l].value}` : '-'))).map(([k2, c]) => `${k2} ×${c}`).join(' / ')} |`);
@@ -425,8 +451,10 @@ async function main(): Promise<void> {
   const store = loadDataStore();
   // --no-traits: 숨겨진 특수능력을 모두 끄고 잰다 (효과 크기 점검용 A/B. 누가 가졌는지는 출력하지 않는다)
   if (process.argv.includes('--no-traits')) store.traits = {};
-  const rs: SeedResult[] = [];
-  for (const sd of seeds) {
+  // --from a.json,b.json: 돌리지 않고 저장한 시드 결과(--json)를 합쳐 표만 다시 만든다 (시드를 여러 프로세스로 나눠 돌릴 때)
+  const from = arg('from');
+  const rs: SeedResult[] = from ? from.split(',').flatMap((p) => JSON.parse(readFileSync(p, 'utf8')) as SeedResult[]) : [];
+  for (const sd of from ? [] : seeds) {
     const t0 = Date.now();
     const r = runSeed(store, year, team, sd, basis);
     rs.push(r);

@@ -83,6 +83,11 @@ const FA_AI_OFFER = [1.0, 0.95, 0.9];
  * 실제 구단은 경쟁·흥행처럼 런으로 잡히지 않는 가치까지 보고 시장가를 낸다.
  */
 const FA_WILLINGNESS = 0.75;
+/**
+ * AI 구단이 FA를 잡을 때 지출 상한(샐러리캡·예산)에서 남겨 두는 몫 (상한 대비, 임시값). FA 뒤에 오는 보상선수·연봉 협상 인상이
+ * 상한의 3~5%를 더해서, 상한까지 꽉 채우면 개막 판정 때 캡을 넘었다 (첫 시즌 밸런스 2차, 2026-10-25: 10시드 중 5시드에서 한 구단 1.04배 안팎)
+ */
+const AI_FA_CAP_ROOM = 0.06;
 /** 2군 선수의 성장 판정 출전 기회 (퓨처스리그, 임시값)와 그 대상 나이 (다음 시즌 기준). 퓨처스 기록이 자료에 없어 근거는 없다 */
 const FUTURES_SHARE = 0.5;
 const FUTURES_AGE = 25;
@@ -1065,7 +1070,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
   const players = byId(league);
   const round = off.fa.round;
   // 구단별 지출 상한: 샐러리캡과 모기업 예산 중 작은 쪽 (owner.ts)
-  const limits = league.teams.map((_, t) => spendLimit(league, t, off.year + 1));
+  // AI 구단은 상한에서 AI_FA_CAP_ROOM만큼 남긴다 (플레이어 제시는 제시 때 상한 그대로 검사한다)
+  const limits = league.teams.map((_, t) => { const l = spendLimit(league, t, off.year + 1); return l === null ? null : Math.round(l * (1 - AI_FA_CAP_ROOM)); });
   const tendency = league.teams.map((_, t) => tendencyFor(league, view, t));
 
   for (const e of off.fa.entries) {

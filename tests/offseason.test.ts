@@ -9,6 +9,7 @@ import * as Off from '../src/league/offseason';
 import {
   ASIA_NEW_CAP, COMPENSATION, FA_COMP, faEligible, faGrade, foreignContractTotal, FOREIGN_NEW_CAP, FOREIGN_TOTAL_CAP, foreignTeamCap, MIN_SALARY, ORG_LIMIT, salaryCap, serviceNeeded,
 } from '../src/league/salary';
+import { ballHrMul } from '../src/league/futureRules';
 import { careerIndex } from '../src/league/growth';
 import { ageWidth, draftIndex, rankCenterRuns, runsPerGrade, sampleScale, triangular } from '../src/league/potential';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
@@ -403,7 +404,9 @@ describe('2026 시즌 종료 → 오프시즌 → 2027 개막과 완주 (M5 완�
 
   it('2027 리그 평균이 최근 실제 시즌 평균 근처다', () => {
     const recent = [2022, 2023, 2024, 2025, 2026].map((y) => store.season(y)!.league.runsPerTeamGame);
-    const target = recent.reduce((a, b) => a + b, 0) / recent.length;
+    // 2027부터 시즌마다 뽑는 반발계수(futureRules seasonCor, 홈런 목표 ×0.67~1.51)는 의도한 운이라 시험 대상에서 뺀다:
+    // 득점 중 홈런 몫(약 0.23)만큼 목표를 옮긴다 ('cycle' 시드 2027 배율 0.833, 2026-10-25 첫 시즌 밸런스 2차)
+    const target = (recent.reduce((a, b) => a + b, 0) / recent.length) * ballHrMul(g.league, 2027) ** 0.23;
     const runs = g.season.totals.r / (g.season.totals.games * 2);
     expect(runs).toBeGreaterThan(target * 0.88);
     expect(runs).toBeLessThan(target * 1.12);
