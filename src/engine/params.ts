@@ -198,6 +198,16 @@ export interface Manager2Params {
    * leadMin~leadMax점 리드나 1~trailMax점 지는 이닝 시작에 마무리를 올린다 (manager.ts). 마무리를 실전 감각 때문에 내보내는 감독 습관. 모두 임시값
    */
   closerWarmup: { rest: number; inning: number; leadMin: number; leadMax: number; trailMax: number };
+  /**
+   * 선발 차례 (투수 이닝 밸런스, 2026-10-26): 쉴 만큼 쉰 로테이션 투수 가운데 (지난 선발 날 + 순번 × 이 값)이 가장 작은 투수. 0이면 가장 오래 쉰 투수부터,
+   * 크면 에이스부터. 실제 구단은 쉬는 날·우천 취소 뒤 앞 순번을 당겨 에이스가 30선발 안팎을 던진다 (2022~2026 이닝 1~6위 29~32선발)
+   */
+  aceDays: number;
+  /**
+   * 잘 던지는 선발 더 끌고 가기 (투수 이닝 밸런스, 2026-10-26): 선발의 감독 투구 수 기준(plan)에 1 + bonus − perRun × 그 경기 실점을 곱한다
+   * (아래 floor·위 1 + bonus로 자른다). 감독이 경기 흐름을 보고 정하는 몫이라 투수의 한계·능력은 보지 않는다
+   */
+  starterDeal: { bonus: number; perRun: number; floor: number };
 }
 
 /** 시대별 주루·병살·희생플라이·도루 배율 한 줄 (엔진 2 13단계). 현대 값(params의 기본값)에 곱한다 */
@@ -439,6 +449,11 @@ export interface EngineParams {
   twoOutBonus: number;
   /** 도루 시도 배율: 선수의 "1루 출루당 시도율"을 타석 기회당 확률로 바꾸는 값 */
   stealScale: number;
+  /**
+   * 도루 시도율(1루 출루당) 능력을 리그 쪽(0.05)으로 당기는 가상 1루 출루 수 (ratings.ts batSkillFrom). 도루 밸런스(2026-10-26)에서 40 → 20:
+   * 40이면 2026 첫 시즌 도루 1위 35~40개·40개 넘는 타자 0.3~0.7명(실제 2015~2025 1위 45.6개·1.7명)으로 잘 뛰는 타자가 덜 뛰었다 (임시값)
+   */
+  sbAttRegress: number;
   /**
    * 시대별 주루·병살·희생플라이·도루 배율 (엔진 2 13단계, eras.ts withEraRunning). year 오름차순 기준 해의 값이고, 사이 해는 앞뒤 기준 해를
    * 선으로 잇고 처음보다 앞·끝보다 뒤는 그 끝 값을 쓴다. 비어 있으면 모두 1. 시즌을 열 때 doublePlay·sacFly·stealScale과 주자 추가 진루 확률(firstToThirdOnSingle·secondToHomeOnSingle·firstToHomeOnDouble)에 곱한다
@@ -762,6 +777,8 @@ export const DEFAULT_PARAMS: EngineParams = {
     onePoint: { inning: 7, maxDiff: 2, rate: 0.12 },
     setup: 2,
     closerWarmup: { rest: 3, inning: 9, leadMin: 4, leadMax: 5, trailMax: 2 },
+    aceDays: 1,
+    starterDeal: { bonus: 0.08, perRun: 0.04, floor: 0.85 },
   },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인 참고값). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
@@ -894,6 +911,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   firstToHomeOnDouble: 0.58,
   twoOutBonus: 0.15,
   stealScale: 1.2,
+  sbAttRegress: 20,
   // 엔진 2 13단계 (2026-10-23, 모두 임시값): tools/validate_engine.ts 20~40시즌으로 1985·1990·1995 득점 ±5%, 병살·희생플라이(온전한 구단) ±10%,
   // 2012·2019 병살·희생플라이·도루를 맞춘 값. 실책(err)은 근거가 있다: 2001~2026은 사용자 수비 기록(리그 실책 합)이 비자책 비율에 비례하고,
   // 2000년 이전은 기사의 경기당 실책(1984 1.7개, 1990년대 1.5개대, OSEN 2023-04-18 등, docs/temp-values.md)이 그 비례식(1985 2.3개)보다 적다.

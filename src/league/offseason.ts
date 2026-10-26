@@ -13,6 +13,7 @@ import { archiveDeparting } from './history';
 import { envFrom } from './war';
 import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
+import { invNorm } from '../data/pitches';
 import {
   ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, penTrustOf, Rng, traitsOf,
   type BatSkill, type EngineParams, type Season, type SimPlayer, type World,
@@ -3030,6 +3031,22 @@ const CONTROL_SKILL = { so: 0.92, bb: 0.8 };
 export const UNDERHAND_SHARE = { R: 0.154, L: 0.004 } as const;
 export const UNDERHAND_SKILL = { so: 0.945, bb: 0.886 } as const;
 
+/**
+ * 가상 타자의 도루 시도율 분포 (도루 밸런스, 2026-10-26): 1루 출루당 시도율을 로그정규로. 가운데·퍼짐은 2001·2015·2026 시작 리그의
+ * 300타석 이상 타자 능력(ratings.ts batSkillFrom)의 25·50·75·90% 값(0.04·0.065·0.12·0.21)에 맞췄다 (임시값). 예전에는 0.02~0.12 균등이라
+ * 가상 선수만 남은 장기 진행에서 도루 40개 타자가 사라졌다 (칭호 분포: 첫해 1.0명 → 20시즌째 0명, 실제 1.7~2명)
+ */
+export const VIRTUAL_SB_ATT = { median: 0.065, sigma: 0.9, max: 0.4 } as const;
+
+/** 가상 타자의 도루 시도율·성공률·주력. 주력은 능력 산출(ratings.ts)과 같은 꼴로 시도율에서 낸다 (난수는 예전처럼 셋) */
+function virtualRunning(rng: Rng): Pick<BatSkill, 'sbAtt' | 'sbPct' | 'speed'> {
+  const v = VIRTUAL_SB_ATT;
+  const sbAtt = Math.min(v.max, v.median * Math.exp(v.sigma * invNorm(Math.min(0.9999, Math.max(0.0001, rng.next())))));
+  const sbPct = 0.6 + rng.next() * 0.2;
+  const speed = Math.min(1, Math.max(0, 0.5 + 2.2 * (sbAtt - 0.05) + (rng.next() - 0.5) * 0.3));
+  return { sbAtt, sbPct, speed };
+}
+
 /** 가상 선수 한 명을 만들어 리그(무소속)에 넣는다. 능력은 리그 평균(모든 비율 1.00) 선수에서 목표 런에 맞게 옮긴다 */
 function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, spec: VirtualSpec, year: number): LeaguePlayer {
   const nextYear = year + 1;
@@ -3053,7 +3070,7 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     foreign: spec.foreign, asia: spec.asia, birthYear: spec.birthYear ?? nextYear - spec.age, school: null, entryYear: nextYear,
     bat: isPitcher ? null : {
       so: 1, bb: 1, hbp: 1, hr: 1, s1: 1, d2: 1, t3: 1,
-      sbAtt: 0.02 + rng.next() * 0.1, sbPct: 0.6 + rng.next() * 0.2, speed: 0.25 + rng.next() * 0.5, sample: 0,
+      ...virtualRunning(rng), sample: 0,
     },
     pit: !isPitcher ? null : {
       so: 1, bb: 1, hbp: 1, hr: 1, hit: 1,

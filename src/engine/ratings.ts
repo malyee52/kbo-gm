@@ -119,7 +119,7 @@ export function batSkillFrom(rows: Weighted<BatRow>[], priors: Rates, p: EngineP
     }
   }
   const PRIOR_ATT = 0.05;
-  skill.sbAtt = (att + 40 * PRIOR_ATT) / (onFirst + 40);
+  skill.sbAtt = (att + p.sbAttRegress * PRIOR_ATT) / (onFirst + p.sbAttRegress);
   skill.sbPct = (sb + 10 * DEFAULT_SB_PCT) / (known + 10);
   // 속도: 도루 시도율과 3루타 비율로 추정. 0.5가 평균
   const raw = 0.5 + 2.2 * (skill.sbAtt - PRIOR_ATT) + 0.08 * (skill.t3 - 1);
