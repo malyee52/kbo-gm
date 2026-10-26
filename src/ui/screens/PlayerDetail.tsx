@@ -174,7 +174,7 @@ function Head({ p, narrow, onClose, onTitles }: { p: SimPlayer; narrow: boolean;
 function TitleChip({ v }: { v: TitleView }) {
   const cls = v.tier === 'L' ? 'legend' : `t${v.tier}`;
   const when = v.years.length > 1 ? `${v.years.join(', ')}` : String(v.years[0]);
-  const tip = `${v.cond} · ${when}${v.real ? ' (실제 기록)' : ''}${v.owner ? ` · KBO 레전드 ${v.owner}의 별명` : ''}`;
+  const tip = `${v.cond}${v.note ? ` (${v.note})` : ''} · ${when}${v.real ? ' (실제 기록)' : ''}${v.owner ? ` · KBO 레전드 ${v.owner}의 별명` : ''}`;
   return <span className={`honor ${cls}`} title={tip}>{v.name}{v.tier !== 'L' && <span className="honor-star" aria-label={`별 ${v.tier}개`}>{tierText(v.tier)}</span>}</span>;
 }
 
@@ -738,7 +738,7 @@ const TITLE_COLS: Column<TitleRow>[] = [
   { key: 'group', label: '갈래', text: true, value: (r) => GROUP_LABEL[r.group], brief: true },
   { key: 'years', label: '얻은 해', text: true, value: (r) => r.years[r.years.length - 1], brief: true,
     cell: (r) => <>{r.years.join(', ')}{r.real && <span className="tag" title="게임 시작 전 실제 기록에서 얻은 칭호">실제</span>}</> },
-  { key: 'cond', label: '조건', text: true, value: (r) => r.cond, cell: (r) => <>{r.cond}{r.owner && <span className="muted"> · KBO 레전드 {r.owner}의 별명</span>}</> },
+  { key: 'cond', label: '조건', text: true, value: (r) => r.cond, cell: (r) => <>{r.cond}{r.note && <span className="muted"> ({r.note})</span>}{r.owner && <span className="muted"> · KBO 레전드 {r.owner}의 별명</span>}</> },
 ];
 
 /** '계약·이력' 탭 칭호 칸 (기획안 6.1): 수상 이력(MVP·골든글러브·신인왕)도 이 칸이 맡는다. 효과는 없다 */

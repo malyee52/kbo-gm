@@ -503,6 +503,8 @@ export interface TitleView {
   /** 얻은 해 (여러 번이면 모두, 오름차순) */
   years: number[];
   cond: string;
+  /** 횟수로 등급이 오르는 칭호의 등급 규칙 */
+  note?: string;
   /** 지금 타이틀 보유 ("현 홈런왕") */
   current: boolean;
   /** 모두 시작 전 실제 기록에서 얻음 */
@@ -525,13 +527,13 @@ function viewOf(key: string, recs: TitleRecord[], ctx: Ctx): TitleView | null {
     const k = key.slice(5) as LeadKey;
     const current = last === ctx.lastYear;
     return { ...base, stem: key, group: n >= 3 ? 'H' : 'A', tier: countTier(n, [[1, 1], [3, 2], [5, 3]]), current,
-      name: `${current ? '현 ' : ''}${LEAD_NAME[k]}${n > 1 ? ` ×${n}` : ''}`, cond: `${LEAD_COND[k]}. 3회 ★★, 5회 ★★★` };
+      name: `${current ? '현 ' : ''}${LEAD_NAME[k]}${n > 1 ? ` ×${n}` : ''}`, cond: LEAD_COND[k], note: '3회 ★★, 5회 ★★★' };
   }
-  if (key === 'mvp') return { ...base, stem: key, group: 'D', tier: n >= 2 ? 3 : 2, current: false, name: n > 1 ? `MVP ×${n}` : 'MVP', cond: '정규시즌 MVP. 2회부터 ★★★' };
+  if (key === 'mvp') return { ...base, stem: key, group: 'D', tier: n >= 2 ? 3 : 2, current: false, name: n > 1 ? `MVP ×${n}` : 'MVP', cond: '정규시즌 MVP', note: '2회부터 ★★★' };
   if (key === 'rookie') return { ...base, stem: key, group: 'D', tier: 1, current: false, name: '신인왕', cond: '신인상' };
   if (key === 'champ') {
     const tier = countTier(n, [[3, 1], [5, 2]]);
-    return { ...base, stem: key, group: 'F', tier, current: false, name: n >= 5 ? `다섯 반지 (우승 ×${n})` : n >= 3 ? `왕조의 주역 (우승 ×${n})` : `우승 ×${n}`, cond: '한국시리즈 우승 (그 해 1군 기록이 있는 선수). 3회 ★, 5회 ★★' };
+    return { ...base, stem: key, group: 'F', tier, current: false, name: n >= 5 ? `다섯 반지 (우승 ×${n})` : n >= 3 ? `왕조의 주역 (우승 ×${n})` : `우승 ×${n}`, cond: '한국시리즈 우승 (그 해 1군 기록이 있는 선수)', note: '3회 ★, 5회 ★★' };
   }
   if (key === 'ksmvp') return { ...base, stem: key, group: 'F', tier: 2, current: false, name: n > 1 ? `한국시리즈 MVP ×${n}` : '한국시리즈 MVP', cond: '한국시리즈 MVP' };
   if (key === 'psmvp') return { ...base, stem: key, group: 'F', tier: 1, current: false, name: n > 1 ? `시리즈 MVP ×${n}` : '시리즈 MVP', cond: '준플레이오프·플레이오프 MVP' };
@@ -558,7 +560,7 @@ function ggView(recs: TitleRecord[], ctx: Ctx): TitleView {
   const years = recs.map((r) => r.year).sort((a, b) => a - b);
   const posText = [...pos].sort((a, b) => b[1] - a[1]).map(([p]) => p).join('·');
   return { stem: 'gg', key: 'gg', group: 'D', tier: countTier(n, [[1, 1], [5, 2], [8, 3]]), years, real: years[n - 1] < ctx.startYear, current: false,
-    name: `골든글러브 ${posText}${n > 1 ? ` ×${n}` : ''}`, cond: '골든글러브 (자리 영문 약자, 외야는 OF). 5회 ★★, 8회 ★★★' };
+    name: `골든글러브 ${posText}${n > 1 ? ` ×${n}` : ''}`, cond: '골든글러브 수상', note: '자리는 영문 약자, 외야는 OF. 5회 ★★, 8회 ★★★' };
 }
 
 const TIER_ORDER = (t: TitleTier) => (t === 'L' ? 4 : t);
