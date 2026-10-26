@@ -1,6 +1,7 @@
 // 칭호 조건 분포 (칭호 기획안, 2026-10-26): 칭호 후보 조건마다 "리그에 몇 명쯤" 붙는지 실제 KBO 기록과 게임 장기 진행에서 같은 셈으로 잰다.
 //
-// 사용법:  npx tsx tools/title_dist.ts [--real-only] [--start 2026] [--seasons 20] [--seeds a,b] [--out reports/title-dist.md]
+// 사용법:  npx tsx tools/title_dist.ts [--real-only] [--start 2026] [--seasons 20] [--seeds a,b] [--out reports/title-dist.md] [--dump 파일 | --load 파일]
+//          --dump: 게임 시즌을 JSON으로 남김, --load: 남긴 시즌으로 시뮬레이션 없이 다시 셈 (조건만 바꿔 볼 때)
 //
 // 셈 기준
 // - 시즌 칭호: 그 해 조건을 채운 선수 수 (해마다 평균).
@@ -353,7 +354,7 @@ const LEGEND: Legend[] = [
   L(33, '61240', '니퍼트', '니느님', '외국인 통산 100승 + 통산 승률 .600', (_, c) => c.hist[0].foreign && c.pit.w >= 100 && c.pit.w / (c.pit.w + c.pit.l) >= 0.6),
   L(34, '91511', '전준호', '대도', '통산 540도루', (_, c) => c.bat.sb >= 540),
   L(35, '70425', '배영수', '푸른 피의 에이스', '만 23세 이하 다승·승률 1위 (같은 해) + 통산 130승', (_, c) => c.hist.some((s) => (s.age ?? 99) <= 23 && s.lead.has('w') && s.lead.has('wpct')) && c.pit.w >= 130),
-  L(36, '99222', '홍성흔', '홍포', '포수·지명타자 골든글러브 (각 1회 이상) + 통산 2,000안타', (_, c) => ggAt(c, 'C') >= 1 && ggAt(c, 'DH') >= 1 && c.bat.h >= 2000),
+  L(36, '99222', '홍성흔', '부전드', '포수·지명타자 골든글러브 (각 1회 이상) + 통산 2,000안타', (_, c) => ggAt(c, 'C') >= 1 && ggAt(c, 'DH') >= 1 && c.bat.h >= 2000),
   L(37, '85620', '이순철', null, '신인왕 + 도루 1위 3회', (_, c) => c.hist.some((s) => s.rookie) && leads(c, 'sb') >= 3),
   L(38, '75808', '정근우', '악마의 2루수', '2루수 골든글러브 3회 + 통산 350도루', (_, c) => ggAt(c, '2B') >= 3 && c.bat.sb >= 350),
   L(39, '96307', '박진만', '국민 유격수', '유격수 골든글러브 5회 + 통산 1,900경기', (_, c) => ggAt(c, 'SS') >= 5 && c.bat.g >= 1900),
@@ -441,19 +442,38 @@ async function main(): Promise<void> {
 
   // 게임 장기 진행
   const game: Tally[] = [];
+  const dump = arg('dump');
+  const load = arg('load');
   if (!realOnly) {
-    installCalCache();
     const startCum = tally(real.filter((s) => s.year < start), null).cum;
-    for (const seed of seeds) {
-      const t0 = Date.now();
-      const { league } = createLeague(store, start, seed, params);
-      const xs: S[] = [];
-      for (let i = 0; i < n; i++) {
-        xs.push(...gameYear(league, store, params));
-        console.log(`[${seed}] ${league.year - 1} 끝 (${((Date.now() - t0) / 1000).toFixed(0)}초)`);
+    if (load) {
+      // --load: 예전에 --dump로 남긴 게임 시즌으로 다시 센다 (조건만 바꿔 볼 때, 시뮬레이션 없음)
+      const saved = JSON.parse(readFileSync(load, 'utf8')) as { start: number; seeds: { seed: string; secs: number; xs: (Omit<S, 'lead'> & { lead: string[] })[] }[] };
+      for (const d of saved.seeds) {
+        game.push(tally(d.xs.map((x) => ({ ...x, lead: new Set(x.lead) })), startCum).tally);
+        parts.push(`- 시드 ${d.seed}: ${saved.start}~${saved.start + n - 1}, ${d.secs}초 (${load}에서 읽음)`);
       }
-      game.push(tally(xs, startCum).tally);
-      parts.push(`- 시드 ${seed}: ${start}~${start + n - 1}, ${((Date.now() - t0) / 1000).toFixed(0)}초`);
+    } else {
+      installCalCache();
+      const out: { seed: string; secs: number; xs: S[] }[] = [];
+      for (const seed of seeds) {
+        const t0 = Date.now();
+        const { league } = createLeague(store, start, seed, params);
+        const xs: S[] = [];
+        for (let i = 0; i < n; i++) {
+          xs.push(...gameYear(league, store, params));
+          console.log(`[${seed}] ${league.year - 1} 끝 (${((Date.now() - t0) / 1000).toFixed(0)}초)`);
+        }
+        game.push(tally(xs, startCum).tally);
+        const secs = Math.round((Date.now() - t0) / 1000);
+        out.push({ seed, secs, xs });
+        parts.push(`- 시드 ${seed}: ${start}~${start + n - 1}, ${secs}초`);
+      }
+      // --dump: 게임 시즌을 남겨 두면 --load로 조건만 바꿔 다시 셀 수 있다
+      if (dump) {
+        mkdirSync(dirname(dump), { recursive: true });
+        writeFileSync(dump, JSON.stringify({ start, seeds: out }, (_, v) => (v instanceof Set ? [...v] : v)));
+      }
     }
     parts.push('');
   }
