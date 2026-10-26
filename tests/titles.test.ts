@@ -55,13 +55,12 @@ describe('레전드 칭호 (기획안 7장)', () => {
 });
 
 describe('시작 때 칭호 (결정 7: 시작 해 전 실제 기록)', () => {
-  it('2026년 시작: 류현진 황태자·손아섭 적토마·강민호 포도대장, 최정은 홈런 줄기 가장 높은 칸 사백 홈런', () => {
+  it('2026년 시작: 레전드 칭호는 별명 주인만이라 아무도 없다 (류현진·양의지·손아섭·강민호 없음), 최정은 홈런 줄기 가장 높은 칸 사백 홈런', () => {
     const { league } = createLeague(store, 2026, 'titles-2026', FAST);
     const look = { startYear: 2026, lastYear: 2025, legends: store.legendTitles };
     const legend = (id: string) => titlesOf(league.titles, id, look).filter((v) => v.tier === 'L').map((v) => v.name);
-    expect(legend('76715')).toEqual(['황태자']);
-    expect(legend('77532')).toEqual(['적토마']);
-    expect(legend('74540')).toEqual(['포도대장']);
+    for (const id of ['76715', '76232', '77532', '74540']) expect(legend(id), id).toEqual([]);
+    expect(league.titles!.some((r) => r.key.startsWith('L:'))).toBe(false);
     const choi = titlesOf(league.titles, '75847', look);
     expect(choi.map((v) => v.name)).toEqual(expect.arrayContaining(['백 홈런', '이백 홈런', '삼백 홈런', '사백 홈런']));
     const chips = titleChips(choi);
@@ -74,17 +73,29 @@ describe('시작 때 칭호 (결정 7: 시작 해 전 실제 기록)', () => {
     expect(league.titles!.every((r) => ids.has(r.id))).toBe(true);
   });
 
-  it('2025년 시작: 로하스 흑곰(2020), 박병호 연습생 신화(2014), 2024년 타이틀은 "현 ○○왕"', () => {
+  it('2025년 시작: 로하스 흑곰·박병호 연습생 신화는 붙지 않고(주인 아님), 2024년 타이틀은 "현 ○○왕"', () => {
     const { league } = createLeague(store, 2025, 'titles-2025', FAST);
     const look = { startYear: 2025, lastYear: 2024, legends: store.legendTitles };
-    const rojas = titlesOf(league.titles, '67025', look).find((v) => v.tier === 'L');
-    expect(rojas).toMatchObject({ name: '흑곰', years: [2020], owner: '우즈', real: true });
-    expect(titlesOf(league.titles, '75125', look).find((v) => v.tier === 'L')?.name).toBe('연습생 신화');
+    expect(league.players.some((p) => p.id === '67025') && league.players.some((p) => p.id === '75125')).toBe(true);
+    expect(titlesOf(league.titles, '67025', look).filter((v) => v.tier === 'L')).toEqual([]);
+    expect(titlesOf(league.titles, '75125', look).filter((v) => v.tier === 'L')).toEqual([]);
+    // 기록 칭호는 그대로 (박병호 홈런왕 등)
+    expect(titlesOf(league.titles, '75125', look).some((v) => v.key === 'lead:hr')).toBe(true);
     const cur = league.titles!.filter((r) => r.year === 2024 && r.key.startsWith('lead:'));
     expect(cur.length).toBeGreaterThan(10);
     const v = titlesOf(league.titles, cur[0].id, look).find((x) => x.key === cur[0].key)!;
     expect(v.current).toBe(true);
     expect(v.name.startsWith('현 ')).toBe(true);
+  });
+
+  it('1995년 시작: 별명 주인은 시작 때 자기 레전드 칭호를 갖고(선동열 국보, 이종범 바람의 아들), 남의 별명 조건은 붙지 않는다(선동열 싸움닭)', () => {
+    const { league } = createLeague(store, 1995, 'titles-1995', FAST);
+    const look = { startYear: 1995, lastYear: 1994, legends: store.legendTitles };
+    const legend = (id: string) => titlesOf(league.titles, id, look).filter((v) => v.tier === 'L').map((v) => v.name);
+    expect(legend('85672')).toEqual(['국보']);
+    expect(legend('93607')).toEqual(['바람의 아들']);
+    const owners = new Map(store.legendTitles!.map((x) => [`L:${x.rank}`, x.id]));
+    for (const r of league.titles!.filter((x) => x.key.startsWith('L:'))) expect(r.id).toBe(owners.get(r.key));
   });
 
   it('타이틀 칭호는 횟수로 남는다: 류현진 탈삼진왕 ×5는 ★★★ (5회), 이력 해 목록', () => {
@@ -164,6 +175,11 @@ describe('결산 판정 (게임 안 시즌)', () => {
     const holders = a.league.titles!.filter((r) => r.key === 'champ' && r.year === 2026);
     expect(holders.length).toBeGreaterThan(15);
     for (const r of holders) expect(a.league.players.find((p) => p.id === r.id)!.history.find((h) => h.year === 2026)!.team).toBe(champ);
+  });
+
+  it('시작 전에 이미 조건을 채운 주인 아닌 선수는 결산에서도 그 레전드 칭호를 얻지 않는다 (강민호 포도대장·손아섭 적토마)', () => {
+    expect(a.league.titles!.some((r) => r.id === '74540' && r.key === 'L:23')).toBe(false);
+    expect(a.league.titles!.some((r) => r.id === '77532' && r.key === 'L:19')).toBe(false);
   });
 
   it('같은 해를 다시 판정해도 결과가 같다 (결정적)', () => {

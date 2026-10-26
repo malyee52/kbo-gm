@@ -111,6 +111,7 @@ function addSeason(c: Cum, s: TitleSeason): void {
   if (s.fr) c.fr[s.fr] = (c.fr[s.fr] ?? 0) + 1;
   c.hist.push(s);
 }
+const cloneCum = (c: Cum): Cum => ({ ...c, bat: { ...c.bat }, pit: { ...c.pit }, lead: { ...c.lead }, fr: { ...c.fr }, hist: [...c.hist] });
 const leads = (c: Cum, ...ks: string[]) => ks.reduce((n, k) => n + (c.lead[k] ?? 0), 0);
 const titleTotal = (c: Cum) => LEAD_KEYS.reduce((n, k) => n + (c.lead[k] ?? 0), 0);
 const streak = (h: TitleSeason[], ok: (s: TitleSeason) => boolean) => {
@@ -365,13 +366,15 @@ export function realTitleSeasons(store: Store, before: number): Map<string, Titl
 }
 
 /** 시즌 줄들을 처음부터 판정한다 (시작 전 실제 기록, 실제 기록 시험). keep: 그 선수의 기존 칭호 */
-function judgeHistory(id: string, hist: TitleSeason[], legends: LegendTitleRow[], keep: TitleRecord[] = []): TitleRecord[] {
+function judgeHistory(id: string, hist: TitleSeason[], legends: LegendTitleRow[], ownerOnly = false): TitleRecord[] {
   const c = emptyCum();
-  const held = new Set(keep.map((r) => r.key));
+  const held = new Set<string>();
   const out: TitleRecord[] = [];
+  // 시작 판정: 레전드 칭호는 별명 주인만 (2026-10-26 사용자 결정). 다른 선수는 게임 안 결산에서 조건을 채울 때 얻는다
+  const mine = ownerOnly ? legends.filter((L) => L.id === id) : legends;
   for (const s of hist) {
     addSeason(c, s);
-    for (const key of earned(s, c, held, legends)) { held.add(key); out.push({ id, key, year: s.year }); }
+    for (const key of earned(s, c, held, mine)) { held.add(key); out.push({ id, key, year: s.year }); }
     if (held.has('one15') && lostOneClub(c)) {
       held.delete('one15');
       const i = out.findIndex((r) => r.key === 'one15');
@@ -387,11 +390,11 @@ export function realTitles(store: Store, before: number): TitleRecord[] {
   return [...realTitleSeasons(store, before)].flatMap(([id, hist]) => judgeHistory(id, hist, legends));
 }
 
-/** 시작 때: 리그 선수의 시작 해 전 실제 기록으로 칭호를 붙인다 (결정 7). 얻은 해는 실제 연도 */
+/** 시작 때: 리그 선수의 시작 해 전 실제 기록으로 칭호를 붙인다 (결정 7). 얻은 해는 실제 연도. 레전드 칭호는 별명 주인만 (2026-10-26 사용자 결정) */
 export function startTitles(league: LeagueState, store: Store): void {
   const real = realTitleSeasons(store, league.startYear);
   const legends = store.legendTitles ?? [];
-  league.titles = league.players.flatMap((p) => (real.has(p.id) ? judgeHistory(p.id, real.get(p.id)!, legends) : []));
+  league.titles = league.players.flatMap((p) => (real.has(p.id) ? judgeHistory(p.id, real.get(p.id)!, legends, true) : []));
 }
 
 // ---- 게임 안 시즌
@@ -477,9 +480,15 @@ export function judgeTitles(league: LeagueState, store: Store, year: number, gam
     for (const l of p.history) if (l.year >= league.startYear && l.year < year && (l.bat || l.pit)) { const g = pastYear(l.year).get(p.id); if (g) hist.push(g); }
     hist.push(s);
     const c = emptyCum();
-    for (const h of hist) addSeason(c, h);
+    for (const h of hist.slice(0, -1)) addSeason(c, h);
+    // 레전드 칭호는 조건을 채운 그 시즌에만 얻는다: 지난 시즌까지 이미 채웠던 조건(시작 전 실제 기록으로 채운 주인 아닌 선수)은 붙지 않는다
+    const before = hist.length > 1 ? { s: hist[hist.length - 2], c: cloneCum(c) } : null;
+    addSeason(c, s);
     const held = new Set((byId.get(p.id) ?? []).map((r) => r.key));
-    for (const key of earned(s, c, held, legends)) added.push({ id: p.id, key, year });
+    for (const key of earned(s, c, held, legends)) {
+      if (key.startsWith('L:') && before && legendTest(Number(key.slice(2)))(before.s, before.c)) continue;
+      added.push({ id: p.id, key, year });
+    }
     if (held.has('one15') && lostOneClub(c)) dropOneClub.add(p.id);
   }
   league.titles = [...prior.filter((r) => !(r.key === 'one15' && dropOneClub.has(r.id))), ...added];

@@ -117,7 +117,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 새 화면을 만들면 `src/ui/menu.ts`의 MENU에 자리를 정하고, 열 수 없는 때가 있으면 `blockOf`에 사유와 열리는 때를 적는다 (숨기지 않는다). 처리해야 하는 일이 생기는 기능이면 `decisions.ts`에 넣는다. 엔트리·기용을 바꾸는 새 화면은 `session.checkBoard`/`applyBoard`로 묶음을 검사·적용한다.
 - 엔진을 바꿀 때 운으로 깨지기 쉬운 시험: `second-draft` 2025, `events-impact` 경기력(16시드 +3.0 대 −3.0, 득실 기준 기대 승률, 문턱 0.05, 전체 시험의 바닥 시간), `park` 홈런 배율(여덟 시드), `articles` 순위 기사. 시드 이력은 각 테스트 주석에 있다. `owner` M7 한 바퀴는 후보 시드 중 LG가 우승하지 못한 첫 판을 쓰고, `fantasy-free` 그레인키·`history` 최다 홈런·`records-screen` 순위표는 운과 관계없게 고쳤다 (2026-10-24).
 - 구장 값은 `teamParkInfo` 한 곳에서 고른다: 가벽 → 펜스 조정 → 게임 안 신구장 → 실제 구장 값 (`realParkYear`, 모든 해). 게임 안 공사는 그 해 개막 전에 끝난 `done` 기록으로 찾는다.
-- 칭호(`league/titles.ts`)는 결산 때 `beginOffseason`이 판정하고, 세션은 가을야구 우승·시리즈 MVP를 붙인 뒤 같은 해를 다시 판정한다 (`judgeTitles`는 그 해 칭호를 지우고 다시 내서 몇 번 불러도 같다). 시작 때는 시작 해 전 실제 기록(`startTitles`), 칸이 없는 예전 저장은 불러올 때 `ensureTitles`. 칭호는 엔진·AI 가치·연봉·관중·저장된 엔진 값에 쓰지 않는다 (`tests/titles.test.ts`).
+- 칭호(`league/titles.ts`)는 결산 때 `beginOffseason`이 판정하고, 세션은 가을야구 우승·시리즈 MVP를 붙인 뒤 같은 해를 다시 판정한다 (`judgeTitles`는 그 해 칭호를 지우고 다시 내서 몇 번 불러도 같다). 시작 때는 시작 해 전 실제 기록(`startTitles`, 레전드 칭호는 별명 주인만, 다른 선수는 게임 안에서 조건을 채운 시즌에만 얻는다, 2026-10-26 사용자), 칸이 없는 예전 저장은 불러올 때 `ensureTitles`. 칭호는 엔진·AI 가치·연봉·관중·저장된 엔진 값에 쓰지 않는다 (`tests/titles.test.ts`).
 - 시즌 중 선수 능력을 리그 값으로 다시 맞추는 조작(자유 모드 만들기·능력)은 뒤에 `applyLeagueRunSkills`로 주루·작전 손잡이와 리그 영점을 다시 낸다 (불러온 판과 같게).
 - 훈련 설정은 조작 `train`(시즌)·`train-off`(오프시즌). AI 훈련은 결산 때 규칙으로 정하고 저장하지 않는다.
 - 트레이드는 `Season.transfer`로 월드의 소속을 직접 바꾸고 저장에 이적 기록을 남긴다. 한 월드를 두 시즌이 같이 쓰지 않는다.
