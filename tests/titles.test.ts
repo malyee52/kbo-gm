@@ -120,7 +120,6 @@ describe('숨김 값과 실존 선수 규칙', () => {
       p.potential = 0;
       p.drive = 9;
       p.timing = 0;
-      if (p.bat) p.bat = { ...p.bat, def: 20 };
     }
     startTitles(league, store);
     expect(keyed(league.titles!)).toEqual(want);

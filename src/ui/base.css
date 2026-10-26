@@ -35,6 +35,11 @@
   --shadow-dock: 0 -4px 14px rgba(0, 0, 0, 0.06);
   --scrim: rgba(8, 12, 10, 0.5);
   /* 나이트 게임 색 (다크 모드의 바탕·강조, 시작 화면 머리는 두 모드 모두 이 색) */
+  /* 칭호 등급 (titles.ts): ★ 동, ★★ 은청, ★★★ 금, 레전드 보라 */
+  --honor-1: #8a6237;
+  --honor-2: #4f6a8a;
+  --honor-3: #9a7300;
+  --honor-legend: #8b2bb0;
   --night-bg: #0e1420;
   --night-fg: #eef2f8;
   --night-muted: #9aa7bc;
@@ -81,6 +86,10 @@
     --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.7);
     --shadow-dock: 0 -4px 14px rgba(0, 0, 0, 0.45);
     --scrim: rgba(0, 0, 0, 0.6);
+    --honor-1: #d6a06b;
+    --honor-2: #a3bfdf;
+    --honor-3: #ffcf4d;
+    --honor-legend: #d896f5;
     color-scheme: dark;
   }
 }

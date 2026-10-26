@@ -33,6 +33,7 @@ import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
 import { addToCompare, addToDraft, COMPARE_MAX, deskOf, tradeBlockReason, updateDesk, useDesk } from '../tradeDesk';
 import { WatchStar } from './Watch';
+import { GROUP_LABEL, tierText, titleChips, type TitleView } from '../../league/titles';
 
 type Tab = 'sum' | 'abil' | 'rec' | 'deal' | 'pit';
 const TABS: { key: Tab; label: string }[] = [
@@ -103,7 +104,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
       onClose={onClose} onClick={(e) => { if (narrow && e.target === ref.current) close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="pd-head">
-          <Head p={p} narrow={narrow} onClose={close} />
+          <Head p={p} narrow={narrow} onClose={close} onTitles={() => setTab('deal')} />
           <div className="pd-more"><HeadMore p={p} onClose={close} go={go} /></div>
           <div className="pd-tabs" role="tablist" aria-label="선수 상세">
             {TABS.filter((t) => t.key !== 'pit' || throws).map((t) => (
@@ -119,7 +120,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           {shownTab === 'sum' && <SummaryTab p={p} full={full} narrow={narrow} onClose={close} />}
           {shownTab === 'abil' && <AbilityTab p={p} full={full} />}
           {shownTab === 'rec' && <RecordTab p={p} full={full} store={store} />}
-          {shownTab === 'deal' && <><ContractInfo id={p.id} /><CareerInfo p={p} /></>}
+          {shownTab === 'deal' && <><ContractInfo id={p.id} /><TitleInfo p={p} full={full} /><CareerInfo p={p} /></>}
           {shownTab === 'pit' && (pitOpen ? <PitchingTab rows={pitchLog} full={full} /> : <p className="muted small">우리 구단 경기 기록만 있습니다 (다른 구단 경기는 박스스코어를 남기지 않는다).</p>)}
         </div>
         {year !== session.year && <p className="muted small">오프시즌: 기록은 {year} 시즌 기준입니다.</p>}
@@ -130,7 +131,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
 
 // ---- 머리 (탭과 상관없이 늘 보임)
 
-function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: () => void }) {
+function Head({ p, narrow, onClose, onTitles }: { p: SimPlayer; narrow: boolean; onClose: () => void; onTitles: () => void }) {
   const { session, store } = useGame();
   const year = session.world.year;
   const mine = p.teamIdx === session.teamIdx;
@@ -164,7 +165,29 @@ function Head({ p, narrow, onClose }: { p: SimPlayer; narrow: boolean; onClose: 
         {back === null && <CondTag text={cond} label />}
         {lp?.military?.state === 'homeOnly' && <span className="tag">방위병 복무 (홈경기만)</span>}
       </p>
+      <TitleChips id={p.id} onMore={onTitles} />
     </>
+  );
+}
+
+/** 칭호 칩 한 개 (효과 없는 명예 칭호, titles.ts). 색은 등급 토큰 (--honor-*) */
+function TitleChip({ v }: { v: TitleView }) {
+  const cls = v.tier === 'L' ? 'legend' : `t${v.tier}`;
+  const when = v.years.length > 1 ? `${v.years.join(', ')}` : String(v.years[0]);
+  const tip = `${v.cond} · ${when}${v.real ? ' (실제 기록)' : ''}${v.owner ? ` · KBO 레전드 ${v.owner}의 별명` : ''}`;
+  return <span className={`honor ${cls}`} title={tip}>{v.name}{v.tier !== 'L' && <span className="honor-star" aria-label={`별 ${v.tier}개`}>{tierText(v.tier)}</span>}</span>;
+}
+
+/** 선수 머리의 칭호: 앞 3개 + "+N" (결정 9). 눌러 보면 '계약·이력' 탭 칭호 칸 */
+function TitleChips({ id, onMore }: { id: string; onMore: () => void }) {
+  const { session } = useGame();
+  const chips = titleChips(session.titlesOf(id));
+  if (!chips.length) return null;
+  return (
+    <p className="pd-line small honors" aria-label="칭호">
+      {chips.slice(0, 3).map((v) => <TitleChip key={v.stem} v={v} />)}
+      <button type="button" className="honor-more" onClick={onMore} title="칭호 목록 (계약·이력 탭)">{chips.length > 3 ? `+${chips.length - 3}` : '칭호 보기'}</button>
+    </p>
   );
 }
 
@@ -704,6 +727,31 @@ function ContractInfo({ id }: { id: string }) {
         {clubs.length > 0 && <><dt>게임 안 소속</dt><dd>{clubs.join(' · ')}</dd></>}
       </dl>
       {session.phase === 'season' && <p className="muted small">시즌 중에는 개막 때 계약 기준입니다.</p>}
+    </section>
+  );
+}
+
+type TitleRow = TitleView;
+const TITLE_COLS: Column<TitleRow>[] = [
+  { key: 'name', label: '칭호', text: true, fixed: true, value: (r) => r.name, cell: (r) => <TitleChip v={r} /> },
+  { key: 'tier', label: '등급', value: (r) => (r.tier === 'L' ? 4 : r.tier), cell: (r) => tierText(r.tier), brief: true },
+  { key: 'group', label: '갈래', text: true, value: (r) => GROUP_LABEL[r.group], brief: true },
+  { key: 'years', label: '얻은 해', text: true, value: (r) => r.years[r.years.length - 1], brief: true,
+    cell: (r) => <>{r.years.join(', ')}{r.real && <span className="tag" title="게임 시작 전 실제 기록에서 얻은 칭호">실제</span>}</> },
+  { key: 'cond', label: '조건', text: true, value: (r) => r.cond, cell: (r) => <>{r.cond}{r.owner && <span className="muted"> · KBO 레전드 {r.owner}의 별명</span>}</> },
+];
+
+/** '계약·이력' 탭 칭호 칸 (기획안 6.1): 수상 이력(MVP·골든글러브·신인왕)도 이 칸이 맡는다. 효과는 없다 */
+function TitleInfo({ p, full }: { p: SimPlayer; full: boolean }) {
+  const { session } = useGame();
+  const rows = session.titlesOf(p.id);
+  return (
+    <section>
+      <h3>칭호</h3>
+      {rows.length
+        ? <DataTable id="player-titles" label="칭호" cols={TITLE_COLS} rows={rows} rowKey={(r) => r.key} full={full} />
+        : <p className="muted small">아직 칭호가 없습니다.</p>}
+      <p className="muted small">기록·타이틀·수상으로 붙는 이름표입니다. 능력이나 경기에는 영향이 없습니다. 칭호는 시즌 결산 때 붙습니다.</p>
     </section>
   );
 }
