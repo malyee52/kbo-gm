@@ -206,6 +206,7 @@ const franchiseStar = (c: Cum, f: string) => (c.fr[f] ?? 0) >= FRANCHISE_STAR_SE
  * 기록의 문턱만 쓰고 특정 경기·연승·시리즈 같은 실제 사건은 쓰지 않는다. alt가 있으면 '원래 또는 대안' (시대에 묶인 조건, 결정 12).
  * 데이터 표에서 nick이 없는 레전드(정민태·김시진·이순철, 결정 13)는 조건만 남고 칭호를 켜지 않는다.
  */
+/* 2026-10-26 개발: 게임에서 시드당 1명을 넘던 7개를 8시드 측정(reports/title-dist-8seeds.md)으로 조였다 (기획안 12장 9) */
 export const LEGEND_RULES: Record<number, { cond: string; test: Test; alt?: { cond: string; test: Test } }> = {
   1: { cond: '평균자책점 1위 5회', test: (_, c) => leads(c, 'era') >= 5 },
   2: { cond: '한 시즌 280이닝 + 탈삼진 220', test: (s) => s.pit.outs >= 840 && s.pit.so >= 220,
@@ -213,9 +214,9 @@ export const LEGEND_RULES: Record<number, { cond: string; test: Test; alt?: { co
   3: { cond: '한 시즌 타율 1위 + 도루 1위', test: (s) => s.lead.has('avg') && s.lead.has('sb') },
   4: { cond: '홈런 1위 5회 + MVP 3회', test: (_, c) => leads(c, 'hr') >= 5 && c.mvp >= 3 },
   5: { cond: '통산 200승', test: (_, c) => c.pit.w >= 200 },
-  6: { cond: '타율 1위 4회 + 통산 타율 .330 (3,000타수)', test: (_, c) => leads(c, 'avg') >= 4 && c.bat.ab >= 3000 && c.bat.h / c.bat.ab >= 0.33 },
+  6: { cond: '타율 1위 4회 + 통산 타율 .330 (3,000타수) + 통산 볼넷이 삼진 이상', test: (_, c) => leads(c, 'avg') >= 4 && c.bat.ab >= 3000 && c.bat.h / c.bat.ab >= 0.33 && c.bat.bb >= c.bat.so },
   7: { cond: '통산 타율 .315 (5,000타수) + 300홈런 + 1,200볼넷', test: (_, c) => c.bat.ab >= 5000 && c.bat.h / c.bat.ab >= 0.315 && c.bat.hr >= 300 && c.bat.bb >= 1200 },
-  8: { cond: '좌투 통산 200세이브', test: (_, c) => c.hist[0].throws === 'L' && c.pit.sv >= 200 },
+  8: { cond: '좌투 통산 200세이브 + 60승', test: (_, c) => c.hist[0].throws === 'L' && c.pit.sv >= 200 && c.pit.w >= 60 },
   9: { cond: '언더핸드로 10시즌 연속 10승', test: (_, c) => c.hist[0].underhand && streak(c.hist, (s) => s.pit.w >= 10) >= 10 },
   10: { cond: '같은 해 홈런·타점 1위 3시즌 연속 + 한 시즌 40홈런', test: (_, c) => streak(c.hist, (s) => s.lead.has('hr') && s.lead.has('rbi')) >= 3 && c.hist.some((s) => s.bat.hr >= 40) },
   11: { cond: '한 시즌 22승 + 4패 이하', test: (s) => s.pit.w >= 22 && s.pit.l <= 4 },
@@ -227,7 +228,7 @@ export const LEGEND_RULES: Record<number, { cond: string; test: Test; alt?: { co
     alt: { cond: '만 38세 이상 시즌에 15승', test: (s) => s.age !== null && s.age >= 38 && s.pit.w >= 15 } },
   17: { cond: '30홈런-30도루 3회', test: (_, c) => countIf(c.hist, (s) => s.bat.hr >= 30 && s.bat.sb >= 30) >= 3 },
   18: { cond: '한 시즌 20승 + 다승 1위 3회', test: (_, c) => c.hist.some((s) => s.pit.w >= 20) && leads(c, 'w') >= 3 },
-  19: { cond: '안타 1위 4회', test: (_, c) => leads(c, 'h') >= 4 },
+  19: { cond: '안타 1위 4회 + 통산 2,000안타', test: (_, c) => leads(c, 'h') >= 4 && c.bat.h >= 2000 },
   20: { cond: '1군 첫 6시즌 통산 100승', test: (_, c) => firstN(c, 6, (s) => s.pit.w) >= 100,
     alt: { cond: '1군 첫 6시즌 안에 다승 1위 2회 + 그 6시즌 95승', test: (_, c) => countIf(c.hist.slice(0, 6), (s) => s.lead.has('w')) >= 2 && firstN(c, 6, (s) => s.pit.w) >= 95 } },
   21: { cond: '세이브 1위 4회 + 통산 100승', test: (_, c) => leads(c, 'sv') >= 4 && c.pit.w >= 100 },
@@ -243,15 +244,15 @@ export const LEGEND_RULES: Record<number, { cond: string; test: Test; alt?: { co
   29: { cond: '주 포지션 3루수(3B) + 통산 타율 .300·출루율 .400 + 250홈런', test: (_, c) => c.hist[0].pos === '3B' && c.bat.ab > 0 && c.bat.h / c.bat.ab >= 0.3 && obp(c.bat) >= 0.4 && c.bat.hr >= 250 },
   30: { cond: '한 시즌 홈런 50 + 출루율 .470 (규정타석)', test: (s) => s.qBat && s.bat.hr >= 50 && obp(s.bat) >= 0.47 },
   31: { cond: '유격수(SS) 골든글러브 4회 + 도루 1위', test: (_, c) => ggAt(c, 'SS') >= 4 && leads(c, 'sb') >= 1 },
-  32: { cond: '2루수(2B) 골든글러브 5회', test: (_, c) => ggAt(c, '2B') >= 5 },
-  33: { cond: '외국인 통산 100승 + 통산 승률 .600', test: (_, c) => c.hist[0].foreign && c.pit.w >= 100 && c.pit.w / (c.pit.w + c.pit.l) >= 0.6 },
+  32: { cond: '2루수(2B) 골든글러브 5회 + 통산 도루 150개 미만', test: (_, c) => ggAt(c, '2B') >= 5 && c.bat.sb < 150 },
+  33: { cond: '외국인 통산 100승 + 통산 승률 .640', test: (_, c) => c.hist[0].foreign && c.pit.w >= 100 && c.pit.w / (c.pit.w + c.pit.l) >= 0.64 },
   34: { cond: '통산 540도루', test: (_, c) => c.bat.sb >= 540 },
   35: { cond: '만 23세 이하 시즌에 다승·승률 1위 (같은 해) + 통산 130승', test: (_, c) => c.hist.some((s) => s.age !== null && s.age <= 23 && s.lead.has('w') && s.lead.has('wpct')) && c.pit.w >= 130 },
   36: { cond: '포수(C)·지명타자(DH) 골든글러브 각 1회 이상 + 통산 2,000안타', test: (_, c) => ggAt(c, 'C') >= 1 && ggAt(c, 'DH') >= 1 && c.bat.h >= 2000 },
   37: { cond: '신인왕 + 도루 1위 3회', test: (_, c) => c.hist.some((s) => s.rookie) && leads(c, 'sb') >= 3 },
-  38: { cond: '2루수(2B) 골든글러브 3회 + 통산 350도루', test: (_, c) => ggAt(c, '2B') >= 3 && c.bat.sb >= 350 },
+  38: { cond: '2루수(2B) 골든글러브 3회 + 통산 350도루 + 득점 1위', test: (_, c) => ggAt(c, '2B') >= 3 && c.bat.sb >= 350 && leads(c, 'r') >= 1 },
   39: { cond: '유격수(SS) 골든글러브 5회 + 통산 1,900경기', test: (_, c) => ggAt(c, 'SS') >= 5 && c.bat.g >= 1900 },
-  40: { cond: '외국인으로 같은 해 홈런 1위 + MVP', test: (s) => s.foreign && s.lead.has('hr') && s.mvp },
+  40: { cond: '외국인으로 같은 해 홈런 1위 + 타점 1위 + 40홈런 + MVP', test: (s) => s.foreign && s.lead.has('hr') && s.lead.has('rbi') && s.bat.hr >= 40 && s.mvp },
 };
 /** 레전드 조건 문구 ('원래 또는 대안') */
 export const legendCond = (rank: number): string => {

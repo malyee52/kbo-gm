@@ -23,7 +23,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 전체 시험 (Vitest, 152개 파일 1140개, 2026-10-25 threads 4로 약 10~15분: npx vitest run --pool=threads --poolOptions.threads.maxThreads=4 --poolOptions.threads.minThreads=1). 모든 변경 뒤 전체 시험. 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
+npm test           # 전체 시험 (Vitest, 154개 파일 1161개, 2026-10-26 threads 4로 약 11분: npx vitest run --pool=threads --poolOptions.threads.maxThreads=4 --poolOptions.threads.minThreads=1). 모든 변경 뒤 전체 시험. 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
                    # 환경 맞춤 디스크 캐시(node_modules/.cache/kbo-cal, tools/calCache.ts): 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다
                    # (결과 같음. 혼자 돌린 PC에서 캐시 없음 1019초 → 찬 캐시 438초, 작업자 8개면 약 +30%). 끄기 KBO_CAL_CACHE=0
                    # 작업자 기본 8개 (약 3.8GB, vite.config.ts). KBO_TEST_FORKS=<수>, 0이면 vitest 기본(코어 수 − 1)
