@@ -46,6 +46,11 @@ export interface Contract {
    * 사용자 조사 2026-10-22). 지금은 실제 계약 자료(외국인_개막명단.csv)가 있는 선수만 있다 (생성식 계약은 연봉에 다 넣는다)
    */
   bonus?: number;
+  /**
+   * 해마다 연봉이 다른 다년 계약의 다음 시즌들 [시즌, 연봉(만 원)] (실제 계약 자료의 연도별 연봉, 예: 2022 SSG 첫해 몰아주기).
+   * 결산(beginOffseason) 때 다음 시즌 값을 salary로 옮기고 지운다. 없으면 계약 끝까지 salary 그대로 (선택 칸, 2026-10-26)
+   */
+  steps?: [number, number][];
 }
 
 export interface LeaguePlayer {

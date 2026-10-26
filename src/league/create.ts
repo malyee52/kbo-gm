@@ -1,6 +1,6 @@
 // 새 게임의 리그 상태 만들기: 시작 연도 자료로 월드를 만들고, 잠재력·계약·연차를 붙인다.
 
-import type { DataStore } from '../data/types';
+import type { ContractRow, DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
 import { marketReputation } from './scout';
@@ -33,6 +33,18 @@ function servedSeason(idx: CareerIndex, id: string, year: number): boolean {
  * 생년이 없는 선수(1980~90년대 자료에 많다)의 생년 추정: 입단 때 대졸 22세, 1991년 이전 입단은 23세(실업·대학 출신이 많던 시대), 그 뒤는 19세 (임시값).
  * 2026-10-08 사용자 결정: 빈 자료는 추정치로 채운다. 화면에는 "약 N세"로 표시한다 (birthYearEstimated).
  */
+/**
+ * 실제 다년 계약의 해마다 연봉 (억 원, 계약 첫해부터). 연도별 연봉 자료(yearly)가 있는 해는 그 값, 나머지 해는 남은 보장액을 고르게 나눈다.
+ * 자료가 없으면 보장액 ÷ 기간 (2026-10-26 전에는 늘 이렇게 나눠, 2022 SSG 첫해 몰아주기 계약이 2023년 캡을 넘겼다)
+ */
+export function contractYearPay(c: Pick<ContractRow, 'first' | 'years' | 'guaranteed' | 'yearly'>): number[] {
+  const known = c.yearly ?? {};
+  const years = Array.from({ length: c.years }, (_, i) => c.first + i);
+  const rest = years.filter((y) => known[y] === undefined);
+  const left = Math.max(0, c.guaranteed - years.reduce((a, y) => a + (known[y] ?? 0), 0));
+  return years.map((y) => known[y] ?? left / rest.length);
+}
+
 export function estimatedBirthYear(m: { entryYear: number; school?: 'HS' | 'UNIV' }): number {
   const age = m.school === 'UNIV' ? 22 : m.entryYear < 1992 ? 23 : 19;
   return m.entryYear - age;
@@ -158,10 +170,15 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     // 외국인 연봉은 진짜 능력이 아니라 시장 평판 (scout.ts, 기획안 19.4)
     if (p.foreign) contract = { kind: 'foreign', salary: foreignSalary(marketReputation(seed, p.id, now, startYear), false, asia), until: startYear };
     else if (active) {
+      const until = active.first + active.years - 1;
+      const pay = contractYearPay(active).map((v) => Math.max(minSalary(startYear), Math.round(v * 10000)));
+      const steps = pay.map((v, i): [number, number] => [active.first + i, v]).filter(([y]) => y > startYear);
       contract = {
         kind: active.kind === 'FA' ? 'fa' : 'nonFA',
-        salary: Math.max(minSalary(startYear), Math.round((active.guaranteed * 10000) / active.years)),
-        until: active.first + active.years - 1,
+        salary: pay[startYear - active.first],
+        until,
+        // 해마다 연봉이 다른 계약만 다음 시즌 값을 남긴다 (고르게 나눈 계약은 예전과 같다)
+        ...(steps.some(([, v]) => v !== pay[startYear - active.first]) ? { steps } : {}),
       };
     } else if (m.entryYear >= startYear) contract = { kind: 'rookie', salary: minSalary(startYear), until: startYear };
     // FA를 다녀왔지만 계약 자료가 없는 선수: 보류 연봉 협상과 같은 하한 (offseason.ts POST_FA_RESERVE. 2026-10-22 시장 연봉의 0.8 → 0.5)

@@ -285,6 +285,8 @@ export interface ContractRow {
   guaranteed: number;
   option: number;
   note?: string;
+  /** 연도별 연봉 (시즌 → 억 원, data-src/계약_연도별.csv). 적지 않은 해는 남은 보장액을 고르게 나눈다. 없으면 모든 해를 고르게 나눈다 */
+  yearly?: Record<string, number>;
 }
 
 /** 불러온 데이터에 접근하는 창구. Node용(loadNode)과 브라우저용(loadBrowser) 구현이 있다 */

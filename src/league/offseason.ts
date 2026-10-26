@@ -402,6 +402,17 @@ function defenseInnings(season: Season, idx: number): { def?: number[] } {
   return inn.some((v) => v > 0) ? { def: inn } : {};
 }
 
+/** 연도별 연봉 계약 (Contract.steps): 그 시즌 값이 있으면 salary로 옮기고, 지난 값은 지운다 */
+export function stepContract(p: LeaguePlayer, season: number): void {
+  const steps = p.contract.steps;
+  if (!steps) return;
+  // 계약이 이미 끝났으면(방출 등) 남은 값은 버린다
+  const hit = season <= p.contract.until ? steps.find(([y]) => y === season) : undefined;
+  const rest = steps.filter(([y]) => y > season && y <= p.contract.until);
+  const { steps: _, ...base } = p.contract;
+  p.contract = { ...base, ...(hit ? { salary: hit[1] } : {}), ...(rest.length ? { steps: rest } : {}) };
+}
+
 export function beginOffseason(league: LeagueState, world: World, season: Season, store: Store, userTeam: number,
                                params: EngineParams = DEFAULT_PARAMS, userEnlist?: string[], userApply?: string[]): OffseasonState {
   const year = league.year;
@@ -613,6 +624,9 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   // 시즌 중 시장 (market.ts): 끝내 계약하지 않은 선수는 리그에서 지운다. 계약한 선수는 이제 보통 선수다
   league.players = league.players.filter((p) => !((p.market === year || p.reserve === year) && p.team === -1 && !p.history.some((h) => h.year === year)));
   for (const p of league.players) { delete p.market; delete p.reserve; }
+
+  // 해마다 연봉이 다른 실제 다년 계약 (Contract.steps): 결산이 끝났으니 다음 시즌 연봉으로 바꾼다 (FA·캡 검사는 다음 시즌 값을 본다)
+  for (const p of league.players) stepContract(p, year + 1);
 
   const off: OffseasonState = {
     format: 1, year, stage: 'fa', userTeam,

@@ -24,6 +24,7 @@
 | KBO 수비상 순위 (언론 보도) | 사실 값 | `defense_awards.json` (`data-src/수비상.csv`) | |
 | 타구 유형·방향 리그 비율 2010~2026 | **출처 미확인 참고값** | `src/engine/params.ts` 땅볼 몫·타구 방향 (`data-src/batted_ball_derived/`) | 원 출처를 모른다 (`data-src/batted_ball_derived/README.md`) |
 | 언론 보도 (서울신문, OSEN, 뉴시스 등) | 사실 값 | 제도·규칙 변경·공인구 (`meta.json` rules, `rule_changes.json`) | 줄마다 출처 열 |
+| 언론 보도 (OSEN, 다음, 스포츠경향, 아이뉴스24) | 사실 값 | 다년 계약 연도별 연봉 (`contracts.json` yearly ← `data-src/계약_연도별.csv`, 2022 SSG 4명) | 줄마다 출처 열 |
 | 연고지 좌표 | 임시값 (기억값) | `homes.json` (`data-src/연고지.csv`) | |
 | 글꼴 [Pretendard](https://github.com/orioncactus/pretendard) (CDN) | SIL Open Font License 1.1 | 화면 | `index.html`에서 받음 |
 
