@@ -82,6 +82,7 @@ PBP_DERIVED = ROOT / 'data-src' / 'pbp_derived'
 HARDHIT_DERIVED = ROOT / 'data-src' / 'hardhit_derived'
 FOREIGN_OPENING = ROOT / 'data-src' / '외국인_개막명단.csv'
 TRAITS_CSV = ROOT / 'data-src' / '특수능력.csv'
+LEGEND_TITLES_CSV = ROOT / 'data-src' / '칭호_레전드.csv'
 MILITARY_CSV = ROOT / 'data-src' / '병역_면제명단.csv'
 MANAGERS_CSV = ROOT / 'data-src' / '감독.csv'
 RULES_CSV = ROOT / 'data-src' / '규칙변경.csv'
@@ -164,6 +165,34 @@ def dump_traits(table):
         'traits': table,
     }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     print(f'특수능력: {len(table)}명 → {OUT / "traits.json"}')
+
+
+def build_legend_titles(known_ids):
+    """data-src/칭호_레전드.csv → legend_titles.json (칭호 기획안 7.2). 조건 판정은 src/league/titles.ts에 있고 이 표는 순위로 잇는다"""
+    if not LEGEND_TITLES_CSV.exists():
+        return
+    out = []
+    with LEGEND_TITLES_CSV.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            pid = str(r['선수ID']).strip()
+            if pid not in known_ids:
+                raise SystemExit(f'칭호_레전드.csv: 없는 선수 ID {pid} ({r.get("이름")})')
+            on = r['켬'].strip() == '예'
+            nick = r['별명'].strip()
+            if on and not nick:
+                raise SystemExit(f'칭호_레전드.csv: 켠 칭호에 별명이 없다 (순위 {r["순위"]})')
+            row = {'rank': int(r['순위']), 'id': pid, 'name': r['이름'].strip(), 'nick': nick if on else None,
+                   'check': r['확인'].strip() or None, 'sources': [x for x in (r['출처1'].strip(), r['출처2'].strip()) if x]}
+            out.append({k: v for k, v in row.items() if v is not None and v != []} | {'nick': row['nick']})
+    out.sort(key=lambda x: x['rank'])
+    (OUT).mkdir(parents=True, exist_ok=True)
+    (OUT / 'legend_titles.json').write_text(json.dumps({
+        'version': 1,
+        'source': 'data-src/칭호_레전드.csv (KBO 레전드 40인 2022, 별명 조사 레전드40_별명.csv의 채택 행)',
+        'note': 'nick이 null이면 칭호를 켜지 않는 레전드. 얻는 조건은 src/league/titles.ts LEGEND_RULES',
+        'legends': out,
+    }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print(f'레전드 칭호: {len(out)}줄 (켬 {sum(1 for x in out if x["nick"])}개) → {OUT / "legend_titles.json"}')
 DRAFTS = ROOT / 'data-src' / 'baseballchart' / 'kbo_draft_1982-2027.csv'
 DRAFT_POS = {'투수': 'P', '포수': 'C', '내야수': 'IF', '외야수': 'OF', '지명타자': 'DH'}
 
@@ -1968,6 +1997,10 @@ def main():
         print(f'계약 연도별 연봉 {apply_contract_yearly(doc["contracts"])}줄')
         (OUT / 'contracts.json').write_text(json.dumps(doc, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
         return
+    if '--titles-only' in sys.argv:
+        # 레전드 칭호 표만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
+        build_legend_titles({p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']})
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -2203,6 +2236,7 @@ def main():
     dump = lambda o, p: p.write_text(json.dumps(o, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
     dump({'version': 1, 'players': players}, OUT / 'players.json')
     dump_traits(build_traits({p['id'] for p in players}))
+    build_legend_titles({p['id'] for p in players})
     drafts = dump_drafts(drafts, players)
     dump({'version': 1, 'note': '보조자료의 FA 계약 목록. 금액은 구단 발표와 대조하지 않았다. 옵션 제외 보장액(억 원)', 'contracts': contracts},
          OUT / 'contracts.json')

@@ -217,7 +217,6 @@ const maxFr = (c: Cum) => Math.max(0, ...Object.values(c.fr));
 export const streak = (h: S[], ok: (s: S) => boolean) => { let best = 0, cur = 0, prev = -9; for (const s of h) { cur = ok(s) && s.year === prev + 1 ? cur + 1 : ok(s) ? 1 : 0; prev = s.year; best = Math.max(best, cur); } return best; };
 const throwsLSet = new Set<string>();
 const foreignSet = new Set<string>();
-const throwsL = (id: string) => throwsLSet.has(id);
 export const countIf = (h: S[], ok: (s: S) => boolean) => h.filter(ok).length;
 
 // ---- 조건 표

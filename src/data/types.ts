@@ -290,6 +290,30 @@ export interface ContractRow {
 }
 
 /** 불러온 데이터에 접근하는 창구. Node용(loadNode)과 브라우저용(loadBrowser) 구현이 있다 */
+/** 실제 시상 한 건 (awards.json, 나무위키 덤프 가공 1982~2025). id가 null이면 선수 ID와 짝짓지 못한 수상 */
+export interface RealAward {
+  award: string;
+  year: number;
+  /** 골든글러브 자리 (P C 1B 2B 3B SS OF DH) */
+  part?: string;
+  name: string;
+  id: string | null;
+  team?: string;
+  franchise?: string;
+}
+
+/** 레전드 칭호 표 한 줄 (legend_titles.json ← data-src/칭호_레전드.csv, 칭호 기획안 7.2). nick이 null이면 칭호를 켜지 않는다 */
+export interface LegendTitleRow {
+  rank: number;
+  /** 별명 주인 (KBO 레전드 40인) 선수 ID */
+  id: string;
+  name: string;
+  nick: string | null;
+  /** 별명 출처 확인 상태 (확인·일부) */
+  check?: string;
+  sources?: string[];
+}
+
 export interface DataStore {
   meta: Meta;
   players: Map<string, PlayerMaster>;
@@ -325,6 +349,10 @@ export interface DataStore {
   parks?: ParkData;
   /** 연도별 정규시즌 일정 규칙 (schedule.json, data-src/일정규칙.csv, 일정 개편 기획안 2장). 한 해 규칙은 data/schedule.ts의 scheduleRule로 읽는다 */
   schedule?: ScheduleData;
+  /** 실제 시상 (awards.json, 칭호의 시작 전 수상). 없으면 시작 전 수상 칭호가 붙지 않는다 */
+  realAwards?: RealAward[];
+  /** 레전드 칭호 표 (legend_titles.json). 없으면 레전드 칭호가 없다 */
+  legendTitles?: LegendTitleRow[];
 }
 
 /**

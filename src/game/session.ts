@@ -55,6 +55,7 @@ import {
   seasonBests, yearbook,
 } from '../league/history';
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM, type ArticleKind } from '../league/articles';
+import { ensureTitles, judgeTitles, tierText, titleEvents, titlesOf, type TitleLookup, type TitleView } from '../league/titles';
 import {
   ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
   pickLedger, tradablePick, transferPick, type DraftPick, type PickLedgerRow,
@@ -501,7 +502,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'> & Partial<Pick<DataStore, 'parks'>>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'> & Partial<Pick<DataStore, 'parks' | 'realAwards' | 'legendTitles'>>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -1015,6 +1016,8 @@ export class GameSession {
     ensureCoaches(g.league);
     ensureGm(g.league);
     g.rebuildTrades();
+    // 칭호 칸이 없는 예전 저장 (2026-10-26 전): 시작 전 실제 기록과 남아 있는 게임 안 시즌으로 채운다 (titles.ts, 화면용)
+    ensureTitles(g.league, store, g.league.lastSeason?.year ?? g.league.startYear - 1);
     // 예전 저장에는 없다: 불러온 직후 엔진 명단은 비어 있으므로 지금 날짜로 짜 본 임시 승격으로 대신한다
     g.lastCallUps = new Set(save.callUps ?? season.activeAt(save.teamIdx).callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -3157,6 +3160,8 @@ export class GameSession {
           const psMvps = ps.series.filter((x) => x.mvp).map((x) => ({ round: x.round, ...x.mvp! }));
           const awNow = L.awards?.find((a) => a.year === this.year);
           if (awNow && psMvps.length) awNow.postseasonMvps = psMvps;
+          // 칭호: 우승·시리즈 MVP가 붙었으니 이 해를 다시 판정한다 (titles.ts, 결산 때 한 번 판정한 것을 바꿔 씀)
+          judgeTitles(L, this.store, this.year, Math.max(...this.season.teams.map((t) => t.g)));
           const ksMvp = ps.series.find((x) => x.round === 'ks')?.mvp;
           if (ksMvp) {
             const t = this.world.teams[ksMvp.team];
@@ -3195,6 +3200,7 @@ export class GameSession {
         this.offNews(0);
         this.actions.push(clone(a));
         this.awardNews();
+        this.titleNews();
         this.addOffNews(`${this.year} 오프시즌 시작. FA 신청 ${this.offseason.fa.entries.length}명.`);
         this.watchCheck(-1);
         return res;
@@ -3902,6 +3908,46 @@ export class GameSession {
     if (gg.length) this.addOffNews(`골든글러브 수상: ${gg.join(', ')}`);
     const tt = aw.titles.flatMap((t) => t.winners.filter((w) => w.team === this.teamIdx).map((w) => `${w.name} ${t.label}`));
     if (tt.length) this.addOffNews(`타이틀 홀더: ${tt.join(', ')}`);
+  }
+
+  /** 칭호 보기 기준: 시작 해, 지난 시상 해("현 홈런왕"), 레전드 표, 구단 계보 → 이름 */
+  titleLookup(): TitleLookup {
+    const L = this.league;
+    return { startYear: L.startYear, lastYear: L.lastSeason?.year ?? L.startYear - 1, legends: this.store.legendTitles,
+      teamName: (f) => L.teams.find((t) => t.franchise === f)?.name ?? f };
+  }
+  /** 한 선수의 칭호 (효과 없는 이름표, titles.ts) */
+  titlesOf(id: string): TitleView[] {
+    return titlesOf(this.league.titles, id, this.titleLookup());
+  }
+
+  /**
+   * 결산 칭호 소식 (칭호 기획안 6.2): 우리 구단 선수는 새로 얻은 칭호 모두, 다른 구단은 ★★★·레전드만.
+   * 기사(honor)는 ★★★·레전드만이고 통산 사다리는 마일스톤 기사와 겹쳐 뺀다. 기록 사실만 쓴다 (실존 선수 규칙)
+   */
+  private titleNews(): void {
+    const L = this.league;
+    const look = this.titleLookup();
+    const byId = new Map(L.players.map((p) => [p.id, p]));
+    const ours = L.teams[this.teamIdx]?.name;
+    const legendRow = new Map((this.store.legendTitles ?? []).map((x) => [`L:${x.rank}`, x]));
+    for (const e of titleEvents(L.titles, this.year, look)) {
+      const p = byId.get(e.id);
+      if (!p) continue;
+      const team = p.history.find((h) => h.year === this.year)?.team ?? L.teams[p.team]?.name ?? '';
+      const top = e.view.tier === 3 || e.view.tier === 'L';
+      const label = e.view.name.replace(/^현 /, '');
+      if (team === ours || top) this.addOffNews(`칭호: ${team} ${p.name} '${label}' ${tierText(e.view.tier)} (${this.year} · ${e.view.cond})`);
+      if (!top || e.view.group === 'C') continue;
+      const franchise = L.teams.find((t) => t.name === team)?.franchise;
+      if (e.view.group === 'L') {
+        const row = legendRow.get(e.key);
+        const origin = row && row.check === '확인' && row.id !== p.id ? ` 칭호 이름은 KBO 레전드 ${row.name}의 별명에서 왔다.` : '';
+        addArticle(L, { year: this.year, day: -1, kind: 'honor', franchise, title: `${p.name}, 레전드 칭호 '${label}'`, body: `${team} ${p.name}: ${e.view.cond}.${origin}` });
+      } else {
+        addArticle(L, { year: this.year, day: -1, kind: 'honor', franchise, title: `${p.name}, 칭호 '${label}'`, body: `${team} ${p.name}: ${this.year} ${e.view.cond}.` });
+      }
+    }
   }
 
   private addOffNews(text: string): void {
