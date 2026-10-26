@@ -309,17 +309,18 @@ const CAREER: Cond[] = [
 /**
  * 레전드 별명 칭호 조건 (칭호 기획안 7장). KBO 40주년 레전드 40인(2022 발표)만. 별명은 조사 결과(레전드40_별명.csv)와 사용자 결정.
  * 조건은 그 레전드의 커리어를 닮게, 실제 1982~2025에서 주인 포함 1~2명만 채우게 맞춘다. 실제 사건(특정 경기·연승·시리즈)은 쓰지 않는다.
- * nick이 null이면 별명이 없는 레전드 (조건만 시험). alt는 [물음 6]의 시대 상대 대안.
+ * nick이 null이면 칭호를 켜지 않는 레전드 (조건만 시험, 물음 7 결정: 정민태·김시진·이순철).
+ * 물음 6 결정 ③: 시대에 묶인 조건 5개는 원래 숫자 조건을 두고 지금 시대 대안을 '또는'으로 더한다.
+ * kind 'alt'는 대안만, 'or'는 원래 또는 대안 (칭호가 실제로 쓰는 조건).
  */
-interface Legend extends Cond { rank: number; owner: string; ownerName: string; nick: string | null; alt?: boolean }
-const L = (rank: number, owner: string, ownerName: string, nick: string | null, label: string, test: Cond['test'], alt = false): Legend =>
-  ({ key: `L${rank}${alt ? '-alt' : ''}`, group: '레전드', rank, owner, ownerName, nick, label, test, alt });
+interface Legend extends Cond { rank: number; owner: string; ownerName: string; nick: string | null; kind: 'base' | 'alt' | 'or' }
+const L = (rank: number, owner: string, ownerName: string, nick: string | null, label: string, test: Cond['test']): Legend =>
+  ({ key: `L${rank}`, group: '레전드', rank, owner, ownerName, nick, label, test, kind: 'base' });
 const ggAt = (c: Cum, pos: string) => countIf(c.hist, (s) => s.ggPos === pos);
 const firstN = (c: Cum, n: number, f: (s: S) => number) => c.hist.slice(0, n).reduce((a, s) => a + f(s), 0);
 const LEGEND: Legend[] = [
   L(1, '85672', '선동열', '국보', '평균자책 1위 5회', (_, c) => leads(c, 'era') >= 5),
   L(2, '83540', '최동원', '무쇠팔', '한 시즌 280이닝 + 탈삼진 220', (s) => s.pit.outs >= 840 && s.pit.so >= 220),
-  L(2, '83540', '최동원', '무쇠팔', '같은 해 다승·탈삼진·이닝 1위 + 탈삼진 210', (s) => ['w', 'so', 'ip'].every((k) => s.lead.has(k)) && s.pit.so >= 210, true),
   L(3, '93607', '이종범', '바람의 아들', '한 시즌 타율 1위 + 도루 1위', (s) => s.lead.has('avg') && s.lead.has('sb')),
   L(4, '95436', '이승엽', '국민타자', '홈런 1위 5회 + MVP 3회', (_, c) => leads(c, 'hr') >= 5 && c.mvp >= 3),
   L(5, '89770', '송진우', '송골매', '통산 200승', (_, c) => c.pit.w >= 200),
@@ -334,7 +335,6 @@ const LEGEND: Legend[] = [
   L(14, '71752', '김태균', '김별명', '출루율 1위 4회 + 통산 2,000안타 + 300홈런', (_, c) => leads(c, 'obp') >= 4 && c.bat.h >= 2000 && c.bat.hr >= 300),
   L(15, '72133', '박용택', '쿨가이', '10시즌 연속 타율 .300 (규정) + 통산 2,000안타', (_, c) => streak(c.hist, (s) => s.qBat && avg(s.bat) >= 0.3) >= 10 && c.bat.h >= 2000),
   L(16, '85110', '김용수', '노송', '한 구단에서만 통산 100승 + 200세이브', (_, c) => Object.keys(c.fr).length === 1 && c.pit.w >= 100 && c.pit.sv >= 200),
-  L(16, '85110', '김용수', '노송', '만 38세 이상 시즌에 15승', (s) => (s.age ?? 0) >= 38 && s.pit.w >= 15, true),
   L(17, '96362', '박재홍', '리틀 쿠바', '30홈런-30도루 3회', (_, c) => countIf(c.hist, (s) => s.bat.hr >= 30 && s.bat.sb >= 30) >= 3),
   L(18, '92301', '정민태', null, '20승 + 다승 1위 3회', (_, c) => c.hist.some((s) => s.pit.w >= 20) && leads(c, 'w') >= 3),
   L(19, '97109', '이병규', '적토마', '안타 1위 4회', (_, c) => leads(c, 'h') >= 4),
@@ -343,7 +343,6 @@ const LEGEND: Legend[] = [
   L(22, '91803', '김기태', '왕방울', '좌타로 홈런 1위 + 출루율 1위 2회', (_, c) => c.hist[0].bats === 'L' && leads(c, 'hr') >= 1 && leads(c, 'obp') >= 2),
   L(23, '92809', '박경완', '포도대장', '주 포지션 포수 + 통산 300홈런', (_, c) => c.hist[0].pos === 'C' && c.bat.hr >= 300),
   L(24, '96480', '백인천', '4할 타자', '한 시즌 타율 .400 (규정)', (s) => s.qBat && avg(s.bat) >= 0.4),
-  L(24, '96480', '백인천', '4할 타자', '타율 1위 + 2위와 5푼 이상 차 (규정)', (s) => (s.avgGap ?? 0) >= 0.05, true),
   L(25, '82612', '김성한', '원조 이도류', '같은 시즌 투수 10승 + 규정타석', (s) => s.pit.w >= 10 && s.qBat),
   L(26, '89670', '조계현', '싸움닭', '다승 1위 2시즌 연속 + 평균자책 1위 + 통산 120승', (_, c) => streak(c.hist, (s) => s.lead.has('w')) >= 2 && leads(c, 'era') >= 1 && c.pit.w >= 120),
   L(27, '93147', '이상훈', '야생마', '좌투로 한 시즌 20승 + 세이브 1위', (_, c) => c.hist[0].throws === 'L' && c.hist.some((s) => s.pit.w >= 20) && leads(c, 'sv') >= 1),
@@ -359,8 +358,25 @@ const LEGEND: Legend[] = [
   L(37, '85620', '이순철', null, '신인왕 + 도루 1위 3회', (_, c) => c.hist.some((s) => s.rookie) && leads(c, 'sb') >= 3),
   L(38, '75808', '정근우', '악마의 2루수', '2루수 골든글러브 3회 + 통산 350도루', (_, c) => ggAt(c, '2B') >= 3 && c.bat.sb >= 350),
   L(39, '96307', '박진만', '국민 유격수', '유격수 골든글러브 5회 + 통산 1,900경기', (_, c) => ggAt(c, 'SS') >= 5 && c.bat.g >= 1900),
-  L(40, '98233', '우즈', null, '외국인으로 같은 해 홈런 1위 + MVP', (s) => s.foreign && s.lead.has('hr') && s.mvp),
+  L(40, '98233', '우즈', '흑곰', '외국인으로 같은 해 홈런 1위 + MVP', (s) => s.foreign && s.lead.has('hr') && s.mvp),
 ];
+/** 물음 6 대안 (지금 시대에서도 아주 어렵게, 실제 주인 포함 1~2명) */
+const ALT: [number, string, Cond['test']][] = [
+  [2, '같은 해 다승·탈삼진·이닝 1위 + 탈삼진 220', (s) => ['w', 'so', 'ip'].every((k) => s.lead.has(k)) && s.pit.so >= 220],
+  [16, '만 38세 이상 시즌에 15승', (s) => (s.age ?? 0) >= 38 && s.pit.w >= 15],
+  [20, '1군 첫 6시즌 안에 다승 1위 2회 + 그 6시즌 95승', (_, c) => countIf(c.hist.slice(0, 6), (s) => s.lead.has('w')) >= 2 && firstN(c, 6, (s) => s.pit.w) >= 95],
+  [27, '좌투로 다승 1위 + 세이브 1위 (커리어 안에서 각 1회 이상)', (_, c) => c.hist[0].throws === 'L' && leads(c, 'w') >= 1 && leads(c, 'sv') >= 1],
+  [25, '같은 시즌 투수 5승 + 타자 10홈런', (s) => s.pit.w >= 5 && s.bat.hr >= 10],
+];
+for (const [rank, label, alt] of ALT) {
+  const i = LEGEND.findIndex((x) => x.rank === rank);
+  const b = LEGEND[i];
+  LEGEND.splice(i + 1, 0,
+    { ...b, key: `L${rank}-alt`, kind: 'alt', label, test: alt },
+    { ...b, key: `L${rank}-or`, kind: 'or', label: `원래 또는 대안`, test: (s, c) => b.test(s, c) || alt(s, c) });
+}
+/** 칭호가 실제로 쓰는 조건: 대안이 있으면 'or', 없으면 원래. 별명 없는 것은 칭호를 켜지 않는다 */
+const inUse = (Lg: Legend) => Lg.kind === 'or' || (Lg.kind === 'base' && !LEGEND.some((x) => x.rank === Lg.rank && x.kind === 'or'));
 
 
 // ---- 세기
@@ -453,21 +469,21 @@ async function main(): Promise<void> {
   parts.push('## 통산·횟수 칭호 후보: 그 해 1군에서 뛴 보유자 수 (평균)\n', '누적은 1982년부터 (실제) / 시작 전 실제 + 게임 안 (게임). 우승·한국시리즈 MVP는 장기 진행 도구가 가을야구를 치르지 않아 게임 쪽 값이 없다.\n', head, sep, ...CAREER.map(row), '');
 
   // 레전드: 실제 1982~2025 전체에서 처음 채운 선수 (주인이 채웠는지 따로)
-  parts.push('## 레전드 칭호 조건: 처음 채운 선수\n', 'KBO 레전드 40인(2022)만. 별명 칸이 비면 별명 없는 레전드. "대안"은 [물음 6]의 시대 상대 조건.\n',
+  parts.push('## 레전드 칭호 조건: 처음 채운 선수\n', 'KBO 레전드 40인(2022)만. "칭호 없음"은 칭호를 켜지 않는 레전드(물음 7). 시대에 묶인 5개는 "원래 또는 대안"이 쓰는 조건(물음 6 ③).\n',
     `| 순위 | 별명 | 주인 | 조건 | 주인 채움 | 실제 1982~2025 (처음 채운 해) | 실제 수 |${realOnly ? '' : ' 게임에서 새로 (시드당 평균) | 게임 예 |'}`, `|---:|---|---|---|---|---|---:|${realOnly ? '' : '---:|---|'}`);
   let realSum = 0, gameSum = 0;
   for (const Lg of LEGEND) {
     const r = realAll.legend.get(Lg.key) ?? [];
     const g = game.map((t) => t.legend.get(Lg.key) ?? []);
     const own = r.find((x) => x.id === Lg.owner);
-    if (!Lg.alt) { realSum += r.length; gameSum += mean(g.map((x) => x.length)); }
-    parts.push(`| ${Lg.rank} | ${Lg.nick ?? '(없음)'}${Lg.alt ? ' 대안' : ''} | ${Lg.ownerName} | ${Lg.label} | ${own ? own.year : '✗'} | ${r.map((x) => `${x.name} ${x.year}`).join(', ') || '—'} | ${r.length} |${realOnly ? '' : ` ${f1(mean(g.map((x) => x.length)))} | ${g.flat().slice(0, 4).map((x) => `${x.name}${x.real ? '' : '(가상)'} ${x.year}`).join(', ') || '—'} |`}`);
+    if (inUse(Lg) && Lg.nick) { realSum += r.length; gameSum += mean(g.map((x) => x.length)); }
+    parts.push(`| ${Lg.rank} | ${Lg.nick ?? '(칭호 없음)'}${Lg.kind === 'alt' ? ' 대안만' : Lg.kind === 'or' ? ' (쓰는 조건)' : ''} | ${Lg.ownerName} | ${Lg.label} | ${own ? own.year : '✗'} | ${r.map((x) => `${x.name} ${x.year}`).join(', ') || '—'} | ${r.length} |${realOnly ? '' : ` ${f1(mean(g.map((x) => x.length)))} | ${g.flat().slice(0, 4).map((x) => `${x.name}${x.real ? '' : '(가상)'} ${x.year}`).join(', ') || '—'} |`}`);
   }
   // 2026년 시작 때 붙는 레전드 칭호 (2025년 1군에서 뛴 보유자, 물음 3 결정: 시작 때 실제 기록으로 붙인다)
   const active = new Set(real.filter((x) => x.year === 2025).map((x) => x.id));
-  const atStart = LEGEND.filter((Lg) => !Lg.alt).flatMap((Lg) => (realAll.legend.get(Lg.key) ?? []).filter((x) => active.has(x.id)).map((x) => `${x.name} '${Lg.nick ?? `(${Lg.ownerName} 조건)`}' (${x.year})`));
+  const atStart = LEGEND.filter((Lg) => inUse(Lg) && Lg.nick).flatMap((Lg) => (realAll.legend.get(Lg.key) ?? []).filter((x) => active.has(x.id)).map((x) => `${x.name} '${Lg.nick ?? `(${Lg.ownerName} 조건)`}' (${x.year})`));
   parts.push('', `2026년 시작 때 붙는 보유자 (2025년 1군): ${atStart.join(', ') || '없음'}.`);
-  parts.push('', `대안을 뺀 모든 조건 합: 실제 1982~2025 ${realSum}명 (해마다 ${f1(realSum / (2025 - firstYear + 1))}명)${realOnly ? '' : `, 게임 시드당 ${f1(gameSum)}명 (해마다 ${f1(gameSum / n)}명)`}.`);
+  parts.push('', `칭호를 켜는 ${LEGEND.filter((Lg) => inUse(Lg) && Lg.nick).length}개 조건(대안은 '원래 또는 대안') 합: 실제 1982~2025 ${realSum}명 (해마다 ${f1(realSum / (2025 - firstYear + 1))}명)${realOnly ? '' : `, 게임 시드당 ${f1(gameSum)}명 (해마다 ${f1(gameSum / n)}명)`}.`);
   parts.push('');
   const text = parts.join('\n');
   if (out) { mkdirSync(dirname(out), { recursive: true }); writeFileSync(out, text); console.log(`${out}에 썼습니다.`); } else console.log(text);
