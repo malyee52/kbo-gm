@@ -37,8 +37,10 @@ function addTo<T extends object>(a: T, b: Partial<T>): void {
 }
 
 /** 한 선수의 한 시즌 */
-interface S {
+export interface S {
   id: string; name: string; real: boolean; pitcher: boolean; year: number; age: number | null; fr: string; pos: string | null;
+  /** 던지는 손·치는 손·외국인·언더핸드 (실제는 선수 마스터, 게임은 SimPlayer) */
+  throws: 'R' | 'L' | null; bats: string | null; foreign: boolean; underhand: boolean;
   bat: Bat; pit: Pit; war: number;
   qBat: boolean; qPit: boolean;
   /** 부문 1위 (공동 포함) */
@@ -46,18 +48,20 @@ interface S {
   mvp: boolean; gg: boolean; ggPos?: string; rookie: boolean; champ: boolean; ksMvp: boolean;
   /** 리그 OPS 순위 분위 (규정타석 타자 안, 0 = 1위) / 리그 평균자책 대비 (규정이닝) */
   opsPct: number | null; eraRel: number | null;
+  /** 타율 1위의 2위와 차 (규정), 이닝 1위의 2위 대비 배수 (레전드 시대 상대 조건용) */
+  avgGap: number | null; ipRatio: number | null;
 }
 
-const avg = (b: Bat) => (b.ab ? b.h / b.ab : 0);
-const obp = (b: Bat) => { const d = b.ab + b.bb + b.hbp + b.sf; return d ? (b.h + b.bb + b.hbp) / d : 0; };
-const slg = (b: Bat) => (b.ab ? (b.h + b.d + 2 * b.t + 3 * b.hr) / b.ab : 0);
-const ops = (b: Bat) => obp(b) + slg(b);
-const era = (p: Pit) => (p.outs ? (p.er * 27) / p.outs : 99);
+export const avg = (b: Bat) => (b.ab ? b.h / b.ab : 0);
+export const obp = (b: Bat) => { const d = b.ab + b.bb + b.hbp + b.sf; return d ? (b.h + b.bb + b.hbp) / d : 0; };
+export const slg = (b: Bat) => (b.ab ? (b.h + b.d + 2 * b.t + 3 * b.hr) / b.ab : 0);
+export const ops = (b: Bat) => obp(b) + slg(b);
+export const era = (p: Pit) => (p.outs ? (p.er * 27) / p.outs : 99);
 
 const LEAD_KEYS = ['avg', 'hr', 'rbi', 'r', 'h', 'sb', 'obp', 'slg', 'w', 'era', 'so', 'sv', 'hld', 'wpct'] as const;
 
 /** 한 해 선수들의 부문 1위·규정·분위를 채운다 */
-function markYear(xs: S[], games: number): void {
+export function markYear(xs: S[], games: number): void {
   const qPa = Math.ceil(3.1 * games);
   const qOuts = 3 * games;
   for (const s of xs) { s.qBat = !s.pitcher && s.bat.pa >= qPa; s.qPit = s.pitcher && s.pit.outs >= qOuts; }
@@ -85,13 +89,17 @@ function markYear(xs: S[], games: number): void {
   for (const s of pits) { er += s.pit.er; outs += s.pit.outs; }
   const lgEra = outs ? (er * 27) / outs : 4.5;
   for (const s of qp) s.eraRel = era(s.pit) / lgEra;
+  const byAvg = [...qb].sort((a, b) => avg(b.bat) - avg(a.bat));
+  if (byAvg.length > 1) byAvg[0].avgGap = avg(byAvg[0].bat) - avg(byAvg[1].bat);
+  const byIp = [...pits].sort((a, b) => b.pit.outs - a.pit.outs);
+  if (byIp.length > 1 && byIp[1].pit.outs > 0) { byIp[0].ipRatio = byIp[0].pit.outs / byIp[1].pit.outs; byIp[0].lead.add('ip'); }
 }
 
 // ---- 실제 기록
 
 interface RealAward { award: string; year: number; id: string | null; part?: string }
 
-function realSeasons(store: Store, before: number): S[] {
+export function realSeasons(store: Store, before: number): S[] {
   const awards = (JSON.parse(readFileSync(join('public', 'data', 'awards.json'), 'utf8')) as { awards: RealAward[] }).awards;
   const aw = new Map<string, Set<string>>();
   const ggPos = new Map<string, string>();
@@ -115,8 +123,8 @@ function realSeasons(store: Store, before: number): S[] {
         const a = aw.get(`${y}/${id}`) ?? new Set<string>();
         s = {
           id, name: m?.name ?? id, real: true, pitcher: m?.kind === 'P', year: y, age: m?.birthYear ? y - m.birthYear : null,
-          fr: fr.get(team) ?? team, pos: m?.pos ?? null, bat: emptyBat(), pit: emptyPit(), war: 0, qBat: false, qPit: false, lead: new Set(),
-          mvp: a.has('MVP'), gg: a.has('골든글러브'), ggPos: ggPos.get(`${y}/${id}`), rookie: a.has('신인왕'), ksMvp: a.has('한국시리즈 MVP'), champ: false, opsPct: null, eraRel: null,
+          fr: fr.get(team) ?? team, pos: m?.pos ?? null, throws: m?.throws ?? null, bats: m?.bats ?? null, foreign: !!m?.foreign, underhand: !!m?.underhand, bat: emptyBat(), pit: emptyPit(), war: 0, qBat: false, qPit: false, lead: new Set(),
+          mvp: a.has('MVP'), gg: a.has('골든글러브'), ggPos: ggPos.get(`${y}/${id}`), rookie: a.has('신인왕'), ksMvp: a.has('한국시리즈 MVP'), champ: false, opsPct: null, eraRel: null, avgGap: null, ipRatio: null,
         };
         by.set(id, s);
       }
@@ -156,8 +164,8 @@ function gameYear(league: LeagueState, store: Store, params: EngineParams): S[] 
     const team = sp.teamIdx >= 0 ? sp.teamIdx : sp.formerTeam ?? -1;
     xs.push({
       id: sp.id, name: sp.name, real: sp.real !== false, pitcher: sp.isPitcher, year: world.year, age: sp.age, fr: league.teams[team]?.franchise ?? '',
-      pos: sp.pos ?? null, bat: { ...emptyBat(), ...pick(b, emptyBat()) }, pit: { ...emptyPit(), ...pick(p, emptyPit()) }, war: 0,
-      qBat: false, qPit: false, lead: new Set(), mvp: false, gg: false, rookie: false, champ: false, ksMvp: false, opsPct: null, eraRel: null,
+      pos: sp.pos ?? null, throws: sp.throws, bats: sp.bats, foreign: sp.foreign, underhand: !!sp.underhand, bat: { ...emptyBat(), ...pick(b, emptyBat()) }, pit: { ...emptyPit(), ...pick(p, emptyPit()) }, war: 0,
+      qBat: false, qPit: false, lead: new Set(), mvp: false, gg: false, rookie: false, champ: false, ksMvp: false, opsPct: null, eraRel: null, avgGap: null, ipRatio: null,
     });
   }
   markYear(xs, games);
@@ -189,7 +197,7 @@ function pick<T extends object>(src: object, keys: T): Partial<T> {
 
 // ---- 누적
 
-interface Cum {
+export interface Cum {
   bat: Bat; pit: Pit; war: number; seasons: number;
   lead: Record<string, number>; mvp: number; gg: number; champ: number; ksMvp: number;
   fr: Record<string, number>;
@@ -203,14 +211,14 @@ function addSeason(c: Cum, s: S): void {
   if (s.fr) c.fr[s.fr] = (c.fr[s.fr] ?? 0) + 1;
   c.hist.push(s);
 }
-const leads = (c: Cum, ...ks: string[]) => ks.reduce((n, k) => n + (c.lead[k] ?? 0), 0);
+export const leads = (c: Cum, ...ks: string[]) => ks.reduce((n, k) => n + (c.lead[k] ?? 0), 0);
 const titleTotal = (c: Cum) => LEAD_KEYS.reduce((n, k) => n + (c.lead[k] ?? 0), 0);
 const maxFr = (c: Cum) => Math.max(0, ...Object.values(c.fr));
-const streak = (h: S[], ok: (s: S) => boolean) => { let best = 0, cur = 0, prev = -9; for (const s of h) { cur = ok(s) && s.year === prev + 1 ? cur + 1 : ok(s) ? 1 : 0; prev = s.year; best = Math.max(best, cur); } return best; };
+export const streak = (h: S[], ok: (s: S) => boolean) => { let best = 0, cur = 0, prev = -9; for (const s of h) { cur = ok(s) && s.year === prev + 1 ? cur + 1 : ok(s) ? 1 : 0; prev = s.year; best = Math.max(best, cur); } return best; };
 const throwsLSet = new Set<string>();
 const foreignSet = new Set<string>();
 const throwsL = (id: string) => throwsLSet.has(id);
-const countIf = (h: S[], ok: (s: S) => boolean) => h.filter(ok).length;
+export const countIf = (h: S[], ok: (s: S) => boolean) => h.filter(ok).length;
 
 // ---- 조건 표
 
@@ -298,43 +306,68 @@ const CAREER: Cond[] = [
   { key: 'seasons20', group: '커리어', label: '1군 20시즌', test: (_, c) => c.seasons >= 20 },
 ];
 
-/** 레전드 별명 칭호 조건 예시 (이름은 별명 후보, 모두 미확인. 기준은 그 커리어를 닮은 수준) */
-const LEGEND: Cond[] = [
-  { key: 'L-국보', group: '레전드', label: '평균자책 1위 5회', test: (_, c) => leads(c, 'era') >= 5 },
-  { key: 'L-무쇠팔', group: '레전드', label: '한 시즌 탈삼진 220 + 280이닝', test: (s) => s.pit.so >= 220 && s.pit.outs >= 840 },
-  { key: 'L-바람의 아들', group: '레전드', label: '한 시즌 도루 1위 + 타율 1위', test: (s) => s.lead.has('sb') && s.lead.has('avg') },
-  { key: 'L-국민타자', group: '레전드', label: '홈런 1위 5회 + MVP 3회', test: (_, c) => leads(c, 'hr') >= 5 && c.mvp >= 3 },
-  { key: 'L-헐크', group: '레전드', label: '포수로 타격 3관왕, 또는 포수로 홈런 1위 3회', test: (s, c) => (s.pos === 'C' && ['avg', 'hr', 'rbi'].every((k) => s.lead.has(k))) || c.hist.filter((x) => x.pos === 'C' && x.lead.has('hr')).length >= 3 },
-  { key: 'L-양신', group: '레전드', label: '타율 1위 4회 + 통산 2,000안타', test: (_, c) => leads(c, 'avg') >= 4 && c.bat.h >= 2000 },
-  { key: 'L-대성불패', group: '레전드', label: '구원 투수(선발 등판 1/3 미만)로 MVP', test: (_, c) => c.hist.some((s) => s.mvp && s.pitcher && s.pit.gs * 3 < s.pit.g) },
-  { key: 'L-노송', group: '레전드', label: '통산 200세이브 + 100승', test: (_, c) => c.pit.sv >= 200 && c.pit.w >= 100 },
-  { key: 'L-야생마', group: '레전드', label: '좌투 세이브 1위 2회', test: (_, c) => countIf(c.hist, (s) => s.lead.has('sv') && throwsL(s.id)) >= 2 },
-  { key: 'L-적토마', group: '레전드', label: '안타 1위 3회 + 통산 2,000안타', test: (_, c) => leads(c, 'h') >= 3 && c.bat.h >= 2000 },
-  { key: 'L-빅보이', group: '레전드', label: '한 시즌 타격 7부문 중 6부문 이상 1위', test: (s) => ['avg', 'hr', 'rbi', 'r', 'h', 'obp', 'slg'].filter((k) => s.lead.has(k)).length >= 6 },
-  { key: 'L-괴물', group: '레전드', label: '같은 해 신인왕 + MVP', test: (s) => s.rookie && s.mvp },
-  { key: 'L-KK', group: '레전드', label: '좌투 다승·탈삼진·평균자책 1위 (각 1회 이상) + 통산 150승', test: (_, c) => throwsL(c.hist[0].id) && leads(c, 'w') >= 1 && leads(c, 'so') >= 1 && leads(c, 'era') >= 1 && c.pit.w >= 150 },
-  { key: 'L-대투수', group: '레전드', label: '좌투 통산 170승 + 2,000탈삼진', test: (_, c) => throwsL(c.hist[0].id) && c.pit.w >= 170 && c.pit.so >= 2000 },
-  { key: 'L-돌부처', group: '레전드', label: '통산 350세이브', test: (_, c) => c.pit.sv >= 350 },
-  { key: 'L-소년장사', group: '레전드', label: '10시즌 연속 20홈런', test: (_, c) => streak(c.hist, (s) => s.bat.hr >= 20) >= 10 },
-  { key: 'L-박뱅', group: '레전드', label: '홈런 1위 연속 4시즌', test: (_, c) => streak(c.hist, (s) => s.lead.has('hr')) >= 4 },
-  { key: 'L-타격기계', group: '레전드', label: '타율 1위 2회 + 안타 1위 2회 + 통산 2,000안타', test: (_, c) => leads(c, 'avg') >= 2 && leads(c, 'h') >= 2 && c.bat.h >= 2000 },
-  { key: 'L-바람의 손자', group: '레전드', label: '만 25세 이하 타율 1위 2회', test: (_, c) => countIf(c.hist, (s) => (s.age ?? 99) <= 25 && s.lead.has('avg')) >= 2 },
-  { key: 'L-국민 유격수', group: '레전드', label: '유격수 골든글러브 5회 + 우승 5회 (게임은 우승을 못 셈)', test: (_, c) => countIf(c.hist, (s) => s.ggPos === 'SS') >= 5 && c.champ >= 5 },
-  { key: 'L-곰의 탈을 쓴 여우', group: '레전드', label: '포수 골든글러브 8회', test: (_, c) => countIf(c.hist, (s) => s.ggPos === 'C') >= 8 },
-  { key: 'L-불사조', group: '레전드', label: '한 시즌 22승 + 4패 이하', test: (s) => s.pit.w >= 22 && s.pit.l <= 4 },
-  { key: 'L-(장효조 후보)', group: '레전드', label: '통산 타율 .330 (3,000타수)', test: (_, c) => c.bat.ab >= 3000 && c.bat.h / c.bat.ab >= 0.33 },
-  { key: 'L-(송진우 후보)', group: '레전드', label: '통산 200승', test: (_, c) => c.pit.w >= 200 },
-  { key: 'L-(장종훈 후보)', group: '레전드', label: '홈런 1위 연속 3시즌 + 한 시즌 40홈런', test: (_, c) => streak(c.hist, (s) => s.lead.has('hr')) >= 3 && c.hist.some((s) => s.bat.hr >= 40) },
-  { key: 'L-(박경완 후보)', group: '레전드', label: '포수로 홈런 1위', test: (s) => s.pos === 'C' && s.lead.has('hr') },
-  { key: 'L-(김태균 후보)', group: '레전드', label: '출루율 1위 4회', test: (_, c) => leads(c, 'obp') >= 4 },
+/**
+ * 레전드 별명 칭호 조건 (칭호 기획안 7장). KBO 40주년 레전드 40인(2022 발표)만. 별명은 조사 결과(레전드40_별명.csv)와 사용자 결정.
+ * 조건은 그 레전드의 커리어를 닮게, 실제 1982~2025에서 주인 포함 1~2명만 채우게 맞춘다. 실제 사건(특정 경기·연승·시리즈)은 쓰지 않는다.
+ * nick이 null이면 별명이 없는 레전드 (조건만 시험). alt는 [물음 6]의 시대 상대 대안.
+ */
+interface Legend extends Cond { rank: number; owner: string; ownerName: string; nick: string | null; alt?: boolean }
+const L = (rank: number, owner: string, ownerName: string, nick: string | null, label: string, test: Cond['test'], alt = false): Legend =>
+  ({ key: `L${rank}${alt ? '-alt' : ''}`, group: '레전드', rank, owner, ownerName, nick, label, test, alt });
+const ggAt = (c: Cum, pos: string) => countIf(c.hist, (s) => s.ggPos === pos);
+const firstN = (c: Cum, n: number, f: (s: S) => number) => c.hist.slice(0, n).reduce((a, s) => a + f(s), 0);
+const LEGEND: Legend[] = [
+  L(1, '85672', '선동열', '국보', '평균자책 1위 5회', (_, c) => leads(c, 'era') >= 5),
+  L(2, '83540', '최동원', '무쇠팔', '한 시즌 280이닝 + 탈삼진 220', (s) => s.pit.outs >= 840 && s.pit.so >= 220),
+  L(2, '83540', '최동원', '무쇠팔', '같은 해 다승·탈삼진·이닝 1위 + 탈삼진 210', (s) => ['w', 'so', 'ip'].every((k) => s.lead.has(k)) && s.pit.so >= 210, true),
+  L(3, '93607', '이종범', '바람의 아들', '한 시즌 타율 1위 + 도루 1위', (s) => s.lead.has('avg') && s.lead.has('sb')),
+  L(4, '95436', '이승엽', '국민타자', '홈런 1위 5회 + MVP 3회', (_, c) => leads(c, 'hr') >= 5 && c.mvp >= 3),
+  L(5, '89770', '송진우', '송골매', '통산 200승', (_, c) => c.pit.w >= 200),
+  L(6, '83460', '장효조', '타격의 달인', '타율 1위 4회 + 통산 타율 .330 (3,000타수)', (_, c) => leads(c, 'avg') >= 4 && c.bat.ab >= 3000 && c.bat.h / c.bat.ab >= 0.33),
+  L(7, '93410', '양준혁', '양신', '통산 타율 .315 (5,000타수) + 300홈런 + 1,200볼넷', (_, c) => c.bat.ab >= 5000 && c.bat.h / c.bat.ab >= 0.315 && c.bat.hr >= 300 && c.bat.bb >= 1200),
+  L(8, '93715', '구대성', '대성불패', '좌투 통산 200세이브', (_, c) => c.hist[0].throws === 'L' && c.pit.sv >= 200),
+  L(9, '89620', '이강철', '핵잠수함', '언더핸드로 10시즌 연속 10승', (_, c) => c.hist[0].underhand && streak(c.hist, (s) => s.pit.w >= 10) >= 10),
+  L(10, '87760', '장종훈', '연습생 신화', '같은 해 홈런·타점 1위 3시즌 연속 + 한 시즌 40홈런', (_, c) => streak(c.hist, (s) => s.lead.has('hr') && s.lead.has('rbi')) >= 3 && c.hist.some((s) => s.bat.hr >= 40)),
+  L(11, '82234', '박철순', '불사조', '한 시즌 22승 + 4패 이하', (s) => s.pit.w >= 22 && s.pit.l <= 4),
+    L(12, '82420', '이만수', '헐크', '포수로 홈런 1위 3회', (_, c) => countIf(c.hist, (s) => s.pos === 'C' && s.lead.has('hr')) >= 3),
+  L(13, '92704', '정민철', '대전의 황태자', '만 25세 시즌까지 통산 80승', (s, c) => (s.age ?? 99) <= 25 && c.pit.w >= 80),
+  L(14, '71752', '김태균', '김별명', '출루율 1위 4회 + 통산 2,000안타 + 300홈런', (_, c) => leads(c, 'obp') >= 4 && c.bat.h >= 2000 && c.bat.hr >= 300),
+  L(15, '72133', '박용택', '쿨가이', '10시즌 연속 타율 .300 (규정) + 통산 2,000안타', (_, c) => streak(c.hist, (s) => s.qBat && avg(s.bat) >= 0.3) >= 10 && c.bat.h >= 2000),
+  L(16, '85110', '김용수', '노송', '한 구단에서만 통산 100승 + 200세이브', (_, c) => Object.keys(c.fr).length === 1 && c.pit.w >= 100 && c.pit.sv >= 200),
+  L(16, '85110', '김용수', '노송', '만 38세 이상 시즌에 15승', (s) => (s.age ?? 0) >= 38 && s.pit.w >= 15, true),
+  L(17, '96362', '박재홍', '리틀 쿠바', '30홈런-30도루 3회', (_, c) => countIf(c.hist, (s) => s.bat.hr >= 30 && s.bat.sb >= 30) >= 3),
+  L(18, '92301', '정민태', null, '20승 + 다승 1위 3회', (_, c) => c.hist.some((s) => s.pit.w >= 20) && leads(c, 'w') >= 3),
+  L(19, '97109', '이병규', '적토마', '안타 1위 4회', (_, c) => leads(c, 'h') >= 4),
+  L(20, '83412', '김시진', null, '1군 첫 6시즌 통산 100승', (_, c) => firstN(c, 6, (s) => s.pit.w) >= 100),
+  L(21, '95657', '임창용', '창용불패', '세이브 1위 4회 + 통산 100승', (_, c) => leads(c, 'sv') >= 4 && c.pit.w >= 100),
+  L(22, '91803', '김기태', '왕방울', '좌타로 홈런 1위 + 출루율 1위 2회', (_, c) => c.hist[0].bats === 'L' && leads(c, 'hr') >= 1 && leads(c, 'obp') >= 2),
+  L(23, '92809', '박경완', '포도대장', '주 포지션 포수 + 통산 300홈런', (_, c) => c.hist[0].pos === 'C' && c.bat.hr >= 300),
+  L(24, '96480', '백인천', '4할 타자', '한 시즌 타율 .400 (규정)', (s) => s.qBat && avg(s.bat) >= 0.4),
+  L(24, '96480', '백인천', '4할 타자', '타율 1위 + 2위와 5푼 이상 차 (규정)', (s) => (s.avgGap ?? 0) >= 0.05, true),
+  L(25, '82612', '김성한', '원조 이도류', '같은 시즌 투수 10승 + 규정타석', (s) => s.pit.w >= 10 && s.qBat),
+  L(26, '89670', '조계현', '싸움닭', '다승 1위 2시즌 연속 + 평균자책 1위 + 통산 120승', (_, c) => streak(c.hist, (s) => s.lead.has('w')) >= 2 && leads(c, 'era') >= 1 && c.pit.w >= 120),
+  L(27, '93147', '이상훈', '야생마', '좌투로 한 시즌 20승 + 세이브 1위', (_, c) => c.hist[0].throws === 'L' && c.hist.some((s) => s.pit.w >= 20) && leads(c, 'sv') >= 1),
+  L(28, '83270', '한대화', '해결사', '3루수 골든글러브 5회 + 출루율 1위 2회', (_, c) => ggAt(c, '3B') >= 5 && leads(c, 'obp') >= 2),
+  L(29, '98218', '김동주', '두목곰', '주 포지션 3루수 + 통산 타율 .300·출루율 .400 + 250홈런', (_, c) => c.hist[0].pos === '3B' && c.bat.ab > 0 && c.bat.h / c.bat.ab >= 0.3 && obp(c.bat) >= 0.4 && c.bat.hr >= 250),
+  L(30, '94204', '심정수', '헤라클레스', '한 시즌 홈런 50 + 출루율 .470 (규정)', (s) => s.qBat && s.bat.hr >= 50 && obp(s.bat) >= 0.47),
+  L(31, '82116', '김재박', '그라운드의 여우', '유격수 골든글러브 4회 + 도루 1위', (_, c) => ggAt(c, 'SS') >= 4 && leads(c, 'sb') >= 1),
+  L(32, '91514', '박정태', '탱크', '2루수 골든글러브 5회', (_, c) => ggAt(c, '2B') >= 5),
+  L(33, '61240', '니퍼트', '니느님', '외국인 통산 100승 + 통산 승률 .600', (_, c) => c.hist[0].foreign && c.pit.w >= 100 && c.pit.w / (c.pit.w + c.pit.l) >= 0.6),
+  L(34, '91511', '전준호', '대도', '통산 540도루', (_, c) => c.bat.sb >= 540),
+  L(35, '70425', '배영수', '푸른 피의 에이스', '만 23세 이하 다승·승률 1위 (같은 해) + 통산 130승', (_, c) => c.hist.some((s) => (s.age ?? 99) <= 23 && s.lead.has('w') && s.lead.has('wpct')) && c.pit.w >= 130),
+  L(36, '99222', '홍성흔', '홍포', '포수·지명타자 골든글러브 (각 1회 이상) + 통산 2,000안타', (_, c) => ggAt(c, 'C') >= 1 && ggAt(c, 'DH') >= 1 && c.bat.h >= 2000),
+  L(37, '85620', '이순철', null, '신인왕 + 도루 1위 3회', (_, c) => c.hist.some((s) => s.rookie) && leads(c, 'sb') >= 3),
+  L(38, '75808', '정근우', '악마의 2루수', '2루수 골든글러브 3회 + 통산 350도루', (_, c) => ggAt(c, '2B') >= 3 && c.bat.sb >= 350),
+  L(39, '96307', '박진만', '국민 유격수', '유격수 골든글러브 5회 + 통산 1,900경기', (_, c) => ggAt(c, 'SS') >= 5 && c.bat.g >= 1900),
+  L(40, '98233', '우즈', null, '외국인으로 같은 해 홈런 1위 + MVP', (s) => s.foreign && s.lead.has('hr') && s.mvp),
 ];
 
 
 // ---- 세기
 
-interface Tally { years: number; perYear: Map<string, number[]>; legend: Map<string, { name: string; year: number; real: boolean; before: boolean }[]> }
+interface Tally { years: number; perYear: Map<string, number[]>; legend: Map<string, { id: string; name: string; year: number; real: boolean; before: boolean }[]> }
 
-function tally(seasons: S[], start: Map<string, Cum> | null): { tally: Tally; cum: Map<string, Cum> } {
+export function tally(seasons: S[], start: Map<string, Cum> | null): { tally: Tally; cum: Map<string, Cum> } {
   const cum = new Map<string, Cum>();
   if (start) for (const [id, c] of start) cum.set(id, { ...c, bat: { ...c.bat }, pit: { ...c.pit }, lead: { ...c.lead }, fr: { ...c.fr }, hist: [...c.hist] });
   const t: Tally = { years: 0, perYear: new Map(), legend: new Map() };
@@ -355,14 +388,14 @@ function tally(seasons: S[], start: Map<string, Cum> | null): { tally: Tally; cu
       for (const s of xs) {
         if (got.has(s.id) || !L.test(s, cum.get(s.id)!)) continue;
         got.add(s.id);
-        (t.legend.get(L.key) ?? t.legend.set(L.key, []).get(L.key)!).push({ name: s.name, year: y, real: s.real, before: false });
+        (t.legend.get(L.key) ?? t.legend.set(L.key, []).get(L.key)!).push({ id: s.id, name: s.name, year: y, real: s.real, before: false });
       }
     }
   }
   return { tally: t, cum };
 }
 /** 그 시즌까지 누적 (시작 전 레전드 판정용) */
-function prefix(c: Cum, i: number): Cum {
+export function prefix(c: Cum, i: number): Cum {
   const p = emptyCum();
   for (const s of c.hist.slice(0, i + 1)) addSeason(p, s);
   return p;
@@ -419,13 +452,22 @@ async function main(): Promise<void> {
   parts.push('## 시즌 칭호 후보: 해마다 조건을 채운 선수 수 (평균)\n', head, sep, ...SEASON.map(row), '');
   parts.push('## 통산·횟수 칭호 후보: 그 해 1군에서 뛴 보유자 수 (평균)\n', '누적은 1982년부터 (실제) / 시작 전 실제 + 게임 안 (게임). 우승·한국시리즈 MVP는 장기 진행 도구가 가을야구를 치르지 않아 게임 쪽 값이 없다.\n', head, sep, ...CAREER.map(row), '');
 
-  // 레전드: 실제 1982~2025 전체에서 처음 채운 선수
-  parts.push('## 레전드 칭호 조건 예시: 처음 채운 선수\n', `| 조건 | 실제 1982~2025 (처음 채운 해) | 실제 수 |${realOnly ? '' : ' 게임에서 새로 (시드당 평균) | 게임 예 |'}`, `|---|---|---:|${realOnly ? '' : '---:|---|'}`);
-  for (const L of LEGEND) {
-    const r = realAll.legend.get(L.key) ?? [];
-    const g = game.map((t) => t.legend.get(L.key) ?? []);
-    parts.push(`| ${L.key.slice(2)}: ${L.label} | ${r.map((x) => `${x.name} ${x.year}`).join(', ') || '—'} | ${r.length} |${realOnly ? '' : ` ${f1(mean(g.map((x) => x.length)))} | ${g.flat().slice(0, 4).map((x) => `${x.name}${x.real ? '' : '(가상)'} ${x.year}`).join(', ') || '—'} |`}`);
+  // 레전드: 실제 1982~2025 전체에서 처음 채운 선수 (주인이 채웠는지 따로)
+  parts.push('## 레전드 칭호 조건: 처음 채운 선수\n', 'KBO 레전드 40인(2022)만. 별명 칸이 비면 별명 없는 레전드. "대안"은 [물음 6]의 시대 상대 조건.\n',
+    `| 순위 | 별명 | 주인 | 조건 | 주인 채움 | 실제 1982~2025 (처음 채운 해) | 실제 수 |${realOnly ? '' : ' 게임에서 새로 (시드당 평균) | 게임 예 |'}`, `|---:|---|---|---|---|---|---:|${realOnly ? '' : '---:|---|'}`);
+  let realSum = 0, gameSum = 0;
+  for (const Lg of LEGEND) {
+    const r = realAll.legend.get(Lg.key) ?? [];
+    const g = game.map((t) => t.legend.get(Lg.key) ?? []);
+    const own = r.find((x) => x.id === Lg.owner);
+    if (!Lg.alt) { realSum += r.length; gameSum += mean(g.map((x) => x.length)); }
+    parts.push(`| ${Lg.rank} | ${Lg.nick ?? '(없음)'}${Lg.alt ? ' 대안' : ''} | ${Lg.ownerName} | ${Lg.label} | ${own ? own.year : '✗'} | ${r.map((x) => `${x.name} ${x.year}`).join(', ') || '—'} | ${r.length} |${realOnly ? '' : ` ${f1(mean(g.map((x) => x.length)))} | ${g.flat().slice(0, 4).map((x) => `${x.name}${x.real ? '' : '(가상)'} ${x.year}`).join(', ') || '—'} |`}`);
   }
+  // 2026년 시작 때 붙는 레전드 칭호 (2025년 1군에서 뛴 보유자, 물음 3 결정: 시작 때 실제 기록으로 붙인다)
+  const active = new Set(real.filter((x) => x.year === 2025).map((x) => x.id));
+  const atStart = LEGEND.filter((Lg) => !Lg.alt).flatMap((Lg) => (realAll.legend.get(Lg.key) ?? []).filter((x) => active.has(x.id)).map((x) => `${x.name} '${Lg.nick ?? `(${Lg.ownerName} 조건)`}' (${x.year})`));
+  parts.push('', `2026년 시작 때 붙는 보유자 (2025년 1군): ${atStart.join(', ') || '없음'}.`);
+  parts.push('', `대안을 뺀 모든 조건 합: 실제 1982~2025 ${realSum}명 (해마다 ${f1(realSum / (2025 - firstYear + 1))}명)${realOnly ? '' : `, 게임 시드당 ${f1(gameSum)}명 (해마다 ${f1(gameSum / n)}명)`}.`);
   parts.push('');
   const text = parts.join('\n');
   if (out) { mkdirSync(dirname(out), { recursive: true }); writeFileSync(out, text); console.log(`${out}에 썼습니다.`); } else console.log(text);
