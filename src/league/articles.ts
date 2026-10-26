@@ -4,10 +4,10 @@
 import type { LeagueState } from './types';
 
 export type ArticleKind = 'milestone' | 'record' | 'streak' | 'title' | 'award' | 'retire' | 'scenario' | 'trade' | 'overseas'
-  | 'game' | 'debut' | 'rank' | 'injury' | 'monthly' | 'interview' | 'allstar';
+  | 'game' | 'debut' | 'rank' | 'injury' | 'monthly' | 'interview' | 'allstar' | 'honor';
 export const ARTICLE_LABEL: Record<ArticleKind, string> = {
   milestone: '통산 기록', record: '신기록', streak: '연승·연패', title: '우승', award: '시상', retire: '은퇴', scenario: '시나리오', trade: '트레이드', overseas: '해외',
-  game: '경기', debut: '데뷔 첫 기록', rank: '순위', injury: '부상', monthly: '월간 MVP', interview: '인터뷰', allstar: '올스타',
+  game: '경기', debut: '데뷔 첫 기록', rank: '순위', injury: '부상', monthly: '월간 MVP', interview: '인터뷰', allstar: '올스타', honor: '칭호',
 };
 
 export interface Article {

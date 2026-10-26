@@ -1,6 +1,6 @@
 // 브라우저용 데이터 로더. public/data/ 의 JSON을 fetch로 읽는다.
 import { setCalendarSchedule } from './schedule';
-import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RunningData, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RealAward, type LegendTitleRow, type RunningData, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
@@ -19,7 +19,7 @@ export interface BrowserStore extends DataStore {
 
 export async function loadBrowserStore(): Promise<BrowserStore> {
   // 신인 지명(drafts.json)은 오프시즌 드래프트와 새 게임에 필요해서 처음부터 불러온다 (약 640KB, 압축 전송)
-  const [meta, pl, dr, tr, mil, mgr, dfa, rc, homes, ppa, schedule, defense, pitches, plate, parks, running] = await Promise.all([
+  const [meta, pl, dr, tr, mil, mgr, dfa, rc, homes, ppa, schedule, defense, pitches, plate, parks, running, realAwards, legendTitles] = await Promise.all([
     get<Meta>('meta.json'), get<{ players: PlayerMaster[] }>('players.json'), get<{ years: Record<string, DraftRow[]> }>('drafts.json'),
     // 숨겨진 특수능력 표. 파일이 없어도 게임은 돌아간다 (아무도 능력이 없는 것으로)
     get<{ traits: Record<string, string[]> }>('traits.json').then((t) => t.traits, () => undefined),
@@ -47,6 +47,9 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     get<ParkData>('parks.json').catch(() => undefined),
     // 선수별 추가 진루·번트 (약 30KB, 능력치 v2 16-3d). 없으면 주루 판단·번트 수행은 나이 평균에서 시작
     get<RunningData>('running.json').catch(() => undefined),
+    // 실제 시상 (약 80KB, 칭호의 시작 전 수상)과 레전드 칭호 표 (약 6KB). 없으면 그 칭호가 붙지 않는다
+    get<{ awards: RealAward[] }>('awards.json').then((t) => t.awards, () => undefined),
+    get<{ legends: LegendTitleRow[] }>('legend_titles.json').then((t) => t.legends, () => undefined),
   ]);
   const seasons = new Map<number, SeasonData>();
   const load = async (years: number[]) => {
@@ -74,6 +77,8 @@ export async function loadBrowserStore(): Promise<BrowserStore> {
     plate,
     parks,
     running,
+    realAwards,
+    legendTitles,
     async ensureYear(year) {
       await load([year, year - 1, year - 2, year - 3]);
     },

@@ -13,6 +13,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 - 리그 규칙 변경 알림·미래 규칙·창단 특례·외국인 출전 한도, 구단 투표(단장 회의), UI 대개편(브리핑·공통 표): 2026-10-24 병합 준비.
 - 출처 표기·제도 고침과 옛 규칙 실제화 (2026-10-24 `feat/rule-fidelity`, 2026-10-25 병합 준비 `merge/prep-2`): 정보·출처 화면과 `DATA_LICENSES.md`(자료별 출처·라이선스), FA 도입 때 자격 10시즌, 위키 병역 현역·보충역 구분 없앰, 1군 등록·출장 인원 분리와 엔트리 확대, 가을야구 시리즈 승수·1993~1998 준PO 생략·1986~1988 3팀.
 - 구장 효과 (2026-10-24 main, PR #131): 1982~2027년 뒤 모든 해 구장 배율, 신구장 펜스 제원·펜스 조정·가벽 공사, 구장 화면 지수. 능력치 v2 16-1(볼카운트 사슬 칸 함수 `plate.ts`)·16-2(타구각 갈래 `angle.ts`)·16-3 첫 단계(수비 v2 `fielding.ts`)도 같이 main에 들어갔다. 16-3 나머지(주루·작전·어깨 `runskills.ts`)와 16-4~16-7(잠재력 v2·갈래 성장·집중 훈련·스카우트·외국인 파견·숨은 값 화면)은 2026-10-25 병합 준비 `merge/prep-2`에 들어갔다 (`feat/ratings-v2`). 16-5 장기 맞춤(성장 여유분 실측·가상 신인 배율)과 16-5b(지명 순위 표를 가상 신인 눈금으로)도 같은 브랜치. 남은 것: 16-6 공개 특수능력 (갈래 성장 크기를 측정값으로 바꾸는 일은 따로 남김).
+- 선수 칭호 첫 범위 (2026-10-26 `feat/titles`, 기획 `docs/칭호_기획안.md`): 효과 없는 명예 칭호 (타이틀·시즌 기록·통산·수상·구단·가을야구·롱런·다관왕·레전드 37개), 결산 판정(`league.titles`)·시작 때 실제 기록·예전 저장 채우기, 선수 상세 머리 칩·'계약·이력' 칭호 칸, 소식 `titleNews`·기사 갈래 `honor`. 나중 묶음(명단 칭호 열·기록실 칭호 화면·명예의 전당 칩·구단주 업적)은 기획안 8장.
 - **다음 작업: M9 확장과 공개 검토** (`docs/milestones.md`). 시작 전에 아래 "마일스톤별 문제점과 빠진 점"을 본다.
 
 읽는 순서: `docs/milestones.md` (할 일) → `docs/design.md` (기획서 v1.0, 확정 사항) → `docs/engine.md` (엔진 구조, 검증 결과, 한계. 엔진 2는 6장).
@@ -22,7 +23,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 ```bash
 npm install
 npm run dev        # 게임 (http://localhost:5173), 엔진 시험 화면은 ?lab
-npm test           # 전체 시험 (Vitest, 152개 파일 1140개, 2026-10-25 threads 4로 약 10~15분: npx vitest run --pool=threads --poolOptions.threads.maxThreads=4 --poolOptions.threads.minThreads=1). 모든 변경 뒤 전체 시험. 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
+npm test           # 전체 시험 (Vitest, 154개 파일 1161개, 2026-10-26 threads 4로 약 11분: npx vitest run --pool=threads --poolOptions.threads.maxThreads=4 --poolOptions.threads.minThreads=1). 모든 변경 뒤 전체 시험. 병합 준비·PR 전에만. PR마다 .github/workflows/check.yml이 테스트·빌드를 돌린다
                    # 환경 맞춤 디스크 캐시(node_modules/.cache/kbo-cal, tools/calCache.ts): 엔진 코드·월드·조정값·시드가 같으면 지난 맞춤을 다시 쓴다
                    # (결과 같음. 혼자 돌린 PC에서 캐시 없음 1019초 → 찬 캐시 438초, 작업자 8개면 약 +30%). 끄기 KBO_CAL_CACHE=0
                    # 작업자 기본 8개 (약 3.8GB, vite.config.ts). KBO_TEST_FORKS=<수>, 0이면 vitest 기본(코어 수 − 1)
@@ -33,6 +34,7 @@ npm run build
 npm run data       # data-src/ 엑셀 → public/data/ JSON 변환 후 검사 (Python 3 + openpyxl 필요)
                    # 이 PC는 python3가 MS 스토어 껍데기라 안 된다: python tools/build_data.py && python tools/validate_data.py
                    # 하드힛 가공값(무시 목록)이 없는 PC에서 돌리면 하드힛으로 채운 값이 빠진다. 데이터는 하드힛 백업이 있는 PC에서만 다시 만든다
+python tools/build_data.py --titles-only    # 레전드 칭호 표만 (data-src/칭호_레전드.csv → legend_titles.json, 다른 JSON·저장 호환 그대로)
 python tools/build_data.py --rules-only     # 연도별 규칙(meta.json rules)과 규칙 변경(rule_changes.json)만. --schedule-only 일정 규칙, --ppa-only 선수별 P/PA, --homes-only 연고지, --contracts-only 계약 연도별 연봉(계약_연도별.csv → contracts.json)
 npm run validate -- --years 2025 --seasons 1000   # 엔진 검증 (validate·park_check·longsim도 같은 맞춤 캐시를 쓴다)
 python3 tools/fit_regression.py                    # 능력 산출 회귀 상수 다시 맞추기
@@ -76,11 +78,11 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 | `src/engine/index.ts` | 엔진 공개 진입점. 화면과 도구는 여기서만 가져다 쓴다 |
 | `src/data/` | 데이터 타입, Node용·브라우저용 로더 |
 | `src/ai/` | AI 단장: 선수 가치·구단 전력(`value.ts`), 성향·트레이드 판단·요구안(`trade.ts`), 구단 투표 AI(`vote.ts`, `VOTE_PARAMS` 임시값). 난수 없이 결정적 |
-| `src/league/` | 여러 해 리그 상태: 선수 능력·잠재력·계약·이력(`types.ts`), 새 리그 만들기(`create.ts`), 리그 → 월드(`world.ts`), 잠재력·성장(`growth.ts`), 연봉·FA·캡·외국인 규정(`salary.ts`), 오프시즌 단계(`offseason.ts`), 은퇴·병역·부상 후유증·슬럼프(`careers.ts`), 포스트시즌(`postseason.ts`), 구단주 평가·난이도·예산·캡 제재·업적(`owner.ts`), 가상 이름(`names.ts`), 연고지 거리(`distance.ts`), 개막 '달라지는 규칙' 알림(`ruleNews.ts`)과 일정 소식(`scheduleNews.ts`), 2028년 이후 미래 규칙 변경(`futureRules.ts`, 게임 속 가상 결정), 숨은 천장·성장 성향(`potential.ts`, 잠재력 v2), 갈래 성장·갈래 천장(`branches.ts`), 집중 훈련(`training.ts`), 스카우트 추측·드래프트 보드·외국인 시장 평판·화면 추측·우리 스카우트 가치(`scout.ts`), 외국인 파견·관찰 명단(`scoutfx.ts`) |
+| `src/league/` | 여러 해 리그 상태: 선수 능력·잠재력·계약·이력(`types.ts`), 새 리그 만들기(`create.ts`), 리그 → 월드(`world.ts`), 잠재력·성장(`growth.ts`), 연봉·FA·캡·외국인 규정(`salary.ts`), 오프시즌 단계(`offseason.ts`), 은퇴·병역·부상 후유증·슬럼프(`careers.ts`), 포스트시즌(`postseason.ts`), 구단주 평가·난이도·예산·캡 제재·업적(`owner.ts`), 선수 칭호(`titles.ts`, 효과 없는 이름표: 공개 기록만 읽고 엔진·AI·연봉은 보지 않는다. 레전드 칭호 조건 `LEGEND_RULES`, 이름·주인·출처는 `legend_titles.json`), 가상 이름(`names.ts`), 연고지 거리(`distance.ts`), 개막 '달라지는 규칙' 알림(`ruleNews.ts`)과 일정 소식(`scheduleNews.ts`), 2028년 이후 미래 규칙 변경(`futureRules.ts`, 게임 속 가상 결정), 숨은 천장·성장 성향(`potential.ts`, 잠재력 v2), 갈래 성장·갈래 천장(`branches.ts`), 집중 훈련(`training.ts`), 스카우트 추측·드래프트 보드·외국인 시장 평판·화면 추측·우리 스카우트 가치(`scout.ts`), 외국인 파견·관찰 명단(`scoutfx.ts`) |
 | `src/game/` | 게임 진행 계층: 세션(플레이어 구단, 엔트리, 알림, 조작 기록), 달력(시즌 개막일 기준), 순위 문장(`rank.ts`), 기록 계산, 화면 구장 지수·wRC+ 구장 보정(`parkView.ts`), 브라우저 저장. `storage.ts`만 브라우저 전용 |
 | `src/ui/` | 화면. `App.tsx` → 시작 화면 / `GameShell.tsx`(왼쪽 메뉴·상태 줄·진행 버튼, 메뉴 구조 `menu.ts`, 결정함 `decisions.ts`, 틀 공유 `shell.tsx`) → `screens/` (홈은 `Briefing.tsx`). 공통 표는 `parts`의 `DataTable`(`table.ts`). 진짜 등급은 `parts.tsx`의 `useSeen`으로만 꺼내고 추측 칸은 `GuessCell`·`guessColumn`, 전망 세 단계는 `game/rank.ts strengthTier`. `ui/grades.ts`는 `runsGrade`·`runsWar`만. 훈련 `screens/Training.tsx`, 영입 > 스카우트 `screens/Scout.tsx`. 엔진 시험 화면은 `EngineLab.tsx` |
 | `tools/` | 데이터 변환·검사(Python), 엔진 검증(TypeScript), 숨겨진 특수능력 후보 추천(`suggest_traits.py`) |
-| `public/data/` | 게임 데이터 JSON. 직접 고치지 말고 엑셀을 고친 뒤 `npm run data`. `schedule.json`(일정 규칙), `rule_changes.json`(규칙 변경·공인구), `homes.json`(연고지), `ppa.json`(선수별 P/PA), `parks.json`(구장 제원·옮기는 해·좌석·옛 해 구장 효과, `build_data.py --parks-only` ← `data-src/구장.csv`·`구장_사용.csv`), `plate.json`(볼카운트 칸 리그 표·선수별 사슬 실측, `--plate-only`), `defense.json`(수비 이닝·평판), `running.json`(선수별 추가 진루·번트, 투구 단위 자료 2023~, `--running-only`) |
+| `public/data/` | 게임 데이터 JSON. 직접 고치지 말고 엑셀을 고친 뒤 `npm run data`. `schedule.json`(일정 규칙), `rule_changes.json`(규칙 변경·공인구), `homes.json`(연고지), `ppa.json`(선수별 P/PA), `parks.json`(구장 제원·옮기는 해·좌석·옛 해 구장 효과, `build_data.py --parks-only` ← `data-src/구장.csv`·`구장_사용.csv`), `plate.json`(볼카운트 칸 리그 표·선수별 사슬 실측, `--plate-only`), `defense.json`(수비 이닝·평판), `running.json`(선수별 추가 진루·번트, 투구 단위 자료 2023~, `--running-only`), `awards.json`(실제 시상, 칭호의 시작 전 수상), `legend_titles.json`(레전드 칭호 표, `--titles-only` ← `data-src/칭호_레전드.csv`) |
 | `data-src/` | 원자료 엑셀. 출처와 한계는 엑셀의 "안내", "출처", "데이터공백" 시트. `일정규칙.csv`는 연도별 정규시즌 일정 규칙 (경기 수·연전 틀·개막·올스타·쉬는 기간, `python tools/build_data.py --schedule-only` → `public/data/schedule.json`), `외국인_개막명단.csv`는 2026 개막 외국인·아시아쿼터 (나무위키 2026 KBO 리그 계약표, 국적, 시즌 중 이적은 `기록소속` 열, 연봉·계약금 열이 있는 선수(지금 LG 3명)는 시작 계약에 그대로), `제도연표_보정.csv`는 자료집 제도연표를 위키로 확인한 값과 출처, `규칙변경.csv`·`공인구.csv`는 개막 알림 자료(조사값 표시), `pbp_derived/`는 투구 단위(네이버 문자중계 기반 HF 자료, CC BY 4.0) 리그·선수별 가공값, `hardhit/`·`hardhit_derived/`(하드힛 원본·가공값)와 `naver_pbp/`·`batted_ball/` 원본은 커밋하지 않는다, `계약_연도별.csv`는 해마다 연봉이 다른 실제 다년 계약 (2022 SSG 첫해 몰아주기 4명, 언론 보도, 적지 않은 해는 남은 보장액을 고르게. `--contracts-only`), `추가_명단.csv`는 그 해 1군 기록이 자료에 없어도 선수단에 넣을 선수 (기록 0 행으로 더해 능력은 직전 시즌에서. 2026 김광현, 사용자 요청), `baseballchart/`는 1982~2027년 입단 신인 지명 원본 (baseballchart.kr CSV, CC BY-NC-SA 2.0 KR, 고치지 않는다) |
 | `reports/` | 엔진 검증 결과 |
 
@@ -115,6 +117,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 새 화면을 만들면 `src/ui/menu.ts`의 MENU에 자리를 정하고, 열 수 없는 때가 있으면 `blockOf`에 사유와 열리는 때를 적는다 (숨기지 않는다). 처리해야 하는 일이 생기는 기능이면 `decisions.ts`에 넣는다. 엔트리·기용을 바꾸는 새 화면은 `session.checkBoard`/`applyBoard`로 묶음을 검사·적용한다.
 - 엔진을 바꿀 때 운으로 깨지기 쉬운 시험: `second-draft` 2025, `events-impact` 경기력(16시드 +3.0 대 −3.0, 득실 기준 기대 승률, 문턱 0.05, 전체 시험의 바닥 시간), `park` 홈런 배율(여덟 시드), `articles` 순위 기사. 시드 이력은 각 테스트 주석에 있다. `owner` M7 한 바퀴는 후보 시드 중 LG가 우승하지 못한 첫 판을 쓰고, `fantasy-free` 그레인키·`history` 최다 홈런·`records-screen` 순위표는 운과 관계없게 고쳤다 (2026-10-24).
 - 구장 값은 `teamParkInfo` 한 곳에서 고른다: 가벽 → 펜스 조정 → 게임 안 신구장 → 실제 구장 값 (`realParkYear`, 모든 해). 게임 안 공사는 그 해 개막 전에 끝난 `done` 기록으로 찾는다.
+- 칭호(`league/titles.ts`)는 결산 때 `beginOffseason`이 판정하고, 세션은 가을야구 우승·시리즈 MVP를 붙인 뒤 같은 해를 다시 판정한다 (`judgeTitles`는 그 해 칭호를 지우고 다시 내서 몇 번 불러도 같다). 시작 때는 시작 해 전 실제 기록(`startTitles`, 레전드 칭호는 별명 주인만, 다른 선수는 게임 안에서 조건을 채운 시즌에만 얻는다, 2026-10-26 사용자), 칸이 없는 예전 저장은 불러올 때 `ensureTitles`. 칭호는 엔진·AI 가치·연봉·관중·저장된 엔진 값에 쓰지 않는다 (`tests/titles.test.ts`).
 - 시즌 중 선수 능력을 리그 값으로 다시 맞추는 조작(자유 모드 만들기·능력)은 뒤에 `applyLeagueRunSkills`로 주루·작전 손잡이와 리그 영점을 다시 낸다 (불러온 판과 같게).
 - 훈련 설정은 조작 `train`(시즌)·`train-off`(오프시즌). AI 훈련은 결산 때 규칙으로 정하고 저장하지 않는다.
 - 트레이드는 `Season.transfer`로 월드의 소속을 직접 바꾸고 저장에 이적 기록을 남긴다. 한 월드를 두 시즌이 같이 쓰지 않는다.

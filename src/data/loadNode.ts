@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RunningData, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
+import { decodeSeason, type ContractRow, type DataStore, type DefenseData, type DraftRow, type ManagerData, type Meta, type MilitaryRecord, type DefenseAward, type HomeCity, type ParkData, type PitchData, type PlateData, type PlayerMaster, type PpaData, type RawSeason, type RealAward, type LegendTitleRow, type RunningData, type RuleChangeData, type ScheduleData, type SeasonData } from './types';
 
 import { setCalendarSchedule } from './schedule';
 export type { DataStore } from './types';
@@ -37,6 +37,8 @@ export function loadDataStore(): DataStore {
     plate: existsSync(join(DATA_DIR, 'plate.json')) ? read<PlateData>('plate.json') : undefined,
     parks: existsSync(join(DATA_DIR, 'parks.json')) ? read<ParkData>('parks.json') : undefined,
     running: existsSync(join(DATA_DIR, 'running.json')) ? read<RunningData>('running.json') : undefined,
+    realAwards: existsSync(join(DATA_DIR, 'awards.json')) ? read<{ awards: RealAward[] }>('awards.json').awards : undefined,
+    legendTitles: existsSync(join(DATA_DIR, 'legend_titles.json')) ? read<{ legends: LegendTitleRow[] }>('legend_titles.json').legends : undefined,
     season(year) {
       if (!meta.years.includes(year)) return undefined;
       let s = cache.get(year);

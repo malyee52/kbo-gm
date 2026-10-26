@@ -1291,3 +1291,20 @@ button.link.team-link:hover:not(:disabled) .team { text-decoration: underline; t
 .track.range { display: flex; }
 .track.range i:first-child { border-radius: 4px 0 0 4px; }
 .track i.rng { opacity: 0.4; border-radius: 0 4px 4px 0; }
+
+/* 칭호 칩 (선수 상세 머리·칭호 칸, titles.ts). 색은 --honor-* 토큰 */
+.honors { gap: 4px 6px; align-items: center; }
+.honor {
+  --h: var(--honor-1);
+  display: inline-flex; align-items: center; gap: 3px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; line-height: 20px; font-weight: 700;
+  color: var(--h); border: 1px solid color-mix(in srgb, var(--h) 45%, transparent); background: color-mix(in srgb, var(--h) 12%, var(--panel));
+  white-space: nowrap;
+}
+.honor.t2 { --h: var(--honor-2); }
+.honor.t3 { --h: var(--honor-3); }
+.honor.legend { --h: var(--honor-legend); border-width: 1.5px; }
+.honor-star { font-size: 9.5px; letter-spacing: -0.5px; }
+.honor-more {
+  padding: 0 7px; min-height: 0; line-height: 20px; font-size: 11.5px; border-radius: 999px; background: transparent; color: var(--muted);
+  border: 1px dashed var(--line-strong);
+}

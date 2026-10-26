@@ -4,6 +4,7 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
+import { judgeTitles } from './titles';
 import { lineTeam } from '../engine/types';
 import { repDemand } from './reputation';
 import { aiFxRegion, FX_OFF_SENDS, fxListCount, fxOpenOff, fxPoolPlan, fxSeasonWindow, fxSendOff, fxSigned, fxSpec, fxState, fxVisible, FX_OFF_UNTIL, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
@@ -566,6 +567,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       }
     }
   }
+  // 칭호 (titles.ts, 효과 없음): 시상과 이 시즌 줄 뒤에 판정한다. 세션은 가을야구 우승·시리즈 MVP를 붙인 뒤 한 번 더 판정한다
+  judgeTitles(league, store, year, Math.max(...season.teams.map((t) => t.g)));
   // 해외에 있는 선수: 해외 리그에서 주전으로 뛰는 것으로 보고 출전 기회 1.0으로 성장 판정 (overseas.ts)
   for (const p of league.players) {
     if (!isAbroad(p)) continue;

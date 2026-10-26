@@ -362,6 +362,8 @@ export interface LeagueState {
   storyMonth?: { year: number; month: number; lines: Record<string, number[]> };
   /** 시즌 시상 기록 (2026-10-08 추가, 게임 안에서 치른 시즌만) */
   awards?: SeasonAwards[];
+  /** 선수 칭호 (titles.ts, 칭호 기획안 5.2). 효과 없는 이름표라 엔진·AI가 읽지 않는다. 2026-10-26부터, 예전 저장은 불러올 때 채운다 (저장 형식 그대로) */
+  titles?: import('./titles').TitleRecord[];
   /** 올스타전 기록 (allstar.ts, 2026-10-14) */
   allStars?: import('./allstar').AllStarRecord[];
   /** 스프링캠프 기록 (camp.ts, 최근 5년) */
