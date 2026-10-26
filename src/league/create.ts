@@ -1,5 +1,6 @@
 // 새 게임의 리그 상태 만들기: 시작 연도 자료로 월드를 만들고, 잠재력·계약·연차를 붙인다.
 
+import { startTitles } from './titles';
 import type { ContractRow, DataStore } from '../data/types';
 import { DEFAULT_PARAMS, Rng, worldForYear, type EngineParams, type SimPlayer, type World } from '../engine';
 import { currentRuns, valueContext } from '../ai/value';
@@ -258,6 +259,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     const sp = simById.get(p.id);
     if (sp) p.potential = Math.max(p.potential, currentRuns(sp, finalCtx));
   }
+  // 칭호: 시작 해 전 실제 기록으로 (칭호 기획안 결정 7, 효과 없음)
+  startTitles(league, store);
   return { league, world };
 }
 
