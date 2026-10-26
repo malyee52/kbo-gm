@@ -90,6 +90,8 @@ HARDHIT = ROOT / 'data-src' / 'hardhit_derived'
 HARDHIT_REPORT = ROOT / 'reports' / 'hardhit-fill.md'
 # 그 해 1군 기록이 자료에 없지만 선수단에 넣어야 하는 선수 (예: 2026 김광현). 기록 0인 행을 그 시즌에 더한다
 EXTRA_ROSTER = ROOT / 'data-src' / '추가_명단.csv'
+# 다년 계약의 연도별 연봉 (보장액을 해마다 고르게 나누지 않은 계약, 예: 2022 SSG 첫해 몰아주기). 적지 않은 해는 남은 보장액을 고르게 나눈다
+CONTRACT_YEARLY = ROOT / 'data-src' / '계약_연도별.csv'
 WIKI = ROOT / 'data-src' / 'wiki'
 WIKI_REPORT = ROOT / 'reports' / 'wiki-fill.md'
 # --no-wiki: 위키 가공값을 넣지 않은 기반 자료를 만든다 (tools/wiki/s5_merge.py가 '우리 값'으로 견줄 때 쓴다.
@@ -100,6 +102,30 @@ TRAIT_LABELS = {
     '승부사': 'clutch', '가을 사나이': 'october', '위기 탈출': 'escape', '철인': 'ironman', '늦게 지는 꽃': 'evergreen',
     '에이스 체력': 'stamina', '안방 사나이': 'homer', '좌완 킬러': 'vsLeft', '우완 킬러': 'vsRight',
 }
+
+
+def apply_contract_yearly(contracts):
+    """data-src/계약_연도별.csv → 계약 행의 yearly {시즌: 억 원}. 모르는 계약·기간 밖 시즌·보장액 초과는 오류"""
+    for c in contracts:
+        c.pop('yearly', None)
+    if not CONTRACT_YEARLY.exists():
+        return 0
+    by_key = {(c['id'], c['first']): c for c in contracts}
+    n = 0
+    with CONTRACT_YEARLY.open(encoding='utf-8-sig', newline='') as f:
+        for r in csv.DictReader(f):
+            pid, first, year = str(r['선수ID']).strip(), int(r['계약 첫 시즌']), int(r['시즌'])
+            c = by_key.get((pid, first))
+            if not c:
+                raise SystemExit(f'계약_연도별.csv: 계약 자료에 없는 계약 {pid} {first} ({r.get("선수명")})')
+            if not first <= year < first + c['years']:
+                raise SystemExit(f'계약_연도별.csv: 계약 기간 밖 시즌 {year} ({r.get("선수명")})')
+            c.setdefault('yearly', {})[str(year)] = float(r['연봉(억 원)'])
+            n += 1
+    for c in contracts:
+        if 'yearly' in c and sum(c['yearly'].values()) > c['guaranteed'] + 1e-6:
+            raise SystemExit(f'계약_연도별.csv: {c["name"]} {c["first"]} 연도별 합이 보장액 {c["guaranteed"]}억을 넘음')
+    return n
 
 
 def trait_key(pid):
@@ -1936,6 +1962,12 @@ def main():
         # 구종 CSV(visualbaseball·위키)만 다시 반영한다 (다른 JSON과 저장 호환은 그대로)
         build_pitches(OUT)
         return
+    if '--contracts-only' in sys.argv:
+        # 계약 연도별 연봉 CSV만 contracts.json에 다시 반영한다 (엑셀을 읽지 않는다. 선수 월드 지문과 무관해 저장 호환은 그대로)
+        doc = json.loads((OUT / 'contracts.json').read_text(encoding='utf-8'))
+        print(f'계약 연도별 연봉 {apply_contract_yearly(doc["contracts"])}줄')
+        (OUT / 'contracts.json').write_text(json.dumps(doc, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        return
     if '--traits-only' in sys.argv:
         # 특수능력 CSV만 다시 반영한다 (엑셀을 읽지 않으므로 다른 JSON과 저장 호환은 그대로)
         ids = {p['id'] for p in json.loads((OUT / 'players.json').read_text(encoding='utf-8'))['players']}
@@ -2009,6 +2041,7 @@ def main():
             'guaranteed': r['보장액(억 원)'] or 0, 'option': r['옵션(억 원)'] or 0,
             **({'note': str(r['기간(년)'])} if not isinstance(r['기간(년)'], int) else {}),
         })
+    apply_contract_yearly(contracts)
 
     # ---- 순위표
     teams = defaultdict(list)

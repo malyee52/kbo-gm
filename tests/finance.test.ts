@@ -163,7 +163,10 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     expect(payOf(p)).toBe(salary - Math.round(fee.amount / e.years));
     const help = h.league.ledger.find((x) => x.kind === 'faSupport' && x.note.startsWith(p.name))!;
     expect(help).toMatchObject({ from: -1, to: lg, amount: fee.amount });
-    expect(cashOf(h.league, lg)).toBe(0);
+    // 모기업은 계약금만 대 준다. 보상금(등급별, 원 소속 구단에)은 자금에서 나간다
+    // (2026-10-26 FA 기간 표로 고른 FA가 C등급 강백호가 되어 보상금만큼 자금이 음수가 된다)
+    const comp = h.league.ledger.filter((x) => x.from === lg && x.note.startsWith(`${p.name} FA 보상금`)).reduce((s, x) => s + x.amount, 0);
+    expect(cashOf(h.league, lg)).toBe(-comp);
     expect(h.offseason!.log.some((l) => l.mine && l.text.includes('모기업이 지원'))).toBe(true);
     // 그해 남은 한도를 넘는 계약금은 예전처럼 제시할 수 없다
     const left = faSupportLeft(h.league, lg, 2027);

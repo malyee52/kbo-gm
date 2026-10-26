@@ -251,12 +251,23 @@ export function nextReserveSalary(prev: number, target: number, afterContract = 
   return Math.max(floor, Math.round(Math.min(prev * 2.5, Math.max(prev * (afterContract ? 0.5 : 0.75), target))));
 }
 
-/** FA 계약 기간 (임시값): 나이가 많을수록 짧다 */
-export function faYears(age: number): number {
-  if (age <= 29) return 4;
-  if (age <= 32) return 3;
-  if (age <= 34) return 2;
-  return 1;
+/**
+ * FA 계약 기간 표: 나이 상한마다 [기여 문턱(런), 기간]을 높은 문턱부터 (2026-10-26 사용자 "대부분의 FA 계약은 4년 혹은 6년이 일반적").
+ * 기준은 자료집 FA계약 시트(금액 미검증)의 계약 첫 시즌 2015년 뒤 FA 187건: 4년 46%·6년 이상 6%·3년 18%·2년 23%·1년 6%.
+ * 33세 이하는 4년이 60~80%이고 6년은 정상급, 34~35세는 4년 42%·3년 29%·2년 20%, 36세 이상은 2년 49%·3년 18%·4년 18%·1년 14%.
+ * 문턱은 게임 FA의 지금 기여 분포(사분위 약 11~40런, tools/fa_contract_check.ts)에 맞춘 임시값.
+ * 전에는 나이만 보았다 (29세 이하 4년, 32세 이하 3년, 34세 이하 2년, 그 위 1년)
+ */
+const FA_YEARS_TABLE: [number, [number, number][]][] = [
+  [33, [[45, 6], [10, 4], [5, 3], [-Infinity, 2]]],
+  [35, [[30, 4], [12, 3], [-Infinity, 2]]],
+  [Infinity, [[30, 3], [10, 2], [-Infinity, 1]]],
+];
+
+/** FA 계약 기간 (요구 기간): 계약 첫해 나이와 지금 기여(런)로 정한다 (FA_YEARS_TABLE, 임시값) */
+export function faYears(age: number, runs: number): number {
+  const rows = FA_YEARS_TABLE.find(([maxAge]) => age <= maxAge)![1];
+  return rows.find(([min]) => runs >= min)![1];
 }
 
 /** 런을 돈으로 바꾸는 시장 단가 (만 원/런, 임시값). 시장 연봉식의 주전급 기울기 근처 */
