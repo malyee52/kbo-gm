@@ -21,7 +21,7 @@ import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
-import { changeText } from '../league/eras';
+import { changeText, foreignRule, teamForeignRule } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
@@ -31,7 +31,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
+import { dollarText, foreignCap, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -1776,7 +1776,7 @@ export class GameSession {
             }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
-            this.applyNationality(lp, op);
+            this.applyNationality(lp, op, year, op.team, true);
             slot.foreign = lp.foreign;
             Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
             delete slot.reserve;
@@ -1791,7 +1791,7 @@ export class GameSession {
             if (op.real) np.outsider = true;
             this.setPitchRole(np, op.role);
             this.typicalStarterStamina(np);
-            this.applyNationality(np, op);
+            this.applyNationality(np, op, year, op.team, false);
             Object.assign(np, skillForRuns({ ...np }, runs, ctx, year));
           }
           break;
@@ -1823,7 +1823,7 @@ export class GameSession {
         case 'future':
           // 입단 예약: 그 해 개막 때 들어온다 (openPipeline)
           if (L.fantasy) (L.fantasy.pipeline ??= []).push({ name: op.name, team: op.team, pos: op.pos, ...(op.role ? { role: op.role } : {}), birthYear: op.birthYear,
-            joinYear: op.joinYear, now: op.now, potential: op.potential, ...(op.foreign ? { foreign: true } : {}), ...(op.real ? { real: true } : {}), from: note });
+            joinYear: op.joinYear, now: op.now, potential: op.potential, ...(op.foreign ? { foreign: true } : {}), ...(op.asia ? { asia: true } : {}), ...(op.real ? { real: true } : {}), from: note });
           break;
         case 'rule': {
           // 리그 규정 (league/rules.ts). 기본값으로 돌리면 기록에서 지운다
@@ -4264,9 +4264,9 @@ export class GameSession {
       const np = Off.addFreePlayer(L, this.store, this.params, x.team, { name: x.name, pos, age, runs, potential: pot });
       if (x.real) np.outsider = true;
       const op = { op: 'create' as const, name: x.name, team: x.team, pos: x.pos as Extract<FreeOp, { op: 'create' }>['pos'], age, now: x.now, potential: x.potential,
-        ...(x.role ? { role: x.role } : {}), ...(x.foreign ? { foreign: true } : {}), military: age >= 28 ? 'done' as const : 'pending' as const };
+        ...(x.role ? { role: x.role } : {}), ...(x.foreign ? { foreign: true } : {}), ...(x.asia ? { asia: true } : {}), military: age >= 28 ? 'done' as const : 'pending' as const };
       this.setPitchRole(np, op.role);
-      this.applyNationality(np, op);
+      this.applyNationality(np, op, L.year, x.team, false);
       const ctx = leagueView({ ...L, year: L.year - 1 }, this.store, this.params).ctx;
       Object.assign(np, skillForRuns({ ...np }, runs, ctx, L.year));
       out.push(`${L.teams[x.team].name} ${x.name} 입단 (예약, ${age}세)`);
@@ -4275,13 +4275,25 @@ export class GameSession {
   }
 
   /** 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약 */
-  private applyNationality(lp: LeaguePlayer, op: Extract<FreeOp, { op: 'create' }>): void {
+  /**
+   * 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약.
+   * 아시아쿼터 대상 국적(op.asia)이면 그 해 아시아쿼터가 있고(2026~, eras.ts foreignRule) 그 구단 아시아쿼터 자리가 비었을 때 아시아쿼터로 (연봉은 아시아쿼터 신규 상한까지).
+   * 자리가 없거나 도입 전이면 일반 외국인 (2026-10-29 사용자 보고: 오타니·야마모토가 아시아쿼터 표시 없이 들어왔다). season: 시즌 중(월드 소속으로 센다)
+   */
+  private applyNationality(lp: LeaguePlayer, op: Extract<FreeOp, { op: 'create' }>, year: number, team: number, season: boolean): void {
     if (op.foreign) {
       lp.foreign = true;
       delete lp.military;
-      lp.contract = { ...lp.contract, kind: 'foreign', salary: Math.max(lp.contract.kind === 'foreign' ? lp.contract.salary : 0, 300_000) };
+      const lim = teamForeignRule(foreignRule(this.store.meta, year, this.league), this.league, team, year).asia;
+      const byId = new Map(this.league.players.map((p) => [p.id, p]));
+      const held = season ? (this.world.teams[team]?.org ?? []).filter((p) => p.id !== lp.id && p.foreign && byId.get(p.id)?.asia).length
+        : this.league.players.filter((p) => p.id !== lp.id && p.team === team && p.foreign && p.asia).length;
+      lp.asia = !!op.asia && held < lim;
+      const base = Math.max(lp.contract.kind === 'foreign' ? lp.contract.salary : 0, 300_000);
+      lp.contract = { ...lp.contract, kind: 'foreign', salary: lp.asia ? Math.min(base, foreignCap(this.league, 'asiaNewCap', year)) : base };
     } else {
       lp.foreign = false;
+      lp.asia = false;
       lp.military = { state: op.military ?? 'pending', basis: 'estimate', note: '자유 모드' };
     }
   }

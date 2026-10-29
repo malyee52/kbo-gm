@@ -35,7 +35,7 @@ export type FreeOp =
   /** 선수를 그 구단으로 (−1이면 방출). 우리·다른 구단 모두 */
   | { op: 'move'; player: string; to: number }
   /** 선수를 만든다 (가상 인물, 또는 real이면 리그 밖에서 데려온 실존 인물). now·potential은 20~80 등급 */
-  | { op: 'create'; name: string; team: number; pos: CreatePos; age: number; now: number; potential: number; real?: boolean; role?: 'SP' | 'RP'; foreign?: boolean; military?: 'done' | 'exempt' | 'pending' }
+  | { op: 'create'; name: string; team: number; pos: CreatePos; age: number; now: number; potential: number; real?: boolean; role?: 'SP' | 'RP'; foreign?: boolean; asia?: boolean; military?: 'done' | 'exempt' | 'pending' }
   /** 능력(now)·잠재력(potential)을 20~80 등급으로 */
   | { op: 'ability'; player: string; now?: number; potential?: number }
   /** 계약: 연봉(만 원), 기간(이번 시즌부터 몇 해) */
@@ -49,7 +49,7 @@ export type FreeOp =
   /** 리그 규정을 바꾼다 (league/rules.ts) */
   | { op: 'rule'; key: RuleKey; value: number | null }
   /** 입단 예약: joinYear 개막 때 그 선수가 들어온다 (후원·육성 계약·파이프라인. 지금 뛸 수 없는 어린 선수) */
-  | { op: 'future'; name: string; team: number; pos: CreatePos; role?: 'SP' | 'RP'; birthYear: number; joinYear: number; now: number; potential: number; foreign?: boolean; real?: boolean };
+  | { op: 'future'; name: string; team: number; pos: CreatePos; role?: 'SP' | 'RP'; birthYear: number; joinYear: number; now: number; potential: number; foreign?: boolean; asia?: boolean; real?: boolean };
 
 /** 입단할 수 있는 가장 어린 나이 (KBO 규정, 만 17세 무렵) */
 export const MIN_JOIN_AGE = 17;
@@ -66,7 +66,7 @@ export function gradeOfRuns(runs: number, year: number): number {
 /** 게임 마스터에게 주는 조작 목록 */
 export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. 동명이인이면 "이름@구단")
 - {"op":"move","player":"선수 이름","to":"구단 이름 또는 방출"} 선수를 그 구단으로 옮긴다 (우리 구단·다른 구단 모두, 트레이드는 move 여러 개로)
-- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH (그 선수의 실제 주 포지션)","role":"SP|RP (투수만: 선발·구원)","age":17~50,"now":20~80,"potential":20~80,"real":true|false,"foreign":true|false (외국 국적),"military":"done|exempt|pending" (국내 선수 병역: 마침·면제·미필)} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
+- {"op":"create","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH (그 선수의 실제 주 포지션)","role":"SP|RP (투수만: 선발·구원)","age":17~50,"now":20~80,"potential":20~80,"real":true|false,"foreign":true|false (외국 국적),"nation":"국적 (외국인만: 일본·대만·호주·미국·도미니카 등)","military":"done|exempt|pending" (국내 선수 병역: 마침·면제·미필)} 선수를 그 구단에 넣는다. 리그 밖 실존 인물(해외 리그 선수, 은퇴 선수 등)을 데려오면 real true와 그 사람의 이름·나이, 지어낸 인물이면 real false
 - {"op":"ability","player":"선수 이름","now":20~80,"potential":20~80} 능력·잠재력 등급을 바꾼다 (둘 중 하나만도 됨, 50 = 리그 주전 평균)
 - {"op":"contract","player":"선수 이름","salary":억 원(소수),"years":1~10} 계약을 바꾼다
 - {"op":"cash","amount":억 원} 우리 구단 자금 (+ 들어옴, − 나감)
@@ -78,7 +78,7 @@ export const FREE_OPS_MENU = `[조작 목록] (선수·구단은 이름으로. �
 - {"op":"rest","player":"우리 선수 이름","days":1~30} (시즌 중)
 - {"op":"pick","draft":입단 연도,"round":라운드,"from":"원래 구단 이름","to":"새 주인 구단 이름"} 신인 지명권을 넘긴다 ([지명권]의 남은 지명권만)
 - {"op":"rule","key":"규정 키","value":값} 리그 규정을 바꾼다 ([이 게임의 규정]의 키와 범위. 리그 전체에 적용된다)
-- {"op":"future","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH","role":"SP|RP","birthYear":출생 연도,"joinYear":입단 연도,"now":입단 때 능력 20~80,"potential":20~80,"foreign":true|false,"real":true|false}
+- {"op":"future","name":"이름","team":"구단 이름","pos":"P|C|1B|2B|3B|SS|LF|CF|RF|DH","role":"SP|RP","birthYear":출생 연도,"joinYear":입단 연도,"now":입단 때 능력 20~80,"potential":20~80,"foreign":true|false,"nation":"국적 (외국인만)","real":true|false}
   입단 예약: 그 해 개막 때 그 선수가 실제로 들어온다. 지금 뛸 수 없는 어린 선수(후원·장학·육성 계약·파이프라인)는 create가 아니라 이것으로, 이름마다 하나씩. 입단 나이는 만 17세 이상`;
 
 export function freeSystem(regressor: boolean, l: Leniency = 3): string {
@@ -119,7 +119,7 @@ function rosterTable(g: GameSession, team: number, n: number): string {
   const grades = g.currentGrades();
   const lp = g.league.players.filter((p) => teamOfNow(g, p) === team);
   const rows = lp.map((p) => ({ p, runs: g.seenRuns(p.id) })).sort((a, b) => b.runs - a.runs).slice(0, n);
-  return rows.map(({ p }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력 추측(${guessSetText(g.guessSet(p.id, grades))}) 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
+  return rows.map(({ p }) => `${p.name}${p.outsider ? '(실존·리그 밖에서 옴)' : p.real === false ? '(가상)' : '(실존)'} ${p.isPitcher ? '투수' : p.pos ?? '야수'} ${p.birthYear ? year - p.birthYear : '?'}세 능력 추측(${guessSetText(g.guessSet(p.id, grades))}) 연봉${p.foreign ? `${Math.round(p.contract.salary / 10000)}만 달러${p.asia ? '(아시아쿼터)' : ''}` : `${Math.round(p.contract.salary / 1000) / 10}억`}`).join('; ');
 }
 
 /** 지금 소속 (시즌 중에는 월드, 오프시즌에는 리그) */
@@ -273,6 +273,36 @@ function playerByName(g: GameSession, raw: unknown): LeaguePlayer | null {
 /** 외국인 이름처럼 보이나: 띄어쓰기나 가운뎃점이 있거나 다섯 글자 이상 (한국 이름은 대개 두세 글자) */
 export const looksForeignName = (name: string) => /[\s·]/.test(name.trim()) || name.trim().length >= 5;
 
+/**
+ * 아시아쿼터 대상 국적: 아시아축구연맹(AFC) 가맹국 국적과 호주 (KBO 2026 아시아쿼터, 보도 기준). 한국은 국내 선수.
+ * 국적을 모르면 null
+ */
+const ASIA_NATIONS = ['일본', '대만', '중국', '홍콩', '마카오', '호주', '필리핀', '인도네시아', '베트남', '태국', '몽골', '싱가포르', '말레이시아', '인도', '파키스탄',
+  '스리랑카', '네팔', '방글라데시', '미얀마', '캄보디아', '라오스', '브루나이', '이란', '이라크', '사우디', '카타르', '아랍에미리트', '우즈베키스탄', '카자흐스탄', '괌', '북마리아나',
+  'japan', 'taiwan', 'chinese taipei', 'china', 'hong kong', 'australia', 'philippines', 'indonesia', 'vietnam', 'thailand', 'mongolia', 'singapore', 'malaysia', 'india'];
+export function asiaNation(nation: unknown): boolean | null {
+  if (typeof nation !== 'string' || !nation.trim()) return null;
+  const n = nation.trim().toLowerCase();
+  return ASIA_NATIONS.some((x) => n.includes(x));
+}
+
+/** 일본 성 (한글 표기, 첫 낱말). 국적을 주지 않았을 때 이름으로 짐작한다: "오타니 쇼헤이", "야마모토 요시노부" */
+const JAPANESE_SURNAMES = new Set(['오타니', '야마모토', '다르빗슈', '스즈키', '다나카', '타나카', '사토', '다카하시', '타카하시', '와타나베', '이토', '나카무라', '고바야시', '코바야시',
+  '가토', '카토', '요시다', '야마다', '사사키', '마쓰모토', '마츠모토', '이노우에', '기무라', '키무라', '하야시', '사이토', '시미즈', '야마구치', '마쓰이', '마츠이', '마에다',
+  '기쿠치', '키쿠치', '센가', '이마나가', '무라카미', '오카모토', '야나기타', '곤도', '콘도', '후지나미', '마키', '사카모토', '아베', '이시카와', '오가사와라', '우에하라',
+  '구로다', '쿠로다', '노모', '후쿠도메', '니시다', '시라카와', '가네코', '모리', '이시이', '오가와', '나카타', '나카지마', '후지타', '오노', '다케다', '타케다', '야마시타',
+  '마쓰다', '마츠다', '이와쿠마', '아오키', '가와사키', '카와사키', '이치로', '조지마', '이구치', '오시타', '미야자키', '요코야마', '후지이', '니시무라', '하라', '사와무라', '야마사키', '우에다']);
+export function looksAsianName(name: string): boolean {
+  const t = name.trim();
+  if (/[\u3040-\u30ff]/.test(t)) return true; // 가나
+  return JAPANESE_SURNAMES.has(t.split(/[\s·]/)[0]);
+}
+
+/** 만든 외국인이 아시아쿼터 대상 국적인가: 국적을 받으면 그대로, 없으면 이름으로 */
+export function asiaEligible(nation: unknown, name: string): boolean {
+  return asiaNation(nation) ?? looksAsianName(name);
+}
+
 const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : typeof x === 'string' && x.trim() && Number.isFinite(Number(x)) ? Number(x) : null);
 
 /** AI가 낸 조작을 이름 → id로 바꾸고 범위를 다듬는다 (판단 상한은 없다, 값의 범위만) */
@@ -293,7 +323,8 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
       }
       case 'create': {
         const team = teamByName(g, e.team);
-        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 8) : '';
+        // 외국 이름은 길다 ("야마모토 요시노부" 9자가 8자로 잘렸다, 2026-10-29). 입단 예약(future)과 같은 20자
+        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 20) : '';
         if (team === null || team < 0 || !name) { dropped.push(`create: ${name || '이름 없음'} (구단 ${String(e.team)})`); break; }
         // 리그 밖 실존 인물: AI가 real로 냈거나, 자료(KBO 기록)에는 있는데 지금 리그에 없는 이름
         const inLeague = new Set(g.league.players.map((p) => p.id));
@@ -304,11 +335,13 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         const pos = (role || e.pos === 'P' ? 'P' : typeof e.pos === 'string' && CREATE_POS.includes(e.pos.toUpperCase()) ? e.pos.toUpperCase() : 'IF') as CreatePos;
         // 외국인·병역 (2026-10-13 사용자 보고: 만든 선수가 모두 미필 국내 선수라 38세 선동열·외국인 멜빈 번치가 입대했다).
         // 게임 마스터가 주지 않으면 이름으로(띄어쓰기·다섯 글자 이상이면 외국인), 국내 선수는 28세 이상이면 마친 것으로
-        const foreign = e.foreign === true || (e.foreign !== false && looksForeignName(name));
+        const foreign = e.foreign === true || (e.foreign !== false && (looksForeignName(name) || asiaNation(e.nation) === true));
+        // 아시아쿼터 대상 국적 (2026-10-29 사용자 보고: 오타니·야마모토가 일반 외국인으로 들어왔다). 자리는 만들 때 정한다 (session applyNationality)
+        const asia = foreign && asiaEligible(e.nation, name);
         const military = foreign ? undefined : e.military === 'done' || e.military === 'exempt' || e.military === 'pending' ? e.military
           : (num(e.age) ?? 22) >= 28 ? 'done' as const : 'pending' as const;
         ops.push({ op: 'create', name, team, pos, age: Math.max(17, Math.min(real ? 50 : 40, Math.round(num(e.age) ?? 22))),
-          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}), ...(pos === 'P' && role ? { role } : {}), ...(foreign ? { foreign: true } : {}), ...(military ? { military } : {}) });
+          now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 45))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 55))), ...(real ? { real: true } : {}), ...(pos === 'P' && role ? { role } : {}), ...(foreign ? { foreign: true } : {}), ...(asia ? { asia: true } : {}), ...(military ? { military } : {}) });
         break;
       }
       case 'ability': {
@@ -376,10 +409,11 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
         const roleRaw = String(e.role ?? e.pos ?? '').toUpperCase();
         const role = /RP|CL|마무리|구원/.test(roleRaw) ? 'RP' as const : /SP|선발/.test(roleRaw) ? 'SP' as const : undefined;
         const pos = (role || e.pos === 'P' ? 'P' : typeof e.pos === 'string' && CREATE_POS.includes(e.pos.toUpperCase()) ? e.pos.toUpperCase() : 'IF') as CreatePos;
-        const foreign = e.foreign === true || (e.foreign !== false && looksForeignName(name));
+        const foreign = e.foreign === true || (e.foreign !== false && (looksForeignName(name) || asiaNation(e.nation) === true));
+        const asia = foreign && asiaEligible(e.nation, name);
         ops.push({ op: 'future', name, team, pos, ...(pos === 'P' && role ? { role } : {}), birthYear: Math.round(by), joinYear: join,
           now: Math.max(20, Math.min(80, Math.round(num(e.now) ?? 40))), potential: Math.max(20, Math.min(80, Math.round(num(e.potential) ?? 60))),
-          ...(foreign ? { foreign: true } : {}), ...(e.real === false ? {} : { real: true }) });
+          ...(foreign ? { foreign: true } : {}), ...(asia ? { asia: true } : {}), ...(e.real === false ? {} : { real: true }) });
         break;
       }
       case 'rule': {
