@@ -7,9 +7,12 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { resolveOps } from '../src/fantasy/free';
-import { agentTalk, sanitizeDeal, DEAL_MAX_SALARY } from '../src/fantasy/negotiate';
-import { spendLimit } from '../src/league/owner';
+import { agentTalk, sanitizeDeal } from '../src/fantasy/negotiate';
+import { applyCapSanctions, spendLimit } from '../src/league/owner';
+import { cashOf, faSupportLeft, signingBonus } from '../src/league/finance';
+import { salaryCap, teamCapPayroll } from '../src/league/salary';
 import { minSalary } from '../src/league/salary';
+import { EXT_BONUS_SHARE } from '../src/league/offseason';
 import { leniencyOf, NEGOTIATE_SCALE } from '../src/fantasy/leniency';
 
 // LLM 답 고정: llmReply가 있으면 completeJsonText가 그 답을 낸다 (실제 API는 부르지 않는다, 제공자는 mock)
@@ -218,19 +221,85 @@ describe('AI 판정 FA 조건의 이행', () => {
     const L = g.league;
     const t = g.teamIdx;
     const min = minSalary(2027, L);
-    expect(sanitizeDeal(L, t, 2026, { salary: 4.5, years: 3 })).toEqual({ salary: 45000, years: 3 });
-    expect(sanitizeDeal(L, t, 2026, { salary: '4.5억', years: '2' })).toEqual({ salary: 45000, years: 2 });
+    expect(sanitizeDeal(L, 2026, { salary: 4.5, years: 3 })).toEqual({ salary: 45000, years: 3 });
+    expect(sanitizeDeal(L, 2026, { salary: '4.5억', years: '2' })).toEqual({ salary: 45000, years: 2 });
     for (const bad of [null, undefined, '동결', {}, { salary: 4.5 }, { years: 3 }, { salary: -3, years: 2 }, { salary: 0, years: 2 }, { salary: 'abc', years: 2 },
       { salary: 4.5, years: 0 }, { salary: 4.5, years: 2.5 }, { salary: 4.5, years: 11 }, { salary: (min - 100) / 10000, years: 1 }, { salary: 150, years: 1 },
       { salary: Infinity, years: 1 }]) {
-      expect(sanitizeDeal(L, t, 2026, bad), JSON.stringify(bad)).toBeNull();
+      expect(sanitizeDeal(L, 2026, bad), JSON.stringify(bad)).toBeNull();
     }
-    // 우리 구단 지출 상한(샐러리캡)을 혼자 넘는 연봉: 캡을 낮춘 판으로 (자유 모드 규정 capScale)
+    // 샐러리캡은 보지 않는다 (합의면 무시, 캡 초과는 개막 제재): 캡을 낮춘 판에서도 캡보다 큰 합의를 받는다
     const tight = roundTrip(L);
     tight.rules = { ...(tight.rules ?? {}), capScale: 0.1 };
     const low = spendLimit(tight, t, 2027)!;
-    expect(sanitizeDeal(tight, t, 2026, { salary: low / 10000, years: 1 })).toEqual({ salary: low, years: 1 });
-    expect(low).toBeLessThan(DEAL_MAX_SALARY);
-    expect(sanitizeDeal(tight, t, 2026, { salary: (low + 10000) / 10000, years: 1 })).toBeNull();
+    expect(sanitizeDeal(tight, 2026, { salary: (low + 10000) / 10000, years: 1 })).toEqual({ salary: low + 10000, years: 1 });
   }, 120_000);
+
+  // 2026-10-29 사용자 결정 "합의면 무시": 합의 조건은 외부 FA 영입 한도·샐러리캡·계약금 자금·라운드 마감 재검사와 관계없이 성사
+  it('판타지 모드: 합의 계약은 외부 FA 한도 0·캡 초과·계약금 자금 부족에도 성사, 자금은 0 아래로, 캡 제재는 평소대로', async () => {
+    const g = toFa('fa-deal-3', {});
+    const off = g.offseason!;
+    const lg = g.teamIdx;
+    // 규정은 조작 기록에 남는 판타지 조작으로 바꾼다 (손으로 바꾸면 재현이 어긋난다): 외부 FA 0명, 캡 0.3배
+    g.addFantasy({ kind: 'action', title: '규정', text: 'x', ops: [{ op: 'rule', key: 'maxFaSignings', value: 0 }, { op: 'rule', key: 'capScale', value: 0.3 }] });
+    const [e, other] = off.fa.entries.filter((x) => x.status === 'open' && !x.returnee && x.from !== lg);
+    const p = g.leaguePlayer(e.id)!;
+    // 계약금(연봉 × 기간 × 30%)이 자금 + 모기업 지원 한도를 넘는 연봉
+    const years = 6;
+    const room = Math.max(0, cashOf(g.league, lg)) + faSupportLeft(g.league, lg, off.year + 1);
+    const salary = Math.ceil((room + 50000) / (0.3 * years) / 10000) * 10000;
+    expect(signingBonus(salary, years)).toBeGreaterThan(room);
+    const cap = salaryCap(off.year + 1, g.league)!;
+    expect(teamCapPayroll(g.league, lg, off.year + 1) + salary).toBeGreaterThan(cap);
+    // 합의 아닌 제시는 한도에 막힌다
+    expect(g.offerFa(other.id, other.ask, other.years).ok).toBe(false);
+    llmReply = JSON.stringify({ reply: '그 조건이면 갑니다.', stance: 0, deal: { salary: salary / 10000, years } });
+    try {
+      g.addFantasy(await agentTalk(g, { ...mock }, p, 'FA 협상', '함께하자'));
+    } finally {
+      llmReply = null;
+    }
+    expect(g.fantasy!.deals?.[0]).toMatchObject({ id: p.id, salary, years });
+    const r1 = g.offerFa(e.id, salary, years);
+    expect(r1.ok, r1.message).toBe(true);
+    // 합의 제시는 외부 FA 수에 들지 않는다: 합의 제시를 낸 뒤에도 한도 문구는 '계약 0명, 다른 외부 제시 0명'
+    expect(g.offerFa(other.id, other.ask, other.years).message).toMatch(/계약 0명, 이번 라운드 다른 외부 제시 0명/);
+    expect(g.nextStage().ok).toBe(true);
+    expect(e.status).toBe('signed');
+    expect(e.team).toBe(lg);
+    expect(g.leaguePlayer(e.id)!.contract.salary).toBe(salary);
+    expect(off.fa.signings[lg]).toBe(0);
+    // 자금은 0 아래로 (시즌 결산 때 적자 보전)
+    expect(cashOf(g.league, lg)).toBeLessThan(0);
+    // 개막 캡 판정은 평소대로: 초과분만큼 제재
+    const sanctions = applyCapSanctions(roundTrip(g.league), off.year + 1);
+    expect(sanctions.find((x) => x.team === lg)?.over).toBeGreaterThan(0);
+    const info = g.reproInfo();
+    const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
+    expect(roundTrip(r.toSave().league)).toEqual(roundTrip(g.toSave().league));
+  }, 900_000);
+
+  it('판타지 모드: 합의한 비FA 다년 계약은 캡 초과·계약금 자금 부족에도 성사', async () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'neg-3', fantasy: {} }, FAST);
+    g.advance(100000);
+    g.beginOffseason();
+    const lg = g.teamIdx;
+    // 캡 0.2배, 자금은 1억 원만 남긴다 (조작 기록에 남는 판타지 조작)
+    g.addFantasy({ kind: 'action', title: '규정', text: 'x', ops: [{ op: 'rule', key: 'capScale', value: 0.2 }, { op: 'effect', effect: { type: 'cash', amount: 10000 - cashOf(g.league, lg) } }] });
+    const target = g.extensionOffers()[0];
+    const years = 6;
+    const salary = Math.min(900000, Math.ceil((Math.max(0, cashOf(g.league, lg)) + 50000) / (EXT_BONUS_SHARE * years) / 10000) * 10000);
+    expect(Math.round(salary * years * EXT_BONUS_SHARE)).toBeGreaterThan(cashOf(g.league, lg));
+    llmReply = JSON.stringify({ reply: '좋습니다.', stance: 0, deal: { salary: salary / 10000, years } });
+    try {
+      g.addFantasy(await agentTalk(g, { ...mock }, target.p, '다년 계약', '오래 함께'));
+    } finally {
+      llmReply = null;
+    }
+    expect(teamCapPayroll(g.league, lg, g.year + 1) + salary).toBeGreaterThan(salaryCap(g.year + 1, g.league)!);
+    const res = g.extend(target.p.id, years);
+    expect(res.ok, res.message).toBe(true);
+    expect(g.leaguePlayer(target.p.id)!.contract.salary).toBe(salary);
+    expect(cashOf(g.league, lg)).toBeLessThan(0);
+  }, 600_000);
 });

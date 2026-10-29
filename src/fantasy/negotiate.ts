@@ -9,7 +9,6 @@ import type { GameSession } from '../game/session';
 import { koreanName } from '../league/names';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { minSalary } from '../league/salary';
-import { spendLimit } from '../league/owner';
 import { completeJsonText, extractJson, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { adjustStance, leniencyOf, leniencyRule, NEGOTIATE_SCALE, type Leniency } from './leniency';
@@ -139,7 +138,7 @@ export async function agentTalk(g: GameSession, s: LlmSettings, p: LeaguePlayer,
   if (!reply) throw new Error('AI 답이 비어 있습니다. 다시 시도하세요.');
   const l = leniencyOf(g.league);
   const pct = Math.round(discountOf(adjustStance(stanceOf(j?.stance), l)) * NEGOTIATE_SCALE[l] * 1000) / 1000;
-  const deal = sanitizeDeal(g.league, g.teamIdx, g.year, j?.deal);
+  const deal = sanitizeDeal(g.league, g.year, j?.deal);
   return {
     kind: 'chat', who: agent.name, title: `에이전트 ${agent.name}와 ${p.name} 계약 협상`, ask: argument.slice(0, 600), text: reply,
     effects: [{ type: 'demandDiscount', player: p.id, pct }, ...(deal ? [{ type: 'agreedDeal' as const, player: p.id, ...deal }] : [])],
@@ -153,9 +152,10 @@ const DEAL_MAX_YEARS = 10;
 
 /**
  * 에이전트 답의 deal(연봉 억 원, 기간)을 검사해 계약 조건(만 원)으로. 숫자가 없거나 엉뚱하면 null (버린다):
- * 숫자가 아님·0 이하·최저 연봉 미만·100억 원 초과·우리 구단 지출 상한(샐러리캡·예산) 초과, 기간이 1~10년 정수가 아님
+ * 숫자가 아님·0 이하·최저 연봉 미만·100억 원 초과, 기간이 1~10년 정수가 아님.
+ * 샐러리캡은 보지 않는다: 합의 계약은 캡을 넘어도 성사하고 개막 캡 제재를 받는다 (2026-10-29 사용자 "합의면 무시")
  */
-export function sanitizeDeal(league: LeagueState, team: number, year: number, raw: unknown): { salary: number; years: number } | null {
+export function sanitizeDeal(league: LeagueState, year: number, raw: unknown): { salary: number; years: number } | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const num = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x.replace(/[,억원\s]/g, '')) : NaN);
@@ -164,8 +164,6 @@ export function sanitizeDeal(league: LeagueState, team: number, year: number, ra
   if (!Number.isFinite(eok) || eok <= 0 || !Number.isInteger(years) || years < 1 || years > DEAL_MAX_YEARS) return null;
   const salary = Math.round(eok * 10000);
   if (salary < minSalary(year + 1, league) || salary > DEAL_MAX_SALARY) return null;
-  const limit = spendLimit(league, team, year + 1);
-  if (limit !== null && salary > limit) return null;
   return { salary, years };
 }
 

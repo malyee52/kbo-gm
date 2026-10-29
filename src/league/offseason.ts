@@ -803,6 +803,12 @@ export function agreedDeal(league: Pick<LeagueState, 'fantasy'>, id: string, yea
   return league.fantasy?.deals?.find((x) => x.id === id && x.year === year) ?? null;
 }
 
+/** 우리 FA 제시가 에이전트와 합의한 조건인가 (합의 연봉 이상, 합의 기간) */
+export function dealMatches(league: Pick<LeagueState, 'fantasy'>, off: Pick<OffseasonState, 'year'>, id: string, salary: number, years: number): boolean {
+  const deal = agreedDeal(league, id, off.year);
+  return !!deal && salary >= deal.salary && years === deal.years;
+}
+
 /** 판타지 협상 할인(+)·할증(−)을 요구액에 (최저 연봉 아래로는 안 간다) */
 export function applyDiscount(salary: number, pct: number, floor = MIN_SALARY): number {
   return pct ? Math.max(floor, Math.round((salary * (1 - pct)) / 100) * 100) : salary;
@@ -825,6 +831,13 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
   const view = leagueView(league, store, params);
   const salary = extensionAsk(league, view, p, off.year, years);
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
+  // 에이전트와 합의한 기간이면 계약금 자금·샐러리캡을 보지 않는다 (FA 합의와 같게, 자금은 0 아래로 갈 수 있고 캡 초과는 개막 제재)
+  const deal = agreedDeal(league, p.id, off.year);
+  if (deal && deal.years === years) {
+    signExtension(league, off, p, salary, years);
+    log(off, 'salary', `${p.name}, 에이전트와 합의한 조건으로 비FA 다년 계약 ${years}년 (연 ${(salary / 10000).toFixed(1)}억 원, 계약금 ${(bonus / 10000).toFixed(1)}억 원)`, true, true);
+    return { ok: true, message: `${p.name}과(와) 합의한 조건으로 ${years}년 다년 계약을 맺었습니다.` };
+  }
   if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);
   if (limit !== null && teamCapPayroll(league, off.userTeam, off.year + 1) - capShareOf(league, off.userTeam, off.year + 1, p) + salary > limit) return { ok: false, message: '이 계약을 하면 샐러리캡 상한을 넘습니다.' };
@@ -1050,9 +1063,15 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
   if (!Number.isFinite(salary) || salary < min) return { ok: false, message: `연봉은 최저 연봉 ${minSalaryText(off.year + 1, min)} 이상이어야 합니다.` };
   if (!Number.isInteger(years) || years < 1 || years > 6) return { ok: false, message: '계약 기간은 1~6년입니다.' };
   const t = off.userTeam;
+  // 에이전트와 합의한 조건(그 연봉 이상, 그 기간)이면 외부 FA 한도·계약금 자금·샐러리캡을 보지 않는다 (2026-10-29 사용자 결정 "합의면 무시").
+  // 계약금이 자금 + 모기업 지원 한도를 넘으면 자금이 0 아래로 내려가고 시즌 결산의 적자 보전(finance.ts rescue)으로 간다. 캡 초과는 개막 캡 제재(owner.ts)를 평소대로 받는다
+  if (dealMatches(league, off, id, salary, years)) {
+    off.fa.userOffers[id] = { team: t, salary: Math.round(salary), years };
+    return { ok: true, message: '에이전트와 합의한 조건으로 제시했습니다. 라운드가 끝나면 계약합니다 (외부 FA 한도·샐러리캡·계약금 자금과 관계없이).' };
+  }
   if (e.from !== t) {
     // 이미 계약한 수 + 이번 라운드에 낸 다른 외부 제시 수. 제시가 모두 받아들여져도 한도를 넘지 않게 한다
-    const pending = Object.keys(off.fa.userOffers).filter((k) => k !== id && off.fa.entries.find((x) => x.id === k)?.from !== t).length;
+    const pending = Object.entries(off.fa.userOffers).filter(([k, o]) => k !== id && off.fa.entries.find((x) => x.id === k)?.from !== t && !dealMatches(league, off, k, o.salary, o.years)).length;
     if (off.fa.signings[t] + pending >= ruleOf(league, 'maxFaSignings')) {
       const left = Math.max(0, ruleOf(league, 'maxFaSignings') - off.fa.signings[t]);
       return { ok: false, message: `외부 FA는 한 오프시즌에 ${ruleOf(league, 'maxFaSignings')}명까지 데려올 수 있습니다 (계약 ${off.fa.signings[t]}명, 이번 라운드 다른 외부 제시 ${pending}명${left ? `, 남은 자리 ${left}명` : ''}). 다른 제시를 거두면 제시할 수 있습니다.` };
@@ -1106,7 +1125,8 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     const offers: FaOffer[] = [];
     const user = off.fa.userOffers[e.id];
     // 제시 때도 막지만, 마감 때 한 번 더 본다 (앞 선수와 계약해 한도가 찼으면 이 제시는 없던 것이 된다)
-    if (user && (e.from === user.team || off.fa.signings[user.team] < ruleOf(league, 'maxFaSignings'))) offers.push(user);
+    // 합의 조건 제시는 한도와 관계없이 남는다
+    if (user && (e.from === user.team || off.fa.signings[user.team] < ruleOf(league, 'maxFaSignings') || dealMatches(league, off, e.id, user.salary, user.years))) offers.push(user);
     else if (user) log(off, 'fa', `${players.get(e.id)!.name}: 외부 FA 영입 한도(${ruleOf(league, 'maxFaSignings')}명)가 차서 우리 제시는 철회됐습니다.`, true);
     for (let t = 0; t < league.teams.length; t++) {
       if (t === off.userTeam || isFuturesTeam(league, t, off.year + 1)) continue;
@@ -1132,10 +1152,12 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     const disc = (1 - talk) * repDemand(league);
     const mine = offers.find((o) => o.team === off.userTeam);
     // 에이전트와 합의한 조건(그 연봉 이상, 그 기간)의 우리 제시는 요구액·다른 구단 제시와 관계없이 받아들인다 (2026-10-29 사용자 결정 "말한 대로 이행")
-    const deal = mine ? agreedDeal(league, e.id, off.year) : null;
-    if (mine && deal && mine.salary >= deal.salary && mine.years === deal.years) {
+    if (mine && dealMatches(league, off, e.id, mine.salary, mine.years)) {
+      const deal = agreedDeal(league, e.id, off.year)!;
       log(off, 'fa', `${p.name}: 에이전트와 합의한 조건(연 ${wonText(deal.salary)}, ${deal.years}년)대로 계약했습니다.`, true);
       signFa(league, off, e, mine, round, view);
+      // 합의 계약은 외부 FA 영입 수(maxFaSignings)에 넣지 않는다 (signFa가 센 것을 되돌린다)
+      if (mine.team !== e.from) off.fa.signings[mine.team]--;
       continue;
     }
     const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand * disc : 1));
