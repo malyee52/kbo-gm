@@ -18,7 +18,7 @@ import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, obp, ops, qualifiedOuts, qualifiedPa, rate3, slg, whip } from '../../game/stats';
 import { dollarText } from '../../league/salary';
 import { ForeignMark, HAND, POS_KO, posName, TeamLink, useGame, useWon } from '../context';
-import { gradeAt } from '../../league/twoway';
+import { altOf, gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
@@ -766,11 +766,12 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const { session, changed, autosave } = useGame();
   const [msg, setMsg] = useState<string | null>(null);
   const lp = session.leaguePlayer(p.id);
-  if (!lp?.alt) return null;
+  if (!lp) return null;
   const year = session.phase === 'season' ? session.world.year : session.year + 1;
   const side = p.isPitcher ? '타격' : '투구';
   const mine = lp.team === session.teamIdx;
-  const alt = session.guessAltGrade(p.id, gradeAt(lp.alt.runs, year));
+  // 오프시즌에 새로 온 선수(외국인·신인)는 개막 전까지 alt가 없다: 개막 때 받을 값을 그대로 보여 준다
+  const alt = session.guessAltGrade(p.id, gradeAt(altOf(session.league, lp, year).runs, year));
   const toggle = () => {
     const r = session.setTwoWay(p.id, !lp.twoWay);
     setMsg(r.message);

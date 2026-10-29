@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { gradeAt, runsForGradeAt } from '../src/league/twoway';
+import { altOf, ensureAlts, gradeAt, makeAlt, runsForGradeAt } from '../src/league/twoway';
 import { seasonWar } from '../src/league/awards';
 
 let store: DataStore;
@@ -84,4 +84,24 @@ describe('투타 겸업', () => {
     g.openNextSeason();
     expect(g.leaguePlayer(ha!.id)!.alt).toBeDefined();
   }, 900_000);
+  it('외국인 이도류 (2026-10-29 사용자 "외국인들 이도류 못하는 버그"): 반대쪽 능력이 아직 없는 선수(오프시즌에 새로 온 외국인·신인)도 개막 때와 같은 값으로 보이고 이도류로 쓸 수 있다', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'tw-fx' }, FAST);
+    const lp = g.leaguePlayer(g.team.org.find((p) => p.foreign && p.isPitcher)!.id)!;
+    const want = makeAlt(g.league, lp, 2026, !!lp.twoWayTalent);
+    expect(lp.alt?.runs).toBe(want.runs); // 개막 때 ensureAlts가 준 값
+    // 오프시즌에 새로 계약한 외국인처럼 alt가 없는 상태: 예전에는 선수 창 이도류 칸이 사라지고, 켜면 22등급 고정값이 들어갔다
+    delete lp.alt;
+    expect(altOf(g.league, lp, 2026).runs).toBe(want.runs);
+    expect(lp.alt).toBeUndefined(); // 보기만 해서는 상태가 바뀌지 않는다
+    expect(g.setTwoWay(lp.id, true).ok).toBe(true);
+    expect(lp.alt!.runs).toBe(want.runs);
+    const sp = g.world.players.find((p) => p.id === lp.id)!;
+    expect(sp.alt?.bat).toBeDefined();
+    g.advance(20);
+    expect(g.season.bat[sp.idx].pa).toBeGreaterThan(0); // 외국인 투수가 지명타자로 나간다
+    // 같은 값이라 개막의 ensureAlts가 덮어쓰지 않는다
+    ensureAlts(g.league, 2026);
+    expect(lp.alt!.runs).toBe(want.runs);
+  }, 300_000);
 });
+

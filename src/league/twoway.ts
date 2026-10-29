@@ -60,14 +60,22 @@ export function altSkillFor(p: LeaguePlayer, ctx: ValueContext, year: number): P
   return p.isPitcher ? { bat: s.bat! } : { pit: s.pit! };
 }
 
-/** 이도류 켜기·끄기 (켜면 실제 능력치를 만든다) */
-export function setTwoWay(p: LeaguePlayer, on: boolean, ctx: ValueContext, year: number): void {
+/**
+ * 반대쪽 능력 (없으면 개막 때 ensureAlts가 줄 값과 같은 값을 만들어 보여 준다, 상태는 바꾸지 않는다).
+ * 오프시즌에 새로 계약한 외국인·지명 신인은 개막 전까지 alt가 없어 선수 창에 이도류 칸이 없었다 (2026-10-29 사용자 "외국인들 이도류 못하는 버그")
+ */
+export function altOf(league: Pick<LeagueState, 'seed'>, p: LeaguePlayer, year: number): AltAbility {
+  return p.alt ?? makeAlt(league, p, year, !!p.twoWayTalent);
+}
+
+/** 이도류 켜기·끄기 (켜면 실제 능력치를 만든다). league를 주면 반대쪽 능력이 없는 선수에게 ensureAlts와 같은 값을 준다 */
+export function setTwoWay(p: LeaguePlayer, on: boolean, ctx: ValueContext, year: number, league?: Pick<LeagueState, 'seed'>): void {
   if (!on) {
     delete p.twoWay;
     if (p.alt) { delete p.alt.bat; delete p.alt.pit; }
     return;
   }
-  p.alt ??= { runs: runsForGradeAt(22, year), potential: runsForGradeAt(22, year) };
+  p.alt ??= league ? makeAlt(league, p, year, !!p.twoWayTalent) : { runs: runsForGradeAt(22, year), potential: runsForGradeAt(22, year) };
   p.twoWay = true;
   Object.assign(p.alt, altSkillFor(p, ctx, year));
 }

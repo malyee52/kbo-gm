@@ -4124,7 +4124,7 @@ export class GameSession {
     const lp = this.leaguePlayer(id);
     if (!lp) return;
     const year = this.phase === 'season' ? this.world.year : this.year + 1;
-    setTwoWayAbility(lp, on, this.values, year);
+    setTwoWayAbility(lp, on, this.values, year, this.league);
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp) {
