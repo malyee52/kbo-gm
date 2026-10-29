@@ -121,7 +121,7 @@ export function Growth() {
         <div>
           <h1>{off.year} 시즌 뒤 선수 성장</h1>
           <p className="muted small">
-            우리 선수는 스카우트 팀이 보는 능력 추측의 전 → 후입니다 (타자 컨·파·선 = 컨택·파워·선구, 투수 구·제·체 = 구위·제구·체력). 리그 전체는 두 시즌 기록의 변화입니다.
+            우리 선수는 능력의 전 → 후입니다 (우리 구단 선수라 정확한 값, 타자 컨·파·선 = 컨택·파워·선구, 투수 구·제·체 = 구위·제구·체력). 리그 전체는 두 시즌 기록의 변화입니다.
             성장은 나이·출전 기회·운과 선수마다 다른 성장 여지로 정해지고, 다음 시즌 성적으로 이어집니다.
           </p>
         </div>
@@ -135,11 +135,11 @@ export function Growth() {
         <section className="panel">
           <h2>
             <TeamName idx={me} />{' '}
-            <span className="muted small">추측 상승 {upN}명 · 하락 {downN}명</span>
+            <span className="muted small">상승 {upN}명 · 하락 {downN}명</span>
           </h2>
           {mine.length ? (
             <table>
-              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th className="l">능력 추측 (전 → 후)</th><th className="l">비고</th></tr></thead>
+              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th className="l">능력 (전 → 후)</th><th className="l">비고</th></tr></thead>
               <tbody>
                 {mine.map(({ g, before, after }) => {
                   const p = session.leaguePlayer(g.id);

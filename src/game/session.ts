@@ -4,7 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
-import { GUESS_SET, guessMid, guessRuns, seenFor, seenGrade, seenPhrase, seenSigma, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
+import { GUESS_SET, guessMid, guessRuns, nowSigma, seenFor, seenGrade, seenPhrase, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
@@ -1476,7 +1476,7 @@ export class GameSession {
 
   /**
    * 플레이어가 보는 구단별 전력 전망 (17.6, 시즌 중): 각 구단의 진짜 전력에 그 구단 핵심 선수(추측 기여 상위 OUTLOOK_CORE명)의
-   * 추측 어긋남(guessRuns − 진짜)을 더해 순위를 매기고 세 단계로. 우리 구단은 폭이 좁아 거의 맞고, 다른 구단은 오차가 섞인다.
+   * 추측 어긋남(guessRuns − 진짜)을 더해 순위를 매기고 세 단계로. 우리 구단은 어긋남이 없고(nowSigma 0), 다른 구단은 오차가 섞인다.
    * 내부 판단(구단주 목표·AI 성향)은 진짜 teamStrength를 그대로 쓴다
    */
   strengthOutlook(): StrengthTier[] {
@@ -1510,9 +1510,9 @@ export class GameSession {
     return seenGrade(this.league, { team: this.teamIdx, user: true }, { ...this.seenOf(id), sample: 0 }, 'alt', grade);
   }
 
-  /** 우리 스카우트 팀의 지금 능력 추측 폭 (등급, 잘 드러나는 갈래) */
+  /** 우리 스카우트 팀의 지금 능력 추측 폭 (등급, 잘 드러나는 갈래). 우리 구단 선수는 0 (scout.ts nowSigma) */
   guessSigma(id: string): number {
-    return seenSigma(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), 'clear');
+    return nowSigma(this.league, { team: this.teamIdx, user: true }, this.seenOf(id), 'clear');
   }
 
   /** 스카우트 보고 문구 (천장까지 격차 4단계, 틀릴 수 있다. 32세부터 없음) */

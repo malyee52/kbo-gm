@@ -368,7 +368,9 @@ function AbilityTab({ p, full }: { p: SimPlayer; full: boolean }) {
       {full && (
         <p className="pd-line small">
           {note && <span>스카우트 보고: {note}</span>}
-          <span className="muted">능력은 우리 스카우트 팀의 추측 범위입니다. 기록이 쌓일수록, 우리 구단에서 오래 뛸수록, 스카우트 투자를 늘릴수록 좁아집니다.</span>
+          <span className="muted">{session.seenOf(p.id).seasonsWithUs !== null
+            ? '우리 구단 선수라 지금 능력은 정확한 값입니다. 스카우트 보고(앞으로 클 여지)는 추측이라 틀릴 수 있습니다.'
+            : '능력은 우리 스카우트 팀의 추측 범위입니다. 기록이 쌓일수록, 스카우트 투자를 늘릴수록 좁아지고, 우리 구단으로 데려오면 정확한 값이 보입니다.'}</span>
         </p>
       )}
       {p.isPitcher && g('stuff') ? (
@@ -768,6 +770,7 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   const year = session.phase === 'season' ? session.world.year : session.year + 1;
   const side = p.isPitcher ? '타격' : '투구';
   const mine = lp.team === session.teamIdx;
+  const alt = session.guessAltGrade(p.id, gradeAt(lp.alt.runs, year));
   const toggle = () => {
     const r = session.setTwoWay(p.id, !lp.twoWay);
     setMsg(r.message);
@@ -776,7 +779,7 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   return (
     <div className="defense">
       <h4 className="small">
-        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <GuessGrade v={session.guessAltGrade(p.id, gradeAt(lp.alt.runs, year))} /> <span title="기록이 거의 없어 추측 범위가 넓다">(추측)</span>{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
+        {side} 능력 <span className="muted">(본업 반대쪽) · 지금 <GuessGrade v={alt} />{alt.kind === 'range' && <> <span title="기록이 거의 없어 추측 범위가 넓다">(추측)</span></>}{lp.twoWay ? ' · 이도류로 뛰는 중' : ''}</span>
         {mine && <button type="button" className="link small" onClick={toggle}>{lp.twoWay ? '본업만 맡기기' : '이도류로 쓰기'}</button>}
       </h4>
       {full && <p className="muted small">모든 선수가 반대쪽 능력을 갖지만 대부분은 낮고 자라지 않습니다. 겸업 재능이 있는 몇 명만 크게 자랍니다. 이도류로 쓰면 {p.isPitcher ? '등판하지 않는 날 지명타자로 나가고(등판 날도 타석에 서고, 다음 날은 쉰다)' : '선발 투수 후보에도 들어가고, 던진 다음 날은 타석에서 쉰다'}.</p>}
