@@ -217,17 +217,31 @@ export function salaryFloor(year: number, league?: Pick<LeagueState, 'rules' | '
 }
 
 /**
+ * 시장 연봉식의 꺾이는 점(런)과 그 위 기울기 (임시값, 2026-10-29 사용자 "FA 금액이 너무 뻥튀기 된다, 2040년이라도 연 100억이 넘는다").
+ * 꺾이는 점 아래는 런^1.31 그대로, 위는 (런 ÷ 꺾이는 점)^MARKET_TAIL_EXP로 덜 오른다.
+ * 전에는 끝까지 런^1.31이라 장기 진행의 가상 스타(지금 81.5런, 6년 평균 90.6런)가 2026년 물가로 연 44억(지수 2.53 → 111억)을 요구했다.
+ * 실제 KBO 최고 FA 연평균은 공개 보도 기준 20억대 중반(미확인: 2023 양의지 6년 152억, 2024 류현진 8년 170억)이라
+ * 90런 약 28억·100런 약 31억이 되게 했다 (reports/fa-finance-after.md)
+ */
+export const MARKET_KNEE = 50;
+export const MARKET_TAIL_EXP = 0.6;
+const kneePay = (wage: number) => 1200 * wage * MARKET_KNEE ** 1.31;
+
+/**
  * FA 시장 연봉 (연평균, 만 원): 계약 기간 평균 기여(런)에 따라 오른다 (임시값).
- * 기준점 (2026년): 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억. wage = 계약 시작 해의 연봉 상승 지수(wageIndex),
- * floor = 계약 시작 해의 최저 연봉(minSalary)
+ * 기준점 (2026년): 50런(리그 최정상급) 약 20억, 20런(주전) 약 6억, 8런(백업) 약 1.8억, 그 위는 꺾여서 70런 약 25억·90런 약 28억 (MARKET_KNEE).
+ * wage = 계약 시작 해의 연봉 상승 지수(wageIndex), floor = 계약 시작 해의 최저 연봉(minSalary)
  */
 export function marketSalary(runs: number, wage = 1, floor = MIN_SALARY): number {
-  return Math.max(floor, Math.round(1200 * wage * Math.max(0, runs) ** 1.31));
+  const r = Math.max(0, runs);
+  const v = r <= MARKET_KNEE ? 1200 * wage * r ** 1.31 : kneePay(wage) * (r / MARKET_KNEE) ** MARKET_TAIL_EXP;
+  return Math.max(floor, Math.round(v));
 }
 
 /** 시장 연봉식의 역함수: 이 연봉이면 시장에서 몇 런짜리 선수 값인가 */
 export function runsForSalary(salary: number, wage = 1): number {
-  return (Math.max(0, salary) / (1200 * wage)) ** (1 / 1.31);
+  const s = Math.max(0, salary);
+  return s <= kneePay(wage) ? (s / (1200 * wage)) ** (1 / 1.31) : MARKET_KNEE * (s / kneePay(wage)) ** (1 / MARKET_TAIL_EXP);
 }
 
 /**

@@ -20,7 +20,7 @@ import {
 } from '../engine';
 import { FIELD_POS } from '../engine/defense';
 import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
-import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
+import { currentRuns, playerValue, teamStrength, twoWayFace, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
 import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex } from './growth';
 import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenValue, type BoardRow } from './scout';
@@ -980,9 +980,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     const sp = view.sim.get(p.id)!;
     const age = ageIn(p, year + 1);
     const years = faYears(age, currentRuns(sp, view.ctx));
-    let sum = 0;
-    for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
-    const ask = marketSalary(sum / years, view.wage, view.minPay);
+    const ask = faAsk(sp, years, view);
     // 신청 여부 (임시 규칙): 대체 선수 이하면 신청하지 않고, 34세 이상은 지금 연봉보다 많이 받을 수 있을 때만, 등급제 전에는 순위 기준 안일 때만
     if (currentRuns(sp, view.ctx) < 0) continue;
     if (age >= 34 && ask < p.contract.salary * 0.9) continue;
@@ -995,9 +993,7 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     const sp = p && view.sim.get(p.id);
     if (!p || !sp) continue;
     const years = faYears(ageIn(p, year + 1), currentRuns(sp, view.ctx));
-    let sum = 0;
-    for (let y = 0; y < years; y++) sum += currentRuns(sp, view.ctx) + projectedShift(sp, y, view.ctx);
-    const ask = marketSalary(sum / years, view.wage, view.minPay);
+    const ask = faAsk(sp, years, view);
     off.fa.entries.push({ id, from: p.abroad?.origin ?? -1, grade: 'C', prevSalary: ask, ask, years, status: 'open', returnee: true });
   }
   off.fa.entries.sort((a, b) => b.ask - a.ask || a.id.localeCompare(b.id));
@@ -1020,6 +1016,35 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
     log(off, 'fa', e.returnee ? `${p.name} 해외에서 복귀, FA 시장에 나옴 (보상 없음${league.teams[e.from] ? `, 원 소속 ${league.teams[e.from].name}` : ''})`
       : `${p.name} FA 신청 (${faGradeLabel(e.grade)}, ${league.teams[e.from].name})`, e.from === off.userTeam || !!e.returnee);
   }
+}
+
+/**
+ * 이도류 FA 요구액에서 반대쪽(겸업) 몫에 쳐 주는 비율 (임시값, 2026-10-29 사용자 "이도류는 성적·잠재력은 그대로 두고 FA 요구액만 현실적으로").
+ * 이도류의 기여(currentRuns)는 본업 + 반대쪽 × TWO_WAY_SHARE를 한 선수의 런으로 더해서, 시장 연봉식(런^1.31, 꺾이는 점 위는 완만)에 넣으면
+ * 두 갈래를 따로 사는 값보다 비싸졌다 (볼록한 식이라 합의 값 > 값의 합). 그래서 요구액은 본업 시장가 + 반대쪽 시장가 × 이 비율로 따로 매긴다.
+ * 반값인 까닭: 반대쪽은 시즌을 나눠 쓰는 겸업 자리이고 혹사·부상 위험을 구단이 진다. 실제 KBO에는 이도류 FA 계약 선례가 없다
+ */
+export const TWO_WAY_ASK_SHARE = 0.5;
+
+/**
+ * FA 요구 연봉 (만 원): 계약 기간 평균 예상 기여의 시장 연봉. 이도류(반대쪽 얼굴이 있는 선수)는 본업·반대쪽을 나눠
+ * 본업 시장가 + 반대쪽 시장가 × TWO_WAY_ASK_SHARE (기간 평균의 갈래 몫은 지금 기여의 몫으로 나눈다)
+ */
+export function faAsk(sp: SimPlayer, years: number, view: Pick<LeagueView, 'ctx' | 'wage' | 'minPay'>): number {
+  return faAskParts(sp, years, view).ask;
+}
+
+/** FA 요구액과 그 재료: 기간 평균 예상 기여(런, 이도류는 두 갈래 합), 그중 반대쪽 몫 (tools/fa_finance.ts가 나눠 보인다) */
+export function faAskParts(sp: SimPlayer, years: number, view: Pick<LeagueView, 'ctx' | 'wage' | 'minPay'>): { avg: number; share: number; ask: number } {
+  const now = currentRuns(sp, view.ctx);
+  let sum = 0;
+  for (let y = 0; y < years; y++) sum += now + projectedShift(sp, y, view.ctx);
+  const avg = sum / years;
+  if (!twoWayFace(sp, view.ctx.world)) return { avg, share: 0, ask: marketSalary(avg, view.wage, view.minPay) };
+  const main = currentRuns({ ...sp, alt: undefined }, view.ctx);
+  const share = now > 0 ? Math.min(1, Math.max(0, (now - main) / now)) : 0;
+  const ask = Math.max(view.minPay, marketSalary(avg * (1 - share), view.wage, view.minPay) + Math.round(marketSalary(avg * share, view.wage, 0) * TWO_WAY_ASK_SHARE));
+  return { avg, share, ask };
 }
 
 function projectedShift(p: SimPlayer, y: number, ctx: ValueContext): number {
