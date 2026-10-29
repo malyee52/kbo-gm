@@ -368,7 +368,9 @@ function AbilityTab({ p, full }: { p: SimPlayer; full: boolean }) {
       {full && (
         <p className="pd-line small">
           {note && <span>스카우트 보고: {note}</span>}
-          <span className="muted">능력은 우리 스카우트 팀의 추측 범위입니다. 기록이 쌓일수록, 우리 구단에서 오래 뛸수록, 스카우트 투자를 늘릴수록 좁아집니다.</span>
+          <span className="muted">{session.seenOf(p.id).seasonsWithUs !== null
+            ? '우리 구단 선수라 지금 능력은 정확한 값입니다. 스카우트 보고(앞으로 클 여지)는 추측이라 틀릴 수 있습니다.'
+            : '능력은 우리 스카우트 팀의 추측 범위입니다. 기록이 쌓일수록, 스카우트 투자를 늘릴수록 좁아지고, 우리 구단으로 데려오면 정확한 값이 보입니다.'}</span>
         </p>
       )}
       {p.isPitcher && g('stuff') ? (
