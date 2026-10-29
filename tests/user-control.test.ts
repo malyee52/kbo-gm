@@ -83,7 +83,8 @@ describe('타순 직접 정하기', () => {
       // 전에는 시즌 중 한 번이라도 빠진 선수가 있으면 모든 경기를 건너뛰어 엔진 2 14단계에서 검사한 경기가 0이 됐다
       const day = g.season.log[k].day;
       if (expected.some((i) => i === undefined || g.season.absences.some((a) => a.idx === i && a.day <= day && day < a.until))) continue;
-      expect(side.batters.slice(0, 9).map((b) => b.idx)).toEqual(expected);
+      // 박스스코어는 교체로 들어온 타자를 그 타순 아래에 끼워 넣으므로 선발 타자만 본다 (2026-10-27: 경기 중 대타·대수비가 있던 경기에서 앞 9명에 교체 타자가 섞였다)
+      expect(side.batters.filter((b) => !b.sub).map((b) => b.idx)).toEqual(expected);
       checked++;
     }
     expect(checked).toBeGreaterThan(3);

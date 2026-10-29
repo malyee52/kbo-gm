@@ -741,17 +741,20 @@ function foreignSide(ts: TeamSeason, world: Pick<World, 'rules'>, starter: SimPl
 }
 
 /**
- * 오늘의 선발 투수. 가장 오래 쉰 로테이션 투수, 없으면 불펜에서 길게 던질 수 있는 투수.
+ * 오늘의 선발 투수. 쉴 만큼 쉰 로테이션 투수 가운데 가장 오래 쉰 투수 (앞 순번은 params.mgr.aceDays만큼 앞당긴다), 없으면 불펜에서 길게 던질 수 있는 투수.
  * 컨디션 (엔진 2 12단계, cond가 있을 때): 차례인 투수의 (컨디션 반영 성향 × 컨디션)이 나쁨 경계(cond.bad) 이하이고
  * 다음으로 오래 쉰 투수가 등판할 수 있으면 하루 미룬다 (성향 0이면 미루지 않는다, 1.5면 컨디션 −0.27부터, 0.5면 −0.8부터)
  */
 export function todaysStarter(ts: TeamSeason, st: PlayerStates, day: number, params: EngineParams, cond?: (p: SimPlayer) => number): SimPlayer {
   let best: SimPlayer | null = null;
   let next: SimPlayer | null = null;
+  // 차례 점수 = 지난 선발 날 + 로테이션 순번 × aceDays (작을수록 먼저). 0이면 가장 오래 쉰 투수
+  const k = params.mgr.aceDays;
+  const key = new Map(ts.rotation.map((p, i) => [p, st.lastStartDay[p.idx] + k * i]));
   for (const p of ts.rotation) {
     if (day - st.lastStartDay[p.idx] < (ts.restDays ?? params.starterRestDays)) continue;
-    if (!best || st.lastStartDay[p.idx] < st.lastStartDay[best.idx]) { next = best; best = p; }
-    else if (!next || st.lastStartDay[p.idx] < st.lastStartDay[next.idx]) next = p;
+    if (!best || key.get(p)! < key.get(best)!) { next = best; best = p; }
+    else if (!next || key.get(p)! < key.get(next)!) next = p;
   }
   const tac = ts.tactics?.cond ?? 1;
   if (best && next && cond && tac > 0 && params.cond.edge > 0 && params.cond.delayStarter !== false && tac * cond(best) <= params.cond.bad && cond(next) > cond(best)) return next;

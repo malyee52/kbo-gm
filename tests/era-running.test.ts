@@ -68,9 +68,10 @@ describe('도루 실패 기록이 없는 해의 리그 성공률 (엔진 2 13단
   it('도루 실패가 비면 시도 수 = 도루 ÷ 그 해 성공률 (없으면 0.7)', () => {
     const plain = batSkillFrom([{ row: row(null), w: 1, lg }], lg, DEFAULT_PARAMS);
     const era = batSkillFrom([{ row: row(null), w: 1, lg, sbPct: 0.6 }], lg, DEFAULT_PARAMS);
-    // 1루 출루 = 단타 90 + 볼넷 50 + 사구 5, 사전 시도율 0.05 × 40
-    expect(plain.sbAtt).toBeCloseTo((30 / 0.7 + 2) / (145 + 40), 10);
-    expect(era.sbAtt).toBeCloseTo((30 / 0.6 + 2) / (145 + 40), 10);
+    // 1루 출루 = 단타 90 + 볼넷 50 + 사구 5, 사전 시도율 0.05 × 가상 1루 출루 sbAttRegress
+    const k = DEFAULT_PARAMS.sbAttRegress;
+    expect(plain.sbAtt).toBeCloseTo((30 / 0.7 + 0.05 * k) / (145 + k), 10);
+    expect(era.sbAtt).toBeCloseTo((30 / 0.6 + 0.05 * k) / (145 + k), 10);
   });
   it('도루 실패가 있으면 표 값을 쓰지 않는다', () => {
     const a = batSkillFrom([{ row: row(12), w: 1, lg }], lg, DEFAULT_PARAMS);
