@@ -15,7 +15,7 @@ import { bestSeasonWar, draftIndex, roomOf, drafteeCeiling, drafteeCenter, drive
 import { foreignSalary, marketSalary, minSalary, ORG_LIMIT, reserveTarget, wageIndex } from './salary';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { worldFromLeague } from './world';
-import { expansionPerk, teamChangesFor } from './eras';
+import { expansionPerk, foreignMixOk, foreignRule, teamChangesFor } from './eras';
 import { addExpansionCapital, ensureFinance } from './finance';
 import { ensureAlts } from './twoway';
 import { withoutRunSkills } from '../engine/runskills';
@@ -84,6 +84,48 @@ export function openingTeamMoves(store: Pick<DataStore, 'meta'>, year: number): 
   return m;
 }
 
+/** 그 해 출전량을 팀 경기 수에 견준 몫 (0~1 넘을 수 있음): 야수 경기 수, 선발 등판 × 5, 구원 경기 수 ÷ 0.45 */
+function usageShare(store: Pick<DataStore, 'season'>, year: number, id: string): number {
+  const sd = store.season(year);
+  if (!sd) return 1;
+  const b = sd.bat.find((r) => r.id === id);
+  const q = sd.pit.find((r) => r.id === id);
+  return q ? ((q.gs ?? 0) >= q.g / 2 ? (q.gs ?? 0) * 5 : q.g / 0.45) / sd.games : b ? b.g / sd.games : 0;
+}
+
+/**
+ * 개막 명단 자료가 없는 해의 짐작 개막 명단 (선수 id → 아시아쿼터 여부, 2026-10-29 사용자 물음 1 ①).
+ * 그 해 기록에는 시즌 중 교체돼 들어온 외국인까지 있어 구단이 보유 한도보다 많이 데리고 시작했다 (2025 LG 5명/3명).
+ * 구단마다 출전량(usageShare)이 많은 외국인부터 보유 한도(창단 특례 포함)·구성 제한(2014~2019)까지 개막 선수단에 두고,
+ * 나머지는 2026처럼 시장 후보가 된다. 한도를 넘는 구단이 없으면 null (지금 월드 그대로)
+ */
+export function estimatedOpeningForeigners(store: Store, recorded: World, year: number): Map<string, boolean> | null {
+  const rule = foreignRule(store.meta, year);
+  if (!rule.total) return null;
+  const successors = new Set(Object.values(store.meta.successors));
+  const keep = new Map<string, boolean>();
+  let dropped = 0;
+  recorded.teams.forEach((t, team) => {
+    const firstYear = Math.min(...(store.meta.franchises[t.franchise] ?? []).map((x) => x.from));
+    const perk = !successors.has(t.franchise) && expansionPerk({ expansions: [{ team, firstYear }] }, team, year);
+    const regularLimit = rule.regular + (perk ? 1 : 0);
+    const mine = t.org.filter((p) => p.foreign)
+      .map((p) => ({ p, share: usageShare(store, year, p.id), asia: rule.asia > 0 && !!store.players.get(p.id)?.asia }))
+      .sort((a, b) => b.share - a.share || a.p.id.localeCompare(b.p.id));
+    let regular = 0, asia = 0;
+    const sides = { pit: 0, bat: 0 };
+    for (const x of mine) {
+      const side = x.p.isPitcher ? 'pit' : 'bat';
+      if (x.asia ? asia < rule.asia : regular < regularLimit && foreignMixOk(year, regularLimit, sides[side])) {
+        keep.set(x.p.id, x.asia);
+        if (x.asia) asia++;
+        else { regular++; sides[side]++; }
+      } else dropped++;
+    }
+  });
+  return dropped ? keep : null;
+}
+
 /**
  * 시작 연도 리그 상태. store에는 모든 시즌과 계약 기록이 불러와져 있어야 한다 (잠재력·연차 산출).
  * 같은 데이터·시드면 같은 결과가 나온다.
@@ -93,7 +135,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   if (store.parks) useParkData(store.parks);
   const recorded = worldForYear(store, startYear, params);
   const ctx = valueContext(recorded);
-  const opening = openingForeigners(store, startYear);
+  // 개막 명단 자료가 없는 해는 출전량으로 짐작한 명단 (estimatedOpeningForeigners)
+  const opening = openingForeigners(store, startYear) ?? estimatedOpeningForeigners(store, recorded, startYear);
   // 외국인: 개막 명단이 있으면 그 명단의 선수만 (시즌 중 교체된 선수는 아직 오지 않은 선수다)
   // 특별 엔트리(은퇴식 등으로 하루 등록된 선수, 예: 2026 박병호)는 현역이 아니라서 뺀다
   const special = new Set(store.meta.specialEntries?.[String(startYear)] ?? []);
@@ -122,7 +165,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const realForeign = openingContracts(store, startYear);
   const toLeague = (p: SimPlayer): LeaguePlayer => {
     const m = store.players.get(p.id)!;
-    const asia = p.foreign && (opening?.get(p.id) ?? m.asia ?? false);
+    // 아시아쿼터는 2026년 제도 (그 전 해 자료의 아시아 표시는 일반 외국인 자리)
+    const asia = p.foreign && (opening?.get(p.id) ?? (startYear >= 2026 ? m.asia : false) ?? false);
     const ten = tenure0(p);
     let now = currentRuns(p, ctx);
     // 잠재력 v2 (기획안 17·18장, league/potential.ts): 시작 연도 국내 신인은 지명 신인과 같은 생성기 (Q11 ①: 그 해 기록으로 매기지 않는다.
@@ -209,9 +253,8 @@ export function createLeague(store: Store, startYear: number, seed: string, para
     const sd = store.season(startYear);
     const arrival = (id: string): number => {
       if (!sd) return 0;
-      const b = sd.bat.find((r) => r.id === id);
-      const q = sd.pit.find((r) => r.id === id);
-      const share = q ? ((q.gs ?? 0) >= q.g / 2 ? (q.gs ?? 0) * 5 : q.g / 0.45) / sd.games : b ? b.g / sd.games : 1;
+      const known = sd.bat.some((r) => r.id === id) || sd.pit.some((r) => r.id === id);
+      const share = known ? usageShare(store, startYear, id) : 1;
       return Math.round(Math.max(0, 1 - Math.min(1, share)) * 100) / 100;
     };
     for (const p of recorded.players) {
