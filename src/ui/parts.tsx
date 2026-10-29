@@ -79,7 +79,7 @@ export function GuessGrade({ v }: { v: GuessView | null | undefined }) {
 export function GuessCell({ g }: { g: GuessSet | null | undefined }) {
   if (!g) return <Missing why="기록 없음" />;
   return (
-    <span className="guess-set" title={g.items.map((it) => `${it.label} ${guessText(it.view)}`).join(' · ') + ' (스카우트 추측)'}>
+    <span className="guess-set" title={g.items.map((it) => `${it.label} ${guessText(it.view)}`).join(' · ') + (g.items.some((it) => it.view.kind === 'range') ? ' (스카우트 추측)' : '')}>
       {g.items.map((it) => <span key={it.key}><span className="muted small">{it.short}</span><GuessGrade v={it.view} /></span>)}
     </span>
   );

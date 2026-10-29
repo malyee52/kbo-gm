@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { computeGrades, DEFAULT_PARAMS } from '../src/engine';
+import { currentRuns } from '../src/ai/value';
 import { GameSession } from '../src/game/session';
 import { guessMid, guessSetText } from '../src/league/scout';
 import { strengthTier } from '../src/game/rank';
@@ -136,6 +137,22 @@ describe('한 시즌 짧게 돌린 화면 값', () => {
     const ours = g.world.teams[0].org.find((p) => !p.isPitcher && (p.bat?.sample ?? 0) > 600)!;
     expect(g.seenOf(ours.id).seasonsWithUs).not.toBeNull();
     expect(g.seenOf(theirs[0].id).seasonsWithUs).toBeNull();
+    // 우리 조직 선수(2군·신인 포함)의 지금 능력은 범위 없이 진짜 등급 그대로 (2026-10-29 사용자)
+    let mineChecked = 0;
+    for (const p of g.world.teams[0].org) {
+      const s = g.guessSet(p.id, grades);
+      if (!s) continue;
+      const tg = (p.isPitcher ? grades.pitchers.get(p.id) : grades.batters.get(p.id)) as unknown as Record<string, number | null>;
+      for (const it of s.items) {
+        expect(it.view.kind).toBe('one');
+        const t = it.key === 'stamina' ? (tg.stamina ?? tg.reliefStamina) : tg[it.key];
+        expect(guessMid(it.view)).toBe(Math.round(t ?? 50));
+      }
+      expect(guessSetText(s)).not.toContain('~');
+      expect(g.seenRuns(p.id)).toBeCloseTo(currentRuns(p, g.values), 9);
+      mineChecked++;
+    }
+    expect(mineChecked).toBeGreaterThan(20);
   });
 
   it('이벤트가 고르는 우리 유망주는 우리 스카우트 가치 순이다', () => {
