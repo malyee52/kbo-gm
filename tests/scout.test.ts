@@ -151,12 +151,12 @@ describe('드래프트 보드 (19.2)', () => {
 });
 
 describe('투자 갈래 (19.3)', () => {
-  it('아마추어·프로 각각 0·3억·6억·10억 (2026-10-29 내림), 장부는 투자와 스카우트비로 나뉜다', () => {
-    expect(INVEST_COST.scout).toEqual([0, 30_000, 60_000, 100_000]);
-    expect(INVEST_COST.scoutPro).toEqual([0, 30_000, 60_000, 100_000]);
+  it('아마추어·프로 각각 0·1억·1.5억·2.5억 (2026-10-29 내림), 장부는 투자와 스카우트비로 나뉜다', () => {
+    expect(INVEST_COST.scout).toEqual([0, 10_000, 15_000, 25_000]);
+    expect(INVEST_COST.scoutPro).toEqual([0, 10_000, 15_000, 25_000]);
     const f = { invest: { scout: 2, scoutPro: 3, develop: 0, medical: 0, marketing: 0 }, history: [] };
-    expect(investCost(f, true, 1, (k) => k === 'scout' || k === 'scoutPro')).toBe(160_000);
-    expect(investCost(f, true, 1)).toBe(160_000);
+    expect(investCost(f, true, 1, (k) => k === 'scout' || k === 'scoutPro')).toBe(40_000);
+    expect(investCost(f, true, 1)).toBe(40_000);
   });
 });
 

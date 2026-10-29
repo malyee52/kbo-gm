@@ -108,24 +108,32 @@ export const INVEST_LABEL: Record<InvestKind, string> = {
   scout: '스카우트 (아마추어)', scoutPro: '스카우트 (프로)', develop: '육성 (2군·코치)', medical: '의료·트레이닝', marketing: '마케팅·구장',
 };
 /**
- * 투자 단계별 연간 비용 (0~3단계, 만 원, 임시값). 스카우트 두 갈래는 0·3억·6억·10억.
- * 2026-10-29 사용자 보고 "스카우트 팀이나 의료팀에 책정된 비용이 너무 과해 감당이 불가능한 수준임 3단계기준"으로
- * 마케팅을 뺀 네 갈래를 약 절반으로 내렸다 (단계 사이 비율은 거의 그대로). 전: 스카우트 0·5·12·20억, 육성 0·15·30·50억, 의료 0·10·20·35억.
- * 전 값으로 tools/invest_cost.ts를 돌리면 B 등급(두산)이 스카우트 둘 또는 의료 하나만 3단계로 올려도 해마다 −20~−30억씩 자금이 줄었고,
- * 모두 3단계는 A 등급도 해마다 −60~−80억이었다. AI 구단은 자금 60% 규칙 때문에 둘째 시즌부터 거의 모든 갈래를 0단계로 뒀다.
- * 목표: 중위 구단이 한두 갈래를 3단계로 감당하고, 모두 3단계는 부자 구단만 빠듯하게 (reports/invest-cost.md).
- * 마케팅은 관중·스폰서 수입으로 비용 일부를 되찾아서 그대로 둔다 (내리면 돈을 버는 투자가 된다)
+ * 투자 단계별 연간 비용 (0~3단계, 만 원, 임시값). 2026-10-29 사용자 보고 "스카우트 팀이나 의료팀에 책정된 비용이 너무 과해 감당이 불가능한 수준임 3단계기준",
+ * 이어서 "3333으로 하면 그냥 적자가 난다니까? 대체 세상 어느 구단이 시설팀 좀 확충했다고 적자가 나"로 크게 내렸다.
+ * 전: 스카우트 아마추어·프로 각 0·5·12·20억, 육성 0·15·30·50억, 의료 0·10·20·35억, 마케팅 0·10·25·45억 (모두 3단계 연 170억).
+ * 목표: 모두 3단계여도 B 등급 중위 구단이 투자 때문에 적자로 돌아서지 않고(투자는 연봉·FA보다 작은 몫), 높은 단계일수록 비싸게 (단계 사이 비율은 대략 그대로).
+ * 측정은 tools/invest_cost.ts (reports/invest-cost-before.md → reports/invest-cost.md)
  */
 export const INVEST_COST: Record<InvestKind, number[]> = {
-  scout: [0, 30_000, 60_000, 100_000],
-  scoutPro: [0, 30_000, 60_000, 100_000],
-  develop: [0, 80_000, 150_000, 250_000],
-  medical: [0, 50_000, 100_000, 180_000],
-  marketing: [0, 100_000, 250_000, 450_000],
+  scout: [0, 10_000, 15_000, 25_000],
+  scoutPro: [0, 10_000, 15_000, 25_000],
+  develop: [0, 20_000, 35_000, 60_000],
+  medical: [0, 10_000, 20_000, 40_000],
+  marketing: [0, 50_000, 120_000, 200_000],
 };
-/** 마케팅 단계별 관중률 보정과 스폰서 배율 */
-export const MARKETING_FILL = [0, 0.03, 0.06, 0.09];
+/**
+ * 마케팅 단계별 관중률 보정과 스폰서 배율 (다 쌓였을 때). 효과는 단계가 아니라 쌓인 효과(TeamFinance.mk, 단계 단위)로 내고 그 사이는 잇는다.
+ * 2026-10-29 사용자: "무조건 수익이 나게하면 3단계를 안할 이유가 전혀 없잖아. 말 그대로 투자라고 투자. 점진적인 증가가 와야지".
+ * 관중률은 0.03씩 → 0.04씩으로 조금 올렸고, 스폰서 배율은 인기도 상한(1.4) 밖에서 곱한다 (전에는 상한 안이라 인기 구단은 마케팅 스폰서 효과가 거의 없었다)
+ */
+export const MARKETING_FILL = [0, 0.04, 0.08, 0.12];
 export const MARKETING_SPONSOR = [1, 1.05, 1.1, 1.15];
+/**
+ * 마케팅 쌓인 효과가 개막 때 고른 단계 쪽으로 다가가는 몫 (올릴 때 MARKETING_UP, 내릴 때 MARKETING_DOWN, 임시값).
+ * 0 → 3단계: 1년차 0.9 · 3년차 1.97 · 5년차 2.5단계. 3 → 0단계로 끊으면 1년차 2.55 · 3년차 1.84 · 5년차 1.33단계로 천천히 빠진다
+ */
+export const MARKETING_UP = 0.3;
+export const MARKETING_DOWN = 0.15;
 /** 스카우트 단계(0~3)별 추측 폭 배율 (아마추어·프로 모두, 기획안 17.7 표, 임시값). scout.ts가 쓴다 */
 export const SCOUT_SCALE = [1, 0.8, 0.65, 0.5];
 /** 아마추어 스카우트 단계별 신인 천장 추측 폭 σ_천장 (등급, 19.2 확정 Q15 ①: 보드와 진짜 천장 상관 0.6 → 0.9) */
@@ -145,7 +153,7 @@ export const INVEST_EFFECT: Record<InvestKind, string[]> = {
   scoutPro: SCOUT_SCALE.map((_, i) => `다른 구단·시장 선수 능력 추측 범위 ${scaleText(i)}`),
   develop: DEVELOP_BONUS.map((b, i) => (i ? `${DEVELOP_AGE}세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
   medical: MEDICAL_RATE.map((r, i) => (i ? `부상 확률 −${Math.round((1 - r) * 100)}%, 결장 기간 −${Math.round((1 - MEDICAL_DAYS[i]) * 100)}%` : '효과 없음')),
-  marketing: MARKETING_FILL.map((f, i) => (i ? `관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}%` : '효과 없음')),
+  marketing: MARKETING_FILL.map((f, i) => (i ? `다 쌓이면 관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}% (해마다 조금씩 쌓임)` : '효과 없음 (쌓인 효과가 천천히 빠짐)')),
 };
 
 // ---- 구단 재정 상태
@@ -155,6 +163,11 @@ export interface TeamFinance {
   invest: Record<InvestKind, number>;
   /** 이번 시즌에 적용 중인 투자 단계. 비용(월말)과 효과는 이것으로 (오프시즌에 올렸다 내리는 꼼수를 막는다) */
   active?: Record<InvestKind, number>;
+  /**
+   * 마케팅 쌓인 효과 (단계 단위 0~3, 소수). 개막 때 active.marketing 쪽으로 MARKETING_UP·MARKETING_DOWN만큼 다가간다.
+   * 없으면(새 게임, 2026-10-29 전 저장) 지금 단계만큼 다 쌓인 것으로 본다
+   */
+  mk?: number;
   /** 지난 결산들 */
   history: FinanceYear[];
 }
@@ -195,6 +208,25 @@ const startInvest = (): Record<InvestKind, number> => ({ scout: 1, scoutPro: 1, 
 export function activeLevel(league: Pick<LeagueState, 'finance'>, team: number, kind: InvestKind): number {
   const f = league.finance?.[team];
   return (f?.active ?? f?.invest)?.[kind] ?? 0;
+}
+
+/** 마케팅 쌓인 효과 (단계 단위, TeamFinance.mk) */
+export function marketingStock(league: Pick<LeagueState, 'finance'>, team: number): number {
+  const f = league.finance?.[team];
+  return f?.mk ?? activeLevel(league, team, 'marketing');
+}
+
+/** 단계별 표를 쌓인 효과(소수 단계)로 잇는다 */
+export function marketingAt(table: number[], stock: number): number {
+  const s = Math.max(0, Math.min(table.length - 1, stock));
+  const i = Math.min(table.length - 2, Math.floor(s));
+  return table[i] + (table[i + 1] - table[i]) * (s - i);
+}
+
+/** 개막 때 마케팅 쌓인 효과를 한 해만큼 옮긴다 (전 쌓인 효과 → 이번 시즌 단계 쪽으로) */
+export function stepMarketing(prev: number, level: number): number {
+  const v = prev + (level - prev) * (level > prev ? MARKETING_UP : MARKETING_DOWN);
+  return Math.round(v * 1000) / 1000;
 }
 
 /** 재정 상태가 없는 리그(새 게임, 예전 저장)에 시작 자금과 기본 투자를 채운다. 구장·팬덤(stadium.ts)도 함께 */
@@ -357,10 +389,10 @@ export function investCostOf(kind: InvestKind, level: number, wage = 1): number 
 /**
  * 개막 때 스타 보정 (리그 상위 30명 안의 선수 수 × 0.015, 최대 0.06). 소속은 리그 상태(시즌 중에는 개막 때 모습)를 따른다.
  * 예전에는 월드마다 처음 부른 때(시즌 첫 이벤트 등)의 월드 소속을 끝까지 써서, 불러온 게임(처음 부른 때가 다름)과
- * 결산 관중 수입이 달라졌다 (2026-10-23). 캐시는 쓴 소속이 같을 때만 다시 쓴다
+ * 결산 관중 수입이 달라졌다 (2026-10-23). 캐시는 쓴 소속이 같을 때만 다시 쓴다. tools/invest_cost.ts도 쓴다
  */
 const starCache = new WeakMap<World, { key: string; out: number[] }>();
-function starBonus(world: World, league: Pick<LeagueState, 'players'>): number[] {
+export function starBonus(world: World, league: Pick<LeagueState, 'players'>): number[] {
   const opening = new Map(league.players.map((p) => [p.id, p.team]));
   const teams = world.players.map((p) => opening.get(p.id) ?? p.teamIdx);
   const key = teams.join(',');
@@ -404,7 +436,7 @@ export const eraFillScale = (year: number) => eraAttendance(year) / eraAttendanc
 export function fillRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number, opp?: number): number {
   const wd = dateOf(year, day).weekday;
   const weekend = wd === 0 || wd === 6 ? 0.15 : wd === 5 ? 0.05 : 0;
-  const mk = MARKETING_FILL[activeLevel(league, team, 'marketing')];
+  const mk = marketingAt(MARKETING_FILL, marketingStock(league, team));
   const noise = (new Rng(`${league.seed}/gate/${year}/${day}/${team}`).next() - 0.5) * 0.1;
   const v = 0.5 + 0.8 * (winPct - 0.5) + parkOf(league, team).market + star + weekend + mk + noise + fillBuff(league, team, year, day)
     + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp)
@@ -512,11 +544,11 @@ function sponsorAmount(league: LeagueState, team: number, futures: boolean, winP
 
 // ---- 결산
 
-/** 인기도 (0.6~1.4): 성적·가을야구·연고·스타·마케팅 */
+/** 인기도: 성적·가을야구·연고·스타·팬 (0.6~1.4) × 마케팅 (쌓인 효과, 상한 밖에서 곱한다. 2026-10-29) */
 export function popularity(league: LeagueState, team: number, winPct: number, postseasonRound: number, star: number): number {
-  const mk = MARKETING_SPONSOR[activeLevel(league, team, 'marketing')] * fanSponsor(fanLevel(league, team, league.year));
-  const v = (1 + 1.2 * (winPct - 0.5) + 0.06 * postseasonRound + 2 * parkOf(league, team).market + 2 * star) * mk;
-  return Math.max(0.6, Math.min(1.4, v));
+  const fan = fanSponsor(fanLevel(league, team, league.year));
+  const v = (1 + 1.2 * (winPct - 0.5) + 0.06 * postseasonRound + 2 * parkOf(league, team).market + 2 * star) * fan;
+  return Math.max(0.6, Math.min(1.4, v)) * marketingAt(MARKETING_SPONSOR, marketingStock(league, team));
 }
 
 /**
@@ -639,12 +671,14 @@ export function trustFromFinance(y: FinanceYear): number {
 
 // ---- 투자
 
+const eokShort = (man: number) => `${Math.round(man / 1000) / 10}억 원`;
+
 /** 투자 계획을 바꾼다 (오프시즌, 다음 시즌부터 적용) */
 export function setInvest(league: LeagueState, team: number, kind: InvestKind, level: number): { ok: boolean; message: string } {
   if (!INVEST_KINDS.includes(kind) || !Number.isInteger(level) || level < 0 || level > 3) return { ok: false, message: '투자 단계는 0~3입니다.' };
   ensureFinance(league);
   league.finance![team].invest[kind] = level;
-  return { ok: true, message: `${INVEST_LABEL[kind]} ${level}단계 (다음 시즌부터, 연 ${(investCostOf(kind, level, wageIndex(league.year + 1, league)) / 10000).toFixed(0)}억 원)` };
+  return { ok: true, message: `${INVEST_LABEL[kind]} ${level}단계 (다음 시즌부터, 연 ${eokShort(investCostOf(kind, level, wageIndex(league.year + 1, league)))})` };
 }
 
 /**
@@ -677,6 +711,8 @@ export function lockInvestments(league: LeagueState, userTeam: number): void {
       }
       f.invest = plan;
     }
+    const prevMk = marketingStock(league, t);
     f.active = { ...f.invest };
+    f.mk = stepMarketing(prevMk, f.active.marketing);
   }
 }

@@ -3,7 +3,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MEDICAL_RATE, payOf, signingBonus, START_CASH, WON_PER_USD } from '../src/league/finance';
+import {
+  activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
+} from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
 
@@ -99,7 +101,9 @@ describe('투자 4종', () => {
     g.beginOffseason();
     expect(g.setInvest('medical', 3).ok).toBe(true);
     expect(g.setInvest('scout', 4).ok).toBe(false);
+    expect(g.setInvest('marketing', 3).ok).toBe(true);
     expect(activeLevel(g.league, lg, 'medical')).toBe(1); // 아직 지난 시즌 단계
+    expect(marketingStock(g.league, lg)).toBe(1); // 새 게임은 지금 단계만큼 다 쌓인 것으로 본다
     let guard = 0;
     while (g.offseason!.stage !== 'ready' && guard++ < 40) {
       const st = g.offseason!.stage;
@@ -108,6 +112,10 @@ describe('투자 4종', () => {
     }
     expect(g.openNextSeason().ok).toBe(true);
     expect(activeLevel(g.league, lg, 'medical')).toBe(3);
+    // 마케팅 쌓인 효과는 개막 때 한 해만큼만 다가간다 (1 → 3단계: 1 + 2 × 0.3)
+    expect(marketingStock(g.league, lg)).toBe(1.6);
+    const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
+    expect(marketingStock(h.league, lg)).toBe(1.6);
     const ai = g.league.finance!.filter((_, t) => t !== lg);
     expect(ai.every((f) => f.active && Object.values(f.active).every((v) => v >= 0 && v <= 3))).toBe(true);
     // 월말 투자비는 확정한 단계로 나간다
@@ -116,6 +124,19 @@ describe('투자 4종', () => {
     const paid = -(f.items.invest ?? 0);
     expect(paid).toBeGreaterThan(0);
     expect(paid).toBeLessThanOrEqual(investCost(g.league.finance![lg]));
+  });
+
+  it('마케팅 쌓인 효과: 올릴 때는 몇 해에 걸쳐 차오르고, 끊으면 더 천천히 빠진다 (2026-10-29 사용자 "점진적인 증가")', () => {
+    let s = 0;
+    const up: number[] = [];
+    for (let n = 0; n < 5; n++) up.push((s = stepMarketing(s, 3)));
+    expect(up[0]).toBeCloseTo(0.9, 3);
+    expect(up[2]).toBeGreaterThan(1.9);
+    expect(up[4]).toBeLessThan(3);
+    const down = stepMarketing(3, 0);
+    expect(3 - down).toBeLessThan(up[0]); // 빠지는 속도 < 차오르는 속도
+    expect(marketingAt(MARKETING_FILL, 1.5)).toBeCloseTo((MARKETING_FILL[1] + MARKETING_FILL[2]) / 2, 6);
+    expect(marketingAt(MARKETING_FILL, 3)).toBe(MARKETING_FILL[3]);
   });
 
   it('의료 투자: 같은 시드에서 부상 확률·결장 기간이 줄어 부상 결장 일수가 줄어든다', () => {
