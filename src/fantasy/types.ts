@@ -99,6 +99,11 @@ export interface FantasyState {
   goodwill?: { team: number; runs: number; year: number; until: number }[];
   /** 협상으로 생긴 요구액 할인·할증 (선수마다, 그 오프시즌) */
   discounts?: { id: string; pct: number; year: number }[];
+  /**
+   * 에이전트가 말로 받아들인 계약 조건 (선수마다, 그 오프시즌, negotiate.ts). 그 연봉 이상·그 기간으로 제시하면 FA는 반드시 우리와 계약하고,
+   * 비FA 다년 계약은 그 기간의 요구 연봉이 이 값이 된다 (2026-10-29 사용자 결정 "말한 대로 이행"). 할인·할증 한도는 걸지 않는다
+   */
+  deals?: { id: string; year: number; salary: number; years: number }[];
   /** 다음 개막에 입단할 가상 유망주 (5단계 큰 변화) */
   prospects?: Extract<FantasyEffect, { type: 'prospect' }>[];
   /** 약속·조건 장부 (자유 모드, promises.ts) */
@@ -153,6 +158,10 @@ export function goodwillFor(state: FantasyState | null | undefined, team: number
 }
 
 /** 그 선수의 요구액 할인 비율 (그 오프시즌, 없으면 0) */
+export function dealFor(state: FantasyState | null | undefined, id: string, year: number): { salary: number; years: number } | null {
+  return state?.deals?.find((x) => x.id === id && x.year === year) ?? null;
+}
+
 export function discountFor(state: FantasyState | null | undefined, id: string, year: number): number {
   return state?.discounts?.find((x) => x.id === id && x.year === year)?.pct ?? 0;
 }

@@ -260,7 +260,14 @@ function playerByName(g: GameSession, raw: unknown): LeaguePlayer | null {
   const hits = g.league.players.filter((p) => p.name === name && (team === null || teamOfNow(g, p) === team) && p.team !== -2);
   if (hits.length === 1) return hits[0];
   const mine = hits.filter((p) => teamOfNow(g, p) === g.teamIdx);
-  return mine.length === 1 ? mine[0] : null;
+  if (mine.length === 1) return mine[0];
+  // "이름@구단"의 구단이 같은 답의 move로 옮겨 갈 구단이면(FA 영입 + contract "이름@우리 구단") 아직 그 구단에 없다.
+  // 그 이름이 리그에 한 명뿐이면 그 선수로 본다 (2026-10-29: 합의한 FA 계약이 '찾지 못함'으로 빠졌다)
+  if (!hits.length && team !== null) {
+    const any = g.league.players.filter((p) => p.name === name && p.team !== -2);
+    if (any.length === 1) return any[0];
+  }
+  return null;
 }
 
 /** 외국인 이름처럼 보이나: 띄어쓰기나 가운뎃점이 있거나 다섯 글자 이상 (한국 이름은 대개 두세 글자) */

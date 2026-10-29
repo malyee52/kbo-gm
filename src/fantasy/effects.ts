@@ -26,7 +26,9 @@ export type FantasyEffect =
   /** 협상 (negotiate.ts만): 그 구단이 우리 트레이드 제안을 보는 호감 (런, AI 트레이드 평가 이득에 더한다) */
   | { type: 'tradeGoodwill'; team: number; runs: number; days: number }
   /** 협상 (negotiate.ts만): 그 선수의 FA·다년 계약 요구액 할인(+)·할증(−) 비율 (이번 오프시즌) */
-  | { type: 'demandDiscount'; player: string; pct: number };
+  | { type: 'demandDiscount'; player: string; pct: number }
+  /** 협상 (negotiate.ts만): 에이전트가 받아들인 계약 조건 (연봉 만 원, 기간). 이번 오프시즌 그 조건 제시는 반드시 수락 */
+  | { type: 'agreedDeal'; player: string; salary: number; years: number };
 
 export interface EffectLimits { trust: number; fans: number; cash: number; edge: number; days: number; fill: number; potential: number; rest: number; count: number }
 
@@ -143,5 +145,6 @@ export function effectText(e: FantasyEffect, nameOf: (id: string) => string): st
     case 'ownerChange': return `구단주 교체 (신뢰 ${e.trust}에서 새로 시작)`;
     case 'tradeGoodwill': return `상대 구단 호감 ${sign(e.runs)}런 (${e.days}일, 트레이드 평가에 더함)`;
     case 'demandDiscount': return `${nameOf(e.player)} 요구액 ${e.pct >= 0 ? `${Math.round(e.pct * 100)}% 할인` : `${Math.round(-e.pct * 100)}% 인상`}`;
+    case 'agreedDeal': return `${nameOf(e.player)} 합의 조건: 연봉 ${(e.salary / 10000).toFixed(1)}억 원·${e.years}년 (이 조건 제시는 반드시 수락)`;
   }
 }
