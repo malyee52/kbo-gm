@@ -107,7 +107,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 ## 작업 방식
 
 - **저장 호환**: `Season.toSave`/`restore`는 선수 색인으로 기록을 저장하고, 월드 지문(`rosterFingerprint`)이 다르면 불러오기를 막는다. `npm run data`로 데이터가 바뀌면 이전 저장은 못 쓴다. 저장 형식을 바꾸면 `format` 값을 올린다.
-- **시즌 저장 형식은 3** (일정 개편, `SEASON_SAVE_FORMAT`): 개막 때 정한 일정(`SeasonSave.schedule`: 개막일·날짜별 경기·취소·순연)을 꼭 담고, 불러올 때 다시 만들지 않는다. 경기마다 따로 난수 줄기(`gameRng(day, g)`, 엔진 2)라 저장에 경기 난수 위치가 없다. 형식 1(엔진 2 이전)·2(일정 개편 이전)는 문구와 함께 거절하고, 게임을 열 때 브라우저의 형식 3 미만 칸을 지우고 한 번 알린다 (`game/storage.ts`). 세션 저장 `format`(2)은 올리지 않았다. 형식을 올리지 않은 선택 칸: 리그 상태 `lastSeason.divisions`(양대 리그 해 리그별 최종 순위), 가을야구 진행의 `bracket`·`seedLabels`·`semiCheck`와 시리즈 `node`·`rule`·`nextDay`, 올스타 기록 `names`, 구단주 기록 `league`, 목표 `projectedLeague`, 지난 시즌 리그 홈런 `lastSeason.hr`, 시즌 저장의 `cond`·`condDay`(선수 컨디션, 없으면 개막부터 다시 계산), 관심 명단 `watch`, 임시 승격 `callUps`, 진행 중인 지휘 경기 `pendingGame`, 외국인 파견 `league.scoutFx`·`LeaguePlayer.fx`, 연도별 연봉 계약 `Contract.steps`.
+- **시즌 저장 형식은 3** (일정 개편, `SEASON_SAVE_FORMAT`): 개막 때 정한 일정(`SeasonSave.schedule`: 개막일·날짜별 경기·취소·순연)을 꼭 담고, 불러올 때 다시 만들지 않는다. 경기마다 따로 난수 줄기(`gameRng(day, g)`, 엔진 2)라 저장에 경기 난수 위치가 없다. 형식 1(엔진 2 이전)·2(일정 개편 이전)는 문구와 함께 거절하고, 게임을 열 때 브라우저의 형식 3 미만 칸을 지우고 한 번 알린다 (`game/storage.ts`). 세션 저장 `format`(2)은 올리지 않았다. 형식을 올리지 않은 선택 칸: 리그 상태 `lastSeason.divisions`(양대 리그 해 리그별 최종 순위), 가을야구 진행의 `bracket`·`seedLabels`·`semiCheck`와 시리즈 `node`·`rule`·`nextDay`, 올스타 기록 `names`, 구단주 기록 `league`, 목표 `projectedLeague`, 지난 시즌 리그 홈런 `lastSeason.hr`, 시즌 저장의 `cond`·`condDay`(선수 컨디션, 없으면 개막부터 다시 계산), 관심 명단 `watch`, 임시 승격 `callUps`, 진행 중인 지휘 경기 `pendingGame`, 외국인 파견 `league.scoutFx`·`LeaguePlayer.fx`, 연도별 연봉 계약 `Contract.steps`, 마케팅 쌓인 효과 `TeamFinance.mk`(없으면 지금 단계).
 - 리그 상태(`LeagueState`)는 시즌 중 개막 때 모습으로 고정되고 결산(`beginOffseason`) 때 시즌 결과를 반영한다. 세션 저장 형식 3(잠재력 v2, 형식 2는 거절)은 리그 상태 + 시즌(+ 오프시즌)을 담는다. 안의 시즌 저장이 형식 3이 아니면 불러오지 않는다.
 - 오프시즌 조작도 모두 조작 기록(`GameAction`)에 남는다. 새 조작을 만들면 `dispatchOff`를 거치게 해서 재현(`replay`)이 깨지지 않게 한다.
 - 일정은 개막 때 시드와 규칙 표로 한 번 정하고 시즌 중에 바꾸지 않는다 (우천 취소·노게임 다시 편성까지 미리 굴림). 화면·소식은 `Season.knownSchedule(day)`(그날 뒤 취소·비 회를 숨김)를 쓴다. 날짜는 `game/calendar.ts`가 그 시즌 개막일로 센다.
@@ -245,7 +245,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 가을야구 진출 구단 수(1986~1988 3팀)·시리즈 승수·1993~1998 준PO 생략(3·4위 3.5경기)은 연표 (`meta.json` rules, 규칙 실제화 2026-10-24, `docs/temp-values.md` "옛 규칙 실제화"). 1군 등록·출장 인원(`activeSize`)과 엔트리 확대(`rosterExtra`, 9월 +5 등)도 연표이고, 엔진은 `teamRules(world, team, extra)`·`Season.rosterExtraOn(day)`, 화면은 `GameSession.entryRules()`로 읽는다.
 - 임시값이 많다: 와일드카드 어드밴티지·무승부 추가 경기, 목표 기준(양대 리그 해는 리그 안 전력 예상 `goalForLeague`: 1위 우승·2~3위 가을야구·4위 탈꼴찌), 신뢰도 증감·해고선, 모기업 등급·예산 배율, 캡 판정 시점(개막 때 한 번), 난이도별 오차. 목록은 `docs/milestones.md` M7.
 - AI 구단은 `aiPotential`(난이도 오차)로 판단한다. 플레이어 화면은 진짜 값 대신 우리 스카우트 추측(갈래 범위·보고 문구, `scout.ts`)만 보인다. 트레이드 상대·구단주 목표 소식의 전력은 '전망 상위권·중위권·하위권'(위·아래 30%).
-- 재정 투자는 다섯 갈래 (스카우트 아마추어·프로 0·5·12·20억, 육성·의료·마케팅). 장부는 '투자'와 '스카우트비'.
+- 재정 투자는 다섯 갈래 (스카우트 아마추어·프로 0·1·1.5·2.5억, 육성 0·2·3.5·6억, 의료 0·1·2·4억, 마케팅 0·5·12·20억. 2026-10-29 사용자 보고로 크게 내림, 측정 `tools/invest_cost.ts`). 마케팅 효과는 쌓인 효과(`TeamFinance.mk`, 선택 칸, 개막 때 `stepMarketing`으로 올릴 때 30%·내릴 때 15%씩 다가감, 없으면 지금 단계)로 낸다. 장부는 '투자'와 '스카우트비'.
 - 세이브는 ①(3점 이내 리드 + 1이닝)·②(동점 주자 누상·타석·대기 타석)·③(3이닝 이상) (`state.ts` `earnsSave`), 홀드는 내려갈 때 리드, 승리 투수는 선발 5이닝 미만이면 가장 길게 던진 구원 (엔진 2 14단계).
 - 포스트시즌 개인 기록은 남기지 않는다. 해고 뒤 제의를 모두 거절하는 선택은 없다.
 - 맡은 구단(`GameSession.teamIdx`)이 바뀔 수 있다 (해고 뒤 부임, 조작 `accept-offer`).

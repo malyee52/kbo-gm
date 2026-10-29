@@ -1,7 +1,7 @@
 // 구단 재정 (재정 상세형, docs/finance.md): 지금 자금, 올해 수입·지출, 월별 흐름, 지난 결산.
 import { dateOf } from '../../game/calendar';
 import {
-  FINANCE_LABEL, investCostOf, INVEST_EFFECT, INVEST_KINDS, INVEST_LABEL, investCost, ledgerItems, type FinanceKind,
+  FINANCE_LABEL, investCostOf, INVEST_EFFECT, marketingStock, INVEST_KINDS, INVEST_LABEL, investCost, ledgerItems, type FinanceKind,
 } from '../../league/finance';
 import { wageIndex } from '../../league/salary';
 import { useGame, useWon } from '../context';
@@ -92,7 +92,7 @@ export function FinancePanel() {
                   ) : `${lv}단계`}
                 </td>
                 <td>{won(investCostOf(k, lv, investWage))}</td>
-                <td className="l small">{INVEST_EFFECT[k][lv]}</td>
+                <td className="l small">{INVEST_EFFECT[k][lv]}{k === 'marketing' && ` · 지금 쌓인 효과 ${marketingStock(session.league, session.teamIdx).toFixed(1)}단계`}</td>
               </tr>
             );
           })}
@@ -101,7 +101,7 @@ export function FinancePanel() {
       <p className="muted small">
         투자는 오프시즌에 다음 시즌 계획을 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 월말에 나눠 냅니다
         ({session.phase === 'offseason' ? `계획 합계 연 ${won(investCost(fin, true, investWage))}` : `연 ${won(investCost(fin, false, investWage))}`}).
-        의료·마케팅은 그 시즌 동안, 육성·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
+        의료는 그 시즌 동안, 마케팅은 개막 때마다 고른 단계 쪽으로 효과가 조금씩 쌓이고(끊으면 천천히 빠짐), 육성·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
       </p>
 
       {flows && (
