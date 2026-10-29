@@ -2,6 +2,7 @@
 // FA 요구액 분포(최고·상위 5·중앙값, 연봉 상승 지수로 나눈 2026년 물가 값)를 표로 낸다.
 // 요구액이 문턱(기본 연 100억)을 넘은 FA는 런·나이·기간·지수로 나눠 보인다.
 //
+// longsim과 달리 개막마다 게임과 같은 이도류 정리(offseason.ts openTwoWay, 반대쪽 45등급 이상이면 AI가 이도류로 쓴다)를 한다 (--no-two-way로 끔).
 // 이도류 FA와 --watch 이름(기본 하현승)은 따로 모아 본업·반대쪽 몫, 옛 식(꺾임·이도류 나눔 전, 런^1.31) 요구액과 나란히 보인다.
 //
 // 사용법:  npx tsx tools/fa_finance.ts [--start 2026] [--seasons 20] [--seeds a,b] [--over 1000000] [--watch 하현승] [--out reports/fa-finance.md]
@@ -12,10 +13,10 @@ import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type EngineParams } from '../src/engine';
 import { currentRuns, valueContext } from '../src/ai/value';
 import { createLeague } from '../src/league/create';
-import { salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
+import { marketSalary, salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
 import { cashOf } from '../src/league/finance';
 import type { FinanceKind } from '../src/league/finance';
-import { faAskParts, leagueView } from '../src/league/offseason';
+import { faAskParts, leagueView, openTwoWay } from '../src/league/offseason';
 import { runYear } from './longsim';
 import { installCalCache } from './calCache';
 
@@ -35,7 +36,7 @@ interface Row {
   avgPay: number; topPay: number; capUse: number; capOver: number;
   fa: { n: number; top: number; top5: number; med: number; signedTop: number };
 }
-interface Big { seed: string; year: number; name: string; age: number; years: number; now: number; avg: number; share: number; wage: number; ask: number; old: number; salary?: number; signed: boolean; twoWay: boolean }
+interface Big { seed: string; year: number; name: string; age: number; years: number; now: number; avg: number; share: number; wage: number; ask: number; old: number; knee: number; salary?: number; signed: boolean; twoWay: boolean }
 /** 고치기 전 시장 연봉식 (꺾임 없음, 이도류도 합친 런 하나로) */
 const oldAsk = (avg: number, wage: number, floor: number) => Math.max(floor, Math.round(1200 * wage * Math.max(0, avg) ** 1.31));
 
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
   const seeds = (arg('seeds') ?? 'fa-a,fa-b').split(',');
   const over = Number(arg('over') ?? 1_000_000);
   const watch = new Set((arg('watch') ?? '하현승').split(','));
+  const twoWayOn = !process.argv.includes('--no-two-way');
   const out = arg('out');
   const params: EngineParams = DEFAULT_PARAMS;
   const store = loadDataStore();
@@ -55,6 +57,7 @@ async function main(): Promise<void> {
   for (const seed of seeds) {
     const { league } = createLeague(store, start, seed, params);
     const rows: Row[] = [];
+    if (twoWayOn) openTwoWay(league, store, params, -1);
     for (let i = 0; i < n; i++) {
       let fa: Row['fa'] = { n: 0, top: 0, top5: 0, med: 0, signedTop: 0 };
       const { world } = runYear(league, store, params, (off, w) => {
@@ -72,9 +75,10 @@ async function main(): Promise<void> {
           if (!sp || (e.ask < over && !twoWay && !watch.has(p.name))) continue;
           const parts = faAskParts(sp, e.years, view);
           bigs.push({ seed, year: off.year, name: p.name, age: p.birthYear ? off.year + 1 - p.birthYear : -1, years: e.years, twoWay,
-            now: currentRuns(sp, ctx), avg: parts.avg, share: parts.share, wage, ask: e.ask, old: oldAsk(parts.avg, wage, view.minPay), salary: e.salary, signed: e.status === 'signed' });
+            now: currentRuns(sp, ctx), avg: parts.avg, share: parts.share, wage, ask: e.ask, old: oldAsk(parts.avg, wage, view.minPay), knee: marketSalary(parts.avg, wage, view.minPay), salary: e.salary, signed: e.status === 'signed' });
         }
       });
+      if (twoWayOn) for (const line of openTwoWay(league, store, params, -1)) console.log(`[${seed}] ${league.year} 개막: ${line}`);
       const y = world.year;
       const teams = league.teams.map((_, t) => t).filter((t) => league.finance?.[t]?.history.some((h) => h.year === y));
       const hist = teams.map((t) => league.finance![t].history.find((h) => h.year === y)!);
@@ -107,9 +111,9 @@ async function main(): Promise<void> {
   }
   parts.push(`## 요구액 ${eok(over)}억 이상·이도류·${[...watch].join('·')} FA (${bigs.length}명)
 `,
-    '옛 식 = 고치기 전 식(런^1.31 끝까지, 이도류도 합친 런 하나로)을 같은 때 같은 런에 넣은 값. 반대쪽 몫 = 이도류 기여 중 겸업 쪽.\n',
-    '| 시드 | 결산 | 선수 | 이도류 | 나이 | 기간 | 지금 런 | 기간 평균 런 | 반대쪽 몫 | 지수 | 옛 식 요구 | 요구 | ÷지수 | 계약 |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
-    ...bigs.map((b) => `| ${b.seed} | ${b.year} | ${b.name} | ${b.twoWay ? '○' : ''} | ${b.age} | ${b.years} | ${b.now.toFixed(1)} | ${b.avg.toFixed(1)} | ${(b.share * 100).toFixed(0)}% | ${b.wage.toFixed(2)} | ${eok(b.old, 1)} | ${eok(b.ask, 1)} | ${eok(b.ask / b.wage, 1)} | ${b.signed ? eok(b.salary ?? 0, 1) : '-'} |`), '');
+    '옛 식 = 고치기 전 식(런^1.31 끝까지, 이도류도 합친 런 하나로)을 같은 때 같은 런에 넣은 값. 꺾임만 = 새 시장 연봉식에 합친 런 그대로(이도류 줄임 없음). 반대쪽 몫 = 이도류 기여 중 겸업 쪽.\n',
+    '| 시드 | 결산 | 선수 | 이도류 | 나이 | 기간 | 지금 런 | 기간 평균 런 | 반대쪽 몫 | 지수 | 옛 식 요구 | 꺾임만 | 요구 | ÷지수 | 계약 |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    ...bigs.map((b) => `| ${b.seed} | ${b.year} | ${b.name} | ${b.twoWay ? '○' : ''} | ${b.age} | ${b.years} | ${b.now.toFixed(1)} | ${b.avg.toFixed(1)} | ${(b.share * 100).toFixed(0)}% | ${b.wage.toFixed(2)} | ${eok(b.old, 1)} | ${eok(b.knee, 1)} | ${eok(b.ask, 1)} | ${eok(b.ask / b.wage, 1)} | ${b.signed ? eok(b.salary ?? 0, 1) : '-'} |`), '');
   const text = parts.join('\n');
   if (out) { mkdirSync(dirname(out), { recursive: true }); writeFileSync(out, text); console.log(`${out}에 썼습니다.`); } else console.log(text);
 }

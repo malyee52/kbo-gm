@@ -1019,16 +1019,17 @@ function openFaMarket(league: LeagueState, off: OffseasonState, store: Store, pa
 }
 
 /**
- * 이도류 FA 요구액에서 반대쪽(겸업) 몫에 쳐 주는 비율 (임시값, 2026-10-29 사용자 "이도류는 성적·잠재력은 그대로 두고 FA 요구액만 현실적으로").
- * 이도류의 기여(currentRuns)는 본업 + 반대쪽 × TWO_WAY_SHARE를 한 선수의 런으로 더해서, 시장 연봉식(런^1.31, 꺾이는 점 위는 완만)에 넣으면
- * 두 갈래를 따로 사는 값보다 비싸졌다 (볼록한 식이라 합의 값 > 값의 합). 그래서 요구액은 본업 시장가 + 반대쪽 시장가 × 이 비율로 따로 매긴다.
- * 반값인 까닭: 반대쪽은 시즌을 나눠 쓰는 겸업 자리이고 혹사·부상 위험을 구단이 진다. 실제 KBO에는 이도류 FA 계약 선례가 없다
+ * 이도류 FA 요구액에서 반대쪽(겸업) 몫의 런을 쳐 주는 비율 (임시값, 2026-10-29 사용자 "이도류는 성적·잠재력은 그대로 두고 FA 요구액만 현실적으로").
+ * 이도류의 기여(currentRuns)는 본업 + 반대쪽 × TWO_WAY_SHARE를 한 선수의 런으로 더한 값이라, 그대로 시장 연봉식에 넣으면
+ * 정상급 이도류가 리그에 없는 100런대 선수 값을 불렀다. 요구액만 반대쪽 몫을 이 비율로 줄인 런으로 매긴다 (기여·성적·잠재력·AI 가치는 그대로).
+ * 반만 치는 까닭: 반대쪽은 시즌을 나눠 쓰는 겸업 자리이고 혹사·부상 위험을 구단이 진다. 실제 KBO에는 이도류 FA 계약 선례가 없다.
+ * 갈래마다 시장가를 따로 매겨 더하는 방식도 보았지만, 시장 연봉식이 50런 위에서 완만해(MARKET_KNEE) 정상급은 거의 줄지 않고 중간만 크게 줄었다
  */
 export const TWO_WAY_ASK_SHARE = 0.5;
 
 /**
- * FA 요구 연봉 (만 원): 계약 기간 평균 예상 기여의 시장 연봉. 이도류(반대쪽 얼굴이 있는 선수)는 본업·반대쪽을 나눠
- * 본업 시장가 + 반대쪽 시장가 × TWO_WAY_ASK_SHARE (기간 평균의 갈래 몫은 지금 기여의 몫으로 나눈다)
+ * FA 요구 연봉 (만 원): 계약 기간 평균 예상 기여의 시장 연봉. 이도류(반대쪽 얼굴이 있는 선수)는 기간 평균 중 반대쪽 몫
+ * (지금 기여의 몫으로 나눈다)을 TWO_WAY_ASK_SHARE만 친다
  */
 export function faAsk(sp: SimPlayer, years: number, view: Pick<LeagueView, 'ctx' | 'wage' | 'minPay'>): number {
   return faAskParts(sp, years, view).ask;
@@ -1043,7 +1044,7 @@ export function faAskParts(sp: SimPlayer, years: number, view: Pick<LeagueView, 
   if (!twoWayFace(sp, view.ctx.world)) return { avg, share: 0, ask: marketSalary(avg, view.wage, view.minPay) };
   const main = currentRuns({ ...sp, alt: undefined }, view.ctx);
   const share = now > 0 ? Math.min(1, Math.max(0, (now - main) / now)) : 0;
-  const ask = Math.max(view.minPay, marketSalary(avg * (1 - share), view.wage, view.minPay) + Math.round(marketSalary(avg * share, view.wage, 0) * TWO_WAY_ASK_SHARE));
+  const ask = marketSalary(avg * (1 - share * (1 - TWO_WAY_ASK_SHARE)), view.wage, view.minPay);
   return { avg, share, ask };
 }
 

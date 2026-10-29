@@ -41,7 +41,7 @@ describe('이도류 FA 요구액 (offseason.ts faAskParts, 2026-10-29 사용자 
   const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
   beforeAll(() => { store = loadDataStore(); }, 120_000);
 
-  it('본업 시장가 + 반대쪽 시장가 × TWO_WAY_ASK_SHARE: 합친 런 하나로 매긴 값보다 낮고 본업만보다는 높다. 기여(런)는 그대로', () => {
+  it('반대쪽 몫 런을 TWO_WAY_ASK_SHARE만 친 시장가: 합친 런 그대로보다 낮고 본업만보다는 높다. 기여(런)는 그대로', () => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'fa-ask-1' }, FAST);
     const ace = g.team.org.filter((p) => p.isPitcher && !p.foreign && (p.pit?.startShare ?? 0) > 0.8).sort((a, b) => a.value - b.value)[0];
@@ -58,6 +58,6 @@ describe('이도류 FA 요구액 (offseason.ts faAskParts, 2026-10-29 사용자 
     expect(currentRuns(sp, view.ctx)).toBeGreaterThan(currentRuns(before.sim.get(ace.id)!, before.ctx));
     expect(parts.ask).toBeLessThan(marketSalary(parts.avg, view.wage, view.minPay));
     expect(parts.ask).toBeGreaterThan(marketSalary(parts.avg * (1 - parts.share), view.wage, view.minPay));
-    expect(parts.ask).toBe(marketSalary(parts.avg * (1 - parts.share), view.wage, view.minPay) + Math.round(marketSalary(parts.avg * parts.share, view.wage, 0) * TWO_WAY_ASK_SHARE));
+    expect(parts.ask).toBe(marketSalary(parts.avg * (1 - parts.share * (1 - TWO_WAY_ASK_SHARE)), view.wage, view.minPay));
   }, 300_000);
 });
