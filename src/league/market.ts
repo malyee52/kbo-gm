@@ -168,8 +168,14 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
     const rule = teamForeignRule(foreignRule(ctx.meta, year, ctx.league), ctx.league, team, year);
     const held = foreignHeld(ctx.world, team, lp);
     const asia = !!lp.get(p.id)?.asia;
-    if (asia ? held.asia >= rule.asia : held.regular >= rule.regular) {
-      return `외국인 ${asia ? '아시아쿼터' : '선수'} 보유 한도(${asia ? rule.asia : rule.regular}명)가 차 있습니다. 먼저 외국인 선수를 방출하세요.`;
+    const have = asia ? held.asia : held.regular;
+    const limit = asia ? rule.asia : rule.regular;
+    if (have >= limit) {
+      const kindName = asia ? '아시아쿼터' : '외국인';
+      // 한도를 넘게 데리고 시작한 구단(개막 명단 자료가 없는 해는 그 해 기록의 외국인이 모두 들어온다)은 한 명 방출로 자리가 나지 않는다
+      if (!limit) return `${year}년에는 ${kindName} 선수를 보유할 수 없습니다.`;
+      const need = have - limit + 1;
+      return `${kindName} 보유 한도가 차 있습니다 (지금 ${have}명 / 한도 ${limit}명). ${kindName} 선수를 ${need}명 더 방출해야 자리가 납니다.`;
     }
     // 구성 제한 (2014~2019, eras.ts foreignMixOk): 보유 자리를 모두 투수 또는 모두 타자로 채울 수 없다
     const same = ctx.world.teams[team].org.filter((x) => x.foreign && !lp.get(x.id)?.asia && x.isPitcher === p.isPitcher).length;

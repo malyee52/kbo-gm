@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { isStarterSkill, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
-import { foreignRule } from '../../league/eras';
+import { foreignRule, teamForeignRule } from '../../league/eras';
 import { availableDay, foreignHeld, foreignSwapsUsed, movesOf, releaseCost } from '../../league/market';
 import { dollarText } from '../../league/salary';
 import { ConfirmButton } from '../ConfirmButton';
@@ -22,6 +22,8 @@ export function Market() {
   const lp = new Map(session.league.players.map((p) => [p.id, p]));
   const market = session.marketPlayers();
   const rule = foreignRule(store.meta, year, session.league);
+  // 창단 특례 구단은 1명 더 (signBlock과 같은 한도)
+  const limit = teamForeignRule(rule, session.league, session.teamIdx, year);
   const held = foreignHeld(session.world, session.teamIdx, lp);
   const used = foreignSwapsUsed(session.marketCtx, session.teamIdx);
   const deadline = session.marketDeadlineDay;
@@ -66,7 +68,11 @@ export function Market() {
           {open ? '' : ' 지금은 마감됐습니다.'}
         </p>
         <ul className="plain small">
-          <li>정식 선수 {regular}/{ruleOf(session.league, 'orgLimit')}명 · 외국인 {held.regular}/{rule.regular}명{rule.asia ? ` · 아시아쿼터 ${held.asia}/${rule.asia}명` : ''} · 외국인 교체 {used}/{ruleOf(session.league, 'foreignSwaps')}번</li>
+          <li>정식 선수 {regular}/{ruleOf(session.league, 'orgLimit')}명 · 외국인 {held.regular}/{limit.regular}명{limit.asia ? ` · 아시아쿼터 ${held.asia}/${limit.asia}명` : ''} · 외국인 교체 {used}/{ruleOf(session.league, 'foreignSwaps')}번</li>
+          {(held.regular > limit.regular || held.asia > limit.asia) && (
+            <li className="note">외국인을 보유 한도보다 많이 데리고 있습니다. 새 외국인을 데려오려면 한도 아래로 내려갈 때까지 먼저 방출해야 합니다 (1군 등록은 한도까지만).</li>
+          )}
+          <li>새 외국인 후보는 관찰 명단(영입 &gt; 스카우트 &gt; 해외)에 오른 선수만 이 목록에 나옵니다.</li>
           <li>방출(웨이버 공시): 선수 창의 "웨이버 공시"로 합니다. 하위 구단부터 데려갈 수 있고, 데려간 구단이 계약을 넘겨받습니다. 아무도 데려가지 않으면 자유계약 선수가 되고 남은 보장 연봉을 그때 냅니다(외국인은 연봉의 60%).</li>
           <li>새 외국인은 보유 한도가 빈 자리에만, 한 시즌 {ruleOf(session.league, 'foreignSwaps')}번까지 데려올 수 있습니다. 연봉은 남은 달만큼 나갑니다.</li>
           <li>자유계약 선수는 최저 연봉으로 이번 시즌까지 계약합니다. 같은 시즌에 방출한 선수는 다시 데려올 수 없습니다.</li>
@@ -82,7 +88,9 @@ export function Market() {
           {msg && <span className={msg.ok ? 'note small' : 'muted small'} role="status">{msg.text}</span>}
         </div>
         {list.length === 0 ? (
-          <p className="muted small">{kind === 'foreign' ? (rule.total ? '시장에 남은 외국인 후보가 없습니다.' : `${year}년에는 외국인 선수 제도가 없습니다.`) : '지금 자유계약 선수가 없습니다.'}</p>
+          <p className="muted small">{kind === 'foreign'
+            ? (rule.total ? '지금 영입할 수 있는 외국인 후보가 없습니다. 새 외국인 후보는 관찰 명단에 오른 선수만 보입니다: 영입 > 스카우트 > 해외에서 스카우트 팀을 보내 찾으세요 (파견이 없어도 에이전트가 몇 주마다 한 명을 추천합니다).' : `${year}년에는 외국인 선수 제도가 없습니다.`)
+            : '지금 자유계약 선수가 없습니다.'}</p>
         ) : (
           <div className="scroll flat">
             <table>
@@ -99,7 +107,10 @@ export function Market() {
                       <td className="l small">{line(p)}</td>
                       <td className="l small">{kind === 'free' && p.formerTeam !== undefined ? <TeamName idx={p.formerTeam} /> : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'}{from(p) > session.day && <span className="muted"> · {shortDate(year, from(p))}부터</span>}</td>
                       <td className="small">{salary(p)}</td>
-                      <td><button type="button" onClick={() => sign(p)} disabled={!!why} title={why ?? '영입합니다 (2군에 들어갑니다)'}>영입</button></td>
+                      <td className="l">
+                        <button type="button" onClick={() => sign(p)} disabled={!!why} title={why ?? '영입합니다 (2군에 들어갑니다)'}>영입</button>
+                        {why && <div className="muted small">{why}</div>}
+                      </td>
                     </tr>
                   );
                 })}
