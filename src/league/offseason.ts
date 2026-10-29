@@ -790,9 +790,17 @@ export function extensionDemand(view: LeagueView, p: LeaguePlayer, year: number,
  * 판타지 협상으로 지금 연봉보다 낮게 합의한 것은 그대로 둔다
  */
 export function extensionAsk(league: LeagueState, view: LeagueView, p: LeaguePlayer, year: number, years: number): number {
+  // 에이전트와 합의한 기간이면 합의한 연봉 그대로 (말한 대로 이행, 할인 한도 없음)
+  const deal = agreedDeal(league, p.id, year);
+  if (deal && deal.years === years) return deal.salary;
   const agreed = applyDiscount(extensionDemand(view, p, year, years), league.fantasy?.discounts?.find((x) => x.id === p.id && x.year === year)?.pct ?? 0, view.minPay);
   const withRep = Math.round(agreed * repDemand(league));
   return Math.max(view.minPay, Math.min(agreed, Math.max(withRep, p.contract.salary)));
+}
+
+/** 판타지 에이전트 협상에서 합의한 계약 조건 (그 오프시즌, fantasy/types.ts deals) */
+export function agreedDeal(league: Pick<LeagueState, 'fantasy'>, id: string, year: number): { salary: number; years: number } | null {
+  return league.fantasy?.deals?.find((x) => x.id === id && x.year === year) ?? null;
 }
 
 /** 판타지 협상 할인(+)·할증(−)을 요구액에 (최저 연봉 아래로는 안 간다) */
@@ -1120,14 +1128,24 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     const faDemand = settingsOf(league).faDemand;
     // 판타지 협상(에이전트 설득)의 할인·할증은 우리 제시에만 (src/fantasy/negotiate.ts)
     // 단장 평판도 우리 제시에만: 평판이 높으면 선수가 덜 부른다 (reputation.ts)
-    const disc = (1 - (league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0)) * repDemand(league);
-    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand * disc : 1));
+    const talk = league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0;
+    const disc = (1 - talk) * repDemand(league);
     const mine = offers.find((o) => o.team === off.userTeam);
+    // 에이전트와 합의한 조건(그 연봉 이상, 그 기간)의 우리 제시는 요구액·다른 구단 제시와 관계없이 받아들인다 (2026-10-29 사용자 결정 "말한 대로 이행")
+    const deal = mine ? agreedDeal(league, e.id, off.year) : null;
+    if (mine && deal && mine.salary >= deal.salary && mine.years === deal.years) {
+      log(off, 'fa', `${p.name}: 에이전트와 합의한 조건(연 ${wonText(deal.salary)}, ${deal.years}년)대로 계약했습니다.`, true);
+      signFa(league, off, e, mine, round, view);
+      continue;
+    }
+    const ok = offers.filter((o) => o.salary >= e.ask * FA_ACCEPT[round - 1] * (o.team === off.userTeam ? faDemand * disc : 1));
     if (!ok.length) {
       if (mine) log(off, 'fa', `${p.name}: 우리 제시(연 ${wonText(mine.salary)})는 선수 요구에 못 미쳐 이번 라운드에 받아들여지지 않았습니다.`, true);
       continue;
     }
-    const score = (o: FaOffer) => o.salary * (1 + 0.04 * (o.years - 1)) * (o.team === e.from ? 1.05 : 1);
+    // 에이전트 설득으로 깎인(할증된) 우리 제시는 깎기 전 값으로 다른 구단 제시와 견준다. 2026-10-29 전에는 깎은 값 그대로 견줘,
+    // 설득으로 요구액을 낮춰도 요구액을 낸 다른 구단에 늘 져서 AI가 판정한 할인이 이행되지 않았다
+    const score = (o: FaOffer) => (o.team === off.userTeam ? o.salary / (1 - talk) : o.salary) * (1 + 0.04 * (o.years - 1)) * (o.team === e.from ? 1.05 : 1);
     ok.sort((a, b) => score(b) - score(a) || (a.team === off.userTeam ? -1 : 1));
     if (mine && ok[0].team !== off.userTeam) {
       const why = ok.includes(mine) ? '다른 구단이 더 좋은 조건' : '우리 제시가 선수 요구에 못 미침';
@@ -1178,6 +1196,19 @@ export function resolveFaRound(league: LeagueState, off: OffseasonState, store: 
     }
   }
   enterComp(league, off, store, params);
+}
+
+/**
+ * 판타지 자유 모드의 게임 마스터가 FA 시장의 선수와 맺은 계약을 그 자리에서 확정한다 (session.applyFreeOps).
+ * 2026-10-29 전에는 move·contract가 소속·계약만 바꾸고 FA 항목은 열린 채 남아, 라운드 마감 때 다른 구단 계약이나 무적 선수로 덮였다.
+ * 판정을 따르므로 외부 FA 한도·캡은 보지 않는다 (자유 모드 규칙). 보상(보상금·보상선수)·계약금은 보통 계약과 같다. 열린 항목이 없으면 false
+ */
+export function signFaDeal(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams, id: string, team: number, salary: number | null, years: number | null): boolean {
+  const e = off.stage === 'fa' ? off.fa.entries.find((x) => x.id === id && x.status === 'open') : undefined;
+  if (!e || !league.teams[team]) return false;
+  delete off.fa.userOffers[id];
+  signFa(league, off, e, { team, salary: salary ?? e.ask, years: years ?? e.years }, off.fa.round, leagueView(league, store, params));
+  return true;
 }
 
 // ---- FA 보상선수

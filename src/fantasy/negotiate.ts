@@ -2,11 +2,14 @@
 // AI가 단장의 설득을 읽고 태도(stance, −3~+3)를 정하면, 그 값이 실제 게임 판단에 들어간다.
 // - 트레이드: 상대 구단 호감(goodwill, 런) = 태도 × GOODWILL_PER. AI 트레이드 평가(ai/trade.ts)의 이득에 더해진다. 14일, 다시 협상하면 바뀐다(쌓이지 않음)
 // - FA·비FA 다년 계약: 에이전트 설득으로 요구액 할인(최대 10%) 또는 할증(최대 6%)
+//   에이전트가 대사로 구체 조건(연봉·기간)을 받아들였으면 deal 숫자로도 받아, 그 조건 제시는 반드시 수락한다 (2026-10-29 사용자 결정 "말한 대로 이행", 한도 없음)
 // 협상 상대는 가상 인물(구단 운영팀장, 에이전트)이다. 같은 상대와는 쉬었다 다시 (쿨다운)
 import { Rng } from '../engine';
 import type { GameSession } from '../game/session';
 import { koreanName } from '../league/names';
 import type { LeaguePlayer, LeagueState } from '../league/types';
+import { minSalary } from '../league/salary';
+import { spendLimit } from '../league/owner';
 import { completeJsonText, extractJson, type LlmSettings } from './llm';
 import { RULES } from './prompts';
 import { adjustStance, leniencyOf, leniencyRule, NEGOTIATE_SCALE, type Leniency } from './leniency';
@@ -116,7 +119,9 @@ ${leniencyRule(l)}
 ${RULES}
 
 [답 형식] JSON 하나만:
-{"reply": "너의 대답 (2~5문장, 대사)", "stance": -3에서 3 사이 정수 (3 크게 양보, 0 그대로, -3 요구를 올림)}`;
+{"reply": "너의 대답 (2~5문장, 대사)", "stance": -3에서 3 사이 정수 (3 크게 양보, 0 그대로, -3 요구를 올림), "deal": {"salary": 연봉 억 원(소수), "years": 계약 기간 정수} 또는 null}
+deal은 대사에서 받아들인 구체 계약 조건이다. 대사에서 금액·기간에 동의했으면(예: 연봉 동결이면 지금 연봉, 기간을 말하지 않았으면 [상황]의 요구 기간) 반드시 대사와 같은 숫자를 넣는다.
+단장이 이 조건으로 제시하면 선수는 반드시 계약한다. 구체 조건에 동의하지 않았으면 null.`;
 }
 
 /** 에이전트 협상 한 번 → 이야기 글 (효과: 그 선수 요구액 할인·할증) */
@@ -127,17 +132,41 @@ export async function agentTalk(g: GameSession, s: LlmSettings, p: LeaguePlayer,
     system: agentSystem(agent.name, leniencyOf(g.league)),
     messages: [{ role: 'user', content: `[선수] ${p.name}${tag}\n[상황] ${situation}\n\n[단장의 말]\n${argument}` }],
     maxTokens: 500,
-    mockReply: JSON.stringify({ reply: '(시험용) 구단의 진심은 알겠습니다. 조금 양보하죠.', stance: 2 }),
+    mockReply: JSON.stringify({ reply: '(시험용) 구단의 진심은 알겠습니다. 조금 양보하죠.', stance: 2, deal: null }),
   });
-  const j = extractJson<{ reply?: string; stance?: unknown }>(raw);
+  const j = extractJson<{ reply?: string; stance?: unknown; deal?: unknown }>(raw);
   const reply = String(j?.reply ?? raw).trim().slice(0, 1000);
   if (!reply) throw new Error('AI 답이 비어 있습니다. 다시 시도하세요.');
   const l = leniencyOf(g.league);
   const pct = Math.round(discountOf(adjustStance(stanceOf(j?.stance), l)) * NEGOTIATE_SCALE[l] * 1000) / 1000;
+  const deal = sanitizeDeal(g.league, g.teamIdx, g.year, j?.deal);
   return {
     kind: 'chat', who: agent.name, title: `에이전트 ${agent.name}와 ${p.name} 계약 협상`, ask: argument.slice(0, 600), text: reply,
-    effects: [{ type: 'demandDiscount', player: p.id, pct }],
+    effects: [{ type: 'demandDiscount', player: p.id, pct }, ...(deal ? [{ type: 'agreedDeal' as const, player: p.id, ...deal }] : [])],
   };
+}
+
+/** 합의 연봉 상한 (만 원, 100억 원): 숫자를 잘못 읽은 답을 버린다 */
+export const DEAL_MAX_SALARY = 1_000_000;
+/** 합의 기간 상한 (FA 제시 1~6년, 비FA 다년 계약은 규정 최대 기간까지) */
+const DEAL_MAX_YEARS = 10;
+
+/**
+ * 에이전트 답의 deal(연봉 억 원, 기간)을 검사해 계약 조건(만 원)으로. 숫자가 없거나 엉뚱하면 null (버린다):
+ * 숫자가 아님·0 이하·최저 연봉 미만·100억 원 초과·우리 구단 지출 상한(샐러리캡·예산) 초과, 기간이 1~10년 정수가 아님
+ */
+export function sanitizeDeal(league: LeagueState, team: number, year: number, raw: unknown): { salary: number; years: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const num = (x: unknown) => (typeof x === 'number' ? x : typeof x === 'string' && x.trim() ? Number(x.replace(/[,억원\s]/g, '')) : NaN);
+  const eok = num(r.salary);
+  const years = num(r.years);
+  if (!Number.isFinite(eok) || eok <= 0 || !Number.isInteger(years) || years < 1 || years > DEAL_MAX_YEARS) return null;
+  const salary = Math.round(eok * 10000);
+  if (salary < minSalary(year + 1, league) || salary > DEAL_MAX_SALARY) return null;
+  const limit = spendLimit(league, team, year + 1);
+  if (limit !== null && salary > limit) return null;
+  return { salary, years };
 }
 
 /** 그 선수를 이번 오프시즌에 벌써 협상했나 */

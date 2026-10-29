@@ -833,7 +833,8 @@ function FaPanel({ act }: { act: Act }) {
     { key: 'prev', label: '전년 연봉', brief: true, value: (r) => r.e.prevSalary, cell: (r) => won(r.e.prevSalary) },
     {
       key: 'ask', label: '요구 (연)', brief: true, value: (r) => r.e.ask,
-      cell: ({ p, e }) => <>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`} />}</>,
+      cell: ({ p, e }) => <>{won(e.ask)}{e.status === 'open' && <AgentTalk p={p} situation={`FA ${faGradeLabel(e.grade)}, 전년 연봉 ${Math.round(e.prevSalary / 1000) / 10}억 원, 요구 연 ${Math.round(e.ask / 1000) / 10}억 원 ${e.years}년. 원 소속 ${session.league.teams[e.from]?.name ?? ''}, 설득하는 구단 ${session.team.name}`}
+        onDeal={(salary, years) => act(session.offerFa(e.id, salary, years))} />}</>,
     },
     { key: 'years', label: '기간', brief: true, value: (r) => r.e.years, cell: (r) => `${r.e.years}년` },
     {
@@ -1075,7 +1076,8 @@ function ExtensionPanel({ act }: { act: Act }) {
                       </select>
                     </td>
                     <td className="small">{won(d.salary)} <span className="muted">(계약금 {won(Math.round(d.salary * y * Off.EXT_BONUS_SHARE))})</span>
-                      <AgentTalk p={p} situation={`비FA 다년 계약 협상. FA까지 ${toFa}시즌, 지금 연봉 ${Math.round(p.contract.salary / 1000) / 10}억 원, ${y}년 요구 연 ${Math.round(d.salary / 1000) / 10}억 원. 구단 ${session.team.name}`} /></td>
+                      <AgentTalk p={p} situation={`비FA 다년 계약 협상. FA까지 ${toFa}시즌, 지금 연봉 ${Math.round(p.contract.salary / 1000) / 10}억 원, ${y}년 요구 연 ${Math.round(d.salary / 1000) / 10}억 원. 구단 ${session.team.name}`}
+                        onDeal={(_, dy) => act(session.extend(p.id, dy))} dealLabel="이 조건으로 계약" /></td>
                     <td><button type="button" className="small-btn" onClick={() => act(session.extend(p.id, y))}>계약</button></td>
                   </tr>
                 );

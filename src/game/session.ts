@@ -1632,7 +1632,29 @@ export class GameSession {
       sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
       if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
     };
+    // FA 시장(오프시즌 FA 단계)의 선수에게 낸 move·contract는 FA 계약으로 확정한다 (Off.signFaDeal, 2026-10-29 사용자 보고 "fa때 ai로 판정된 조건들이 실제로 이행되지 않는 문제").
+    // 같은 선수의 move(구단)와 contract(연봉·기간)를 한 계약으로 묶는다. contract만 냈으면 우리 구단과의 합의로 본다
+    const off = season ? null : this.offseason;
+    const faDeals = new Map<string, { to?: number; salary?: number; years?: number }>();
+    if (off?.stage === 'fa') {
+      for (const op of ops) {
+        if ((op.op !== 'move' && op.op !== 'contract') || !off.fa.entries.some((x) => x.id === op.player && x.status === 'open')) continue;
+        const d = faDeals.get(op.player) ?? {};
+        if (op.op === 'move') d.to = op.to;
+        else { d.salary = op.salary; d.years = op.years; }
+        faDeals.set(op.player, d);
+      }
+    }
+    const faSigned = new Set<string>();
     for (const op of ops) {
+      if ((op.op === 'move' || op.op === 'contract') && faDeals.has(op.player)) {
+        if (faSigned.has(op.player)) continue;
+        faSigned.add(op.player);
+        const d = faDeals.get(op.player)!;
+        // 방출(−1)로 낸 FA는 시장에 그대로 둔다
+        if ((d.to ?? this.teamIdx) >= 0) Off.signFaDeal(L, off!, this.store, this.params, op.player, d.to ?? this.teamIdx, d.salary ?? null, d.years ?? null);
+        continue;
+      }
       switch (op.op) {
         case 'move': {
           const lp = lpOf(op.player);
@@ -1776,6 +1798,11 @@ export class GameSession {
         case 'demandDiscount': {
           f.discounts = (f.discounts ?? []).filter((x) => x.id !== e.player || x.year !== this.year);
           if (e.pct) f.discounts.push({ id: e.player, pct: e.pct, year: this.year });
+          break;
+        }
+        case 'agreedDeal': {
+          f.deals = (f.deals ?? []).filter((x) => x.id !== e.player || x.year !== this.year);
+          f.deals.push({ id: e.player, year: this.year, salary: e.salary, years: e.years });
           break;
         }
         case 'ownerChange': { const o = this.owner; o.trust = e.trust; this.addNews(Math.max(0, this.phase === 'season' ? this.day : 0), 'owner', `판타지: 구단주가 바뀌었습니다. 새 구단주의 신뢰 ${e.trust}에서 시작합니다.`); break; }
