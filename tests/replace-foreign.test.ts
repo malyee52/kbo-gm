@@ -18,7 +18,7 @@ const teamOf = (year: number, name: string) => store.season(year)!.teams.findInd
 const overLimit = (g: GameSession) => {
   const lp = new Map(g.league.players.map((p) => [p.id, p]));
   return g.world.teams.filter((_, i) => {
-    const h = foreignHeld(g.world, i, lp);
+    const h = foreignHeld(g.world, i, lp, g.league);
     const r = teamForeignRule(foreignRule(store.meta, g.world.year, g.league), g.league, i, g.world.year);
     return h.regular > r.regular || h.asia > r.asia;
   }).map((t) => t.name);

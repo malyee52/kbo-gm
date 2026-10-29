@@ -44,7 +44,22 @@ export const SLUMP_OPS = 0.9;
 export const AI_SWAP_EVERY = 7;
 export const AI_SWAP_FROM_DAY = 21;
 
-export type MarketKind = 'release' | 'claim' | 'sign';
+/**
+ * 부상 대체 외국인 (2024~, KBO 2023-11 발표, 보도 기준. KBO 규약 원문은 확인 못 함):
+ *   - 6주 이상 치료가 필요한 부상을 당한 외국인을 재활 선수 명단에 올리고(보유는 유지) 대체 외국인을 데려온다. 교체 횟수는 쓰지 않는다
+ *   - 재활 명단 선수는 보유 한도에서 빠지고, 최소 6주 뒤 복귀할 수 있다 (게임: 영입 때 남은 결장이 6주 이상이어야 하므로 복귀는 늘 6주 뒤)
+ *   - 복귀 때 구단이 둘 중 하나: 원래 선수 복귀(대체 선수는 웨이버) 또는 대체 선수를 남기고 원래 선수 방출(교체 1회로 셈)
+ *   - 대체 선수 고용 비용은 한 달에 10만 달러까지
+ * 임시 규칙: 대체 선수 남기기는 복귀 전에도 고를 수 있다. 복귀 선택은 마감일 뒤에도 된다. 그날 경기 전까지 고르지 않으면 원래 선수 복귀(rehabDay)
+ */
+export const INJURY_SWAP_FROM = 2024;
+/** 부상 대체 외국인을 데려올 수 있는 남은 결장 (6주) */
+export const INJURY_SWAP_DAYS = 42;
+/** 대체 외국인 한 달 고용 비용 상한 (달러) */
+export const INJURY_SWAP_MONTH_USD = 100_000;
+
+/** 'rehab' = 부상 대체 영입 (교체 횟수에 안 셈), 'keep' = 복귀 때 대체 선수를 남김 (교체 1회로 셈, 이동 없음) */
+export type MarketKind = 'release' | 'claim' | 'sign' | 'rehab' | 'keep';
 
 /** 시즌 중 방출·영입 기록 (리그 상태에 남는다. 재정·결산·조작 기록 재실행에 쓴다) */
 export interface MarketMove {
@@ -56,6 +71,8 @@ export interface MarketMove {
   from: number;
   /** 'release'면 -1 */
   to: number;
+  /** 'rehab'이면 재활 명단에 올린(다친) 외국인 id */
+  rehab?: string;
 }
 
 export interface MarketCtx {
@@ -85,12 +102,36 @@ export function movesOf(league: LeagueState, year: number): MarketMove[] {
 /** 그 구단이 이번 시즌 새로 계약한 외국인 수 (교체 횟수) */
 export function foreignSwapsUsed(ctx: Pick<MarketCtx, 'league' | 'world'>, team: number): number {
   const foreign = new Set(ctx.world.players.filter((p) => p.foreign).map((p) => p.id));
-  return movesOf(ctx.league, ctx.world.year).filter((m) => m.kind === 'sign' && m.to === team && foreign.has(m.id)).length;
+  return movesOf(ctx.league, ctx.world.year).filter((m) => (m.kind === 'sign' || m.kind === 'keep') && m.to === team && foreign.has(m.id)).length;
 }
 
-/** 구단 외국인 보유 (일반, 아시아쿼터). 복무·육성 구분 없이 명단 전체 */
-export function foreignHeld(world: World, team: number, lp: Map<string, LeaguePlayer>): { regular: number; asia: number } {
-  const list = world.teams[team].org.filter((p) => p.foreign);
+/** 재활 명단 (부상 대체 외국인): 다친 선수와 대체 선수가 둘 다 아직 그 구단에 있는 것만 (복귀 선택을 하면 한쪽이 방출돼 끝난다) */
+export interface Rehab {
+  team: number;
+  /** 재활 명단에 오른 선수 id */
+  injured: string;
+  /** 대체 선수 id */
+  sub: string;
+  /** 대체 영입한 날 */
+  day: number;
+}
+
+export function rehabsOf(ctx: Pick<MarketCtx, 'league' | 'world'>, team?: number): Rehab[] {
+  const at = new Map(ctx.world.players.map((p) => [p.id, p.teamIdx]));
+  return movesOf(ctx.league, ctx.world.year)
+    .filter((m) => m.kind === 'rehab' && m.rehab && (team === undefined || m.to === team) && at.get(m.id) === m.to && at.get(m.rehab) === m.to)
+    .map((m) => ({ team: m.to, injured: m.rehab!, sub: m.id, day: m.day }));
+}
+
+/** 재활 명단에 있는 선수 id (보유 한도에서 빠진다) */
+export function rehabListed(ctx: Pick<MarketCtx, 'league' | 'world'>, team?: number): Set<string> {
+  return new Set(rehabsOf(ctx, team).map((r) => r.injured));
+}
+
+/** 구단 외국인 보유 (일반, 아시아쿼터). 복무·육성 구분 없이 명단 전체. league를 주면 재활 명단 선수는 빼고 센다 */
+export function foreignHeld(world: World, team: number, lp: Map<string, LeaguePlayer>, league?: LeagueState): { regular: number; asia: number } {
+  const rehab = league ? rehabListed({ league, world }, team) : new Set<string>();
+  const list = world.teams[team].org.filter((p) => p.foreign && !rehab.has(p.id));
   const asia = list.filter((p) => lp.get(p.id)?.asia).length;
   return { regular: list.length - asia, asia };
 }
@@ -138,6 +179,8 @@ export function availableDay(lp: LeaguePlayer | undefined, seasonDays: number): 
 export function releaseBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | null {
   if (p.teamIdx !== team) return '우리 구단 선수가 아닙니다.';
   if (ctx.season.done) return '시즌이 끝났습니다.';
+  const rehab = rehabsOf(ctx, team).find((r) => r.injured === p.id || r.sub === p.id);
+  if (rehab) return p.id === rehab.injured ? '재활 명단에 있습니다. 복귀 선택(선수 시장)에서 정하세요.' : '부상 대체 선수입니다. 원래 선수 복귀 선택(선수 시장)에서 정하세요.';
   if (ctx.season.day > marketDeadlineDay(ctx.world.year, ctx.season.schedule.length, ctx.league)) return `방출·영입 마감(${ruleDate(ctx.league, 'marketDeadline').month}월 ${ruleDate(ctx.league, 'marketDeadline').date}일)이 지났습니다.`;
   const org = ctx.world.teams[team].org;
   const catchers = org.filter((x) => !x.isPitcher && x.pos === 'C').length;
@@ -148,10 +191,30 @@ export function releaseBlock(ctx: MarketCtx, p: SimPlayer, team: number): string
   return null;
 }
 
-/** 영입할 수 없는 이유 (없으면 null) */
-export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | null {
+/** 그 외국인을 재활 명단에 올리고 부상 대체 외국인을 데려올 수 없는 이유 (없으면 null) */
+export function rehabBlock(ctx: Pick<MarketCtx, 'league' | 'world' | 'season'>, injured: SimPlayer, team: number): string | null {
+  const year = ctx.world.year;
+  if (year < INJURY_SWAP_FROM) return `부상 대체 외국인 제도는 ${INJURY_SWAP_FROM}년부터입니다.`;
+  if (injured.teamIdx !== team || !injured.foreign) return '우리 구단 외국인 선수가 아닙니다.';
+  if (rehabListed(ctx, team).has(injured.id)) return '이미 재활 명단에 있습니다.';
+  if (rehabsOf(ctx, team).some((r) => r.sub === injured.id)) return '부상 대체 선수는 다시 재활 명단에 올릴 수 없습니다.';
+  const left = ctx.season.states.absentUntil[injured.idx] - ctx.season.day;
+  if (left < INJURY_SWAP_DAYS) return `6주(${INJURY_SWAP_DAYS}일) 넘게 빠지는 부상만 대상입니다 (${left > 0 ? `남은 결장 ${left}일` : '결장 중 아님'}).`;
+  return null;
+}
+
+/**
+ * 영입할 수 없는 이유 (없으면 null). rehab을 주면 그 선수를 재활 명단에 올리는 부상 대체 영입:
+ * 재활 명단 선수는 보유 한도·구성 제한에서 빠지고 교체 횟수를 보지 않는다. 외국인 후보만
+ */
+export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number, rehab?: SimPlayer): string | null {
   const lp = new Map(ctx.league.players.map((x) => [x.id, x]));
   const year = ctx.world.year;
+  if (rehab) {
+    const why = rehabBlock(ctx, rehab, team);
+    if (why) return why;
+    if (!isMarketForeign(p, lp.get(p.id), year)) return '부상 대체로는 외국인 후보만 데려올 수 있습니다.';
+  }
   if (p.teamIdx !== -1) return '시장에 있는 선수가 아닙니다.';
   if (p.formerTeam === team) return '이번 시즌에 방출한 선수는 다시 데려올 수 없습니다.';
   if (ctx.season.done) return '시즌이 끝났습니다.';
@@ -166,9 +229,10 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
     if (!fxVisible(ctx.league, team, lp.get(p.id) ?? { id: p.id })) return '관찰 명단에 없는 후보입니다. 스카우트 팀을 보내 찾으세요.';
     // 창단 특례 구단은 1명 더 (eras.ts teamForeignRule)
     const rule = teamForeignRule(foreignRule(ctx.meta, year, ctx.league), ctx.league, team, year);
-    const held = foreignHeld(ctx.world, team, lp);
+    const held = foreignHeld(ctx.world, team, lp, ctx.league);
     const asia = !!lp.get(p.id)?.asia;
-    const have = asia ? held.asia : held.regular;
+    const out = rehab && !!lp.get(rehab.id)?.asia === asia ? 1 : 0;
+    const have = (asia ? held.asia : held.regular) - out;
     const limit = asia ? rule.asia : rule.regular;
     if (have >= limit) {
       const kindName = asia ? '아시아쿼터' : '외국인';
@@ -178,11 +242,13 @@ export function signBlock(ctx: MarketCtx, p: SimPlayer, team: number): string | 
       return `${kindName} 보유 한도가 차 있습니다 (지금 ${have}명 / 한도 ${limit}명). ${kindName} 선수를 ${need}명 더 방출해야 자리가 납니다.`;
     }
     // 구성 제한 (2014~2019, eras.ts foreignMixOk): 보유 자리를 모두 투수 또는 모두 타자로 채울 수 없다
-    const same = ctx.world.teams[team].org.filter((x) => x.foreign && !lp.get(x.id)?.asia && x.isPitcher === p.isPitcher).length;
+    const listed = rehabListed(ctx, team);
+    if (rehab) listed.add(rehab.id);
+    const same = ctx.world.teams[team].org.filter((x) => x.foreign && !listed.has(x.id) && !lp.get(x.id)?.asia && x.isPitcher === p.isPitcher).length;
     if (!asia && !foreignMixOk(year, rule.regular, same)) {
       return `${year}년에는 외국인 ${rule.regular}명을 모두 ${p.isPitcher ? '투수' : '타자'}로 채울 수 없습니다 (${p.isPitcher ? '투수' : '타자'}는 ${rule.regular - 1}명까지).`;
     }
-    if (foreignSwapsUsed(ctx, team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체는 한 시즌 ${ruleOf(ctx.league, 'foreignSwaps')}번까지입니다.`;
+    if (!rehab && foreignSwapsUsed(ctx, team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체는 한 시즌 ${ruleOf(ctx.league, 'foreignSwaps')}번까지입니다.`;
   }
   return null;
 }
@@ -230,19 +296,78 @@ export function releasePlayer(ctx: MarketCtx, p: SimPlayer, team: number): numbe
  * 자유계약 국내 선수는 최저 연봉의 남은 몫을 그때 낸다 (원 소속 계약은 방출 때 정산했다).
  * 파견 후보면 모든 관찰 명단에서 빼고 그 소식을 돌려준다 (scoutfx.ts)
  */
-export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): FxNews[] {
+export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number, rehab?: SimPlayer): FxNews[] {
   const { league, world, season } = ctx;
   const year = world.year;
   const lp = league.players.find((x) => x.id === p.id)!;
-  if (!(p.foreign && lp.market === year)) {
+  if (rehab) {
+    // 부상 대체: 한 달 10만 달러 상한 (연봉은 지급일마다 고르게 나가므로 상한 × 지급 달 수, 계약금 없음)
+    lp.contract = { ...lp.contract, salary: rehabSalary(lp, year, season.schedule.length) };
+    delete lp.contract.bonus;
+  } else if (!(p.foreign && lp.market === year)) {
     const cost = Math.round(minSalary(year, league) * remainingShare(year, season.schedule.length, season.day));
     if (cost > 0) league.ledger.push({ year, from: team, to: -1, amount: cost, note: `${p.name} 영입 연봉 (남은 기간)`, kind: 'release' });
   }
   season.transfer(p.idx, team);
-  (league.marketMoves ??= []).push({ year, day: season.day, id: p.id, kind: 'sign', from: -1, to: team });
+  (league.marketMoves ??= []).push(rehab
+    ? { year, day: season.day, id: p.id, kind: 'rehab', from: -1, to: team, rehab: rehab.id }
+    : { year, day: season.day, id: p.id, kind: 'sign', from: -1, to: team });
   if (!lp.fx) return [];
   delete lp.fx;
   return fxSigned(league, p.id, team);
+}
+
+/** 부상 대체로 데려올 때의 연봉 (달러): 후보 요구액, 다만 한 달 INJURY_SWAP_MONTH_USD까지 */
+export function rehabSalary(lp: LeaguePlayer, year: number, seasonDays: number): number {
+  return Math.min(lp.contract.salary, INJURY_SWAP_MONTH_USD * Math.max(1, paydays(year, seasonDays).length));
+}
+
+/** 재활 명단 선수 복귀 선택을 할 수 없는 이유 (없으면 null). keep = 대체 선수를 남기고 원래 선수 방출 */
+export function rehabEndBlock(ctx: Pick<MarketCtx, 'league' | 'world' | 'season'>, r: Rehab, keep: boolean): string | null {
+  if (ctx.season.done) return '시즌이 끝났습니다.';
+  if (keep) {
+    if (foreignSwapsUsed(ctx, r.team) >= ruleOf(ctx.league, 'foreignSwaps')) return `외국인 교체 ${ruleOf(ctx.league, 'foreignSwaps')}번을 다 써서 대체 선수를 남길 수 없습니다.`;
+    return null;
+  }
+  const p = ctx.world.players.find((x) => x.id === r.injured);
+  const left = p ? ctx.season.states.absentUntil[p.idx] - ctx.season.day : 0;
+  return left > 0 ? `아직 복귀 전입니다 (남은 결장 ${left}일).` : null;
+}
+
+/** 복귀 선택을 해야 하는 재활 명단 (다친 선수가 다 나았다) */
+export function rehabsDue(ctx: Pick<MarketCtx, 'league' | 'world' | 'season'>, team?: number): Rehab[] {
+  const idx = new Map(ctx.world.players.map((p) => [p.id, p.idx]));
+  return rehabsOf(ctx, team).filter((r) => ctx.season.states.absentUntil[idx.get(r.injured)!] <= ctx.season.day);
+}
+
+/** 복귀 선택: keep이면 대체 선수를 남기고(교체 1회) 원래 선수를 방출, 아니면 원래 선수가 돌아오고 대체 선수를 방출. 둘 다 웨이버 (releasePlayer) */
+export function endRehab(ctx: MarketCtx, r: Rehab, keep: boolean): void {
+  const byId = new Map(ctx.world.players.map((p) => [p.id, p]));
+  if (keep) (ctx.league.marketMoves ??= []).push({ year: ctx.world.year, day: ctx.season.day, id: r.sub, kind: 'keep', from: -1, to: r.team });
+  releasePlayer(ctx, byId.get(keep ? r.injured : r.sub)!, r.team);
+}
+
+/**
+ * 그날 경기 전 복귀 선택 (결정적). AI 구단은 대체 선수가 원래 선수보다 낫게 보이고(추측) 교체 횟수가 남았으면 남긴다.
+ * 플레이어 구단은 그날 경기 전까지 고르지 않았으면 원래 선수 복귀 (조작 기록은 같은 날 경기 전에 들어가므로 재현과 같다)
+ */
+export function rehabDay(ctx: MarketCtx): { r: Rehab; keep: boolean }[] {
+  if (ctx.season.done) return [];
+  const out: { r: Rehab; keep: boolean }[] = [];
+  const byId = new Map(ctx.world.players.map((p) => [p.id, p]));
+  for (const r of rehabsDue(ctx)) {
+    let keep = false;
+    if (r.team !== ctx.userTeam && !rehabEndBlock(ctx, r, true)) {
+      const sub = byId.get(r.sub)!;
+      const who = { team: r.team, user: false };
+      const seen = guessRuns(ctx.league, who, sub.id, currentRuns(sub, ctx.values),
+        foreignSigma(ctx.league, who, { id: sub.id, sample: sub.bat?.sample ?? sub.pit?.sample ?? null }), ctx.world.year);
+      keep = seen > currentRuns(byId.get(r.injured)!, ctx.values);
+    }
+    endRehab(ctx, r, keep);
+    out.push({ r, keep });
+  }
+  return out;
 }
 
 /**
@@ -252,7 +377,7 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number): FxNews[]
 export function financeMoves(league: LeagueState, year: number): { day: number; from: number; to: number; give: string[]; get: string[] }[] {
   const market = new Set(league.players.filter((p) => p.market === year && p.foreign).map((p) => p.id));
   return movesOf(league, year)
-    .filter((m) => m.kind !== 'sign' || market.has(m.id))
+    .filter((m) => m.kind !== 'keep' && ((m.kind !== 'sign' && m.kind !== 'rehab') || market.has(m.id)))
     .map((m) => ({ day: m.day, from: m.from, to: m.to, give: [m.id], get: [] }));
 }
 
@@ -277,8 +402,9 @@ function swapTarget(ctx: MarketCtx, team: number): { out: SimPlayer; why: 'injur
   const lgOps = opsOf(lgBat);
   const lgEra = (() => { let er = 0, outs = 0; for (const l of season.pit) { er += l.er; outs += l.outs; } return outs ? (er * 27) / outs : 4.5; })();
   let best: { out: SimPlayer; why: 'injury' | 'slump'; score: number } | null = null;
+  const listed = rehabListed(ctx, team);
   for (const p of world.teams[team].org) {
-    if (!p.foreign) continue;
+    if (!p.foreign || listed.has(p.id)) continue;
     const left = season.states.absentUntil[p.idx] - day;
     if (left >= AI_SWAP_INJURY_DAYS) {
       if (!best || left + 100 > best.score) best = { out: p, why: 'injury', score: left + 100 };
@@ -303,16 +429,19 @@ function swapTarget(ctx: MarketCtx, team: number): { out: SimPlayer; why: 'injur
  * 하루 시작 때 AI 구단의 외국인 교체 (결정적: 난수 없음). 바꾼 기록을 돌려준다 (소식용).
  * 같은 쓰임(투수·타자)·같은 구분(일반·아시아쿼터)의 시장 후보 가운데 가장 나은 선수로: 다쳤으면 그냥, 부진이면 후보가 지금 선수 + AI_SWAP_GAIN런 이상일 때
  */
-export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump'; fx: FxNews[] }[] {
+export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' | 'rehab'; fx: FxNews[] }[] {
   const { world, season } = ctx;
   const day = season.day;
   if (day < AI_SWAP_FROM_DAY || day % AI_SWAP_EVERY !== 0 || day > marketDeadlineDay(world.year, season.schedule.length, ctx.league) || season.done) return [];
   const lpById = new Map(ctx.league.players.map((p) => [p.id, p]));
-  const out: { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump'; fx: FxNews[] }[] = [];
+  const out: { team: number; out: SimPlayer; in: SimPlayer; why: 'injury' | 'slump' | 'rehab'; fx: FxNews[] }[] = [];
   for (let t = 0; t < world.teams.length; t++) {
-    if (t === ctx.userTeam || foreignSwapsUsed(ctx, t) >= ruleOf(ctx.league, 'foreignSwaps')) continue;
+    if (t === ctx.userTeam || !ruleOf(ctx.league, 'foreignSwaps')) continue;
     const target = swapTarget(ctx, t);
     if (!target) continue;
+    // 6주 넘게 다쳤으면 (2024~) 재활 명단에 올리고 부상 대체 (교체 횟수를 쓰지 않는다)
+    const rehab = target.why === 'injury' && !rehabBlock(ctx, target.out, t);
+    if (!rehab && foreignSwapsUsed(ctx, t) >= ruleOf(ctx.league, 'foreignSwaps')) continue;
     // 같은 쓰임(투수·타자)과 같은 구분(일반·아시아쿼터)의 후보
     const asia = !!lpById.get(target.out.id)?.asia;
     // 파견 후보는 그 구단 관찰 명단에 있는 선수만 (scoutfx.ts)
@@ -325,6 +454,11 @@ export function aiMarketDay(ctx: MarketCtx): { team: number; out: SimPlayer; in:
       foreignSigma(ctx.league, who, { id: p.id, sample: p.bat?.sample ?? p.pit?.sample ?? null }), world.year);
     const pick = cands.reduce((a, b) => (seen(b) > seen(a) || (seen(b) === seen(a) && b.id < a.id) ? b : a));
     if (target.why === 'slump' && seen(pick) < currentRuns(target.out, ctx.values) + AI_SWAP_GAIN) continue;
+    if (rehab) {
+      if (signBlock(ctx, pick, t, target.out)) continue;
+      out.push({ team: t, out: target.out, in: pick, why: 'rehab', fx: signPlayer(ctx, pick, t, target.out) });
+      continue;
+    }
     releasePlayer(ctx, target.out, t);
     const fx = signPlayer(ctx, pick, t);
     out.push({ team: t, out: target.out, in: pick, why: target.why, fx });
