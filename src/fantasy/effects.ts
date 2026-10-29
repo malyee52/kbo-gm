@@ -114,7 +114,7 @@ export function sanitizeEffects(raw: unknown, scale: EffectScale, roster: Effect
     } else if (t === 'prospect' || t === 'ownerChange') {
       if (scale !== 'arc') { dropped.push(`${t}: 이야기의 절정에서만`); continue; }
       if (t === 'prospect') {
-        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 6) : '';
+        const name = typeof e.name === 'string' ? e.name.trim() : '';
         if (!/^[가-힣]{2,4}$/.test(name) || roster.some((p) => p.name === name)) { dropped.push('prospect: 이름이 알맞지 않음'); continue; }
         const pos = e.pos === 'P' || e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
         out.push({ type: 'prospect', name, pos, age: Math.max(17, Math.min(22, Math.round(num(e.age) ?? 19))), potential: Math.max(20, Math.min(45, Math.round(num(e.potential) ?? 30))) });

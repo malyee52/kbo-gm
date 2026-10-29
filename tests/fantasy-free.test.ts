@@ -114,6 +114,24 @@ describe('자유 모드', () => {
     expect(defenseGrade(defenseAt(sp, 'C'))).toBe(20); // 능력치 v2: 안 해 본 자리는 등급 20 (16.4)
   }, 120_000);
 
+  it('긴 이름은 자르지 않는다 (2026-10-29 보고: 야마모토 요시노부 → 야마모토 요시노), 20자를 넘으면 버린다', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lgOf(), seed: 'long-name', fantasy: { free: true } }, FAST);
+    const long = '야마모토 요시노부';
+    const nine = '알렉산더블라디미르';
+    const { ops, dropped } = resolveOps(g, [
+      { op: 'create', name: long, team: 'LG', pos: 'P', role: 'SP', age: 28, now: 70, potential: 72 },
+      { op: 'create', name: nine, team: 'LG', pos: 'OF', age: 25, now: 50, potential: 60 },
+      { op: 'create', name: '가'.repeat(21), team: 'LG', pos: 'OF', age: 25, now: 50, potential: 60 },
+      { op: 'future', name: long, team: 'LG', pos: 'P', birthYear: 2010 },
+    ]);
+    expect(ops.map((o) => 'name' in o ? o.name : '')).toEqual([long, nine, long]);
+    expect(ops[0]).toMatchObject({ foreign: true });
+    expect(dropped.some((d) => d.includes('20자를 넘음'))).toBe(true);
+    g.addFantasy({ kind: 'action', title: 't', text: 'x', ops: ops.filter((o) => o.op === 'create') });
+    expect(g.world.players.filter((p) => p.name === long || p.name === nine)).toHaveLength(2);
+    expect(g.league.players.some((p) => p.name === long)).toBe(true);
+  }, 600_000);
+
   it('만든 선수의 국적·병역: 외국 이름은 외국인, 28세 이상 국내 선수는 병역 마침, 리그 밖 선수는 입대하지 않는다', () => {
     const g = GameSession.create(store, { year: 2000, teamIdx: 0, seed: 'mil-t', fantasy: { free: true } }, FAST);
     const team = g.league.teams[0].name;
