@@ -52,6 +52,8 @@ describe('오프시즌', () => {
   it('단계를 마치면 AI 구단도 육성선수를 두고, 모든 구단 정식 선수는 정원 안, 육성선수는 상한 안', () => {
     g.autoRelease();
     g.nextStage();
+    expect(g.offseason!.stage).toBe('meeting'); // 구단주 예산 회의 (재정 2 F4b)
+    g.nextStage();
     expect(g.offseason!.stage).toBe('ready');
     const L = g.league;
     const aiDevs = L.players.filter((p) => p.dev && p.team >= 0 && p.team !== lg).length;
