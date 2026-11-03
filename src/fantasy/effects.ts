@@ -26,7 +26,9 @@ export type FantasyEffect =
   /** 협상 (negotiate.ts만): 그 구단이 우리 트레이드 제안을 보는 호감 (런, AI 트레이드 평가 이득에 더한다) */
   | { type: 'tradeGoodwill'; team: number; runs: number; days: number }
   /** 협상 (negotiate.ts만): 그 선수의 FA·다년 계약 요구액 할인(+)·할증(−) 비율 (이번 오프시즌) */
-  | { type: 'demandDiscount'; player: string; pct: number };
+  | { type: 'demandDiscount'; player: string; pct: number }
+  /** 협상 (negotiate.ts만): 에이전트가 받아들인 계약 조건 (연봉 만 원, 기간). 이번 오프시즌 그 조건 제시는 반드시 수락 */
+  | { type: 'agreedDeal'; player: string; salary: number; years: number };
 
 export interface EffectLimits { trust: number; fans: number; cash: number; edge: number; days: number; fill: number; potential: number; rest: number; count: number }
 
@@ -112,7 +114,7 @@ export function sanitizeEffects(raw: unknown, scale: EffectScale, roster: Effect
     } else if (t === 'prospect' || t === 'ownerChange') {
       if (scale !== 'arc') { dropped.push(`${t}: 이야기의 절정에서만`); continue; }
       if (t === 'prospect') {
-        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 6) : '';
+        const name = typeof e.name === 'string' ? e.name.trim() : '';
         if (!/^[가-힣]{2,4}$/.test(name) || roster.some((p) => p.name === name)) { dropped.push('prospect: 이름이 알맞지 않음'); continue; }
         const pos = e.pos === 'P' || e.pos === 'C' || e.pos === 'IF' || e.pos === 'OF' ? e.pos : 'IF';
         out.push({ type: 'prospect', name, pos, age: Math.max(17, Math.min(22, Math.round(num(e.age) ?? 19))), potential: Math.max(20, Math.min(45, Math.round(num(e.potential) ?? 30))) });
@@ -143,5 +145,6 @@ export function effectText(e: FantasyEffect, nameOf: (id: string) => string): st
     case 'ownerChange': return `구단주 교체 (신뢰 ${e.trust}에서 새로 시작)`;
     case 'tradeGoodwill': return `상대 구단 호감 ${sign(e.runs)}런 (${e.days}일, 트레이드 평가에 더함)`;
     case 'demandDiscount': return `${nameOf(e.player)} 요구액 ${e.pct >= 0 ? `${Math.round(e.pct * 100)}% 할인` : `${Math.round(-e.pct * 100)}% 인상`}`;
+    case 'agreedDeal': return `${nameOf(e.player)} 합의 조건: 연봉 ${(e.salary / 10000).toFixed(1)}억 원·${e.years}년 (이 조건 제시는 반드시 수락)`;
   }
 }

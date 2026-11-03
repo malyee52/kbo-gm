@@ -8,11 +8,11 @@ import { GM_STYLE_LABEL, gmStyle } from '../../league/gm';
 import type { LeaguePlayer } from '../../league/types';
 import { agentTalk, agentTalkBlock, negotiatorOf, tradeTalk, tradeTalkBlock, GOODWILL_DAYS } from '../../fantasy/negotiate';
 import { effectText } from '../../fantasy/effects';
-import { goodwillFor, discountFor } from '../../fantasy/types';
+import { goodwillFor, discountFor, dealFor } from '../../fantasy/types';
 import { loadAiSettings } from '../../fantasy/settings';
 import { GmPreviewCard, useGmJudge } from './GmPreview';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
-import { useGame, posName } from '../context';
+import { useGame, useWon, posName } from '../context';
 import { rankText } from '../../game/rank';
 import { guessSetText } from '../../league/scout';
 import { useSeen } from '../parts';
@@ -97,9 +97,13 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
   );
 }
 
-/** 에이전트 설득 (FA·다년 계약): 그 선수 요구액 할인·할증 */
-export function AgentTalk({ p, situation }: { p: LeaguePlayer; situation: string }) {
+/**
+ * 에이전트 설득 (FA·다년 계약): 그 선수 요구액 할인·할증. 에이전트가 구체 조건에 합의했으면 그 숫자를 보여 주고,
+ * onDeal이 있으면 그 조건으로 바로 제시·계약하는 단추 (합의 조건 제시는 반드시 수락, 2026-10-29 사용자 결정)
+ */
+export function AgentTalk({ p, situation, onDeal, dealLabel = '이 조건으로 제시' }: { p: LeaguePlayer; situation: string; onDeal?: (salary: number, years: number) => void; dealLabel?: string }) {
   const { session, changed, autosave } = useGame();
+  const won = useWon();
   const [open, setOpen] = useState(false);
   const [arg, setArg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -107,6 +111,13 @@ export function AgentTalk({ p, situation }: { p: LeaguePlayer; situation: string
   const judge = useGmJudge((e, ok) => { setArg(''); setOut({ text: ok ? (e.ops?.length ? '→ 게임에 반영했습니다.' : '→ 변화 없음') : '→ 거둬들였습니다.' }); });
   if (!session.fantasy) return null;
   const pct = discountFor(session.fantasy, p.id, session.year);
+  const deal = dealFor(session.fantasy, p.id, session.year);
+  const dealLine = deal && (
+    <span className="inline">
+      <span className="up small">합의 조건: 연봉 {won(deal.salary)}·{deal.years}년</span>
+      {onDeal && <button type="button" className="small-btn" onClick={() => onDeal(deal.salary, deal.years)}>{dealLabel}</button>}
+    </span>
+  );
   const free = !!session.fantasy.free;
   const block = free ? null : agentTalkBlock(session, p);
   const talk = async () => {
@@ -132,6 +143,7 @@ export function AgentTalk({ p, situation }: { p: LeaguePlayer; situation: string
     return (
       <span className="inline">
         {pct !== 0 && <span className={pct > 0 ? 'up small' : 'down small'}>협상 {pct > 0 ? `−${Math.round(pct * 100)}%` : `+${Math.round(-pct * 100)}%`}</span>}
+        {dealLine}
         {!block && <button type="button" className="small-btn ghost" onClick={() => setOpen(true)}>에이전트 설득</button>}
       </span>
     );
@@ -146,6 +158,7 @@ export function AgentTalk({ p, situation }: { p: LeaguePlayer; situation: string
       {judge.error && <p className="note error-box">{judge.error}</p>}
       <GmPreviewCard judge={judge} />
       {out && <p className={out.error ? 'note error-box' : 'note'}>{out.text}</p>}
+      {dealLine}
     </div>
   );
 }

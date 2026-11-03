@@ -64,8 +64,9 @@ const STOP_INFO: Record<AttentionKind, { title: string; go: Screen; button: stri
   deadline: { title: '트레이드 마감일입니다.', go: 'trade', button: '트레이드로' },
   dev: { title: '육성선수 정식 등록이 열렸습니다.', go: 'roster', button: '선수단으로' },
   crisis: { title: '오늘 경기에 위기·승부처가 옵니다.', go: 'home', button: '홈으로' },
+  rehab: { title: '재활 명단 외국인이 다 나았습니다. 복귀 선택을 하세요.', go: 'market', button: '시장으로' },
 };
-const STOP_ORDER: AttentionKind[] = ['injury', 'losing', 'deadline', 'dev', 'crisis'];
+const STOP_ORDER: AttentionKind[] = ['injury', 'rehab', 'losing', 'deadline', 'dev', 'crisis'];
 
 export function AdvanceSummary({ snap, attention = [], onClose }: { snap: AdvanceSnapshot; attention?: Attention[]; onClose: () => void }) {
   const { go } = useGame();

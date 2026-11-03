@@ -126,6 +126,8 @@ export interface GameContext {
   injuries?: GameInjury[];
   /** 선수별 실제 한계 투구 수 배율 (선수 색인, 기획안 4.6, Season이 리그 시드로 만든다). 없으면 1 */
   realLimitScale?: Float32Array;
+  /** 선수별 시즌 폼 (선수 색인, 타자 쪽·투수 쪽, params.seasonForm, Season이 시즌 시드로 만든다). 타석 edge에 타자 값 − 투수 값. 없으면 0 */
+  seasonForm?: { bat: Float32Array; pit: Float32Array };
   /** 볼카운트 사슬 능력 (능력치 v2 16-1, Season이 만든다). 있으면 삼진·볼넷·사구와 투구 수를 칸 함수로 낸다. 없으면 예전 길 (결과 비율 → 손잡이 풀기) */
   plate?: PlateContext;
   /** 투수 구종 (엔진 2 20-1단계, World.arsenals). A 해결기만 쓴다. 없거나 답이 없으면 선수 ID로 정한 리그 평균 꼴 (data/pitches.ts arsenalFor) */

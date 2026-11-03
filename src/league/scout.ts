@@ -288,10 +288,19 @@ export function seenSigma(league: LeagueState, who: Observer, p: Seen, kind: Gue
   return branchSigma(league, who, kind, { sample: p.sample || null, seasonsWithUs: p.seasonsWithUs, scout: p.amateur ? 'amateur' : 'pro' });
 }
 
-/** 화면 갈래 등급의 추측 꼴 (key = 화면 갈래 이름, 진짜 등급은 computeGrades 값) */
+/**
+ * 지금 능력의 추측 폭 σ (등급). 플레이어 구단 소속 선수(2군·육성 포함, seasonsWithUs가 있음)는 0이라 진짜 등급 숫자 하나로 보인다
+ * (2026-10-29 사용자: "보유중인 선수들의 스탯은 똑바로"). 천장·스카우트 문구의 격차 폭은 seenSigma 그대로 (seenGap)
+ */
+export function nowSigma(league: LeagueState, who: Observer, p: Seen, kind: GuessKind): number {
+  if (who.user && p.seasonsWithUs !== null) return 0;
+  return seenSigma(league, who, p, kind);
+}
+
+/** 화면 갈래 등급의 추측 꼴 (key = 화면 갈래 이름, 진짜 등급은 computeGrades 값). 우리 구단 선수는 진짜 등급 (nowSigma) */
 export function seenGrade(league: LeagueState, who: Observer, p: Seen, key: string, trueGrade: number): GuessView {
   const kind = GUESS_KIND[key] ?? 'mid';
-  return guessView(trueGrade, seenSigma(league, who, p, kind), scoutZ(league.seed, who, p.id, key));
+  return guessView(trueGrade, nowSigma(league, who, p, kind), scoutZ(league.seed, who, p.id, key));
 }
 
 /**
@@ -309,11 +318,11 @@ function seenGap(league: LeagueState, who: Observer, p: Seen, nowRuns: number, p
 }
 
 /**
- * 우리 스카우트 가치 (런, 추측): 추측 지금 + 추측 격차 × 나이 몫 (드래프트 보드와 같은 꼴, boardGapShare). 격차는 문구와 같은 추측이고,
+ * 우리 스카우트 가치 (런, 추측): 추측 지금(우리 구단 선수는 진짜) + 추측 격차 × 나이 몫 (드래프트 보드와 같은 꼴, boardGapShare). 격차는 문구와 같은 추측이고,
  * 문구가 없는 나이(32세부터)는 격차를 보지 않는다. 플레이어 구단의 자동 방출 순서·이벤트가 고르는 유망주 순서에 쓴다 (진짜 잠재 대신)
  */
 export function seenValue(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, ageNext: number, year: number): number {
-  const now = guessRuns(league, who, p.id, nowRuns, seenSigma(league, who, p, 'clear'), year);
+  const now = guessRuns(league, who, p.id, nowRuns, nowSigma(league, who, p, 'clear'), year);
   if (ageNext > PHRASE_MAX_AGE) return now;
   return now + seenGap(league, who, p, nowRuns, potential, year) * runsPerGrade(year) * boardGapShare(ageNext);
 }

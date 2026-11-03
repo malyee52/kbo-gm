@@ -106,7 +106,8 @@ describe('결산 때 이력에 남긴다 (2026 시작)', () => {
         expect(p.bat!.def?.[q] ?? 0, `${p.name} ${q} 등급`).toBeGreaterThan(-15);
       });
     }
-    expect(n).toBeGreaterThan(60);
+    // 표본 문턱: 시즌 폼(params.seasonForm, 2026-10-29) 뒤 이 시드 57명 (전 60명 넘음). 450이닝 주전 수는 기용 운을 탄다
+    expect(n).toBeGreaterThan(50);
   });
 });
 

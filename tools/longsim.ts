@@ -94,7 +94,9 @@ export interface VoteRow {
 }
 
 /** 리그 상태에서 한 시즌을 돌리고 오프시즌을 AI로 끝까지 진행한다 */
-export function runYear(league: LeagueState, store: ReturnType<typeof loadDataStore>, params: EngineParams): { m: YearMetrics; world: World } {
+export function runYear(league: LeagueState, store: ReturnType<typeof loadDataStore>, params: EngineParams,
+  /** 오프시즌이 끝난 직후(closeOffseason 전) 상태를 들여다보는 도구용 고리 (tools/fa_finance.ts) */
+  onOffseason?: (off: Off.OffseasonState, world: World) => void): { m: YearMetrics; world: World } {
   const world = worldFromLeague(structuredClone(league), store, params);
   const seed = league.year === league.startYear ? league.seed : `${league.seed}/${league.year}`;
   const season = Season.start(world, params, seed);
@@ -156,6 +158,7 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
     };
   });
   if (off.stage !== 'ready') throw new Error(`${league.year} 오프시즌이 끝나지 않았습니다 (단계 ${off.stage})`);
+  onOffseason?.(off, world);
   const retiredNow = (league.retired ?? []).filter((r) => r.year === off.year).length;
   const faEntries = (off.fa?.entries ?? []).filter((e) => !e.returnee);
   const faSigned = faEntries.filter((e) => e.status === 'signed').length;

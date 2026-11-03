@@ -55,6 +55,29 @@ export function packSchedule(p: SeasonPlan): SavedSchedule {
   };
 }
 
+/** 해시 둘로 만든 표준정규 값 (Box-Muller), ±3에서 자른다 */
+function hashNormal(key: string): number {
+  const u = 1 - unitHash(`${key}/u`);
+  const v = unitHash(`${key}/v`);
+  const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  return z > 3 ? 3 : z < -3 ? -3 : z;
+}
+
+/**
+ * 시즌 폼 (params.seasonForm, 2026-10-27): 선수마다 타자 쪽·투수 쪽 값을 `${시즌 시드}/seasonForm/${선수 ID}` 해시로.
+ * 시즌 시드는 해마다 달라 해마다 새 값이고, 난수를 쓰지 않아 다른 결과를 밀지 않는다
+ */
+export function seasonFormOf(players: readonly SimPlayer[], seed: string, size: { bat: number; pit: number }): { bat: Float32Array; pit: Float32Array } {
+  const n = players.reduce((m, p) => Math.max(m, p.idx + 1), 0);
+  const bat = new Float32Array(n);
+  const pit = new Float32Array(n);
+  for (const p of players) {
+    bat[p.idx] = size.bat * hashNormal(`${seed}/seasonForm/${p.id}/bat`);
+    pit[p.idx] = size.pit * hashNormal(`${seed}/seasonForm/${p.id}/pit`);
+  }
+  return { bat, pit };
+}
+
 export function unpackSchedule(s: SavedSchedule): SeasonPlan {
   return {
     opening: s.opening, days: s.days.map((d) => d.map(unpackGame)), planned: s.planned.map((d) => d.map(unpackGame)),
@@ -431,6 +454,8 @@ export class Season {
       for (const p of world.players) scale[p.idx] = 1 + ou.realSpread * (2 * unitHash(`${this.hiddenSeed}/hidden/${p.id}/realLimit`) - 1);
       this.ctx.realLimitScale = scale;
     }
+    // 시즌 폼 (params.seasonForm): 시즌 시드·선수 ID 해시라 난수 흐름을 건드리지 않고, 불러온 시즌도 같은 값이다
+    if (params.seasonForm.bat > 0 || params.seasonForm.pit > 0) this.ctx.seasonForm = seasonFormOf(world.players, this.seed, params.seasonForm);
     // 지난 시즌에서 넘어온 혹사지수 (league/offseason.ts). 개막일(0)에 기록한 값으로 둔다
     for (const p of world.players) {
       if (!p.overuseStart) continue;

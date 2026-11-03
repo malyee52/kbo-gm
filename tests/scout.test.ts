@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { gradeRuns, runsPerGrade } from '../src/league/potential';
 import {
-  aiDifficultyScale, boardTier, foreignSigma, marketReputation, branchSigma, ceilingSigma, CEIL_SIGMA, draftBoard, gapPhrase, guessProspect, guessView, relationScale, sampleScale, scoutZ,
+  aiDifficultyScale, boardTier, foreignSigma, marketReputation, branchSigma, ceilingSigma, CEIL_SIGMA, draftBoard, gapPhrase, guessProspect, guessView, nowSigma, relationScale, sampleScale, scoutZ, seenGrade, seenSigma,
 } from '../src/league/scout';
 import { INVEST_COST, investCost, type InvestKind } from '../src/league/finance';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
@@ -44,6 +44,24 @@ describe('추측 폭 σ (17.7 ①)', () => {
     const L = fakeLeague({ pro: 3 });
     expect(branchSigma(L, { team: 0, user: true }, 'clear', { sample: 1500, seasonsWithUs: null, scout: 'pro' })).toBeCloseTo(3);
     expect(branchSigma(L, { team: 0, user: true }, 'mid', { sample: 1500, seasonsWithUs: null, scout: 'amateur' })).toBeCloseTo(9 * 0.8);
+  });
+
+  it('지금 능력: 우리 구단 선수(2군·신인 포함)는 σ 0이라 진짜 숫자 하나, 다른 구단·AI 쪽은 그대로 (2026-10-29 사용자)', () => {
+    const L = fakeLeague({ pro: 1 });
+    const me = { team: 0, user: true };
+    const ours = { id: 'p1', sample: 200, seasonsWithUs: 0 };
+    const rookie = { id: 'p2', sample: 0, seasonsWithUs: 0, amateur: true };
+    const theirs = { id: 'p1', sample: 200, seasonsWithUs: null };
+    expect(nowSigma(L, me, ours, 'faint')).toBe(0);
+    expect(nowSigma(L, me, rookie, 'mid')).toBe(0);
+    expect(seenGrade(L, me, ours, 'hrSuppression', 57)).toEqual({ kind: 'one', v: 57 });
+    expect(seenGrade(L, me, rookie, 'speed', 43)).toEqual({ kind: 'one', v: 43 });
+    expect(nowSigma(L, me, theirs, 'clear')).toBe(seenSigma(L, me, theirs, 'clear'));
+    expect(seenGrade(L, me, theirs, 'contact', 57).kind).toBe('range');
+    // 천장 격차 문구의 폭(seenSigma)은 관계 배율 그대로
+    expect(seenSigma(L, me, ours, 'clear')).toBeGreaterThan(0);
+    // AI 구단은 seasonsWithUs가 있어도 지금처럼 추측
+    expect(nowSigma(L, { team: 3, user: false }, ours, 'clear')).toBeGreaterThan(0);
   });
 
   it('AI 구단 난이도 배율: 쉬움 1.5 · 보통 1 · 어려움 0.5, 플레이어 쪽에는 난이도가 없다 (Q5 ①)', () => {
@@ -151,12 +169,12 @@ describe('드래프트 보드 (19.2)', () => {
 });
 
 describe('투자 갈래 (19.3)', () => {
-  it('아마추어·프로 각각 0·5억·12억·20억, 장부는 투자와 스카우트비로 나뉜다', () => {
-    expect(INVEST_COST.scout).toEqual([0, 50_000, 120_000, 200_000]);
-    expect(INVEST_COST.scoutPro).toEqual([0, 50_000, 120_000, 200_000]);
+  it('아마추어·프로 각각 0·1억·1.5억·2.5억 (2026-10-29 내림), 장부는 투자와 스카우트비로 나뉜다', () => {
+    expect(INVEST_COST.scout).toEqual([0, 10_000, 15_000, 25_000]);
+    expect(INVEST_COST.scoutPro).toEqual([0, 10_000, 15_000, 25_000]);
     const f = { invest: { scout: 2, scoutPro: 3, develop: 0, medical: 0, marketing: 0 }, history: [] };
-    expect(investCost(f, true, 1, (k) => k === 'scout' || k === 'scoutPro')).toBe(320_000);
-    expect(investCost(f, true, 1)).toBe(320_000);
+    expect(investCost(f, true, 1, (k) => k === 'scout' || k === 'scoutPro')).toBe(40_000);
+    expect(investCost(f, true, 1)).toBe(40_000);
   });
 });
 

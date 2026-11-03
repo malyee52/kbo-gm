@@ -266,14 +266,17 @@ export function maybeChangePitcher(fld: Side, bat: Side, inning: number, basesEm
     // 원포인트: 맡은 좌타자를 상대했으면 다음 타자가 좌타가 아닐 때 바꾼다
     pull = bat.lineup[bat.spot].bats !== 'L';
   } else if (pg.isStarter) {
+    // 잘 던지는 선발은 기준보다 더, 맞는 선발은 덜 (params.mgr.starterDeal)
+    const d = ctx.params.mgr.starterDeal;
+    const plan = pg.plan * Math.max(d.floor, Math.min(1 + d.bonus, 1 + d.bonus - d.perRun * pg.runs));
     if (start) {
       // 이닝 시작: 한 이닝을 더 못 버티거나, 이미 많이 내줬으면 내린다
-      pull = np + 2 * u >= pg.plan || pg.runs >= 6 || (pg.runs >= 5 && inning <= 4);
+      pull = np + 2 * u >= plan || pg.runs >= 6 || (pg.runs >= 5 && inning <= 4);
     } else {
-      pull = np >= pg.plan + 4 * u // 한계를 크게 넘김
-        || (np >= pg.plan && !basesEmpty) // 한계를 넘긴 뒤 주자를 내보냄
+      pull = np >= plan + 4 * u // 한계를 크게 넘김
+        || (np >= plan && !basesEmpty) // 한계를 넘긴 뒤 주자를 내보냄
         || pg.runs >= 7
-        || (halfRuns >= 3 && !basesEmpty && (pg.runs >= 4 || np >= pg.plan - 3 * u)) // 이번 이닝 무너짐
+        || (halfRuns >= 3 && !basesEmpty && (pg.runs >= 4 || np >= plan - 3 * u)) // 이번 이닝 무너짐
         || (pg.runs >= 5 && inning <= 3 && !basesEmpty); // 초반 대량 실점
     }
   } else if (pg.p === closer) {
