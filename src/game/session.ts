@@ -86,6 +86,8 @@ import { leagueNews, scheduleNews, scheduleNewsText } from '../league/scheduleNe
 import { fitRuleToTeams, scheduleRule } from '../data/schedule';
 import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/camp';
 import { openNaming, signNaming } from '../league/naming';
+import { signSponsor, type SponsorSlot } from '../league/sponsor';
+import { holdMeeting, meetingOf, ownerInput, shiftGoal, type OwnerAsk } from '../league/meeting';
 import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
@@ -334,6 +336,10 @@ export type GameAction =
   | { year: number; type: 'budget-auto'; kind: BudgetKind }
   | { year: number; type: 'ticket-price'; grade: SeatGrade; scale: number }
   | { year: number; type: 'ticket-auto'; grade?: SeatGrade }
+  /** 스폰서 빈 자리 계약 (재정 2 F4a): 결산 때 만든 제안의 번호 (제안은 시드로 정해짐) */
+  | { year: number; type: 'sponsor-sign'; slot: SponsorSlot; offer: number }
+  /** 구단주 예산 회의 요청 (재정 2 F4b, 회의 단계에서 한 해 한 번). accept: 조건부 판정에 대한 답 (두 번째 조작) */
+  | { year: number; type: 'owner-ask'; ask: OwnerAsk; accept?: boolean }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
@@ -3349,6 +3355,8 @@ export class GameSession {
         return res;
       }
       case 'open': {
+        // 회의 단계가 생기기 전(재정 2 F4b) 조작 기록: 정원 정리 → 개막 사이에 회의 단계를 기본값으로 마친다
+        if (off?.stage === 'meeting') Off.advanceStage(L, off, this.store, this.params);
         if (!off || off.stage !== 'ready') return { ok: false, message: '오프시즌 단계를 모두 마쳐야 개막할 수 있습니다.' };
         const changes = off.changes ?? [];
         const undrafted = new Set(off.draft?.pool ?? []);
@@ -3464,6 +3472,11 @@ export class GameSession {
       case 'budget-auto': res = setBudgetAuto(L, this.teamIdx, a.kind); break;
       case 'ticket-price': res = setTicketPrice(L, this.teamIdx, a.grade, a.scale); break;
       case 'ticket-auto': res = setTicketAuto(L, this.teamIdx, a.grade); break;
+      case 'sponsor-sign': res = signSponsor(L, this.teamIdx, a.slot, a.offer); break;
+      case 'owner-ask':
+        if (off.stage !== 'meeting') { res = { ok: false, message: '구단주 예산 회의는 오프시즌 마지막(개막 준비 앞) 단계에서 엽니다.' }; break; }
+        res = holdMeeting(L, this.teamIdx, this.year, a.ask, ownerInput(L, this.teamIdx, this.year), a.accept);
+        break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }, this.parkSource()); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
@@ -3552,7 +3565,9 @@ export class GameSession {
     const k = div ? div.teams.findIndex((ts) => ts.includes(this.teamIdx)) : -1;
     const pool = k >= 0 ? div!.teams[k] : null;
     const rank = 1 + str.filter((v, i) => (!pool || pool.includes(i)) && (v > str[this.teamIdx] || (v === str[this.teamIdx] && i < this.teamIdx))).length;
-    const kind = pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams);
+    // 구단주 예산 회의 결과만큼 목표를 옮긴다 (재정 2 F4b, meeting.ts)
+    const shift = meetingOf(this.league, this.teamIdx, this.year)?.goalShift ?? 0;
+    const kind = shiftGoal(pool ? goalForLeague(rank) : goalFor(rank, this.world.rules.postseasonTeams), shift);
     o.goal = { year: this.year, kind, projectedRank: rank, ...(pool ? { projectedLeague: div!.names[k] } : {}) };
     // 소식에는 순위 숫자 대신 세 단계 (능력치 v2 17.6: 진짜 전력 순위가 드러나지 않게)
     const tier = strengthTier(rank, pool ? pool.length : str.length);
@@ -3572,7 +3587,10 @@ export class GameSession {
       place.league && place.rank ? { name: place.league, rank: place.rank } : undefined);
     const td = trustDelta(goal.kind, outcome);
     const achieved = td.achieved;
-    const delta = td.delta < 0 ? Math.round(td.delta * settingsOf(this.league).ownerPressure) : td.delta;
+    // 구단주 예산 회의 (재정 2 F4b): 목표를 낮췄으면 오르는 몫은 절반, 회의의 신뢰도 변화(요청 없음 +1·거절 −2·낮추기 −4·예산 초과 −3)를 더한다
+    const meet = meetingOf(L, team, this.year);
+    const gain = td.delta > 0 && meet?.halfGain ? Math.round(td.delta / 2) : td.delta;
+    const delta = (gain < 0 ? Math.round(gain * settingsOf(this.league).ownerPressure) : gain) + (meet?.trust ?? 0);
     const before = o.trust;
     o.trust = Math.max(0, Math.min(100, before + delta));
     o.history.push({
@@ -3582,7 +3600,7 @@ export class GameSession {
       ...(outcome.league ? { league: outcome.league } : {}),
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
-    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}). 신뢰도 ${before} → ${o.trust}.`);
+    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}). 신뢰도 ${before} → ${o.trust}.`);
     // 재정: 적자를 모기업이 메우면 신뢰도가 떨어지고, 흑자면 조금 오른다 (finance.ts)
     if (fin) {
       const fd = trustFromFinance(fin);
@@ -4155,6 +4173,10 @@ export class GameSession {
   setTicketPrice(grade: SeatGrade, scale: number) { return this.dispatchOff({ year: this.year, type: 'ticket-price', grade, scale }); }
   /** 한 등급(없으면 모두)을 재무팀 추천 가격(자동)으로 */
   setTicketAuto(grade?: SeatGrade) { return this.dispatchOff({ year: this.year, type: 'ticket-auto', ...(grade ? { grade } : {}) }); }
+  /** 스폰서 빈 자리에 제안 하나로 계약 (오프시즌, 다음 시즌부터, 재정 2 F4a) */
+  signSponsor(slot: SponsorSlot, offer: number) { return this.dispatchOff({ year: this.year, type: 'sponsor-sign', slot, offer }); }
+  /** 구단주 예산 회의 요청 (회의 단계). accept는 조건부 판정에 대한 답 */
+  ownerAsk(ask: OwnerAsk, accept?: boolean) { return this.dispatchOff({ year: this.year, type: 'owner-ask', ask, ...(accept === undefined ? {} : { accept }) }); }
   /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
   parkSource() {
     return { parkFactors: this.store.meta.parkFactors, parkEvents: this.store.meta.parkEvents, parks: this.store.parks };

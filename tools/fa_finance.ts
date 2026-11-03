@@ -25,7 +25,7 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-const INCOME: FinanceKind[] = ['gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'champion'];
+const INCOME: FinanceKind[] = ['gate', 'postseason', 'broadcast', 'sponsor', 'merch', 'parent', 'parentExtra', 'champion'];
 const eok = (man: number, d = 0) => (man / 10000).toFixed(d);
 const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 

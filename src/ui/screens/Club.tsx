@@ -59,7 +59,7 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
       {tab === 'coach' && <><ManagerPanel /><CoachPanel /></>}
       {tab === 'owner' && (<>
         <section className="cards"><OwnerCard /></section>
-        {session.fantasy ? <OwnerMeeting /> : <p className="muted small">구단주와의 정기 면담(안건 듣고 답하기)은 판타지 모드 게임에서 열립니다.</p>}
+        {session.fantasy ? <OwnerMeeting /> : <p className="muted small">구단주 예산 회의(요청 하나: 운영 자금·FA 지원 한도·목표)는 오프시즌 마지막(개막 준비 앞) 단계에서 열립니다. 정기 면담(안건 듣고 답하기)은 판타지 모드 게임에서 열립니다.</p>}
       </>)}
 
       {tab === 'overview' && (<>

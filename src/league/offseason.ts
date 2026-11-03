@@ -4,6 +4,7 @@
 // 플레이어 구단의 결정은 단계마다 함수로 받고, AI 구단은 같은 가치 함수(ai/value.ts)로 결정한다.
 // 난수는 시드에서 갈라 쓰므로 같은 시드·같은 결정이면 같은 결과가 나온다.
 
+import { aiMeetings, closeMeeting, ownerInput } from './meeting';
 import { judgeTitles } from './titles';
 import { lineTeam } from '../engine/types';
 import { repDemand } from './reputation';
@@ -64,10 +65,10 @@ import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_
 type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits' | 'defense'>;
 
 /** vote: 단장 회의 (구단 투표, 안건이 있는 해만 열린다. league/ruleVote.ts) */
-export type Stage = 'vote' | 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'ready';
-export const STAGES: Stage[] = ['vote', 'fa', 'comp', 'second', 'foreign', 'draft', 'salary', 'release', 'ready'];
+export type Stage = 'vote' | 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'meeting' | 'ready';
+export const STAGES: Stage[] = ['vote', 'fa', 'comp', 'second', 'foreign', 'draft', 'salary', 'release', 'meeting', 'ready'];
 export const STAGE_LABEL: Record<Stage, string> = {
-  vote: '단장 회의', fa: 'FA', comp: 'FA 보상선수', second: '2차 드래프트·특별 지명', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', ready: '개막 준비',
+  vote: '단장 회의', fa: 'FA', comp: 'FA 보상선수', second: '2차 드래프트·특별 지명', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', meeting: '구단주 예산 회의', ready: '개막 준비',
 };
 /** 오프시즌 기록의 구분: 단계 + 결산(은퇴·병역 등) */
 export type LogStage = Stage | 'settle';
@@ -2824,6 +2825,13 @@ export function advanceStage(league: LeagueState, off: OffseasonState, store: St
       aiDevMarket(league, off);
       aiSignUnsignedFa(league, off, store, params);
       aiMeetFloor(league, off);
+      // 구단주 예산 회의 (재정 2 F4b, meeting.ts): AI 구단은 규칙으로 바로
+      aiMeetings(league, off.year, off.userTeam);
+      off.stage = 'meeting';
+      return;
+    case 'meeting':
+      // 플레이어 구단: 요청을 안 했으면 '요청 없음', 답하지 않은 조건부는 거절, 예산 초과면 신뢰도 −3
+      if (off.userTeam >= 0) closeMeeting(league, off.userTeam, off.year, ownerInput(league, off.userTeam, off.year));
       off.stage = 'ready';
       return;
     case 'ready':

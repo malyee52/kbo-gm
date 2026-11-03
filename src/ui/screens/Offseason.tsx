@@ -3,6 +3,7 @@ import { fxVisible } from '../../league/scoutfx';
 import { isStarterSkill } from '../../engine';
 import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ConfirmButton } from '../ConfirmButton';
 import { OfferPanel } from './Club';
 import { useCurrentStep, useShell } from '../shell';
 import { PICK_MAX_ROUND, PICK_TRADE_FROM } from '../../league/picks';
@@ -32,6 +33,10 @@ import { countVotes, interestBreakdown, SWING_LABEL, voteOutlook, type FactKey, 
 import { agendaChange, agendaLabel } from '../../league/ruleVote';
 import { voteResultText } from '../../league/ruleNews';
 import { REJECT_COOLDOWN, type RuleShift } from '../../league/futureRules';
+import { ASK_LABEL, ASK_NOTE, askMoney, askScore, budgetCheck, MEETING_ACCEPT, MEETING_CONDITIONAL, meetingOf, OWNER_ASKS, ownerInput, RESULT_LABEL, type OwnerAsk } from '../../league/meeting';
+import { cashOf, ledgerItems } from '../../league/finance';
+import { GOAL_LABEL, parentGrade } from '../../league/owner';
+import { OwnerMeeting } from './OwnerMeeting';
 
 /**
  * 오프시즌 화면에서 쓰는 선수 한 줄 정보. 능력은 우리 스카우트 팀의 갈래 추측 셋(다음 시즌 기준), 앞날은 스카우트 보고 문구
@@ -187,6 +192,7 @@ export function Offseason() {
       {off.stage === 'draft' && <DraftPanel act={act} />}
       {off.stage === 'salary' && <SalaryPanel act={act} />}
       {off.stage === 'release' && <ReleasePanel act={act} />}
+      {off.stage === 'meeting' && <MeetingPanel act={act} />}
       {off.stage === 'ready' && <ReadyCard busy={busy} onOpen={() => void open()} />}
       {off.stage === 'ready' && <CapRulesPanel act={act} />}
       {/* 단장 회의 중에는 FA 대상을 아직 몰라 다년 계약 후보가 없다 (offseason.ts extensionCandidates) */}
@@ -1444,5 +1450,92 @@ function CapRulesPanel({ act }: { act: Act }) {
         </label>
       )}
     </section>
+  );
+}
+
+/**
+ * 구단주 예산 회의 (재정 2 F4b, docs/재정2_기획안.md 4.7): 구단주 말 · 예산 보고 · 요청 하나.
+ * 판정 점수는 회의 뒤에만 보인다 (문턱은 미리 알려 줌). 판타지 게임이면 아래에 면담(LLM) 칸
+ */
+function MeetingPanel({ act }: { act: Act }) {
+  const { session, go } = useGame();
+  const won = useWon();
+  const L = session.league;
+  const me = session.teamIdx;
+  const offYear = session.year;
+  const year = offYear + 1;
+  const [pick, setPick] = useState<OwnerAsk>('none');
+  const rec = meetingOf(L, me, year);
+  const o = L.owner;
+  const last = o?.history.at(-1);
+  const items = ledgerItems(L, me, offYear);
+  // 시즌 수지: 시작 자금·모기업 환원은 빼고 (환원은 아래 문장에 따로)
+  const net = Object.entries(items).reduce((a, [k, v]) => a + (k === 'start' || k === 'dividend' ? 0 : v ?? 0), 0);
+  const dividend = -(items.dividend ?? 0);
+  const b = budgetCheck(L, me, year);
+  const input = ownerInput(L, me, offYear);
+  const parts = rec?.score !== undefined ? askScore(L, me, year, rec.ask, input).parts : null;
+  const moneyText = won(askMoney(L, me, year));
+  return (
+    <>
+      <section className="panel">
+        <h2>구단주 말</h2>
+        <div className="stats">
+          <div className="stat"><span className="stat-label">신뢰도</span><strong className="stat-value">{o?.trust ?? '-'}</strong></div>
+          <div className="stat"><span className="stat-label">모기업</span><strong className="stat-value">{parentGrade(L, me)}등급</strong></div>
+          <div className="stat"><span className="stat-label">{offYear} 시즌 수지</span><strong className="stat-value">{net >= 0 ? '+' : '−'}{won(Math.abs(net))}</strong></div>
+          <div className="stat"><span className="stat-label">자금</span><strong className="stat-value">{won(cashOf(L, me))}</strong></div>
+        </div>
+        <p className="small">
+          {last && last.year === offYear && last.team === me
+            ? `지난 시즌 목표 ${GOAL_LABEL[last.goal]}: ${last.achieved ? '달성' : '미달'} (${last.result}). `
+            : '지난 시즌 평가 기록이 없습니다. '}
+          {dividend > 0 ? `쌓인 자금 가운데 ${won(dividend)}을 모기업에 돌려보냈습니다. ` : ''}
+          {year} 시즌 목표는 개막 때 구단주 전망으로 정하고, 이 회의 결과만큼 한 단계 오르내립니다.
+        </p>
+      </section>
+
+      <section className="panel">
+        <h2>예산 보고 <span className="muted small">{year} 시즌 예상</span></h2>
+        <p className="small">예상 수지 <strong className={b.net >= 0 ? 'up' : 'down'}>{b.net >= 0 ? '+' : '−'}{won(Math.abs(b.net))}</strong> · 모기업 한도 −{won(Math.abs(b.limit))} (자금의 30%까지 적자 허용)</p>
+        {b.over
+          ? <p className="warn-line small" role="status">구단주: "예산이 너무 크다. 줄여 오라." 그대로 넘기면 시즌 평가 때 신뢰도 −3. <button type="button" className="small-btn" onClick={() => go('budget')}>예산안 열기</button></p>
+          : <p className="muted small">예산은 모기업 한도 안입니다.</p>}
+      </section>
+
+      <section className="panel">
+        <h2>요청</h2>
+        {!rec && (
+          <>
+            <p className="muted small">한 해에 하나만 요청합니다. 돈 요청(운영 자금·FA 지원 한도)은 판정 점수 {MEETING_ACCEPT} 이상이면 수락, {MEETING_CONDITIONAL}~{MEETING_ACCEPT - 1}이면 "목표를 한 단계 올리면" 조건부, 그 아래는 거절(신뢰도 −2)입니다. 점수 = 신뢰도 ± 지난 목표 달성·모기업 등급·부채·3년 안 같은 요청.</p>
+            <ul className="plain">
+              {OWNER_ASKS.map((a) => (
+                <li key={a}>
+                  <label>
+                    <input type="radio" name="owner-ask" checked={pick === a} onChange={() => setPick(a)} /> <strong>{ASK_LABEL[a]}</strong>
+                    <span className="muted small"> {ASK_NOTE[a]}{a === 'money' || a === 'raiseGoal' ? ` · ${moneyText}` : ''}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <ConfirmButton label="요청하기" confirmLabel={`정말 요청 (${ASK_LABEL[pick]}, 한 해 한 번)`} className="small-btn" onConfirm={() => act(session.ownerAsk(pick))} />
+          </>
+        )}
+        {rec && (
+          <>
+            <p className="small"><strong>{ASK_LABEL[rec.ask]}</strong> → {RESULT_LABEL[rec.result]}{rec.money ? ` · 모기업 추가 지원 ${won(rec.money)}` : ''}{rec.goalShift ? ` · 목표 한 단계 ${rec.goalShift > 0 ? '위' : '아래'}` : ''}{rec.faCapYear ? ' · 다음 FA 때 지원 한도 1.5배' : ''}</p>
+            <p className="small">구단주: "{rec.reason}"</p>
+            {parts && <p className="muted small">판정 점수 {rec.score}: {parts.map(([k, v], i) => `${i ? (v >= 0 ? ' + ' : ' − ') : ''}${k} ${i ? Math.abs(v) : v}`).join('')}</p>}
+            {rec.result === 'conditional' && (
+              <span className="inline">
+                <ConfirmButton label="조건 받기 (목표 한 단계 위)" confirmLabel="정말 받기" className="small-btn" onConfirm={() => act(session.ownerAsk(rec.ask, true))} />
+                <button type="button" className="small-btn" onClick={() => act(session.ownerAsk(rec.ask, false))}>거절</button>
+              </span>
+            )}
+          </>
+        )}
+      </section>
+      {session.fantasy && <OwnerMeeting />}
+    </>
   );
 }
