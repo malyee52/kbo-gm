@@ -1469,7 +1469,8 @@ function MeetingPanel({ act }: { act: Act }) {
   const o = L.owner;
   const last = o?.history.at(-1);
   const items = ledgerItems(L, me, offYear);
-  const net = Object.values(items).reduce((a, v) => a + (v ?? 0), 0);
+  // 시즌 수지: 시작 자금·모기업 환원은 빼고 (환원은 아래 문장에 따로)
+  const net = Object.entries(items).reduce((a, [k, v]) => a + (k === 'start' || k === 'dividend' ? 0 : v ?? 0), 0);
   const dividend = -(items.dividend ?? 0);
   const b = budgetCheck(L, me, year);
   const input = ownerInput(L, me, offYear);
@@ -1482,7 +1483,7 @@ function MeetingPanel({ act }: { act: Act }) {
         <div className="stats">
           <div className="stat"><span className="stat-label">신뢰도</span><strong className="stat-value">{o?.trust ?? '-'}</strong></div>
           <div className="stat"><span className="stat-label">모기업</span><strong className="stat-value">{parentGrade(L, me)}등급</strong></div>
-          <div className="stat"><span className="stat-label">{offYear} 시즌 장부</span><strong className="stat-value">{net >= 0 ? '+' : '−'}{won(Math.abs(net))}</strong></div>
+          <div className="stat"><span className="stat-label">{offYear} 시즌 수지</span><strong className="stat-value">{net >= 0 ? '+' : '−'}{won(Math.abs(net))}</strong></div>
           <div className="stat"><span className="stat-label">자금</span><strong className="stat-value">{won(cashOf(L, me))}</strong></div>
         </div>
         <p className="small">

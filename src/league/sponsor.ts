@@ -126,7 +126,7 @@ export function signSponsor(league: LeagueState, team: number, slot: SponsorSlot
   if (!o) return { ok: false, message: '없는 제안입니다.' };
   if (!emptySlots(league, team, offers.year).includes(slot)) return { ok: false, message: `${SLOT_LABEL[slot]} 자리는 이미 계약되어 있습니다.` };
   f.sponsors = [...(f.sponsors ?? []).filter((d) => d.to >= offers.year - 1), { ...o, slot, from: offers.year, to: offers.year + o.years - 1 }];
-  return { ok: true, message: `${SLOT_LABEL[slot]} 스폰서 계약: ${o.name} (${STYLE_LABEL[o.style]}, ${offers.year}~${offers.year + o.years - 1} 시즌, 해마다 ${(o.amount / 10000).toFixed(1)}억 원)` };
+  return { ok: true, message: `${SLOT_LABEL[slot]} 스폰서 계약: ${o.name} (${STYLE_LABEL[o.style]}, ${offers.year}~${offers.year + o.years - 1} 시즌, 해마다 ${(o.amount / 10000).toFixed(1)}억 원, 2026년 물가)` };
 }
 
 /** 개막 때 (league.year = 새 시즌): 모든 구단의 빈 자리를 기대 연액이 가장 큰 제안으로 자동 계약 (플레이어 구단도 고르지 않은 자리는). 계약한 자리 수 */
