@@ -88,6 +88,7 @@ import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/cam
 import { openNaming, signNaming } from '../league/naming';
 import { signSponsor, type SponsorSlot } from '../league/sponsor';
 import { holdMeeting, meetingOf, ownerInput, shiftGoal, type OwnerAsk } from '../league/meeting';
+import { teamLineRange, type LineRange } from '../league/frontInfo';
 import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
@@ -4142,6 +4143,16 @@ export class GameSession {
     this.news.push({ year: this.year, day: -1, kind: 'offseason', text });
   }
 
+  /**
+   * FA가 이번 라운드에 우리 제시를 받아들일 최저선의 범위 (프런트 예산이 클수록 좁다, 재정 2 프런트 정보, frontInfo.ts).
+   * 화면 정보일 뿐 계약 판정은 진짜 값으로 한다. 열린 FA가 아니면 null
+   */
+  faAcceptRange(id: string): LineRange | null {
+    const off = this.offseason;
+    const e = off?.stage === 'fa' ? off.fa.entries.find((x) => x.id === id && x.status === 'open') : undefined;
+    if (!off || !e) return null;
+    return teamLineRange(this.league, this.teamIdx, `fa/${off.year}/${off.fa.round}/${id}`, Off.faAcceptLine(this.league, off, e));
+  }
   offerFa(id: string, salary: number, years: number) { return this.dispatchOff({ year: this.year, type: 'fa-offer', id, salary, years }); }
   withdrawFa(id: string) { return this.dispatchOff({ year: this.year, type: 'fa-withdraw', id }); }
   setForeignKeep(id: string, keep: boolean) { return this.dispatchOff({ year: this.year, type: 'foreign-keep', id, keep }); }

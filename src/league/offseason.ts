@@ -78,6 +78,14 @@ export const LOG_LABEL: Record<LogStage, string> = { ...STAGE_LABEL, settle: '�
 export const FA_ROUNDS = 3;
 /** 라운드별로 선수가 받아들이는 최소 금액 (요구액 대비, 임시값) */
 const FA_ACCEPT = [1.0, 0.93, 0.85];
+/**
+ * 우리 제시를 이번 라운드에 받아들이는 최저선 (만 원, 진짜 값): 요구액 × 라운드 수락 비율 × 난이도 FA 요구 배율 × 협상 할인·단장 평판.
+ * 화면은 이 값을 프런트 예산만큼 흐린 범위로만 보인다 (frontInfo.ts). 합의 조건 제시는 이것과 관계없이 받아들인다
+ */
+export function faAcceptLine(league: LeagueState, off: Pick<OffseasonState, 'year' | 'fa'>, e: Pick<FaEntry, 'id' | 'ask'>): number {
+  const talk = league.fantasy?.discounts?.find((x) => x.id === e.id && x.year === off.year)?.pct ?? 0;
+  return e.ask * FA_ACCEPT[Math.max(0, Math.min(FA_ACCEPT.length, off.fa.round) - 1)] * settingsOf(league).faDemand * (1 - talk) * repDemand(league);
+}
 /** 라운드별 AI 제시 기본액 (요구액 대비, 임시값) */
 const FA_AI_OFFER = [1.0, 0.95, 0.9];
 /**

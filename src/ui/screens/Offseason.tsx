@@ -34,7 +34,8 @@ import { agendaChange, agendaLabel } from '../../league/ruleVote';
 import { voteResultText } from '../../league/ruleNews';
 import { REJECT_COOLDOWN, type RuleShift } from '../../league/futureRules';
 import { ASK_LABEL, ASK_NOTE, askMoney, askScore, budgetCheck, MEETING_ACCEPT, MEETING_CONDITIONAL, meetingOf, OWNER_ASKS, ownerInput, RESULT_LABEL, type OwnerAsk } from '../../league/meeting';
-import { cashOf, ledgerItems } from '../../league/finance';
+import { activeBudgetOf, cashOf, ledgerItems } from '../../league/finance';
+import { frontInfoWidth } from '../../league/frontInfo';
 import { GOAL_LABEL, parentGrade } from '../../league/owner';
 import { OwnerMeeting } from './OwnerMeeting';
 
@@ -844,6 +845,11 @@ function FaPanel({ act }: { act: Act }) {
     },
     { key: 'years', label: '기간', brief: true, value: (r) => r.e.years, cell: (r) => `${r.e.years}년` },
     {
+      key: 'line', label: '수락선 (프런트)', title: '이번 라운드에 우리 제시를 받아들일 최저 연봉의 범위. 프런트 예산이 클수록 좁다 (진짜 값은 늘 이 범위 안)',
+      value: (r) => session.faAcceptRange(r.e.id)?.lo ?? null,
+      cell: (r) => { const g = session.faAcceptRange(r.e.id); return g ? `${won(g.lo)} ~ ${won(g.hi)}` : '-'; },
+    },
+    {
       key: 'vs', label: '제시/요구', title: '우리 제시 연봉이 요구 연봉의 몇 %인가', value: (r) => (off.fa.userOffers[r.e.id] ? off.fa.userOffers[r.e.id].salary / r.e.ask : null),
       cell: (r) => (off.fa.userOffers[r.e.id] ? `${Math.round((off.fa.userOffers[r.e.id].salary / r.e.ask) * 100)}%` : '-'),
     },
@@ -857,6 +863,7 @@ function FaPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>FA 시장 <span className="muted small">{off.fa.round}/{FA_ROUNDS}라운드</span></h2>
         <p className="muted small">
+          수락선은 프런트(구단 운영 예산)가 알아 온 범위입니다: 프런트 예산이 클수록 좁습니다 (지금 ±{Math.round(frontInfoWidth(activeBudgetOf(session.league, session.teamIdx, 'front')) * 100)}%). 진짜 최저선은 늘 범위 안에 있고, 다른 구단이 더 좋은 조건을 내면 수락선을 넘어도 질 수 있습니다.
           라운드를 마감하면 AI 구단도 제시하고, 선수는 가장 좋은 조건을 고릅니다 (원 소속 구단은 조금 더 쳐줍니다). 라운드가 지날수록 선수가 눈높이를 낮춥니다.
           외부 FA는 한 오프시즌에 {ruleOf(session.league, 'maxFaSignings')}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 {off.year >= FA_GRADE_FROM
             ? '보상금(A 300%, B 200%, C 150%)을 냅니다'
