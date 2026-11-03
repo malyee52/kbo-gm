@@ -13,7 +13,7 @@ import { useGame, usePriceIndex, useWon } from '../context';
 const ORDER: FinanceKind[] = [
   'gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'rescue', 'faSupport', 'champion', 'posting',
   'payroll', 'foreign', 'coach', 'opsFront', 'opsGame', 'opsPark', 'opsFutures', 'ops', 'invest', 'scouting', 'signing',
-  'compensation', 'fine', 'transfer', 'stadium', 'release', 'trade', 'event', 'other',
+  'compensation', 'fine', 'transfer', 'stadium', 'release', 'trade', 'event', 'editor', 'other',
 ];
 const orderOf = (k: FinanceKind) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
 

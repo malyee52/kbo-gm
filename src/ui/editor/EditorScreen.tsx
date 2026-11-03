@@ -1,12 +1,15 @@
-// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표, 구단 진짜 전력. 보기만 (E1).
+// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표(체크 일괄 고침, E3), 구단 진짜 전력·고치기(E3), 고친 기록 (E2).
 // 진짜 값은 본문 색 등급, 우리 스카우트 추측은 옆의 흐린 글씨.
 import { useMemo, useState } from 'react';
-import { driveWord, editorRows, editorTeams, timingText, type EditorRow } from '../../game/editor';
+import { driveWord, editorBulkOps, editorPreview, editorRows, timingText, type BulkKind, type EditorRow } from '../../game/editor';
 import { DataTable } from '../parts';
 import type { Column } from '../table';
 import { TeamLink, useGame } from '../context';
 import { useShell } from '../shell';
 import { EditorPlayer } from './EditorPlayer';
+import { EditorTeams } from './EditorTeams';
+import { editRecords } from '../../game/editOps';
+import { formatDate } from '../../game/calendar';
 
 type Kind = 'all' | 'hit' | 'pit';
 type Who = 'all' | 'free' | number;
@@ -17,13 +20,13 @@ export function EditorScreen() {
   const { session, version, go, openPlayer } = useGame();
   const { density } = useShell();
   const full = density === 'full';
-  const [tab, setTab] = useState<'players' | 'teams'>('players');
+  const [tab, setTab] = useState<'players' | 'teams' | 'log'>('players');
   const [who, setWho] = useState<Who>('all');
   const [kind, setKind] = useState<Kind>('all');
   const [sel, setSel] = useState<string | null>(null);
   const on = session.editorOn;
   const all = useMemo(() => editorRows(session) ?? [], [session, version, on]); // eslint-disable-line react-hooks/exhaustive-deps
-  const teams = useMemo(() => editorTeams(session) ?? [], [session, version, on]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const rows = useMemo(() => all.filter((r) => (kind === 'all' || (kind === 'pit') === r.isPitcher)
     && (who === 'all' || (who === 'free' ? r.team < 0 : r.team === who))), [all, kind, who]);
 
@@ -37,7 +40,10 @@ export function EditorScreen() {
     );
   }
 
+  const toggle = (id: string) => { const n = new Set(checked); if (n.has(id)) n.delete(id); else n.add(id); setChecked(n); };
   const cols: Column<EditorRow>[] = [
+    { key: 'chk', label: '고름', fixed: true, title: '일괄 고침에 넣을 선수', value: (r) => Number(checked.has(r.id)),
+      cell: (r) => <input type="checkbox" checked={checked.has(r.id)} onChange={() => toggle(r.id)} aria-label={`${r.name} 고르기`} /> },
     { key: 'name', label: '이름', text: true, fixed: true, value: (r) => r.name,
       cell: (r) => <button type="button" className="link" onClick={() => setSel(r.id)}>{r.name}{r.foreign ? <span className="tag">외</span> : null}{r.traitCount ? <span className="tag" title="숨겨진 특수능력">특</span> : null}</button> },
     { key: 'place', label: '소속', text: true, brief: true, value: (r) => r.place, cell: (r) => (r.team >= 0 ? <TeamLink idx={r.team} /> : <span className="muted small">{r.place}</span>) },
@@ -63,9 +69,10 @@ export function EditorScreen() {
           <span className="inline">
             <button type="button" className={`small-btn${tab === 'players' ? '' : ' ghost'}`} onClick={() => setTab('players')}>선수</button>
             <button type="button" className={`small-btn${tab === 'teams' ? '' : ' ghost'}`} onClick={() => setTab('teams')}>구단</button>
+            <button type="button" className={`small-btn${tab === 'log' ? '' : ' ghost'}`} onClick={() => setTab('log')}>고친 기록</button>
           </span>
         </div>
-        <p className="muted small">숨긴 진짜 값입니다 (보기만, 고치기는 다음 단계). {session.phase === 'season' ? '지금 시즌' : '다음 시즌'} 기준이고, 흐린 글씨는 우리 스카우트 추측입니다. 끄려면 저장·설정에서.</p>
+        <p className="muted small">숨긴 진짜 값입니다. 선수 이름을 누르면 아래에 고치기 칸이 열립니다. {session.phase === 'season' ? '지금 시즌' : '다음 시즌'} 기준이고, 흐린 글씨는 우리 스카우트 추측입니다. 끄려면 저장·설정에서.</p>
       </section>
 
       {tab === 'players' && picked && (
@@ -98,31 +105,91 @@ export function EditorScreen() {
             </label>
             <span className="muted small" role="status">{rows.length}명</span>
           </div>
+          <BulkEdit checked={checked} setChecked={setChecked} shown={rows} />
           <DataTable id="editor-players" cols={cols} rows={rows} rowKey={(r) => r.id} full={full} searchText={(r) => `${r.name} ${r.place} ${r.pos}`}
             rowClass={(r) => (r.id === sel ? 'me' : undefined)} label="에디터 선수 표" />
         </section>
       )}
 
-      {tab === 'teams' && (
-        <section className="panel">
-          <h2>구단 진짜 전력</h2>
-          <div className="scroll flat">
-            <table>
-              <thead><tr><th>순위</th><th className="l">구단</th><th>전력 (런)</th>{session.phase === 'season' && <th className="l">우리가 보는 전망</th>}</tr></thead>
-              <tbody>
-                {[...teams].sort((a, b) => a.rank - b.rank).map((t) => (
-                  <tr key={t.idx} className={t.idx === session.teamIdx ? 'me' : undefined}>
-                    <td>{t.rank}</td>
-                    <td className="l"><TeamLink idx={t.idx} /></td>
-                    <td>{fmt(t.strength)}</td>
-                    {session.phase === 'season' && <td className="l muted small">{t.outlook}</td>}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="muted small">전력은 구단 선수의 한 시즌 기여 합 (AI 판단과 구단주 목표가 쓰는 값)입니다. 구단 자금·신뢰 고치기는 다음 단계.</p>
-        </section>
+      {tab === 'log' && <EditLog />}
+
+      {tab === 'teams' && <EditorTeams />}
+    </div>
+  );
+}
+
+/** 고친 기록 탭: 조작 기록 중 에디터 고침만, 최근 것 먼저 (전 → 후) */
+function EditLog() {
+  const { session, version } = useGame();
+  const recs = useMemo(() => editRecords(session), [session, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <section className="panel">
+      <h2>고친 기록 <span className="muted small">{recs.length}번</span></h2>
+      {recs.length === 0 ? <p className="muted">아직 고친 값이 없습니다.</p> : (
+        <ol className="editor-log">
+          {recs.map((r, i) => (
+            <li key={i}>
+              <p className="small"><strong>{r.day >= 0 ? formatDate(r.year, r.day, true) : `${r.year}년 오프시즌`}</strong> · {r.names.join(', ')}</p>
+              <ul className="small">{r.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="muted small">고친 값은 조작 기록에 남아 같은 시드로 다시 돌려도 같은 날·같은 순서로 들어갑니다.</p>
+    </section>
+  );
+}
+
+const BULK_LABEL: Record<BulkKind, string> = { pot: '천장 ± (등급)', now: '지금 능력 = (등급)', drive: '성장 성향 = (d)', heal: '부상 낫게 하기' };
+
+/** 체크한 선수 일괄 고침 (기획안 6.2): 묶음 전체가 조작 하나로 남는다. 바뀌지 않는 선수(천장 끝·부상 아님 등)는 뺀다 */
+function BulkEdit({ checked, setChecked, shown }: { checked: Set<string>; setChecked: (s: Set<string>) => void; shown: EditorRow[] }) {
+  const { session, version, changed, autosave } = useGame();
+  const [kind, setKind] = useState<BulkKind>('pot');
+  const [value, setValue] = useState('5');
+  const [note, setNote] = useState<{ text: string; warn: string[] } | null>(null);
+  const v = kind === 'heal' ? 0 : Number(value);
+  const ops = useMemo(() => (checked.size && Number.isFinite(v) && value.trim() !== '' ? editorBulkOps(session, [...checked], kind, v) : []),
+    [session, version, checked, kind, v, value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pv = useMemo(() => (ops.length ? editorPreview(session, ops) : null), [session, ops, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const SHOW = 8;
+  const save = () => {
+    const r = session.editPlayer(ops);
+    setNote({ text: r.message, warn: r.warnings });
+    // 한 번 적용하면 체크를 푼다 (같은 묶음을 두 번 누르는 실수 막기)
+    if (r.ok) { setChecked(new Set()); changed(); void autosave(); }
+  };
+  return (
+    <div className="editor-bulk">
+      <div className="form-row wrap">
+        <span className="small"><strong>체크 {checked.size}명</strong></span>
+        <button type="button" className="small-btn ghost" onClick={() => setChecked(new Set([...checked, ...shown.map((r) => r.id)]))}>보이는 {shown.length}명 모두</button>
+        <button type="button" className="small-btn ghost" disabled={!checked.size} onClick={() => setChecked(new Set())}>체크 풀기</button>
+        <label>일괄
+          <select value={kind} onChange={(e) => { const k = e.target.value as BulkKind; setKind(k); setValue(k === 'pot' ? '5' : k === 'now' ? '60' : k === 'drive' ? '0.5' : ''); }}>
+            {(Object.keys(BULK_LABEL) as BulkKind[]).map((k) => <option key={k} value={k}>{BULK_LABEL[k]}</option>)}
+          </select>
+        </label>
+        {kind !== 'heal' && <input type="number" step={kind === 'drive' ? 0.05 : 1} value={value} onChange={(e) => setValue(e.target.value)} aria-label="일괄 값" />}
+        <button type="button" className="small-btn" disabled={!pv || !!pv.error || !!session.gameLock} onClick={save}>적용</button>
+      </div>
+      {checked.size > 0 && (
+        <div className="editor-preview" role="status">
+          {!ops.length ? <p className="muted small">체크한 선수 가운데 바뀌는 선수가 없습니다.</p> : pv?.error ? <p className="warn-line small">{pv.error}</p> : pv && (
+            <>
+              <p className="small">{pv.names.length}명 · {pv.lines.length}가지 (조작 하나로 남습니다)</p>
+              <ul className="small">{pv.lines.slice(0, SHOW).map((l) => <li key={l}>{l}</li>)}{pv.lines.length > SHOW && <li className="muted">외 {pv.lines.length - SHOW}줄</li>}</ul>
+              {pv.warnings.map((w) => <p key={w} className="warn-line small">규정 넘김: {w}</p>)}
+            </>
+          )}
+        </div>
+      )}
+      {session.gameLock && <p className="muted small">{session.gameLock}</p>}
+      {note && (
+        <div role="status">
+          <p className="note small">{note.text}</p>
+          {note.warn.map((w) => <p key={w} className="warn-line small">규정 넘김: {w}</p>)}
+        </div>
       )}
     </div>
   );

@@ -40,10 +40,12 @@ import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
+import { isPlayerOp, type EditOp } from './editOps';
+import { applyGrow, editorPreview } from './editor';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
-import { skillForRuns } from '../league/growth';
+import { shiftBat, shiftPit, skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
 import {
@@ -384,6 +386,9 @@ export type GameAction =
   /** 에디터 모드 켜기·끄기 (docs/에디터_기획안.md 2.1). league.editor만 바꾸고 경기 결과에는 닿지 않는다 */
   | { year: number; day: number; type: 'editor'; on: boolean }
   | { year: number; type: 'editor-off'; on: boolean }
+  /** 에디터 고치기 (E2, docs/에디터_기획안.md 4.1): ops를 그날 경기 전에 그대로 적용한다. names·log는 고친 기록 화면용 (재현에는 쓰지 않는다) */
+  | { year: number; day: number; type: 'edit'; ops: EditOp[]; names?: string[]; log?: string[] }
+  | { year: number; type: 'edit-off'; ops: EditOp[]; names?: string[]; log?: string[] }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
@@ -1130,6 +1135,7 @@ export class GameSession {
     else if (a.type === 'settings') this.applySettings(a.s);
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
     else if (a.type === 'editor') this.applyEditor(a.on, a.day);
+    else if (a.type === 'edit') this.applyEdits(a.ops, a.day);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
     else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
     else if (a.type === 'fx-send') fxSendInSeason(this.marketCtx, this.teamIdx, a.region);
@@ -1716,15 +1722,7 @@ export class GameSession {
     const ctx = this.values;
     const lpOf = (id: string) => L.players.find((p) => p.id === id);
     const spOf = (id: string) => (season ? this.world.players.find((p) => p.id === id) : undefined);
-    const syncSim = (lp: LeaguePlayer) => {
-      const sp = spOf(lp.id);
-      if (!sp) return;
-      // 수비는 리그 쪽 값을 따른다 (없던 예전 저장만 월드 값을 남긴다). 전에는 월드 값이 앞서 만든 선수의 새 수비가 들어가지 않았다
-      sp.bat = lp.bat ? { ...lp.bat, def: lp.bat.def ?? sp.bat?.def } : null;
-      sp.pit = lp.pit;
-      sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
-      if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
-    };
+    const syncSim = (lp: LeaguePlayer) => this.syncSimPlayer(lp);
     // FA 시장(오프시즌 FA 단계)의 선수에게 낸 move·contract는 FA 계약으로 확정한다 (Off.signFaDeal, 2026-10-29 사용자 보고 "fa때 ai로 판정된 조건들이 실제로 이행되지 않는 문제").
     // 같은 선수의 move(구단)와 contract(연봉·기간)를 한 계약으로 묶는다. contract만 냈으면 우리 구단과의 합의로 본다
     const off = season ? null : this.offseason;
@@ -1855,6 +1853,20 @@ export class GameSession {
     // 만든 선수(가상·나이)·바뀐 능력(표본)은 영점도 바꾼다. 불러온 판(월드를 새로 만듦)과 같게 시즌 월드 전체에 다시 낸다
     if (season && L.defPool && ops.some((op) => op.op === 'create' || op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
     this.valueCtx = null;
+  }
+
+  /** 리그 상태의 능력을 시즌 월드 선수에 옮긴다 (자유 모드·에디터 능력 고침 뒤, 시즌 중만) */
+  private syncSimPlayer(lp: LeaguePlayer): void {
+    if (this.phase !== 'season') return;
+    const sp = this.world.players.find((p) => p.id === lp.id);
+    if (!sp) return;
+    // 수비는 리그 쪽 값을 따른다 (없던 예전 저장만 월드 값을 남긴다). 전에는 월드 값이 앞서 만든 선수의 새 수비가 들어가지 않았다
+    // 그 시즌 슬럼프는 월드를 만들 때(world.ts)처럼 옮겨 둔다 (전에는 빠져서 불러온 판과 이어 돌린 판이 갈렸다)
+    const bat = lp.bat ? { ...lp.bat, def: lp.bat.def ?? sp.bat?.def } : null;
+    sp.bat = bat && lp.slump ? shiftBat(bat, lp.slump) : bat;
+    sp.pit = lp.pit && lp.slump ? shiftPit(lp.pit, lp.slump) : lp.pit;
+    sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
+    if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
   }
 
   /** 판타지 효과 적용 (src/fantasy/effects.ts). 시즌 중에는 이벤트 도구, 오프시즌에는 리그 상태에 바로 */
@@ -3473,6 +3485,7 @@ export class GameSession {
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'editor-off': res = this.applyEditor(a.on, -1); break;
+      case 'edit-off': this.applyEdits(a.ops, -1); res = { ok: true, message: '에디터로 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
       case 'train-off': res = setTrainingRule(L, this.teamIdx, a.id, a.plan, 0); break;
       case 'fx-send-off': res = Off.sendFxOff(L, off, a.region); break;
@@ -4408,6 +4421,129 @@ export class GameSession {
       return { ok: true, message: on ? '에디터를 켰습니다.' : '에디터를 껐습니다.' };
     }
     return this.dispatchOff({ year: this.year, type: 'editor-off', on });
+  }
+
+  /**
+   * 에디터로 값을 고친다 (docs/에디터_기획안.md 3.2): E2 능력·천장·생년·소속·계약·병역·부상 낫게 하기, E3 갈래·갈래 천장·성향·시기와
+   * 구단 자금·팬·신뢰·지명권. 표 일괄 고침도 여러 선수의 ops를 한 번에 넘겨 조작 하나로 남는다. 에디터가 켜져 있을 때만.
+   * 규정을 넘어도 막지 않고 경고만 돌려준다 (2026-11-03 사용자 Q5). 시즌 중은 그날 경기 전(dispatchSeason 'edit'), 오프시즌은 dispatchOff('edit-off').
+   * 경기 결과에 닿으므로 지휘 중인 경기가 있으면 막는다 (gameLock)
+   */
+  editPlayer(input: EditOp[]): { ok: boolean; message: string; warnings: string[] } {
+    if (!this.editorOn) return { ok: false, message: '에디터가 꺼져 있습니다 (저장·설정에서 켭니다).', warnings: [] };
+    if (this.gameLock) return { ok: false, message: this.gameLock, warnings: [] };
+    const pv = editorPreview(this, input);
+    if (!pv || pv.error) return { ok: false, message: pv?.error ?? '고칠 수 없습니다.', warnings: [] };
+    const base = { ops: clone(pv.ops), names: pv.names, log: pv.lines };
+    const who = pv.names.length > 3 ? `${pv.names.slice(0, 3).join(', ')} 외 ${pv.names.length - 3}명` : pv.names.join(', ');
+    const message = `${who}: ${pv.lines.length}가지를 고쳤습니다.`;
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'edit', ...base });
+      return { ok: true, message, warnings: pv.warnings };
+    }
+    const r = this.dispatchOff({ year: this.year, type: 'edit-off', ...base });
+    return { ok: r.ok, message: r.ok ? message : r.message, warnings: r.ok ? pv.warnings : [] };
+  }
+
+  /**
+   * 에디터 고침 적용 (난수 없음, 값을 그대로 넣는다). 자유 모드 조작(move·ability·contract)은 applyFreeOps를 다시 쓰고, 생년·병역·부상은 여기서.
+   * 사용 표시: 처음 고친 때(firstEdit)와 연도별 횟수(edits)
+   */
+  private applyEdits(ops: EditOp[], day: number): void {
+    const L = this.league;
+    const e = (L.editor ??= { on: true, firstOn: { year: this.year, day } });
+    e.firstEdit ??= { year: this.year, day };
+    (e.edits ??= {})[this.year] = (e.edits[this.year] ?? 0) + 1;
+    const season = this.phase === 'season';
+    const free: FreeOp[] = [];
+    let aged = false;
+    let skills = false;
+    for (const op of ops) {
+      // 구단 고치기 (E3): 자금·팬·신뢰·지명권. 결과(재정·평가)는 평소 규칙대로
+      if (!isPlayerOp(op)) {
+        switch (op.op) {
+          case 'cash': {
+            const year = season ? this.world.year : this.year + 1;
+            if (!op.amount || !L.teams[op.team]) break;
+            L.ledger.push(op.amount > 0 ? { year, from: -1, to: op.team, amount: op.amount, note: '에디터: 자금 고침', kind: 'editor' }
+              : { year, from: op.team, to: -1, amount: -op.amount, note: '에디터: 자금 고침', kind: 'editor' });
+            break;
+          }
+          case 'fans': addFanEvent(L, op.team, this.year, season ? day : -2, op.delta, '에디터'); break;
+          case 'trust': this.owner.trust = Math.max(0, Math.min(100, op.value)); break;
+          case 'pick': free.push(op); break;
+        }
+        continue;
+      }
+      const lp = this.leaguePlayer(op.player);
+      if (!lp) continue;
+      const sp = season ? this.world.players.find((p) => p.id === op.player) : undefined;
+      switch (op.op) {
+        case 'birth':
+          lp.birthYear = op.birthYear;
+          delete lp.birthYearEstimated;
+          if (sp) { sp.age = this.world.year - op.birthYear; delete sp.ageEstimated; }
+          aged = true;
+          break;
+        case 'military':
+          lp.military = op.state === 'pending' ? { state: 'pending' } : { state: op.state, note: '에디터' };
+          break;
+        case 'heal':
+          if (sp) this.season.healInjury(sp.idx, day, lp.startAbsentReason === 'injury');
+          else if (!season && lp.startAbsentReason === 'injury') { delete lp.startAbsent; delete lp.startAbsentReason; }
+          break;
+        case 'branch': {
+          // 미리보기가 푼 비율을 그대로 넣는다 (난수·환경 맞춤 없음)
+          if (op.now && Object.keys(op.now).length) {
+            if (lp.isPitcher && lp.pit) lp.pit = { ...lp.pit, ...op.now };
+            else if (!lp.isPitcher && lp.bat) lp.bat = { ...lp.bat, ...op.now };
+            delete lp.slump;
+            lp.estimated = false;
+          }
+          if (op.ceil) lp.ceil = clone(op.ceil);
+          if (op.potential !== undefined) lp.potential = op.potential;
+          this.syncSimPlayer(lp);
+          skills = true;
+          break;
+        }
+        case 'grow':
+          // 숨은 성향은 에디터 파일만 만진다 (tests/potential.test.ts 소스 검사)
+          applyGrow(lp, op);
+          break;
+        case 'ability':
+          // 고친 능력이 그대로 보이게 그 시즌 슬럼프는 없앤다
+          if (op.now !== undefined) delete lp.slump;
+          free.push(op);
+          break;
+        default:
+          free.push(op);
+      }
+    }
+    if (free.length) this.applyFreeOps(free, '에디터');
+    // 새 계약은 예전 연도별 연봉(steps)을 이어 쓰지 않는다
+    for (const op of free) if (op.op === 'contract') delete this.leaguePlayer(op.player)?.contract.steps;
+    // 나이·갈래가 바뀌면 주루·작전 손잡이(나이 곡선)와 리그 영점을 다시 낸다 (불러온 판과 같게, applyFreeOps의 능력 고침과 같은 까닭)
+    if (season && (aged || skills) && L.defPool && !free.some((op) => op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
+    for (const op of ops) {
+      if (!isPlayerOp(op)) continue;
+      const sp = season ? this.world.players.find((p) => p.id === op.player) : undefined;
+      if (sp && sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
+    }
+    this.valueCtx = null;
+  }
+
+  /**
+   * 지금 부상 (에디터 '부상 낫게 하기'): 부상 결장(이탈 이벤트·병역 결장 빼고)의 문구와 남은 일수. 오프시즌은 다음 개막으로 넘어가는 부상 재활.
+   * 부상 문구는 결장 알림과 같은 absenceReason을 거친다
+   */
+  injuryNow(id: string, sim?: SimPlayer): { text: string; days: number } | null {
+    const lp = this.leaguePlayer(id);
+    if (this.phase !== 'season') return lp?.startAbsentReason === 'injury' && (lp.startAbsent ?? 0) > 0 ? { text: '지난 시즌 부상 재활', days: lp.startAbsent! } : null;
+    const p = sim ?? this.world.players.find((x) => x.id === id);
+    if (!p || !this.isAbsent(p)) return null;
+    const a = this.absenceOf(p);
+    if (a ? a.kind === 'event' : lp?.startAbsentReason !== 'injury') return null;
+    return { text: this.absenceReason(p) ?? '부상', days: this.season.states.absentUntil[p.idx] - this.currentDay };
   }
 
   private applyEditor(on: boolean, day: number): { ok: boolean; message: string } {

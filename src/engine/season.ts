@@ -832,6 +832,33 @@ export class Season {
     if (ts) ts.dirty = true;
   }
 
+  /**
+   * 부상을 낫게 한다 (에디터 고치기, 난수 없음): 그날 뒤까지 이어지는 부상 결장(이탈 이벤트 빼고)을 그날 끝난 것으로 줄이고,
+   * 출전 금지는 남은 이탈 이벤트(withStart가 아니면 개막부터의 결장도)까지만 둔다. withStart면 개막부터의 결장(넘어온 부상 재활)도 없앤다.
+   * 그 선수에게 걸린 휴식 처방은 함께 풀린다. 나은 것이 있으면 true
+   */
+  healInjury(idx: number, day: number, withStart: boolean): boolean {
+    let keep = day;
+    let healed = false;
+    for (const a of this.absences) {
+      if (a.idx !== idx || a.until <= day) continue;
+      if (a.kind === 'event') keep = Math.max(keep, a.until);
+      else { a.until = day; healed = true; }
+    }
+    const start = this.world.players[idx].startAbsent ?? 0;
+    if (start > day) {
+      if (withStart) healed = true;
+      else keep = Math.max(keep, start);
+    }
+    if (!healed) return false;
+    if (this.states.absentUntil[idx] > keep) {
+      this.states.absentUntil[idx] = keep;
+      const ts = this.teamSeasons[this.world.players[idx].teamIdx];
+      if (ts) ts.dirty = true;
+    }
+    return true;
+  }
+
   /** 투수 피로를 없앤다 (무작위 이벤트의 휴식 처방) */
   clearFatigue(idx: number): void {
     this.states.fatigue[idx] = 0;

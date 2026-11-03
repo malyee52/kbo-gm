@@ -1,9 +1,10 @@
 // 에디터: 선수 하나의 숨긴 값 보기 (선수 상세 '에디터' 탭과 에디터 화면 아래 칸, docs/에디터_기획안.md 6.3).
-// 진짜 값 옆에 우리 스카우트 추측을 나란히 둔다. 보기만 (E1).
-import { useMemo } from 'react';
+// 진짜 값 옆에 우리 스카우트 추측을 나란히 둔다. 아래 고치기 칸 (E2).
+import { useMemo, useState } from 'react';
 import { driveWord, editorView, timingText, type EditorPlayerView } from '../../game/editor';
 import { guessText } from '../../league/scout';
 import { useGame } from '../context';
+import { EditorEdit, type EditNote } from './EditorEdit';
 
 const fmt = (x: number, d = 1) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 
@@ -12,10 +13,13 @@ export function EditorPlayer({ id }: { id: string }) {
   const { session, version } = useGame();
   const v = useMemo(() => editorView(session, id), [session, id, version, session.editorOn]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!v) return <p className="muted small">{session.editorOn ? '이 선수는 에디터로 볼 값이 없습니다.' : '에디터가 꺼져 있습니다 (저장·설정에서 켭니다).'}</p>;
-  return <EditorPlayerBody v={v} />;
+  return <EditorPlayerBody key={v.id} v={v} />;
 }
 
 function EditorPlayerBody({ v }: { v: EditorPlayerView }) {
+  // 고친 뒤 칸을 새 값으로 다시 연다 (epoch), 결과 문장은 여기 남긴다
+  const [epoch, setEpoch] = useState(0);
+  const [note, setNote] = useState<EditNote>(null);
   const guessOf = (key: string) => {
     const it = v.guessSet?.items.find((x) => x.key === key);
     return it ? guessText(it.view) : '-';
@@ -65,6 +69,7 @@ function EditorPlayerBody({ v }: { v: EditorPlayerView }) {
         )}
         <p className="muted small">특수능력은 에디터에서만 보이고 고칠 수 없습니다 (2026-11-03 결정).</p>
       </section>
+      <EditorEdit key={`${v.id}:${epoch}`} v={v} note={note} onSaved={(n, ok) => { setNote(n); if (ok) setEpoch(epoch + 1); }} />
     </div>
   );
 }
