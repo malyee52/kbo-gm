@@ -197,7 +197,7 @@ describe('③ 구단주 예산 회의', () => {
     const at = (score: number, ask: 'money' | 'faCap' = 'money') => {
       const M = roundTrip(g.league);
       const cash0 = cashOf(M, lg);
-      const r = holdMeeting(M, lg, 2026, ask, { trust: score - base, achieved: null });
+      const r = holdMeeting(M, lg, 2026, ask, { trust: score - (base - 50), achieved: null });
       return { r, M, gained: cashOf(M, lg) - cash0 };
     };
     const ok = at(60);
