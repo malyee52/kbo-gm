@@ -30,11 +30,13 @@ describe('에디터 고치기 (시즌 중)', () => {
     expect(editorPreview(g, [{ op: 'ability', player: p.id, potential: 70 }])).toBeNull();
     g.setEditor(true);
     const before = editorView(g, p.id)!;
-    const r = g.editPlayer([{ op: 'ability', player: p.id, now: before.now + 5, potential: Math.max(before.pot, before.now + 8) }]);
+    const target = Math.min(75, before.now + 5);
+    const pot = Math.min(80, Math.max(before.pot, target + 3));
+    const r = g.editPlayer([{ op: 'ability', player: p.id, now: target, potential: pot }]);
     expect(r.ok).toBe(true);
     const after = editorView(g, p.id)!;
-    expect(Math.abs(after.now - (before.now + 5))).toBeLessThanOrEqual(1);
-    expect(after.pot).toBe(Math.max(before.pot, before.now + 8));
+    expect(Math.abs(after.now - target)).toBeLessThanOrEqual(1);
+    expect(after.pot).toBe(pot);
     expect(g.editorMark).toBe('고침');
     expect(g.league.editor?.firstEdit).toEqual({ year: 2026, day: g.day });
     expect(g.league.editor?.edits).toEqual({ 2026: 1 });
@@ -94,6 +96,17 @@ describe('에디터 고치기 (시즌 중)', () => {
     expect(g.editPlayer([{ op: 'heal', player: hurt!.id }]).ok).toBe(true);
     expect(g.injuryNow(hurt!.id)).toBeNull();
     expect(g.season.states.absentUntil[hurt!.idx]).toBeLessThanOrEqual(g.day);
+
+    // 낫게 한 판: 저장·불러오기 뒤 이어 돌린 결과 = 끊김 없이 돌린 결과, 재현도 같다
+    const healDay = g.day;
+    const back = GameSession.load(store, JSON.parse(JSON.stringify(g.toSave())), P);
+    g.advance(6);
+    back.advance(6);
+    expect(fingerprint(back)).toBe(fingerprint(g));
+    const info = g.reproInfo();
+    const r = GameSession.replay(store, info.opts, info.actions, { year: info.at.year, day: info.at.day }, P);
+    expect(fingerprint(r)).toBe(fingerprint(g));
+    expect(healDay).toBeGreaterThan(0);
   }, 240_000);
 
   it('고친 뒤 저장·불러오기·이어 돌리기 = 끊김 없이 돌린 판, 재현(replay)도 같다', () => {
@@ -102,7 +115,7 @@ describe('에디터 고치기 (시즌 중)', () => {
       g.advance(3);
       const a = g.world.teams[1].org.find((x) => !x.isPitcher && (x.bat?.sample ?? 0) > 600)!;
       const b = g.world.teams[4].org.find((x) => x.isPitcher && (x.pit?.sample ?? 0) > 300)!;
-      const c = g.world.teams[0].org.find((x) => !x.foreign && !x.isPitcher)!;
+      const c = g.world.teams[0].org.find((x) => !x.foreign && !x.isPitcher && g.leaguePlayer(x.id)?.military?.state === 'pending')!;
       const va = editorView(g, a.id)!;
       expect(g.editPlayer([{ op: 'ability', player: a.id, now: Math.min(80, va.now + 10) }, { op: 'birth', player: a.id, birthYear: 2000 }]).ok).toBe(true);
       expect(g.editPlayer([{ op: 'move', player: b.id, to: 0 }, { op: 'contract', player: b.id, salary: 50000, years: 3 }]).ok).toBe(true);

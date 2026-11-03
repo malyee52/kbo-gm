@@ -1,4 +1,4 @@
-// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표, 구단 진짜 전력. 보기만 (E1).
+// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표, 구단 진짜 전력, 고친 기록 (E2).
 // 진짜 값은 본문 색 등급, 우리 스카우트 추측은 옆의 흐린 글씨.
 import { useMemo, useState } from 'react';
 import { driveWord, editorRows, editorTeams, timingText, type EditorRow } from '../../game/editor';
@@ -7,6 +7,8 @@ import type { Column } from '../table';
 import { TeamLink, useGame } from '../context';
 import { useShell } from '../shell';
 import { EditorPlayer } from './EditorPlayer';
+import { editRecords } from '../../game/editOps';
+import { formatDate } from '../../game/calendar';
 
 type Kind = 'all' | 'hit' | 'pit';
 type Who = 'all' | 'free' | number;
@@ -17,7 +19,7 @@ export function EditorScreen() {
   const { session, version, go, openPlayer } = useGame();
   const { density } = useShell();
   const full = density === 'full';
-  const [tab, setTab] = useState<'players' | 'teams'>('players');
+  const [tab, setTab] = useState<'players' | 'teams' | 'log'>('players');
   const [who, setWho] = useState<Who>('all');
   const [kind, setKind] = useState<Kind>('all');
   const [sel, setSel] = useState<string | null>(null);
@@ -63,9 +65,10 @@ export function EditorScreen() {
           <span className="inline">
             <button type="button" className={`small-btn${tab === 'players' ? '' : ' ghost'}`} onClick={() => setTab('players')}>선수</button>
             <button type="button" className={`small-btn${tab === 'teams' ? '' : ' ghost'}`} onClick={() => setTab('teams')}>구단</button>
+            <button type="button" className={`small-btn${tab === 'log' ? '' : ' ghost'}`} onClick={() => setTab('log')}>고친 기록</button>
           </span>
         </div>
-        <p className="muted small">숨긴 진짜 값입니다 (보기만, 고치기는 다음 단계). {session.phase === 'season' ? '지금 시즌' : '다음 시즌'} 기준이고, 흐린 글씨는 우리 스카우트 추측입니다. 끄려면 저장·설정에서.</p>
+        <p className="muted small">숨긴 진짜 값입니다. 선수 이름을 누르면 아래에 고치기 칸이 열립니다. {session.phase === 'season' ? '지금 시즌' : '다음 시즌'} 기준이고, 흐린 글씨는 우리 스카우트 추측입니다. 끄려면 저장·설정에서.</p>
       </section>
 
       {tab === 'players' && picked && (
@@ -103,6 +106,8 @@ export function EditorScreen() {
         </section>
       )}
 
+      {tab === 'log' && <EditLog />}
+
       {tab === 'teams' && (
         <section className="panel">
           <h2>구단 진짜 전력</h2>
@@ -125,5 +130,27 @@ export function EditorScreen() {
         </section>
       )}
     </div>
+  );
+}
+
+/** 고친 기록 탭: 조작 기록 중 에디터 고침만, 최근 것 먼저 (전 → 후) */
+function EditLog() {
+  const { session, version } = useGame();
+  const recs = useMemo(() => editRecords(session), [session, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <section className="panel">
+      <h2>고친 기록 <span className="muted small">{recs.length}번</span></h2>
+      {recs.length === 0 ? <p className="muted">아직 고친 값이 없습니다.</p> : (
+        <ol className="editor-log">
+          {recs.map((r, i) => (
+            <li key={i}>
+              <p className="small"><strong>{r.day >= 0 ? formatDate(r.year, r.day, true) : `${r.year}년 오프시즌`}</strong> · {r.names.join(', ')}</p>
+              <ul className="small">{r.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="muted small">고친 값은 조작 기록에 남아 같은 시드로 다시 돌려도 같은 날·같은 순서로 들어갑니다.</p>
+    </section>
   );
 }

@@ -1322,3 +1322,7 @@ dialog.editor-confirm .dialog-body { padding-top: 18px; }
 .editor-player h3 { margin: 4px 0; }
 dialog.editor-confirm p { margin: 6px 0; }
 dialog.editor-confirm .inline { margin-top: 12px; }
+.editor-edit { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.editor-edit input[type="number"] { width: 6.5em; }
+.editor-preview ul, .editor-log ul { margin: 2px 0 4px; padding-left: 18px; }
+.editor-log { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }

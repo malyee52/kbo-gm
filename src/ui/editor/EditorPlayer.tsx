@@ -1,9 +1,10 @@
 // 에디터: 선수 하나의 숨긴 값 보기 (선수 상세 '에디터' 탭과 에디터 화면 아래 칸, docs/에디터_기획안.md 6.3).
-// 진짜 값 옆에 우리 스카우트 추측을 나란히 둔다. 보기만 (E1).
+// 진짜 값 옆에 우리 스카우트 추측을 나란히 둔다. 아래 고치기 칸 (E2).
 import { useMemo } from 'react';
 import { driveWord, editorView, timingText, type EditorPlayerView } from '../../game/editor';
 import { guessText } from '../../league/scout';
 import { useGame } from '../context';
+import { EditorEdit } from './EditorEdit';
 
 const fmt = (x: number, d = 1) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 
@@ -65,6 +66,7 @@ function EditorPlayerBody({ v }: { v: EditorPlayerView }) {
         )}
         <p className="muted small">특수능력은 에디터에서만 보이고 고칠 수 없습니다 (2026-11-03 결정).</p>
       </section>
+      <EditorEdit key={v.id} v={v} />
     </div>
   );
 }
