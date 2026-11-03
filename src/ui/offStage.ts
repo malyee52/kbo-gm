@@ -7,6 +7,7 @@ import { dollarText, FA_COMP, salaryCap, teamCapPayroll, wonText } from '../leag
 import { ruleOf } from '../league/rules';
 import { voteAgendaText } from '../league/ruleNews';
 import { voteOutlook } from '../ai/vote';
+import { ASK_LABEL, budgetCheck, meetingOf, RESULT_LABEL, TRUST_BUDGET } from '../league/meeting';
 
 /** 남은 처리를 한 번에 해결하고 넘기는 길 (조작 하나 + 다음 단계) */
 export type LeftoverFix = 'auto-comp' | 'auto-draft' | 'auto-release';
@@ -148,6 +149,14 @@ export function stageLeftovers(s: GameSession): Leftover[] {
       }
       break;
     }
+    case 'meeting': {
+      const m = meetingOf(L, me, off.year + 1);
+      if (!m) out.push({ key: 'meeting', title: '구단주에게 요청하지 않음', then: '"요청 없음"으로 회의를 마칩니다 (시즌 평가 때 신뢰도 +1).' });
+      else if (m.result === 'conditional') out.push({ key: 'meeting-cond', title: `조건부 제안에 답하지 않음 (${ASK_LABEL[m.ask]})`, then: '조건을 거절한 것으로 합니다 (돈·목표 변화 없음).' });
+      const b = budgetCheck(L, me, off.year + 1);
+      if (b.over && !m?.overBudget) out.push({ key: 'meeting-budget', title: '예상 수지가 모기업 한도를 넘는 적자', then: `그대로 넘기면 시즌 평가 때 신뢰도 ${TRUST_BUDGET}. 예산안에서 지출을 줄일 수 있습니다.` });
+      break;
+    }
     case 'ready':
       break;
   }
@@ -220,6 +229,10 @@ export function stageHeadline(s: GameSession): string[] {
       const size = Off.userOrgSize(L, off);
       const lim = ruleOf(L, 'orgLimit');
       return [`소속 ${size}/${lim}명${size > lim ? ' ⚠' : ''}`];
+    }
+    case 'meeting': {
+      const m = meetingOf(L, me, off.year + 1);
+      return [m ? `${ASK_LABEL[m.ask]} · ${RESULT_LABEL[m.result]}` : '요청 고르기', `신뢰도 ${L.owner?.trust ?? '-'}`];
     }
     case 'ready':
       return [];

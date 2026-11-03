@@ -11,7 +11,7 @@ import { useGame, usePriceIndex, useWon } from '../context';
 
 // 표의 줄 차례 (재정 2 기획안 4.1: 수입 R1~R7, 지출 E1~E10). 수입·지출 어느 쪽인지는 금액 부호로 가른다
 const ORDER: FinanceKind[] = [
-  'gate', 'postseason', 'broadcast', 'sponsor', 'parent', 'rescue', 'faSupport', 'champion', 'posting',
+  'gate', 'postseason', 'broadcast', 'sponsor', 'merch', 'parent', 'parentExtra', 'rescue', 'faSupport', 'champion', 'posting',
   'payroll', 'foreign', 'coach', 'opsFront', 'opsGame', 'opsPark', 'opsFutures', 'ops', 'invest', 'scouting', 'signing',
   'compensation', 'fine', 'transfer', 'stadium', 'release', 'trade', 'event', 'other',
 ];

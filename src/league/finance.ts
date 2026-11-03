@@ -21,6 +21,8 @@ import { managerPayroll } from './managers';
 import { gmStyle } from './gm';
 import { settingsOf, userTeamOf } from './difficulty';
 import { wageIndex } from './salary';
+import { faCapScale, type MeetingRecord } from './meeting';
+import { dealsAt, dealsBase, dealsBonus, emptySlots, autoSignSponsors, bestOffer, makeOffers, MERCH_PER_FAN, type SponsorDeal, type SponsorOffers } from './sponsor';
 import {
   ensureFans, ensureStadiums, fanFill, fanLevel, fansSeasonEnd, fanSponsor, installment, seatsAt, stadiumFill, stadiumYearEnd, ticketScale,
 } from './stadium';
@@ -309,10 +311,18 @@ export const SEAT_NOTE: Record<SeatGrade, string> = { general: '외야·응원�
  * 좌석 비중, 기본 가격(만 원, 2026년 돈, 시설 배율 전), 가격 탄력성 (임시값, 시대별 좌석 구성 자료 없음 → 1982년부터 같은 세 등급).
  * 가중 평균 1.4625만 원 ≈ TICKET 1.46. 실제 셈은 기본 가격 ÷ 가중 평균(seatFactor)을 TICKET에 곱해 기본 가격이면 관중 수입이 예전과 같다
  */
+/**
+ * 가격 탄력성 (기본 가격에서, 임시값). 관중률 = min(1, 수요 × e^(탄력성 × (배율 − 1))) 꼴이라 값을 올릴수록 더 민감해지고
+ * (배율 s에서 점 탄력성 = 탄력성 × s), 한 등급 수입은 배율 −1/탄력성에서 꼭대기 (일반 100%·지정 111%·프리미엄 125%).
+ * 2026-11-03 사용자 "관중이 더 빠지게" (F3의 −0.8·−0.6·−0.3은 올릴수록 늘 이득이었다, reports/ticket-check.md)
+ */
+export const ELASTIC_GENERAL = -1.0;
+export const ELASTIC_RESERVED = -0.9;
+export const ELASTIC_PREMIUM = -0.8;
 export const SEAT: Record<SeatGrade, { share: number; price: number; elastic: number }> = {
-  general: { share: 0.55, price: 0.95, elastic: -0.8 },
-  reserved: { share: 0.35, price: 1.6, elastic: -0.6 },
-  premium: { share: 0.1, price: 3.8, elastic: -0.3 },
+  general: { share: 0.55, price: 0.95, elastic: ELASTIC_GENERAL },
+  reserved: { share: 0.35, price: 1.6, elastic: ELASTIC_RESERVED },
+  premium: { share: 0.1, price: 3.8, elastic: ELASTIC_PREMIUM },
 };
 const SEAT_AVG = (['general', 'reserved', 'premium'] as SeatGrade[]).reduce((s, g) => s + SEAT[g].share * SEAT[g].price, 0);
 /** 등급 가격 몫 (좌석 비중 가중 합 = 1) */
@@ -320,9 +330,6 @@ export const seatFactor = (g: SeatGrade) => SEAT[g].price / SEAT_AVG;
 /** 가격 배율 범위와 칸 (70~150%, 5%) */
 export const PRICE_RANGE: [number, number] = [0.7, 1.5];
 export const PRICE_STEP = 0.05;
-/** 만원에 가까운 경기(수요 관중률 ≥ 이 값)는 넘친 수요가 있어 값을 올려도 덜 빠진다: 탄력성 × PRICE_FULL_DAMP (임시값) */
-export const PRICE_FULL = 0.9;
-export const PRICE_FULL_DAMP = 0.5;
 /** 결산 때 팬 만족도 −PRICE_FAN × (관중 가중 가격 지수 − 1) (임시값) */
 export const PRICE_FAN = 10;
 /** 재무팀 추천 가격: 지난 시즌 관중률 ≥ HIGH → 지정·프리미엄 110%, ≤ LOW → 일반 90%, 그 밖 100% (기획 4.5 [정함]) */
@@ -342,17 +349,20 @@ export function pricesOf(f: TeamFinance | undefined, planned: boolean): SeatPric
 }
 export const priceLockedOf = (f: TeamFinance | undefined): SeatGrade[] => f?.priceLocked ?? [];
 
-/** 한 등급 관중률: 수요 관중률 f × 배율^탄력성 (1 넘지 않음). 만원 가까운 경기에서 값을 올리면 탄력성 절반 */
-export function seatFill(f: number, g: SeatGrade, scale: number): number {
-  if (scale === 1) return f;
-  const e = SEAT[g].elastic * (scale > 1 && f >= PRICE_FULL ? PRICE_FULL_DAMP : 1);
-  return Math.min(1, f * scale ** e);
+/**
+ * 한 등급 관중률: min(1, 수요 d × e^(탄력성 × (배율 − 1))). 수요 d는 좌석을 넘을 수 있다 (만원 구단의 넘친 수요, demandRate):
+ * 넘친 만큼은 값을 올려도 관중이 빠지지 않아 만원 구단만 올려서 이득을 본다
+ */
+export function seatFill(d: number, g: SeatGrade, scale: number): number {
+  if (scale === 1) return Math.min(1, d);
+  return Math.min(1, d * Math.exp(SEAT[g].elastic * (scale - 1)));
 }
 
-/** 한 경기 관중 (좌석 cap, 수요 관중률 f, 한 명 평균 객단가 ticket). 기본 가격이면 예전 셈 그대로 (반올림까지). seats = 등급별 관중 (소수) */
-export function gameGate(cap: number, f: number, ticket: number, prices: SeatPrices): { fans: number; revenue: number; seats: SeatPrices } {
+/** 한 경기 관중 (좌석 cap, 수요 관중률 d(1 넘을 수 있음), 한 명 평균 객단가 ticket). 기본 가격이면 예전 셈 그대로 (반올림까지). seats = 등급별 관중 (소수) */
+export function gameGate(cap: number, d: number, ticket: number, prices: SeatPrices): { fans: number; revenue: number; seats: SeatPrices } {
   const seats = basePrices();
   if (isBasePrices(prices)) {
+    const f = Math.min(1, d);
     const fans = Math.round(cap * f);
     for (const g of SEAT_GRADES) seats[g] = cap * SEAT[g].share * f;
     return { fans, revenue: Math.round(fans * ticket), seats };
@@ -360,7 +370,7 @@ export function gameGate(cap: number, f: number, ticket: number, prices: SeatPri
   let n = 0;
   let r = 0;
   for (const g of SEAT_GRADES) {
-    seats[g] = cap * SEAT[g].share * seatFill(f, g, prices[g]);
+    seats[g] = cap * SEAT[g].share * seatFill(d, g, prices[g]);
     n += seats[g];
     r += seats[g] * ticket * seatFactor(g) * prices[g];
   }
@@ -381,9 +391,10 @@ export const seatPriceIndex = (p: SeatPrices) => SEAT_GRADES.reduce((s, g) => s 
 /** 결산 때 가격에 따른 팬 만족도 변화 (0.1 단위로 반올림) */
 export const priceFanDelta = (P: number) => Math.round(-PRICE_FAN * (P - 1) * 10) / 10;
 
-/** 수요 관중률 분포 (FinanceYear.demand): 칸 21개, 칸 i = 관중률 i/20 */
-export const DEMAND_BINS = 21;
-export const demandBin = (f: number) => Math.max(0, Math.min(DEMAND_BINS - 1, Math.round(f * (DEMAND_BINS - 1))));
+/** 수요 관중률 분포 (FinanceYear.demand): 칸 i = 수요 i/20, 칸 31개 (0~1.5, 넘친 수요 포함). F3 첫 판(칸 21개, 1에서 잘림) 저장도 같은 눈금으로 읽는다 */
+export const DEMAND_STEP = 20;
+export const DEMAND_BINS = 31;
+export const demandBin = (f: number) => Math.max(0, Math.min(DEMAND_BINS - 1, Math.round(f * DEMAND_STEP)));
 
 /**
  * 수요 분포와 가격으로 한 경기 평균 등급별 예상 관중·관중 수입 (좌석 cap, 한 명 평균 객단가 ticket).
@@ -392,7 +403,7 @@ export const demandBin = (f: number) => Math.max(0, Math.min(DEMAND_BINS - 1, Ma
 export function gatePredict(demand: number[] | undefined, meanFill: number, cap: number, ticket: number, prices: SeatPrices):
   { fans: number; revenue: number; seats: SeatPrices; gate: SeatPrices } {
   const bins: [number, number][] = demand && demand.some((c) => c > 0)
-    ? demand.map((c, i) => [i / (DEMAND_BINS - 1), c] as [number, number]).filter(([, c]) => c > 0)
+    ? demand.map((c, i) => [i / DEMAND_STEP, c] as [number, number]).filter(([, c]) => c > 0)
     : [[meanFill, 1]];
   const total = bins.reduce((s, [, c]) => s + c, 0) || 1;
   const seats = basePrices();
@@ -428,7 +439,7 @@ export function lastDemand(league: LeagueState, team: number): number | null {
   if (h.demand?.some((c) => c > 0)) {
     let n = 0;
     let s = 0;
-    h.demand.forEach((c, i) => { n += c; s += c * (i / (DEMAND_BINS - 1)); });
+    h.demand.forEach((c, i) => { n += c; s += c * (i / DEMAND_STEP); });
     return s / n;
   }
   if (!h.homeGames || !h.attendance) return null;
@@ -510,6 +521,12 @@ export interface TeamFinance {
   activePrices?: Partial<SeatPrices>;
   /** 고정한 좌석 등급 (해마다 결산 뒤 자동 추천 가격이 남겨 둠). 없으면 없음 (모두 자동) */
   priceLocked?: SeatGrade[];
+  /** 스폰서 계약 (재정 2 F4a, 끝난 계약은 다음 계약 때 지움). 없으면 예전 공식 (첫 오프시즌에 자동 계약) */
+  sponsors?: SponsorDeal[];
+  /** 결산 때 만든 다음 시즌 빈 자리 제안 (개막 때 자동 계약 뒤 지움) */
+  sponsorOffers?: SponsorOffers;
+  /** 구단주 예산 회의 기록 (재정 2 F4b, 최근 몇 해만). AI 구단은 돈 요청만 */
+  meetings?: MeetingRecord[];
   /** 지난 결산들 */
   history: FinanceYear[];
 }
@@ -538,14 +555,14 @@ export interface FinanceYear {
 }
 
 export type FinanceKind =
-  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
+  | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'merch' | 'parent' | 'parentExtra' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other'
   | OpsKind;
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
-  start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
-  parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
+  start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서', merch: '상품·식음',
+  parent: '모기업 지원금', parentExtra: '모기업 추가 지원 (예산 회의)', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비 (나누기 전·캠프)', invest: '투자', scouting: '스카우트비',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
   opsFront: '프런트', opsGame: '원정·경기 운영', opsPark: '구장 운영', opsFutures: '2군 운영',
@@ -863,8 +880,13 @@ export function eraAttendance(year: number): number {
 /** 그 해 관중 배율 (2024 = 1). 관중률에 곱하고, 객단가는 거꾸로 나눠 관중 수입은 시대와 상관없이 같게 둔다 (게임 돈은 모두 2026년 물가) */
 export const eraFillScale = (year: number) => eraAttendance(year) / eraAttendance(2024);
 
-/** 한 경기 관중률 (0.15~1.0) */
+/** 한 경기 관중률 (0.05~1.0) = 수요를 좌석에서 자른 값 */
 export function fillRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number, opp?: number): number {
+  return Math.min(1, demandRate(league, team, winPct, star, day, year, opp));
+}
+
+/** 한 경기 관중 수요 (좌석 대비, 0.05 이상, 1을 넘을 수 있다: 만원 구단의 넘친 수요, 입장권 가격 반응에 쓴다. 재정 2 F3 맞춤) */
+export function demandRate(league: LeagueState, team: number, winPct: number, star: number, day: number, year: number, opp?: number): number {
   const wd = dateOf(year, day).weekday;
   const weekend = wd === 0 || wd === 6 ? 0.15 : wd === 5 ? 0.05 : 0;
   const mk = marketingAt(MARKETING_FILL, marketingStock(league, team));
@@ -873,7 +895,7 @@ export function fillRate(league: LeagueState, team: number, winPct: number, star
     + legendFill(league, league.teams[team].franchise) + rivalFill(league, team, opp)
     + stadiumFill(league.stadiums?.[team], year) + fanFill(fanLevel(league, team, year, day));
   // 시대별 관중 수준 (2000년대 초 침체기는 2024년의 약 0.3배)
-  return Math.max(0.05, Math.min(1, v * eraFillScale(year)));
+  return Math.max(0.05, v * eraFillScale(year));
 }
 
 /**
@@ -899,6 +921,8 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const seats = { general: 0, reserved: 0, premium: 0 };
   const demand = new Array<number>(DEMAND_BINS).fill(0);
   const prices = pricesOf(league.finance?.[team], false);
+  // 상품·식음 (재정 2 F4a): 스폰서 계약이 걸린 시즌만 관중 수에 따라 (아니면 예전 공식의 스폰서 안)
+  const merch = sponsorModelOn(league, team, year) && team < world.teams.length ? merchPerFan(league, team, year, starBonus(world, league)[team] ?? 0) : 0;
 
   // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로. 좌석 등급별 가격에 따라 등급마다 관중이 빠지거나 는다 (재정 2 F3)
   if (team < world.teams.length) {
@@ -913,7 +937,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       if (g.day >= upToDay) break;
       if (g.home === team) {
         const pct = w[team] + l[team] > 0 ? w[team] / (w[team] + l[team]) : 0.5;
-        const f = fillRate(league, team, pct, star, g.day, year, g.away);
+        const f = demandRate(league, team, pct, star, g.day, year, g.away);
         const gg = gameGate(cap, f, ticket, prices);
         const fans = gg.fans;
         attendance += fans;
@@ -924,6 +948,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
         const v = gg.revenue;
         add('gate', v);
         addM(g.day, v);
+        if (merch) { const m = Math.round(fans * merch); add('merch', m); addM(g.day, m); }
       }
       if (g.homeRuns > g.awayRuns) { w[g.home]++; l[g.away]++; } else if (g.awayRuns > g.homeRuns) { w[g.away]++; l[g.home]++; }
     }
@@ -935,6 +960,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       const v = Math.round(fans * POSTSEASON_TICKET * ticketScale(park) * wageIndex(year, league));
       add('postseason', v);
       net[pays.length - 1] += v;
+      if (merch) { const m = Math.round(fans * merch); add('merch', m); net[pays.length - 1] += m; }
     }
   }
 
@@ -980,12 +1006,45 @@ export function seasonIncome(league: LeagueState, world: World, team: number): {
   return {
     broadcast: futures ? 0 : Math.round(BROADCAST * wageIndex(year, league)),
     parent: parentSupport(league, team, trust, lastCash, year),
-    sponsor: sponsorAmount(league, team, futures, 0.5, 0, star, year),
+    sponsor: sponsorModelOn(league, team, year) ? contractSponsor(league, team, year, 0) : sponsorAmount(league, team, futures, 0.5, 0, star, year),
   };
 }
 
+/** 그 시즌 스폰서를 계약 모델로 셈하는지 (계약이 걸려 있고 퓨처스 구단이 아님) */
+export const sponsorModelOn = (league: LeagueState, team: number, year: number) => !isFuturesTeam(league, team, year) && dealsAt(league, team, year).length > 0;
+
+/**
+ * 계획용 스폰서 (그 해 돈, 보너스 없음): 걸린 계약 + 빈 자리는 그 시즌 제안 중 기대 연액이 가장 큰 것 (개막 때 자동 계약과 같은 규칙).
+ * 계약도 제안도 없으면 null (예전 공식)
+ */
+export function plannedSponsor(league: LeagueState, team: number, year: number): number | null {
+  if (isFuturesTeam(league, team, year)) return null;
+  const deals = dealsAt(league, team, year);
+  const offers = league.finance?.[team]?.sponsorOffers;
+  const extra = offers?.year === year
+    ? emptySlots(league, team, year).reduce((s, slot) => { const l = offers.slots[slot]; return s + (l?.length ? l[bestOffer(l)].amount : 0); }, 0) : 0;
+  if (!deals.length && !extra) return null;
+  return contractSponsor(league, team, year, extra);
+}
+
+/** 계약 스폰서 연액 (기본액 + 보너스, 그 해 돈) + 구단 이름 스폰서 */
+function contractSponsor(league: LeagueState, team: number, year: number, bonus: number): number {
+  const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
+  const wage = wageIndex(year, league);
+  return Math.round((dealsBase(dealsAt(league, team, year)) + bonus) * wage * inc) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
+}
+
+/** 상품·식음 관중 한 명당 (만 원, 그 해 돈): 1인 구매액 × 팬 배율 × (1 + 2 × 스타) × 마케팅 × 프런트 ÷ 시대 관중 배율 (재정 2 F4a, 임시값) */
+export function merchPerFan(league: LeagueState, team: number, year: number, star: number, opt?: PopularityOpt): number {
+  const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
+  const fan = fanSponsor(fanLevel(league, team, year));
+  const mk = marketingAt(MARKETING_SPONSOR, opt?.mk ?? marketingStock(league, team));
+  const front = frontScale(opt?.front ?? activeBudgetOf(league, team, 'front'));
+  return (MERCH_PER_FAN * wageIndex(year, league) * inc * fan * (1 + 2 * star) * mk * front) / eraFillScale(year);
+}
+
 /** 스폰서·상품 수입 (인기도 × 기본액 + 구단 이름 스폰서). opt: 계획 셈에서 쓸 마케팅 쌓인 효과·프런트 예산 */
-function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number, year: number, opt?: PopularityOpt): number {
+export function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number, year: number, opt?: PopularityOpt): number {
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
   const wage = wageIndex(year, league);
   return Math.round(SPONSOR_BASE * wage * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star, opt))) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
@@ -1046,7 +1105,7 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
     ks.days.forEach((games, day) => {
       for (const g of games) {
         if (g.home !== team) continue;
-        const gg = gameGate(cap, fillRate(league, team, winPct, star, day, year, g.away), ticket, prices);
+        const gg = gameGate(cap, demandRate(league, team, winPct, star, day, year, g.away), ticket, prices);
         sum += gg.revenue;
         n++;
         for (const k of SEAT_GRADES) { seats[k].fans += gg.seats[k]; seats[k].gate += gg.seats[k] * ticket * seatFactor(k) * prices[k]; }
@@ -1088,7 +1147,10 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
   const b = budget ?? budgetOf(fin, !inSeason);
   const popOpt: PopularityOpt | undefined = inSeason && !budget ? undefined
     : { front: b.front, mk: inSeason ? undefined : stepMarketing(marketingStock(league, team), investStep('marketing', b.marketing)) };
-  add('sponsor', sponsorAmount(league, team, futures, winPct, 0, star, year, popOpt));
+  const planned = plannedSponsor(league, team, year);
+  add('sponsor', planned ?? sponsorAmount(league, team, futures, winPct, 0, star, year, popOpt));
+  // 상품·식음 (재정 2 F4a): 예상 관중 × 한 명당
+  if (planned !== null) add('merch', SEAT_GRADES.reduce((s, k) => s + seats[k].fans, 0) * merchPerFan(league, team, year, star, popOpt));
   // 지출
   const roster = rosterAt(league, team, -1, []);
   add('payroll', -roster.filter((p) => !p.foreign).reduce((s, p) => s + payOf(p), 0));
@@ -1137,7 +1199,12 @@ export function budgetRows(input: SeasonInput, team: number, upToDay: number, pl
   const rec = team < world.teams.length ? season.teams[team] : null;
   const pct = rec && rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : plan.winPct;
   const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
-  end.sponsor = sponsorAmount(league, team, isFuturesTeam(league, team, year), pct, 0, star, year);
+  if (sponsorModelOn(league, team, year)) {
+    // 계약 스폰서는 고정 (보너스는 결산 때), 상품·식음은 지금까지 + 남은 홈 경기 × 지금까지 경기당
+    end.sponsor = contractSponsor(league, team, year, 0);
+    const per = full.homeGames ? (full.items.merch ?? 0) / full.homeGames : 0;
+    end.merch = (full.items.merch ?? 0) + Math.round(per * Math.max(0, plan.homeGames - full.homeGames));
+  } else end.sponsor = sponsorAmount(league, team, isFuturesTeam(league, team, year), pct, 0, star, year);
   if (plan.items.stadium && !booked.stadium) end.stadium = plan.items.stadium;
   const kinds = new Set<FinanceKind>([...Object.keys(plan.items), ...Object.keys(sofar), ...Object.keys(end)] as FinanceKind[]);
   return [...kinds].map((kind) => ({ kind, plan: plan.items[kind] ?? 0, sofar: sofar[kind] ?? 0, end: end[kind] ?? 0 }))
@@ -1203,7 +1270,10 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     const pct = rec && rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5;
     const futures = isFuturesTeam(league, t, year);
     // 중계권·모기업 지원금은 지급일마다 받았다 (결산 몫은 방금 셈에 넣음). 스폰서는 실제 인기도로 다시 매겨 차액을 정산한다
-    items.sponsor = sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0, year);
+    const perGame = flows.homeGames ? flows.regular / flows.homeGames : 0;
+    items.sponsor = sponsorModelOn(league, t, year)
+      ? contractSponsor(league, t, year, dealsBonus(dealsAt(league, t, year), input.postseasonDepth(t), input.champion === t, perGame))
+      : sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0, year);
     if (input.champion === t) items.champion = Math.round(CHAMPION_BONUS * wage);
     const build = installment(league.stadiums?.[t], year);
     if (build) items.stadium = -build;
@@ -1243,6 +1313,11 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     const fanPrice = base || !flows.homeGames ? 0 : priceFanDelta(priceIndexOf(flows.seats, flows.prices));
     fansSeasonEnd(league, t, year, pct, input.postseasonDepth(t), input.champion === t, parkOf(league, t).market,
       fanPrice ? [[fanPrice, `${year} 입장권 가격`]] : []);
+    // 다음 시즌 스폰서 빈 자리 제안 (재정 2 F4a): 이 시즌 인기도(팬 결산 뒤)와 홈 경기당 관중으로
+    if (!isFuturesTeam(league, t, year + 1)) {
+      const pop = popularity(league, t, pct, input.postseasonDepth(t), stars[t] ?? 0);
+      league.finance![t].sponsorOffers = makeOffers(league, t, year + 1, pop, perGame);
+    }
   }
   // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
   league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
@@ -1264,7 +1339,8 @@ export function coverFaBonus(league: LeagueState, team: number, bonus: number, y
 
 /** 그 해(장부 연도 = 계약한 오프시즌 다음 해) 모기업 FA 계약금 지원 한도 (만 원) */
 export function faSupportCap(league: LeagueState, team: number, year = league.year): number {
-  return Math.round(PARENT_BASE[parentGrade(league, team)] * FA_SUPPORT_SHARE * wageIndex(year, league));
+  // 구단주 예산 회의에서 한도 상향을 받은 해는 1.5배 (재정 2 F4b, meeting.ts)
+  return Math.round(PARENT_BASE[parentGrade(league, team)] * FA_SUPPORT_SHARE * wageIndex(year, league) * faCapScale(league, team, year));
 }
 
 /** 그 해 남은 모기업 FA 계약금 지원 (만 원) */
@@ -1392,6 +1468,8 @@ export function lockBudgets(league: LeagueState, userTeam: number): void {
   }
   for (let t = 0; t < league.teams.length; t++) {
     const f = league.finance![t];
+    // 스폰서 빈 자리 자동 계약 (재정 2 F4a, 플레이어 구단도 고르지 않은 자리는 같은 규칙)
+    autoSignSponsors(league, t);
     const prices = pricesOf(f, true);
     if (f.prices || f.activePrices) f.activePrices = prices;
     const prevMk = marketingStock(league, t);

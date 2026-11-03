@@ -52,7 +52,7 @@ describe('① 등급 셈', () => {
     }
   });
 
-  it('값을 올리면 관중 ↓·한 명 객단가 ↑·수입 ↑ (탄력성 1 미만), 내리면 반대. 일반석이 가장 민감', () => {
+  it('값을 올리면 관중 ↓·한 명 객단가 ↑, 만원이 아닌 구단은 수입도 ↓ (꼭대기 100~125%), 내리면 관중 ↑·수입 ↓. 일반석이 가장 민감', () => {
     const cap = 20000;
     const t = 1.46;
     const b = gameGate(cap, 0.6, t, basePrices());
@@ -60,18 +60,29 @@ describe('① 등급 셈', () => {
     const dn = gameGate(cap, 0.6, t, all(0.8));
     expect(up.fans).toBeLessThan(b.fans);
     expect(up.revenue / up.fans).toBeGreaterThan(b.revenue / b.fans);
-    expect(up.revenue).toBeGreaterThan(b.revenue);
+    expect(up.revenue).toBeLessThan(b.revenue);
+    expect(gameGate(cap, 0.6, t, all(1.5)).revenue).toBeLessThan(b.revenue);
     expect(dn.fans).toBeGreaterThan(b.fans);
     expect(dn.revenue).toBeLessThan(b.revenue);
+    expect(gameGate(cap, 0.6, t, all(0.7)).revenue).toBeLessThan(b.revenue);
     const drop = (g: 'general' | 'reserved' | 'premium') => 1 - seatFill(0.6, g, 1.3) / 0.6;
     expect(drop('general')).toBeGreaterThan(drop('reserved'));
     expect(drop('reserved')).toBeGreaterThan(drop('premium'));
+    // 한 등급 수입 꼭대기 = −1/탄력성
+    const peak = (g: 'general' | 'reserved' | 'premium') => -1 / SEAT[g].elastic;
+    expect(peak('general')).toBeCloseTo(1, 6);
+    expect(peak('premium')).toBeGreaterThan(peak('reserved'));
+    expect(peak('premium')).toBeLessThanOrEqual(1.25 + 1e-9);
   });
 
-  it('만원 가까운 경기(수요 0.9 이상)는 넘친 수요로 덜 빠지고, 값을 내려도 관중률은 1을 넘지 않는다', () => {
-    const rel = (f: number) => seatFill(f, 'premium', 1.5) / f;
-    expect(rel(0.95)).toBeGreaterThan(rel(0.6));
+  it('넘친 수요(좌석보다 큰 수요)는 값을 올려도 그만큼 빠지지 않아 만원 구단만 올려서 이득, 관중률은 1을 넘지 않는다', () => {
+    const b = gameGate(10000, 1.2, 1.46, basePrices());
+    expect(b.fans).toBe(10000);
+    expect(gameGate(10000, 1.2, 1.46, all(1.1)).revenue).toBeGreaterThan(b.revenue);
+    expect(gameGate(10000, 1.2, 1.46, all(1.1)).fans).toBe(10000);
+    expect(gameGate(10000, 0.8, 1.46, all(1.1)).revenue).toBeLessThan(gameGate(10000, 0.8, 1.46, basePrices()).revenue * 1.01);
     expect(seatFill(0.95, 'general', 0.7)).toBe(1);
+    expect(seatFill(1.3, 'general', 1)).toBe(1);
     expect(gameGate(10000, 1, 1.46, all(0.7)).fans).toBe(10000);
   });
 
