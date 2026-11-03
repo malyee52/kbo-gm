@@ -55,12 +55,15 @@ export const OPS_KINDS: OpsKind[] = ['opsFront', 'opsGame', 'opsPark', 'opsFutur
  * 임시값 (근거 없음, 재정 2 기획안 4.4). 퓨처스 구단은 합과 함께 각각 × FUTURES_OPS_SHARE
  */
 export const OPS_SPLIT: Record<OpsKind, number> = { opsFront: 600_000, opsGame: 500_000, opsPark: 450_000, opsFutures: 470_000 };
-/** 운영비 한 번 지급액(total)을 네 줄로 나눈다. 반올림 나머지는 원정·경기 운영에 (합이 늘 total) */
-export function splitOps(total: number): Record<OpsKind, number> {
-  const all = OPS_KINDS.reduce((s, k) => s + OPS_SPLIT[k], 0);
-  const front = Math.round((total * OPS_SPLIT.opsFront) / all);
-  const park = Math.round((total * OPS_SPLIT.opsPark) / all);
-  const futures = Math.round((total * OPS_SPLIT.opsFutures) / all);
+/**
+ * 운영비 한 번 지급액(total)을 네 줄로 나눈다. 반올림 나머지는 원정·경기 운영에 (합이 늘 total).
+ * w는 네 줄 몫 (재정 2 F2: 프런트·2군은 그 구단 예산, opsWeights), 없으면 기본 몫
+ */
+export function splitOps(total: number, w: Record<OpsKind, number> = OPS_SPLIT): Record<OpsKind, number> {
+  const all = OPS_KINDS.reduce((s, k) => s + w[k], 0);
+  const front = Math.round((total * w.opsFront) / all);
+  const park = Math.round((total * w.opsPark) / all);
+  const futures = Math.round((total * w.opsFutures) / all);
   return { opsFront: front, opsGame: total - front - park - futures, opsPark: park, opsFutures: futures };
 }
 /** 모기업 지원금 기본액 (등급별, 한 해, 만 원) */
@@ -129,14 +132,146 @@ export const INVEST_LABEL: Record<InvestKind, string> = {
  * 전: 스카우트 아마추어·프로 각 0·5·12·20억, 육성 0·15·30·50억, 의료 0·10·20·35억, 마케팅 0·10·25·45억 (모두 3단계 연 170억).
  * 목표: 모두 3단계여도 B 등급 중위 구단이 투자 때문에 적자로 돌아서지 않고(투자는 연봉·FA보다 작은 몫), 높은 단계일수록 비싸게 (단계 사이 비율은 대략 그대로).
  * 측정은 tools/invest_cost.ts (reports/invest-cost-before.md → reports/invest-cost.md)
+ * 재정 2 F2 (docs/재정2_기획안.md 4.2): 투자는 금액 예산이고 이 표는 화면 눈금(0·1·2·3단계 금액)이다. 체감 곡선 조건(1단계 ÷ 3단계 < 1/3) 때문에
+ * 스카우트 둘의 3단계 눈금을 2.5 → 3.5억, 육성을 6 → 7억으로 올렸다
  */
 export const INVEST_COST: Record<InvestKind, number[]> = {
-  scout: [0, 10_000, 15_000, 25_000],
-  scoutPro: [0, 10_000, 15_000, 25_000],
-  develop: [0, 20_000, 35_000, 60_000],
+  scout: [0, 10_000, 15_000, 35_000],
+  scoutPro: [0, 10_000, 15_000, 35_000],
+  develop: [0, 20_000, 35_000, 70_000],
   medical: [0, 10_000, 20_000, 40_000],
   marketing: [0, 50_000, 120_000, 200_000],
 };
+
+// ---- 예산 (재정 2 F2, docs/재정2_기획안.md 4.2~4.4)
+
+/** 예산 줄: 투자 5갈래 + 프런트·2군 운영 (운영비 넷 중 조절하는 둘) */
+export type BudgetKind = InvestKind | 'front' | 'futures';
+export const BUDGET_KINDS: BudgetKind[] = ['scout', 'scoutPro', 'develop', 'medical', 'marketing', 'front', 'futures'];
+export const BUDGET_LABEL: Record<BudgetKind, string> = { ...INVEST_LABEL, front: '프런트', futures: '2군 운영' };
+/** 예산 금액 단위 (1천만 원 = 1,000만 원) */
+export const BUDGET_UNIT = 1_000;
+/** 투자 금액 상한 = 3단계 눈금 × 이 배율 (1천만 원 단위로 내림, 임시값: B 구단이 모두 상한이어도 3시즌 수지 ≥ 0, tools/invest_cost.ts) */
+export const INVEST_CAP_SCALE = 1.5;
+/** 프런트·2군 운영 범위 (만 원, 2026년 돈, 임시값). 기본값은 운영비 넷의 기본 몫 (OPS_SPLIT) */
+export const OPS_BUDGET_RANGE: Record<'front' | 'futures', [number, number]> = { front: [450_000, 800_000], futures: [350_000, 650_000] };
+/** 예산 줄 범위 [하한, 상한] (만 원, 2026년 돈) */
+export function budgetRange(kind: BudgetKind): [number, number] {
+  if (kind === 'front' || kind === 'futures') return OPS_BUDGET_RANGE[kind];
+  return [0, Math.floor((INVEST_COST[kind][3] * INVEST_CAP_SCALE) / BUDGET_UNIT) * BUDGET_UNIT];
+}
+/**
+ * 체감 곡선 상수 k (만 원): s(a) = 3 × (1 − e^(−a/k)) / (1 − e^(−A3/k)), s(1단계 눈금) = 1이 되게 이분법으로 정한 값 (tests/finance2.test.ts가 확인).
+ * 1단계 ÷ 3단계 비가 같은 갈래는 k ÷ A3가 같다 (스카우트·육성 1/3.5, 의료·마케팅 1/4)
+ */
+export const INVEST_K: Record<InvestKind, number> = {
+  scout: 77_155.576, scoutPro: 77_155.576, develop: 154_311.152, medical: 47_605.474, marketing: 238_027.372,
+};
+/** 곡선 그대로의 효과 단계 (눈금에서 딱 맞추기 전) */
+export function investCurve(kind: InvestKind, amount: number): number {
+  const k = INVEST_K[kind];
+  const a3 = INVEST_COST[kind][3];
+  return (3 * (1 - Math.exp(-Math.max(0, amount) / k))) / (1 - Math.exp(-a3 / k));
+}
+/**
+ * 투자 금액 → 효과 단계 s (소수, 0~약 4). s(0) = 0, s(1단계 눈금) = 1, s(3단계 눈금) = 3은 정확히 (기본값 = 예전 효과), 그 사이는 오목 (1억당 효과가 줄어듦).
+ * 3단계 위(상한까지)도 곡선대로 오른다
+ */
+export function investStep(kind: InvestKind, amount: number): number {
+  if (amount <= 0) return 0;
+  if (amount === INVEST_COST[kind][1]) return 1;
+  if (amount === INVEST_COST[kind][3]) return 3;
+  return investCurve(kind, amount);
+}
+/** 단계 표(0~3)를 효과 단계 s로 잇는다. 3단계 위는 마지막 구간 기울기의 절반으로 늘리고(임시값), floor/ceil로 막는다 */
+export function stepAt(table: number[], s: number, limit?: number): number {
+  const last = table.length - 1;
+  const x = Math.max(0, s);
+  if (x <= last) {
+    const i = Math.min(last - 1, Math.floor(x));
+    return table[i] + (table[i + 1] - table[i]) * (x - i);
+  }
+  const v = table[last] + ((table[last] - table[last - 1]) / 2) * (x - last);
+  if (limit === undefined) return v;
+  return table[last] < table[0] ? Math.max(limit, v) : Math.min(limit, v);
+}
+/** 3단계 위 효과의 막는 값 (임시값): 의료 부상 확률·결장 배율 0.7, 스카우트 추측 폭 배율 0.4 (천장 추측 폭은 같은 비율로 3.6등급) */
+export const MEDICAL_FLOOR = 0.7;
+export const SCOUT_FLOOR = 0.4;
+export const CEIL_SIGMA_FLOOR = 3.6;
+/** 운영 예산 효과 (임시값, 선형): 프런트 45억 0.95 · 60억 1 · 80억 1.05 → 스폰서·상품 배율, 2군 운영 35억 0.8 · 47억 1 · 65억 1.2 → 2군 성장 기회 배율 */
+export const FRONT_SPONSOR: [number, number] = [0.95, 1.05];
+export const FUTURES_GROWTH: [number, number] = [0.8, 1.2];
+function opsScale(kind: 'front' | 'futures', amount: number, ends: [number, number]): number {
+  const [lo, hi] = OPS_BUDGET_RANGE[kind];
+  const base = kind === 'front' ? OPS_SPLIT.opsFront : OPS_SPLIT.opsFutures;
+  const a = Math.max(lo, Math.min(hi, amount));
+  if (a === base) return 1;
+  return a < base ? 1 - ((1 - ends[0]) * (base - a)) / (base - lo) : 1 + ((ends[1] - 1) * (a - base)) / (hi - base);
+}
+export const frontScale = (amount: number) => opsScale('front', amount, FRONT_SPONSOR);
+export const futuresScale = (amount: number) => opsScale('futures', amount, FUTURES_GROWTH);
+
+/** 재무팀 추천안 (임시값, 2026년 돈 기준 금액, wageIndex를 곱하지 않는다). 균형 = 지금 1단계 + 운영비 기본값 */
+export type BudgetPreset = 'balance' | 'winnow' | 'develop' | 'frugal';
+export const BUDGET_PRESETS: BudgetPreset[] = ['balance', 'winnow', 'develop', 'frugal'];
+export const PRESET_LABEL: Record<BudgetPreset, string> = { balance: '균형', winnow: '윈나우', develop: '육성', frugal: '긴축' };
+export const PRESET_BUDGET: Record<BudgetPreset, Record<BudgetKind, number>> = {
+  balance: { scout: 10_000, scoutPro: 10_000, develop: 20_000, medical: 10_000, marketing: 50_000, front: 600_000, futures: 470_000 },
+  winnow: { scout: 10_000, scoutPro: 25_000, develop: 20_000, medical: 30_000, marketing: 120_000, front: 600_000, futures: 420_000 },
+  develop: { scout: 25_000, scoutPro: 10_000, develop: 50_000, medical: 10_000, marketing: 50_000, front: 550_000, futures: 550_000 },
+  frugal: { scout: 5_000, scoutPro: 5_000, develop: 10_000, medical: 5_000, marketing: 20_000, front: 500_000, futures: 400_000 },
+};
+const isInvestKind = (k: BudgetKind): k is InvestKind => k !== 'front' && k !== 'futures';
+/** 금액에 가장 가까운 눈금 단계 (예전 invest·active 칸을 채운다. 효과에는 쓰지 않는다) */
+export function nearestLevel(kind: InvestKind, amount: number): number {
+  let best = 0;
+  for (let i = 1; i < 4; i++) if (Math.abs(INVEST_COST[kind][i] - amount) < Math.abs(INVEST_COST[kind][best] - amount)) best = i;
+  return best;
+}
+/**
+ * 예산 (만 원, 2026년 돈). planned = 다음 시즌 계획(budget), 아니면 이번 시즌 확정(activeBudget).
+ * 칸이 없는 예전 저장은 투자 단계(invest·active) → 그 단계 눈금 금액, 프런트·2군은 기본값
+ */
+export function budgetOf(f: TeamFinance | undefined, planned: boolean): Record<BudgetKind, number> {
+  const src = planned ? f?.budget : f?.activeBudget;
+  const lv = planned ? f?.invest : f?.active ?? f?.invest;
+  const out = {} as Record<BudgetKind, number>;
+  for (const k of BUDGET_KINDS) {
+    out[k] = src?.[k] ?? (isInvestKind(k) ? INVEST_COST[k][lv?.[k] ?? 0] ?? 0 : PRESET_BUDGET.balance[k]);
+  }
+  return out;
+}
+/** 고정한 줄 (자동 배분이 건드리지 않음). 칸이 없는 예전 저장은 1단계가 아닌 투자 갈래를 고정으로 본다 (플레이어가 고른 것) */
+export function lockedOf(f: TeamFinance | undefined): BudgetKind[] {
+  if (!f) return [];
+  return f.locked ?? INVEST_KINDS.filter((k) => (f.invest?.[k] ?? 1) !== 1);
+}
+/** 예산 한 줄의 효과 설명 (화면용, 금액 → 효과 단계 s → 효과 표). 숨은 값은 쓰지 않는다 */
+export function budgetEffect(kind: BudgetKind, amount: number): string {
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  if (kind === 'front') return `스폰서·상품 수입 × ${frontScale(amount).toFixed(3)}`;
+  if (kind === 'futures') return `2군 출전 성장 기회 × ${futuresScale(amount).toFixed(2)} (${FUTURES_GROWTH_AGE}세 이하)`;
+  const s = investStep(kind, amount);
+  const st = `효과 ${s.toFixed(2)}단계`;
+  if (!s) return '효과 없음' + (kind === 'marketing' ? ' (쌓인 효과가 천천히 빠짐)' : '');
+  switch (kind) {
+    case 'scout': return `${st}: 신인 천장 추측 폭 ±${stepAt(CEIL_SIGMA, s, CEIL_SIGMA_FLOOR).toFixed(1)}등급, 신인 능력 추측 범위 −${pct(1 - stepAt(SCOUT_SCALE, s, SCOUT_FLOOR))}`;
+    case 'scoutPro': return `${st}: 다른 구단·시장 선수 능력 추측 범위 −${pct(1 - stepAt(SCOUT_SCALE, s, SCOUT_FLOOR))}`;
+    case 'develop': return `${st}: ${DEVELOP_AGE}세 이하 성장 폭 +${pct(stepAt(DEVELOP_BONUS, s))}, 2군 출전 몫 +${stepAt(DEVELOP_SHARE, s).toFixed(3)}`;
+    case 'medical': { const m = medicalScale(s); return `${st}: 부상 확률 −${pct(1 - m.rate)}, 결장 기간 −${pct(1 - m.days)}`; }
+    case 'marketing': return `${st}: 다 쌓이면 관중률 +${(stepAt(MARKETING_FILL, s) * 100).toFixed(1)}%p, 스폰서·상품 +${pct(stepAt(MARKETING_SPONSOR, s) - 1)} (개막마다 조금씩 쌓임)`;
+  }
+}
+/** 2군 운영 예산 효과를 받는 나이 (offseason.ts FUTURES_AGE와 같음) */
+const FUTURES_GROWTH_AGE = 25;
+
+/** 예산 계획을 바꾸고 예전 칸(invest)을 가까운 눈금으로 맞춘다 */
+function writeBudget(f: TeamFinance, b: Record<BudgetKind, number>): void {
+  f.budget = { ...b };
+  f.invest = { ...f.invest };
+  for (const k of INVEST_KINDS) f.invest[k] = nearestLevel(k, b[k]);
+}
 /**
  * 마케팅 단계별 관중률 보정과 스폰서 배율 (다 쌓였을 때). 효과는 단계가 아니라 쌓인 효과(TeamFinance.mk, 단계 단위)로 내고 그 사이는 잇는다.
  * 2026-10-29 사용자: "무조건 수익이 나게하면 3단계를 안할 이유가 전혀 없잖아. 말 그대로 투자라고 투자. 점진적인 증가가 와야지".
@@ -184,6 +319,12 @@ export interface TeamFinance {
    * 없으면(새 게임, 2026-10-29 전 저장) 지금 단계만큼 다 쌓인 것으로 본다
    */
   mk?: number;
+  /** 다음 시즌 예산 계획 (만 원, 2026년 돈, 재정 2 F2). 없으면 invest 단계의 눈금 금액과 운영비 기본값 */
+  budget?: Partial<Record<BudgetKind, number>>;
+  /** 이번 시즌 확정 예산 (개막 때 budget에서). 없으면 active 단계의 눈금 금액 */
+  activeBudget?: Partial<Record<BudgetKind, number>>;
+  /** 고정한 줄 (해마다 결산 뒤 자동 배분이 남겨 둠, 플레이어 구단). 없으면 lockedOf가 invest에서 짐작 */
+  locked?: BudgetKind[];
   /** 지난 결산들 */
   history: FinanceYear[];
 }
@@ -222,26 +363,40 @@ export const FINANCE_LABEL: Record<FinanceKind, string> = {
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
 const startInvest = (): Record<InvestKind, number> => ({ scout: 1, scoutPro: 1, develop: 1, medical: 1, marketing: 1 });
 
-/** 이번 시즌에 적용 중인 투자 단계 */
+/** 이번 시즌 확정 예산에 가장 가까운 눈금 단계 (화면 눈금·예전 도구용. 효과는 activeStep) */
 export function activeLevel(league: Pick<LeagueState, 'finance'>, team: number, kind: InvestKind): number {
   const f = league.finance?.[team];
+  if (f?.activeBudget?.[kind] !== undefined) return nearestLevel(kind, f.activeBudget[kind]!);
   return (f?.active ?? f?.invest)?.[kind] ?? 0;
+}
+
+/** 이번 시즌 효과 단계 s (소수, 재정 2 F2): 확정 예산 금액을 체감 곡선으로 */
+export function activeStep(league: Pick<LeagueState, 'finance'>, team: number, kind: InvestKind): number {
+  return investStep(kind, budgetOf(league.finance?.[team], false)[kind]);
+}
+
+/** 이번 시즌 확정 예산 한 줄 (만 원, 2026년 돈) */
+export function activeBudgetOf(league: Pick<LeagueState, 'finance'>, team: number, kind: BudgetKind): number {
+  return budgetOf(league.finance?.[team], false)[kind];
+}
+
+/** 의료 효과 (부상 확률 배율, 결장 기간 배율) */
+export function medicalScale(s: number): { rate: number; days: number } {
+  return { rate: stepAt(MEDICAL_RATE, s, MEDICAL_FLOOR), days: stepAt(MEDICAL_DAYS, s, MEDICAL_FLOOR) };
 }
 
 /** 마케팅 쌓인 효과 (단계 단위, TeamFinance.mk) */
 export function marketingStock(league: Pick<LeagueState, 'finance'>, team: number): number {
   const f = league.finance?.[team];
-  return f?.mk ?? activeLevel(league, team, 'marketing');
+  return f?.mk ?? activeStep(league, team, 'marketing');
 }
 
-/** 단계별 표를 쌓인 효과(소수 단계)로 잇는다 */
+/** 단계별 표를 쌓인 효과(소수 단계)로 잇는다. 3단계 위는 마지막 구간 기울기의 절반 (stepAt) */
 export function marketingAt(table: number[], stock: number): number {
-  const s = Math.max(0, Math.min(table.length - 1, stock));
-  const i = Math.min(table.length - 2, Math.floor(s));
-  return table[i] + (table[i + 1] - table[i]) * (s - i);
+  return stepAt(table, stock);
 }
 
-/** 개막 때 마케팅 쌓인 효과를 한 해만큼 옮긴다 (전 쌓인 효과 → 이번 시즌 단계 쪽으로) */
+/** 개막 때 마케팅 쌓인 효과를 한 해만큼 옮긴다 (전 쌓인 효과 → 이번 시즌 효과 단계 s 쪽으로) */
 export function stepMarketing(prev: number, level: number): number {
   const v = prev + (level - prev) * (level > prev ? MARKETING_UP : MARKETING_DOWN);
   return Math.round(v * 1000) / 1000;
@@ -436,22 +591,34 @@ function rosterAt(league: LeagueState, team: number, day: number, trades: TradeM
   return out;
 }
 
-/** 그 해 운영비 연간 합 (네 줄 합, 퓨처스 구단은 × FUTURES_OPS_SHARE, 연봉 상승 지수 반영) */
-export function opsCost(league: LeagueState, team: number, year: number): number {
-  return (isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wageIndex(year, league);
+/** 운영비 네 줄 몫 (2026년 돈): 프런트·2군 운영은 그 구단 예산 (planned = 다음 시즌 계획), 원정·경기 운영·구장 운영은 기본 몫 */
+export function opsWeights(f: TeamFinance | undefined, planned = false): Record<OpsKind, number> {
+  const b = budgetOf(f, planned);
+  return { opsFront: b.front, opsGame: OPS_SPLIT.opsGame, opsPark: OPS_SPLIT.opsPark, opsFutures: b.futures };
 }
 
-/** 투자 연간 비용 합. only를 주면 그 갈래만 (장부의 투자·스카우트비 나누기) */
-export function investCost(f: TeamFinance | undefined, planned = false, wage = 1, only?: (k: InvestKind) => boolean): number {
-  if (!f) return 0;
-  const lv = planned ? f.invest : f.active ?? f.invest;
-  return INVEST_KINDS.filter((k) => !only || only(k)).reduce((s, k) => s + investCostOf(k, lv[k] ?? 0, wage), 0);
+/** 그 해 운영비 연간 합 (네 줄 합, 퓨처스 구단은 × FUTURES_OPS_SHARE, 연봉 상승 지수 반영). 프런트·2군은 그 구단 예산 */
+export function opsCost(league: LeagueState, team: number, year: number, planned = false): number {
+  const w = opsWeights(league.finance?.[team], planned);
+  const all = OPS_KINDS.reduce((s, k) => s + w[k], 0);
+  return (isFuturesTeam(league, team, year) ? all * FUTURES_OPS_SHARE : all) * wageIndex(year, league);
+}
+
+/** 투자 연간 비용 합 (예산 금액 × 연봉 상승 지수). only를 주면 그 갈래만 (장부의 투자·스카우트비 나누기). budget을 주면 그 예산으로 */
+export function investCost(f: TeamFinance | undefined, planned = false, wage = 1, only?: (k: InvestKind) => boolean, budget?: Record<BudgetKind, number>): number {
+  if (!f && !budget) return 0;
+  const b = budget ?? budgetOf(f, planned);
+  return INVEST_KINDS.filter((k) => !only || only(k)).reduce((s, k) => s + budgetCostOf(b[k] ?? 0, wage), 0);
 }
 const isScoutKind = (k: InvestKind) => SCOUT_KINDS.includes(k);
 
-/** 투자 한 항목의 그 해 연간 비용 (INVEST_COST × 연봉 상승 지수, 10만 원 단위 아래는 반올림) */
+/** 투자 한 항목의 그 해 연간 비용 (눈금 단계 금액 × 연봉 상승 지수, 10만 원 단위 아래는 반올림) */
 export function investCostOf(kind: InvestKind, level: number, wage = 1): number {
-  return Math.round((INVEST_COST[kind][level] * wage) / 10) * 10;
+  return budgetCostOf(INVEST_COST[kind][level], wage);
+}
+/** 예산 금액(2026년 돈)의 그 해 비용 (연봉 상승 지수, 10만 원 단위 아래는 반올림) */
+export function budgetCostOf(amount: number, wage = 1): number {
+  return Math.round((amount * wage) / 10) * 10;
 }
 
 /**
@@ -578,6 +745,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const scouting = investCost(fin, false, wage, isScoutKind);
   const coach = coachPayroll(league, team) + managerPayroll(league, team);
   const ops = opsCost(league, team, year);
+  const opsW = opsWeights(fin);
   pays.forEach((pd, i) => {
     if (pd.when === 'settle' ? !input.settle : pd.when === 'day' && pd.day >= upToDay) return;
     const roster = rosterAt(league, team, pd.day, input.trades ?? []);
@@ -586,7 +754,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const share = (x: number) => Math.round((x * pd.months.length) / PAY_COUNT);
     const parts: [FinanceKind, number][] = [
       ['payroll', -share(dom)], ['foreign', -share(fgn)],
-      ...(Object.entries(splitOps(-share(ops))) as [FinanceKind, number][]), ['invest', -share(invest)],
+      ...(Object.entries(splitOps(-share(ops), opsW)) as [FinanceKind, number][]), ['invest', -share(invest)],
       ['scouting', -share(scouting)], ['coach', -share(coach)],
       ['broadcast', share(yearly.broadcast)], ['parent', share(yearly.parent)], ['sponsor', share(yearly.sponsor)],
     ];
@@ -613,11 +781,11 @@ export function seasonIncome(league: LeagueState, world: World, team: number): {
   };
 }
 
-/** 스폰서·상품 수입 (인기도 × 기본액 + 구단 이름 스폰서) */
-function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number, year: number): number {
+/** 스폰서·상품 수입 (인기도 × 기본액 + 구단 이름 스폰서). opt: 계획 셈에서 쓸 마케팅 쌓인 효과·프런트 예산 */
+function sponsorAmount(league: LeagueState, team: number, futures: boolean, winPct: number, depth: number, star: number, year: number, opt?: PopularityOpt): number {
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
   const wage = wageIndex(year, league);
-  return Math.round(SPONSOR_BASE * wage * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
+  return Math.round(SPONSOR_BASE * wage * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star, opt))) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
 }
 
 // ---- 예산안: 계획·지금까지·시즌 끝 예상 (재정 2 F1a, docs/재정2_기획안.md 4.3·6장)
@@ -645,7 +813,7 @@ export interface PlanInput {
  * 연봉은 지금(시즌 중이면 개막 때) 소속 선수 연봉 합, 운영비·투자·감독·코치·중계권·모기업은 그 해 금액,
  * 장부에 이미 적힌 그 해 항목(오프시즌 계약금·보상금 등)은 그대로 넣는다. 난수를 쓰지 않는다 (관중률 잡음은 날짜별 고정 시드)
  */
-export function financePlan(input: PlanInput, team: number, year: number): FinancePlan {
+export function financePlan(input: PlanInput, team: number, year: number, budget?: Record<BudgetKind, number>): FinancePlan {
   const { league, world, season } = input;
   const items: Partial<Record<FinanceKind, number>> = {};
   const add = (k: FinanceKind, v: number) => { if (v) items[k] = (items[k] ?? 0) + Math.round(v); };
@@ -691,14 +859,20 @@ export function financePlan(input: PlanInput, team: number, year: number): Finan
     const trust = league.owner?.team === team ? league.owner.trust : 50;
     add('parent', parentSupport(league, team, trust, cashOf(league, team), year));
   }
-  add('sponsor', sponsorAmount(league, team, futures, winPct, 0, star, year));
+  // 다음 시즌 계획(오프시즌)은 계획 예산으로: 마케팅 쌓인 효과는 개막 때 한 해만큼 옮긴 값, 프런트는 계획 금액
+  const b = budget ?? budgetOf(fin, !inSeason);
+  const popOpt: PopularityOpt | undefined = inSeason && !budget ? undefined
+    : { front: b.front, mk: inSeason ? undefined : stepMarketing(marketingStock(league, team), investStep('marketing', b.marketing)) };
+  add('sponsor', sponsorAmount(league, team, futures, winPct, 0, star, year, popOpt));
   // 지출
   const roster = rosterAt(league, team, -1, []);
   add('payroll', -roster.filter((p) => !p.foreign).reduce((s, p) => s + payOf(p), 0));
   add('foreign', -roster.filter((p) => p.foreign).reduce((s, p) => s + payOf(p), 0));
-  for (const [k, v] of Object.entries(splitOps(-Math.round(opsCost(league, team, year)))) as [FinanceKind, number][]) add(k, v);
-  add('invest', -investCost(fin, !inSeason, wage, (k) => !isScoutKind(k)));
-  add('scouting', -investCost(fin, !inSeason, wage, isScoutKind));
+  const opsW: Record<OpsKind, number> = { ...OPS_SPLIT, opsFront: b.front, opsFutures: b.futures };
+  const opsAll = OPS_KINDS.reduce((s, k) => s + opsW[k], 0) * (futures ? FUTURES_OPS_SHARE : 1) * wage;
+  for (const [k, v] of Object.entries(splitOps(-Math.round(opsAll), opsW)) as [FinanceKind, number][]) add(k, v);
+  add('invest', -investCost(fin, !inSeason, wage, (k) => !isScoutKind(k), b));
+  add('scouting', -investCost(fin, !inSeason, wage, isScoutKind, b));
   add('coach', -(coachPayroll(league, team) + managerPayroll(league, team)));
   const build = installment(league.stadiums?.[team], year);
   if (build) add('stadium', -build);
@@ -747,11 +921,18 @@ export function budgetRows(input: SeasonInput, team: number, upToDay: number, pl
 
 // ---- 결산
 
-/** 인기도: 성적·가을야구·연고·스타·팬 (0.6~1.4) × 마케팅 (쌓인 효과, 상한 밖에서 곱한다. 2026-10-29) */
-export function popularity(league: LeagueState, team: number, winPct: number, postseasonRound: number, star: number): number {
+/** 인기도 셈에 덮어쓸 값 (예산안 계획: 다음 시즌 마케팅 쌓인 효과·프런트 예산) */
+export interface PopularityOpt { mk?: number; front?: number }
+
+/**
+ * 인기도: 성적·가을야구·연고·스타·팬 (0.6~1.4) × 마케팅 (쌓인 효과, 상한 밖에서 곱한다. 2026-10-29)
+ * × 프런트 예산 배율 (재정 2 F2, 0.95~1.05, frontScale)
+ */
+export function popularity(league: LeagueState, team: number, winPct: number, postseasonRound: number, star: number, opt?: PopularityOpt): number {
   const fan = fanSponsor(fanLevel(league, team, league.year));
   const v = (1 + 1.2 * (winPct - 0.5) + 0.06 * postseasonRound + 2 * parkOf(league, team).market + 2 * star) * fan;
-  return Math.max(0.6, Math.min(1.4, v)) * marketingAt(MARKETING_SPONSOR, marketingStock(league, team));
+  const front = frontScale(opt?.front ?? activeBudgetOf(league, team, 'front'));
+  return Math.max(0.6, Math.min(1.4, v)) * marketingAt(MARKETING_SPONSOR, opt?.mk ?? marketingStock(league, team)) * front;
 }
 
 /**
@@ -876,46 +1057,114 @@ export function trustFromFinance(y: FinanceYear): number {
 
 const eokShort = (man: number) => `${Math.round(man / 1000) / 10}억 원`;
 
-/** 투자 계획을 바꾼다 (오프시즌, 다음 시즌부터 적용) */
+/** 투자 계획을 바꾼다 (예전 조작 'invest', 오프시즌, 다음 시즌부터). 재정 2 F2부터는 그 단계 눈금 금액의 예산(setBudget)으로 바꿔 적용한다 */
 export function setInvest(league: LeagueState, team: number, kind: InvestKind, level: number): { ok: boolean; message: string } {
   if (!INVEST_KINDS.includes(kind) || !Number.isInteger(level) || level < 0 || level > 3) return { ok: false, message: '투자 단계는 0~3입니다.' };
+  return setBudget(league, team, kind, INVEST_COST[kind][level]);
+}
+
+/** 예산 한 줄을 정한다 (오프시즌, 다음 시즌부터). 그 줄은 고정된다 (해마다 자동 배분이 남겨 둠) */
+export function setBudget(league: LeagueState, team: number, kind: BudgetKind, amount: number): { ok: boolean; message: string } {
+  if (!BUDGET_KINDS.includes(kind)) return { ok: false, message: '없는 예산 줄입니다.' };
+  const [lo, hi] = budgetRange(kind);
+  if (!Number.isFinite(amount) || amount % BUDGET_UNIT !== 0 || amount < lo || amount > hi) {
+    return { ok: false, message: `${BUDGET_LABEL[kind]} 예산은 ${eokShort(lo)}~${eokShort(hi)}, 1천만 원 단위입니다.` };
+  }
   ensureFinance(league);
-  league.finance![team].invest[kind] = level;
-  return { ok: true, message: `${INVEST_LABEL[kind]} ${level}단계 (다음 시즌부터, 연 ${eokShort(investCostOf(kind, level, wageIndex(league.year + 1, league)))})` };
+  const f = league.finance![team];
+  writeBudget(f, { ...budgetOf(f, true), [kind]: amount });
+  f.locked = [...new Set([...lockedOf(f), kind])].sort((a, b) => BUDGET_KINDS.indexOf(a) - BUDGET_KINDS.indexOf(b));
+  return { ok: true, message: `${BUDGET_LABEL[kind]} 예산 연 ${eokShort(budgetCostOf(amount, wageIndex(league.year + 1, league)))} (다음 시즌부터, 고정)` };
+}
+
+/** 추천안을 넣는다 (모든 줄의 고정이 풀린다) */
+export function setBudgetPreset(league: LeagueState, team: number, preset: BudgetPreset): { ok: boolean; message: string } {
+  if (!BUDGET_PRESETS.includes(preset)) return { ok: false, message: '없는 추천안입니다.' };
+  ensureFinance(league);
+  const f = league.finance![team];
+  writeBudget(f, { ...PRESET_BUDGET[preset] });
+  f.locked = [];
+  return { ok: true, message: `예산을 '${PRESET_LABEL[preset]}' 추천안으로 정했습니다 (다음 시즌부터).` };
+}
+
+/** 한 줄을 자동(균형 추천안 값)으로 되돌린다 */
+export function setBudgetAuto(league: LeagueState, team: number, kind: BudgetKind): { ok: boolean; message: string } {
+  if (!BUDGET_KINDS.includes(kind)) return { ok: false, message: '없는 예산 줄입니다.' };
+  ensureFinance(league);
+  const f = league.finance![team];
+  writeBudget(f, { ...budgetOf(f, true), [kind]: PRESET_BUDGET.balance[kind] });
+  f.locked = lockedOf(f).filter((k) => k !== kind);
+  return { ok: true, message: `${BUDGET_LABEL[kind]} 예산을 자동(균형)으로 되돌렸습니다.` };
 }
 
 /**
- * 개막 때 투자를 확정한다. AI 구단은 지난 시즌 순위와 자금으로 계획을 정한다 (임시 규칙):
- * 상위 1/3은 의료·마케팅, 하위 1/3은 스카우트·육성을 2단계, 나머지는 1단계. 연간 비용이 자금의 60%를 넘으면 높은 것부터 낮춘다.
+ * 해마다 결산 뒤(오프시즌 시작) 플레이어 구단 예산을 "균형" 추천안으로 다시 채운다. 고정한 줄은 남긴다 (재정 2 기획안 4.3, 결정 Q7).
+ * 칸이 없는 예전 저장도 이때 칸을 만든다 (고정은 lockedOf의 짐작)
  */
-export function lockInvestments(league: LeagueState, userTeam: number): void {
+export function autoBudget(league: LeagueState, team: number): void {
+  if (team < 0) return;
   ensureFinance(league);
+  const f = league.finance![team];
+  if (!f) return;
+  const locked = lockedOf(f);
+  const cur = budgetOf(f, true);
+  const next = { ...PRESET_BUDGET.balance };
+  for (const k of locked) next[k] = cur[k];
+  writeBudget(f, next);
+  f.locked = locked;
+}
+
+/** 한 단계 아래 추천안 (자금이 모자랄 때): 윈나우·육성 → 균형 → 긴축 */
+const PRESET_DOWN: Record<BudgetPreset, BudgetPreset | null> = { winnow: 'balance', develop: 'balance', balance: 'frugal', frugal: null };
+/** AI 자금 규칙: 예상 수지 < −(자금 × 이 비율)이면 한 단계 아래 추천안 (임시값) */
+export const AI_BUDGET_CASH = 0.5;
+
+/** AI 구단이 고르는 추천안: 성향 윈나우 → 윈나우, 리빌딩 → 육성, 긴축 → 긴축, 그 밖은 지난 순위 상위 ⅓ 윈나우·하위 ⅓ 육성·가운데 균형 */
+export function aiPreset(league: LeagueState, team: number): BudgetPreset {
+  const style = gmStyle(league, team);
+  if (style === 'winnow') return 'winnow';
+  if (style === 'develop') return 'develop';
+  if (style === 'frugal') return 'frugal';
   const st = league.lastSeason?.standings ?? [];
+  const r = st.indexOf(team);
+  const n = st.length || 1;
+  if (r >= 0 && r < n / 3) return 'winnow';
+  if (r >= 0 && r >= (2 * n) / 3) return 'develop';
+  return 'balance';
+}
+
+/** 오프시즌 셈용 빈 월드 (스타 보정 없음) */
+const NO_WORLD = { teams: [], year: -1 } as unknown as World;
+
+/**
+ * 개막 때 예산을 확정한다 (재정 2 F2, 예전 lockInvestments 자리). AI 구단은 추천안을 고르고(aiPreset),
+ * 그 추천안의 예상 수지가 −(자금 × AI_BUDGET_CASH)보다 나쁘면 한 단계씩 아래 추천안으로 내린다. 마케팅 쌓인 효과는 확정 금액의 효과 단계 쪽으로
+ */
+export function lockBudgets(league: LeagueState, userTeam: number): void {
+  ensureFinance(league);
   for (let t = 0; t < league.teams.length; t++) {
     const f = league.finance![t];
     if (t !== userTeam) {
-      const r = st.indexOf(t);
-      const n = st.length || 1;
-      const plan = startInvest();
-      // 스카우트 갈래 (19.3): 하위 ⅓은 아마추어 2, 상위 ⅓은 프로 2, 리빌딩 성향 아마추어 +1, 윈나우 성향 프로 +1 (해외 파견 +1번은 scoutfx.ts)
-      if (r >= 0 && r < n / 3) { plan.medical = 2; plan.marketing = 2; plan.scoutPro = 2; }
-      else if (r >= 0 && r >= (2 * n) / 3) { plan.scout = 2; plan.develop = 2; }
-      // 단장 성향 (gm.ts)
-      const style = gmStyle(league, t);
-      if (style === 'develop') { plan.develop = Math.min(3, plan.develop + 1); plan.scout = Math.min(3, plan.scout + 1); }
-      if (style === 'winnow') { plan.medical = Math.min(3, plan.medical + 1); plan.scoutPro = Math.min(3, plan.scoutPro + 1); }
-      if (style === 'frugal') for (const k of Object.keys(plan) as InvestKind[]) plan[k] = Math.max(0, plan[k] - 1);
-      const room = Math.max(0, cashOf(league, t) * 0.6);
-      const order: InvestKind[] = ['marketing', 'medical', 'scoutPro', 'scout', 'develop'];
-      for (let guard = 0; guard < 12 && investCost({ invest: plan, history: [] }, true, wageIndex(league.year, league)) > room; guard++) {
-        const k = order.filter((x) => plan[x] > 0).sort((a, b) => plan[b] - plan[a])[0];
-        if (!k) break;
-        plan[k]--;
+      let preset = aiPreset(league, t);
+      const cash = cashOf(league, t);
+      for (let guard = 0; guard < 3; guard++) {
+        const plan = financePlan({ league, world: NO_WORLD }, t, league.year, PRESET_BUDGET[preset]);
+        const net = Object.values(plan.items).reduce((s, v) => s + (v ?? 0), 0);
+        const down = PRESET_DOWN[preset];
+        if (net >= -(Math.max(0, cash) * AI_BUDGET_CASH) || !down) break;
+        preset = down;
       }
-      f.invest = plan;
+      writeBudget(f, { ...PRESET_BUDGET[preset] });
     }
+  }
+  for (let t = 0; t < league.teams.length; t++) {
+    const f = league.finance![t];
     const prevMk = marketingStock(league, t);
+    const b = budgetOf(f, true);
+    f.activeBudget = { ...b };
     f.active = { ...f.invest };
-    f.mk = stepMarketing(prevMk, f.active.marketing);
+    f.mk = stepMarketing(prevMk, investStep('marketing', b.marketing));
   }
 }
+/** 예전 이름 (도구·시험) */
+export const lockInvestments = lockBudgets;

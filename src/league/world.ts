@@ -15,7 +15,7 @@ import { shiftBat, shiftPit } from './growth';
 import type { LeagueState } from './types';
 import { virtualDefense } from '../engine/fielding';
 import { applyRunSkills } from '../engine/runskills';
-import { activeLevel, MEDICAL_DAYS, MEDICAL_RATE } from './finance';
+import { activeStep, medicalScale } from './finance';
 import { campInjury } from './camp';
 import { homeIsDome, teamParkAt } from './stadium';
 import { homeOnlyUntil } from './careers';
@@ -119,17 +119,19 @@ export function worldFromLeague(league: LeagueState, store: Store, params: Engin
   const parkFrs = league.teams.slice(0, kept).map((t) => t.franchise);
   const parkLg = data ? leagueRpa(data.league) : { rates: lg, rpa: 0 };
   const teams: SimTeam[] = league.teams.slice(0, kept).map((t, idx) => {
-    const med = activeLevel(league, idx, 'medical');
+    // 의료 예산 (재정 2 F2): 효과 단계 s를 단계 표에서 잇는다 (s = 1이면 예전 1단계와 같은 값)
+    const med = activeStep(league, idx, 'medical');
+    const ms = medicalScale(med);
     // 세부 난이도의 부상 빈도는 플레이어 구단에만 (difficulty.ts)
     const inj = idx === userTeamOf(league) ? settingsOf(league).injury : 1;
     // 스프링캠프 (camp.ts): 체력 훈련·국내 캠프의 시즌 부상 배율
     const camp = campInjury(league, idx, year);
-    const rate = (med ? MEDICAL_RATE[med] : 1) * inj * camp;
+    const rate = (med ? ms.rate : 1) * inj * camp;
     // 홈 구장 배율 (stadium.ts teamParkAt): 실제 구장 값 + 게임 안에서 지은 신구장
     const park = teamParkAt(parkSrc, t.franchise, year, league.stadiums?.[idx], parkFrs, parkLg, params.park);
     // 창단 특례 (eras.ts expansionPerk): 1군 첫 두 시즌 엔트리 +1, 외국인 +1 (외국인 제도가 있는 해만)
     const perk = expansionPerk(league, idx, year);
-    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? MEDICAL_DAYS[med] : 1 } : {}),
+    return { idx, name: t.name, franchise: t.franchise, org: [], ...(med || inj !== 1 || camp !== 1 ? { injuryRate: rate, injuryDays: med ? ms.days : 1 } : {}),
       ...(park ? { park } : {}),
       ...(perk ? { rosterBonus: 1, ...(rules.foreignLimit > 0 ? { foreignBonus: 1 } : {}) } : {}),
       ...(homeIsDome(league.stadiums?.[idx], t.franchise, year) ? { dome: true } : {}) };
