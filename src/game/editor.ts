@@ -10,7 +10,9 @@ import { timingOf, ceilingFor } from '../league/branches';
 import { runsOf } from '../league/growth';
 import { condToday } from '../league/events';
 import { gradeOfRuns } from '../fantasy/free';
-import type { LeaguePlayer } from '../league/types';
+import type { LeaguePlayer, MilitaryState } from '../league/types';
+import { dollarText, wonText } from '../league/salary';
+import { editWarnings, editYear, MILITARY_LABEL, type EditOp } from './editOps';
 import type { GuessSet } from '../league/scout';
 import type { GameSession } from './session';
 
@@ -80,6 +82,8 @@ export interface EditorPlayerView extends EditorRow {
   condition: { text: string; value: number } | null;
   /** 숨겨진 특수능력 이름·효과 */
   traits: { label: string; note: string }[];
+  /** 고치기 칸이 쓰는 지금 값 (E2) */
+  edit: EditorEditBase;
 }
 
 /** 구단 진짜 전력 */
@@ -220,6 +224,7 @@ export function editorView(s: GameSession, id: string): EditorPlayerView | null 
     overuse: Math.round(overuse * 100) / 100,
     condition,
     traits: (traitsOf(s.store.traits, id) ?? []).map((t) => ({ label: TRAIT_INFO[t].label, note: TRAIT_INFO[t].note })),
+    edit: editBase(s, lp, sim),
   };
 }
 
@@ -237,4 +242,123 @@ export function editorTeams(s: GameSession): EditorTeam[] | null {
     rank: 1 + str.filter((w, j) => w > x || (w === x && j < i)).length,
     outlook: outlook?.[i] ?? null,
   }));
+}
+
+/** 고치기 칸이 쓰는 지금 값 (숨긴 값이 아닌 것: 생년·계약·병역·부상) */
+export interface EditorEditBase {
+  /** 고침이 쓰는 기준 시즌 (시즌 중 = 이 시즌, 오프시즌 = 다음 시즌) */
+  year: number;
+  birthYear: number | null;
+  /** 연봉 (만 원, 외국인은 달러). 계약이 없으면 null */
+  salary: number | null;
+  until: number | null;
+  military: MilitaryState | null;
+  /** 병역을 고칠 수 있나 (국내 선수, 복무 중이 아님) */
+  militaryEditable: boolean;
+  militaryText: string | null;
+  /** 지금 부상 (낫게 하기 대상). 이탈 이벤트·병역 결장은 아님 */
+  injury: { text: string; days: number } | null;
+}
+
+const MILITARY_TEXT: Record<MilitaryState, string> = { pending: '미필', serving: '복무 중', homeOnly: '방위병 복무 중', done: '마침', exempt: '면제' };
+
+function editBase(s: GameSession, lp: LeaguePlayer, sim: SimPlayer | undefined): EditorEditBase {
+  const st = lp.military?.state ?? null;
+  return {
+    year: editYear(s), birthYear: lp.birthYear, salary: lp.contract ? lp.contract.salary : null, until: lp.contract ? lp.contract.until : null,
+    military: st, militaryEditable: !lp.foreign && st !== 'serving' && st !== 'homeOnly', militaryText: st ? MILITARY_TEXT[st] : null,
+    injury: s.injuryNow(lp.id, sim),
+  };
+}
+
+/** 고치기 미리보기: 다듬은 조작·대상 이름·"전 → 후" 문장·규정 경고 (Q5). 에디터가 꺼져 있으면 null */
+export interface EditorPreview {
+  ops: EditOp[];
+  names: string[];
+  lines: string[];
+  warnings: string[];
+  /** 고칠 수 없는 까닭 (있으면 저장하지 않는다) */
+  error?: string;
+}
+
+export function editorPreview(s: GameSession, input: EditOp[]): EditorPreview | null {
+  if (!s.editorOn) return null;
+  const f = frameOf(s);
+  const year = f.year;
+  const ops: EditOp[] = [];
+  const lines: string[] = [];
+  const names: string[] = [];
+  const fail = (error: string): EditorPreview => ({ ops: [], names, lines, warnings: [], error });
+  const money = (lp: LeaguePlayer, v: number) => (lp.foreign ? dollarText(v) : wonText(v, year));
+  for (const raw of input) {
+    const lp = s.leaguePlayer(raw.player);
+    if (!lp || (!lp.bat && !lp.pit)) return fail('고칠 선수를 찾을 수 없습니다.');
+    if (!names.includes(lp.name)) names.push(lp.name);
+    const sim = f.sim.get(lp.id);
+    switch (raw.op) {
+      case 'ability': {
+        const nowG = gradeOfRuns(sim ? currentRuns(sim, f.ctx) : runsOf(lp, f.ctx, year), year);
+        const potG = gradeOfRuns(lp.potential, year);
+        const clampG = (x: number) => Math.max(20, Math.min(80, Math.round(x)));
+        const op: Extract<EditOp, { op: 'ability' }> = { op: 'ability', player: lp.id };
+        if (raw.now !== undefined) op.now = clampG(raw.now);
+        if (raw.potential !== undefined) op.potential = clampG(raw.potential);
+        // 능력은 천장 위로 자라지 않는다: 지금 능력을 천장보다 높이면 천장도 같이 올린다 (기획안 3.2)
+        const potAfter = op.potential ?? potG;
+        if (op.now !== undefined && op.now > potAfter) op.potential = op.now;
+        if (op.now === undefined && op.potential === undefined) break;
+        if (op.now !== undefined) lines.push(`${lp.name} 지금 능력 ${nowG} → ${op.now}${lp.slump ? ' (슬럼프는 없앰)' : ''}`);
+        if (op.potential !== undefined) lines.push(`${lp.name} 천장 ${potG} → ${op.potential}${raw.potential === undefined || raw.potential < op.potential ? ' (지금 능력에 맞춰 올림)' : ''}`);
+        ops.push(op);
+        break;
+      }
+      case 'birth': {
+        const b = Math.round(raw.birthYear);
+        if (!Number.isFinite(b) || b > year - 10 || b < year - 70) return fail(`생년은 ${year - 70}~${year - 10}년 사이로 넣습니다.`);
+        const was = lp.birthYear;
+        lines.push(`${lp.name} 생년 ${was ?? '모름'} → ${b} (나이 ${was ? `${lp.birthYearEstimated ? '약 ' : ''}${year - was}세` : '모름'} → ${year - b}세)`);
+        ops.push({ op: 'birth', player: lp.id, birthYear: b });
+        break;
+      }
+      case 'move': {
+        if (raw.to !== -1 && !s.league.teams[raw.to]) return fail('없는 구단입니다.');
+        const from = s.phase === 'season' && sim ? sim.teamIdx : lp.team;
+        if (from === raw.to) break;
+        if (s.phase === 'season' && !sim) return fail('이번 시즌 선수단에 없는 선수라 시즌 중에는 옮길 수 없습니다 (오프시즌에).');
+        const nameOf = (t: number) => (t >= 0 ? s.teamInfo(t).name : '소속 없음');
+        lines.push(`${lp.name} 소속 ${nameOf(from)} → ${nameOf(raw.to)}`);
+        ops.push({ op: 'move', player: lp.id, to: raw.to });
+        break;
+      }
+      case 'contract': {
+        const salary = Math.max(0, Math.round(raw.salary));
+        const years = Math.round(raw.years);
+        if (!Number.isFinite(salary) || !Number.isFinite(years) || years < 1 || years > 15) return fail(`계약 끝 시즌은 ${year}~${year + 14}년 사이로 넣습니다.`);
+        const c = lp.contract;
+        const until = year + years - 1;
+        lines.push(`${lp.name} 연봉 ${money(lp, c.salary)} → ${money(lp, salary)}, 계약 ${c.until} → ${until} 시즌까지`);
+        ops.push({ op: 'contract', player: lp.id, salary, years });
+        break;
+      }
+      case 'military': {
+        const st = lp.military?.state;
+        if (lp.foreign) return fail('외국인 선수는 병역이 없습니다.');
+        if (st === 'serving' || st === 'homeOnly') return fail('복무 중인 선수의 병역은 고칠 수 없습니다.');
+        if (!(raw.state in MILITARY_LABEL)) return fail('없는 병역 상태입니다.');
+        if (st === raw.state) break;
+        lines.push(`${lp.name} 병역 ${st ? MILITARY_TEXT[st] : '모름'} → ${MILITARY_LABEL[raw.state]}`);
+        ops.push({ op: 'military', player: lp.id, state: raw.state });
+        break;
+      }
+      case 'heal': {
+        const inj = s.injuryNow(lp.id, sim);
+        if (!inj) return fail(`${lp.name}은(는) 부상 중이 아닙니다.`);
+        lines.push(`${lp.name} 부상 (${inj.text}, ${inj.days}일 남음) → 나음`);
+        ops.push({ op: 'heal', player: lp.id });
+        break;
+      }
+    }
+  }
+  if (!ops.length) return { ops, names, lines, warnings: [], error: '바뀌는 값이 없습니다.' };
+  return { ops, names, lines, warnings: editWarnings(s, ops) };
 }
