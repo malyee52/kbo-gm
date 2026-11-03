@@ -99,6 +99,10 @@ button.small-btn {
 button.small-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
 button.small-btn.danger { color: var(--error); }
 button.small-btn.danger:hover:not(:disabled) { background: var(--error-bg); border-color: var(--error); }
+button.small-btn.on { background: var(--accent-soft); border-color: var(--accent); }
+/* 예산안 금액 칸 (재정 2 F2b) */
+input.num-input { width: 6.5em; }
+.tag.on { color: var(--accent); border-color: var(--accent); }
 
 /* ---- 시작 화면 */
 .start { max-width: 1320px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 16px; }

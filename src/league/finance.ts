@@ -289,7 +289,6 @@ export const MARKETING_DOWN = 0.15;
 export const SCOUT_SCALE = [1, 0.8, 0.65, 0.5];
 /** 아마추어 스카우트 단계별 신인 천장 추측 폭 σ_천장 (등급, 19.2 확정 Q15 ①: 보드와 진짜 천장 상관 0.6 → 0.9) */
 export const CEIL_SIGMA = [12, 9, 6.5, 4.5];
-const scaleText = (i: number) => (i ? `−${Math.round((1 - SCOUT_SCALE[i]) * 100)}%` : '기본');
 /** 육성: DEVELOP_AGE(30세) 이하 성장 폭 배율 가산, 2군 유망주 출전 몫 가산 */
 export const DEVELOP_BONUS = [0, 0.06, 0.12, 0.2];
 export const DEVELOP_SHARE = [0, 0.05, 0.1, 0.15];
@@ -298,14 +297,6 @@ export const DEVELOP_AGE = 30;
 /** 의료·트레이닝: 부상 확률 배율, 결장 기간 배율 */
 export const MEDICAL_RATE = [1, 0.92, 0.85, 0.78];
 export const MEDICAL_DAYS = [1, 0.93, 0.87, 0.8];
-/** 투자 효과 설명 (화면용) */
-export const INVEST_EFFECT: Record<InvestKind, string[]> = {
-  scout: CEIL_SIGMA.map((n, i) => `신인 천장 추측 폭 ±${n}등급, 신인 능력 추측 범위 ${scaleText(i)}`),
-  scoutPro: SCOUT_SCALE.map((_, i) => `다른 구단·시장 선수 능력 추측 범위 ${scaleText(i)}`),
-  develop: DEVELOP_BONUS.map((b, i) => (i ? `${DEVELOP_AGE}세 이하 성장 폭 +${Math.round(b * 100)}%, 2군 출전 몫 +${DEVELOP_SHARE[i]}` : '효과 없음')),
-  medical: MEDICAL_RATE.map((r, i) => (i ? `부상 확률 −${Math.round((1 - r) * 100)}%, 결장 기간 −${Math.round((1 - MEDICAL_DAYS[i]) * 100)}%` : '효과 없음')),
-  marketing: MARKETING_FILL.map((f, i) => (i ? `다 쌓이면 관중률 +${Math.round(f * 100)}%p, 스폰서·상품 +${Math.round((MARKETING_SPONSOR[i] - 1) * 100)}% (해마다 조금씩 쌓임)` : '효과 없음 (쌓인 효과가 천천히 빠짐)')),
-};
 
 // ---- 구단 재정 상태
 
