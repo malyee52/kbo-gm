@@ -57,6 +57,9 @@ describe('에디터 고치기 (시즌 중)', () => {
     expect(g.editPlayer(pv.ops).ok).toBe(true);
     expect(gradeOfRuns(lp.potential, 2026)).toBe(75);
     expect(aiPotential(g.league, lp) - lp.potential).toBeCloseTo(gap, 9);
+    // 천장은 지금 능력 아래로 내릴 수 없다 (오류, 저장하지 않음)
+    expect(editorPreview(g, [{ op: 'ability', player: lp.id, potential: 60 }])!.error).toMatch(/낮출 수 없습니다/);
+    expect(g.editPlayer([{ op: 'ability', player: lp.id, potential: 60 }]).ok).toBe(false);
   }, 120_000);
 
   it('규정을 넘는 고침은 막지 않고 경고만 (외국인 이동·한도, 최저 연봉, 입단 나이)', () => {

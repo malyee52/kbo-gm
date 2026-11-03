@@ -45,7 +45,8 @@ export function EditorEdit({ v }: { v: EditorPlayerView }) {
     const s = num(salary);
     const u = num(until);
     if (s !== null && u !== null && e.salary !== null && (salaryIn(e.salary) !== salary.trim() || Math.round(u) !== e.until)) {
-      const man = foreign ? Math.round(s * 10000) : Math.round((s * 10000) / pi);
+      // 연봉 칸을 그대로 두고 기간만 바꾸면 지금 연봉 그대로 (억 원 두 자리 반올림이 끼지 않게)
+      const man = salaryIn(e.salary) === salary.trim() ? e.salary : foreign ? Math.round(s * 10000) : Math.round((s * 10000) / pi);
       out.push({ op: 'contract', player: id, salary: Math.max(0, man), years: Math.round(u) - e.year + 1 });
     }
     if (mil && mil !== e.military) out.push({ op: 'military', player: id, state: mil });
@@ -91,7 +92,7 @@ export function EditorEdit({ v }: { v: EditorPlayerView }) {
         )}
         {!e.militaryEditable && e.militaryText && <span className="muted small">병역: {e.militaryText} (고칠 수 없음)</span>}
         {e.injury
-          ? <label className="inline"><input type="checkbox" checked={heal} onChange={(x) => setHeal(x.target.checked)} /> 부상 낫게 하기 <span className="muted small">({e.injury.text}, {e.injury.days}일 남음)</span></label>
+          ? <label className="editor-check"><input type="checkbox" checked={heal} onChange={(x) => setHeal(x.target.checked)} /> 부상 낫게 하기 <span className="muted small">({e.injury.text}, {e.injury.days}일 남음)</span></label>
           : <span className="muted small">부상 없음</span>}
       </div>
       {pv && (

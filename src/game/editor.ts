@@ -3,6 +3,7 @@
 // 꺼내는 곳은 이 파일 하나다. 에디터가 꺼져 있으면 모든 함수가 null을 돌려준다 (끄면 다시 숨김).
 // 화면은 src/ui/editor/ 폴더만 이 파일을 부른다 (tests/editor.test.ts·hidden-values.test.ts가 검사).
 // 보기만 하므로 상태를 바꾸지 않고 난수를 쓰지 않는다 (같은 판에서 몇 번 불러도 같은 값, 조회를 끼워도 진행 결과가 같다).
+// 고치기 미리보기(editorPreview, E2)도 상태를 바꾸지 않는다. 실제 고침은 session.editPlayer → 조작 edit·edit-off.
 import { computeGrades, conditionOf, isStarterSkill, TRAIT_INFO, traitsOf, type DisplayGrades, type SimPlayer, type World } from '../engine';
 import { currentRuns, teamStrength, type ValueContext } from '../ai/value';
 import { aiPotential } from '../league/owner';
@@ -303,12 +304,13 @@ export function editorPreview(s: GameSession, input: EditOp[]): EditorPreview | 
         const op: Extract<EditOp, { op: 'ability' }> = { op: 'ability', player: lp.id };
         if (raw.now !== undefined) op.now = clampG(raw.now);
         if (raw.potential !== undefined) op.potential = clampG(raw.potential);
-        // 능력은 천장 위로 자라지 않는다: 지금 능력을 천장보다 높이면 천장도 같이 올린다 (기획안 3.2)
-        const potAfter = op.potential ?? potG;
-        if (op.now !== undefined && op.now > potAfter) op.potential = op.now;
+        // 능력은 천장 위로 자라지 않는다: 지금 능력을 천장보다 높이면 천장도 같이 올리고, 천장은 지금 능력 아래로 내리지 않는다 (기획안 3.2)
+        const nowAfter = op.now ?? nowG;
+        if ((op.potential ?? potG) < nowAfter) op.potential = nowAfter;
+        if (op.potential === potG && raw.potential !== undefined && raw.now === undefined) return fail(`천장은 지금 능력(${nowG})보다 낮출 수 없습니다.`);
         if (op.now === undefined && op.potential === undefined) break;
         if (op.now !== undefined) lines.push(`${lp.name} 지금 능력 ${nowG} → ${op.now}${lp.slump ? ' (슬럼프는 없앰)' : ''}`);
-        if (op.potential !== undefined) lines.push(`${lp.name} 천장 ${potG} → ${op.potential}${raw.potential === undefined || raw.potential < op.potential ? ' (지금 능력에 맞춰 올림)' : ''}`);
+        if (op.potential !== undefined) lines.push(`${lp.name} 천장 ${potG} → ${op.potential}${raw.potential === undefined || raw.potential < op.potential ? ' (지금 능력보다 낮을 수 없어 맞춤)' : ''}`);
         ops.push(op);
         break;
       }
@@ -336,7 +338,8 @@ export function editorPreview(s: GameSession, input: EditOp[]): EditorPreview | 
         if (!Number.isFinite(salary) || !Number.isFinite(years) || years < 1 || years > 15) return fail(`계약 끝 시즌은 ${year}~${year + 14}년 사이로 넣습니다.`);
         const c = lp.contract;
         const until = year + years - 1;
-        lines.push(`${lp.name} 연봉 ${money(lp, c.salary)} → ${money(lp, salary)}, 계약 ${c.until} → ${until} 시즌까지`);
+        const pay = salary === c.salary ? `연봉 ${money(lp, salary)} 그대로` : `연봉 ${money(lp, c.salary)} → ${money(lp, salary)}`;
+        lines.push(`${lp.name} ${pay}, 계약 ${c.until === until ? `${until} 시즌까지 그대로` : `${c.until} → ${until} 시즌까지`}`);
         ops.push({ op: 'contract', player: lp.id, salary, years });
         break;
       }
