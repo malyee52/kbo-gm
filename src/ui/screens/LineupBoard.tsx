@@ -396,7 +396,7 @@ export function LineupBoard() {
                             onClick={() => open(t)} onDragOver={(e) => editable && e.preventDefault()} onDrop={(e) => onDrop(e, s)}
                             draggable={editable && !!p} onDragStart={(e) => p && onDrag(e, p.idx)}>
                             <span className="slot-pos">{s}</span>
-                            <strong>{p ? p.name : '비어 있음'}</strong>
+                            <strong title={p?.name}>{p ? p.name : '비어 있음'}</strong>
                             <span className="slot-sub">
                               {p ? (s === 'DH' ? '지명타자' : <>수비 <Grade v={defAt(p, s)} /></>) : 'AI 감독이 채움'}
                               {st?.out && <span className="status out">{st.text}</span>}
@@ -439,7 +439,7 @@ export function LineupBoard() {
                     <li key={s}>
                       <span className="order-no">{k + 1}</span>
                       <span className="slot-pos">{s}</span>
-                      <span className="grow">{nameOf(d.plan.starters[s])}</span>
+                      <span className="grow" title={nameOf(d.plan.starters[s])}>{nameOf(d.plan.starters[s])}</span>
                       <button type="button" className="small-btn" aria-label={`${k + 1}번 ${s} 위로`} disabled={!editable || k === 0} onClick={() => moveOrder(k, -1)}>↑</button>
                       <button type="button" className="small-btn" aria-label={`${k + 1}번 ${s} 아래로`} disabled={!editable || k === shownOrder.length - 1} onClick={() => moveOrder(k, 1)}>↓</button>
                     </li>
@@ -549,7 +549,7 @@ function PitchButton({ p, label, on, changed, status, note, empty = '비어 있�
   return (
     <button type="button" className={`slot-card pitch${on ? ' on' : ''}${changed ? ' changed' : ''}${p ? '' : ' add'}`} aria-pressed={on} disabled={disabled} onClick={onClick}>
       {label && <span className="slot-pos">{label}</span>}
-      {p ? <strong>{p.name}</strong> : empty && <span className="muted small">{empty}</span>}
+      {p ? <strong title={p.name}>{p.name}</strong> : empty && <span className="muted small">{empty}</span>}
       {status?.out && <span className="status out">{status.text}</span>}
       <CondTag text={status?.cond} />
       {p && note && <span className="slot-note" title="지난 등판 · 그 뒤 쉰 날">{note}</span>}
