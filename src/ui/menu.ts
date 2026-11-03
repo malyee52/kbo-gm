@@ -57,7 +57,7 @@ export const MENU: MenuItem[] = [
   { key: 'season-end', group: '시즌', label: '결산·시상', tabs: [{ screen: 'season-end', label: '결산' }, { screen: 'awards', label: '시상' }] },
 
   one('club', '경영', '구단 현황', 'club'),
-  one('finance', '경영', '재정', 'finance'),
+  { key: 'finance', group: '경영', label: '재정', tabs: [{ screen: 'finance', label: '재정' }, { screen: 'budget', label: '예산안' }] },
   one('stadium', '경영', '구장·팬', 'stadium'),
   one('staff', '경영', '감독·코치', 'staff'),
   one('owner', '경영', '구단주', 'owner'),

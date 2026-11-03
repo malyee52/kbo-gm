@@ -21,7 +21,7 @@ import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { foreignMixOk, foreignRule, teamForeignRule } from './eras';
-import { payOf, paydays } from './finance';
+import { payOf, paydays, payPlan, PAY_COUNT } from './finance';
 import { minSalary, wageIndex, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { ruleDate, ruleOf } from './rules';
@@ -138,10 +138,12 @@ export function foreignHeld(world: World, team: number, lp: Map<string, LeaguePl
 
 const regularCount = (world: World, team: number) => world.teams[team].org.filter((p) => !p.dev).length;
 
-/** 이번 시즌 남은 월급 몫 (0~1): 그날 뒤의 지급일 수 ÷ 전체 지급일 수 */
+/**
+ * 이번 시즌 남은 월급 몫 (0~1): 그날(포함) 뒤 지급(payPlan, 2~11월 10번)의 달 수 ÷ 10. 결산 지급은 늘 남은 몫이다.
+ * 그날 소속이 바뀌면 그날 지급부터 새 소속을 따르므로(finance.ts rosterAt) 그날 지급도 남은 몫에 넣는다
+ */
 export function remainingShare(year: number, seasonDays: number, day: number): number {
-  const pays = paydays(year, seasonDays);
-  return pays.length ? pays.filter((pd) => pd.day >= day).length / pays.length : 0;
+  return payPlan(year, seasonDays).filter((pd) => pd.day >= day).reduce((s, pd) => s + pd.months.length, 0) / PAY_COUNT;
 }
 
 /**
