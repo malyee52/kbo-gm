@@ -16,6 +16,7 @@ import { PlayerDetail } from './screens/PlayerDetail';
 import { Roster } from './screens/Roster';
 import { LineupBoard } from './screens/LineupBoard';
 import { SaveScreen } from './screens/SaveScreen';
+import { EditorScreen } from './editor/EditorScreen';
 import { Schedule } from './screens/Schedule';
 import { SeasonEnd } from './screens/SeasonEnd';
 import { Standings } from './screens/Standings';
@@ -532,6 +533,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             <div className="sb-team">
               <i className="sb-band" aria-hidden />
               <strong>{team.name}</strong>
+              {session.editorMark && <span className="tag sb-editor" title={session.editorOn ? '에디터 켜짐 (숨긴 값을 볼 수 있음)' : '에디터를 켠 적 있는 게임 (지금은 꺼짐)'}>에디터 ({session.editorMark}){session.editorOn ? '' : ' 꺼짐'}</span>}
             </div>
             <span className="sb-when">{when}{(seasonRunning || (cast && left > 0)) && <span className="muted"> · 남은 경기 {left}</span>}</span>
             <span className="sb-score" title={summaryOf(session)}>
@@ -626,6 +628,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'allstar' && <AllStar />}
                 {screen === 'fantasy' && <Fantasy />}
                 {screen === 'save' && <SaveScreen onQuit={onQuit} />}
+                {screen === 'editor' && <EditorScreen />}
                 {screen === 'about' && <About />}
                 {screen === 'season-end' && <SeasonEnd />}
                 {screen === 'offseason' && <Offseason />}

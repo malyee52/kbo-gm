@@ -137,6 +137,7 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
               <li key={id} className={got ? 'on' : 'muted'}>
                 <strong>{ACHIEVEMENTS[id].label}</strong> <span className="small">{ACHIEVEMENTS[id].note}</span>
                 {got && <span className="small"> · {got.year} {name(got.team)}</span>}
+                {got?.editor && <span className="tag" title="에디터를 켠 적 있는 게임에서 얻은 업적">에디터</span>}
               </li>
             );
           })}

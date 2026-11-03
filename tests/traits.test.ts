@@ -144,21 +144,24 @@ describe('숨김', () => {
     expect(currentRuns(stripped, ctx)).toBe(before);
   });
 
-  it('저장 파일에 능력이 남지 않는다', () => {
+  it('저장 파일에 능력이 남지 않는다 (에디터를 켜도)', () => {
     const session = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'traits-save', difficulty: 'normal' });
     session.advance(3);
+    session.setEditor(true);
     const text = JSON.stringify(session.toSave());
     expect(text).not.toContain('"traits"');
     // 'stamina'는 투수 능력 필드 이름이기도 해서 뺀다
     for (const c of TRAIT_CODES) if (c !== 'stamina') expect(text).not.toContain(`"${c}"`);
   });
 
-  it('화면 코드(src/ui)는 특수능력 모듈과 코드를 가져다 쓰지 않는다', () => {
+  // 예외: 에디터 폴더(src/ui/editor/)는 에디터를 켰을 때만 이름·효과를 보여 준다 (2026-11-03 사용자 Q4, 보기만).
+  // 값은 game/editor.ts(꺼져 있으면 null)에서 얻고, 폴더 안도 엔진 특수능력 모듈을 직접 가져오지 않는다 (tests/editor.test.ts)
+  it('화면 코드(src/ui, 에디터 폴더 빼고)는 특수능력 모듈과 코드를 가져다 쓰지 않는다', () => {
     const files: string[] = [];
     const walk = (dir: string) => {
       for (const f of readdirSync(dir)) {
         const p = join(dir, f);
-        if (statSync(p).isDirectory()) walk(p);
+        if (statSync(p).isDirectory()) { if (f !== 'editor') walk(p); }
         else if (/\.(tsx?|css)$/.test(f)) files.push(p);
       }
     };

@@ -88,6 +88,12 @@ export async function listSaves(): Promise<SaveRecord[]> {
   return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
 }
 
+/** 저장의 에디터 사용 표시 (docs/에디터_기획안.md 2.2): 켠 적 없으면 null */
+export function editorMarkOfSave(data: GameSave | undefined): '보기' | '고침' | null {
+  const e = (data as { league?: { editor?: { firstEdit?: unknown } } } | undefined)?.league?.editor;
+  return e ? (e.firstEdit ? '고침' : '보기') : null;
+}
+
 /** 예전 저장을 지운 뒤 한 번 보여 주는 문구 (일정 개편 기획안 6.1) */
 export const OUTDATED_NOTICE = '게임 규칙(정규시즌 일정·잠재력)이 바뀌어 예전 저장을 지웠습니다';
 

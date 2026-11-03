@@ -1,6 +1,7 @@
 // 저장·설정: 저장 칸, 파일 내보내기·가져오기, 버그 보고용 재현 정보.
 import { useEffect, useState } from 'react';
-import { deleteSave, isAutoSlot, listSaves, renameSave, type SaveRecord } from '../../game/storage';
+import { deleteSave, editorMarkOfSave, isAutoSlot, listSaves, renameSave, type SaveRecord } from '../../game/storage';
+import { EditorPanel } from '../editor/EditorToggle';
 import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
 import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
@@ -46,6 +47,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
       {msg && <p className={msg.error ? 'error' : 'note'} role="status">{msg.text}</p>}
 
       <DifficultyPanel />
+      <EditorPanel />
 
       <section className="panel">
         <h2>브라우저에 저장</h2>
@@ -68,7 +70,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
                     </td>
                     {s ? (
                       <>
-                        <td className="l">{s.year} {s.teamName}</td>
+                        <td className="l">{s.year} {s.teamName}{editorMarkOfSave(s.data) && <span className="tag">에디터 ({editorMarkOfSave(s.data)})</span>}</td>
                         <td className="l">{whenText(s, isSeasonDone(s))}</td>
                         <td className="l">{s.summary}</td>
                         <td className="l muted">{new Date(s.savedAt).toLocaleString('ko-KR')}</td>

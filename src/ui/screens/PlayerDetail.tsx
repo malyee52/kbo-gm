@@ -33,11 +33,14 @@ import { recentLines } from '../recent';
 import type { GameSession } from '../../game/session';
 import { addToCompare, addToDraft, COMPARE_MAX, deskOf, tradeBlockReason, updateDesk, useDesk } from '../tradeDesk';
 import { WatchStar } from './Watch';
+import { EditorPlayer } from '../editor/EditorPlayer';
 import { GROUP_LABEL, tierText, titleChips, type TitleView } from '../../league/titles';
 
-type Tab = 'sum' | 'abil' | 'rec' | 'deal' | 'pit';
+type Tab = 'sum' | 'abil' | 'rec' | 'deal' | 'pit' | 'edit';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'sum', label: '요약' }, { key: 'abil', label: '능력' }, { key: 'rec', label: '기록' }, { key: 'deal', label: '계약·이력' }, { key: 'pit', label: '투수 등판' },
+  // 에디터를 켰을 때만 생기는 탭 (docs/에디터_기획안.md 6.3). 내용은 에디터 폴더 부품이 그린다
+  { key: 'edit', label: '에디터' },
 ];
 const TAB_KEY = 'kbo-gm.player-tab';
 
@@ -96,7 +99,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
   const pitchLog = useMemo(() => pitchingLog(session, p), [session, p, session.season.log.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const throws = p.isPitcher || session.season.pit[p.idx].bf > 0;
   const pitOpen = throws && team === session.teamIdx;
-  const shownTab: Tab = tab === 'pit' && !throws ? 'sum' : tab;
+  const shownTab: Tab = (tab === 'pit' && !throws) || (tab === 'edit' && !session.editorOn) ? 'sum' : tab;
   const close = () => ref.current?.close();
 
   return (
@@ -107,7 +110,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           <Head p={p} narrow={narrow} onClose={close} onTitles={() => setTab('deal')} />
           <div className="pd-more"><HeadMore p={p} onClose={close} go={go} /></div>
           <div className="pd-tabs" role="tablist" aria-label="선수 상세">
-            {TABS.filter((t) => t.key !== 'pit' || throws).map((t) => (
+            {TABS.filter((t) => (t.key !== 'pit' || throws) && (t.key !== 'edit' || session.editorOn)).map((t) => (
               <button key={t.key} type="button" role="tab" aria-selected={shownTab === t.key}
                 title={t.key === 'pit' && !pitOpen ? '우리 구단 경기 기록만 있습니다' : undefined}
                 onClick={() => setTab(t.key)}>{t.label}</button>
@@ -120,6 +123,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
           {shownTab === 'sum' && <SummaryTab p={p} full={full} narrow={narrow} onClose={close} />}
           {shownTab === 'abil' && <AbilityTab p={p} full={full} />}
           {shownTab === 'rec' && <RecordTab p={p} full={full} store={store} />}
+          {shownTab === 'edit' && <EditorPlayer id={p.id} />}
           {shownTab === 'deal' && <><ContractInfo id={p.id} /><TitleInfo p={p} full={full} /><CareerInfo p={p} /></>}
           {shownTab === 'pit' && (pitOpen ? <PitchingTab rows={pitchLog} full={full} /> : <p className="muted small">우리 구단 경기 기록만 있습니다 (다른 구단 경기는 박스스코어를 남기지 않는다).</p>)}
         </div>
