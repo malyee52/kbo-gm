@@ -53,7 +53,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeLevel, addExpansionCapital, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockInvestments,
+  activeBudgetOf, activeStep, addExpansionCapital, autoBudget, autoPrices, futuresScale, stepAt, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockBudgets,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -433,6 +433,10 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     const standings = season.standings();
     settleSeason({ league, world, season, standings, champion: null, postseasonDepth: () => 0, trust: () => 50 });
   }
+  // 예산 자동 배분 (재정 2 F2): 플레이어 구단의 다음 시즌 예산을 균형 추천안으로 다시 채우고 고정한 줄만 남긴다
+  autoBudget(league, userTeam);
+  // 입장권 가격도 재무팀 추천 가격으로 (고정한 등급만 남김, 재정 2 F3)
+  autoPrices(league, userTeam);
   // 시상 (history에 이 시즌이 들어가기 전에: 신인 자격 판정)
   league.awards = [...(league.awards ?? []).filter((a) => a.year !== year), seasonAwards(world, season, league, store)];
   for (const p of league.players) {
@@ -519,12 +523,14 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
       : b.pa / 550;
     // 2군 유망주는 퓨처스리그에서 뛴다 (2026-10-12부터 실제 퓨처스 출전량으로, 예전에는 모두 FUTURES_SHARE):
     // 퓨처스에서 꽉 채워 뛰면 1군 기회 FUTURES_WEIGHT만큼. 퓨처스 활약·부진은 성장에 ±FUT_FORM_RUNS (futures.ts)
-    // 육성 투자: 2군 유망주 출전 몫과 30세 이하 성장 폭 (finance.ts)
-    const dev = activeLevel(league, team, 'develop');
+    // 육성 투자: 2군 유망주 출전 몫과 30세 이하 성장 폭 (finance.ts, 재정 2 F2: 효과 단계 s를 표에서 잇는다)
+    // 2군 운영 예산: 퓨처스 출전 성장 기회 배율 (futuresScale, 47억 = 1)
+    const dev = activeStep(league, team, 'develop');
+    const futScale = futuresScale(activeBudgetOf(league, team, 'futures'));
     const young = ageIn(p, year + 1) <= FUTURES_AGE;
     const fl = futById.get(p.id);
     const futOpp = young ? futuresOpportunity(fl) : 0;
-    const share = young && futOpp > 0 ? Math.max(firstTeam, firstTeam + FUTURES_WEIGHT * futOpp + DEVELOP_SHARE[dev]) : firstTeam;
+    const share = young && futOpp > 0 ? Math.max(firstTeam, firstTeam + FUTURES_WEIGHT * futOpp * futScale + stepAt(DEVELOP_SHARE, dev)) : firstTeam;
     const form = young ? futuresForm(fl) : 0;
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
     const burst: { breakout?: boolean } = {};
@@ -598,9 +604,10 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (p.team < 0 || isServing(p) || !isFuturesTeam(league, p.team, year)) continue;
     const runs = runsAt(p, year);
     growth.set(p.id, { id: p.id, team: p.team, age: p.birthYear ? year + 1 - p.birthYear : null, before: runs, after: runs, tags: ['퓨처스'] });
-    const dev = activeLevel(league, p.team, 'develop');
+    const dev = activeStep(league, p.team, 'develop');
+    const futScale = futuresScale(activeBudgetOf(league, p.team, 'futures'));
     const fl = futById.get(p.id);
-    const share = fl ? FUTURES_WEIGHT * futuresOpportunity(fl) + DEVELOP_SHARE[dev] : FUTURES_SHARE + DEVELOP_SHARE[dev];
+    const share = (fl ? FUTURES_WEIGHT * futuresOpportunity(fl) : FUTURES_SHARE) * futScale + stepAt(DEVELOP_SHARE, dev);
     const age = ageIn(p, year + 1) + (p.decline ?? 0);
     const burst: { breakout?: boolean } = {};
     const next = capAtCeiling(developed(ageIn(p, year + 1), runs, growthRuns(age, runs, p.potential, share, new Rng(`${league.seed}/growth/${year}/${p.id}`), p.isPitcher,
@@ -2845,8 +2852,8 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
       log(off, 'settle', `${COACH_ROLE_LABEL[role]} 빈자리를 ${pick.level}등급 코치로 채웠습니다`, true);
     }
   }
-  // 투자 확정 (AI 구단은 이때 계획을 정한다, finance.ts)
-  lockInvestments(league, off.userTeam);
+  // 예산 확정 (AI 구단은 이때 추천안을 고른다, finance.ts lockBudgets)
+  lockBudgets(league, off.userTeam);
 }
 
 /**
@@ -2944,10 +2951,10 @@ function growInBranches(league: LeagueState, p: LeaguePlayer, next: number, ctx:
     { age, timing: timingFor(league, p, params), stream: `${league.seed}/growth2/${year}/${p.id}`, breakout, ...(focus ? { focus } : {}) }, params));
 }
 
-/** 육성 투자: 25세 이하 선수가 오를 때 오름폭을 늘린다 */
+/** 육성 투자: DEVELOP_AGE 이하 선수가 오를 때 오름폭을 늘린다 (level = 효과 단계 s, 소수) */
 function developed(age: number, runs: number, next: number, level: number): number {
   if (age > DEVELOP_AGE || next <= runs || !level) return next;
-  return runs + (next - runs) * (1 + DEVELOP_BONUS[level]);
+  return runs + (next - runs) * (1 + stepAt(DEVELOP_BONUS, level));
 }
 
 // ---- 실제 지명 신인

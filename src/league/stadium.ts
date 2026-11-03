@@ -724,7 +724,8 @@ export function starStays(league: LeagueState, team: number, year: number, p: Le
  * 결산 때 만족도 (finance.ts settleSeason): 시즌 중 변화를 시작 값에 합치고, 성적·가을야구·우승을 더한 뒤 연고 기본값 쪽으로 조금 돌아간다.
  * depth: 가을야구 (0 못 감, 1 진출, 2부터 시리즈를 이길 때마다 +1)
  */
-export function fansSeasonEnd(league: LeagueState, team: number, year: number, winPct: number, depth: number, champion: boolean, market: number): void {
+export function fansSeasonEnd(league: LeagueState, team: number, year: number, winPct: number, depth: number, champion: boolean, market: number,
+  extra: [number, string][] = []): void {
   const f = league.fans?.[team];
   if (!f) return;
   f.level = fanLevel(league, team, year);
@@ -733,6 +734,8 @@ export function fansSeasonEnd(league: LeagueState, team: number, year: number, w
   const parts: [number, string][] = [[(winPct - 0.5) * FAN_WIN, `${year} 시즌 성적`]];
   if (depth >= 1) parts.push([FAN_PS_IN + FAN_PS * (depth - 1), `${year} 가을야구`]);
   if (champion) parts.push([FAN_TITLE, `${year} 우승`]);
+  // 그 밖 결산 변화 (입장권 가격, 재정 2 F3)
+  parts.push(...extra);
   for (const [d, r] of parts) addFanEvent(league, team, year, -1, d, r);
   const base = fanBase(market);
   const back = (base - f.level) * FAN_REVERT;

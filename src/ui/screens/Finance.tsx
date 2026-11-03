@@ -1,10 +1,13 @@
 // 구단 재정 (재정 상세형, docs/finance.md): 지금 자금, 올해 수입·지출, 월별 흐름, 지난 결산.
 import { dateOf } from '../../game/calendar';
+import { useEffect, useState } from 'react';
 import {
-  FINANCE_LABEL, investCostOf, INVEST_EFFECT, marketingStock, INVEST_KINDS, INVEST_LABEL, investCost, ledgerItems, OPS_KINDS, type FinanceKind, type OpsKind,
+  BUDGET_KINDS, BUDGET_LABEL, BUDGET_PRESETS, budgetCostOf, budgetEffect, budgetOf, budgetRange, FINANCE_LABEL, INVEST_COST, investCost, ledgerItems, lockedOf,
+  marketingStock, OPS_KINDS, PRESET_BUDGET, PRESET_LABEL, PRICE_RANGE, PRICE_STEP, priceLockedOf, pricesOf, recommendPrices, SEAT, SEAT_GRADES, SEAT_LABEL, SEAT_NOTE, seatTicket,
+  type BudgetKind, type FinanceKind, type OpsKind,
 } from '../../league/finance';
 import { wageIndex } from '../../league/salary';
-import { useGame, useWon } from '../context';
+import { useGame, usePriceIndex, useWon } from '../context';
 
 // 표의 줄 차례 (재정 2 기획안 4.1: 수입 R1~R7, 지출 E1~E10). 수입·지출 어느 쪽인지는 금액 부호로 가른다
 const ORDER: FinanceKind[] = [
@@ -76,12 +79,193 @@ function MoneyTable() {
   );
 }
 
+/** 예산 한 줄의 눈금 (화면 단추): 투자는 0~3단계·상한, 프런트·2군은 하한·기본·상한 */
+function marksOf(kind: BudgetKind): { label: string; amount: number }[] {
+  const [lo, hi] = budgetRange(kind);
+  if (kind === 'front' || kind === 'futures') return [{ label: '하한', amount: lo }, { label: '기본', amount: PRESET_BUDGET.balance[kind] }, { label: '상한', amount: hi }];
+  return [...INVEST_COST[kind].map((a, i) => ({ label: `${i}단계`, amount: a })), { label: '상한', amount: hi }];
+}
+const eok = (man: number) => `${Math.round(man / 1000) / 10}억`;
+
+/** 예산 금액 칸 (억 원, 0.1억 = 1천만 원 단위). 바꾸면 그 줄이 고정된다 */
+function AmountInput({ kind, amount, onSet }: { kind: BudgetKind; amount: number; onSet: (a: number) => void }) {
+  const [lo, hi] = budgetRange(kind);
+  const [text, setText] = useState(String(amount / 10_000));
+  useEffect(() => setText(String(amount / 10_000)), [amount]);
+  const commit = () => {
+    const v = Math.round(Number(text) * 10) * 1_000;
+    if (!Number.isFinite(v) || text.trim() === '') { setText(String(amount / 10_000)); return; }
+    const c = Math.max(lo, Math.min(hi, v));
+    if (c !== amount) onSet(c); else setText(String(amount / 10_000));
+  };
+  return (
+    <span className="inline">
+      <input type="number" className="num-input" aria-label={`${BUDGET_LABEL[kind]} 예산 (억 원)`} value={text} min={lo / 10_000} max={hi / 10_000} step={0.1}
+        onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); }} />
+      <span className="muted small">억</span>
+    </span>
+  );
+}
+
+/** 예산 줄 표 (오프시즌 입력, 시즌 중 읽기만) */
+function BudgetLines({ edit, planned = edit }: { edit: boolean; planned?: boolean }) {
+  const { session, changed, autosave } = useGame();
+  const plain = useWon();
+  const L = session.league;
+  const fin = L.finance?.[session.teamIdx];
+  const b = budgetOf(fin, planned);
+  const locked = lockedOf(fin);
+  const year = planned ? session.year + 1 : session.year;
+  const wage = wageIndex(year, L);
+  const run = (r: { ok: boolean; message: string }) => { if (r.ok) { changed(); void autosave(); } };
+  return (
+    <table>
+      <thead>
+        <tr><th className="l">예산 줄</th><th>기준액 (2026년 돈)</th><th>{year} 비용</th>{edit && <th className="l">눈금</th>}<th className="l">배분</th><th className="l">효과</th></tr>
+      </thead>
+      <tbody>
+        {BUDGET_KINDS.map((k) => {
+          const isLocked = locked.includes(k);
+          return (
+            <tr key={k}>
+              <td className="l">{BUDGET_LABEL[k]}{k === 'front' || k === 'futures' ? <span className="muted small"> · 운영비</span> : null}</td>
+              <td>{edit ? <AmountInput kind={k} amount={b[k]} onSet={(a) => run(session.setBudget(k, a))} /> : eok(b[k])}</td>
+              <td>{plain(budgetCostOf(b[k], wage))}</td>
+              {edit && (
+                <td className="l">
+                  <span className="inline">
+                    {marksOf(k).map((m) => (
+                      <button key={m.label} type="button" className={`small-btn${m.amount === b[k] ? ' on' : ''}`} title={eok(m.amount)} onClick={() => run(session.setBudget(k, m.amount))}>
+                        {m.label}
+                      </button>
+                    ))}
+                  </span>
+                </td>
+              )}
+              <td className="l">
+                <span className={`tag${isLocked ? ' on' : ''}`}>{isLocked ? '고정' : '자동'}</span>
+                {edit && isLocked && <button type="button" className="small-btn" onClick={() => run(session.setBudgetAuto(k))}>자동으로</button>}
+              </td>
+              <td className="l small">
+                {budgetEffect(k, b[k])}
+                {k === 'marketing' && ` · 지금 쌓인 효과 ${marketingStock(L, session.teamIdx).toFixed(2)}단계`}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+/** 가격 배율 고르기 칸 (70~150%, 5%) */
+const PRICE_CHOICES = Array.from({ length: Math.round((PRICE_RANGE[1] - PRICE_RANGE[0]) / PRICE_STEP) + 1 }, (_, i) => Math.round((PRICE_RANGE[0] + i * PRICE_STEP) * 100) / 100);
+const pctOf = (x: number) => `${Math.round(x * 100)}%`;
+
 /**
- * 예산안 (재정 2 F1a, 읽기 전용): 한 시즌 예상 수입·지출 계획과 예상 수지, 연말 자금 전 → 후.
- * 시즌 중에는 이번 시즌 계획(개막 때 확정), 오프시즌에는 다음 시즌 계획. 예산 입력은 F2에서
+ * 입장권 (재정 2 F3, 기획안 4.5): 좌석 등급 세 줄 (가격 배율, 한 장 값, 추천, 자동/고정, 예상 관중·관중 수입).
+ * 오프시즌에는 다음 시즌 가격을 고르고 "추천 가격 → 이 가격"을 보여 준다. 시즌 중에는 확정 가격을 읽기만
+ */
+function TicketLines({ season }: { season: boolean }) {
+  const { session, changed, autosave } = useGame();
+  const plain = useWon();
+  const pi = usePriceIndex();
+  const L = session.league;
+  const team = session.teamIdx;
+  const fin = L.finance?.[team];
+  const prices = pricesOf(fin, !season);
+  const locked = priceLockedOf(fin);
+  const rec = recommendPrices(L, team);
+  const year = season ? session.year : session.year + 1;
+  const v = session.budgetView();
+  const now = v.plan;
+  const base = season ? null : session.budgetPlanWith(budgetOf(fin, true), team, rec);
+  const same = !base || SEAT_GRADES.every((g) => rec[g] === prices[g]);
+  const run = (r: { ok: boolean; message: string }) => { if (r.ok) { changed(); void autosave(); } };
+  const shiftAll = (d: number) => {
+    for (const g of SEAT_GRADES) {
+      const x = Math.round(Math.max(PRICE_RANGE[0], Math.min(PRICE_RANGE[1], prices[g] + d)) * 100) / 100;
+      if (x !== prices[g]) session.setTicketPrice(g, x);
+    }
+    changed();
+    void autosave();
+  };
+  const fans = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}명`;
+  const ticketText = (man: number) => `${(Math.round((man * pi * 10_000) / 100) * 100).toLocaleString('ko-KR')}원`;
+  const arrow = (a: string, z: string) => (same ? z : `${a} → ${z}`);
+  const last = fin?.history.at(-1);
+  const sumFans = (p: typeof now | null) => (p ? SEAT_GRADES.reduce((s, g) => s + p.seats[g].fans, 0) : 0);
+  const sumGate = (p: typeof now | null) => (p ? SEAT_GRADES.reduce((s, g) => s + p.seats[g].gate, 0) : 0);
+  const hasGames = now.homeGames > 0;
+  return (
+    <>
+      <h3>입장권 <span className="muted small">{season ? `${year} 시즌 확정 가격 (읽기만)` : `${year} 시즌 좌석 등급별 가격`}</span></h3>
+      {!season && (
+        <div className="row-between">
+          <span className="inline">
+            <button type="button" className="small-btn" onClick={() => shiftAll(-PRICE_STEP)}>전체 −5%</button>
+            <button type="button" className="small-btn" onClick={() => shiftAll(PRICE_STEP)}>전체 +5%</button>
+            <button type="button" className="small-btn" disabled={!locked.length && !!fin?.prices} onClick={() => run(session.setTicketAuto())}>모두 추천 가격(자동)</button>
+          </span>
+          <span className="muted small">고친 등급은 고정되고, 나머지는 해마다 결산 뒤 재무팀 추천 가격으로 바뀝니다</span>
+        </div>
+      )}
+      <table>
+        <thead>
+          <tr>
+            <th className="l">좌석</th><th>좌석 몫</th><th>가격 배율</th><th>한 장</th><th>추천</th><th className="l">배분</th>
+            <th>예상 관중{same ? '' : ' (추천 → 이 가격)'}</th><th>관중 수입{same ? '' : ' (추천 → 이 가격)'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {SEAT_GRADES.map((g) => {
+            const isLocked = locked.includes(g);
+            return (
+              <tr key={g}>
+                <td className="l">{SEAT_LABEL[g]} <span className="muted small">· {SEAT_NOTE[g]}</span></td>
+                <td>{pctOf(SEAT[g].share)}</td>
+                <td>
+                  {season ? pctOf(prices[g]) : (
+                    <select aria-label={`${SEAT_LABEL[g]} 가격 배율`} value={prices[g]} onChange={(e) => run(session.setTicketPrice(g, Number(e.target.value)))}>
+                      {PRICE_CHOICES.map((x) => <option key={x} value={x}>{pctOf(x)}</option>)}
+                    </select>
+                  )}
+                </td>
+                <td>{ticketText(seatTicket(L, team, year, g, prices[g]))}</td>
+                <td>{pctOf(rec[g])}</td>
+                <td className="l">
+                  <span className={`tag${isLocked ? ' on' : ''}`}>{isLocked ? '고정' : '자동'}</span>
+                  {!season && isLocked && <button type="button" className="small-btn" onClick={() => run(session.setTicketAuto(g))}>자동으로</button>}
+                </td>
+                <td>{hasGames ? arrow(fans(base?.seats[g].fans ?? 0), fans(now.seats[g].fans)) : '-'}</td>
+                <td>{hasGames ? arrow(plain(Math.round(base?.seats[g].gate ?? 0)), plain(Math.round(now.seats[g].gate))) : '-'}</td>
+              </tr>
+            );
+          })}
+          <tr>
+            <td className="l strong">합</td><td>100%</td><td /><td /><td /><td />
+            <td className="strong">{hasGames ? arrow(fans(sumFans(base)), fans(sumFans(now))) : '-'}</td>
+            <td className="strong">{hasGames ? arrow(plain(Math.round(sumGate(base))), plain(Math.round(sumGate(now)))) : '-'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="muted small">
+        {!season && !fin?.prices ? '재정 2 전 저장이라 다음 시즌은 기본 가격(100%)으로 둡니다 (돈 흐름 그대로). 등급 하나를 고치거나 "모두 추천 가격"을 누르면 나머지 자동 등급도 추천 가격이 되고, 다음 결산부터는 늘 그렇습니다. ' : ''}
+        {hasGames ? `예상은 홈 ${now.homeGames}경기, 지난 시즌 승률 그대로 가정한 시즌 합입니다. ` : '지난 시즌 홈 경기가 없어 예상을 낼 수 없습니다. '}
+        {last?.seats && last.homeGames ? `지난 시즌 관중 ${SEAT_GRADES.map((g) => `${SEAT_LABEL[g]} ${fans(last.seats![g] / last.homeGames!)}`).join(' · ')} (경기당). ` : ''}
+        값을 올리면 등급마다 관중이 빠지고(일반석이 가장 민감, 프리미엄은 덜), 만원에 가까운 경기는 덜 빠집니다.
+        결산 때 관중이 낸 평균 가격이 기본보다 10% 높을 때마다 팬 만족도 −1 (낮으면 +). 재무팀 추천: 지난 시즌 관중률 90% 이상이면 지정석·프리미엄 110%, 60% 이하면 일반석 90%. 수치는 임시값입니다.
+      </p>
+    </>
+  );
+}
+
+/**
+ * 예산안 (재정 2 F1a 읽기 → F2b 입력): 한 시즌 예상 수입·지출 계획과 예상 수지, 연말 자금 전 → 후.
+ * 오프시즌에는 다음 시즌 예산을 정한다 (추천안 단추, 줄별 금액, 자동/고정). 시즌 중에는 이번 시즌 확정 예산을 읽기만
  */
 export function BudgetPanel() {
-  const { session } = useGame();
+  const { session, changed, autosave } = useGame();
   const plain = useWon();
   const won = (v: number) => (v < 0 ? `−${plain(-v)}` : plain(v + 0));
   const v = session.budgetView();
@@ -101,15 +285,53 @@ export function BudgetPanel() {
     : kinds.reduce((s, k) => s + (items[k] ?? 0) - (booked[k] ?? 0), 0);
   const endCash = cash + rest;
   const ops = OPS_KINDS.reduce((s, k) => s + (items[k] ?? 0), 0);
+  // 전 → 후: 균형 추천안 그대로일 때 → 지금 예산 (오프시즌만)
+  const fin = session.league.finance?.[session.teamIdx];
+  const b = budgetOf(fin, !season);
+  const base = season ? null : session.budgetPlanWith({ ...PRESET_BUDGET.balance });
+  const baseNet = base ? Object.values(base.items).reduce((s, x) => s + (x ?? 0), 0) : net;
+  const same = !base || Math.abs(baseNet - net) < 100;
+  const preset = BUDGET_PRESETS.find((p) => BUDGET_KINDS.every((k) => PRESET_BUDGET[p][k] === b[k]));
+  const run = (r: { ok: boolean; message: string }) => { if (r.ok) { changed(); void autosave(); } };
+  const arrow = (a: string, z: string) => (same ? z : `${a} → ${z}`);
   return (
     <section className="panel">
-      <h2>예산안 <span className="muted small">{year} 시즌 · {season ? '개막 때 확정 (읽기만)' : '다음 시즌 예상 (읽기만, 예산 조정은 다음 단계에서)'}</span></h2>
+      <h2>예산안 <span className="muted small">{year} 시즌 · {season ? '개막 때 확정 (읽기만)' : '다음 시즌 예산 (개막 때 확정)'}</span></h2>
       <div className="stats">
         <div className="stat"><span className="stat-label">예상 수입</span><span className="stat-value">{won(sum(inc))}</span></div>
         <div className="stat"><span className="stat-label">예상 지출</span><span className="stat-value">{won(-sum(exp))}</span></div>
-        <div className="stat"><span className="stat-label">예상 수지</span><span className={`stat-value ${net < 0 ? 'down' : 'up'}`}>{won(net)}</span></div>
-        <div className="stat"><span className="stat-label">연말 자금 (지금 → 예상)</span><span className={`stat-value${endCash < 0 ? ' down' : ''}`}>{won(cash)} → {won(endCash)}</span></div>
+        <div className="stat">
+          <span className="stat-label">예상 수지{same ? '' : ' (균형 → 이 예산)'}</span>
+          <span className={`stat-value ${net < 0 ? 'down' : 'up'}`}>{arrow(won(baseNet), won(net))}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">연말 자금 (지금 → 예상{same ? '' : ': 균형 → 이 예산'})</span>
+          <span className={`stat-value${endCash < 0 ? ' down' : ''}`}>{won(cash)} → {arrow(won(endCash + baseNet - net), won(endCash))}</span>
+        </div>
       </div>
+
+      <h3>예산 줄 <span className="muted small">{preset ? `지금: ${PRESET_LABEL[preset]} 추천안` : '지금: 직접 고친 예산'}</span></h3>
+      {!season && (
+        <div className="row-between">
+          <div className="seg small" role="group" aria-label="재무팀 추천안">
+            {BUDGET_PRESETS.map((p) => (
+              <button key={p} type="button" className={preset === p ? 'on' : undefined} onClick={() => run(session.setBudgetPreset(p))}>{PRESET_LABEL[p]}</button>
+            ))}
+          </div>
+          <span className="muted small">추천안을 누르면 모든 줄의 고정이 풀리고 그 값이 들어갑니다</span>
+        </div>
+      )}
+      <BudgetLines edit={!season} />
+      <p className="muted small">
+        {season
+          ? '이번 시즌 예산은 개막 때 확정했습니다. 다음 시즌 예산은 오프시즌에 정합니다.'
+          : '해마다 결산 뒤 재무팀이 "균형" 추천안을 다시 채우고, 직접 고친 줄(고정)만 남깁니다. 기준액은 2026년 돈이고 그 해 비용은 연봉 상승 지수만큼 오릅니다.'}
+        {' '}투자는 1억 원당 효과가 점점 줄고(체감), 마케팅은 개막 때마다 고른 금액의 효과 쪽으로 조금씩 쌓여 첫해에는 손해이고 이어 가면 본전·이득입니다.
+        {' '}프런트를 늘리면 스폰서·상품이 조금 늘고, 2군 운영을 늘리면 25세 이하 2군 선수의 성장 기회가 늡니다. 수치는 임시값입니다.
+      </p>
+
+      <TicketLines season={season} />
+
       <div className="cards">
         <div>
           <h3>예상 수입</h3>
@@ -119,7 +341,7 @@ export function BudgetPanel() {
           </tbody></table>
           <p className="muted small">
             관중 수입은 {v.plan.homeGames ? `홈 ${v.plan.homeGames}경기 × 한 경기 ${won(Math.round(v.plan.perGame))}` : '홈 경기 없음'},
-            지난 시즌 승률 {v.plan.winPct.toFixed(3)} 그대로 가정 (가을야구 없음). 스폰서·상품도 같은 승률로 셉니다.
+            지난 시즌 승률 {v.plan.winPct.toFixed(3)} 그대로 가정 (가을야구 없음). 스폰서·상품도 같은 승률로 셉니다{season ? '' : ' (마케팅 쌓인 효과는 개막 때 옮긴 값, 프런트는 계획 금액)'}.
           </p>
         </div>
         <div>
@@ -128,7 +350,7 @@ export function BudgetPanel() {
             {exp.map((k) => <tr key={k}><td className="l">{FINANCE_LABEL[k]}{OPS_KINDS.includes(k as OpsKind) ? <span className="muted small"> · 운영비</span> : null}</td><td>{won(-(items[k] ?? 0))}</td></tr>)}
             <tr><td className="l strong">합</td><td className="strong">{won(-sum(exp))}</td></tr>
           </tbody></table>
-          <p className="muted small">운영비 {won(-ops)}는 프런트·원정·경기 운영·구장 운영·2군 운영 네 줄입니다 (나눈 몫은 임시값). 투자는 {season ? '개막 때 확정한 단계' : '재정 화면의 다음 시즌 계획'} 금액입니다.</p>
+          <p className="muted small">운영비 {won(-ops)}는 프런트·원정·경기 운영·구장 운영·2군 운영 네 줄이고, 그중 프런트와 2군 운영은 예산 줄에서 정합니다 (원정·구장 운영은 고정, 나눈 몫은 임시값).</p>
         </div>
       </div>
       <p className="muted small">결산 때 자금이 0보다 작으면 모기업이 메우고(구단주 신뢰도 −), 100억 원을 넘으면 넘는 몫의 절반을 모기업에 돌려줍니다. 예산안의 연말 자금은 그 전 금액입니다.</p>
@@ -137,7 +359,7 @@ export function BudgetPanel() {
 }
 
 export function FinancePanel() {
-  const { session, changed, autosave } = useGame();
+  const { session, go } = useGame();
   const plain = useWon();
   // 음수는 "−6억 3,474만 원"처럼 (wonText는 음수를 단위마다 부호를 붙인다)
   const won = (v: number) => (v < 0 ? `−${plain(-v)}` : plain(v + 0)); // + 0: −0을 0으로
@@ -178,36 +400,12 @@ export function FinancePanel() {
 
       <MoneyTable />
 
-      <h3>투자 <span className="muted small">{session.phase === 'offseason' ? `${session.year + 1} 시즌 계획 (개막 때 확정)` : `${session.year} 시즌 적용 중`}</span></h3>
-      <table>
-        <thead><tr><th className="l">항목</th><th>단계</th><th>연간 비용</th><th className="l">효과</th></tr></thead>
-        <tbody>
-          {INVEST_KINDS.map((k) => {
-            const lv = session.phase === 'offseason' ? fin?.invest[k] ?? 0 : (fin?.active ?? fin?.invest)?.[k] ?? 0;
-            return (
-              <tr key={k}>
-                <td className="l">{INVEST_LABEL[k]}</td>
-                <td>
-                  {session.phase === 'offseason' ? (
-                    <select value={lv} aria-label={`${INVEST_LABEL[k]} 단계`} onChange={(e) => {
-                      const r = session.setInvest(k, Number(e.target.value));
-                      if (r.ok) { changed(); void autosave(); }
-                    }}>
-                      {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}단계</option>)}
-                    </select>
-                  ) : `${lv}단계`}
-                </td>
-                <td>{won(investCostOf(k, lv, investWage))}</td>
-                <td className="l small">{INVEST_EFFECT[k][lv]}{k === 'marketing' && ` · 지금 쌓인 효과 ${marketingStock(session.league, session.teamIdx).toFixed(1)}단계`}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <h3>예산 <span className="muted small">{session.phase === 'offseason' ? `${session.year + 1} 시즌 계획 (개막 때 확정)` : `${session.year} 시즌 적용 중`}</span></h3>
+      <BudgetLines edit={false} planned={session.phase === 'offseason'} />
       <p className="muted small">
-        투자는 오프시즌에 다음 시즌 계획을 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 지급일마다 나눠 냅니다
-        ({session.phase === 'offseason' ? `계획 합계 연 ${won(investCost(fin, true, investWage))}` : `연 ${won(investCost(fin, false, investWage))}`}).
-        의료는 그 시즌 동안, 마케팅은 개막 때마다 고른 단계 쪽으로 효과가 조금씩 쌓이고(끊으면 천천히 빠짐), 육성·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
+        투자 5갈래와 프런트·2군 운영 예산은 <button type="button" className="link" onClick={() => go('budget')}>예산안</button>에서 오프시즌에 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 지급일마다 나눠 냅니다
+        ({session.phase === 'offseason' ? `투자 계획 합계 연 ${won(investCost(fin, true, investWage))}` : `투자 연 ${won(investCost(fin, false, investWage))}`}).
+        의료는 그 시즌 동안, 마케팅은 개막 때마다 고른 금액의 효과 쪽으로 조금씩 쌓이고(끊으면 천천히 빠짐), 육성·2군 운영·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
       </p>
 
       {flows && (
