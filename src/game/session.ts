@@ -4436,7 +4436,7 @@ export class GameSession {
     if (!pv || pv.error) return { ok: false, message: pv?.error ?? '고칠 수 없습니다.', warnings: [] };
     const base = { ops: clone(pv.ops), names: pv.names, log: pv.lines };
     const who = pv.names.length > 3 ? `${pv.names.slice(0, 3).join(', ')} 외 ${pv.names.length - 3}명` : pv.names.join(', ');
-    const message = `${who}: ${pv.lines.length}가지를 고쳤습니다.`;
+    const message = pv.ops.every((o) => o.op === 'create') ? `${who}: 가상 선수로 만들었습니다.` : `${who}: ${pv.lines.length}가지를 고쳤습니다.`;
     if (this.phase === 'season') {
       this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'edit', ...base });
       return { ok: true, message, warnings: pv.warnings };
@@ -4472,6 +4472,9 @@ export class GameSession {
           case 'fans': addFanEvent(L, op.team, this.year, season ? day : -2, op.delta, '에디터'); break;
           case 'trust': this.owner.trust = Math.max(0, Math.min(100, op.value)); break;
           case 'pick': free.push(op); break;
+          // 리그 규정 (E4): 자유 모드 rule 그대로 (league.rules, 소식 '규정 변경')
+          case 'rule': free.push(op); break;
+          case 'create': this.applyEditCreate(op); break;
         }
         continue;
       }
@@ -4533,7 +4536,27 @@ export class GameSession {
   }
 
   /**
-   * 지금 부상 (에디터 '부상 낫게 하기'): 부상 결장(이탈 이벤트·병역 결장 빼고)의 문구와 남은 일수. 오프시즌은 다음 개막으로 넘어가는 부상 재활.
+   * 에디터 선수 만들기 (E4, 오프시즌만: 미리보기가 시즌 중을 막는다). 자유 모드 create를 그대로 쓰고(이름·국적·아시아쿼터·병역·투수 역할),
+   * 늘 가상 선수(real: false)로 둔다. 계약을 줬으면 그 계약으로 (연도별 연봉 없음)
+   */
+  private applyEditCreate(op: Extract<EditOp, { op: 'create' }>): void {
+    if (this.phase === 'season') return;
+    const L = this.league;
+    const n = L.players.length;
+    this.applyFreeOps([{ op: 'create', name: op.name, team: op.team, pos: op.pos, age: op.age, now: op.now, potential: op.potential,
+      ...(op.role ? { role: op.role } : {}), ...(op.foreign ? { foreign: true } : {}), ...(op.asia ? { asia: true } : {}), ...(op.military ? { military: op.military } : {}) }], '에디터');
+    const np = L.players.length > n ? L.players[L.players.length - 1] : undefined;
+    if (!np) return;
+    np.real = false;
+    delete np.outsider;
+    if (op.salary !== undefined && op.years !== undefined) {
+      np.contract = { ...np.contract, kind: np.foreign ? 'foreign' : np.contract.kind, salary: op.salary, until: this.year + 1 + op.years - 1 };
+      delete np.contract.steps;
+    }
+  }
+
+  /**
+   * 지금 부상 (에디터 '부상 낫게 하기'):부상 결장(이탈 이벤트·병역 결장 빼고)의 문구와 남은 일수. 오프시즌은 다음 개막으로 넘어가는 부상 재활.
    * 부상 문구는 결장 알림과 같은 absenceReason을 거친다
    */
   injuryNow(id: string, sim?: SimPlayer): { text: string; days: number } | null {

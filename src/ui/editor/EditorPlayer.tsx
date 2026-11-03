@@ -5,6 +5,7 @@ import { driveWord, editorView, timingText, type EditorPlayerView } from '../../
 import { guessText } from '../../league/scout';
 import { useGame } from '../context';
 import { EditorEdit, type EditNote } from './EditorEdit';
+import { EditorCurve } from './EditorCurve';
 
 const fmt = (x: number, d = 1) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 
@@ -69,6 +70,7 @@ function EditorPlayerBody({ v }: { v: EditorPlayerView }) {
         )}
         <p className="muted small">특수능력은 에디터에서만 보이고 고칠 수 없습니다 (2026-11-03 결정).</p>
       </section>
+      <EditorCurve id={v.id} />
       <EditorEdit key={`${v.id}:${epoch}`} v={v} note={note} onSaved={(n, ok) => { setNote(n); if (ok) setEpoch(epoch + 1); }} />
     </div>
   );
