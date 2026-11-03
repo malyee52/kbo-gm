@@ -36,7 +36,8 @@ function MoneyTable() {
   const part = (sign: 1 | -1) => rows.filter((r) => sideOf(r) === sign).sort((a, b) => orderOf(a.kind) - orderOf(b.kind));
   const line = (r: Row, label: string, sign: 1 | -1, bold = false) => {
     // 차이: 시즌 끝 예상 − 계획. 수입이 늘거나 지출이 줄면 +
-    const diff = (r.end - r.plan) * sign;
+    // 지급마다 반올림한 차이(몇만 원)는 없는 것으로 본다
+    const diff = Math.abs(r.end - r.plan) < 100 ? 0 : (r.end - r.plan) * sign;
     const b = bold ? ' strong' : '';
     return (
       <tr key={label}>
@@ -219,7 +220,8 @@ export function FinancePanel() {
                 const paid = m.when === 'open' || (m.when === 'day' && m.day < session.currentDay);
                 const d = dateOf(session.year, m.day);
                 const label = m.when === 'open' ? `개막일 (${d.month}월 ${d.date}일)` : m.when === 'settle' ? '결산' : `${d.month}월 ${d.date}일`;
-                const state = paid ? '' : m.when === 'settle' ? ' (결산 때)' : ' (진행 중)';
+                const next = flows.months.find((x) => x.when === 'day' && x.day >= session.currentDay);
+                const state = paid ? '' : m.when === 'settle' ? ' (결산 때)' : m === next ? ' (진행 중)' : ' (예정)';
                 return (
                   <tr key={`${m.when}-${m.day}`}>
                     <td className="l">{label}{state}</td>
