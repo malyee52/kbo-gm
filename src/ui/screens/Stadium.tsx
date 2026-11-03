@@ -13,6 +13,7 @@ import { isGuessBasis, PARK_BASIS_LABEL, teamParkView, type ParkLeague, type Tea
 import { leagueBase } from '../../game/saber';
 import type { ParkSpec } from '../../data/types';
 import { wageIndex } from '../../league/salary';
+import { dealsAt, emptySlots, expectedAmount, bestOffer, SLOT_LABEL, STYLE_LABEL, PERF_BONUS, POP_BONUS, type SponsorDeal, type SponsorOffer } from '../../league/sponsor';
 
 const levelClass = (v: number) => (v >= 75 ? 'g-hi' : v >= 60 ? 'g-up' : v <= 25 ? 'g-lo' : v <= 40 ? 'g-dn' : '');
 const pctp = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(1)}%p`;
@@ -211,6 +212,7 @@ export function StadiumPanel() {
         {off && <FenceWorkSection now={mine} pl={pl} onDone={(r) => { setMsg({ text: r.message, error: !r.ok }); changed(); if (r.ok) void autosave(); }} />}
         {!off && !building && <p className="muted small">공사는 오프시즌에 주문합니다.</p>}
         <NamingSection year={year} off={off} onDone={(r) => { setMsg({ text: r.message, error: !r.ok }); changed(); if (r.ok) void autosave(); }} />
+        <SponsorSection year={year} off={off} onDone={(r) => { setMsg({ text: r.message, error: !r.ok }); changed(); if (r.ok) void autosave(); }} />
         {msg && <p className={msg.error ? 'note error-box' : 'note'} role="status">{msg.text}</p>}
       </section>
 
@@ -417,6 +419,72 @@ function NamingSection({ year, off, onDone }: { year: number; off: boolean; onDo
         </div>
       )}
       {offers.length > 0 && <p className="muted small">제안 금액은 팬 만족도와 시설이 좋을수록 큽니다. 기업 이름은 모두 가상입니다.</p>}
+    </>
+  );
+}
+
+/** 성향 설명 (보너스 조건) */
+function styleNote(o: SponsorOffer): string {
+  if (o.style === 'perf') return `가을야구 진출 +${Math.round(PERF_BONUS.postseason * 100)}% · 우승 +${Math.round(PERF_BONUS.champion * 100)}%`;
+  if (o.style === 'pop') return `홈 경기당 관중 ${(o.target ?? 0).toLocaleString()}명 이상이면 +${Math.round(POP_BONUS * 100)}%`;
+  return '보너스 없음';
+}
+
+/**
+ * 스폰서 계약 (재정 2 F4a): 메인 1·서브 2. 오프시즌에는 다음 시즌 빈 자리마다 가상 기업 제안 3개.
+ * 고르지 않은 자리는 개막 때 기대 연액이 가장 큰 제안으로 자동 계약된다
+ */
+function SponsorSection({ year, off, onDone }: { year: number; off: boolean; onDone: (r: { ok: boolean; message: string }) => void }) {
+  const { session } = useGame();
+  const won = useWon();
+  const L = session.league;
+  const me = session.teamIdx;
+  const wi = wageIndex(year, L);
+  const deals: SponsorDeal[] = dealsAt(L, me, year);
+  const offers = off ? L.finance?.[me]?.sponsorOffers : undefined;
+  const open = offers && offers.year === year ? emptySlots(L, me, year).filter((s) => offers.slots[s]?.length) : [];
+  return (
+    <>
+      <h3>스폰서 <span className="muted small">{year} 시즌</span></h3>
+      {deals.length > 0
+        ? (
+          <div className="scroll flat">
+            <table>
+              <thead><tr><th className="l">자리</th><th className="l">기업 (가상)</th><th className="l">성향</th><th>기간</th><th>해마다</th></tr></thead>
+              <tbody>
+                {deals.map((d) => (
+                  <tr key={d.slot}><td className="l">{SLOT_LABEL[d.slot]}</td><td className="l">{d.name}</td><td className="l" title={styleNote(d)}>{STYLE_LABEL[d.style]}</td><td>{d.from}~{d.to}</td><td>{won(d.amount * wageIndex(year, L))}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+        : <p className="muted small">{year} 시즌에 걸린 스폰서 계약이 없습니다{off ? '' : ' (계약 전 시즌은 인기도로 정한 예전 금액이 들어옵니다)'}.</p>}
+      {open.map((slot) => {
+        const list = offers!.slots[slot]!;
+        const best = bestOffer(list);
+        return (
+          <div key={slot}>
+            <h4 className="small">{SLOT_LABEL[slot]} 자리 제안</h4>
+            <div className="scroll flat">
+              <table>
+                <thead><tr><th className="l">기업 (가상)</th><th className="l">성향</th><th>기간</th><th>해마다</th><th>기대 연액</th><th /></tr></thead>
+                <tbody>
+                  {list.map((o, i) => (
+                    <tr key={o.name}>
+                      <td className="l">{o.name}{i === best && <span className="muted small"> 자동 계약 후보</span>}</td>
+                      <td className="l">{STYLE_LABEL[o.style]} <span className="muted small">{styleNote(o)}</span></td>
+                      <td>{o.years}시즌</td><td>{won(o.amount * wi)}</td><td>{won(expectedAmount(o) * wi)}</td>
+                      <td><ConfirmButton label="계약" confirmLabel="정말 계약 (중간에 깰 수 없음)" className="small-btn" onConfirm={() => onDone(session.signSponsor(slot, i))} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+      {open.length > 0 && <p className="muted small">고르지 않은 자리는 개막 때 기대 연액(보너스 확률을 넣은 값)이 가장 큰 제안으로 자동 계약됩니다. 스폰서 금액은 팬 인기도(마케팅·프런트 포함)를 따르고, 보너스는 결산 때 들어옵니다. 기업 이름은 모두 가상이고 수치는 임시값입니다.</p>}
     </>
   );
 }

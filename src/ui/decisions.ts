@@ -9,6 +9,8 @@ import { pendingChoices } from '../fantasy/types';
 import { offerExpired } from '../fantasy/rivals';
 import { meetingSlot, SLOT_LABEL } from '../fantasy/ownerMeeting';
 import { eventDef } from '../league/events';
+import { meetingOf, ASK_LABEL } from '../league/meeting';
+import { emptySlots, SLOT_LABEL as SPONSOR_SLOT_LABEL } from '../league/sponsor';
 import type { Screen } from './context';
 import type { Group } from './menu';
 
@@ -139,6 +141,18 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     const postings = (off.postings ?? []).filter((x) => !x.decided);
     if (postings.length && off.stage !== 'release' && off.stage !== 'ready') {
       out.push({ key: 'posting', kind: '계약', group: '영입', title: `포스팅 요청 ${postings.length}건`, why: '답하지 않으면 붙잡은 것으로 합니다.', when: '정원 정리 단계 전', go: 'offseason' });
+    }
+    // 구단주 예산 회의 (재정 2 F4b): 요청 전·조건부 답 전
+    if (off.stage === 'meeting') {
+      const m = meetingOf(s.league, me, off.year + 1);
+      if (!m) out.push({ key: 'owner-meeting', kind: '구단주', group: '경영', title: '구단주 예산 회의', why: '요청 하나(운영 자금·FA 지원 한도·목표)를 고릅니다. 고르지 않으면 "요청 없음"으로 마칩니다.', when: '개막 준비 전', go: 'offseason' });
+      else if (m.result === 'conditional') out.push({ key: 'owner-meeting', kind: '구단주', group: '경영', title: `조건부 제안: ${ASK_LABEL[m.ask]}`, why: '목표를 한 단계 올리면 들어주겠다고 합니다. 답하지 않으면 거절로 합니다.', when: '개막 준비 전', go: 'offseason' });
+    }
+    // 빈 스폰서 자리 (재정 2 F4a): 고르지 않으면 개막 때 자동 계약
+    const so = s.league.finance?.[me]?.sponsorOffers;
+    if (so && so.year === off.year + 1) {
+      const open = emptySlots(s.league, me, so.year).filter((x) => so.slots[x]?.length);
+      if (open.length) out.push({ key: 'sponsor', kind: '계약', group: '경영', title: `빈 스폰서 자리 ${open.length}곳`, why: `${open.map((x) => SPONSOR_SLOT_LABEL[x]).join('·')} 자리에 제안이 와 있습니다. 고르지 않으면 개막 때 기대 연액이 가장 큰 제안으로 자동 계약합니다.`, when: `${so.year} 시즌 개막 전`, go: 'stadium', ack: `${so.year}:${open.join(',')}` });
     }
     // 단계 진행 자체: 다른 할 일이 없어도 오프시즌은 단계를 넘겨야 끝난다
     out.push({
