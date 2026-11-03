@@ -14,7 +14,7 @@ import { DEFAULT_PARAMS, type EngineParams } from '../src/engine';
 import { currentRuns, valueContext } from '../src/ai/value';
 import { createLeague } from '../src/league/create';
 import { marketSalary, salaryCap, teamCapPayroll, wageIndex } from '../src/league/salary';
-import { cashOf } from '../src/league/finance';
+import { cashOf, OPS_KINDS } from '../src/league/finance';
 import type { FinanceKind } from '../src/league/finance';
 import { faAskParts, leagueView, openTwoWay } from '../src/league/offseason';
 import { runYear } from './longsim';
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
       const capPays = teams.map((t) => teamCapPayroll(league, t, league.year));
       rows.push({
         year: y, wage: wageIndex(y, league),
-        income: -INCOME.reduce((a, k) => a + sum(k), 0), payroll: sum('payroll'), foreign: sum('foreign'), ops: sum('ops'),
+        income: -INCOME.reduce((a, k) => a + sum(k), 0), payroll: sum('payroll'), foreign: sum('foreign'), ops: sum('ops') + OPS_KINDS.reduce((a, k) => a + sum(k), 0),
         invest: sum('invest') + sum('scouting'), coach: sum('coach'), signing: sum('signing'),
         net: hist.reduce((a, h) => a + h.net, 0) / hist.length,
         cashAvg: hist.reduce((a, h) => a + h.cash, 0) / hist.length, cashMin: Math.min(...hist.map((h) => h.cash)),

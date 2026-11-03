@@ -47,6 +47,22 @@ export const SPONSOR_BASE = 750_000;
  * FA 계약금을 못 내고 자기 FA도 잡지 못했다 (reports/first-season-balance.md). 긴축 때 맞춘 지출 합으로 되돌린다
  */
 export const OPS_COST = 2_020_000;
+/** 운영비 네 줄 (재정 2 F1a, docs/재정2_기획안.md 4.4) */
+export type OpsKind = 'opsFront' | 'opsGame' | 'opsPark' | 'opsFutures';
+export const OPS_KINDS: OpsKind[] = ['opsFront', 'opsGame', 'opsPark', 'opsFutures'];
+/**
+ * 운영비를 넷으로 나눈 기본 몫 (만 원, 합 = OPS_COST): 프런트 60억·원정·경기 운영 50억·구장 운영 45억·2군 운영 47억.
+ * 임시값 (근거 없음, 재정 2 기획안 4.4). 퓨처스 구단은 합과 함께 각각 × FUTURES_OPS_SHARE
+ */
+export const OPS_SPLIT: Record<OpsKind, number> = { opsFront: 600_000, opsGame: 500_000, opsPark: 450_000, opsFutures: 470_000 };
+/** 운영비 한 번 지급액(total)을 네 줄로 나눈다. 반올림 나머지는 원정·경기 운영에 (합이 늘 total) */
+export function splitOps(total: number): Record<OpsKind, number> {
+  const all = OPS_KINDS.reduce((s, k) => s + OPS_SPLIT[k], 0);
+  const front = Math.round((total * OPS_SPLIT.opsFront) / all);
+  const park = Math.round((total * OPS_SPLIT.opsPark) / all);
+  const futures = Math.round((total * OPS_SPLIT.opsFutures) / all);
+  return { opsFront: front, opsGame: total - front - park - futures, opsPark: park, opsFutures: futures };
+}
 /** 모기업 지원금 기본액 (등급별, 한 해, 만 원) */
 export const PARENT_BASE: Record<ParentGrade, number> = { A: 600_000, B: 450_000, C: 0 };
 /**
@@ -192,13 +208,15 @@ export interface FinanceYear {
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'parent' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
-  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other';
+  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'other'
+  | OpsKind;
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
   start: '시작 자금', gate: '관중 수입', postseason: '가을야구 수입', broadcast: '중계권·리그 배분', sponsor: '스폰서·상품',
   parent: '모기업 지원금', rescue: '모기업 긴급 지원', faSupport: '모기업 지원 (FA 계약금)', champion: '우승 배당',
-  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비', invest: '투자', scouting: '스카우트비',
+  payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비 (나누기 전·캠프)', invest: '투자', scouting: '스카우트비',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', other: '기타',
+  opsFront: '프런트', opsGame: '원정·경기 운영', opsPark: '구장 운영', opsFutures: '2군 운영',
 };
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
@@ -373,6 +391,11 @@ function rosterAt(league: LeagueState, team: number, day: number, trades: TradeM
   return out;
 }
 
+/** 그 해 운영비 연간 합 (네 줄 합, 퓨처스 구단은 × FUTURES_OPS_SHARE, 연봉 상승 지수 반영) */
+export function opsCost(league: LeagueState, team: number, year: number): number {
+  return (isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wageIndex(year, league);
+}
+
 /** 투자 연간 비용 합. only를 주면 그 갈래만 (장부의 투자·스카우트비 나누기) */
 export function investCost(f: TeamFinance | undefined, planned = false, wage = 1, only?: (k: InvestKind) => boolean): number {
   if (!f) return 0;
@@ -508,7 +531,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     const n = pays.length;
     const parts: [FinanceKind, number][] = [
       ['payroll', -Math.round(dom / n)], ['foreign', -Math.round(fgn / n)],
-      ['ops', -Math.round(((isFuturesTeam(league, team, year) ? OPS_COST * FUTURES_OPS_SHARE : OPS_COST) * wage) / n)], ['invest', -Math.round(investCost(fin, false, wage, (k) => !isScoutKind(k)) / n)],
+      ...(Object.entries(splitOps(-Math.round(opsCost(league, team, year) / n))) as [FinanceKind, number][]), ['invest', -Math.round(investCost(fin, false, wage, (k) => !isScoutKind(k)) / n)],
       ['scouting', -Math.round(investCost(fin, false, wage, isScoutKind) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
       ['broadcast', Math.round(yearly.broadcast / n)], ['parent', Math.round(yearly.parent / n)], ['sponsor', Math.round(yearly.sponsor / n)],
     ];
@@ -540,6 +563,131 @@ function sponsorAmount(league: LeagueState, team: number, futures: boolean, winP
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
   const wage = wageIndex(year, league);
   return Math.round(SPONSOR_BASE * wage * inc * (futures ? 0.3 : popularity(league, team, winPct, depth, star))) + Math.round((NAMING_SPONSOR[league.teams[team].franchise] ?? 0) * wage);
+}
+
+// ---- 예산안: 계획·지금까지·시즌 끝 예상 (재정 2 F1a, docs/재정2_기획안.md 4.3·6장)
+
+/** 한 시즌 돈 계획 (항목별, 만 원). homeGames·perGame은 관중 수입 셈의 근거 */
+export interface FinancePlan {
+  year: number;
+  items: Partial<Record<FinanceKind, number>>;
+  /** 예상 홈 경기 수와 한 경기 예상 관중 수입 */
+  homeGames: number;
+  perGame: number;
+  /** 가정한 승률 (지난 시즌, 없으면 0.5) */
+  winPct: number;
+}
+
+/** 계획의 입력. season이 그 해 시즌이면 그 일정으로, 아니면(오프시즌에 다음 시즌) 지난 결산 관중으로 관중 수입을 잡는다 */
+export interface PlanInput {
+  league: LeagueState;
+  world: World;
+  season?: Season;
+}
+
+/**
+ * 한 시즌 돈 계획 (읽기 전용 예산안). 관중·스폰서는 "지난 시즌 승률 그대로" 가정 (가을야구 없음),
+ * 연봉은 지금(시즌 중이면 개막 때) 소속 선수 연봉 합, 운영비·투자·감독·코치·중계권·모기업은 그 해 금액,
+ * 장부에 이미 적힌 그 해 항목(오프시즌 계약금·보상금 등)은 그대로 넣는다. 난수를 쓰지 않는다 (관중률 잡음은 날짜별 고정 시드)
+ */
+export function financePlan(input: PlanInput, team: number, year: number): FinancePlan {
+  const { league, world, season } = input;
+  const items: Partial<Record<FinanceKind, number>> = {};
+  const add = (k: FinanceKind, v: number) => { if (v) items[k] = (items[k] ?? 0) + Math.round(v); };
+  const wage = wageIndex(year, league);
+  const futures = isFuturesTeam(league, team, year);
+  const fin = league.finance?.[team];
+  const inSeason = !!season && world.year === year;
+  const last = league.lastSeason?.teams?.[team];
+  const winPct = last && last.w + last.l > 0 ? last.w / (last.w + last.l) : 0.5;
+  const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
+  // 관중 수입
+  let homeGames = 0;
+  let perGame = 0;
+  if (inSeason && team < world.teams.length) {
+    const ks = season!.knownSchedule(0);
+    const park = league.stadiums?.[team];
+    const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
+    const ticket = (TICKET * ticketScale(park) * wage) / eraFillScale(year);
+    let sum = 0;
+    let n = 0;
+    ks.days.forEach((games, day) => {
+      for (const g of games) if (g.home === team) { sum += Math.round(Math.round(cap * fillRate(league, team, winPct, star, day, year, g.away)) * ticket); n++; }
+    });
+    const pending = ks.pending.filter((g) => g.home === team).length;
+    homeGames = n + pending;
+    perGame = n ? sum / n : 0;
+    add('gate', sum + perGame * pending);
+  } else {
+    const h = fin?.history.at(-1);
+    if (h?.homeGames && !futures) {
+      homeGames = h.homeGames;
+      perGame = ((h.items.gate ?? 0) / h.homeGames) * (wage / wageIndex(h.year, league));
+      add('gate', perGame * homeGames);
+    }
+  }
+  // 고정 수입
+  if (inSeason) {
+    const y = seasonIncome(league, world, team);
+    add('broadcast', y.broadcast);
+    add('parent', y.parent);
+  } else {
+    add('broadcast', futures ? 0 : BROADCAST * wage);
+    const trust = league.owner?.team === team ? league.owner.trust : 50;
+    add('parent', parentSupport(league, team, trust, cashOf(league, team), year));
+  }
+  add('sponsor', sponsorAmount(league, team, futures, winPct, 0, star, year));
+  // 지출
+  const roster = rosterAt(league, team, -1, []);
+  add('payroll', -roster.filter((p) => !p.foreign).reduce((s, p) => s + payOf(p), 0));
+  add('foreign', -roster.filter((p) => p.foreign).reduce((s, p) => s + payOf(p), 0));
+  for (const [k, v] of Object.entries(splitOps(-Math.round(opsCost(league, team, year)))) as [FinanceKind, number][]) add(k, v);
+  add('invest', -investCost(fin, !inSeason, wage, (k) => !isScoutKind(k)));
+  add('scouting', -investCost(fin, !inSeason, wage, isScoutKind));
+  add('coach', -(coachPayroll(league, team) + managerPayroll(league, team)));
+  const build = installment(league.stadiums?.[team], year);
+  if (build) add('stadium', -build);
+  // 장부에 이미 적힌 그 해 항목
+  const booked = ledgerItems(league, team, year);
+  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start') add(k, booked[k] ?? 0);
+  return { year, items, homeGames, perGame, winPct };
+}
+
+/** 예산안 한 줄 */
+export interface BudgetRow {
+  kind: FinanceKind;
+  plan: number;
+  sofar: number;
+  /** 시즌 끝 예상 */
+  end: number;
+}
+
+/**
+ * 재정 표 (계획 / 지금까지 / 시즌 끝 예상): 지금까지 = 시즌 중 흐름 + 그 해 장부, 시즌 끝 예상 = 지급 항목은 지금 소속으로 남은 지급까지,
+ * 관중 수입은 지금까지 + 남은 홈 경기 × 계획의 한 경기 관중 수입, 스폰서는 지금 승률로 결산 셈, 가을야구는 지금까지
+ */
+export function budgetRows(input: SeasonInput, team: number, upToDay: number, plan: FinancePlan): BudgetRow[] {
+  const { league, world, season } = input;
+  const year = world.year;
+  const now = seasonFlows(input, team, upToDay);
+  const full = seasonFlows(input, team, Number.MAX_SAFE_INTEGER);
+  const booked = ledgerItems(league, team, year);
+  const sofar: Partial<Record<FinanceKind, number>> = { ...now.items };
+  const end: Partial<Record<FinanceKind, number>> = { ...full.items };
+  for (const k of Object.keys(booked) as FinanceKind[]) {
+    if (k === 'start') continue;
+    sofar[k] = (sofar[k] ?? 0) + (booked[k] ?? 0);
+    end[k] = (end[k] ?? 0) + (booked[k] ?? 0);
+  }
+  end.gate = (full.items.gate ?? 0) + Math.round(plan.perGame * Math.max(0, plan.homeGames - full.homeGames));
+  const rec = team < world.teams.length ? season.teams[team] : null;
+  const pct = rec && rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : plan.winPct;
+  const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
+  end.sponsor = sponsorAmount(league, team, isFuturesTeam(league, team, year), pct, 0, star, year);
+  if (plan.items.stadium && !booked.stadium) end.stadium = plan.items.stadium;
+  const kinds = new Set<FinanceKind>([...Object.keys(plan.items), ...Object.keys(sofar), ...Object.keys(end)] as FinanceKind[]);
+  return [...kinds].map((kind) => ({ kind, plan: plan.items[kind] ?? 0, sofar: sofar[kind] ?? 0, end: end[kind] ?? 0 }))
+    .filter((r) => r.plan || r.sofar || r.end);
 }
 
 // ---- 결산
