@@ -270,6 +270,11 @@ function playerByName(g: GameSession, raw: unknown): LeaguePlayer | null {
   return null;
 }
 
+/** 선수 이름 최대 길이. 넘으면 자르지 않고 버린다 (2026-10-29: 8글자로 잘라 '야마모토 요시노부'가 '야마모토 요시노'가 됐다) */
+export const NAME_MAX = 20;
+/** 게임 마스터가 준 이름: 앞뒤 공백만 걷고, 비었거나 NAME_MAX를 넘으면 빈 글자 */
+const nameOf = (v: unknown) => { const s = typeof v === 'string' ? v.trim() : ''; return s.length <= NAME_MAX ? s : ''; };
+
 /** 외국인 이름처럼 보이나: 띄어쓰기나 가운뎃점이 있거나 다섯 글자 이상 (한국 이름은 대개 두세 글자) */
 export const looksForeignName = (name: string) => /[\s·]/.test(name.trim()) || name.trim().length >= 5;
 
@@ -293,8 +298,8 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
       }
       case 'create': {
         const team = teamByName(g, e.team);
-        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 8) : '';
-        if (team === null || team < 0 || !name) { dropped.push(`create: ${name || '이름 없음'} (구단 ${String(e.team)})`); break; }
+        const name = nameOf(e.name);
+        if (team === null || team < 0 || !name) { dropped.push(`create: ${name || (typeof e.name === 'string' && e.name.trim() ? `이름이 ${NAME_MAX}자를 넘음` : '이름 없음')} (구단 ${String(e.team)})`); break; }
         // 리그 밖 실존 인물: AI가 real로 냈거나, 자료(KBO 기록)에는 있는데 지금 리그에 없는 이름
         const inLeague = new Set(g.league.players.map((p) => p.id));
         const real = e.real === true || (!!store && [...store.players.values()].some((m) => m.name === name && !inLeague.has(m.id)));
@@ -367,7 +372,7 @@ export function resolveOps(g: GameSession, raw: unknown, store?: Pick<DataStore,
       }
       case 'future': {
         const team = teamByName(g, e.team);
-        const name = typeof e.name === 'string' ? e.name.trim().slice(0, 20) : '';
+        const name = nameOf(e.name);
         const by = num(e.birthYear);
         if (team === null || team < 0 || !name || by === null) { dropped.push(`future: ${name || '이름 없음'}`); break; }
         const nowYear = g.phase === 'season' ? g.world.year : g.year;
