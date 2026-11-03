@@ -9,7 +9,7 @@
 // 크기는 모두 임시값 (기획안 숫자 그대로).
 
 import { Rng } from '../engine';
-import { activeLevel, CEIL_SIGMA, SCOUT_SCALE } from './finance';
+import { activeStep, CEIL_SIGMA, CEIL_SIGMA_FLOOR, SCOUT_FLOOR, SCOUT_SCALE, stepAt } from './finance';
 
 export { CEIL_SIGMA, SCOUT_SCALE };
 import { gmStyle } from './gm';
@@ -65,22 +65,22 @@ export function aiDifficultyScale(league: LeagueState): number {
   return n >= 1 ? 1 + (n - 1) * 0.5 : Math.max(0.5, 1 - (1 - n) * 0.75);
 }
 
-/** 그 구단의 스카우트 단계 (amateur = 드래프트·육성, pro = 다른 구단·시장 선수) */
+/** 그 구단의 스카우트 효과 단계 s (소수, 재정 2 F2 체감 곡선. amateur = 드래프트·육성, pro = 다른 구단·시장 선수) */
 export function scoutLevel(league: LeagueState, team: number, kind: 'amateur' | 'pro'): number {
-  return activeLevel(league, team, kind === 'amateur' ? 'scout' : 'scoutPro');
+  return activeStep(league, team, kind === 'amateur' ? 'scout' : 'scoutPro');
 }
 
 /** 갈래 추측 폭 σ (등급) */
 export function branchSigma(
   league: LeagueState, who: Observer, kind: GuessKind, o: { sample: number | null; seasonsWithUs: number | null; scout: 'amateur' | 'pro' },
 ): number {
-  const s = BASE_SIGMA[kind] * sampleScale(o.sample) * relationScale(o.seasonsWithUs) * SCOUT_SCALE[scoutLevel(league, who.team, o.scout)];
+  const s = BASE_SIGMA[kind] * sampleScale(o.sample) * relationScale(o.seasonsWithUs) * stepAt(SCOUT_SCALE, scoutLevel(league, who.team, o.scout), SCOUT_FLOOR);
   return who.user ? s : s * aiDifficultyScale(league);
 }
 
 /** 신인 천장 추측 폭 σ_천장 (등급) */
 export function ceilingSigma(league: LeagueState, who: Observer): number {
-  const s = CEIL_SIGMA[scoutLevel(league, who.team, 'amateur')];
+  const s = stepAt(CEIL_SIGMA, scoutLevel(league, who.team, 'amateur'), CEIL_SIGMA_FLOOR);
   return who.user ? s : s * aiDifficultyScale(league);
 }
 

@@ -1,7 +1,7 @@
 // 스카우트 (능력치 v2 기획안 19장, 16-7): 영입 > 스카우트. 탭 셋 — 아마추어(드래프트 보드), 프로(다른 구단·시장 선수 추측), 해외(파견·관찰 명단).
 // 화면에 나오는 것은 우리 스카우트 팀의 평가뿐이다. 진짜 능력·천장·성장 성향 같은 숨은 값은 보여 주지 않는다 (추측 범위·보고 문구만).
 import { useMemo, useState } from 'react';
-import { activeLevel, INVEST_EFFECT, INVEST_LABEL, type InvestKind } from '../../league/finance';
+import { budgetEffect, budgetOf, INVEST_LABEL, type InvestKind } from '../../league/finance';
 import { dollarText } from '../../league/salary';
 import { FX_AGENT_EVERY, FX_COST, FX_LIST_MAX, FX_MAX_OUT, FX_OFF_SENDS, FX_REGIONS, FX_WEEKS, regionName, type FxEntry } from '../../league/scoutfx';
 import { Pos, useGame } from '../context';
@@ -12,15 +12,14 @@ import type { LeaguePlayer } from '../../league/types';
 
 export type ScoutTab = 'amateur' | 'pro' | 'fx';
 
-/** 투자 단계 한 줄 (바꾸기는 경영 > 재정) */
+/** 스카우트 예산 한 줄 (정하기는 경영 > 재정 > 예산안) */
 function LevelLine({ kind }: { kind: InvestKind }) {
   const { session } = useGame();
   const off = session.phase === 'offseason';
-  const fin = session.league.finance?.[session.teamIdx];
-  const lv = off ? fin?.invest[kind] ?? 0 : activeLevel(session.league, session.teamIdx, kind);
+  const amount = budgetOf(session.league.finance?.[session.teamIdx], off)[kind];
   return (
     <p className="muted small">
-      {INVEST_LABEL[kind]} <strong>{lv}단계</strong>{off ? ' (다음 시즌 계획)' : ''}: {INVEST_EFFECT[kind][lv]}. 단계는 경영 &gt; 재정에서 오프시즌에 정합니다.
+      {INVEST_LABEL[kind]} 예산 <strong>{Math.round(amount / 1000) / 10}억 원</strong>{off ? ' (다음 시즌 계획)' : ''}: {budgetEffect(kind, amount)}. 예산은 경영 &gt; 재정 &gt; 예산안에서 오프시즌에 정합니다.
     </p>
   );
 }

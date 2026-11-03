@@ -30,7 +30,7 @@ import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '.
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
-import { activeLevel, MEDICAL_RATE } from '../league/finance';
+import { activeStep, medicalScale } from '../league/finance';
 import { dollarText, foreignCap, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
@@ -65,7 +65,8 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setInvest, settleSeason, trustFromFinance,
+  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
+  type BudgetKind, type BudgetPreset, type SeatGrade, type SeatPrices,
   type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
 import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules';
@@ -325,7 +326,14 @@ export type GameAction =
   /** 2차 드래프트·창단 특별 지명: 우리 보호 명단, 지명 희망 순서 (offseason.ts ProtectDraft) */
   | { year: number; type: 'pd-protect'; kind: 'second' | 'expansion'; ids: string[] }
   | { year: number; type: 'pd-wish'; kind: 'second' | 'expansion'; ids: string[] }
+  /** 예전 투자 단계 조작 (재정 2 F2부터는 그 단계 눈금 금액의 예산으로 바꿔 적용, 예전 기록 재현용) */
   | { year: number; type: 'invest'; kind: InvestKind; level: number }
+  /** 예산 한 줄 (만 원, 2026년 돈, 그 줄 고정), 추천안 (고정 모두 풀림), 한 줄 자동으로 (재정 2 F2) */
+  | { year: number; type: 'budget'; kind: BudgetKind; amount: number }
+  | { year: number; type: 'budget-preset'; preset: BudgetPreset }
+  | { year: number; type: 'budget-auto'; kind: BudgetKind }
+  | { year: number; type: 'ticket-price'; grade: SeatGrade; scale: number }
+  | { year: number; type: 'ticket-auto'; grade?: SeatGrade }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
@@ -3451,6 +3459,11 @@ export class GameSession {
       case 'pd-protect': res = Off.setDraftProtectByUser(L, off, a.kind, a.ids); break;
       case 'pd-wish': res = Off.setDraftWishByUser(L, off, a.kind, a.ids); break;
       case 'invest': res = setInvest(L, this.teamIdx, a.kind, a.level); break;
+      case 'budget': res = setBudget(L, this.teamIdx, a.kind, a.amount); break;
+      case 'budget-preset': res = setBudgetPreset(L, this.teamIdx, a.preset); break;
+      case 'budget-auto': res = setBudgetAuto(L, this.teamIdx, a.kind); break;
+      case 'ticket-price': res = setTicketPrice(L, this.teamIdx, a.grade, a.scale); break;
+      case 'ticket-auto': res = setTicketAuto(L, this.teamIdx, a.grade); break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }, this.parkSource()); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
@@ -4020,6 +4033,12 @@ export class GameSession {
     return { plan, rows: budgetRows(input, team, this.postseason?.done ? Number.MAX_SAFE_INTEGER : this.currentDay, plan) };
   }
 
+  /** 오프시즌 예산안: 다음 시즌 계획을 이 예산으로 셌을 때 (예산 줄 화면의 전 → 후, 재정 2 F2b). 시즌 중이면 null */
+  budgetPlanWith(budget: Record<BudgetKind, number>, team = this.teamIdx, prices?: SeatPrices): FinancePlan | null {
+    if (this.phase === 'season') return null;
+    return financePlan({ league: this.league, world: this.world }, team, this.year + 1, budget, prices);
+  }
+
   financeLabel(k: FinanceKind): string {
     return FINANCE_LABEL[k];
   }
@@ -4128,6 +4147,14 @@ export class GameSession {
   setDraftProtect(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-protect', kind, ids }); }
   setDraftWish(kind: 'second' | 'expansion', ids: string[]) { return this.dispatchOff({ year: this.year, type: 'pd-wish', kind, ids }); }
   setInvest(kind: InvestKind, level: number) { return this.dispatchOff({ year: this.year, type: 'invest', kind, level }); }
+  /** 예산 (재정 2 F2, 오프시즌에 다음 시즌 계획) */
+  setBudget(kind: BudgetKind, amount: number) { return this.dispatchOff({ year: this.year, type: 'budget', kind, amount }); }
+  setBudgetPreset(preset: BudgetPreset) { return this.dispatchOff({ year: this.year, type: 'budget-preset', preset }); }
+  setBudgetAuto(kind: BudgetKind) { return this.dispatchOff({ year: this.year, type: 'budget-auto', kind }); }
+  /** 좌석 등급 입장권 가격 배율 (오프시즌, 다음 시즌부터, 재정 2 F3) */
+  setTicketPrice(grade: SeatGrade, scale: number) { return this.dispatchOff({ year: this.year, type: 'ticket-price', grade, scale }); }
+  /** 한 등급(없으면 모두)을 재무팀 추천 가격(자동)으로 */
+  setTicketAuto(grade?: SeatGrade) { return this.dispatchOff({ year: this.year, type: 'ticket-auto', ...(grade ? { grade } : {}) }); }
   /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
   parkSource() {
     return { parkFactors: this.store.meta.parkFactors, parkEvents: this.store.meta.parkEvents, parks: this.store.parks };
@@ -4569,9 +4596,9 @@ export class GameSession {
 
   /** 세부 난이도의 부상 빈도를 지금 시즌 우리 구단에 (의료 투자 배율과 곱한다) */
   private refreshInjury(): void {
-    const med = activeLevel(this.league, this.teamIdx, 'medical');
+    const med = activeStep(this.league, this.teamIdx, 'medical');
     const t = this.world.teams[this.teamIdx];
-    if (t) t.injuryRate = (med ? MEDICAL_RATE[med] : 1) * settingsOf(this.league).injury;
+    if (t) t.injuryRate = (med ? medicalScale(med).rate : 1) * settingsOf(this.league).injury;
   }
 
   /** 우리 선수의 포스팅(해외 진출) 요청에 답한다 */
