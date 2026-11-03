@@ -1,9 +1,12 @@
-// 재정 2 (docs/재정2_기획안.md 7장 F1): 운영비 네 줄 나눠 보기(F1a)와 예산안 계획·예상.
+// 재정 2 (docs/재정2_기획안.md 7장 F1): 운영비 네 줄 나눠 보기(F1a)와 예산안 계획·예상, 지급 달력 2~11월 10번(F1b).
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { cashOf, ledgerItems, OPS_COST, OPS_KINDS, OPS_SPLIT, splitOps, type FinanceKind } from '../src/league/finance';
+import {
+  BROADCAST, cashOf, investCost, ledgerItems, OPS_COST, OPS_KINDS, OPS_SPLIT, opsCost, PAY_COUNT, PAY_MONTHS, paydays, payOf, payPlan, seasonFlows, splitOps, type FinanceKind,
+} from '../src/league/finance';
+import { dateOf } from '../src/game/calendar';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -103,5 +106,82 @@ describe('재정 2 F1a 운영비 네 줄', () => {
       err += Math.abs(plan - regular) / income;
     }
     expect(err / g.league.teams.length).toBeLessThan(0.1);
+  });
+});
+
+describe('재정 2 F1b 지급 달력 10번', () => {
+  it('⑤ 1982·1999·2020(늦은 개막)·2026 모두 2~11월 10번: 개막 전 달은 개막일, 경기 달은 그 달 마지막 날, 시즌 뒤 달은 결산', () => {
+    for (const year of [1982, 1999, 2020, 2026]) {
+      const g = GameSession.create(store, { year, teamIdx: 0, seed: `fin2-pay-${year}` }, FAST);
+      const days = g.season.schedule.length;
+      const plan = payPlan(year, days);
+      expect(plan.flatMap((p) => p.months), `${year}`).toEqual(PAY_MONTHS);
+      const ends = paydays(year, days);
+      const open = dateOf(year, 0).month;
+      for (const p of plan) {
+        if (p.when === 'open') { expect(p.day).toBe(0); expect(Math.max(...p.months)).toBeLessThan(open); }
+        if (p.when === 'day') expect(ends.some((e) => e.day === p.day && e.month === Math.max(...p.months))).toBe(true);
+        if (p.when === 'settle') { expect(p.day).toBe(days - 1); expect(Math.min(...p.months)).toBeGreaterThan(ends.at(-1)!.month); }
+      }
+      // 2020은 5월 개막: 2·3·4월분이 개막일에
+      if (year === 2020) expect(plan[0]).toMatchObject({ when: 'open', months: [2, 3, 4] });
+    }
+  });
+
+  it('① 소속이 바뀌지 않으면 항목별 연 합계는 연간액 그대로 (반올림만), 결산 셈에만 결산 지급이 들어간다', () => {
+    const g = GameSession.create(store, opts('fin2-b'), FAST);
+    g.advance(100000);
+    const input = { league: g.league, world: g.world, season: g.season, trades: [] };
+    const plan = payPlan(2026, g.season.schedule.length);
+    const tol = 10 * plan.length; // 10만 원 × 지급 횟수
+    const full = seasonFlows({ ...input, settle: true }, lg, Number.MAX_SAFE_INTEGER).items;
+    const before = seasonFlows(input, lg, Number.MAX_SAFE_INTEGER).items;
+    const roster = g.league.players.filter((p) => p.team === lg && p.military?.state !== 'serving');
+    const dom = roster.filter((p) => !p.foreign).reduce((s, p) => s + payOf(p), 0);
+    const fgn = roster.filter((p) => p.foreign).reduce((s, p) => s + payOf(p), 0);
+    expect(Math.abs((full.payroll ?? 0) + dom)).toBeLessThanOrEqual(tol);
+    expect(Math.abs((full.foreign ?? 0) + fgn)).toBeLessThanOrEqual(tol);
+    expect(Math.abs(sumOps(full) + opsCost(g.league, lg, 2026))).toBeLessThanOrEqual(tol);
+    expect(Math.abs((full.broadcast ?? 0) - BROADCAST)).toBeLessThanOrEqual(tol);
+    expect(Math.abs((full.invest ?? 0) + (full.scouting ?? 0) + investCost(g.league.finance![lg], false, 1))).toBeLessThanOrEqual(2 * tol);
+    // 결산 몫(시즌 뒤 달)은 결산 셈에만
+    const settleMonths = plan.find((p) => p.when === 'settle')?.months.length ?? 0;
+    expect(settleMonths).toBeGreaterThan(0);
+    expect(Math.abs((before.payroll ?? 0) - Math.round(((full.payroll ?? 0) * (PAY_COUNT - settleMonths)) / PAY_COUNT))).toBeLessThanOrEqual(tol);
+  });
+
+  it('② 개막일 지급은 개막 날(경기 전) 지금 자금에 보인다', () => {
+    const g = GameSession.create(store, opts('fin2-c'), FAST);
+    const open = payPlan(2026, g.season.schedule.length).find((p) => p.when === 'open')!;
+    expect(open.months.length).toBeGreaterThan(0);
+    const f = g.seasonFinance()!;
+    expect(g.currentDay).toBe(0);
+    expect(f.items.payroll).toBeLessThan(0);
+    expect(f.months.find((m) => m.when === 'open')!.net).toBeLessThan(0);
+    expect(g.cashNow()).toBe(cashOf(g.league, lg) + Object.values(f.items).reduce((s, v) => s + (v ?? 0), 0));
+    expect(g.cashNow()).toBeLessThan(cashOf(g.league, lg));
+  });
+
+  it('③ 결산: 결산 지급까지 넣은 항목이 결산 기록에 들어가고, 결산 자금 = 장부 합, 시즌 끝 예상 = 결산 항목', () => {
+    const L = base.league;
+    const g = base;
+    for (let t = 0; t < L.teams.length; t++) {
+      const y = L.finance![t].history.at(-1)!;
+      expect(y.net).toBe(Object.values(y.items).reduce((s, v) => s + (v ?? 0), 0));
+    }
+    expect(g.league.finance![lg].history.at(-1)!.cash).toBeGreaterThanOrEqual(0);
+    // 결산 직전 지금 자금 + 결산 몫(시즌 뒤 달 지급·스폰서 정산 등) = 결산 자금 (긴급 지원·환원 앞) — 다른 판으로 확인
+    const h = GameSession.create(store, opts('fin2-d'), FAST);
+    h.advance(100000);
+    h.advancePostseason(10_000);
+    const before = h.cashNow();
+    const rows = h.budgetView().rows!;
+    const rest = rows.reduce((s, r) => s + r.end - r.sofar, 0);
+    h.beginOffseason();
+    const y = h.league.finance![lg].history.at(-1)!;
+    const after = y.cash - y.rescue + (y.dividend ?? 0);
+    // 스폰서는 가을야구 깊이까지 매기므로 그 몫만 다르다
+    const sponsorRow = rows.find((r) => r.kind === 'sponsor')!;
+    expect(after - before - (rest - (sponsorRow.end - sponsorRow.sofar)) - ((y.items.sponsor ?? 0) - sponsorRow.sofar) - (y.items.champion ?? 0)).toBe(0);
   });
 });

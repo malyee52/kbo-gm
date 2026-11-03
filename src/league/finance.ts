@@ -1,7 +1,7 @@
 // 재정 (재정 상세형, docs/finance.md, 2026-10-11 사용자 결정).
 //
 // 구단 자금 = 장부(league.ledger)의 합. 보상금·제재금처럼 이미 장부에 남던 돈이 그대로 실제 돈이 된다.
-// 시즌 중 수입·지출(관중 수입, 월말 연봉·운영비·투자비)은 경기 기록과 날짜에서 그때그때 계산하고(seasonFlows),
+// 시즌 중 수입·지출(관중 수입, 지급일(2~11월 10번, payPlan)의 연봉·운영비·투자비)은 경기 기록과 날짜에서 그때그때 계산하고(seasonFlows),
 // 결산(settleSeason) 때 항목별로 장부에 적는다. 그래서 하루씩 진행하든 한 번에 진행하든 금액이 같다.
 // 금액은 모두 2026년 돈(만 원). 화면에서만 그 해 물가(priceIndex)로 바꿔 보여 준다. 수치는 임시값.
 // 2026년 뒤에는 연봉과 함께 수입(객단가·중계권·스폰서·모기업 지원·우승 배당)·운영비·투자비·기준 자금이 연봉 상승 지수(salary.ts wageIndex)만큼 오른다 (2026-10-22).
@@ -177,7 +177,7 @@ export const INVEST_EFFECT: Record<InvestKind, string[]> = {
 export interface TeamFinance {
   /** 다음 시즌 투자 계획 (단계 0~3). 오프시즌에 정하고 개막 때 active로 확정한다 */
   invest: Record<InvestKind, number>;
-  /** 이번 시즌에 적용 중인 투자 단계. 비용(월말)과 효과는 이것으로 (오프시즌에 올렸다 내리는 꼼수를 막는다) */
+  /** 이번 시즌에 적용 중인 투자 단계. 비용(지급일)과 효과는 이것으로 (오프시즌에 올렸다 내리는 꼼수를 막는다) */
   active?: Record<InvestKind, number>;
   /**
    * 마케팅 쌓인 효과 (단계 단위 0~3, 소수). 개막 때 active.marketing 쪽으로 MARKETING_UP·MARKETING_DOWN만큼 다가간다.
@@ -313,13 +313,20 @@ export interface SeasonInput {
   trades?: TradeMove[];
   /** 가을야구 경기 (진행한 것까지) */
   postseason?: SeriesGame[];
+  /** 결산 셈: 결산 지급(정규시즌 마지막 달 뒤 몫, payPlan 'settle')까지 넣는다 (settleSeason) */
+  settle?: boolean;
 }
 
 export interface MonthPoint {
-  /** 월말 일정 색인 */
+  /** 지급일 일정 색인 (결산은 정규시즌 마지막 날) */
   day: number;
+  /** 경기 달 지급이면 그 달, 개막일·결산이면 낸 달 가운데 마지막 */
   month: number;
-  /** 그달 수입·지출 합 */
+  /** 지급 때 (payPlan) */
+  when: PayEntry['when'];
+  /** 이번에 낸 달 */
+  months: number[];
+  /** 앞 지급일 뒤부터 이 지급일까지 수입·지출 합 (관중 수입 포함, 결산 칸에는 가을야구) */
   net: number;
 }
 
@@ -338,7 +345,7 @@ const parkOf = (league: LeagueState, team: number) => BALLPARK[league.teams[team
 /** 연고 시장 보정 (팬덤 기본값, stadium.ts) */
 export const marketOf = (league: LeagueState, team: number) => parkOf(league, team).market;
 
-/** 월말에 나가는 연봉 (만 원, 한 해). 외국인은 달러를 환산하고, FA 계약금으로 미리 낸 몫은 뺀다 */
+/** 지급일에 나가는 연봉 (만 원, 한 해). 외국인은 달러를 환산하고, FA 계약금으로 미리 낸 몫은 뺀다 */
 export function payOf(p: LeaguePlayer): number {
   if (p.foreign) return Math.round((p.contract.salary + (p.contract.bonus ?? 0)) * WON_PER_USD);
   return Math.max(0, p.contract.salary - (p.contract.prepaid ?? 0));
@@ -362,7 +369,7 @@ export function transferFeeUsd(salaryUsd: number): number {
  */
 export const CASH_WON_PER_RUN = 6_000;
 
-/** 월말 지급일: 정규시즌 일정 안의 각 달 마지막 날 (그달에 경기가 있는 달만) */
+/** 정규시즌 일정 안의 각 달 마지막 날 (그달에 경기가 있는 달만). 지급 달력(payPlan)의 경기 달 지급일, 부상 대체 연봉 상한의 달 수 */
 export function paydays(year: number, seasonDays: number): { day: number; month: number }[] {
   const out: { day: number; month: number }[] = [];
   for (let d = 0; d < seasonDays; d++) {
@@ -370,6 +377,44 @@ export function paydays(year: number, seasonDays: number): { day: number; month:
     const next = d + 1 < seasonDays ? dateOf(year, d + 1).month : -1;
     if (next !== m) out.push({ day: d, month: m });
   }
+  return out;
+}
+
+/** 연봉·운영비 등을 나눠 내는 달 (참가활동기간 2~11월, 규약 제72조 ①: 10회 분할 매월 1회, 재정 2 기획안 4.8) */
+export const PAY_MONTHS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+export const PAY_COUNT = PAY_MONTHS.length;
+
+/** 지급 한 번: 개막일(open, 개막 달보다 앞선 달 몫), 경기 달의 마지막 날(day), 결산(settle, 정규시즌 마지막 달보다 뒤 달 몫) */
+export interface PayEntry {
+  when: 'open' | 'day' | 'settle';
+  /** 일정 색인 (open = 0, settle = 정규시즌 마지막 날: 그날 소속으로 낸다) */
+  day: number;
+  /** 이번에 내는 달 (2~11월 가운데) */
+  months: number[];
+}
+
+/**
+ * 지급 달력 (재정 2 F1b, 기획안 4.8): 2~11월의 달마다 한 번 (연간액 ÷ 10).
+ * 그 달에 정규시즌 경기일이 있으면 그 달 마지막 날, 개막 달보다 앞이면 개막일, 정규시즌 마지막 달보다 뒤면 결산.
+ * 시즌 사이에 경기 없는 달이 끼면 그 몫은 다음 경기 달 지급일에. 1982년부터 모든 해 같은 10번 (도입 연도 미확인, 임시 단순화)
+ */
+export function payPlan(year: number, seasonDays: number): PayEntry[] {
+  const ends = paydays(year, seasonDays);
+  if (!ends.length) return [{ when: 'settle', day: Math.max(0, seasonDays - 1), months: [...PAY_MONTHS] }];
+  const first = ends[0].month;
+  const lastMonth = ends[ends.length - 1].month;
+  const out: PayEntry[] = [];
+  const open = PAY_MONTHS.filter((m) => m < first);
+  if (open.length) out.push({ when: 'open', day: 0, months: open });
+  let k = 0;
+  for (const e of ends) {
+    // 앞 지급일 뒤부터 이 달까지의 지급 달 (경기 없는 달이 끼면 함께)
+    const months = PAY_MONTHS.filter((m) => m >= first && m <= e.month && m > k);
+    k = e.month;
+    if (months.length) out.push({ when: 'day', day: e.day, months });
+  }
+  const settle = PAY_MONTHS.filter((m) => m > lastMonth);
+  if (settle.length) out.push({ when: 'settle', day: seasonDays - 1, months: settle });
   return out;
 }
 
@@ -469,16 +514,22 @@ export function fillRate(league: LeagueState, team: number, winPct: number, star
 }
 
 /**
- * 시즌 중 그 구단의 수입·지출 (upToDay 전날까지 치른 경기, 지난 월말 지급).
- * 관중 수입은 홈 경기마다, 연봉·운영비·투자비는 월말마다 (연간액 ÷ 지급 횟수).
+ * 시즌 중 그 구단의 수입·지출 (upToDay 전날까지 치른 경기, 지난 지급일 지급, 개막일 지급은 개막 날부터, 결산 지급은 settle일 때만).
+ * 관중 수입은 홈 경기마다, 연봉·운영비·투자비는 지급일마다 (연간액 × 낸 달 수 ÷ 10).
  */
 export function seasonFlows(input: SeasonInput, team: number, upToDay: number): SeasonFlows {
   const { league, world, season } = input;
   const year = world.year;
   const items: Partial<Record<FinanceKind, number>> = {};
   const add = (k: FinanceKind, v: number) => { if (v) items[k] = (items[k] ?? 0) + v; };
-  const byMonth = new Map<number, number>();
-  const addM = (day: number, v: number) => { const m = dateOf(year, day).month; byMonth.set(m, (byMonth.get(m) ?? 0) + v); };
+  // 지급 달력 (재정 2 F1b): 관중 수입은 그날 뒤 첫 경기 달 지급일 칸에, 가을야구는 결산 칸에
+  const pays = payPlan(year, season.schedule.length);
+  const net = new Array<number>(pays.length).fill(0);
+  const slotOf = (day: number) => {
+    const i = pays.findIndex((p) => p.when === 'day' && p.day >= day);
+    return i >= 0 ? i : pays.length - 1;
+  };
+  const addM = (day: number, v: number) => { net[slotOf(day)] += v; };
   let attendance = 0;
   let regular = 0;
   let homeGames = 0;
@@ -513,31 +564,35 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       attendance += fans;
       const v = Math.round(fans * POSTSEASON_TICKET * ticketScale(park) * wageIndex(year, league));
       add('postseason', v);
-      addM(g.day, v);
+      net[pays.length - 1] += v;
     }
   }
 
-  // 월말: 연봉(그날 소속)·운영비·투자비가 나가고, 개막 때 정한 중계권·모기업 지원금·스폰서 기본액이 들어온다
-  // (예전에는 이 수입이 결산 때 한꺼번에 들어와 시즌 중 자금이 크게 마이너스였다, 2026-10-11)
-  const pays = paydays(year, season.schedule.length);
+  // 지급일 (payPlan, 2~11월 10번): 연봉(그날 소속)·감독·코치·운영비·투자비가 나가고, 개막 때 정한 중계권·모기업 지원금·스폰서 기본액이 들어온다
+  // (예전에는 이 수입이 결산 때 한꺼번에 들어와 시즌 중 자금이 크게 마이너스였다, 2026-10-11).
+  // 개막일 지급은 개막 날부터 보이고, 결산 지급은 결산 셈(settle)에서만 낸다 (정규시즌 마지막 날 소속)
   const fin = league.finance?.[team];
   const yearly = seasonIncome(league, world, team);
   const wage = wageIndex(year, league);
-  for (const pd of pays) {
-    if (pd.day >= upToDay) break;
+  const invest = investCost(fin, false, wage, (k) => !isScoutKind(k));
+  const scouting = investCost(fin, false, wage, isScoutKind);
+  const coach = coachPayroll(league, team) + managerPayroll(league, team);
+  const ops = opsCost(league, team, year);
+  pays.forEach((pd, i) => {
+    if (pd.when === 'settle' ? !input.settle : pd.when === 'day' && pd.day >= upToDay) return;
     const roster = rosterAt(league, team, pd.day, input.trades ?? []);
     const dom = roster.filter((p) => !p.foreign).reduce((s, p) => s + payOf(p), 0);
     const fgn = roster.filter((p) => p.foreign).reduce((s, p) => s + payOf(p), 0);
-    const n = pays.length;
+    const share = (x: number) => Math.round((x * pd.months.length) / PAY_COUNT);
     const parts: [FinanceKind, number][] = [
-      ['payroll', -Math.round(dom / n)], ['foreign', -Math.round(fgn / n)],
-      ...(Object.entries(splitOps(-Math.round(opsCost(league, team, year) / n))) as [FinanceKind, number][]), ['invest', -Math.round(investCost(fin, false, wage, (k) => !isScoutKind(k)) / n)],
-      ['scouting', -Math.round(investCost(fin, false, wage, isScoutKind) / n)], ['coach', -Math.round((coachPayroll(league, team) + managerPayroll(league, team)) / n)],
-      ['broadcast', Math.round(yearly.broadcast / n)], ['parent', Math.round(yearly.parent / n)], ['sponsor', Math.round(yearly.sponsor / n)],
+      ['payroll', -share(dom)], ['foreign', -share(fgn)],
+      ...(Object.entries(splitOps(-share(ops))) as [FinanceKind, number][]), ['invest', -share(invest)],
+      ['scouting', -share(scouting)], ['coach', -share(coach)],
+      ['broadcast', share(yearly.broadcast)], ['parent', share(yearly.parent)], ['sponsor', share(yearly.sponsor)],
     ];
-    for (const [k, v] of parts) { add(k, v); byMonth.set(pd.month, (byMonth.get(pd.month) ?? 0) + v); }
-  }
-  const months = pays.map((pd) => ({ day: pd.day, month: pd.month, net: byMonth.get(pd.month) ?? 0 }));
+    for (const [k, v] of parts) { add(k, v); net[i] += v; }
+  });
+  const months: MonthPoint[] = pays.map((pd, i) => ({ day: pd.day, month: pd.months[pd.months.length - 1], when: pd.when, months: pd.months, net: net[i] }));
   return { items, attendance, regular, homeGames, months };
 }
 
@@ -670,7 +725,7 @@ export function budgetRows(input: SeasonInput, team: number, upToDay: number, pl
   const { league, world, season } = input;
   const year = world.year;
   const now = seasonFlows(input, team, upToDay);
-  const full = seasonFlows(input, team, Number.MAX_SAFE_INTEGER);
+  const full = seasonFlows({ ...input, settle: true }, team, Number.MAX_SAFE_INTEGER);
   const booked = ledgerItems(league, team, year);
   const sofar: Partial<Record<FinanceKind, number>> = { ...now.items };
   const end: Partial<Record<FinanceKind, number>> = { ...full.items };
@@ -736,12 +791,12 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   const wage = wageIndex(year, league);
   const reserve = DIVIDEND_RESERVE * wage;
   for (let t = 0; t < league.teams.length; t++) {
-    const flows = seasonFlows(input, t, end);
+    const flows = seasonFlows({ ...input, settle: true }, t, end);
     const items = { ...flows.items };
     const rec = t < world.teams.length ? season.teams[t] : null;
     const pct = rec && rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5;
     const futures = isFuturesTeam(league, t, year);
-    // 중계권·모기업 지원금은 시즌 중 월말에 다 받았다. 스폰서는 실제 인기도로 다시 매겨 차액을 정산한다
+    // 중계권·모기업 지원금은 지급일마다 받았다 (결산 몫은 방금 셈에 넣음). 스폰서는 실제 인기도로 다시 매겨 차액을 정산한다
     items.sponsor = sponsorAmount(league, t, futures, pct, input.postseasonDepth(t), stars[t] ?? 0, year);
     if (input.champion === t) items.champion = Math.round(CHAMPION_BONUS * wage);
     const build = installment(league.stadiums?.[t], year);

@@ -170,7 +170,7 @@ export function FinancePanel() {
         <div className="stat"><span className="stat-label">{year} 수지</span><span className={`stat-value ${sum(income) + sum(expense) < 0 ? 'down' : 'up'}`}>{won(sum(income) + sum(expense))}</span></div>
       </div>
       <p className="muted small">
-        관중 수입은 홈 경기마다 들어오고, 연봉·운영비·투자비는 월말마다 나갑니다. 중계권·모기업 지원금·스폰서 기본액도 월말에 나눠 들어오며,
+        관중 수입은 홈 경기마다 들어오고, 연봉·운영비·투자비는 2~11월 10번 지급일에 나갑니다. 중계권·모기업 지원금·스폰서 기본액도 같은 지급일에 나눠 들어오며,
         스폰서·상품은 시즌 결산 때 실제 성적과 인기로 다시 매겨 차액을 정산합니다. 결산 뒤 자금이 모자라면 모기업이 메우지만 구단주 신뢰도가 떨어지고
         다음 해 지원금이 줄어듭니다. 금액은 그 해 물가로 표시하며, 수치는 임시값입니다.
       </p>
@@ -204,23 +204,37 @@ export function FinancePanel() {
         </tbody>
       </table>
       <p className="muted small">
-        투자는 오프시즌에 다음 시즌 계획을 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 월말에 나눠 냅니다
+        투자는 오프시즌에 다음 시즌 계획을 정하고, 개막 때 확정됩니다. 비용은 시즌 동안 지급일마다 나눠 냅니다
         ({session.phase === 'offseason' ? `계획 합계 연 ${won(investCost(fin, true, investWage))}` : `연 ${won(investCost(fin, false, investWage))}`}).
         의료는 그 시즌 동안, 마케팅은 개막 때마다 고른 단계 쪽으로 효과가 조금씩 쌓이고(끊으면 천천히 빠짐), 육성·스카우트는 그 시즌이 끝난 뒤 성장 판정과 드래프트·외국인 후보 평가에 효과가 납니다.
       </p>
 
       {flows && (
         <>
-          <h3>월별 <span className="muted small">홈 관중 {flows.attendance.toLocaleString('ko-KR')}명 ({flows.homeGames}경기{flows.homeGames ? `, 평균 ${Math.round(flows.attendance / flows.homeGames).toLocaleString('ko-KR')}명` : ''})</span></h3>
+          <h3>지급일별 <span className="muted small">홈 관중 {flows.attendance.toLocaleString('ko-KR')}명 ({flows.homeGames}경기{flows.homeGames ? `, 평균 ${Math.round(flows.attendance / flows.homeGames).toLocaleString('ko-KR')}명` : ''})</span></h3>
           <table className="narrow">
-            <thead><tr><th className="l">월</th><th>수지</th></tr></thead>
+            <thead><tr><th className="l">지급일</th><th className="l">낸 달</th><th>수지</th></tr></thead>
             <tbody>
-              {flows.months.filter((m) => m.net !== 0 || m.day < session.currentDay).map((m) => (
-                <tr key={m.month}><td className="l">{m.month}월 {m.day < session.currentDay ? '' : '(진행 중)'}</td><td className={m.net < 0 ? 'down' : 'up'}>{won(m.net)}</td></tr>
-              ))}
+              {flows.months.map((m) => {
+                const paid = m.when === 'open' || (m.when === 'day' && m.day < session.currentDay);
+                const d = dateOf(session.year, m.day);
+                const label = m.when === 'open' ? `개막일 (${d.month}월 ${d.date}일)` : m.when === 'settle' ? '결산' : `${d.month}월 ${d.date}일`;
+                const state = paid ? '' : m.when === 'settle' ? ' (결산 때)' : ' (진행 중)';
+                return (
+                  <tr key={`${m.when}-${m.day}`}>
+                    <td className="l">{label}{state}</td>
+                    <td className="l small">{m.months.map((x) => `${x}월`).join('·')}분</td>
+                    <td className={m.net < 0 ? 'down' : m.net > 0 ? 'up' : undefined}>{m.net ? won(m.net) : '-'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-          <p className="muted small">다음 월말 지급일: {(() => { const n = flows.months.find((m) => m.day >= session.currentDay); if (!n) return '없음'; const d = dateOf(session.year, n.day); return `${d.month}월 ${d.date}일`; })()}</p>
+          <p className="muted small">
+            연봉·감독·코치·운영비·투자비와 중계권·모기업 지원금·스폰서 기본액은 2~11월 10번(규약의 10회 분할)에 나눠 냅니다:
+            개막 전 달 몫은 개막일에, 경기가 있는 달은 그 달 마지막 날에, 시즌 뒤 달 몫은 결산 때. 관중 수입은 그 경기 뒤 첫 지급일 칸에 셉니다.
+            다음 지급일: {(() => { const n = flows.months.find((m) => m.when === 'day' && m.day >= session.currentDay); if (!n) return '결산'; const d = dateOf(session.year, n.day); return `${d.month}월 ${d.date}일`; })()}
+          </p>
         </>
       )}
 

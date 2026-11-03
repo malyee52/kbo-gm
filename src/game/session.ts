@@ -3959,7 +3959,7 @@ export class GameSession {
 
   // ---- 재정 (finance.ts)
 
-  /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 월말 연봉 계산용) */
+  /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 지급일 연봉 계산용) */
   tradeMoves(): TradeMove[] {
     const W = this.world.players;
     const mine = this.trades.map((t) => ({ day: t.day, from: this.teamIdx, to: t.team, give: t.give.map((i) => W[i].id), get: t.get.map((i) => W[i].id) }));
