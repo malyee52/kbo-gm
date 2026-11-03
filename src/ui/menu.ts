@@ -68,6 +68,8 @@ export const MENU: MenuItem[] = [
   one('rec-dynasty', '아카이브', '왕조·라이벌', 'rec-dynasty'),
   one('rec-hof', '아카이브', '명예의 전당', 'rec-hof'),
   one('club-history', '아카이브', '이력·업적', 'club-history'),
+  // 에디터 모드 (docs/에디터_기획안.md 6.1): 꺼져 있으면 숨기지 않고 사유를 보인다
+  one('editor', '아카이브', '에디터', 'editor'),
 
   one('find', '공통', '전체 검색', 'find'),
   one('save', '공통', '저장·설정', 'save'),
@@ -118,6 +120,8 @@ export function blockOf(s: GameSession, screen: Screen): string | null {
       return s.league.awards?.length ? null : '시즌 결산 뒤 열림';
     case 'fantasy':
       return s.fantasy ? null : '판타지 모드 게임에서만';
+    case 'editor':
+      return s.editorOn ? null : '저장·설정에서 에디터를 켜면 열림';
     default:
       return null;
   }

@@ -251,6 +251,18 @@ export interface LedgerEntry {
   kind?: string;
 }
 
+/** 에디터 모드 사용 표시 (LeagueState.editor) */
+export interface EditorUse {
+  /** 지금 켜져 있나 (끄면 화면은 다시 숨김) */
+  on: boolean;
+  /** 처음 켠 때 (시즌 연도, 시즌 중이면 그날 색인, 오프시즌이면 -1). 지우지 않는다 */
+  firstOn: { year: number; day: number };
+  /** 처음 값을 고친 때 (E2부터, 보기만 했으면 없음) */
+  firstEdit?: { year: number; day: number };
+  /** 연도별 고친 횟수 (E2부터) */
+  edits?: Record<number, number>;
+}
+
 export interface LeagueState {
   format: 1;
   /** 게임 시드 (오프시즌 난수도 여기서 갈라 쓴다) */
@@ -332,6 +344,11 @@ export interface LeagueState {
   pickOwners?: { draft: number; round: number; from: number; owner: number }[];
   /** 도전 모드 진행 (challenges.ts) */
   challenge?: ChallengeState;
+  /**
+   * 에디터 모드 사용 표시 (docs/에디터_기획안.md 2.2, 2026-11-03 사용자 Q1). 켜면 숨긴 값이 에디터 화면에서 보인다.
+   * 한 번 켠 게임에는 지우지 않고 남는다 (끄면 on만 false). 없으면 에디터를 켠 적 없는 게임. 선택 칸이라 저장 형식은 그대로
+   */
+  editor?: EditorUse;
   /** 판타지 모드 (AI 이야기, src/fantasy). 없으면 보통 게임 */
   fantasy?: import('../fantasy/types').FantasyState;
   /** 바뀐 리그 규정 (league/rules.ts). 자유 모드에서만 바뀐다. 없으면 실제 규정 */

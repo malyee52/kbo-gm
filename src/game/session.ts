@@ -262,6 +262,8 @@ export interface ReproInfo {
   opts: NewGameOptions;
   /** 지금 위치 (오프시즌이면 막 끝난 시즌 연도와 마지막 날) */
   at: { year: number; day: number; phase: 'season' | 'offseason' };
+  /** 에디터 사용 표시 (켠 적 있는 게임만, docs/에디터_기획안.md 2.2) */
+  editor?: '보기' | '고침';
   actions: GameAction[];
 }
 
@@ -371,6 +373,9 @@ export type GameAction =
   | { year: number; type: 'train-off'; id: string; plan: { drill?: string; pos?: FieldPos } | null }
   | { year: number; type: 'two-way-off'; id: string; on: boolean }
   | { year: number; type: 'settings-off'; s: DifficultySettings }
+  /** 에디터 모드 켜기·끄기 (docs/에디터_기획안.md 2.1). league.editor만 바꾸고 경기 결과에는 닿지 않는다 */
+  | { year: number; day: number; type: 'editor'; on: boolean }
+  | { year: number; type: 'editor-off'; on: boolean }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
@@ -506,7 +511,7 @@ export interface EntryCheck {
   warnings: string[];
 }
 
-type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'> & Partial<Pick<DataStore, 'parks' | 'realAwards' | 'legendTitles'>>;
+type Store = Pick<DataStore, 'meta' | 'players' | 'season' | 'contracts' | 'managers' | 'ruleChanges' | 'schedule'> & Partial<Pick<DataStore, 'parks' | 'realAwards' | 'legendTitles' | 'traits'>>;
 
 const clone = <T>(x: T): T => structuredClone(x);
 
@@ -1116,6 +1121,7 @@ export class GameSession {
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
     else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
+    else if (a.type === 'editor') this.applyEditor(a.on, a.day);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
     else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
     else if (a.type === 'fx-send') fxSendInSeason(this.marketCtx, this.teamIdx, a.region);
@@ -1202,6 +1208,7 @@ export class GameSession {
       opts: { year: L.startYear, teamIdx: firstTeam, seed: L.seed, difficulty: L.difficulty ?? 'normal', ...(L.challenge ? { challenge: L.challenge.id } : {}), ...(L.startSettings ? { settings: L.startSettings } : {}), ...(L.ratingBasis ? { ratingBasis: L.ratingBasis } : {}), ...(L.fantasy ? { fantasy: { ...(L.fantasy.regressor ? { regressor: true } : {}), ...(L.fantasy.free ? { free: true } : {}) } } : {}) },
       // 가을야구 중이면 가을야구 날짜 (2026-10-12: 정규시즌 날짜를 적어 다시 돌리면 가을야구 경기를 치르지 않던 문제)
       at: { year: this.year, day: this.currentDay, phase: this.phase },
+      ...(L.editor ? { editor: this.editorMark! } : {}),
       actions: clone(this.actions),
     };
   }
@@ -3452,6 +3459,7 @@ export class GameSession {
       case 'franchise-tag': res = Off.setFranchiseTagByUser(L, off!, a.id); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
       case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
+      case 'editor-off': res = this.applyEditor(a.on, -1); break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
       case 'train-off': res = setTrainingRule(L, this.teamIdx, a.id, a.plan, 0); break;
       case 'fx-send-off': res = Off.sendFxOff(L, off, a.region); break;
@@ -3563,7 +3571,7 @@ export class GameSession {
     const prevLast = !!prevStandings && prevStandings[prevStandings.length - 1] === team;
     const got = newAchievements(o, prevLast);
     for (const id of got) {
-      o.achievements.push({ id, year: this.year, team });
+      o.achievements.push({ id, year: this.year, team, ...(L.editor ? { editor: true as const } : {}) });
       say(`업적 달성: ${ACHIEVEMENTS[id].label} (${ACHIEVEMENTS[id].note})`);
     }
     const fired = o.trust < FIRE_BELOW;
@@ -4347,6 +4355,39 @@ export class GameSession {
       }
     }
     this.valueCtx = null;
+  }
+
+  // ---- 에디터 모드 (docs/에디터_기획안.md, game/editor.ts)
+
+  /** 에디터가 켜져 있나 (켜져 있을 때만 에디터 보기 함수가 숨긴 값을 돌려준다) */
+  get editorOn(): boolean {
+    return this.league.editor?.on === true;
+  }
+
+  /** 에디터 사용 표시: 켠 적 없으면 null, 보기만 했으면 '보기', 값을 고쳤으면 '고침' (상태 줄·저장 목록·재현 정보) */
+  get editorMark(): '보기' | '고침' | null {
+    const e = this.league.editor;
+    return e ? (e.firstEdit ? '고침' : '보기') : null;
+  }
+
+  /**
+   * 에디터를 켜고 끈다 (2026-11-03 사용자 Q1: 게임 중 언제든). 켜면 사용 표시가 영구히 남고, 끄면 화면만 다시 숨김.
+   * 조작 기록에 남지만 리그 상태의 표시만 바꾸므로 경기 결과는 켜기 전후가 같다
+   */
+  setEditor(on: boolean): { ok: boolean; message: string } {
+    if (this.editorOn === on) return { ok: true, message: on ? '에디터가 이미 켜져 있습니다.' : '에디터가 이미 꺼져 있습니다.' };
+    if (this.phase === 'season') {
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'editor', on });
+      return { ok: true, message: on ? '에디터를 켰습니다.' : '에디터를 껐습니다.' };
+    }
+    return this.dispatchOff({ year: this.year, type: 'editor-off', on });
+  }
+
+  private applyEditor(on: boolean, day: number): { ok: boolean; message: string } {
+    const L = this.league;
+    if (on && !L.editor) L.editor = { on: true, firstOn: { year: this.year, day } };
+    else if (L.editor) L.editor.on = on;
+    return { ok: true, message: on ? '에디터를 켰습니다.' : '에디터를 껐습니다.' };
   }
 
   /**

@@ -24,6 +24,11 @@ function filesUnder(dir: string): string[] {
  * 화면 코드에서 빠지는 파일: 엔진 시험 화면(?lab, 개발용), 자유 모드 입력·미리보기(사용자가 넣은 능력·잠재 숫자, Q6 ①: 입력·미리보기는 그대로)
  */
 const UI_EXEMPT = ['EngineLab.tsx', 'FantasyFree.tsx', 'GmPreview.tsx'];
+/**
+ * 에디터 폴더 (docs/에디터_기획안.md 5장, 2026-11-03 사용자 Q1~Q4): 에디터를 켰을 때만 숨긴 값을 보여 주는 의도된 예외.
+ * 값은 game/editor.ts(꺼져 있으면 null)에서만 얻고, 폴더 밖은 그 함수를 부르지 않는다 (tests/editor.test.ts)
+ */
+const UI_EXEMPT_DIR = join('src', 'ui', 'editor');
 
 /** 화면이 읽으면 안 되는 것: 진짜 천장·숨은 성장 값·추측 어긋남·진짜 기여·진짜 전력·AI 판단값 */
 const FORBIDDEN: [string, RegExp][] = [
@@ -40,7 +45,7 @@ const FORBIDDEN: [string, RegExp][] = [
 ];
 
 describe('화면 코드는 숨긴 값을 읽지 않는다 (소스 검사)', () => {
-  const files = filesUnder('src/ui').filter((f) => !UI_EXEMPT.some((x) => f.endsWith(x)));
+  const files = filesUnder('src/ui').filter((f) => !UI_EXEMPT.some((x) => f.endsWith(x)) && !f.startsWith(UI_EXEMPT_DIR));
 
   it('src/ui에 진짜 천장·d·τ·갈래 천장·z·진짜 기여·전력이 없다', () => {
     expect(files.length).toBeGreaterThan(40);

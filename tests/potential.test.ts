@@ -175,8 +175,9 @@ describe('잠재력 v2: 숨은 성장 성향은 어디에도 보이지 않는다
     const walk = (dir: string) => {
       for (const f of readdirSync(dir)) {
         const p = join(dir, f);
-        if (statSync(p).isDirectory()) walk(p);
-        else if (/\.(ts|tsx)$/.test(f)) files.push(p);
+        // 예외: 에디터 모드 (켰을 때만 보기, docs/에디터_기획안.md 5장, 2026-11-03 사용자). 값은 game/editor.ts, 화면은 src/ui/editor/만 (tests/editor.test.ts)
+        if (statSync(p).isDirectory()) { if (p !== join('src', 'ui', 'editor')) walk(p); }
+        else if (/\.(ts|tsx)$/.test(f) && p !== join('src', 'game', 'editor.ts')) files.push(p);
       }
     };
     for (const d of ['src/ui', 'src/ai', 'src/fantasy']) walk(d);

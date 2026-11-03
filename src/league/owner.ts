@@ -310,7 +310,8 @@ export interface OwnerState {
   /** 이번 시즌 목표 */
   goal: { year: number; kind: GoalKind; projectedRank: number; /** 양대 리그 해만: projectedRank가 이 리그 안 순위 */ projectedLeague?: string } | null;
   history: OwnerRecord[];
-  achievements: { id: AchievementId; year: number; team: number }[];
+  /** editor: 에디터를 켠 적 있는 게임에서 얻은 업적 (2026-11-03 사용자 Q2: 막지 않고 꼬리표만, docs/에디터_기획안.md 2.2) */
+  achievements: { id: AchievementId; year: number; team: number; editor?: true }[];
   /** 해고된 뒤 받은 영입 제의 (구단 색인). 고르기 전에는 오프시즌을 진행할 수 없다 */
   offers: number[] | null;
   firedYears: number[];
