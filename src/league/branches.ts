@@ -22,8 +22,8 @@ export const PIT_BRANCHES = ['so', 'bb', 'hr', 'hit'] as const;
 export type BatBranch = (typeof BAT_BRANCHES)[number];
 export type PitBranch = (typeof PIT_BRANCHES)[number];
 /** 갈래가 좋아지는 방향 (로그 비율이 커지면 좋으면 +1) */
-const BAT_GOOD: Record<BatBranch, 1 | -1> = { so: -1, bb: 1, s1: 1, d2: 1, t3: 1, hr: 1 };
-const PIT_GOOD: Record<PitBranch, 1 | -1> = { so: 1, bb: -1, hr: -1, hit: -1 };
+export const BAT_GOOD: Record<BatBranch, 1 | -1> = { so: -1, bb: 1, s1: 1, d2: 1, t3: 1, hr: 1 };
+export const PIT_GOOD: Record<PitBranch, 1 | -1> = { so: 1, bb: -1, hr: -1, hit: -1 };
 /** 천장으로 옮기는 기본 방향의 크기 (growth.ts BAT_SHIFT·PIT_SHIFT와 같은 비율) */
 const BAT_W: Record<BatBranch, number> = { so: 0.6, bb: 0.7, s1: 0.4, d2: 0.7, t3: 0.3, hr: 1.2 };
 const PIT_W: Record<PitBranch, number> = { so: 0.6, bb: 0.6, hr: 0.8, hit: 0.3 };

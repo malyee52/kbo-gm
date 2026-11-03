@@ -40,7 +40,7 @@ import { lineTeam } from '../engine/types';
 import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type FantasyState } from '../fantasy/types';
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
-import type { EditOp } from './editOps';
+import { isPlayerOp, type EditOp } from './editOps';
 import { editorPreview } from './editor';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
@@ -1714,17 +1714,7 @@ export class GameSession {
     const ctx = this.values;
     const lpOf = (id: string) => L.players.find((p) => p.id === id);
     const spOf = (id: string) => (season ? this.world.players.find((p) => p.id === id) : undefined);
-    const syncSim = (lp: LeaguePlayer) => {
-      const sp = spOf(lp.id);
-      if (!sp) return;
-      // 수비는 리그 쪽 값을 따른다 (없던 예전 저장만 월드 값을 남긴다). 전에는 월드 값이 앞서 만든 선수의 새 수비가 들어가지 않았다
-      // 그 시즌 슬럼프는 월드를 만들 때(world.ts)처럼 옮겨 둔다 (전에는 빠져서 불러온 판과 이어 돌린 판이 갈렸다)
-      const bat = lp.bat ? { ...lp.bat, def: lp.bat.def ?? sp.bat?.def } : null;
-      sp.bat = bat && lp.slump ? shiftBat(bat, lp.slump) : bat;
-      sp.pit = lp.pit && lp.slump ? shiftPit(lp.pit, lp.slump) : lp.pit;
-      sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
-      if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
-    };
+    const syncSim = (lp: LeaguePlayer) => this.syncSimPlayer(lp);
     // FA 시장(오프시즌 FA 단계)의 선수에게 낸 move·contract는 FA 계약으로 확정한다 (Off.signFaDeal, 2026-10-29 사용자 보고 "fa때 ai로 판정된 조건들이 실제로 이행되지 않는 문제").
     // 같은 선수의 move(구단)와 contract(연봉·기간)를 한 계약으로 묶는다. contract만 냈으면 우리 구단과의 합의로 본다
     const off = season ? null : this.offseason;
@@ -1855,6 +1845,20 @@ export class GameSession {
     // 만든 선수(가상·나이)·바뀐 능력(표본)은 영점도 바꾼다. 불러온 판(월드를 새로 만듦)과 같게 시즌 월드 전체에 다시 낸다
     if (season && L.defPool && ops.some((op) => op.op === 'create' || op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
     this.valueCtx = null;
+  }
+
+  /** 리그 상태의 능력을 시즌 월드 선수에 옮긴다 (자유 모드·에디터 능력 고침 뒤, 시즌 중만) */
+  private syncSimPlayer(lp: LeaguePlayer): void {
+    if (this.phase !== 'season') return;
+    const sp = this.world.players.find((p) => p.id === lp.id);
+    if (!sp) return;
+    // 수비는 리그 쪽 값을 따른다 (없던 예전 저장만 월드 값을 남긴다). 전에는 월드 값이 앞서 만든 선수의 새 수비가 들어가지 않았다
+    // 그 시즌 슬럼프는 월드를 만들 때(world.ts)처럼 옮겨 둔다 (전에는 빠져서 불러온 판과 이어 돌린 판이 갈렸다)
+    const bat = lp.bat ? { ...lp.bat, def: lp.bat.def ?? sp.bat?.def } : null;
+    sp.bat = bat && lp.slump ? shiftBat(bat, lp.slump) : bat;
+    sp.pit = lp.pit && lp.slump ? shiftPit(lp.pit, lp.slump) : lp.pit;
+    sp.value = sp.isPitcher ? pitValue(sp.pit!, this.world.league) : batValue(sp.bat!, this.world.league);
+    if (sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
   }
 
   /** 판타지 효과 적용 (src/fantasy/effects.ts). 시즌 중에는 이벤트 도구, 오프시즌에는 리그 상태에 바로 */
@@ -4393,7 +4397,8 @@ export class GameSession {
   }
 
   /**
-   * 에디터로 선수 값을 고친다 (E2, docs/에디터_기획안.md 3.2): 능력·천장·생년·소속·계약·병역·부상 낫게 하기. 에디터가 켜져 있을 때만.
+   * 에디터로 값을 고친다 (docs/에디터_기획안.md 3.2): E2 능력·천장·생년·소속·계약·병역·부상 낫게 하기, E3 갈래·갈래 천장·성향·시기와
+   * 구단 자금·팬·신뢰·지명권. 표 일괄 고침도 여러 선수의 ops를 한 번에 넘겨 조작 하나로 남는다. 에디터가 켜져 있을 때만.
    * 규정을 넘어도 막지 않고 경고만 돌려준다 (2026-11-03 사용자 Q5). 시즌 중은 그날 경기 전(dispatchSeason 'edit'), 오프시즌은 dispatchOff('edit-off').
    * 경기 결과에 닿으므로 지휘 중인 경기가 있으면 막는다 (gameLock)
    */
@@ -4403,7 +4408,8 @@ export class GameSession {
     const pv = editorPreview(this, input);
     if (!pv || pv.error) return { ok: false, message: pv?.error ?? '고칠 수 없습니다.', warnings: [] };
     const base = { ops: clone(pv.ops), names: pv.names, log: pv.lines };
-    const message = `${pv.names.join(', ')}: ${pv.lines.length}가지를 고쳤습니다.`;
+    const who = pv.names.length > 3 ? `${pv.names.slice(0, 3).join(', ')} 외 ${pv.names.length - 3}명` : pv.names.join(', ');
+    const message = `${who}: ${pv.lines.length}가지를 고쳤습니다.`;
     if (this.phase === 'season') {
       this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'edit', ...base });
       return { ok: true, message, warnings: pv.warnings };
@@ -4424,7 +4430,24 @@ export class GameSession {
     const season = this.phase === 'season';
     const free: FreeOp[] = [];
     let aged = false;
+    let skills = false;
     for (const op of ops) {
+      // 구단 고치기 (E3): 자금·팬·신뢰·지명권. 결과(재정·평가)는 평소 규칙대로
+      if (!isPlayerOp(op)) {
+        switch (op.op) {
+          case 'cash': {
+            const year = season ? this.world.year : this.year + 1;
+            if (!op.amount || !L.teams[op.team]) break;
+            L.ledger.push(op.amount > 0 ? { year, from: -1, to: op.team, amount: op.amount, note: '에디터: 자금 고침', kind: 'editor' }
+              : { year, from: op.team, to: -1, amount: -op.amount, note: '에디터: 자금 고침', kind: 'editor' });
+            break;
+          }
+          case 'fans': addFanEvent(L, op.team, this.year, season ? day : -2, op.delta, '에디터'); break;
+          case 'trust': this.owner.trust = Math.max(0, Math.min(100, op.value)); break;
+          case 'pick': free.push(op); break;
+        }
+        continue;
+      }
       const lp = this.leaguePlayer(op.player);
       if (!lp) continue;
       const sp = season ? this.world.players.find((p) => p.id === op.player) : undefined;
@@ -4442,6 +4465,24 @@ export class GameSession {
           if (sp) this.season.healInjury(sp.idx, day, lp.startAbsentReason === 'injury');
           else if (!season && lp.startAbsentReason === 'injury') { delete lp.startAbsent; delete lp.startAbsentReason; }
           break;
+        case 'branch': {
+          // 미리보기가 푼 비율을 그대로 넣는다 (난수·환경 맞춤 없음)
+          if (op.now && Object.keys(op.now).length) {
+            if (lp.isPitcher && lp.pit) lp.pit = { ...lp.pit, ...op.now };
+            else if (!lp.isPitcher && lp.bat) lp.bat = { ...lp.bat, ...op.now };
+            delete lp.slump;
+            lp.estimated = false;
+          }
+          if (op.ceil) lp.ceil = clone(op.ceil);
+          if (op.potential !== undefined) lp.potential = op.potential;
+          this.syncSimPlayer(lp);
+          skills = true;
+          break;
+        }
+        case 'grow':
+          if (op.drive !== undefined) lp.drive = op.drive;
+          if (op.timing !== undefined) lp.timing = op.timing;
+          break;
         case 'ability':
           // 고친 능력이 그대로 보이게 그 시즌 슬럼프는 없앤다
           if (op.now !== undefined) delete lp.slump;
@@ -4454,9 +4495,10 @@ export class GameSession {
     if (free.length) this.applyFreeOps(free, '에디터');
     // 새 계약은 예전 연도별 연봉(steps)을 이어 쓰지 않는다
     for (const op of free) if (op.op === 'contract') delete this.leaguePlayer(op.player)?.contract.steps;
-    // 나이가 바뀌면 주루·작전 손잡이(나이 곡선)와 리그 영점을 다시 낸다 (불러온 판과 같게, applyFreeOps의 능력 고침과 같은 까닭)
-    if (season && aged && L.defPool && !free.some((op) => op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
+    // 나이·갈래가 바뀌면 주루·작전 손잡이(나이 곡선)와 리그 영점을 다시 낸다 (불러온 판과 같게, applyFreeOps의 능력 고침과 같은 까닭)
+    if (season && (aged || skills) && L.defPool && !free.some((op) => op.op === 'ability')) applyLeagueRunSkills(this.world.players, L, this.store, this.params);
     for (const op of ops) {
+      if (!isPlayerOp(op)) continue;
       const sp = season ? this.world.players.find((p) => p.id === op.player) : undefined;
       if (sp && sp.teamIdx >= 0) this.season.teamSeasons[sp.teamIdx].dirty = true;
     }

@@ -1327,3 +1327,7 @@ dialog.editor-confirm .inline { margin-top: 12px; }
 .editor-preview ul, .editor-log ul { margin: 2px 0 4px; padding-left: 18px; }
 .editor-log { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
 .editor-edit .editor-check { display: flex; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.editor-branches { width: auto; }
+.editor-branches input[type="number"] { width: 5em; }
+.editor-bulk { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.editor-bulk input[type="number"] { width: 6em; }

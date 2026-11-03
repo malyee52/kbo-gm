@@ -9,6 +9,7 @@ import { foreignRule } from '../league/eras';
 import { ruleOf } from '../league/rules';
 import { minSalary, salaryCap, teamCapPayroll } from '../league/salary';
 import type { LeaguePlayer } from '../league/types';
+import type { BranchCeiling } from '../league/branches';
 import type { GameSession } from './session';
 
 /** 병역 고치기로 고를 수 있는 상태 (복무 중으로 넣거나 복무 중인 선수를 돌려놓는 것은 하지 않는다, 기획안 3.2) */
@@ -21,7 +22,28 @@ export type EditOp =
   /** 부상 낫게 하기 (오늘부터 출전 가능, 넘어온 부상 재활도). 부상을 넣는 조작은 없다 */
   | { op: 'heal'; player: string }
   /** 병역: 미필·마침·면제 */
-  | { op: 'military'; player: string; state: EditMilitary };
+  | { op: 'military'; player: string; state: EditMilitary }
+  /**
+   * 갈래 능력·갈래 천장 (E3). 화면은 갈래 등급(nowGrade·ceilGrade: 갈래 이름 → 20~80)으로 넣고, 미리보기(editorPreview)가
+   * 능력 비율로 풀어 조작에 남긴다: now(바뀐 갈래의 비율), ceil(갈래 천장 전체), potential(종합 천장 런). 적용은 값을 그대로 넣는다
+   */
+  | { op: 'branch'; player: string; nowGrade?: Record<string, number>; ceilGrade?: Record<string, number>;
+      now?: Record<string, number>; ceil?: BranchCeiling; potential?: number }
+  /** 숨은 성장 성향 d(−1~1)·시기 τ(해) (E3) */
+  | { op: 'grow'; player: string; drive?: number; timing?: number }
+  /** 구단 자금 (E3, 만 원, 늘리면 +). 장부에 '에디터' 줄 */
+  | { op: 'cash'; team: number; amount: number }
+  /** 구단 팬 만족도 변화 (E3, 0~100 눈금의 차이) */
+  | { op: 'fans'; team: number; delta: number }
+  /** 구단주 신뢰 (E3, 우리 구단, 0~100 값 그대로) */
+  | { op: 'trust'; value: number }
+  /** 지명권 주인 (E3, 자유 모드 pick 그대로) */
+  | Extract<FreeOp, { op: 'pick' }>;
+
+/** 선수 고치기인가 (구단 고치기는 player가 없다) */
+export function isPlayerOp(op: EditOp): op is Extract<EditOp, { player: string }> {
+  return 'player' in op;
+}
 
 export const MILITARY_LABEL: Record<EditMilitary, string> = { pending: '미필', done: '마침', exempt: '면제' };
 
@@ -61,6 +83,7 @@ export function editWarnings(s: GameSession, ops: EditOp[]): string[] {
   const contract = new Map<string, LeaguePlayer['contract']>();
   const lpOf = (id: string) => L.players.find((p) => p.id === id);
   for (const op of ops) {
+    if (!isPlayerOp(op)) continue;
     const lp = lpOf(op.player);
     if (!lp) continue;
     if (op.op === 'move') {
