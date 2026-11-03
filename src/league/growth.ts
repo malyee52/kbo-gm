@@ -199,3 +199,21 @@ export function growthRuns(age: number, runs: number, potential: number, share: 
   const noise = (rng.next() + rng.next() - 1) * GROWTH_NOISE * 1.7;
   return runs + d + noise;
 }
+
+/**
+ * growthRuns의 기대값 (난수 없음, 에디터 성장 곡선 미리보기 E4): 같은 식에서 운(평균 0)을 빼고, 터지는 해는 확률만큼 섞는다.
+ * 코치·육성 투자·퓨처스 활약·부상 후유증·훈련은 넣지 않는다 (부르는 쪽이 천장에서 자른다, capAtCeiling)
+ */
+export function expectedGrowthRuns(age: number, runs: number, potential: number, share: number, isPitcher = false, aging = 1, drive?: number,
+                                   pp: EngineParams['potential'] = DEFAULT_PARAMS.potential, timing = 0,
+                                   g2: EngineParams['growth2'] = DEFAULT_PARAMS.growth2): number {
+  const ga = age - timing;
+  let d = expectedGrowth(age, runs, potential, isPitcher, false);
+  if (ga <= 27 && d > 0) d *= 0.6 + 0.4 * Math.max(0, Math.min(1, share));
+  if (d > 0) d *= driveScale(drive, pp);
+  if (d > 0 && timing) d *= Math.max(0.5, Math.min(1.5, Math.exp(g2.tauSlope * timing * (age - g2.tauPivot) / 4)));
+  if (d > 0) d = Math.min(d, growthCap(ga));
+  if (ga <= 27 && potential - runs > 0) d += BREAKOUT_CHANCE * Math.max(0, (potential - runs) * 0.4 - d);
+  if (age >= DECLINE_START_AGE && d < 0) d *= aging;
+  return runs + d;
+}

@@ -9,6 +9,7 @@ import {
 import { DYNASTY_GAP, DYNASTY_TITLES, dynasties, RIVAL_FILL, RIVAL_MIN, RIVAL_YEARS } from '../../league/rivals';
 import type { SeasonLine } from '../../league/types';
 import { useGame } from '../context';
+import { editRuleChanges } from '../../game/editOps';
 
 // 2026-10-12 UI 개편: 탭은 위쪽 '기록실' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
 export type RecordsTab = 'years' | 'career' | 'season' | 'teams' | 'dynasty' | 'hof';
@@ -39,6 +40,8 @@ export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
   }, [L, store, session, version]);
   const years = useMemo(() => [...yearbook(L, store)].reverse(), [L, store, version]);
   const teams = useMemo(() => franchiseHistory(L, store), [L, store, version]);
+  // 에디터로 바꾼 리그 규정 (E4): 그 시즌 줄에 (조작 기록에서)
+  const ruleEdits = useMemo(() => editRuleChanges(session), [session, version]);
 
   return (
     <div className="stack">
@@ -63,7 +66,8 @@ export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
                   return (
                     <tr key={y.year} className={y.champion && y.teams.find((t) => t.name === y.champion)?.franchise === me ? 'me' : ''}>
                       <td className="l">{y.year}{y.inGame ? '' : <span className="muted small"> 실제</span>}
-                        {y.inGame && L.editor && y.year >= L.editor.firstOn.year && <span className="tag" title="에디터를 켠 뒤의 시즌 (에디터 사용 표시)">에디터</span>}</td>
+                        {y.inGame && L.editor && y.year >= L.editor.firstOn.year && <span className="tag" title="에디터를 켠 뒤의 시즌 (에디터 사용 표시)">에디터</span>}
+                        {ruleEdits.get(y.year)?.map((l) => <div key={l} className="muted small">에디터 {l}</div>)}</td>
                       <td className="l"><strong>{y.champion ?? '-'}</strong></td>
                       <td className="l">{y.runnerUp ?? '-'}</td>
                       <td className="l">{y.teams[0] ? firsts.map(first).join(' · ') : '-'}</td>

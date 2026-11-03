@@ -1326,3 +1326,22 @@ dialog.editor-confirm .dialog-body { padding-top: 18px; }
 .editor-player h3 { margin: 4px 0; }
 dialog.editor-confirm p { margin: 6px 0; }
 dialog.editor-confirm .inline { margin-top: 12px; }
+.editor-edit { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.editor-edit input[type="number"] { width: 6.5em; }
+.editor-preview ul, .editor-log ul { margin: 2px 0 4px; padding-left: 18px; }
+.editor-log { padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.editor-edit .editor-check { display: flex; flex-direction: row; align-items: center; gap: 6px; align-self: flex-end; }
+.editor-branches { width: auto; }
+.editor-branches input[type="number"] { width: 5em; }
+.editor-curve { display: flex; flex-direction: column; gap: 4px; }
+.curve-svg { width: 100%; max-width: 520px; height: auto; display: block; }
+.curve-grid { stroke: var(--line); stroke-width: 1; }
+.curve-ceil { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.curve-cross { stroke: var(--line-strong); stroke-width: 1; }
+.curve-axis { fill: var(--muted); font-size: 10px; }
+.curve-line { fill: none; stroke: var(--team); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.curve-dot { fill: var(--team); stroke: var(--panel); stroke-width: 2; }
+.curve-tip { min-height: 1.4em; margin: 0; }
+.editor-curve-table { width: auto; }
+.editor-bulk { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.editor-bulk input[type="number"] { width: 6em; }
