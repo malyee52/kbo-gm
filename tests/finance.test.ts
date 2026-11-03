@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import {
-  activeLevel, cashOf, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
+  activeLevel, cashOf, seasonFlows, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
 } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
@@ -26,7 +26,10 @@ describe('재정 기반', () => {
     // 개막 샐러리캡 판정(applyCapSanctions)의 제재금만 빠질 수 있다 (2026-10-22 하드힛 포지션 반영 뒤 삼성 생성 연봉이 캡을 조금 넘는다)
     const fine = (t: number) => g.league.ledger.filter((e) => e.from === t && e.note.startsWith('샐러리캡 초과')).reduce((s, e) => s + e.amount, 0);
     for (let t = 0; t < g.league.teams.length; t++) expect(cashOf(g.league, t) + fine(t)).toBe(START_CASH);
-    expect(g.cashNow() + fine(g.teamIdx)).toBe(START_CASH);
+    // 개막일 지급 (재정 2 F1b: 개막 달보다 앞선 달의 연봉·운영비 등, 2026은 2월분)은 개막 날부터 지금 자금에 보인다
+    const open = Object.values(g.seasonFinance()!.items).reduce((s, v) => s + (v ?? 0), 0);
+    expect(open).toBeLessThan(0);
+    expect(g.cashNow() + fine(g.teamIdx)).toBe(START_CASH + open);
   });
 
   it('시즌 중 수입·지출은 진행 방식과 상관없이 같다 (하루씩 vs 한 번에), 홈 경기마다 관중 수입이 들어온다', () => {
@@ -50,6 +53,10 @@ describe('재정 기반', () => {
     g.advancePostseason(10_000); // 가을야구 홈 경기 수입까지
     const before = g.cashNow();
     const monthlySponsor = g.seasonFinance()!.items.sponsor ?? 0;
+    // 결산 지급 (재정 2 F1b: 정규시즌 마지막 달 뒤 몫, 2026은 10·11월분): 스폰서 기본액 몫은 결산 정산에 들어가므로 뺀다
+    const input = { league: g.league, world: g.world, season: g.season, trades: g.tradeMoves(), postseason: g.postseason?.series.flatMap((x) => x.games) };
+    const withSettle = seasonFlows({ ...input, settle: true }, lg, Number.MAX_SAFE_INTEGER).items;
+    const settlePay = Object.entries(withSettle).reduce((s, [k, v]) => s + (k === 'sponsor' ? 0 : (v ?? 0) - ((g.seasonFinance()!.items as Record<string, number>)[k] ?? 0)), 0);
     g.beginOffseason();
     const L = g.league;
     for (let t = 0; t < L.teams.length; t++) {
@@ -61,7 +68,7 @@ describe('재정 기반', () => {
     }
     // 결산 직전 자금(시즌 중 흐름 포함) + 결산 때 정산하는 것(스폰서 차액, 우승 배당) = 결산 뒤 자금 (긴급 지원 포함)
     const mine = L.finance![lg].history.at(-1)!;
-    const settleOnly = (mine.items.sponsor ?? 0) - monthlySponsor + (mine.items.champion ?? 0);
+    const settleOnly = (mine.items.sponsor ?? 0) - monthlySponsor + (mine.items.champion ?? 0) + settlePay;
     expect(mine.cash).toBe(Math.max(0, before + settleOnly) - (mine.dividend ?? 0)); // 100억 넘으면 모기업 환원
     expect(mine.items.broadcast).toBeGreaterThan(0); // 월말에 나눠 받은 중계권도 결산표에 있다
     const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
