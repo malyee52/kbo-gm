@@ -1,4 +1,5 @@
-// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표(체크 일괄 고침, E3), 구단 진짜 전력·고치기(E3), 고친 기록 (E2).
+// 에디터 화면 (아카이브 > 에디터, docs/에디터_기획안.md 6.2): 모든 선수의 진짜 값 표(체크 일괄 고침, E3), 구단 진짜 전력·고치기(E3),
+// 선수 만들기(오프시즌)·리그 규정(E4), 고친 기록 (E2).
 // 진짜 값은 본문 색 등급, 우리 스카우트 추측은 옆의 흐린 글씨.
 import { useMemo, useState } from 'react';
 import { driveWord, editorBulkOps, editorPreview, editorRows, timingText, type BulkKind, type EditorRow } from '../../game/editor';
@@ -8,6 +9,8 @@ import { TeamLink, useGame } from '../context';
 import { useShell } from '../shell';
 import { EditorPlayer } from './EditorPlayer';
 import { EditorTeams } from './EditorTeams';
+import { EditorCreate } from './EditorCreate';
+import { EditorRules } from './EditorRules';
 import { editRecords } from '../../game/editOps';
 import { formatDate } from '../../game/calendar';
 
@@ -20,7 +23,7 @@ export function EditorScreen() {
   const { session, version, go, openPlayer } = useGame();
   const { density } = useShell();
   const full = density === 'full';
-  const [tab, setTab] = useState<'players' | 'teams' | 'log'>('players');
+  const [tab, setTab] = useState<'players' | 'teams' | 'create' | 'rules' | 'log'>('players');
   const [who, setWho] = useState<Who>('all');
   const [kind, setKind] = useState<Kind>('all');
   const [sel, setSel] = useState<string | null>(null);
@@ -69,6 +72,8 @@ export function EditorScreen() {
           <span className="inline">
             <button type="button" className={`small-btn${tab === 'players' ? '' : ' ghost'}`} onClick={() => setTab('players')}>선수</button>
             <button type="button" className={`small-btn${tab === 'teams' ? '' : ' ghost'}`} onClick={() => setTab('teams')}>구단</button>
+            <button type="button" className={`small-btn${tab === 'create' ? '' : ' ghost'}`} onClick={() => setTab('create')}>만들기</button>
+            <button type="button" className={`small-btn${tab === 'rules' ? '' : ' ghost'}`} onClick={() => setTab('rules')}>규정</button>
             <button type="button" className={`small-btn${tab === 'log' ? '' : ' ghost'}`} onClick={() => setTab('log')}>고친 기록</button>
           </span>
         </div>
@@ -114,6 +119,10 @@ export function EditorScreen() {
       {tab === 'log' && <EditLog />}
 
       {tab === 'teams' && <EditorTeams />}
+
+      {tab === 'create' && <EditorCreate />}
+
+      {tab === 'rules' && <EditorRules />}
     </div>
   );
 }

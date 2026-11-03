@@ -4,18 +4,20 @@
 // 화면은 src/ui/editor/ 폴더만 이 파일을 부른다 (tests/editor.test.ts·hidden-values.test.ts가 검사).
 // 보기만 하므로 상태를 바꾸지 않고 난수를 쓰지 않는다 (같은 판에서 몇 번 불러도 같은 값, 조회를 끼워도 진행 결과가 같다).
 // 고치기 미리보기(editorPreview, E2)도 상태를 바꾸지 않는다. 실제 고침은 session.editPlayer → 조작 edit·edit-off.
-import { computeGrades, conditionOf, isStarterSkill, TRAIT_INFO, traitsOf, type DisplayGrades, type SimPlayer, type World } from '../engine';
+import { agingScale, computeGrades, conditionOf, isStarterSkill, TRAIT_INFO, traitsOf, type DisplayGrades, type SimPlayer, type World } from '../engine';
 import { currentRuns, teamStrength, type ValueContext } from '../ai/value';
 import { aiPotential } from '../league/owner';
 import { BAT_BRANCHES, BAT_GOOD, PIT_BRANCHES, PIT_GOOD, timingOf, ceilingFor, type BranchCeiling } from '../league/branches';
 import { fanLevel } from '../league/stadium';
 import { pickOwner, PICK_MAX_ROUND, PICK_YEARS_AHEAD } from '../league/picks';
-import { runsOf } from '../league/growth';
+import { expectedGrowthRuns, runsOf } from '../league/growth';
+import { capAtCeiling } from '../league/potential';
+import { clampRule, ruleOf, RULE_DEFS, type RuleKey } from '../league/rules';
 import { condToday } from '../league/events';
-import { firstOpenDraft, gradeOfRuns } from '../fantasy/free';
+import { asiaEligible, firstOpenDraft, gradeOfRuns, MIN_JOIN_AGE, NAME_MAX } from '../fantasy/free';
 import type { LeaguePlayer, MilitaryState } from '../league/types';
 import { dollarText, wonText } from '../league/salary';
-import { editWarnings, editYear, isPlayerOp, MILITARY_LABEL, type EditOp } from './editOps';
+import { EDIT_CREATE_POS, editWarnings, editYear, isPlayerOp, MILITARY_LABEL, type EditOp } from './editOps';
 import type { GuessSet } from '../league/scout';
 import type { GameSession } from './session';
 
@@ -578,6 +580,20 @@ function teamPreview(s: GameSession, raw: Exclude<EditOp, { player: string }>, y
       if (!Number.isFinite(v) || v === before) return null;
       return { op: { op: 'trust', value: v }, name: teamName(s.teamIdx), line: `${teamName(s.teamIdx)} 구단주 신뢰 ${before} → ${v}` };
     }
+    case 'create': return createPreview(s, raw, year);
+    case 'rule': {
+      const def = RULE_DEFS.find((d) => d.key === raw.key);
+      if (!def) return '없는 규정입니다.';
+      const nullable = raw.key === 'foreignRegular' || raw.key === 'foreignAsia';
+      if (raw.value === null && !nullable) return `${def.label}은(는) 숫자로 넣습니다.`;
+      if (raw.value !== null && !Number.isFinite(raw.value)) return `${def.label}은(는) 숫자로 넣습니다.`;
+      const v = raw.value === null ? null : clampRule(raw.key, raw.value);
+      const before = ruleOf(L, raw.key);
+      if (before === v) return null;
+      const fit = raw.value !== null && v !== raw.value ? ` (${def.min}~${def.max} 범위로 맞춤)` : '';
+      return { op: { op: 'rule', key: raw.key, value: v }, name: '리그 규정',
+        line: `규정 ${def.label} ${ruleText(raw.key, before)} → ${ruleText(raw.key, v)}${fit}` };
+    }
     case 'pick': {
       const pv = editorPicks(s);
       if (!pv) return null;
@@ -640,4 +656,123 @@ export function editorBulkOps(s: GameSession, ids: string[], kind: BulkKind, val
 export function applyGrow(lp: LeaguePlayer, op: Extract<EditOp, { op: 'grow' }>): void {
   if (op.drive !== undefined) lp.drive = op.drive;
   if (op.timing !== undefined) lp.timing = op.timing;
+}
+
+/** 규정 값 글 (실제 규정 = null, 월일·달러·배율) */
+export function ruleText(key: RuleKey, v: number | null): string {
+  if (v === null) return '실제 규정';
+  const def = RULE_DEFS.find((d) => d.key === key)!;
+  if (key === 'tradeDeadline' || key === 'marketDeadline') return `${Math.floor(v / 100)}월 ${v % 100}일`;
+  if (key === 'foreignPosting') return v ? '켬' : '끔';
+  if (def.unit === '달러') return dollarText(v);
+  return `${v}${def.unit}`;
+}
+
+/** 규정 표 한 줄 (E4 규정 탭) */
+export interface EditorRuleRow {
+  key: RuleKey;
+  label: string;
+  /** 지금 값 (null = 실제 규정) */
+  value: number | null;
+  /** 바꾼 규정인가 (league.rules에 있음) */
+  changed: boolean;
+  min: number;
+  max: number;
+  unit: string;
+  /** '실제 규정'(null)으로 돌릴 수 있나 (외국인 보유 한도·아시아쿼터) */
+  nullable: boolean;
+}
+
+/** 리그 규정 표 (E4 규정 탭): 지금 값·범위. 에디터가 꺼져 있으면 null */
+export function editorRules(s: GameSession): EditorRuleRow[] | null {
+  if (!s.editorOn) return null;
+  return RULE_DEFS.map((d) => ({
+    key: d.key, label: d.label, value: ruleOf(s.league, d.key), changed: s.league.rules?.[d.key] !== undefined, min: d.min, max: d.max, unit: d.unit,
+    nullable: d.key === 'foreignRegular' || d.key === 'foreignAsia',
+  }));
+}
+
+/**
+ * 선수 만들기 미리보기 (E4, 오프시즌만): 자유 모드 create처럼 이름(NAME_MAX자)·국적으로 아시아쿼터 대상·병역(28세 이상이면 마침)을 정한다.
+ * 늘 가상 선수. 값은 범위 안으로 맞추고 맞춘 것을 문장에 적는다
+ */
+function createPreview(s: GameSession, raw: Extract<EditOp, { op: 'create' }>, year: number): { op: EditOp; name: string; line: string } | string {
+  if (s.phase === 'season') return '선수 만들기는 오프시즌에만 됩니다 (시즌 중에는 선수단 빈 자리가 없습니다).';
+  const name = (raw.name ?? '').trim();
+  if (!name) return '이름을 넣습니다.';
+  if (name.length > NAME_MAX) return `이름은 ${NAME_MAX}자까지입니다.`;
+  if (!s.league.teams[raw.team]) return '없는 구단입니다.';
+  if (!EDIT_CREATE_POS.includes(raw.pos)) return '없는 포지션입니다.';
+  if (![raw.age, raw.now, raw.potential].every(Number.isFinite)) return '나이·능력·천장은 숫자로 넣습니다.';
+  const fits: string[] = [];
+  const age = Math.max(MIN_JOIN_AGE, Math.min(50, Math.round(raw.age)));
+  if (age !== raw.age) fits.push(`나이 ${MIN_JOIN_AGE}~50세로 맞춤`);
+  const now = clampG(raw.now);
+  let pot = clampG(raw.potential);
+  if (now !== raw.now || pot !== raw.potential) fits.push('등급 20~80으로 맞춤');
+  if (pot < now) { pot = now; fits.push('천장은 지금 능력보다 낮을 수 없어 맞춤'); }
+  const foreign = raw.foreign === true;
+  const nation = foreign ? (raw.nation ?? '').trim() : '';
+  const asia = foreign && asiaEligible(nation || undefined, name);
+  const military = foreign ? undefined : raw.military ?? (age >= 28 ? 'done' : 'pending');
+  const role = raw.pos === 'P' ? (raw.role ?? 'SP') : undefined;
+  const op: Extract<EditOp, { op: 'create' }> = { op: 'create', name, team: raw.team, pos: raw.pos, ...(role ? { role } : {}), age, now, potential: pot,
+    ...(foreign ? { foreign: true } : {}), ...(nation ? { nation } : {}), ...(asia ? { asia: true } : {}), ...(military ? { military } : {}) };
+  let pay = foreign ? '외국인 기본 계약' : '신인 계약 (최저 연봉, 3시즌)';
+  if (raw.salary !== undefined || raw.years !== undefined) {
+    const salary = Math.max(0, Math.round(raw.salary ?? 0));
+    const yrs = Math.round(raw.years ?? 1);
+    if (!Number.isFinite(salary) || !Number.isFinite(yrs) || yrs < 1 || yrs > 15) return '계약 기간은 1~15시즌입니다.';
+    op.salary = salary;
+    op.years = yrs;
+    pay = `연봉 ${foreign ? dollarText(salary) : wonText(salary, year)}, ${year + yrs - 1} 시즌까지`;
+  }
+  const posText = raw.pos === 'P' ? (role === 'RP' ? '구원 투수' : '선발 투수') : raw.pos;
+  const who = foreign ? `외국인${nation ? ` ${nation}` : ''}${asia ? ', 아시아쿼터 대상 (자리가 비면 아시아쿼터)' : ''}` : `국내, 병역 ${MILITARY_LABEL[military!]}`;
+  return { op, name, line: `새 가상 선수 ${name}: ${s.teamInfo(raw.team).name} ${posText}, ${year}년 ${age}세, 지금 ${now} · 천장 ${pot} (${who}), ${pay}${fits.length ? ` (${fits.join(', ')})` : ''}` };
+}
+
+/** 성장 곡선 한 점 (그 시즌 기대 능력) */
+export interface EditorCurvePoint {
+  year: number;
+  age: number;
+  runs: number;
+  grade: number;
+}
+
+/** 성장 곡선 미리보기 (E4): 그 선수의 진짜 성장 판정 식을 난수 없이 기대값으로 몇 해 앞까지 */
+export interface EditorCurve {
+  /** 가정한 1군 출전 기회 (0~1) */
+  share: number;
+  potRuns: number;
+  pot: number;
+  /** 첫 점 = 지금 보는 시즌 (슬럼프 뺀 바탕 능력), 그 뒤 해마다 결산 성장 뒤 */
+  points: EditorCurvePoint[];
+}
+
+/** 성장 곡선이 내다보는 해 수 */
+export const CURVE_YEARS = 6;
+
+/**
+ * 성장 곡선 미리보기: 결산 성장 판정(league/growth.ts growthRuns)과 같은 식에서 운을 빼고 터지는 해를 확률만큼 섞은 기대값(expectedGrowthRuns),
+ * 천장에서 자름(capAtCeiling). 숨은 성향 d·시기 τ·조기 노쇠·노화 특수능력을 쓴다. 코치·육성 투자·퓨처스 활약·부상·훈련·은퇴·입대는 넣지 않는다.
+ * 등급은 지금 보는 시즌 눈금. 상태를 바꾸지 않는다. 에디터가 꺼져 있거나 나이를 모르면 null
+ */
+export function editorGrowthCurve(s: GameSession, id: string, share = 1, years = CURVE_YEARS): EditorCurve | null {
+  if (!s.editorOn) return null;
+  const lp = s.leaguePlayer(id);
+  if (!lp || (!lp.bat && !lp.pit) || !lp.birthYear) return null;
+  const f = frameOf(s);
+  const aging = agingScale(traitsOf(s.store.traits, lp.id), s.params.traits);
+  const timing = lp.timing ?? timingOf(s.league.seed, lp.id, false, s.params);
+  let runs = runsOf(lp, f.ctx, f.year);
+  const pts: EditorCurvePoint[] = [{ year: f.year, age: f.year - lp.birthYear, runs, grade: gradeOfRuns(runs, f.year) }];
+  for (let k = 1; k <= years; k++) {
+    const y = f.year + k;
+    const age = y - lp.birthYear + (lp.decline ?? 0);
+    const next = expectedGrowthRuns(age, runs, lp.potential, share, lp.isPitcher, aging, lp.drive, s.params.potential, timing, s.params.growth2);
+    runs = capAtCeiling(next, runs, lp.potential);
+    pts.push({ year: y, age: y - lp.birthYear, runs, grade: gradeOfRuns(runs, f.year) });
+  }
+  return { share, potRuns: lp.potential, pot: gradeOfRuns(lp.potential, f.year), points: pts };
 }
