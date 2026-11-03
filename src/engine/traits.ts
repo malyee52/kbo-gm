@@ -11,13 +11,13 @@ import type { SimPlayer } from './types';
 export const TRAIT_CODES = ['clutch', 'october', 'escape', 'ironman', 'evergreen', 'stamina', 'homer', 'vsLeft', 'vsRight'] as const;
 export type Trait = (typeof TRAIT_CODES)[number];
 
-/** 능력 설명 (문서·데이터 도구용. 화면에는 쓰지 않는다) */
+/** 능력 설명 (문서·데이터 도구용, 화면은 에디터를 켰을 때 game/editor.ts를 거쳐 에디터 폴더에서만) */
 export const TRAIT_INFO: Record<Trait, { label: string; note: string; who: 'bat' | 'pit' | 'both' }> = {
   clutch: { label: '승부사', note: '득점권이거나 7회 이후 2점 차 이내일 때 타격이 좋아진다', who: 'bat' },
   october: { label: '가을 사나이', note: '포스트시즌 경기에서 좋아진다', who: 'both' },
   escape: { label: '위기 탈출', note: '주자가 있을 때 투구가 좋아진다', who: 'pit' },
   ironman: { label: '철인', note: '부상 확률이 낮다', who: 'both' },
-  evergreen: { label: '늦게 지는 꽃', note: '기량이 떨어지는 나이(35세)부터 노화 하락이 완만하다', who: 'both' },
+  evergreen: { label: '늦게 지는 꽃', note: '기량이 떨어지는 나이부터 노화 하락이 완만하다', who: 'both' },
   stamina: { label: '에이스 체력', note: '한계 투구 수를 넘긴 뒤 피로 누적이 느리다', who: 'pit' },
   homer: { label: '안방 사나이', note: '홈 경기에서 좋아진다', who: 'both' },
   vsLeft: { label: '좌완 킬러', note: '좌투수를 상대로 타격이 좋아진다', who: 'bat' },

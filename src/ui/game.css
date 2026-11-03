@@ -1312,3 +1312,17 @@ button.link.team-link:hover:not(:disabled) .team { text-decoration: underline; t
   padding: 0 7px; min-height: 0; line-height: 20px; font-size: 11.5px; border-radius: 999px; background: transparent; color: var(--muted);
   border: 1px dashed var(--line-strong);
 }
+
+/* 에디터 모드 (src/ui/editor/, docs/에디터_기획안.md 6장): 진짜 값은 본문 색 등급, 추측은 흐린 글씨 */
+dialog.editor-confirm { width: min(520px, calc(100vw / var(--z) - 32px)); }
+dialog.editor-confirm .dialog-body { padding-top: 18px; }
+.grade.ed-true { background: var(--accent-soft); color: var(--fg); }
+.sb-editor { margin-left: 8px; }
+.editor-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin: 0; }
+.editor-facts > div { display: flex; flex-direction: column; gap: 2px; }
+.editor-facts dt { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.editor-facts dd { margin: 0; }
+.editor-specials { margin: 0; padding-left: 18px; }
+.editor-player h3 { margin: 4px 0; }
+dialog.editor-confirm p { margin: 6px 0; }
+dialog.editor-confirm .inline { margin-top: 12px; }

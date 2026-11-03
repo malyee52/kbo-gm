@@ -7,7 +7,7 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, isAutoSlot, listSaves, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveRecord } from '../game/storage';
+import { deleteSave, editorMarkOfSave, isAutoSlot, listSaves, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveRecord } from '../game/storage';
 import { isSeasonDone, whenText } from './saving';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
@@ -39,6 +39,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [mode, setMode] = useState<'base' | 'fantasy' | 'free'>('base');
   const fantasy = mode !== 'base';
   const [regressor, setRegressor] = useState(false);
+  // 에디터 모드를 켜고 시작 (docs/에디터_기획안.md 2.1, 게임 중에도 저장·설정에서 켜고 끈다)
+  const [editor, setEditor] = useState(false);
+  const withEditor = (g: GameSession) => { if (editor) g.setEditor(true); return g; };
   const extra = { ...(custom ? { settings: custom } : {}), ratingBasis: basis,
     ...(fantasy ? { fantasy: { ...(regressor ? { regressor: true } : {}), ...(mode === 'free' ? { free: true } : {}) } } : {}) };
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
@@ -79,7 +82,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       await store.ensureAll();
       setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
       await nextFrame();
-      onStart(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty, ...extra }));
+      onStart(withEditor(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty, ...extra })));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -97,7 +100,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       const t = planTeam(store, ch);
       if (t === null) throw new Error(`${plan.year}년 자료에서 구단을 찾을 수 없습니다`);
       await nextFrame();
-      onStart(GameSession.create(store, { year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra }));
+      onStart(withEditor(GameSession.create(store, { year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra })));
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -243,6 +246,13 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
             <span className="muted small">판타지 → 기억 노트에 시작 뒤 실제 시즌의 순위·우승·타이틀, 앞으로 터질 선수, 다가올 드래프트의 대어가 보입니다 (자료가 있는 2026년까지). 게임이 원래 역사와 갈라지면 표시합니다.</span>
           </div>
         )}
+        <div className="form-row">
+          <label className="inline">
+            <input type="checkbox" checked={editor} disabled={!!busy} onChange={(e) => setEditor(e.target.checked)} />
+            에디터 켜고 시작
+          </label>
+          <span className="muted small">숨긴 값(진짜 능력·잠재력·성장 성향·숨겨진 특수능력)을 보는 치트 도구입니다. 켜면 이 게임에 "에디터 사용" 표시가 영구히 남고, 업적과 연표에 꼬리표가 붙습니다. 게임 중 저장·설정에서도 켜고 끌 수 있습니다.</span>
+        </div>
         <p className="muted small">같은 연도·구단·시드·난이도에서 같은 조작을 하면 결과가 똑같이 나옵니다. 버그를 보고할 때 시드를 함께 적어 주세요.</p>
         {twoLeagues(current) && <p className="note small">{year}년은 드림·매직 양대 리그입니다. 각 리그 1·2위가 가을야구에 나가고, 한 리그 3위 승률이 다른 리그 2위보다 높으면 둘이 준플레이오프를 치릅니다.</p>}
         {year < 2001 && <p className="note small">과거 시대: 외국인(1998년)·FA(1999년 시즌 뒤) 제도는 도입 연도부터 생기고, 창단·명칭 변경·승계는 실제 연도에 일어납니다. 생년이 없는 선수의 나이는 추정값("약 N세")이고, 1980년대 득점은 실제보다 조금 높습니다.</p>}
@@ -350,7 +360,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                 <div>
                   <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot}{s.label ? ` "${s.label}"` : ''} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
                   <br />
-                  <strong>{s.year} {s.teamName}</strong> <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
+                  <strong>{s.year} {s.teamName}</strong>{editorMarkOfSave(s.data) && <span className="tag">에디터 ({editorMarkOfSave(s.data)})</span>} <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
                 </div>
                 <div className="r-actions">
                   <button type="button" onClick={() => void load(s.data)} disabled={!!busy}>불러오기</button>

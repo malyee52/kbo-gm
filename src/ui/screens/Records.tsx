@@ -62,7 +62,8 @@ export function Records({ tab = 'years' }: { tab?: RecordsTab }) {
                   const first = (i: number) => `${lg ? `${lg[i].league} ` : ''}${y.teams[i].name} (${y.teams[i].w}승 ${y.teams[i].l}패)`;
                   return (
                     <tr key={y.year} className={y.champion && y.teams.find((t) => t.name === y.champion)?.franchise === me ? 'me' : ''}>
-                      <td className="l">{y.year}{y.inGame ? '' : <span className="muted small"> 실제</span>}</td>
+                      <td className="l">{y.year}{y.inGame ? '' : <span className="muted small"> 실제</span>}
+                        {y.inGame && L.editor && y.year >= L.editor.firstOn.year && <span className="tag" title="에디터를 켠 뒤의 시즌 (에디터 사용 표시)">에디터</span>}</td>
                       <td className="l"><strong>{y.champion ?? '-'}</strong></td>
                       <td className="l">{y.runnerUp ?? '-'}</td>
                       <td className="l">{y.teams[0] ? firsts.map(first).join(' · ') : '-'}</td>
