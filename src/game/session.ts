@@ -63,8 +63,8 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, settleSeason, trustFromFinance,
-  type BudgetKind, type BudgetPreset,
+  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
+  type BudgetKind, type BudgetPreset, type SeatGrade, type SeatPrices,
   type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
 import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules';
@@ -330,6 +330,8 @@ export type GameAction =
   | { year: number; type: 'budget'; kind: BudgetKind; amount: number }
   | { year: number; type: 'budget-preset'; preset: BudgetPreset }
   | { year: number; type: 'budget-auto'; kind: BudgetKind }
+  | { year: number; type: 'ticket-price'; grade: SeatGrade; scale: number }
+  | { year: number; type: 'ticket-auto'; grade?: SeatGrade }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
@@ -3448,6 +3450,8 @@ export class GameSession {
       case 'budget': res = setBudget(L, this.teamIdx, a.kind, a.amount); break;
       case 'budget-preset': res = setBudgetPreset(L, this.teamIdx, a.preset); break;
       case 'budget-auto': res = setBudgetAuto(L, this.teamIdx, a.kind); break;
+      case 'ticket-price': res = setTicketPrice(L, this.teamIdx, a.grade, a.scale); break;
+      case 'ticket-auto': res = setTicketAuto(L, this.teamIdx, a.grade); break;
       case 'stadium': res = orderStadium(L, this.teamIdx, this.year, a.id, this.cashNow(), { ...(a.size ? { size: a.size } : {}), ...(a.fence ? { fence: a.fence } : {}), ...(a.dome ? { dome: true } : {}), ...(a.deal ? { deal: a.deal } : {}) }, this.parkSource()); break;
       case 'naming': res = signNaming(L, this.teamIdx, this.year, a.id); break;
       case 'camp':
@@ -4017,9 +4021,9 @@ export class GameSession {
   }
 
   /** 오프시즌 예산안: 다음 시즌 계획을 이 예산으로 셌을 때 (예산 줄 화면의 전 → 후, 재정 2 F2b). 시즌 중이면 null */
-  budgetPlanWith(budget: Record<BudgetKind, number>, team = this.teamIdx): FinancePlan | null {
+  budgetPlanWith(budget: Record<BudgetKind, number>, team = this.teamIdx, prices?: SeatPrices): FinancePlan | null {
     if (this.phase === 'season') return null;
-    return financePlan({ league: this.league, world: this.world }, team, this.year + 1, budget);
+    return financePlan({ league: this.league, world: this.world }, team, this.year + 1, budget, prices);
   }
 
   financeLabel(k: FinanceKind): string {
@@ -4134,6 +4138,10 @@ export class GameSession {
   setBudget(kind: BudgetKind, amount: number) { return this.dispatchOff({ year: this.year, type: 'budget', kind, amount }); }
   setBudgetPreset(preset: BudgetPreset) { return this.dispatchOff({ year: this.year, type: 'budget-preset', preset }); }
   setBudgetAuto(kind: BudgetKind) { return this.dispatchOff({ year: this.year, type: 'budget-auto', kind }); }
+  /** 좌석 등급 입장권 가격 배율 (오프시즌, 다음 시즌부터, 재정 2 F3) */
+  setTicketPrice(grade: SeatGrade, scale: number) { return this.dispatchOff({ year: this.year, type: 'ticket-price', grade, scale }); }
+  /** 한 등급(없으면 모두)을 재무팀 추천 가격(자동)으로 */
+  setTicketAuto(grade?: SeatGrade) { return this.dispatchOff({ year: this.year, type: 'ticket-auto', ...(grade ? { grade } : {}) }); }
   /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
   parkSource() {
     return { parkFactors: this.store.meta.parkFactors, parkEvents: this.store.meta.parkEvents, parks: this.store.parks };

@@ -53,7 +53,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeBudgetOf, activeStep, addExpansionCapital, autoBudget, futuresScale, stepAt, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockBudgets,
+  activeBudgetOf, activeStep, addExpansionCapital, autoBudget, autoPrices, futuresScale, stepAt, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockBudgets,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -435,6 +435,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   }
   // 예산 자동 배분 (재정 2 F2): 플레이어 구단의 다음 시즌 예산을 균형 추천안으로 다시 채우고 고정한 줄만 남긴다
   autoBudget(league, userTeam);
+  // 입장권 가격도 재무팀 추천 가격으로 (고정한 등급만 남김, 재정 2 F3)
+  autoPrices(league, userTeam);
   // 시상 (history에 이 시즌이 들어가기 전에: 신인 자격 판정)
   league.awards = [...(league.awards ?? []).filter((a) => a.year !== year), seasonAwards(world, season, league, store)];
   for (const p of league.players) {

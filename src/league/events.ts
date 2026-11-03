@@ -10,6 +10,7 @@
 import { Rng } from '../engine';
 import type { LeaguePlayer, LeagueState } from './types';
 import { EXTRA_EVENTS, prospects } from './events-extra';
+import { pricesOf, seatPriceIndex } from './finance';
 
 /** 하루 확률의 처음 값, 하루마다 오르는 폭, 최대 */
 // 2026-10-12 이벤트를 127종으로 늘리며 조금 잦게 (한 시즌 무작위 이벤트 약 10 → 14번, 임시값)
@@ -187,6 +188,8 @@ export interface EventDef {
 }
 
 const eok = (man: number) => `${(man / 10000).toFixed(1)}억 원`;
+/** 입장권 가격 인상 선판매: 3억 원 × 이번 시즌 좌석 등급 가격 지수 (재정 2 F3, 기획 4.5 "결과를 전체 배율에 곱한다") */
+const ticketPresale = (c: EventContext) => Math.round(30_000 * seatPriceIndex(pricesOf(c.league.finance?.[c.team], false)));
 const r3 = (x: number) => x.toFixed(3).replace(/^0/, '');
 
 /** 부진한 주전 타자: 150타석 이상, OPS .650 미만 (가장 낮은 선수) */
@@ -324,8 +327,8 @@ export const EVENTS: EventDef[] = [
     text: () => '재무팀이 남은 시즌 입장권 가격을 올리자고 합니다. 관중은 조금 줄지만 수입은 늘 것이라고 합니다.',
     choices: [
       { label: '그대로 둔다', note: () => '변화 없음', apply: () => '가격을 그대로 두었습니다.' },
-      { label: '올린다', note: () => '남은 시즌 관중률 −4%p, 대신 이번에 자금 +3억 원(선판매)',
-        apply: (c) => { c.addCash(30_000, '입장권 가격 인상(선판매)'); c.addFill(-0.04, Math.max(1, c.seasonDays - c.day), '입장권 가격 인상'); return '가격을 올렸습니다. 일부 팬이 불만을 표했습니다.'; } },
+      { label: '올린다', note: (c) => `남은 시즌 관중률 −4%p, 대신 이번에 자금 +${eok(ticketPresale(c))}(선판매)`,
+        apply: (c) => { c.addCash(ticketPresale(c), '입장권 가격 인상(선판매)'); c.addFill(-0.04, Math.max(1, c.seasonDays - c.day), '입장권 가격 인상'); return '가격을 올렸습니다. 일부 팬이 불만을 표했습니다.'; } },
     ],
   },
   {

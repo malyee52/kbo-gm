@@ -298,6 +298,194 @@ export const DEVELOP_AGE = 30;
 export const MEDICAL_RATE = [1, 0.92, 0.85, 0.78];
 export const MEDICAL_DAYS = [1, 0.93, 0.87, 0.8];
 
+
+// ---- 좌석 등급별 입장권 가격 (재정 2 F3, docs/재정2_기획안.md 4.5, 결정 Q3)
+
+export type SeatGrade = 'general' | 'reserved' | 'premium';
+export const SEAT_GRADES: SeatGrade[] = ['general', 'reserved', 'premium'];
+export const SEAT_LABEL: Record<SeatGrade, string> = { general: '일반석', reserved: '지정석', premium: '프리미엄' };
+export const SEAT_NOTE: Record<SeatGrade, string> = { general: '외야·응원석', reserved: '내야', premium: '테이블·스카이박스' };
+/**
+ * 좌석 비중, 기본 가격(만 원, 2026년 돈, 시설 배율 전), 가격 탄력성 (임시값, 시대별 좌석 구성 자료 없음 → 1982년부터 같은 세 등급).
+ * 가중 평균 1.4625만 원 ≈ TICKET 1.46. 실제 셈은 기본 가격 ÷ 가중 평균(seatFactor)을 TICKET에 곱해 기본 가격이면 관중 수입이 예전과 같다
+ */
+export const SEAT: Record<SeatGrade, { share: number; price: number; elastic: number }> = {
+  general: { share: 0.55, price: 0.95, elastic: -0.8 },
+  reserved: { share: 0.35, price: 1.6, elastic: -0.6 },
+  premium: { share: 0.1, price: 3.8, elastic: -0.3 },
+};
+const SEAT_AVG = (['general', 'reserved', 'premium'] as SeatGrade[]).reduce((s, g) => s + SEAT[g].share * SEAT[g].price, 0);
+/** 등급 가격 몫 (좌석 비중 가중 합 = 1) */
+export const seatFactor = (g: SeatGrade) => SEAT[g].price / SEAT_AVG;
+/** 가격 배율 범위와 칸 (70~150%, 5%) */
+export const PRICE_RANGE: [number, number] = [0.7, 1.5];
+export const PRICE_STEP = 0.05;
+/** 만원에 가까운 경기(수요 관중률 ≥ 이 값)는 넘친 수요가 있어 값을 올려도 덜 빠진다: 탄력성 × PRICE_FULL_DAMP (임시값) */
+export const PRICE_FULL = 0.9;
+export const PRICE_FULL_DAMP = 0.5;
+/** 결산 때 팬 만족도 −PRICE_FAN × (관중 가중 가격 지수 − 1) (임시값) */
+export const PRICE_FAN = 10;
+/** 재무팀 추천 가격: 지난 시즌 관중률 ≥ HIGH → 지정·프리미엄 110%, ≤ LOW → 일반 90%, 그 밖 100% (기획 4.5 [정함]) */
+export const PRICE_REC_HIGH = 0.9;
+export const PRICE_REC_LOW = 0.6;
+
+export type SeatPrices = Record<SeatGrade, number>;
+export const basePrices = (): SeatPrices => ({ general: 1, reserved: 1, premium: 1 });
+export const isBasePrices = (p: SeatPrices) => SEAT_GRADES.every((g) => p[g] === 1);
+
+/** 가격 배율. planned = 다음 시즌 계획(prices), 아니면 이번 시즌 확정(activePrices). 칸이 없으면 모두 1 (기본 가격) */
+export function pricesOf(f: TeamFinance | undefined, planned: boolean): SeatPrices {
+  const src = planned ? f?.prices : f?.activePrices;
+  const out = basePrices();
+  for (const g of SEAT_GRADES) if (src?.[g] !== undefined) out[g] = src[g]!;
+  return out;
+}
+export const priceLockedOf = (f: TeamFinance | undefined): SeatGrade[] => f?.priceLocked ?? [];
+
+/** 한 등급 관중률: 수요 관중률 f × 배율^탄력성 (1 넘지 않음). 만원 가까운 경기에서 값을 올리면 탄력성 절반 */
+export function seatFill(f: number, g: SeatGrade, scale: number): number {
+  if (scale === 1) return f;
+  const e = SEAT[g].elastic * (scale > 1 && f >= PRICE_FULL ? PRICE_FULL_DAMP : 1);
+  return Math.min(1, f * scale ** e);
+}
+
+/** 한 경기 관중 (좌석 cap, 수요 관중률 f, 한 명 평균 객단가 ticket). 기본 가격이면 예전 셈 그대로 (반올림까지). seats = 등급별 관중 (소수) */
+export function gameGate(cap: number, f: number, ticket: number, prices: SeatPrices): { fans: number; revenue: number; seats: SeatPrices } {
+  const seats = basePrices();
+  if (isBasePrices(prices)) {
+    const fans = Math.round(cap * f);
+    for (const g of SEAT_GRADES) seats[g] = cap * SEAT[g].share * f;
+    return { fans, revenue: Math.round(fans * ticket), seats };
+  }
+  let n = 0;
+  let r = 0;
+  for (const g of SEAT_GRADES) {
+    seats[g] = cap * SEAT[g].share * seatFill(f, g, prices[g]);
+    n += seats[g];
+    r += seats[g] * ticket * seatFactor(g) * prices[g];
+  }
+  return { fans: Math.round(n), revenue: Math.round(r), seats };
+}
+
+const roundSeats = (x: SeatPrices): SeatPrices => ({ general: Math.round(x.general), reserved: Math.round(x.reserved), premium: Math.round(x.premium) });
+
+/** 관중 가중 가격 지수 P (1 = 기본): Σ 관중 × 기본 가격 × 배율 ÷ Σ 관중 × 기본 가격 */
+export function priceIndexOf(seats: SeatPrices, prices: SeatPrices): number {
+  let a = 0;
+  let b = 0;
+  for (const g of SEAT_GRADES) { a += seats[g] * seatFactor(g) * prices[g]; b += seats[g] * seatFactor(g); }
+  return b > 0 ? a / b : 1;
+}
+/** 좌석 가중 가격 지수 (관중 반응 전). 이벤트 "입장권 가격 조정"의 결과에 곱한다 */
+export const seatPriceIndex = (p: SeatPrices) => SEAT_GRADES.reduce((s, g) => s + SEAT[g].share * seatFactor(g) * p[g], 0);
+/** 결산 때 가격에 따른 팬 만족도 변화 (0.1 단위로 반올림) */
+export const priceFanDelta = (P: number) => Math.round(-PRICE_FAN * (P - 1) * 10) / 10;
+
+/** 수요 관중률 분포 (FinanceYear.demand): 칸 21개, 칸 i = 관중률 i/20 */
+export const DEMAND_BINS = 21;
+export const demandBin = (f: number) => Math.max(0, Math.min(DEMAND_BINS - 1, Math.round(f * (DEMAND_BINS - 1))));
+
+/**
+ * 수요 분포와 가격으로 한 경기 평균 등급별 예상 관중·관중 수입 (좌석 cap, 한 명 평균 객단가 ticket).
+ * 분포가 없으면(예전 결산) 평균 관중률 하나로
+ */
+export function gatePredict(demand: number[] | undefined, meanFill: number, cap: number, ticket: number, prices: SeatPrices):
+  { fans: number; revenue: number; seats: SeatPrices; gate: SeatPrices } {
+  const bins: [number, number][] = demand && demand.some((c) => c > 0)
+    ? demand.map((c, i) => [i / (DEMAND_BINS - 1), c] as [number, number]).filter(([, c]) => c > 0)
+    : [[meanFill, 1]];
+  const total = bins.reduce((s, [, c]) => s + c, 0) || 1;
+  const seats = basePrices();
+  const gate = basePrices();
+  for (const g of SEAT_GRADES) {
+    let s = 0;
+    for (const [f, c] of bins) s += c * cap * SEAT[g].share * seatFill(f, g, prices[g]);
+    seats[g] = s / total;
+    gate[g] = seats[g] * ticket * seatFactor(g) * prices[g];
+  }
+  const sum = (x: SeatPrices) => SEAT_GRADES.reduce((s, g) => s + x[g], 0);
+  return { fans: sum(seats), revenue: sum(gate), seats, gate };
+}
+
+/** 그 해 그 구단 한 등급 입장권 한 장 값 (만 원, 2026년 돈): 기본 가격 × 배율 × 시설 배율 × 연봉 지수 ÷ 시대 관중 배율 (화면용) */
+export function seatTicket(league: LeagueState, team: number, year: number, grade: SeatGrade, scale: number): number {
+  return (TICKET * seatFactor(grade) * scale * ticketScale(league.stadiums?.[team]) * wageIndex(year, league)) / eraFillScale(year);
+}
+
+/** 그 해 그 구단 좌석 수 */
+export function capOf(league: LeagueState, team: number, year: number): number {
+  const park = league.stadiums?.[team];
+  return park ? seatsAt(park, year) : parkOf(league, team).capacity;
+}
+
+/**
+ * 지난 시즌 수요 관중률 (가격 반응 전). 분포가 있으면 그 평균, 없으면 관중 ÷ (홈 경기 × 좌석).
+ * 추천 가격은 이 값으로 정한다: 값을 올려 관중률이 떨어지면 다음 해 다시 내리는 널뛰기를 막는다 (기본 가격이면 기획의 "지난 시즌 관중률"과 같음)
+ */
+export function lastDemand(league: LeagueState, team: number): number | null {
+  const h = league.finance?.[team]?.history.at(-1);
+  if (!h) return null;
+  if (h.demand?.some((c) => c > 0)) {
+    let n = 0;
+    let s = 0;
+    h.demand.forEach((c, i) => { n += c; s += c * (i / (DEMAND_BINS - 1)); });
+    return s / n;
+  }
+  if (!h.homeGames || !h.attendance) return null;
+  return h.attendance / (h.homeGames * capOf(league, team, h.year));
+}
+
+/** 재무팀 추천 가격 (자동). AI 구단도 같은 규칙 */
+export function recommendPrices(league: LeagueState, team: number): SeatPrices {
+  const p = basePrices();
+  const f = lastDemand(league, team);
+  if (f === null) return p;
+  if (f >= PRICE_REC_HIGH) { p.reserved = 1.1; p.premium = 1.1; } else if (f <= PRICE_REC_LOW) p.general = 0.9;
+  return p;
+}
+
+/** 해마다 결산 뒤 플레이어 구단 가격을 추천 가격으로 다시 채우고 고정한 등급만 남긴다 (예산 autoBudget과 같은 규칙) */
+export function autoPrices(league: LeagueState, team: number): void {
+  if (team < 0) return;
+  ensureFinance(league);
+  const f = league.finance![team];
+  if (!f) return;
+  const locked = priceLockedOf(f);
+  const cur = pricesOf(f, true);
+  const next = recommendPrices(league, team);
+  for (const g of locked) next[g] = cur[g];
+  f.prices = next;
+}
+
+const validScale = (x: number) => Number.isFinite(x) && x >= PRICE_RANGE[0] - 1e-9 && x <= PRICE_RANGE[1] + 1e-9 && Math.abs(x / PRICE_STEP - Math.round(x / PRICE_STEP)) < 1e-6;
+const pctText = (x: number) => `${Math.round(x * 100)}%`;
+
+/** 한 등급 가격 배율을 정한다 (오프시즌, 다음 시즌부터). 그 등급은 고정된다 */
+export function setTicketPrice(league: LeagueState, team: number, grade: SeatGrade, scale: number): { ok: boolean; message: string } {
+  if (!SEAT_GRADES.includes(grade)) return { ok: false, message: '없는 좌석 등급입니다.' };
+  if (!validScale(scale)) return { ok: false, message: `가격 배율은 ${pctText(PRICE_RANGE[0])}~${pctText(PRICE_RANGE[1])}, 5% 단위입니다.` };
+  ensureFinance(league);
+  const f = league.finance![team];
+  // 가격 칸이 없는 예전 저장은 처음 고칠 때 나머지(자동) 등급을 추천 가격으로 채운다 (자동 = 추천 가격)
+  f.prices = { ...(f.prices ? pricesOf(f, true) : recommendPrices(league, team)), [grade]: Math.round(scale * 100) / 100 };
+  f.priceLocked = SEAT_GRADES.filter((g) => g === grade || priceLockedOf(f).includes(g));
+  return { ok: true, message: `${SEAT_LABEL[grade]} 가격 ${pctText(scale)} (다음 시즌부터, 고정)` };
+}
+
+/** 한 등급(없으면 모든 등급)을 재무팀 추천 가격(자동)으로 되돌린다 */
+export function setTicketAuto(league: LeagueState, team: number, grade?: SeatGrade): { ok: boolean; message: string } {
+  if (grade !== undefined && !SEAT_GRADES.includes(grade)) return { ok: false, message: '없는 좌석 등급입니다.' };
+  ensureFinance(league);
+  const f = league.finance![team];
+  const rec = recommendPrices(league, team);
+  const cur = pricesOf(f, true);
+  const gs = grade ? [grade] : SEAT_GRADES;
+  for (const g of gs) cur[g] = rec[g];
+  f.prices = cur;
+  f.priceLocked = priceLockedOf(f).filter((g) => !gs.includes(g));
+  return { ok: true, message: `${grade ? SEAT_LABEL[grade] : '모든 좌석'} 가격을 재무팀 추천 가격(자동)으로 되돌렸습니다.` };
+}
+
 // ---- 구단 재정 상태
 
 export interface TeamFinance {
@@ -316,6 +504,12 @@ export interface TeamFinance {
   activeBudget?: Partial<Record<BudgetKind, number>>;
   /** 고정한 줄 (해마다 결산 뒤 자동 배분이 남겨 둠, 플레이어 구단). 없으면 lockedOf가 invest에서 짐작 */
   locked?: BudgetKind[];
+  /** 다음 시즌 좌석 등급별 입장권 가격 배율 (재정 2 F3, 1 = 기본 가격). 없으면 모두 1 */
+  prices?: Partial<SeatPrices>;
+  /** 이번 시즌 확정 가격 (개막 때 prices에서). 없으면 모두 1 */
+  activePrices?: Partial<SeatPrices>;
+  /** 고정한 좌석 등급 (해마다 결산 뒤 자동 추천 가격이 남겨 둠). 없으면 없음 (모두 자동) */
+  priceLocked?: SeatGrade[];
   /** 지난 결산들 */
   history: FinanceYear[];
 }
@@ -335,6 +529,12 @@ export interface FinanceYear {
   /** 정규시즌 홈 관중 합과 홈 경기 수 (미래 규칙 변경의 흥행 신호, 2026-10-22. 예전 저장에는 없다) */
   attendance?: number;
   homeGames?: number;
+  /** 정규시즌 등급별 홈 관중 합 (재정 2 F3, 예전 저장에는 없다) */
+  seats?: SeatPrices;
+  /** 정규시즌 홈 경기 수요 관중률(가격 반응 전) 분포, DEMAND_BINS칸 (추천 가격·예상 셈) */
+  demand?: number[];
+  /** 그 시즌 확정 가격 (기본 가격이면 적지 않는다) */
+  prices?: SeatPrices;
 }
 
 export type FinanceKind =
@@ -484,6 +684,11 @@ export interface SeasonFlows {
   regular: number;
   /** 정규시즌 홈 경기 수 */
   homeGames: number;
+  /** 정규시즌 등급별 홈 관중 합 (소수), 수요 관중률 분포 (재정 2 F3) */
+  seats: SeatPrices;
+  demand: number[];
+  /** 이번 시즌 확정 가격 */
+  prices: SeatPrices;
   months: MonthPoint[];
 }
 
@@ -691,8 +896,11 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   let attendance = 0;
   let regular = 0;
   let homeGames = 0;
+  const seats = { general: 0, reserved: 0, premium: 0 };
+  const demand = new Array<number>(DEMAND_BINS).fill(0);
+  const prices = pricesOf(league.finance?.[team], false);
 
-  // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로
+  // 관중 수입: 경기 기록을 날짜 순으로 보며 그때까지의 승률로. 좌석 등급별 가격에 따라 등급마다 관중이 빠지거나 는다 (재정 2 F3)
   if (team < world.teams.length) {
     const star = starBonus(world, league)[team] ?? 0;
     const park = league.stadiums?.[team];
@@ -705,11 +913,15 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
       if (g.day >= upToDay) break;
       if (g.home === team) {
         const pct = w[team] + l[team] > 0 ? w[team] / (w[team] + l[team]) : 0.5;
-        const fans = Math.round(cap * fillRate(league, team, pct, star, g.day, year, g.away));
+        const f = fillRate(league, team, pct, star, g.day, year, g.away);
+        const gg = gameGate(cap, f, ticket, prices);
+        const fans = gg.fans;
         attendance += fans;
         regular += fans;
         homeGames++;
-        const v = Math.round(fans * ticket);
+        for (const k of SEAT_GRADES) seats[k] += gg.seats[k];
+        demand[demandBin(f)]++;
+        const v = gg.revenue;
         add('gate', v);
         addM(g.day, v);
       }
@@ -752,7 +964,7 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     for (const [k, v] of parts) { add(k, v); net[i] += v; }
   });
   const months: MonthPoint[] = pays.map((pd, i) => ({ day: pd.day, month: pd.months[pd.months.length - 1], when: pd.when, months: pd.months, net: net[i] }));
-  return { items, attendance, regular, homeGames, months };
+  return { items, attendance, regular, homeGames, seats, demand, prices, months };
 }
 
 /**
@@ -790,6 +1002,9 @@ export interface FinancePlan {
   perGame: number;
   /** 가정한 승률 (지난 시즌, 없으면 0.5) */
   winPct: number;
+  /** 좌석 등급별 예상 관중·관중 수입 (시즌 합), 가정한 가격 (재정 2 F3). 홈 경기가 없으면 관중 0 */
+  seats: Record<SeatGrade, { fans: number; gate: number }>;
+  prices: SeatPrices;
 }
 
 /** 계획의 입력. season이 그 해 시즌이면 그 일정으로, 아니면(오프시즌에 다음 시즌) 지난 결산 관중으로 관중 수입을 잡는다 */
@@ -804,7 +1019,7 @@ export interface PlanInput {
  * 연봉은 지금(시즌 중이면 개막 때) 소속 선수 연봉 합, 운영비·투자·감독·코치·중계권·모기업은 그 해 금액,
  * 장부에 이미 적힌 그 해 항목(오프시즌 계약금·보상금 등)은 그대로 넣는다. 난수를 쓰지 않는다 (관중률 잡음은 날짜별 고정 시드)
  */
-export function financePlan(input: PlanInput, team: number, year: number, budget?: Record<BudgetKind, number>): FinancePlan {
+export function financePlan(input: PlanInput, team: number, year: number, budget?: Record<BudgetKind, number>, seatPrices?: SeatPrices): FinancePlan {
   const { league, world, season } = input;
   const items: Partial<Record<FinanceKind, number>> = {};
   const add = (k: FinanceKind, v: number) => { if (v) items[k] = (items[k] ?? 0) + Math.round(v); };
@@ -815,28 +1030,47 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
   const last = league.lastSeason?.teams?.[team];
   const winPct = last && last.w + last.l > 0 ? last.w / (last.w + last.l) : 0.5;
   const star = team < world.teams.length ? starBonus(world, league)[team] ?? 0 : 0;
-  // 관중 수입
+  // 관중 수입 (좌석 등급별 가격, 재정 2 F3): 시즌 중이면 확정 가격, 오프시즌이면 다음 시즌 계획 가격
   let homeGames = 0;
   let perGame = 0;
+  const prices = seatPrices ?? pricesOf(fin, !inSeason);
+  const seats = Object.fromEntries(SEAT_GRADES.map((g) => [g, { fans: 0, gate: 0 }])) as Record<SeatGrade, { fans: number; gate: number }>;
+  const park = league.stadiums?.[team];
+  const ticketOf = (y: number) => (TICKET * ticketScale(park) * wageIndex(y, league)) / eraFillScale(y);
   if (inSeason && team < world.teams.length) {
     const ks = season!.knownSchedule(0);
-    const park = league.stadiums?.[team];
-    const cap = park ? seatsAt(park, year) : parkOf(league, team).capacity;
-    const ticket = (TICKET * ticketScale(park) * wage) / eraFillScale(year);
+    const cap = capOf(league, team, year);
+    const ticket = ticketOf(year);
     let sum = 0;
     let n = 0;
     ks.days.forEach((games, day) => {
-      for (const g of games) if (g.home === team) { sum += Math.round(Math.round(cap * fillRate(league, team, winPct, star, day, year, g.away)) * ticket); n++; }
+      for (const g of games) {
+        if (g.home !== team) continue;
+        const gg = gameGate(cap, fillRate(league, team, winPct, star, day, year, g.away), ticket, prices);
+        sum += gg.revenue;
+        n++;
+        for (const k of SEAT_GRADES) { seats[k].fans += gg.seats[k]; seats[k].gate += gg.seats[k] * ticket * seatFactor(k) * prices[k]; }
+      }
     });
     const pending = ks.pending.filter((g) => g.home === team).length;
     homeGames = n + pending;
     perGame = n ? sum / n : 0;
+    if (n) for (const k of SEAT_GRADES) { seats[k].fans *= homeGames / n; seats[k].gate *= homeGames / n; }
     add('gate', sum + perGame * pending);
   } else {
     const h = fin?.history.at(-1);
     if (h?.homeGames && !futures) {
       homeGames = h.homeGames;
       perGame = ((h.items.gate ?? 0) / h.homeGames) * (wage / wageIndex(h.year, league));
+      // 가격이 지난 시즌과 다르면 수요 분포로 잰 비율만큼 (지난 시즌 실제 관중 수입이 바탕)
+      const meanFill = (h.attendance ?? 0) / (h.homeGames * capOf(league, team, h.year));
+      const cap = capOf(league, team, year);
+      const was = gatePredict(h.demand, meanFill, cap, ticketOf(year), { ...basePrices(), ...h.prices });
+      const now = gatePredict(h.demand, meanFill, cap, ticketOf(year), prices);
+      if (was.revenue > 0) perGame *= now.revenue / was.revenue;
+      const fanScale = was.fans > 0 ? (h.attendance ?? 0) / h.homeGames / was.fans : 0;
+      const gateScale = now.revenue > 0 ? perGame / now.revenue : 0;
+      for (const k of SEAT_GRADES) seats[k] = { fans: now.seats[k] * fanScale * homeGames, gate: now.gate[k] * gateScale * homeGames };
       add('gate', perGame * homeGames);
     }
   }
@@ -870,7 +1104,7 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
   // 장부에 이미 적힌 그 해 항목
   const booked = ledgerItems(league, team, year);
   for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start') add(k, booked[k] ?? 0);
-  return { year, items, homeGames, perGame, winPct };
+  return { year, items, homeGames, perGame, winPct, seats, prices };
 }
 
 /** 예산안 한 줄 */
@@ -998,11 +1232,17 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       league.ledger.push({ year, from: t, to: -1, amount: dividend, note: `${year} 모기업 환원 (쌓인 자금)`, kind: 'dividend' });
       cash -= dividend;
     }
-    const y: FinanceYear = { year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), attendance: flows.regular, homeGames: flows.homeGames };
+    const base = isBasePrices(flows.prices);
+    const y: FinanceYear = {
+      year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), attendance: flows.regular, homeGames: flows.homeGames,
+      ...(flows.homeGames ? { seats: roundSeats(flows.seats), demand: flows.demand } : {}), ...(base ? {} : { prices: flows.prices }),
+    };
     league.finance![t].history.push(y);
     out.push(y);
-    // 팬 만족도 결산 (stadium.ts): 스폰서를 매긴 뒤에
-    fansSeasonEnd(league, t, year, pct, input.postseasonDepth(t), input.champion === t, parkOf(league, t).market);
+    // 팬 만족도 결산 (stadium.ts): 스폰서를 매긴 뒤에. 입장권 가격 지수만큼 (재정 2 F3, 기본 가격이면 0)
+    const fanPrice = base || !flows.homeGames ? 0 : priceFanDelta(priceIndexOf(flows.seats, flows.prices));
+    fansSeasonEnd(league, t, year, pct, input.postseasonDepth(t), input.champion === t, parkOf(league, t).market,
+      fanPrice ? [[fanPrice, `${year} 입장권 가격`]] : []);
   }
   // 구장: 낡고, 끝난 공사는 완공 (AI 리모델링 주문 포함)
   league.stadiumNews = stadiumYearEnd(league, year, (t) => cashOf(league, t), userTeamOf(league));
@@ -1146,10 +1386,14 @@ export function lockBudgets(league: LeagueState, userTeam: number): void {
         preset = down;
       }
       writeBudget(f, { ...PRESET_BUDGET[preset] });
+      // 입장권 가격: AI는 재무팀 추천 가격 (재정 2 F3, 플레이어와 같은 규칙)
+      f.prices = recommendPrices(league, t);
     }
   }
   for (let t = 0; t < league.teams.length; t++) {
     const f = league.finance![t];
+    const prices = pricesOf(f, true);
+    if (f.prices || f.activePrices) f.activePrices = prices;
     const prevMk = marketingStock(league, t);
     const b = budgetOf(f, true);
     f.activeBudget = { ...b };
