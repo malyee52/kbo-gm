@@ -635,3 +635,9 @@ export function editorBulkOps(s: GameSession, ids: string[], kind: BulkKind, val
   }
   return out;
 }
+
+/** 에디터 grow 조작 적용 (숨은 성장 성향 d·시기 τ를 쓰는 곳은 이 파일 하나, session.applyEdits가 부른다) */
+export function applyGrow(lp: LeaguePlayer, op: Extract<EditOp, { op: 'grow' }>): void {
+  if (op.drive !== undefined) lp.drive = op.drive;
+  if (op.timing !== undefined) lp.timing = op.timing;
+}

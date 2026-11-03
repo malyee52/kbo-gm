@@ -41,7 +41,7 @@ import { addFantasyEntry, applyArc, goodwillFor, type FantasyEntry, type Fantasy
 import type { FantasyEffect } from '../fantasy/effects';
 import { looksForeignName, runsForGrade, type FreeOp } from '../fantasy/free';
 import { isPlayerOp, type EditOp } from './editOps';
-import { editorPreview } from './editor';
+import { applyGrow, editorPreview } from './editor';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
@@ -4480,8 +4480,8 @@ export class GameSession {
           break;
         }
         case 'grow':
-          if (op.drive !== undefined) lp.drive = op.drive;
-          if (op.timing !== undefined) lp.timing = op.timing;
+          // 숨은 성향은 에디터 파일만 만진다 (tests/potential.test.ts 소스 검사)
+          applyGrow(lp, op);
           break;
         case 'ability':
           // 고친 능력이 그대로 보이게 그 시즌 슬럼프는 없앤다
