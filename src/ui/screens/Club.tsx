@@ -3,7 +3,7 @@ import { strengthTier } from '../../game/rank';
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
 import { ScenarioBanner } from '../ScenarioBanner';
-import { FinancePanel } from './Finance';
+import { BudgetPanel, FinancePanel } from './Finance';
 import { StadiumPanel } from './Stadium';
 import { ManagerPanel } from './Manager';
 import { franchiseTag, salaryCap, salaryFloor, teamCapPayroll } from '../../league/salary';
@@ -18,7 +18,7 @@ import { REP_FA, REP_TRADE, repLabel, repOf } from '../../league/reputation';
 
 // 2026-10-12 UI 개편: 탭(개요·재정·구장·팬·감독·코치·이력·업적)은 위쪽 '구단' 메뉴의 작은 탭으로 올렸다 (GameShell NAV)
 // 2026-10-22 UI 대개편 1차: 경영 > 구단주 (owner) 칸을 더했다. 구단주 평가 카드 + 판타지 모드의 정기 면담
-export type ClubTab = 'overview' | 'finance' | 'stadium' | 'coach' | 'history' | 'owner';
+export type ClubTab = 'overview' | 'finance' | 'budget' | 'stadium' | 'coach' | 'history' | 'owner';
 
 export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
   const { session, go } = useGame();
@@ -54,6 +54,7 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
       <ScenarioBanner />
 
       {tab === 'finance' && <FinancePanel />}
+      {tab === 'budget' && <BudgetPanel />}
       {tab === 'stadium' && <StadiumPanel />}
       {tab === 'coach' && <><ManagerPanel /><CoachPanel /></>}
       {tab === 'owner' && (<>

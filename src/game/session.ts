@@ -63,8 +63,8 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  cashOf, ensureFinance, FINANCE_LABEL, seasonFlows, setInvest, settleSeason, trustFromFinance,
-  type FinanceKind, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
+  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setInvest, settleSeason, trustFromFinance,
+  type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
 import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules';
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
@@ -3967,7 +3967,7 @@ export class GameSession {
 
   // ---- 재정 (finance.ts)
 
-  /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 월말 연봉 계산용) */
+  /** 시즌 중 우리 구단 트레이드를 선수 id로 (재정의 지급일 연봉 계산용) */
   tradeMoves(): TradeMove[] {
     const W = this.world.players;
     const mine = this.trades.map((t) => ({ day: t.day, from: this.teamIdx, to: t.team, give: t.give.map((i) => W[i].id), get: t.get.map((i) => W[i].id) }));
@@ -3991,6 +3991,20 @@ export class GameSession {
     const flows = this.seasonFinance(team);
     const inSeason = flows ? Object.values(flows.items).reduce((s, v) => s + (v ?? 0), 0) : 0;
     return cashOf(this.league, team) + inSeason;
+  }
+
+  /**
+   * 예산안 (재정 2 F1a, 읽기 전용): 시즌 중이면 이번 시즌 계획(개막 때 모습)과 계획 / 지금까지 / 시즌 끝 예상,
+   * 오프시즌이면 다음 시즌 계획만 (지난 결산 관중·지금 계약·투자 계획으로)
+   */
+  budgetView(team = this.teamIdx): { plan: FinancePlan; rows: BudgetRow[] | null } {
+    if (this.phase !== 'season') return { plan: financePlan({ league: this.league, world: this.world }, team, this.year + 1), rows: null };
+    const input = {
+      league: this.league, world: this.world, season: this.season, trades: this.tradeMoves(),
+      postseason: this.postseason?.series.flatMap((x) => x.games),
+    };
+    const plan = financePlan(input, team, this.world.year);
+    return { plan, rows: budgetRows(input, team, this.postseason?.done ? Number.MAX_SAFE_INTEGER : this.currentDay, plan) };
   }
 
   financeLabel(k: FinanceKind): string {

@@ -634,6 +634,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'offseason' && <Offseason />}
                 {screen === 'club' && <Club />}
                 {screen === 'finance' && <Club tab="finance" />}
+                {screen === 'budget' && <Club tab="budget" />}
                 {screen === 'stadium' && <Club tab="stadium" />}
                 {screen === 'staff' && <Club tab="coach" />}
                 {screen === 'owner' && <Club tab="owner" />}
