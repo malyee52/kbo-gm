@@ -61,11 +61,14 @@ describe('외국인 출전 한도 (리그 규칙 1-6)', () => {
     expect(games.some((g) => g.played === g.limit)).toBe(true);
   }, 120_000);
 
-  it('2020 시즌: 3명이 함께 나온 경기가 있다 (3명 보유·3명 출전)', () => {
+  // 2026-10-29: 개막 명단 짐작(create.ts estimatedOpeningForeigners) 뒤로 2020 구단은 모두 선발 투수 2명·타자 1명이라 한 경기에 셋이 함께 나오는 일이
+  // (외국인 선발이 구원으로 나오지 않는 한) 없다. 전에는 시즌 중 교체 외국인까지 개막에 들어와 4~5명이던 구단에서 나왔다. 1군에 셋이 함께 있는지로 본다
+  it('2020 시즌: 1군에 3명이 함께 있고 한도(3명 보유·3명 출전) 이하로 나온다', () => {
     const { world } = createLeague(store, 2020, 'fa-2020', FAST);
     const games = foreignPerGame(world, 'fa-2020');
     for (const g of games) expect(g.played).toBeLessThanOrEqual(g.limit);
-    expect(games.some((g) => g.played === 3)).toBe(true);
+    expect(games.every((g) => g.limit === 3)).toBe(true);
+    expect(games.filter((g) => g.active === 3).length).toBeGreaterThan(100);
   }, 120_000);
 
   it('개막 규칙 요약: 2015는 "3명 보유·2명 출전", 2020은 "3명"', () => {

@@ -71,6 +71,16 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
     });
   }
 
+  // 부상 대체 외국인: 재활 명단 선수가 다 나았다 (오늘 경기 전까지 고르지 않으면 원래 선수 복귀, market.ts rehabDay)
+  for (const r of s.rehabsDue()) {
+    const name = (id: string) => s.world.players.find((p) => p.id === id)?.name ?? id;
+    out.push({
+      key: `rehab:${r.injured}`, kind: '선수단', group: '영입', title: `${name(r.injured)} 복귀 선택`,
+      why: `${name(r.injured)} 복귀(${name(r.sub)} 방출)와 ${name(r.sub)} 남기기(${name(r.injured)} 방출, 교체 1회) 가운데 고릅니다. 고르지 않으면 원래 선수가 돌아옵니다.`,
+      when: '오늘 경기 전', go: 'market',
+    });
+  }
+
   // 엔트리: 직접 관리하는 1군·기용표에 이미 생긴 빈 곳만 (기한 없음)
   if (s.phase === 'season' && s.canManage && s.manualEntry) out.push(...entryDecisions(s));
 

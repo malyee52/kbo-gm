@@ -177,6 +177,8 @@ export interface FutureSigning {
   now: number;
   potential: number;
   foreign?: boolean;
+  /** 아시아쿼터 대상 국적 (입단 때 자리가 비면 아시아쿼터로) */
+  asia?: boolean;
   real?: boolean;
   /** 예약한 이야기 글 */
   from?: string;

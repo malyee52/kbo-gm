@@ -33,7 +33,7 @@ export const NO_STOPS: StopRules = {
   event: false, tradeOffer: false, injury: false, injuryDays: 3, losing: false, losingN: 5, deadline: false, devDay: false, cast: false, crisis: false,
 };
 
-export type AttentionKind = 'injury' | 'losing' | 'deadline' | 'dev' | 'crisis';
+export type AttentionKind = 'injury' | 'losing' | 'deadline' | 'dev' | 'crisis' | 'rehab';
 
 /** 진행을 멈춘 까닭 (화면이 요약 창 맨 위에 보여 준다) */
 export interface Attention {

@@ -21,7 +21,7 @@ import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
-import { changeText } from '../league/eras';
+import { changeText, foreignRule, teamForeignRule } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
 import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
@@ -31,7 +31,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeLevel, MEDICAL_RATE } from '../league/finance';
-import { dollarText, minSalary, wageIndex, wonText } from '../league/salary';
+import { dollarText, foreignCap, minSalary, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -48,7 +48,8 @@ import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
 import {
   aiMarketDay, fxSendInSeason, fxSeasonOpen, scoutFxDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
-  settleMarketContracts, signBlock, signPlayer, type MarketCtx,
+  settleMarketContracts, signBlock, signPlayer, endRehab, INJURY_SWAP_DAYS, INJURY_SWAP_FROM, rehabBlock, rehabDay, rehabEndBlock, rehabsDue, rehabsOf,
+  type MarketCtx, type Rehab,
 } from '../league/market';
 import {
   careers, FAREWELL_DAYS, FAREWELL_FILL, farewellWorthy, hallOfFame, LEGEND_SEASONS, legendCandidates, recordSeasonBests, recordYear,
@@ -344,6 +345,9 @@ export type GameAction =
   | { year: number; day: number; type: 'mgr-change'; name: string | null }
   | { year: number; day: number; type: 'hire-coach-in'; id: string }
   | { year: number; day: number; type: 'sign-in'; id: string }
+  /** 부상 대체 외국인 (2024~, market.ts): injured를 재활 명단에 올리고 id를 데려온다 / 복귀 선택 (keep = 대체 선수를 남김) */
+  | { year: number; day: number; type: 'rehab-sign'; id: string; injured: string }
+  | { year: number; day: number; type: 'rehab-end'; injured: string; keep: boolean }
   /** 판타지 모드: AI가 만든 글(기사·대화·사건). 재현 때는 AI를 다시 부르지 않고 이 기록을 그대로 넣는다 (docs/fantasy-mode.md) */
   | { year: number; day: number; type: 'ai'; entry: FantasyEntry }
   | { year: number; type: 'ai-off'; entry: FantasyEntry }
@@ -1104,6 +1108,8 @@ export class GameSession {
     else if (a.type === 'convert') this.applyConvert(a.id);
     else if (a.type === 'release-in') this.applyRelease(a.id);
     else if (a.type === 'sign-in') this.applySign(a.id);
+    else if (a.type === 'rehab-sign') this.applySign(a.id, a.injured);
+    else if (a.type === 'rehab-end') this.applyRehabEnd(a.injured, a.keep);
     else if (a.type === 'mgr-change') this.applyManagerChange(a.name);
     else if (a.type === 'hire-coach-in') this.applyHireCoachIn(a.id);
     else if (a.type === 'ai') this.applyFantasy(a.entry);
@@ -1363,12 +1369,82 @@ export class GameSession {
     return to;
   }
 
-  private applySign(id: string): void {
+  /** 재활 명단에 올리고 부상 대체 외국인을 데려올 수 있는 우리 외국인 (2024~, 6주 넘게 결장) */
+  rehabCandidates(): SimPlayer[] {
+    if (this.phase !== 'season' || this.world.year < INJURY_SWAP_FROM) return [];
+    return this.team.org.filter((p) => p.foreign && !rehabBlock(this.marketCtx, p, this.teamIdx));
+  }
+
+  /** 우리 구단 재활 명단 (부상 대체 외국인) */
+  rehabs(): Rehab[] {
+    return this.phase === 'season' ? rehabsOf(this.marketCtx, this.teamIdx) : [];
+  }
+
+  /** 복귀 선택을 해야 하는 우리 재활 명단 (오늘 경기 전까지 고르지 않으면 원래 선수 복귀) */
+  rehabsDue(): Rehab[] {
+    return this.phase === 'season' ? rehabsDue(this.marketCtx, this.teamIdx) : [];
+  }
+
+  rehabSignBlock(p: SimPlayer, injured: SimPlayer): string | null {
+    if (this.phase !== 'season') return '시즌 중에만 영입할 수 있습니다.';
+    if (this.gameLock) return this.gameLock;
+    return signBlock(this.marketCtx, p, this.teamIdx, injured);
+  }
+
+  /** 부상 대체 외국인 영입: injured를 재활 명단에 올리고 p를 데려온다 (교체 횟수를 쓰지 않는다) */
+  signRehab(p: SimPlayer, injured: SimPlayer): { ok: boolean; message: string } {
+    const why = this.rehabSignBlock(p, injured);
+    if (why) return { ok: false, message: why };
+    this.applySign(p.id, injured.id);
+    this.actions.push({ year: this.year, day: this.day, type: 'rehab-sign', id: p.id, injured: injured.id });
+    return { ok: true, message: `${injured.name} 재활 명단, ${p.name} 부상 대체 영입 (2군에 들어갑니다. 1군은 따로 올리세요).` };
+  }
+
+  rehabEndBlock(r: Rehab, keep: boolean): string | null {
+    if (this.phase !== 'season') return '시즌 중에만 정할 수 있습니다.';
+    if (this.gameLock) return this.gameLock;
+    return rehabEndBlock(this.marketCtx, r, keep);
+  }
+
+  /** 복귀 선택: keep이면 대체 선수를 남기고(교체 1회) 원래 선수 방출, 아니면 원래 선수 복귀·대체 선수 방출 */
+  endRehab(injured: string, keep: boolean): { ok: boolean; message: string } {
+    const r = this.rehabs().find((x) => x.injured === injured);
+    if (!r) return { ok: false, message: '재활 명단에 없는 선수입니다.' };
+    const why = this.rehabEndBlock(r, keep);
+    if (why) return { ok: false, message: why };
+    this.applyRehabEnd(injured, keep);
+    this.actions.push({ year: this.year, day: this.day, type: 'rehab-end', injured, keep });
+    return { ok: true, message: keep ? '대체 선수를 남겼습니다 (외국인 교체 1회).' : '원래 선수가 돌아왔습니다 (대체 선수 방출).' };
+  }
+
+  private applyRehabEnd(injured: string, keep: boolean): void {
+    const r = rehabsOf(this.marketCtx).find((x) => x.injured === injured);
+    if (r) this.rehabNews(r, keep, false);
+  }
+
+  /** 복귀 선택을 하고 소식을 남긴다 (auto = 고르지 않아 원래 선수 복귀, AI 구단 선택) */
+  private rehabNews(r: Rehab, keep: boolean, auto: boolean, done = false): void {
+    const name = (id: string) => this.world.players.find((p) => p.id === id)?.name ?? id;
+    if (!done) endRehab(this.marketCtx, r, keep);
+    this.valueCtx = null;
+    const body = keep
+      ? `${josa(name(r.sub), '을', '를')} 남기고 ${name(r.injured)} 방출 (외국인 교체 ${foreignSwapsUsed(this.marketCtx, r.team)}/${ruleOf(this.league, 'foreignSwaps')})`
+      : `${name(r.injured)} 복귀, 부상 대체 ${name(r.sub)} 방출`;
+    if (r.team === this.teamIdx) this.addNews(this.day, 'entry', `${body}.${auto ? ' (경기 전까지 고르지 않아 원래 선수가 돌아왔습니다)' : ''}`);
+    else this.addNews(this.day, 'trade', `[부상 대체 외국인] ${this.world.teams[r.team].name}, ${body}.`);
+  }
+
+  private applySign(id: string, injured?: string): void {
     const p = this.world.players.find((x) => x.id === id);
     if (!p || p.teamIdx !== -1) return;
-    this.fxNews(signPlayer(this.marketCtx, p, this.teamIdx));
+    const hurt = injured ? this.world.players.find((x) => x.id === injured) : undefined;
+    this.fxNews(signPlayer(this.marketCtx, p, this.teamIdx, hurt));
     this.valueCtx = null;
     const lp = this.leaguePlayer(id);
+    if (hurt && lp) {
+      this.addNews(this.day, 'entry', `${hurt.name} 재활 명단, ${p.name} 부상 대체 영입 (교체 횟수 안 씀, 연봉 ${dollarText(lp.contract.salary)}의 남은 달 몫)`);
+      return;
+    }
     this.addNews(this.day, 'entry', p.foreign && lp
       ? `${p.name} 영입 (외국인 교체 ${foreignSwapsUsed(this.marketCtx, this.teamIdx)}/${ruleOf(this.league, 'foreignSwaps')}, 연봉 ${dollarText(lp.contract.salary)}의 남은 달 몫)`
       : `${p.name} 영입 (최저 연봉, 이번 시즌까지)`);
@@ -1380,7 +1456,9 @@ export class GameSession {
       this.valueCtx = null;
       this.fxNews(m.fx);
       const t = this.world.teams[m.team];
-      const body = `${t.name}, 외국인 ${josa(m.out.name, '을', '를')} 내보내고 ${josa(m.in.name, '을', '를')} 영입했다${m.why === 'injury' ? ' (부상 대체)' : ''}.`;
+      const body = m.why === 'rehab'
+        ? `${t.name}, 다친 외국인 ${josa(m.out.name, '을', '를')} 재활 명단에 올리고 ${josa(m.in.name, '을', '를')} 부상 대체 선수로 영입했다.`
+        : `${t.name}, 외국인 ${josa(m.out.name, '을', '를')} 내보내고 ${josa(m.in.name, '을', '를')} 영입했다${m.why === 'injury' ? ' (부상 대체)' : ''}.`;
       this.addNews(this.season.day, 'trade', `[외국인 교체] ${body}`);
       addArticle(this.league, { year: this.world.year, day: this.season.day, kind: 'trade', franchise: t.franchise, title: `${t.name} 외국인 교체`, body });
     }
@@ -1698,7 +1776,7 @@ export class GameSession {
             }
             this.setPitchRole(lp, op.role);
             this.typicalStarterStamina(lp);
-            this.applyNationality(lp, op);
+            this.applyNationality(lp, op, year, op.team, true);
             slot.foreign = lp.foreign;
             Object.assign(lp, skillForRuns({ ...lp }, runs, ctx, year));
             delete slot.reserve;
@@ -1713,7 +1791,7 @@ export class GameSession {
             if (op.real) np.outsider = true;
             this.setPitchRole(np, op.role);
             this.typicalStarterStamina(np);
-            this.applyNationality(np, op);
+            this.applyNationality(np, op, year, op.team, false);
             Object.assign(np, skillForRuns({ ...np }, runs, ctx, year));
           }
           break;
@@ -1745,7 +1823,7 @@ export class GameSession {
         case 'future':
           // 입단 예약: 그 해 개막 때 들어온다 (openPipeline)
           if (L.fantasy) (L.fantasy.pipeline ??= []).push({ name: op.name, team: op.team, pos: op.pos, ...(op.role ? { role: op.role } : {}), birthYear: op.birthYear,
-            joinYear: op.joinYear, now: op.now, potential: op.potential, ...(op.foreign ? { foreign: true } : {}), ...(op.real ? { real: true } : {}), from: note });
+            joinYear: op.joinYear, now: op.now, potential: op.potential, ...(op.foreign ? { foreign: true } : {}), ...(op.asia ? { asia: true } : {}), ...(op.real ? { real: true } : {}), from: note });
           break;
         case 'rule': {
           // 리그 규정 (league/rules.ts). 기본값으로 돌리면 기록에서 지운다
@@ -2252,6 +2330,13 @@ export class GameSession {
       }
     }
     if (this.season.done) return;
+    // 재활 명단 선수가 오늘 나았다: 오늘 경기 전까지 복귀 선택 (고르지 않으면 원래 선수 복귀). 멈춤 설정과 상관없이 멈춘다
+    for (const x of this.rehabsDue()) {
+      const p = this.world.players.find((q) => q.id === x.injured)!;
+      if (this.season.states.absentUntil[p.idx] !== this.season.day) continue;
+      const sub = this.world.players.find((q) => q.id === x.sub)?.name ?? x.sub;
+      this.attention.push({ kind: 'rehab', text: `${josa(p.name, '이', '가')} 다 나았습니다. 오늘 경기 전까지 ${p.name} 복귀(${sub} 방출)와 ${sub} 남기기(${p.name} 방출) 가운데 고르세요. 고르지 않으면 ${josa(p.name, '이', '가')} 돌아옵니다.` });
+    }
     if (r.losing) {
       const k = this.currentStreak();
       if (k <= -r.losingN && streak0 > -r.losingN) this.attention.push({ kind: 'losing', text: `${-k}연패에 빠졌습니다. 엔트리·기용표·타순을 점검해 보세요.` });
@@ -2308,6 +2393,8 @@ export class GameSession {
 
   private stepDay(): void {
     const s = this.season;
+    // 재활 명단 복귀 선택 (부상 대체 외국인, market.ts): 다 나은 선수는 그날 경기 전에 정한다. 우리 구단은 고르지 않았으면 원래 선수 복귀
+    if (!s.done) for (const x of rehabDay(this.marketCtx)) this.rehabNews(x.r, x.keep, x.r.team === this.teamIdx, true);
     const day = s.day;
     const year = this.world.year;
     const org = this.team.org;
@@ -2347,7 +2434,9 @@ export class GameSession {
         const back = until >= s.schedule.length ? '이번 시즌 복귀 어려움' : `복귀 예정 ${formatDate(year, until)} (${until - day}일)`;
         // 직접 관리하는 1군 선수가 빠지면 멈춤 판정에 넘긴다 (엔트리·기용표를 손볼 수 있게, checkStops)
         if (manual?.has(p.idx)) this.absencesToday.push({ text: `${p.name}: ${reason}, ${back}`, days: until - day });
-        this.addNews(day, 'absence', `${p.name}: ${reason}. ${back}.${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}`);
+        // 6주 넘게 빠지는 외국인은 부상 대체 외국인을 데려올 수 있다 (2024~, market.ts)
+        const rehab = p.foreign && until - day >= INJURY_SWAP_DAYS && year >= INJURY_SWAP_FROM ? ' 재활 명단에 올리고 부상 대체 외국인을 데려올 수 있습니다 (영입 > 시장).' : '';
+        this.addNews(day, 'absence', `${p.name}: ${reason}. ${back}.${inFirst && manual ? ' 1군 자리를 비워 두려면 2군으로 내리세요.' : ''}${rehab}`);
       }
     });
 
@@ -4124,7 +4213,7 @@ export class GameSession {
     const lp = this.leaguePlayer(id);
     if (!lp) return;
     const year = this.phase === 'season' ? this.world.year : this.year + 1;
-    setTwoWayAbility(lp, on, this.values, year);
+    setTwoWayAbility(lp, on, this.values, year, this.league);
     if (this.phase === 'season') {
       const sp = this.world.players.find((p) => p.id === id);
       if (sp) {
@@ -4175,9 +4264,9 @@ export class GameSession {
       const np = Off.addFreePlayer(L, this.store, this.params, x.team, { name: x.name, pos, age, runs, potential: pot });
       if (x.real) np.outsider = true;
       const op = { op: 'create' as const, name: x.name, team: x.team, pos: x.pos as Extract<FreeOp, { op: 'create' }>['pos'], age, now: x.now, potential: x.potential,
-        ...(x.role ? { role: x.role } : {}), ...(x.foreign ? { foreign: true } : {}), military: age >= 28 ? 'done' as const : 'pending' as const };
+        ...(x.role ? { role: x.role } : {}), ...(x.foreign ? { foreign: true } : {}), ...(x.asia ? { asia: true } : {}), military: age >= 28 ? 'done' as const : 'pending' as const };
       this.setPitchRole(np, op.role);
-      this.applyNationality(np, op);
+      this.applyNationality(np, op, L.year, x.team, false);
       const ctx = leagueView({ ...L, year: L.year - 1 }, this.store, this.params).ctx;
       Object.assign(np, skillForRuns({ ...np }, runs, ctx, L.year));
       out.push(`${L.teams[x.team].name} ${x.name} 입단 (예약, ${age}세)`);
@@ -4186,13 +4275,25 @@ export class GameSession {
   }
 
   /** 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약 */
-  private applyNationality(lp: LeaguePlayer, op: Extract<FreeOp, { op: 'create' }>): void {
+  /**
+   * 만든 선수의 국적·병역 (자유 모드 create). 외국인은 병역이 없고 달러 계약.
+   * 아시아쿼터 대상 국적(op.asia)이면 그 해 아시아쿼터가 있고(2026~, eras.ts foreignRule) 그 구단 아시아쿼터 자리가 비었을 때 아시아쿼터로 (연봉은 아시아쿼터 신규 상한까지).
+   * 자리가 없거나 도입 전이면 일반 외국인 (2026-10-29 사용자 보고: 오타니·야마모토가 아시아쿼터 표시 없이 들어왔다). season: 시즌 중(월드 소속으로 센다)
+   */
+  private applyNationality(lp: LeaguePlayer, op: Extract<FreeOp, { op: 'create' }>, year: number, team: number, season: boolean): void {
     if (op.foreign) {
       lp.foreign = true;
       delete lp.military;
-      lp.contract = { ...lp.contract, kind: 'foreign', salary: Math.max(lp.contract.kind === 'foreign' ? lp.contract.salary : 0, 300_000) };
+      const lim = teamForeignRule(foreignRule(this.store.meta, year, this.league), this.league, team, year).asia;
+      const byId = new Map(this.league.players.map((p) => [p.id, p]));
+      const held = season ? (this.world.teams[team]?.org ?? []).filter((p) => p.id !== lp.id && p.foreign && byId.get(p.id)?.asia).length
+        : this.league.players.filter((p) => p.id !== lp.id && p.team === team && p.foreign && p.asia).length;
+      lp.asia = !!op.asia && held < lim;
+      const base = Math.max(lp.contract.kind === 'foreign' ? lp.contract.salary : 0, 300_000);
+      lp.contract = { ...lp.contract, kind: 'foreign', salary: lp.asia ? Math.min(base, foreignCap(this.league, 'asiaNewCap', year)) : base };
     } else {
       lp.foreign = false;
+      lp.asia = false;
       lp.military = { state: op.military ?? 'pending', basis: 'estimate', note: '자유 모드' };
     }
   }
