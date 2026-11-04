@@ -137,6 +137,9 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
       money(r, lg, 1_500_000); // 새 긴급 지원이 생기지 않게 (자금 150억, 환원 문턱 위로는 안 감)
       toStage(r, 'ready');
       expect(r.openNextSeason().ok).toBe(true);
+      // 해고는 이 시험 대상이 아닌 운이라 막는다 (결산 앞 신뢰도 100). 투수 퍼짐(plate.pitFit 1)과 특기 모양을 합친 판에서
+      // 2027 결산 신뢰도 23으로 LG가 해고되어 오프시즌이 'fa'에서 멈췄다 (2026-11-04)
+      r.league.owner!.trust = 100;
       toOffseason(r);
       amounts.push(debtOf(r.league.finance![lg]));
       expect(r.league.finance![lg].history.at(-1)!.rescue).toBe(0);
