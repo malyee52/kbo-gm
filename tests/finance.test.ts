@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import {
-  bonusNow, dueOf, activeLevel, cashOf, seasonFlows, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
+  bonusNow, dueOf, activeLevel, cashOf, seasonFlows, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, parentParts, PARENT_CLAWBACK, PARENT_RESERVE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
 } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
@@ -257,50 +257,24 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
   });
 });
 
-describe('자금이 끝없이 쌓이지 않는다 (2026-10-11 사용자: 돈이 너무 넉넉하다)', () => {
-  it('세 시즌 동안 결산 뒤 자금이 100억 원을 넘으면 넘는 몫의 절반을 모기업에 돌려주고, 어느 구단도 200억 원을 넘지 않는다', () => {
-    // 200억 상한은 배당 규칙(100억 넘는 몫의 절반)이 배당 전 자금 300억 미만일 때 내는 결과다.
-    // 한 해 순이익이 190억을 넘는 판(가을야구 수입이 크게 겹친 해)에서는 규칙이 맞게 돌아도 200억을 넘는다.
-    // 2026-11-03 부상 대체 외국인(AI 구단 시장 이동)으로 리그 판이 바뀌어 'fin-cap'의 LG가 2028년 배당 전 354억이 됐다.
-    // 그래서 시드를 손으로 바꾸지 않고, 후보 시드 가운데 배당 전 자금이 모두 300억 미만인 첫 판을 쓴다 (시험 대상이 아닌 운을 막음).
-    // 배당 계산(넘는 몫의 절반)과 200억 상한 검사는 고른 판에서 그대로 본다.
-    const run = (seed: string) => {
-      const g = GameSession.create(store, opts(seed), FAST);
-      for (let y = 0; y < 3; y++) {
-        g.advance(100000);
-        g.beginOffseason();
-        for (let guard = 0; g.offseason!.stage !== 'ready' && guard < 40; guard++) {
-          // 시드에 따라 해고될 수 있다: 첫 영입 제의를 받아들이고 이어 간다
-          const offers = g.league.owner?.offers;
-          if (offers?.length) g.acceptOffer(offers[0]);
-          const st = g.offseason!.stage;
-          if (st === 'draft') g.autoDraft(); if (st === 'comp') g.autoComp(); if (st === 'release') g.autoRelease();
-          g.nextStage();
-        }
-        expect(g.openNextSeason().ok).toBe(true);
-      }
-      return g.league;
-    };
-    const windfall = (L: ReturnType<typeof run>) => L.teams.some((_, t) => L.finance![t].history.some((y) => y.cash + (y.dividend ?? 0) >= 3_000_000 * wageIndex(y.year, L)));
-    let L: ReturnType<typeof run> | null = null;
-    for (const seed of ['fin-cap', 'fin-cap-2', 'fin-cap-3', 'fin-cap-4']) {
-      const cand = run(seed);
-      if (!windfall(cand)) { L = cand; break; }
+describe('흑자는 구단에 남는다 (재정 2 F7, 2026-11-04 사용자: 모기업 환원을 없앰)', () => {
+  it('결산 뒤 자금이 100억 원을 넘어도 환원이 없고, 자금은 장부 합 그대로이며, 다음 해 모기업 지원금만 쌓인 자금만큼 줄어든다 (회수)', () => {
+    // 예전에는 '결산 뒤 100억 넘는 몫의 절반 환원'과 '어느 구단도 200억을 넘지 않음'을 3시즌으로 보았다 (2026-10-11 사용자: 돈이 너무 넉넉하다).
+    // 환원을 없앤 뒤에는 한 시즌으로: 환원 장부가 없고, 결산 자금이 장부 합과 같고, 쌓인 자금 회수(80억 넘는 몫 50%)는 지원금에만 걸린다
+    const g = GameSession.create(store, opts('fin-cap'), FAST);
+    g.advance(100000);
+    g.beginOffseason();
+    const L = g.league;
+    expect(L.ledger.some((e) => e.kind === 'dividend')).toBe(false);
+    let rich = 0;
+    for (let t = 0; t < L.teams.length; t++) {
+      const y = L.finance![t].history.at(-1)!;
+      expect(y.dividend).toBeUndefined();
+      expect(cashOf(L, t)).toBe(y.cash + L.ledger.filter((e) => e.year > 2026).reduce((s, e) => s + ledgerFlow(e, t), 0));
+      if (y.cash > 1_000_000) rich++;
+      const p = parentParts(L, t, 50, y.cash, 2027);
+      expect(p.clawback).toBe(Math.round(Math.max(0, y.cash - PARENT_RESERVE * wageIndex(2027, L)) * PARENT_CLAWBACK));
     }
-    expect(L, '후보 시드 모두 배당 전 300억을 넘는 해가 있다').not.toBeNull();
-    let paid = 0;
-    for (let t = 0; t < L!.teams.length; t++) {
-      for (const y of L!.finance![t].history) {
-        // 기준 금액은 2026년 뒤 연봉 상승 지수만큼 오른다 (2026-10-22)
-        const w = wageIndex(y.year, L!);
-        expect(y.cash, `${L!.teams[t].name} ${y.year}`).toBeLessThan(2_000_000 * w);
-        if (y.dividend) {
-          paid++;
-          expect(y.cash).toBeGreaterThanOrEqual(1_000_000 * w - 1);
-          expect(y.cash + y.dividend - 1_000_000 * w).toBeCloseTo(y.dividend * 2, -1);
-        }
-      }
-    }
-    expect(paid).toBeGreaterThan(0);
-  }, 1_200_000);
+    expect(rich, '100억 넘는 구단이 있는 판').toBeGreaterThan(0);
+  });
 });
