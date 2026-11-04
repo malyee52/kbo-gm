@@ -125,6 +125,7 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
     const q = parentParts(old, lg, trust, cashOf(old, lg), 2027);
     // 예전 규칙은 지원금(감액 전 = 이번 지원금 + 부채 몫)에서 긴급 지원 절반을 한 번에 빼고 0에서 멈춘다.
     // 재정 2 F7 뒤 이 판(LG가 관중 수입 리그 배분을 내는 쪽)은 긴급 지원이 147억으로 커져 예전 규칙이 0에서 멈추므로 0 막기를 넣어 견준다
+    // (특기 모양 2026-11-04 뒤에도 긴급 지원이 지원금의 두 배를 넘는 판이 된다)
     expect(q.support).toBeCloseTo(Math.max(0, p.support + p.debt - rescue / 2), -1);
   });
 
