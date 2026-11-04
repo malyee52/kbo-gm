@@ -5,7 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import {
-  basePrices, DEMAND_BINS, financePlan, gameGate, gatePredict, priceFanDelta, priceIndexOf, priceLockedOf, pricesOf, recommendPrices, SEAT, SEAT_GRADES,
+  basePrices, DEMAND_BINS, DEMAND_STEP, financePlan, gameGate, gatePredict, priceFanDelta, priceIndexOf, priceLockedOf, pricesOf, recommendPrices, SEAT, SEAT_GRADES,
   lastDemand, seatFactor, seatFill, seatPriceIndex, type SeatPrices, type TeamFinance,
 } from '../src/league/finance';
 import { fanLevel } from '../src/league/stadium';
@@ -252,7 +252,11 @@ describe('③ 조작·저장·replay·AI', () => {
     const plan = financePlan({ league: h.league, world: h.world }, lg, h.year + 1);
     const plan1 = financePlan({ league: h.league, world: h.world }, lg, h.year + 1, undefined, basePrices());
     expect(plan.items.gate).toBe(plan1.items.gate);
-    // 분포가 없어도 평균 관중률(관중 ÷ 홈 경기 × 좌석)로 추천 가격을 낸다
-    expect(lastDemand(h.league, lg)).toBeCloseTo(lastDemand(g.league, lg)!, 1);
+    // 분포가 없어도 평균 관중률(관중 ÷ 홈 경기 × 좌석)로 추천 가격을 낸다. 관중은 매진(수요 1 이상)에서 잘리므로
+    // 분포 평균을 1에서 자른 값과 견준다 (예전에는 자르지 않은 분포 평균과 견줘, 매진이 많은 판에서 0.05 넘게 벌어졌다: 특기 모양 2026-11-04)
+    const dist = g.league.finance![lg].history.at(-1)!.demand!;
+    const n = dist.reduce((s, c) => s + c, 0);
+    const capped = dist.reduce((s, c, i) => s + c * Math.min(1, i / DEMAND_STEP), 0) / n;
+    expect(lastDemand(h.league, lg)).toBeCloseTo(capped, 1);
   });
 });

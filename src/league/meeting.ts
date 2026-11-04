@@ -20,7 +20,7 @@ export const ASK_NOTE: Record<OwnerAsk, string> = {
   money: '이번 시즌 모기업 추가 지원 (판정)',
   faCap: '다음 FA 때 모기업 계약금 지원 한도 1.5배 (판정)',
   lowerGoal: '이번 시즌 목표 한 단계 아래, 신뢰도 −4, 달성해도 신뢰도 증가 절반',
-  raiseGoal: '운영 자금 증액과 같은 돈, 판정 없이 수락. 이번 시즌 목표 한 단계 위',
+  raiseGoal: '운영 자금 증액과 같은 돈, 판정 없이 수락. 이번 시즌 목표 한 단계 위 (이미 우승 목표면 우승 못 할 때 신뢰도 −15 더)',
 };
 
 /** 판정 문턱 (점수 ≥ ACCEPT 수락, ≥ CONDITIONAL 조건부, 아래는 거절) */
@@ -42,6 +42,13 @@ export const TRUST_NONE = 1;
 export const TRUST_REJECT = -2;
 export const TRUST_LOWER = -4;
 export const TRUST_BUDGET = -3;
+/**
+ * 목표를 올리는 약속(목표 높이기 약속·조건부 수락)을 했는데 목표가 이미 '우승'이라 오르지 못한 시즌: 우승을 못 하면 신뢰도를 이만큼 더 뺀다
+ * (2026-11-04 사용자 결정, 재정 2 F6 물음 2 ②. 임시값). 무게: 다른 구단은 한 단계 올린 목표에 미달하면 달성 +6(보통 난이도) 대신 −10이라
+ * 기대 손해가 약 11인데, 우승 후보가 우승을 놓칠 확률(약 65%)로 나누면 약 17 → 15. 미달 감점처럼 난이도 압박 배율을 받는다
+ */
+export const TRUST_RAISE_CAPPED = -15;
+
 /** 모기업 한도: 예상 수지가 −(자금 × 이 값)보다 나쁘면 구단주가 "줄여 오라" */
 export const BUDGET_CASH_SHARE = 0.3;
 /** AI 판정에 쓰는 신뢰도 (AI 구단은 신뢰도가 없다) */
@@ -220,6 +227,11 @@ export function shiftGoal(kind: GoalKind, shift: number): GoalKind {
   const order: GoalKind[] = ['notLast', 'postseason', 'champion'];
   const i = Math.max(0, Math.min(order.length - 1, order.indexOf(kind) + shift));
   return order[i];
+}
+
+/** 회의로 목표를 올렸는데(goalShift +1) 회의 전 목표가 이미 우승이라 오르지 못했나 */
+export function raiseCapped(rec: Pick<MeetingRecord, 'goalShift'> | undefined, baseGoal: GoalKind): boolean {
+  return rec?.goalShift === 1 && baseGoal === 'champion';
 }
 
 /** 그 장부 연도의 FA 계약금 지원 한도 배율 */

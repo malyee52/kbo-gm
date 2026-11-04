@@ -80,9 +80,8 @@ export const NAMING_SPONSOR: Record<string, number> = { 히어로즈: 500_000 };
 /** 자금이 이만큼을 넘으면 모기업 지원금을 넘는 금액의 PARENT_CLAWBACK만큼 줄인다 (자금이 끝없이 쌓이지 않게) */
 export const PARENT_RESERVE = 800_000;
 export const PARENT_CLAWBACK = 0.5;
-/** 결산 뒤 자금이 이만큼을 넘으면 넘는 금액의 DIVIDEND_SHARE를 모기업에 돌려준다 (실제 구단은 흑자를 쌓아 두지 않는다, 임시값) */
-export const DIVIDEND_RESERVE = 1_000_000;
-export const DIVIDEND_SHARE = 0.5;
+// 모기업 환원(결산 뒤 자금 100억 넘는 몫의 50%)은 재정 2 F7에서 없앴다 (2026-11-04 사용자 결정: 흑자는 모두 구단에 남는다).
+// 예전 결산 기록의 dividend 칸은 화면에 그대로 보인다. 지원금 회수(PARENT_RESERVE·PARENT_CLAWBACK)는 지원금만 줄이고 자금을 가져가지 않아 남긴다
 /** 우승 보너스 (리그 배분, 만 원) */
 export const CHAMPION_BONUS = 200_000;
 /** 새 게임 시작 자금 (만 원) */
@@ -153,14 +152,21 @@ export const BUDGET_KINDS: BudgetKind[] = ['scout', 'scoutPro', 'develop', 'medi
 export const BUDGET_LABEL: Record<BudgetKind, string> = { ...INVEST_LABEL, front: '프런트', futures: '2군 운영' };
 /** 예산 금액 단위 (1천만 원 = 1,000만 원) */
 export const BUDGET_UNIT = 1_000;
-/** 투자 금액 상한 = 3단계 눈금 × 이 배율 (1천만 원 단위로 내림, 임시값: B 구단이 모두 상한이어도 3시즌 수지 ≥ 0, tools/invest_cost.ts) */
+/**
+ * 투자 금액 상한 = 3단계 눈금 × 이 배율 (1천만 원 단위로 내림, 임시값). 처음(F2) 1.5: B 구단이 모두 상한이어도 3시즌 수지 ≥ 0 (tools/invest_cost.ts).
+ * 재정 2 F7 (2026-11-04 사용자 결정 "쌓인 현금을 쓸 곳을 늘린다"): 돈으로 돌아오지 않는 넷(스카우트 둘·육성·의료)은 2.5로 올렸다.
+ * 3단계 위 효과는 곡선이 오목하고 기울기 절반·막는 값이 있어 1억당 효과가 빠르게 준다. 마케팅은 돈을 다시 벌어 오므로 1.5 그대로
+ */
 export const INVEST_CAP_SCALE = 1.5;
+export const INVEST_CAP_SCALE_SINK = 2.5;
+const SINK_KINDS: InvestKind[] = ['scout', 'scoutPro', 'develop', 'medical'];
 /** 프런트·2군 운영 범위 (만 원, 2026년 돈, 임시값). 기본값은 운영비 넷의 기본 몫 (OPS_SPLIT) */
 export const OPS_BUDGET_RANGE: Record<'front' | 'futures', [number, number]> = { front: [450_000, 800_000], futures: [350_000, 650_000] };
 /** 예산 줄 범위 [하한, 상한] (만 원, 2026년 돈) */
 export function budgetRange(kind: BudgetKind): [number, number] {
   if (kind === 'front' || kind === 'futures') return OPS_BUDGET_RANGE[kind];
-  return [0, Math.floor((INVEST_COST[kind][3] * INVEST_CAP_SCALE) / BUDGET_UNIT) * BUDGET_UNIT];
+  const scale = SINK_KINDS.includes(kind) ? INVEST_CAP_SCALE_SINK : INVEST_CAP_SCALE;
+  return [0, Math.floor((INVEST_COST[kind][3] * scale) / BUDGET_UNIT) * BUDGET_UNIT];
 }
 /**
  * 체감 곡선 상수 k (만 원): s(a) = 3 × (1 − e^(−a/k)) / (1 − e^(−A3/k)), s(1단계 눈금) = 1이 되게 이분법으로 정한 값 (tests/finance2.test.ts가 확인).
@@ -557,7 +563,7 @@ export interface FinanceYear {
   cash: number;
   /** 모기업 긴급 지원 (적자 보전) */
   rescue: number;
-  /** 모기업 환원 (결산 뒤 자금이 DIVIDEND_RESERVE를 넘은 몫의 일부, 수지에는 넣지 않는다) */
+  /** 모기업 환원 (예전 결산만: 자금 100억 넘는 몫의 50%, 재정 2 F7에서 없앰. 수지에는 넣지 않는다) */
   dividend?: number;
   /** 결산 뒤 남은 모기업 부채 (재정 2 F5, 없으면 0) */
   debt?: number;
@@ -1094,6 +1100,11 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     ];
     for (const [k, v] of parts) { add(k, v); net[i] += v; }
   });
+  // 관중 수입 리그 배분 (재정 2 F7): 결산 지급에 '중계권·리그 배분' 줄로 (관중이 적은 구단 +, 많은 구단 −)
+  if (input.settle) {
+    const share = gateShareOf(input, team);
+    if (share) { add('broadcast', share); net[pays.length - 1] += share; }
+  }
   // 개막일에 낼 돈 (재정 2 F5: 계약금의 남은 절반). 개막 날부터 보인다
   for (const d of fin?.due ?? []) {
     if (d.year !== year || !d.amount) continue;
@@ -1120,6 +1131,56 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
   const months: MonthPoint[] = pays.map((pd, i) => ({ day: pd.day, month: pd.months[pd.months.length - 1], when: pd.when, months: pd.months, net: net[i] }));
   if (input.settle && interest) months[months.length - 1].net -= interest;
   return { items, attendance, regular, homeGames, seats, demand, prices, months, loan, interest };
+}
+
+/**
+ * 관중 수입 리그 배분 비율 (재정 2 F7, 2026-11-04 사용자 결정 "리그 공동 수입을 키워 관중 차이가 수입 차이로 그대로 가지 않게"):
+ * 1군 구단마다 정규시즌 관중 수입의 이 몫을 리그에 모아 1군 구단에 똑같이 나눈다 (가을야구 관중 수입은 빼지 않는다). 임시값.
+ * 0.3이면 관중 수입이 리그 평균보다 55억 적은 구단(KT·NC 쯤)은 약 +16억, 70억 많은 구단(잠실 둘)은 약 −21억
+ */
+export const GATE_SHARE = 0.4;
+
+const gateShareCache = new WeakMap<Season, { key: string; shares: number[] }>();
+
+/**
+ * 구단별 관중 수입 리그 배분 (그 해 돈, 만 원, 합 0): 리그 평균 몫 − 자기 몫. 정규시즌 끝까지(진행한 경기까지)의 관중 수입으로 센다.
+ * 퓨처스 구단(1군 진입 전)은 내지도 받지도 않는다
+ */
+export function gateShares(input: SeasonInput): number[] {
+  const { league, world, season } = input;
+  const key = `${world.year}:${season.log.length}:${(input.trades ?? []).length}`;
+  const hit = gateShareCache.get(season);
+  if (hit && hit.key === key) return hit.shares;
+  const n = league.teams.length;
+  const gate = new Array<number>(n).fill(0);
+  const member: number[] = [];
+  for (let t = 0; t < Math.min(n, world.teams.length); t++) {
+    if (isFuturesTeam(league, t, world.year)) continue;
+    member.push(t);
+    gate[t] = seasonFlows({ ...input, settle: false }, t, Number.MAX_SAFE_INTEGER).items.gate ?? 0;
+  }
+  const shares = new Array<number>(n).fill(0);
+  if (member.length > 1) {
+    const avg = member.reduce((s, t) => s + gate[t], 0) / member.length;
+    for (const t of member) shares[t] = Math.round(GATE_SHARE * (avg - gate[t]));
+  }
+  gateShareCache.set(season, { key, shares });
+  return shares;
+}
+
+/** 한 구단의 관중 수입 리그 배분 (gateShares) */
+export const gateShareOf = (input: SeasonInput, team: number): number => gateShares(input)[team] ?? 0;
+
+/**
+ * 계획용 관중 수입 리그 배분: 리그 평균 관중 수입은 지난 결산의 1군 구단 평균(그 해 돈으로), 자기 몫은 계획 관중 수입
+ */
+function plannedGateShare(league: LeagueState, team: number, year: number, ownGate: number): number {
+  if (isFuturesTeam(league, team, year)) return 0;
+  const lasts = (league.finance ?? []).map((f, t) => ({ t, h: f.history.at(-1) }))
+    .filter((x) => x.h && x.h.homeGames && x.h.items.gate && !isFuturesTeam(league, x.t, x.h.year));
+  if (lasts.length < 2) return 0;
+  const avg = lasts.reduce((s, x) => s + (x.h!.items.gate ?? 0) * (wageIndex(year, league) / wageIndex(x.h!.year, league)), 0) / lasts.length;
+  return Math.round(GATE_SHARE * (avg - ownGate));
 }
 
 /**
@@ -1264,6 +1325,8 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
       add('gate', perGame * homeGames);
     }
   }
+  // 관중 수입 리그 배분 (재정 2 F7, 결산 때 '중계권·리그 배분' 줄에 들어온다)
+  add('broadcast', plannedGateShare(league, team, year, items.gate ?? 0));
   // 고정 수입
   if (inSeason) {
     const y = seasonIncome(league, world, team);
@@ -1408,7 +1471,6 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   const out: FinanceYear[] = [];
   const stars = starBonus(world, league);
   const wage = wageIndex(year, league);
-  const reserve = DIVIDEND_RESERVE * wage;
   for (let t = 0; t < league.teams.length; t++) {
     // 이번 시즌 모기업 지원금에서 실제로 뺀 부채 몫 (seasonIncome과 같은 입력, 지원금을 바꾸기 전에)
     const fin = league.finance![t];
@@ -1459,15 +1521,9 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       fin.due = fin.due.filter((d) => d.year > year);
       if (!fin.due.length) delete fin.due;
     }
-    let dividend = 0;
-    if (cash > reserve) {
-      dividend = Math.round((cash - reserve) * DIVIDEND_SHARE);
-      league.ledger.push({ year, from: t, to: -1, amount: dividend, note: `${year} 모기업 환원 (쌓인 자금)`, kind: 'dividend' });
-      cash -= dividend;
-    }
     const base = isBasePrices(flows.prices);
     const y: FinanceYear = {
-      year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), ...(fin.debt?.amount ? { debt: fin.debt.amount } : {}), attendance: flows.regular, homeGames: flows.homeGames,
+      year, items, net, cash, rescue, ...(fin.debt?.amount ? { debt: fin.debt.amount } : {}), attendance: flows.regular, homeGames: flows.homeGames,
       ...(flows.homeGames ? { seats: roundSeats(flows.seats), demand: flows.demand } : {}), ...(base ? {} : { prices: flows.prices }),
     };
     league.finance![t].history.push(y);
@@ -1590,6 +1646,30 @@ const PRESET_DOWN: Record<BudgetPreset, BudgetPreset | null> = { winnow: 'balanc
 /** AI 자금 규칙: 예상 수지 < −(자금 × 이 비율)이면 한 단계 아래 추천안 (임시값) */
 export const AI_BUDGET_CASH = 0.5;
 
+/**
+ * AI 여유 자금 투자 (재정 2 F7, 임시값): 개막 때 자금(2026년 돈)이 AI_SURPLUS_FROM을 넘으면, 넘는 몫의 AI_SURPLUS_RATE를
+ * 이번 시즌 예산 위에 더 쓴다. 돈으로 돌아오지 않는 갈래(육성·의료·스카우트 둘·2군 운영·프런트)에 남은 상한 비율대로 나누고 상한에서 멈춘다.
+ * 환원을 없앤 뒤 잠실 두 구단 자금이 끝없이 쌓이지 않게 하는 '쓸 곳'이다 (플레이어 구단은 스스로 정한다)
+ */
+export const AI_SURPLUS_FROM = 2_000_000;
+export const AI_SURPLUS_RATE = 0.25;
+const SURPLUS_KINDS: BudgetKind[] = ['develop', 'medical', 'scoutPro', 'scout', 'futures', 'front'];
+
+/** 추천안 예산에 여유 자금 투자를 얹는다 (cash: 그 해 돈) */
+export function aiSurplusBudget(base: Record<BudgetKind, number>, cash: number, wage: number): Record<BudgetKind, number> {
+  const extra = Math.max(0, cash / wage - AI_SURPLUS_FROM) * AI_SURPLUS_RATE;
+  if (extra < BUDGET_UNIT) return base;
+  const room = SURPLUS_KINDS.map((k) => Math.max(0, budgetRange(k)[1] - base[k]));
+  const all = room.reduce((a, b) => a + b, 0);
+  if (all <= 0) return base;
+  const use = Math.min(extra, all);
+  const out = { ...base };
+  SURPLUS_KINDS.forEach((k, i) => {
+    out[k] = Math.min(budgetRange(k)[1], base[k] + Math.floor((use * room[i]) / all / BUDGET_UNIT) * BUDGET_UNIT);
+  });
+  return out;
+}
+
 /** AI 구단이 고르는 추천안: 성향 윈나우 → 윈나우, 리빌딩 → 육성, 긴축 → 긴축, 그 밖은 지난 순위 상위 ⅓ 윈나우·하위 ⅓ 육성·가운데 균형 */
 export function aiPreset(league: LeagueState, team: number): BudgetPreset {
   const style = gmStyle(league, team);
@@ -1639,7 +1719,8 @@ export function lockBudgets(league: LeagueState, userTeam: number): void {
         if (net >= -(Math.max(0, cash) * AI_BUDGET_CASH) || !down) break;
         preset = down;
       }
-      writeBudget(f, { ...PRESET_BUDGET[preset] });
+      // 여유 자금이 많으면 추천안 위에 더 쓴다 (재정 2 F7, 추천안을 내렸으면 얹지 않는다)
+      writeBudget(f, preset === aiPreset(league, t) ? aiSurplusBudget({ ...PRESET_BUDGET[preset] }, cash, wageIndex(league.year, league)) : { ...PRESET_BUDGET[preset] });
       // 입장권 가격: AI는 재무팀 추천 가격 (재정 2 F3, 플레이어와 같은 규칙)
       f.prices = recommendPrices(league, t);
     }
