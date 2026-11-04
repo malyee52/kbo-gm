@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import {
-  BROADCAST, cashOf, investCost, ledgerItems, OPS_COST, OPS_KINDS, OPS_SPLIT, opsCost, PAY_COUNT, PAY_MONTHS, paydays, payOf, payPlan, seasonFlows, splitOps, type FinanceKind,
+  BROADCAST, cashOf, investCost, ledgerItems, OPS_COST, OPS_KINDS, OPS_SPLIT, opsCost, PAY_COUNT, PAY_MONTHS, paydays, payOf, payPlan, seasonFlows, splitOps, gateShares, type FinanceKind,
 } from '../src/league/finance';
 import { dateOf } from '../src/game/calendar';
 
@@ -142,7 +142,8 @@ describe('재정 2 F1b 지급 달력 10번', () => {
     expect(Math.abs((full.payroll ?? 0) + dom)).toBeLessThanOrEqual(tol);
     expect(Math.abs((full.foreign ?? 0) + fgn)).toBeLessThanOrEqual(tol);
     expect(Math.abs(sumOps(full) + opsCost(g.league, lg, 2026))).toBeLessThanOrEqual(tol);
-    expect(Math.abs((full.broadcast ?? 0) - BROADCAST)).toBeLessThanOrEqual(tol);
+    // 결산 지급에는 관중 수입 리그 배분이 더해진다 (재정 2 F7, gateShares)
+    expect(Math.abs((full.broadcast ?? 0) - BROADCAST - gateShares(input)[lg])).toBeLessThanOrEqual(tol);
     expect(Math.abs((full.invest ?? 0) + (full.scouting ?? 0) + investCost(g.league.finance![lg], false, 1))).toBeLessThanOrEqual(2 * tol);
     // 결산 몫(시즌 뒤 달)은 결산 셈에만
     const settleMonths = plan.find((p) => p.when === 'settle')?.months.length ?? 0;
