@@ -6,7 +6,7 @@
 // - 연봉 부담: 트레이드 판단(trade.ts)에서 연봉을 런으로 바꿔 뺀다.
 // - 포지션 희소성: 선수 가치에는 포지션 보정을, 구단 전력에는 "그 자리를 맡을 선수가 없을 때의 손해"를 넣는다.
 
-import { assignSlots, batValue, DECLINE_START_AGE, defenseAt, eraPitching, fieldPosOf, fitPenalty, isStarterSkill, pitValue, type SimPlayer, type Slot, type World } from '../engine';
+import { assignSlots, batValue, DECLINE_START_AGE, DEFAULT_PARAMS, defenseAt, eraPitching, fieldPosOf, fitPenalty, isStarterSkill, pitValue, type EngineParams, type SimPlayer, type Slot, type World } from '../engine';
 
 /** 선형 가중치(wOBA 계열)를 득점으로 바꾸는 배율. 공개된 세이버메트릭스 상수의 근사값 */
 export const WOBA_SCALE = 1.2;
@@ -30,24 +30,19 @@ const POS_ADJ: Record<string, number> = {
   C: 12.5, SS: 7.5, '2B': 2.5, '3B': 2.5, CF: 2.5, LF: -7.5, RF: -7.5, '1B': -12.5, DH: -17.5, IF: 2.5, OF: -5,
 };
 
-/**
- * 하락 첫 5년의 연간 하락 (런/시즌, 리그 평균 주전 기준). 색인 0 = 하락 첫해 (DECLINE_START_AGE, 32세).
- * 2026-10-12 사용자 "하락 나이는 낮추되 하락 폭은 둔화": 실제 기록 추정치(reports/aging-fit.txt, 31~35세: 타자 -2~-4.3, 투수 -4.2~-6.5)의
- * 절반쯤에서 시작해 해마다 조금씩 커진다 (임시값). 투수가 타자보다 조금 더 떨어진다.
- */
-const DECLINE_BAT = [-1, -1.5, -2, -2.5, -3];
-const DECLINE_PIT = [-1.5, -2, -2.5, -3.5, -4];
+type AgingParams = EngineParams['aging'];
 
 /**
  * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 하락 나이(DECLINE_START_AGE, 지금 32세) 이후에 쓴다.
- * 하락 전은 임시값. 하락 첫 5년은 DECLINE_BAT·DECLINE_PIT, 그 뒤(37세~)는 더 가파르다 (임시값).
+ * 하락 전은 임시값. 하락 뒤는 params.aging.bat·pit (색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에).
+ * 2026-10-12 사용자 "하락 나이는 낮추되 하락 폭은 둔화"로 실제 추정치(reports/aging-fit.txt)의 절반쯤에서 시작했고,
+ * 2026-11-04 사용자 "투수 노화를 실제 기록 곡선에 맞춘다" (가상 투수 곡선 카드, params.ts aging 주석)
  */
-export function agingDelta(age: number, isPitcher = false): number {
+export function agingDelta(age: number, isPitcher = false, ap: AgingParams = DEFAULT_PARAMS.aging): number {
   const k = age - DECLINE_START_AGE;
   if (k < 0) return age <= 23 ? 6 : age <= 26 ? 3 : 0;
-  if (k < 5) return (isPitcher ? DECLINE_PIT : DECLINE_BAT)[k];
-  if (k < 7) return isPitcher ? -5 : -4;
-  return isPitcher ? -7 : -6;
+  const t = isPitcher ? ap.pit : ap.bat;
+  return t[Math.min(k, t.length - 1)];
 }
 
 /** 나이를 모르는 선수는 이 나이로 본다 */
@@ -67,11 +62,11 @@ export function growthCap(age: number): number {
  * 잠재력과의 격차를 나이에 따라 좁히되(27세까지 빠르게, 28세부터 천천히) 한 해 상한(growthCap)을 넘지 않고,
  * 하락 나이(DECLINE_START_AGE)부터 떨어진다 (임시값). 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
  */
-export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false, cap = true): number {
-  if (age >= DECLINE_START_AGE) return agingDelta(age, isPitcher);
+export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false, cap = true, ap: AgingParams = DEFAULT_PARAMS.aging): number {
+  if (age >= DECLINE_START_AGE) return agingDelta(age, isPitcher, ap);
   const gap = potential - runs;
   if (gap < 0) return gap * 0.2;
-  const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.25 : 0.15;
+  const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.25 : ap.lateRate[isPitcher ? 1 : 0];
   return cap ? Math.min(gap * rate, growthCap(age)) : gap * rate;
 }
 /** 앞으로 몇 시즌을 내다보는지 (이번 시즌 포함) */

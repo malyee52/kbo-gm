@@ -237,6 +237,15 @@ export function entryGap(hsGap: number, years: number, path: EntryPath, pp: PotP
 }
 
 /**
+ * 가상 신인 고졸 18세 시작 격차 (런, 2026-11-04 가상 투수 곡선 카드): gap + slope × max(0, 천장 − pivot).
+ * 예전 값은 growthRoom(18) 30 고정이라 천장이 높을수록 시작부터 강했다. 입단 전 경로 몫은 entryGap이 줄인다
+ */
+export function virtualStartGap(ceiling: number, ap: EngineParams['aging'] = DEFAULT_PARAMS.aging): number {
+  const g = ap.startGap;
+  return g.gap + g.slope * Math.max(0, ceiling - g.pivot);
+}
+
+/**
  * 신인 천장: max(지금, 중심 + 입단 나이 폭 × 표본 배율(기록 없음) × z). 시드는 실존 선수와 같은 `pa` 줄기
  */
 export function drafteeCeiling(id: string, center: number, start: number, ageNext: number, year: number, seed: string, pp: PotParams = DEFAULT_PARAMS.potential): number {

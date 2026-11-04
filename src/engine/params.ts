@@ -552,6 +552,16 @@ export interface EngineParams {
     floor: number; room: number; yearSd: number; ceilSd: number; peakPull: number; tauSpan: number; tauSlope: number; tauPivot: number; breakout: number;
   };
   /**
+   * 성장·노화 곡선 (2026-11-04 가상 투수 곡선 카드, ai/value.ts agingDelta·expectedGrowth, league/growth.ts growthRuns).
+   * bat·pit: 하락 나이(DECLINE_START_AGE)부터 해마다 하락 (런/시즌, 색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에 쓴다),
+   * lateRate: 28세부터 하락 전까지 잠재력 격차를 좁히는 한 해 몫 [타자, 투수] (27세 이하는 0.35·0.3·0.25),
+   * startGap: 가상 신인 고졸 18세 시작 격차 = gap + slope × max(0, 천장 − pivot) (런, 입단 전 경로는 potential.ts entryGap)
+   */
+  aging: {
+    bat: number[]; pit: number[]; lateRate: [number, number];
+    startGap: { gap: number; slope: number; pivot: number };
+  };
+  /**
    * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
    * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
    * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
@@ -1014,6 +1024,13 @@ export const DEFAULT_PARAMS: EngineParams = {
   },
   // 잠재력 v2 (기획안 17.3·17.4·18.2~18.5, 사용자 2026-10-24 확정 꼴): 폭 두 배(Q2 ③), 고정 2승·극단 8승(Q7·Q3), 고정 폭 ½(Q8 ③), k ¼(Q10 ②).
   // 크기(바닥 47·44·41, 4런, 성장 성향 0.25·0.85·0.15, c 0.75·0.9·0.5, 0.28)는 모두 임시값이고 16-5에서 맞춘다
+  // 예전 값 그대로 (ai/value.ts DECLINE_BAT·DECLINE_PIT 첫 5년 + 37~38세 −4·−5, 39세~ −6·−7, 늦은 성장 0.15, growthRoom(18) 30)
+  aging: {
+    bat: [-1, -1.5, -2, -2.5, -3, -4, -4, -6],
+    pit: [-1.5, -2, -2.5, -3.5, -4, -5, -5, -7],
+    lateRate: [0.15, 0.15],
+    startGap: { gap: 30, slope: 0, pivot: 0 },
+  },
   potential: {
     width: [14, 10, 6, 3, 0], sampleFull: 1500, sampleExtra: 0.5,
     fixWar: 2, extremeWar: 8, fixedWidth: 0.5, extremeDrive: 0.25,
