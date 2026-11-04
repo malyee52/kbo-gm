@@ -34,7 +34,8 @@ import { agendaChange, agendaLabel } from '../../league/ruleVote';
 import { voteResultText } from '../../league/ruleNews';
 import { REJECT_COOLDOWN, type RuleShift } from '../../league/futureRules';
 import { ASK_LABEL, ASK_NOTE, askMoney, askScore, budgetCheck, MEETING_ACCEPT, MEETING_CONDITIONAL, meetingOf, OWNER_ASKS, ownerInput, RESULT_LABEL, type OwnerAsk } from '../../league/meeting';
-import { cashOf, ledgerItems } from '../../league/finance';
+import { activeBudgetOf, cashOf, debtDueOf, debtOf, ledgerItems } from '../../league/finance';
+import { frontInfoWidth } from '../../league/frontInfo';
 import { GOAL_LABEL, parentGrade } from '../../league/owner';
 import { OwnerMeeting } from './OwnerMeeting';
 
@@ -844,6 +845,11 @@ function FaPanel({ act }: { act: Act }) {
     },
     { key: 'years', label: '기간', brief: true, value: (r) => r.e.years, cell: (r) => `${r.e.years}년` },
     {
+      key: 'line', label: '수락선 (프런트)', title: '이번 라운드에 우리 제시를 받아들일 최저 연봉의 범위. 프런트 예산이 클수록 좁다 (진짜 값은 늘 이 범위 안)',
+      value: (r) => session.faAcceptRange(r.e.id)?.lo ?? null,
+      cell: (r) => { const g = session.faAcceptRange(r.e.id); return g ? `${won(g.lo)} ~ ${won(g.hi)}` : '-'; },
+    },
+    {
       key: 'vs', label: '제시/요구', title: '우리 제시 연봉이 요구 연봉의 몇 %인가', value: (r) => (off.fa.userOffers[r.e.id] ? off.fa.userOffers[r.e.id].salary / r.e.ask : null),
       cell: (r) => (off.fa.userOffers[r.e.id] ? `${Math.round((off.fa.userOffers[r.e.id].salary / r.e.ask) * 100)}%` : '-'),
     },
@@ -857,6 +863,7 @@ function FaPanel({ act }: { act: Act }) {
       <div className="panel">
         <h2>FA 시장 <span className="muted small">{off.fa.round}/{FA_ROUNDS}라운드</span></h2>
         <p className="muted small">
+          수락선은 프런트(구단 운영 예산)가 알아 온 범위입니다: 프런트 예산이 클수록 좁습니다 (지금 ±{Math.round(frontInfoWidth(activeBudgetOf(session.league, session.teamIdx, 'front')) * 100)}%). 진짜 최저선은 늘 범위 안에 있고, 다른 구단이 더 좋은 조건을 내면 수락선을 넘어도 질 수 있습니다.
           라운드를 마감하면 AI 구단도 제시하고, 선수는 가장 좋은 조건을 고릅니다 (원 소속 구단은 조금 더 쳐줍니다). 라운드가 지날수록 선수가 눈높이를 낮춥니다.
           외부 FA는 한 오프시즌에 {ruleOf(session.league, 'maxFaSignings')}명까지, 다른 구단 선수를 데려오면 원 소속 구단에 {off.year >= FA_GRADE_FROM
             ? '보상금(A 300%, B 200%, C 150%)을 냅니다'
@@ -1060,7 +1067,7 @@ function ExtensionPanel({ act }: { act: Act }) {
         <button type="button" className="ghost small-btn" onClick={() => setOpen(!open)}>{open ? '접기' : '후보 보기'}</button>
       </div>
       <p className="muted small">
-        보류·신인 계약인 국내 선수와 {Off.EXT_MIN_YEARS}~{ruleOf(session.league, 'extMaxYears')}년 계약을 맺습니다. 계약 동안 연봉 협상과 FA가 없고, 총액의 {Off.EXT_BONUS_SHARE * 100}%를 계약금으로 먼저 냅니다.
+        보류·신인 계약인 국내 선수와 {Off.EXT_MIN_YEARS}~{ruleOf(session.league, 'extMaxYears')}년 계약을 맺습니다. 계약 동안 연봉 협상과 FA가 없고, 총액의 {Off.EXT_BONUS_SHARE * 100}%를 계약금으로 냅니다 (계약 때 절반, 남은 절반은 다음 개막일).
         FA가 멀수록 싸게(최대 20% 할인), 길게 맺을수록 해마다 조금 더 쌉니다. AI 구단도 FA가 가까운 주축과 다년 계약을 맺습니다.
       </p>
       {open && (
@@ -1472,6 +1479,7 @@ function MeetingPanel({ act }: { act: Act }) {
   // 시즌 수지: 시작 자금·모기업 환원은 빼고 (환원은 아래 문장에 따로)
   const net = Object.entries(items).reduce((a, [k, v]) => a + (k === 'start' || k === 'dividend' ? 0 : v ?? 0), 0);
   const dividend = -(items.dividend ?? 0);
+  const debt = debtOf(L.finance?.[me]);
   const b = budgetCheck(L, me, year);
   const input = ownerInput(L, me, offYear);
   const parts = rec?.score !== undefined ? askScore(L, me, year, rec.ask, input).parts : null;
@@ -1485,12 +1493,14 @@ function MeetingPanel({ act }: { act: Act }) {
           <div className="stat"><span className="stat-label">모기업</span><strong className="stat-value">{parentGrade(L, me)}등급</strong></div>
           <div className="stat"><span className="stat-label">{offYear} 시즌 수지</span><strong className="stat-value">{net >= 0 ? '+' : '−'}{won(Math.abs(net))}</strong></div>
           <div className="stat"><span className="stat-label">자금</span><strong className="stat-value">{won(cashOf(L, me))}</strong></div>
+          <div className="stat"><span className="stat-label">부채</span><strong className={`stat-value${debt ? ' down' : ''}`}>{debt ? won(debt) : '없음'}</strong></div>
         </div>
         <p className="small">
           {last && last.year === offYear && last.team === me
             ? `지난 시즌 목표 ${GOAL_LABEL[last.goal]}: ${last.achieved ? '달성' : '미달'} (${last.result}). `
             : '지난 시즌 평가 기록이 없습니다. '}
           {dividend > 0 ? `쌓인 자금 가운데 ${won(dividend)}을 모기업에 돌려보냈습니다. ` : ''}
+          {debt > 0 ? `긴급 지원으로 생긴 부채 ${won(debt)}이 남아 있어 돈 요청 판정이 어렵습니다 (−15). ` : ''}
           {year} 시즌 목표는 개막 때 구단주 전망으로 정하고, 이 회의 결과만큼 한 단계 오르내립니다.
         </p>
       </section>
@@ -1498,6 +1508,7 @@ function MeetingPanel({ act }: { act: Act }) {
       <section className="panel">
         <h2>예산 보고 <span className="muted small">{year} 시즌 예상</span></h2>
         <p className="small">예상 수지 <strong className={b.net >= 0 ? 'up' : 'down'}>{b.net >= 0 ? '+' : '−'}{won(Math.abs(b.net))}</strong> · 모기업 한도 −{won(Math.abs(b.limit))} (자금의 30%까지 적자 허용)</p>
+        {debtDueOf(L.finance?.[me]) > 0 && <p className="small">부채 상환: {year} 시즌 모기업 지원금에서 {won(debtDueOf(L.finance?.[me]))} 빠짐 (예상 수지에 들어 있음, 구단 운영 &gt; 재정에서 일찍 갚기)</p>}
         {b.over
           ? <p className="warn-line small" role="status">구단주: "예산이 너무 크다. 줄여 오라." 그대로 넘기면 시즌 평가 때 신뢰도 −3. <button type="button" className="small-btn" onClick={() => go('budget')}>예산안 열기</button></p>
           : <p className="muted small">예산은 모기업 한도 안입니다.</p>}

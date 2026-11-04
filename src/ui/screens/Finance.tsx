@@ -3,7 +3,7 @@ import { dateOf } from '../../game/calendar';
 import { useEffect, useState } from 'react';
 import {
   BUDGET_KINDS, BUDGET_LABEL, BUDGET_PRESETS, budgetCostOf, budgetEffect, budgetOf, budgetRange, FINANCE_LABEL, INVEST_COST, investCost, ledgerItems, lockedOf,
-  marketingStock, OPS_KINDS, PRESET_BUDGET, PRESET_LABEL, PRICE_RANGE, PRICE_STEP, priceLockedOf, pricesOf, recommendPrices, SEAT, SEAT_GRADES, SEAT_LABEL, SEAT_NOTE, seatTicket,
+  marketingStock, OPS_KINDS, debtDueOf, debtOf, dueOf, LOAN_RATE, PRESET_BUDGET, PRESET_LABEL, PRICE_RANGE, PRICE_STEP, priceLockedOf, pricesOf, recommendPrices, SEAT, SEAT_GRADES, SEAT_LABEL, SEAT_NOTE, seatTicket,
   type BudgetKind, type FinanceKind, type OpsKind,
 } from '../../league/finance';
 import { wageIndex } from '../../league/salary';
@@ -13,7 +13,7 @@ import { useGame, usePriceIndex, useWon } from '../context';
 const ORDER: FinanceKind[] = [
   'gate', 'postseason', 'broadcast', 'sponsor', 'merch', 'parent', 'parentExtra', 'rescue', 'faSupport', 'champion', 'posting',
   'payroll', 'foreign', 'coach', 'opsFront', 'opsGame', 'opsPark', 'opsFutures', 'ops', 'invest', 'scouting', 'signing',
-  'compensation', 'fine', 'transfer', 'stadium', 'release', 'trade', 'event', 'editor', 'other',
+  'interest', 'compensation', 'fine', 'transfer', 'stadium', 'release', 'trade', 'event', 'editor', 'other',
 ];
 const orderOf = (k: FinanceKind) => { const i = ORDER.indexOf(k); return i < 0 ? ORDER.length : i; };
 
@@ -26,6 +26,7 @@ function useMoneyRows(): { rows: Row[]; season: boolean } {
   if (v.rows) return { rows: v.rows, season: true };
   const booked = ledgerItems(session.league, session.teamIdx, session.year + 1);
   const rows = (Object.keys(v.plan.items) as FinanceKind[]).map((k) => ({ kind: k, plan: v.plan.items[k] ?? 0, sofar: booked[k] ?? 0, end: v.plan.items[k] ?? 0 }));
+  // 계약금은 계약 때 절반만 장부에 (남은 절반은 개막일, 재정 2 F5)
   return { rows, season: false };
 }
 
@@ -40,7 +41,8 @@ function MoneyTable() {
   const line = (r: Row, label: string, sign: 1 | -1, bold = false) => {
     // 차이: 시즌 끝 예상 − 계획. 수입이 늘거나 지출이 줄면 +
     // 지급마다 반올림한 차이(몇만 원)는 없는 것으로 본다
-    const diff = Math.abs(r.end - r.plan) < 100 ? 0 : (r.end - r.plan) * sign;
+    // 값은 부호째(수입 +, 지출 −)라 end − plan이 곧 좋아진 쪽 + (지출 줄에 sign을 곱하면 뒤집힌다, F5 이자 줄에서 찾음)
+    const diff = Math.abs(r.end - r.plan) < 100 ? 0 : r.end - r.plan;
     const b = bold ? ' strong' : '';
     return (
       <tr key={label}>
@@ -358,6 +360,53 @@ export function BudgetPanel() {
   );
 }
 
+/** 모기업 단기 대여·부채 (재정 2 F5, 기획안 4.9): 시즌 중 대여 잔액·쌓인 이자, 부채 잔액·이번(다음) 시즌에 지원금에서 빠질 몫, 오프시즌 일찍 갚기 */
+function DebtBox() {
+  const { session, changed, autosave } = useGame();
+  const refresh = () => { changed(); void autosave(); };
+  const plain = useWon();
+  const toMan = usePriceIndex();
+  const [amount, setAmount] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const fin = session.league.finance?.[session.teamIdx];
+  const flows = session.seasonFinance();
+  const debt = debtOf(fin);
+  const due = session.phase === 'offseason' ? dueOf(fin, session.year + 1) : 0;
+  const plan = session.budgetView().plan;
+  if (!debt && !flows?.loan && !flows?.interest && !due) return null;
+  const off = session.phase === 'offseason';
+  return (
+    <div className="stack">
+      <div className="stats">
+        {flows && <div className="stat"><span className="stat-label">모기업 단기 대여 잔액</span><span className={`stat-value${flows.loan ? ' down' : ''}`}>{flows.loan ? plain(flows.loan) : '없음'}</span></div>}
+        {flows && <div className="stat"><span className="stat-label">쌓인 이자 (연 {LOAN_RATE * 100}%, 결산 때)</span><span className="stat-value">{flows.interest ? plain(flows.interest) : '-'}</span></div>}
+        <div className="stat"><span className="stat-label">모기업 부채</span><span className={`stat-value${debt ? ' down' : ''}`}>{debt ? plain(debt) : '없음'}</span></div>
+        {debt > 0 && <div className="stat"><span className="stat-label">{off ? `${session.year + 1} 시즌` : '이번 시즌'} 지원금에서 빠질 몫</span><span className="stat-value">{plain(plan.debtPay || debtDueOf(fin))}</span></div>}
+        {due > 0 && <div className="stat"><span className="stat-label">개막일에 낼 계약금 (남은 절반)</span><span className="stat-value">{plain(due)}</span></div>}
+      </div>
+      <p className="muted small">
+        시즌 중 지급일 뒤 자금이 0보다 작으면 그 몫은 모기업에서 잠시 빌린 것으로 보고 연 {LOAN_RATE * 100}% 이자를 쌓아 결산 때 '단기 대여 이자'로 냅니다.
+        부채는 구단주 예산 회의 판정 점수를 깎습니다 (−15). 오프시즌에는 자금으로 일찍 갚을 수 있습니다 (수지에는 들어가지 않습니다).
+      </p>
+      {off && debt > 0 && (
+        <div className="inline">
+          <input type="number" min={0} step={0.1} value={amount} placeholder={(Math.round((debt * toMan) / 1000) / 10).toFixed(1)} aria-label="갚을 금액(억 원)"
+            onChange={(e) => setAmount(e.target.value)} style={{ width: '6em' }} />억 원
+          <button type="button" className="small-btn" onClick={() => {
+            const v = amount === '' ? debt : Math.round((Number(amount) * 10000) / toMan);
+            const r = session.repayDebt(v);
+            setMsg(r.message);
+            if (r.ok) setAmount('');
+            refresh();
+          }}>부채 갚기</button>
+          <button type="button" className="small-btn" onClick={() => { const r = session.repayDebt(Math.min(debt, Math.max(0, session.cashNow()))); setMsg(r.message); refresh(); }}>자금만큼 갚기</button>
+          {msg && <span className="small">{msg}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FinancePanel() {
   const { session, go } = useGame();
   const plain = useWon();
@@ -375,7 +424,8 @@ export function FinancePanel() {
   const year = session.phase === 'season' ? session.year : session.year + 1;
   const items: Partial<Record<FinanceKind, number>> = { ...(flows?.items ?? {}) };
   const booked = ledgerItems(L, me, year);
-  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start') items[k] = (items[k] ?? 0) + (booked[k] ?? 0);
+  // 일찍 갚은 부채는 빌린 돈 갚기라 수지에 넣지 않는다 (재정 2 F5)
+  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start' && k !== 'debt') items[k] = (items[k] ?? 0) + (booked[k] ?? 0);
   const vals = Object.values(items).map((v) => v ?? 0);
   const income = vals.filter((v) => v > 0).map((v) => ({ v }));
   const expense = vals.filter((v) => v < 0).map((v) => ({ v }));
@@ -395,8 +445,9 @@ export function FinancePanel() {
       <p className="muted small">
         관중 수입은 홈 경기마다 들어오고, 연봉·운영비·투자비는 2~11월 10번 지급일에 나갑니다. 중계권·모기업 지원금·스폰서 기본액도 같은 지급일에 나눠 들어오며,
         스폰서·상품은 시즌 결산 때 실제 성적과 인기로 다시 매겨 차액을 정산합니다. 결산 뒤 자금이 모자라면 모기업이 메우지만 구단주 신뢰도가 떨어지고
-        다음 해 지원금이 줄어듭니다. 금액은 그 해 물가로 표시하며, 수치는 임시값입니다.
+        메운 금액의 절반은 부채로 남아 다음 3년 동안 모기업 지원금에서 ⅓씩 빠집니다. 금액은 그 해 물가로 표시하며, 수치는 임시값입니다.
       </p>
+      <DebtBox />
 
       <MoneyTable />
 
@@ -442,7 +493,7 @@ export function FinancePanel() {
         <>
           <h3>지난 결산</h3>
           <table>
-            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th><th title="결산 뒤 자금이 100억 원을 넘으면 넘는 금액의 절반을 모기업에 돌려준다">모기업 환원</th><th>결산 뒤 자금</th></tr></thead>
+            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th><th title="결산 뒤 자금이 100억 원을 넘으면 넘는 금액의 절반을 모기업에 돌려준다">모기업 환원</th><th>결산 뒤 자금</th><th title="결산 뒤 남은 모기업 부채 (긴급 지원의 절반, 3년 ⅓씩)">부채</th></tr></thead>
             <tbody>
               {[...fin.history].reverse().map((y) => {
                 const vals = Object.values(y.items).map((v) => v ?? 0);
@@ -455,6 +506,7 @@ export function FinancePanel() {
                     <td>{y.rescue ? won(y.rescue) : '-'}</td>
                     <td>{y.dividend ? won(y.dividend) : '-'}</td>
                     <td>{won(y.cash)}</td>
+                    <td>{y.debt ? won(y.debt) : '-'}</td>
                   </tr>
                 );
               })}

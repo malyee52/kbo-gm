@@ -4,7 +4,7 @@
 // 판타지 면담(OwnerMeeting.tsx, LLM)은 따로: 그 효과는 판타지 효과 목록으로만 남고 이 회의 돈과 겹치지 않는다.
 // 수치는 모두 임시값.
 import type { World } from '../engine';
-import { cashOf, ensureFinance, financePlan, PARENT_BASE } from './finance';
+import { cashOf, debtOf, ensureFinance, financePlan, PARENT_BASE } from './finance';
 import { gmStyle } from './gm';
 import { parentGrade, type GoalKind } from './owner';
 import { wageIndex } from './salary';
@@ -87,11 +87,8 @@ export function meetingOf(league: Pick<LeagueState, 'finance'>, team: number, ye
   return league.finance?.[team]?.meetings?.find((m) => m.year === year);
 }
 
-/** 부채가 있나 (재정 2 F5에서 채움. 지금은 칸이 없으면 없음) */
-const hasDebt = (league: LeagueState, team: number) => {
-  const d = (league.finance?.[team] as { debt?: { amount?: number } } | undefined)?.debt;
-  return !!d && (d.amount ?? 0) > 0;
-};
+/** 모기업 부채가 남아 있나 (재정 2 F5, finance.ts debtOf) */
+const hasDebt = (league: LeagueState, team: number) => debtOf(league.finance?.[team]) > 0;
 
 /** 판정 점수와 이유. ask는 돈 요청(money·faCap) */
 export function askScore(league: LeagueState, team: number, year: number, ask: OwnerAsk, input: MeetingInput): { score: number; parts: [string, number][] } {

@@ -65,7 +65,7 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  budgetRows, cashOf, ensureFinance, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
+  budgetRows, cashOf, ensureFinance, repayDebt, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
   type BudgetKind, type BudgetPreset, type SeatGrade, type SeatPrices,
   type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
@@ -88,6 +88,7 @@ import { DEFAULT_CAMP, isCampPick, runCamps, type CampPick } from '../league/cam
 import { openNaming, signNaming } from '../league/naming';
 import { signSponsor, type SponsorSlot } from '../league/sponsor';
 import { holdMeeting, meetingOf, ownerInput, shiftGoal, type OwnerAsk } from '../league/meeting';
+import { teamLineRange, type LineRange } from '../league/frontInfo';
 import { offersByRep, repGoodwill, repOf, updateReputation } from '../league/reputation';
 import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
@@ -340,6 +341,8 @@ export type GameAction =
   | { year: number; type: 'sponsor-sign'; slot: SponsorSlot; offer: number }
   /** 구단주 예산 회의 요청 (재정 2 F4b, 회의 단계에서 한 해 한 번). accept: 조건부 판정에 대한 답 (두 번째 조작) */
   | { year: number; type: 'owner-ask'; ask: OwnerAsk; accept?: boolean }
+  /** 모기업 부채를 일찍 갚기 (재정 2 F5, 오프시즌, 자금에서, 만 원) */
+  | { year: number; type: 'repay-debt'; amount: number }
   /** 구장 공사 주문 (stadium.ts stadiumOptions의 id) */
   | { year: number; type: 'stadium'; id: string; size?: ParkSize; fence?: Fence; dome?: boolean; deal?: 'push' }
   | { year: number; type: 'camp'; pick: CampPick }
@@ -3473,6 +3476,7 @@ export class GameSession {
       case 'ticket-price': res = setTicketPrice(L, this.teamIdx, a.grade, a.scale); break;
       case 'ticket-auto': res = setTicketAuto(L, this.teamIdx, a.grade); break;
       case 'sponsor-sign': res = signSponsor(L, this.teamIdx, a.slot, a.offer); break;
+      case 'repay-debt': res = !off ? { ok: false, message: '부채는 오프시즌에 갚습니다.' } : repayDebt(L, this.teamIdx, this.year + 1, a.amount, cashOf(L, this.teamIdx)); break;
       case 'owner-ask':
         if (off.stage !== 'meeting') { res = { ok: false, message: '구단주 예산 회의는 오프시즌 마지막(개막 준비 앞) 단계에서 엽니다.' }; break; }
         res = holdMeeting(L, this.teamIdx, this.year, a.ask, ownerInput(L, this.teamIdx, this.year), a.accept);
@@ -4142,6 +4146,16 @@ export class GameSession {
     this.news.push({ year: this.year, day: -1, kind: 'offseason', text });
   }
 
+  /**
+   * FA가 이번 라운드에 우리 제시를 받아들일 최저선의 범위 (프런트 예산이 클수록 좁다, 재정 2 프런트 정보, frontInfo.ts).
+   * 화면 정보일 뿐 계약 판정은 진짜 값으로 한다. 열린 FA가 아니면 null
+   */
+  faAcceptRange(id: string): LineRange | null {
+    const off = this.offseason;
+    const e = off?.stage === 'fa' ? off.fa.entries.find((x) => x.id === id && x.status === 'open') : undefined;
+    if (!off || !e) return null;
+    return teamLineRange(this.league, this.teamIdx, `fa/${off.year}/${off.fa.round}/${id}`, Off.faAcceptLine(this.league, off, e));
+  }
   offerFa(id: string, salary: number, years: number) { return this.dispatchOff({ year: this.year, type: 'fa-offer', id, salary, years }); }
   withdrawFa(id: string) { return this.dispatchOff({ year: this.year, type: 'fa-withdraw', id }); }
   setForeignKeep(id: string, keep: boolean) { return this.dispatchOff({ year: this.year, type: 'foreign-keep', id, keep }); }
@@ -4176,6 +4190,7 @@ export class GameSession {
   /** 스폰서 빈 자리에 제안 하나로 계약 (오프시즌, 다음 시즌부터, 재정 2 F4a) */
   signSponsor(slot: SponsorSlot, offer: number) { return this.dispatchOff({ year: this.year, type: 'sponsor-sign', slot, offer }); }
   /** 구단주 예산 회의 요청 (회의 단계). accept는 조건부 판정에 대한 답 */
+  repayDebt(amount: number) { return this.dispatchOff({ year: this.year, type: 'repay-debt', amount }); }
   ownerAsk(ask: OwnerAsk, accept?: boolean) { return this.dispatchOff({ year: this.year, type: 'owner-ask', ask, ...(accept === undefined ? {} : { accept }) }); }
   /** 구장 효과 자료 (실측 표와 구장 제원, engine/park.ts) */
   parkSource() {

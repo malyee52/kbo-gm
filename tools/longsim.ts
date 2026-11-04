@@ -71,7 +71,7 @@ export interface YearMetrics {
   /** 그 시즌 선수층 압력 (1 / 맞춤 계수): 홈런·삼진·볼넷 */
   pressure: { hr: number; so: number; bb: number };
   /** 연봉·재정 (다음 시즌 개막 기준): 연봉 상승 지수, 캡 상향률, 결산 뒤 구단 자금 평균·최소, 긴급 지원 구단 수, FA 계약 수 */
-  econ: { wage: number; capGrowth: number; cashAvg: number; cashMin: number; rescued: number; faSigned: number };
+  econ: { wage: number; capGrowth: number; cashAvg: number; cashMin: number; rescued: number; faSigned: number; rescueSum?: number; debtSum?: number; debtTeams?: number; interest?: number };
   /** 그 시즌 공·타격: 홈런 목표 배율, 타석당 홈런, 리그 평균자책, 최다 홈런, 규정이닝 평균자책 2점 미만 투수 수, 다음 해 외국인 한도 */
   ball: { hrMul: number; hrPa: number; era: number; topHr: number; subTwo: number; foreign: number };
   /** 규정·흥행 (외국인 한도 판정 신호): 다음 해 최저 연봉(만 원)·외국인 신규·총액 상한(달러), 그 시즌 경기당 관중·외국인 연봉 부담·적자 구단 */
@@ -185,6 +185,9 @@ export function runYear(league: LeagueState, store: ReturnType<typeof loadDataSt
     wage: wageIndex(league.year, league), capGrowth: futureValue(league, 'capGrowth', league.year),
     cashAvg: hist.reduce((a, h) => a + h.cash, 0) / (hist.length || 1), cashMin: Math.min(...hist.map((h) => h.cash)),
     rescued: hist.filter((h) => h.rescue > 0).length, faSigned,
+    // 재정 2 F5: 긴급 지원 합, 결산 뒤 부채 합·부채 구단 수, 단기 대여 이자 합 (만 원)
+    rescueSum: hist.reduce((a, h) => a + h.rescue, 0), debtSum: hist.reduce((a, h) => a + (h.debt ?? 0), 0),
+    debtTeams: hist.filter((h) => (h.debt ?? 0) > 0).length, interest: -hist.reduce((a, h) => a + (h.items.interest ?? 0), 0),
   };
   const ball = {
     hrMul: ballHrMul(league, world.year), hrPa: t.hr / (t.pa || 1), era: (27 * t.er) / (outs || 1),
@@ -236,8 +239,8 @@ function table(rows: YearMetrics[]): string {
   const sep = '|' + '---|'.repeat(19);
   const body = rows.map((r) => `| ${r.year} | ${f(r.runs)} | ${f(r.cal.s1)} ${f(r.cal.hr)} ${f(r.cal.bb)} ${f(r.cal.so)} | ${f(r.sd, 3)} | ${r.maxW}·${r.minW} | ${r.orgMin}~${r.orgMax} | ${r.players} | ${f(r.ageBat, 1)}·${f(r.agePit, 1)} | ${r.maxAge} | ${f(r.realPa * 100, 0)}% | ${r.injuries}(${r.majors}) | ${r.events}(${r.specific}) | ${r.retired} | ${r.serving} | ${f(r.core, 0)} | ${r.fa.filed}·${r.fa.moved}·${r.fa.compPlayers} | ${r.cap ? `${r.cap.over}·${r.cap.short}·${f(r.cap.use * 100, 0)}%` : '-'} | ${f(r.pressure.hr)} ${f(r.pressure.so)} ${f(r.pressure.bb)} | ${r.shift} |`);
   const eok = (v: number) => (v / 10000).toFixed(0);
-  const econ = ['| 연도 | 연봉 지수(다음 해) | 캡 상향률(다음 해) | 캡 사용률 | 자금 평균·최소(억) | 긴급 지원 구단 | FA 신청·계약 |', '|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${r.year} | ${f(r.econ.wage)} | ${f(r.econ.capGrowth * 100, 0)}% | ${r.cap ? f(r.cap.use * 100, 0) + '%' : '-'} | ${eok(r.econ.cashAvg)}·${eok(r.econ.cashMin)} | ${r.econ.rescued} | ${r.fa.filed}·${r.econ.faSigned} |`)];
+  const econ = ['| 연도 | 연봉 지수(다음 해) | 캡 상향률(다음 해) | 캡 사용률 | 자금 평균·최소(억) | 긴급 지원 구단·합(억) | 부채 구단·합(억) | 대여 이자 합(억) | FA 신청·계약 |', '|---|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.year} | ${f(r.econ.wage)} | ${f(r.econ.capGrowth * 100, 0)}% | ${r.cap ? f(r.cap.use * 100, 0) + '%' : '-'} | ${eok(r.econ.cashAvg)}·${eok(r.econ.cashMin)} | ${r.econ.rescued}·${eok(r.econ.rescueSum ?? 0)} | ${r.econ.debtTeams ?? 0}·${eok(r.econ.debtSum ?? 0)} | ${f((r.econ.interest ?? 0) / 10000, 2)} | ${r.fa.filed}·${r.econ.faSigned} |`)];
   const ball = ['| 연도 | 홈런 배율 | 타석당 홈런 | 평균자책 | 최다 홈런 | 2점 미만 투수 | 다음 해 외국인 한도 |', '|---|---|---|---|---|---|---|',
     ...rows.map((r) => `| ${r.year} | ${f(r.ball.hrMul, 3)} | ${f(r.ball.hrPa * 100, 2)}% | ${f(r.ball.era)} | ${r.ball.topHr} | ${r.ball.subTwo} | ${r.ball.foreign} |`)];
   const man = (v: number) => Math.round(v / 10000);

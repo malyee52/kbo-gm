@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { cashOf } from '../src/league/finance';
+import { bonusNow, cashOf } from '../src/league/finance';
 import { EXT_BONUS_SHARE } from '../src/league/offseason';
 import { faEligible } from '../src/league/salary';
 
@@ -43,7 +43,8 @@ describe('비FA 다년 계약', () => {
     expect(g.extend(o.p.id, 5).ok).toBe(true);
     const p = g.league.players.find((x) => x.id === o.p.id)!;
     expect(p.contract).toMatchObject({ kind: 'nonFA', salary: d.salary, until: 2031 });
-    expect(before - cashOf(g.league, lg)).toBe(Math.round(d.salary * 5 * EXT_BONUS_SHARE));
+    // 계약 때 절반, 남은 절반은 다음 개막일 (재정 2 F5)
+    expect(before - cashOf(g.league, lg)).toBe(bonusNow(Math.round(d.salary * 5 * EXT_BONUS_SHARE)));
     expect(faEligible(p, 2028)).toBe(false);
     expect(g.extend(o.p.id, 3).ok).toBe(false); // 이미 다년 계약
     expect(g.extend(g.extensionOffers()[0].p.id, 9).ok).toBe(false); // 기간 범위 밖

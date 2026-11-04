@@ -7,9 +7,9 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { resolveOps } from '../src/fantasy/free';
-import { agentTalk, sanitizeDeal } from '../src/fantasy/negotiate';
+import { agentTalk, DEAL_MAX_SALARY, sanitizeDeal } from '../src/fantasy/negotiate';
 import { applyCapSanctions, spendLimit } from '../src/league/owner';
-import { cashOf, faSupportLeft, signingBonus } from '../src/league/finance';
+import { bonusNow, cashOf, faSupportLeft, signingBonus } from '../src/league/finance';
 import { salaryCap, teamCapPayroll } from '../src/league/salary';
 import { minSalary } from '../src/league/salary';
 import { EXT_BONUS_SHARE } from '../src/league/offseason';
@@ -241,14 +241,16 @@ describe('AI 판정 FA 조건의 이행', () => {
     const off = g.offseason!;
     const lg = g.teamIdx;
     // 규정은 조작 기록에 남는 판타지 조작으로 바꾼다 (손으로 바꾸면 재현이 어긋난다): 외부 FA 0명, 캡 0.3배
-    g.addFantasy({ kind: 'action', title: '규정', text: 'x', ops: [{ op: 'rule', key: 'maxFaSignings', value: 0 }, { op: 'rule', key: 'capScale', value: 0.3 }] });
+    // 자금은 1억 원만 남긴다 (재정 2 F5: 계약 때 계약금 절반만 내므로 합의 연봉 상한 안에서 자금 부족을 만들려고)
+    g.addFantasy({ kind: 'action', title: '규정', text: 'x', ops: [{ op: 'rule', key: 'maxFaSignings', value: 0 }, { op: 'rule', key: 'capScale', value: 0.3 }, { op: 'effect', effect: { type: 'cash', amount: 10000 - cashOf(g.league, g.teamIdx) } }] });
     const [e, other] = off.fa.entries.filter((x) => x.status === 'open' && !x.returnee && x.from !== lg);
     const p = g.leaguePlayer(e.id)!;
-    // 계약금(연봉 × 기간 × 30%)이 자금 + 모기업 지원 한도를 넘는 연봉
+    // 계약 때 낼 계약금(연봉 × 기간 × 30%의 절반, 재정 2 F5)이 자금 + 모기업 지원 한도를 넘는 연봉
     const years = 6;
     const room = Math.max(0, cashOf(g.league, lg)) + faSupportLeft(g.league, lg, off.year + 1);
-    const salary = Math.ceil((room + 50000) / (0.3 * years) / 10000) * 10000;
-    expect(signingBonus(salary, years)).toBeGreaterThan(room);
+    const salary = Math.ceil((2 * room + 100000) / (0.3 * years) / 10000) * 10000;
+    expect(bonusNow(signingBonus(salary, years))).toBeGreaterThan(room);
+    expect(salary).toBeLessThanOrEqual(DEAL_MAX_SALARY);
     const cap = salaryCap(off.year + 1, g.league)!;
     expect(teamCapPayroll(g.league, lg, off.year + 1) + salary).toBeGreaterThan(cap);
     // 합의 아닌 제시는 한도에 막힌다

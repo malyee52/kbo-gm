@@ -4,7 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import {
-  activeLevel, cashOf, seasonFlows, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
+  bonusNow, dueOf, activeLevel, cashOf, seasonFlows, faSupportCap, faSupportLeft, investCost, ledgerFlow, MARKETING_FILL, marketingAt, marketingStock, MEDICAL_RATE, payOf, signingBonus, START_CASH, stepMarketing, WON_PER_USD,
 } from '../src/league/finance';
 import * as Off from '../src/league/offseason';
 import { wageIndex } from '../src/league/salary';
@@ -186,9 +186,12 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     const p = h.leaguePlayer(e.id)!;
     expect(p.team).toBe(lg);
     const fee = h.league.ledger.find((x) => x.kind === 'signing' && x.note.startsWith(p.name))!;
-    expect(fee.amount).toBe(signingBonus(salary, e.years));
+    // 계약금 2번 (재정 2 F5): 계약 때 절반은 장부, 남은 절반은 다음 개막일 (due)
+    const bonus = signingBonus(salary, e.years);
+    expect(fee.amount).toBe(bonusNow(bonus));
+    expect(dueOf(h.league.finance![lg], 2027)).toBe(bonus - bonusNow(bonus));
     expect(fee.from).toBe(lg);
-    expect(payOf(p)).toBe(salary - Math.round(fee.amount / e.years));
+    expect(payOf(p)).toBe(salary - Math.round(bonus / e.years));
     const help = h.league.ledger.find((x) => x.kind === 'faSupport' && x.note.startsWith(p.name))!;
     expect(help).toMatchObject({ from: -1, to: lg, amount: fee.amount });
     // 모기업은 계약금만 대 준다. 보상금(등급별, 원 소속 구단에)은 자금에서 나간다
@@ -202,7 +205,8 @@ describe('새 지출: FA 계약금, 외국인 이적료, 현금 트레이드', (
     const big = h.offseason!.fa.entries.find((x) => x.from !== lg && x.status === 'open');
     if (big) {
       const years = 4;
-      const salary = Math.ceil(((left + 10_000) / 0.3) / years);
+      // 계약 때 내는 절반이 남은 한도를 넘게
+      const salary = Math.ceil(((2 * left + 20_000) / 0.3) / years);
       const r2 = h.offerFa(big.id, salary, years);
       expect(r2.ok).toBe(false);
       expect(r2.message).toContain('제시할 수 없');
