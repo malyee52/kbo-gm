@@ -42,6 +42,7 @@ const FORBIDDEN: [string, RegExp][] = [
   ['진짜 기여', /currentRuns\(|nextRuns\(/],
   ['진짜 전력', /teamStrength\(/],
   ['시즌 폼', /seasonForm/],
+  ['특기 모양', /applyShape\(|shapeTable|SHAPE_(BAT|PIT)/],
 ];
 
 describe('화면 코드는 숨긴 값을 읽지 않는다 (소스 검사)', () => {
