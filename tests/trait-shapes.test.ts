@@ -34,7 +34,7 @@ describe('특기 모양 (applyShape)', () => {
     expect(a.bat).toEqual(b.bat);
     expect(a.bat.hr).not.toBe(1);
     const c = { bat: flatBat(), pit: flatPit(), pos: 'SS', foreign: false };
-    applyShape(c, 'x/shape/v1', { bat: 0, pit: 0, s1: 1 }, true, 20);
+    applyShape(c, 'x/shape/v1', { bat: 0, pit: 0, noise: {} }, true, 20);
     expect(c.bat).toEqual(flatBat());
     expect(c.pit).toEqual(flatPit());
   });
@@ -73,7 +73,7 @@ describe('실존 선수는 그대로', () => {
 
   it('시작 해 실존 선수 능력은 모양 크기와 관계없다', () => {
     const a = createLeague(store, 2026, 'shape-real', FAST).league;
-    const b = createLeague(store, 2026, 'shape-real', { ...FAST, shape: { bat: 0, pit: 0, s1: 1 } }).league;
+    const b = createLeague(store, 2026, 'shape-real', { ...FAST, shape: { bat: 0, pit: 0, noise: {} } }).league;
     const skill = (l: typeof a) => new Map(l.players.filter((p) => p.real !== false).map((p) => [p.id, JSON.stringify([p.bat, p.pit, p.potential])]));
     const sa = skill(a);
     const sb = skill(b);

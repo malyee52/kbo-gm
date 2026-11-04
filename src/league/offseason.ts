@@ -3170,7 +3170,7 @@ const normalOf = (rng: Rng) => invNorm(Math.min(0.9999, Math.max(0.0001, rng.nex
  * 리그 전체 구성이 조금 옮겨 가도 시즌마다 환경 맞춤(season.ts calibrate)이 리그 평균을 목표에 맞춘다.
  * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다
  */
-export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: { bat: number; pit: number; s1: number }, starter: boolean, ceiling: number): void {
+export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: EngineParams['shape'], starter: boolean, ceiling: number): void {
   const rng = new Rng(stream);
   const draw = (chol: readonly (readonly number[])[]) => {
     const z = chol.map(() => normalOf(rng));
@@ -3186,7 +3186,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const r = runTerm(T);
     const b = { ...p.bat };
     SHAPE_BAT_KEYS.forEach((k, i) => {
-      b[k] *= Math.exp(size.bat * (T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r + e[i] * (k === 's1' ? size.s1 : 1)));
+      b[k] *= Math.exp(size.bat * (T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r + e[i] * (size.noise[k] ?? 1)));
     });
     p.bat = b;
   }
