@@ -21,8 +21,8 @@ import type { Season, SimPlayer, World } from '../engine';
 import type { Meta } from '../data/types';
 import { dateOf } from '../game/calendar';
 import { foreignMixOk, foreignRule, teamForeignRule } from './eras';
-import { payOf, paydays, payPlan, PAY_COUNT } from './finance';
-import { minSalary, wageIndex, WON_PER_RUN } from './salary';
+import { payOf, payPlan, PAY_COUNT } from './finance';
+import { foreignCap, minSalary, wageIndex, WON_PER_RUN } from './salary';
 import type { LeaguePlayer, LeagueState } from './types';
 import { ruleDate, ruleOf } from './rules';
 
@@ -49,14 +49,77 @@ export const AI_SWAP_FROM_DAY = 21;
  *   - 6주 이상 치료가 필요한 부상을 당한 외국인을 재활 선수 명단에 올리고(보유는 유지) 대체 외국인을 데려온다. 교체 횟수는 쓰지 않는다
  *   - 재활 명단 선수는 보유 한도에서 빠지고, 최소 6주 뒤 복귀할 수 있다 (게임: 영입 때 남은 결장이 6주 이상이어야 하므로 복귀는 늘 6주 뒤)
  *   - 복귀 때 구단이 둘 중 하나: 원래 선수 복귀(대체 선수는 웨이버) 또는 대체 선수를 남기고 원래 선수 방출(교체 1회로 셈)
- *   - 대체 선수 고용 비용은 한 달에 10만 달러까지
+ *   - 대체 선수 고용 비용은 한 달에 10만 달러까지 (보통 교체 외국인과 같은 셈, swapCap)
  * 임시 규칙: 대체 선수 남기기는 복귀 전에도 고를 수 있다. 복귀 선택은 마감일 뒤에도 된다. 그날 경기 전까지 고르지 않으면 원래 선수 복귀(rehabDay)
  */
 export const INJURY_SWAP_FROM = 2024;
 /** 부상 대체 외국인을 데려올 수 있는 남은 결장 (6주) */
 export const INJURY_SWAP_DAYS = 42;
-/** 대체 외국인 한 달 고용 비용 상한 (달러) */
-export const INJURY_SWAP_MONTH_USD = 100_000;
+
+/**
+ * 시즌 중 교체 외국인 금액 상한 (2019~, 2018-09 이사회 결정 보도 기준. KBO 규약 원문은 확인 못 함, 조사 2026-11-04):
+ *   - 신규 외국인 계약 총액 상한(100만 달러, 연봉 + 계약금 + 이적료)을 계약 기간 2~11월 10달로 나눈 몫 × 남은 달 (한 달 10만 달러)
+ *   - 아시아쿼터(2026~)는 신규 상한 20만 ÷ 10 = 한 달 2만 달러
+ *   - 부상 대체 외국인(2024~)도 "기존 교체 외국인선수와 동일하게 1개월당 최대 10만 달러" → 같은 셈 (swapCap)
+ *   - 2014~2018은 외국인 몸값 상한이 없었고, 2013 전 30만 달러 상한은 사문화됐다는 보도라 걸지 않는다 (임시 판단)
+ * 임시 해석·단순화:
+ *   - 남은 달 = 영입일부터 11월 말까지, 영입한 달은 날짜 비율 (부분 달 처리는 [미확인], 보도 예시 "5월 중순 65만·6월 중순 55만"과 맞음)
+ *   - 이적료는 시즌 중에 없다 (오프시즌 transferFeeUsd만)
+ *   - 아시아쿼터 선수의 부상 대체 허용 여부·금액은 [미확인]: 아시아쿼터끼리 한 달 2만 달러로 본다
+ *   - 한 달 상한은 신규 상한 ÷ 10이라 규정 인상(foreignCap)·자유 모드 규정 값을 따른다
+ */
+export const SWAP_CAP_FROM = 2019;
+/** 계약 기간 마지막 달 (참가활동기간 2~11월) */
+const CONTRACT_LAST_MONTH = 11;
+
+/** 교체 외국인 한 달 상한 (달러): 신규 상한 ÷ 10 (일반 10만·아시아쿼터 2만, 2026 규정) */
+export function swapMonthCap(league: Pick<LeagueState, 'rules' | 'ruleShifts'> | null | undefined, year: number, asia: boolean): number {
+  return foreignCap(league, asia ? 'asiaNewCap' : 'foreignNewCap', year) / PAY_COUNT;
+}
+
+/** 그날부터 11월 말까지 남은 달 (영입한 달은 그달 남은 날 ÷ 그달 날 수, 임시 해석) */
+export function monthsLeft(year: number, day: number): number {
+  const d = dateOf(year, day);
+  if (d.month > CONTRACT_LAST_MONTH) return 0;
+  const days = new Date(Date.UTC(d.year, d.month, 0)).getUTCDate();
+  return (days - d.date + 1) / days + (CONTRACT_LAST_MONTH - d.month);
+}
+
+/** 그날 시즌 중에 새로 들여오는 외국인의 이번 시즌 계약 총액 상한 (달러). 상한이 없는 해(2019 전)는 null */
+export function swapCap(league: Pick<LeagueState, 'rules' | 'ruleShifts'> | null | undefined, year: number, asia: boolean, day: number): number | null {
+  if (year < SWAP_CAP_FROM) return null;
+  return Math.round(swapMonthCap(league, year, asia) * monthsLeft(year, day));
+}
+
+/** 시즌 중 외국인 계약: salary·bonus는 연간 금액(지급일마다 연간 ÷ 10이 나간다), total = 이번 시즌 실제로 나갈 총액(달러), ask = 깎기 전 총액 */
+export interface SwapContract {
+  salary: number;
+  bonus?: number;
+  total: number;
+  ask: number;
+  /** 상한 때문에 깎았는가 */
+  capped: boolean;
+  /** 이번 시즌 총액 상한 (없는 해는 null) */
+  cap: number | null;
+}
+
+/**
+ * 시즌 중에 들여오는 외국인 후보의 계약 (보통 교체·부상 대체 공통). 연봉은 연간 금액 × 남은 지급 몫(remainingShare)만큼 나가므로,
+ * 총액이 상한(swapCap)을 넘으면 연간 금액을 상한 ÷ 남은 지급 몫으로 깎는다 (연봉·계약금을 같은 비율로).
+ * 부상 대체(rehab)는 계약금 없이 연봉만 (앞 규칙 그대로)
+ */
+export function swapContract(lp: LeaguePlayer, league: Pick<LeagueState, 'rules' | 'ruleShifts'>, year: number, seasonDays: number, day: number, rehab = false): SwapContract {
+  const share = remainingShare(year, seasonDays, day);
+  const bonus0 = rehab ? 0 : (lp.contract.bonus ?? 0);
+  const annual = lp.contract.salary + bonus0;
+  const ask = Math.round(annual * share);
+  const cap = swapCap(league, year, !!lp.asia, day);
+  if (cap === null || ask <= cap || annual <= 0) return { salary: lp.contract.salary, ...(bonus0 ? { bonus: bonus0 } : {}), total: ask, ask, capped: false, cap };
+  const k = share > 0 ? cap / share / annual : 0;
+  const salary = Math.floor(lp.contract.salary * k);
+  const bonus = Math.floor(bonus0 * k);
+  return { salary, ...(bonus ? { bonus } : {}), total: Math.round((salary + bonus) * share), ask, capped: true, cap };
+}
 
 /** 'rehab' = 부상 대체 영입 (교체 횟수에 안 셈), 'keep' = 복귀 때 대체 선수를 남김 (교체 1회로 셈, 이동 없음) */
 export type MarketKind = 'release' | 'claim' | 'sign' | 'rehab' | 'keep';
@@ -302,11 +365,13 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number, rehab?: S
   const { league, world, season } = ctx;
   const year = world.year;
   const lp = league.players.find((x) => x.id === p.id)!;
-  if (rehab) {
-    // 부상 대체: 한 달 10만 달러 상한 (연봉은 지급일마다 고르게 나가므로 상한 × 지급 달 수, 계약금 없음)
-    lp.contract = { ...lp.contract, salary: rehabSalary(lp, year, season.schedule.length) };
-    delete lp.contract.bonus;
-  } else if (!(p.foreign && lp.market === year)) {
+  if (p.foreign && lp.market === year) {
+    // 시즌 중 교체 외국인 금액 상한 (2019~, 한 달 10만·아시아쿼터 2만 달러 × 남은 달, swapContract). 부상 대체는 계약금 없음
+    const c = swapContract(lp, league, year, season.schedule.length, season.day, !!rehab);
+    lp.contract = { ...lp.contract, salary: c.salary };
+    if (c.bonus) lp.contract.bonus = c.bonus;
+    else delete lp.contract.bonus;
+  } else {
     const cost = Math.round(minSalary(year, league) * remainingShare(year, season.schedule.length, season.day));
     if (cost > 0) league.ledger.push({ year, from: team, to: -1, amount: cost, note: `${p.name} 영입 연봉 (남은 기간)`, kind: 'release' });
   }
@@ -319,10 +384,6 @@ export function signPlayer(ctx: MarketCtx, p: SimPlayer, team: number, rehab?: S
   return fxSigned(league, p.id, team);
 }
 
-/** 부상 대체로 데려올 때의 연봉 (달러): 후보 요구액, 다만 한 달 INJURY_SWAP_MONTH_USD까지 */
-export function rehabSalary(lp: LeaguePlayer, year: number, seasonDays: number): number {
-  return Math.min(lp.contract.salary, INJURY_SWAP_MONTH_USD * Math.max(1, paydays(year, seasonDays).length));
-}
 
 /** 재활 명단 선수 복귀 선택을 할 수 없는 이유 (없으면 null). keep = 대체 선수를 남기고 원래 선수 방출 */
 export function rehabEndBlock(ctx: Pick<MarketCtx, 'league' | 'world' | 'season'>, r: Rehab, keep: boolean): string | null {

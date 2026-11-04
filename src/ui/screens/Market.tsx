@@ -4,7 +4,7 @@ import { isStarterSkill, type SimPlayer } from '../../engine';
 import { shortDate } from '../../game/calendar';
 import { avg, era, fixed2, ipText, ops, rate3 } from '../../game/stats';
 import { foreignRule, teamForeignRule } from '../../league/eras';
-import { availableDay, foreignHeld, foreignSwapsUsed, INJURY_SWAP_FROM, INJURY_SWAP_MONTH_USD, movesOf, rehabSalary, releaseCost } from '../../league/market';
+import { availableDay, foreignHeld, foreignSwapsUsed, INJURY_SWAP_FROM, monthsLeft, movesOf, releaseCost, SWAP_CAP_FROM, swapContract, swapMonthCap, type SwapContract } from '../../league/market';
 import { dollarText } from '../../league/salary';
 import { ConfirmButton } from '../ConfirmButton';
 import { PlayerLink, posName, TeamName, useGame, useWon } from '../context';
@@ -56,6 +56,17 @@ export function Market() {
     if (!l) return '-';
     return p.foreign ? dollarText(l.contract.salary) : `${won(3000)} (최저)`;
   };
+  // 시즌 중 교체 외국인 금액 상한 (2019~, 한 달 10만·아시아쿼터 2만 달러 × 남은 달): 요구액이 넘는 후보는 상한으로 깎아 제시한다
+  // (실제로 교체 선수는 남은 달로 줄인 총액에 계약한다. 계약 불가로 두면 6월 이후 좋은 후보가 거의 모두 막힌다)
+  const days = session.season.schedule.length;
+  const contractOf = (p: SimPlayer, rehab = false): SwapContract | null => {
+    const l = lp.get(p.id);
+    return p.foreign && l && l.market === year ? swapContract(l, session.league, year, days, session.day, rehab) : null;
+  };
+  const totalLine = (c: SwapContract | null, label = '올해 총액') => c && (
+    <div className="muted">{label} {c.capped ? <>{dollarText(c.ask)} → {dollarText(c.total)} (상한)</> : dollarText(c.total)}</div>
+  );
+  const monthsNow = monthsLeft(year, session.day);
   const sign = (p: SimPlayer) => {
     const r = session.signInSeason(p);
     setMsg({ text: r.message, ok: r.ok });
@@ -93,9 +104,12 @@ export function Market() {
           <li>새 외국인 후보는 관찰 명단(영입 &gt; 스카우트 &gt; 해외)에 오른 선수만 이 목록에 나옵니다.</li>
           <li>방출(웨이버 공시): 선수 창의 "웨이버 공시"로 합니다. 하위 구단부터 데려갈 수 있고, 데려간 구단이 계약을 넘겨받습니다. 아무도 데려가지 않으면 자유계약 선수가 되고 남은 보장 연봉을 그때 냅니다(외국인은 연봉의 60%).</li>
           <li>새 외국인은 보유 한도가 빈 자리에만, 한 시즌 {ruleOf(session.league, 'foreignSwaps')}번까지 데려올 수 있습니다. 연봉은 남은 달만큼 나갑니다.</li>
+          {year >= SWAP_CAP_FROM && (
+            <li>교체 외국인 금액 상한: 이번 시즌 계약 총액은 한 달 {dollarText(swapMonthCap(session.league, year, false))}{limit.asia ? `(아시아쿼터 ${dollarText(swapMonthCap(session.league, year, true))})` : ''} × 11월 말까지 남은 달(지금 {monthsNow.toFixed(1)}달)까지입니다. 요구액이 넘는 후보는 상한으로 깎아 계약합니다.</li>
+          )}
           <li>자유계약 선수는 최저 연봉으로 이번 시즌까지 계약합니다. 같은 시즌에 방출한 선수는 다시 데려올 수 없습니다.</li>
           {year >= INJURY_SWAP_FROM && (
-            <li>부상 대체 외국인: 6주 넘게 빠지는 외국인을 재활 명단에 올리고(보유 한도에서 빠짐) 교체 횟수를 쓰지 않고 데려옵니다. 연봉은 한 달 {dollarText(INJURY_SWAP_MONTH_USD)}까지. 원래 선수가 나으면 복귀(대체 선수 방출)와 대체 선수 남기기(원래 선수 방출, 교체 1회) 가운데 고릅니다.</li>
+            <li>부상 대체 외국인: 6주 넘게 빠지는 외국인을 재활 명단에 올리고(보유 한도에서 빠짐) 교체 횟수를 쓰지 않고 데려옵니다. 금액 상한은 보통 교체와 같고 계약금은 없습니다. 원래 선수가 나으면 복귀(대체 선수 방출)와 대체 선수 남기기(원래 선수 방출, 교체 1회) 가운데 고릅니다.</li>
           )}
         </ul>
       </section>
@@ -153,7 +167,6 @@ export function Market() {
                 {list.map((p) => {
                   const why = session.signBlock(p);
                   const rehabWhy = kind === 'foreign' && injured ? session.rehabSignBlock(p, injured) : null;
-                  const l = lp.get(p.id);
                   return (
                     <tr key={p.idx}>
                       <td className="l"><PlayerLink p={p} /></td>
@@ -162,7 +175,7 @@ export function Market() {
                       <td><GuessCell g={guessOf.get(p.idx)} /></td>
                       <td className="l small">{line(p)}</td>
                       <td className="l small">{kind === 'free' && p.formerTeam !== undefined ? <TeamName idx={p.formerTeam} /> : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'}{from(p) > session.day && <span className="muted"> · {shortDate(year, from(p))}부터</span>}</td>
-                      <td className="small">{salary(p)}{injured && kind === 'foreign' && l && rehabSalary(l, year, session.season.schedule.length) < l.contract.salary && <div className="muted">부상 대체 {dollarText(rehabSalary(l, year, session.season.schedule.length))}</div>}</td>
+                      <td className="small">{salary(p)}{kind === 'foreign' && totalLine(contractOf(p))}{injured && kind === 'foreign' && totalLine(contractOf(p, true), '부상 대체')}</td>
                       <td className="l">
                         <button type="button" onClick={() => sign(p)} disabled={!!why} title={why ?? '영입합니다 (2군에 들어갑니다)'}>영입</button>
                         {why && <div className="muted small">{why}</div>}
