@@ -497,6 +497,12 @@ export interface EngineParams {
    * 경기력(이벤트 ctx.form)과 따로다: 모든 선수가 같은 규칙이고 화면·AI 판단·컨디션 낱말 어디에도 들어가지 않는다
    */
   seasonForm: { bat: number; pit: number };
+  /**
+   * 가상 선수 특기 모양 (2026-10-26 사용자 결정, league/offseason.ts makeVirtual, 표는 자동 생성 league/shapeTable.ts ← tools/fit_shapes.ts):
+   * 실존 선수 능력 비율에서 가치 방향을 뺀 모양(거포·삼진형·준족·컨택형, 구위형·제구형 등)을 가상 선수(real: false)에게 뽑아 주고,
+   * 가치 총량은 skillForRuns가 다시 맞춘다. bat·pit은 모양 크기 배율 (1 = 실존 선수 능력의 퍼짐 그대로, 0이면 예전처럼 평평한 모양)
+   */
+  shape: { bat: number; pit: number };
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -965,6 +971,8 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 100이닝 투수 ERA÷리그 0.171 → 0.186 (실제 0.187·0.204)이 되게. 타자 쪽은 폼 없이도 실제만큼 퍼져 작게 둔다.
   // 180이닝 1.6 → 2.0명, 15승 1.0 → 1.3명 (실제 2015~25 5.2·3.8)
   seasonForm: { bat: 0.02, pit: 0.07 },
+  // 가상 선수 특기 모양 크기 (2026-11-04, 임시값: 실존 능력은 3시즌 추정이라 운 몫이 섞여 있어 재능 모양보다 조금 넓다)
+  shape: { bat: 1, pit: 1 },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md

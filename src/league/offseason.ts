@@ -16,6 +16,7 @@ import { envFrom } from './war';
 import { leagueBase } from '../game/saber';
 import type { DataStore, DraftRow, PlayerMaster } from '../data/types';
 import { invNorm } from '../data/pitches';
+import { SHAPE_BAT, SHAPE_BAT_KEYS, SHAPE_PIT, SHAPE_PIT_KEYS } from './shapeTable';
 import {
   ageDefense, agingScale, currentOveruse, DEFAULT_PARAMS, emptyBatLine, emptyPitLine, isStarterSkill, penTrustOf, Rng, traitsOf,
   type BatSkill, type EngineParams, type Season, type SimPlayer, type World,
@@ -284,6 +285,8 @@ export interface LeagueView {
   minPay: number;
   /** 다음 시즌 기준 월드 (화면 갈래 등급 computeGrades용, 무소속 선수는 sim에만) */
   world?: World;
+  /** 조정값 (가상 선수 특기 모양 크기 params.shape). 없으면 기본값 */
+  params?: EngineParams;
 }
 
 /** 다음 시즌(league.year + 1) 기준으로 선수 가치를 잴 수 있게 SimPlayer를 만든다. 무소속 선수도 포함 */
@@ -299,7 +302,7 @@ export function leagueView(league: LeagueState, store: Store, params: EnginePara
     if (sim.has(lp.id)) continue;
     sim.set(lp.id, { ...asSim(lp, world.league, next.year), idx: 1_000_000 + k++, name: lp.name, foreign: lp.foreign, teamIdx: lp.team });
   }
-  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league), world };
+  return { year: next.year, ctx, sim, orgs: world.teams.map((t) => [...t.org]), wage: wageIndex(next.year, league), minPay: minSalary(next.year, league), world, params };
 }
 
 const byId = (league: LeagueState) => new Map(league.players.map((p) => [p.id, p]));
@@ -3156,6 +3159,50 @@ function virtualRunning(rng: Rng): Pick<BatSkill, 'sbAtt' | 'sbPct' | 'speed'> {
   return { sbAtt, sbPct, speed };
 }
 
+/** 표준정규 (선수별 시드 줄기) */
+const normalOf = (rng: Rng) => invNorm(Math.min(0.9999, Math.max(0.0001, rng.next())));
+
+/** 모양 무리 평균에서 뺄 가운데 (가상 선수의 자리 비율 HIT_POS·선발 비율 0.6으로 무리 평균을 섞은 값). 그래서 가상 선수 전체의 평균 모양은 예전(평평)과 같다 */
+const SHAPE_CENTER = (() => {
+  const total = HIT_POS.reduce((s, [, w]) => s + w, 0);
+  const bat = SHAPE_BAT_KEYS.map((_, i) => HIT_POS.reduce((s, [pos, w]) => s + w * (SHAPE_BAT.mean[pos] ?? SHAPE_BAT.mean['1B'])[i], 0) / total);
+  const pit = SHAPE_PIT_KEYS.map((_, i) => 0.6 * SHAPE_PIT.mean.SP[i] + 0.4 * SHAPE_PIT.mean.RP[i]);
+  return { bat, pit };
+})();
+
+/**
+ * 가상 선수 특기 모양 (league/shapeTable.ts, tools/fit_shapes.ts): 실존 선수 능력 비율에서 가치 방향을 뺀 모양을 자리(외국인)·역할 무리 평균
+ * + (타자) 도루 시도율 기울기 + 다변량 정규로 뽑아 능력 비율에 곱한다. 무리 평균은 가상 선수 전체 가운데(SHAPE_CENTER)를 빼서
+ * 리그 전체 구성은 예전과 같게 두고, 거포(홈런↑·삼진↑)·컨택형(단타↑·삼진↓)·준족(3루타↑)·구위형·제구형 같은 퍼짐만 더한다.
+ * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다
+ */
+export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: { bat: number; pit: number }, starter: boolean): void {
+  const rng = new Rng(stream);
+  const draw = (chol: readonly (readonly number[])[]) => {
+    const z = chol.map(() => normalOf(rng));
+    return chol.map((row) => row.reduce((s, c, j) => s + c * z[j], 0));
+  };
+  if (p.bat && size.bat) {
+    const g = p.foreign ? 'F' : p.pos && SHAPE_BAT.mean[p.pos] ? p.pos : '1B';
+    const e = draw(SHAPE_BAT.chol);
+    const lsb = Math.log(Math.max(0.005, p.bat.sbAtt)) - Math.log(VIRTUAL_SB_ATT.median);
+    const b = { ...p.bat };
+    SHAPE_BAT_KEYS.forEach((k, i) => {
+      b[k] *= Math.exp(size.bat * (SHAPE_BAT.mean[g][i] - SHAPE_CENTER.bat[i] + SHAPE_BAT.sbSlope[i] * lsb + e[i]));
+    });
+    p.bat = b;
+  }
+  if (p.pit && size.pit) {
+    const g = p.foreign ? 'F' : starter ? 'SP' : 'RP';
+    const e = draw(SHAPE_PIT.chol);
+    const q = { ...p.pit };
+    SHAPE_PIT_KEYS.forEach((k, i) => {
+      q[k] *= Math.exp(size.pit * (SHAPE_PIT.mean[g][i] - SHAPE_CENTER.pit[i] + e[i]));
+    });
+    p.pit = q;
+  }
+}
+
 /** 가상 선수 한 명을 만들어 리그(무소속)에 넣는다. 능력은 리그 평균(모든 비율 1.00) 선수에서 목표 런에 맞게 옮긴다 */
 function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set<string>, spec: VirtualSpec, year: number): LeaguePlayer {
   const nextYear = year + 1;
@@ -3201,6 +3248,8 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so, bb: p.pit.bb * UNDERHAND_SKILL.bb };
   }
   if (spec.control && p.pit) p.pit = { ...p.pit, so: p.pit.so * CONTROL_SKILL.so, bb: p.pit.bb * CONTROL_SKILL.bb };
+  // 특기 모양 (2026-10-26 사용자 결정): 가상 선수만. 실존 선수 분포에서 뽑은 모양을 곱하고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
+  if (!p.real) applyShape(p, `${league.seed}/shape/${p.id}`, (view.params ?? DEFAULT_PARAMS).shape, starter);
   Object.assign(p, skillForRuns(p, spec.runs, view.ctx, nextYear));
   p.potential = Math.max(spec.runs, spec.potential ?? spec.runs + 4 * rng.next());
   // 숨은 성장 성향 (잠재력 v2, potential.ts): 선수별 시드라 공유 난수 흐름을 바꾸지 않는다
