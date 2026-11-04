@@ -1867,11 +1867,16 @@ const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.unti
  * 런당 금액은 금액 상한 인상(foreignCap)과 같은 배율, 아시아쿼터는 신규 상한 비율(20만 ÷ 100만)만큼 작다
  */
 export function foreignKeepBar(league: LeagueState, view: LeagueView, p: LeaguePlayer): number {
+  return foreignBar(league, view, p, false) - FOREIGN_KEEP_FAMILIAR;
+}
+
+/** 시장 후보 기대 능력 + (요구액 − 그 후보 신규 요구액) ÷ 런당 금액. fresh면 신규 계약 요구액(다른 구단이 풀린 선수를 데려올 때) */
+function foreignBar(league: LeagueState, view: LeagueView, p: LeaguePlayer, fresh: boolean): number {
   const ref = fxMarketRuns(p.isPitcher, !!p.asia);
-  const want = foreignSalary(fxRep(league, view, p), false, !!p.asia, league, view.year);
-  const fresh = foreignSalary(ref, true, !!p.asia, league, view.year);
+  const want = foreignSalary(fxRep(league, view, p), fresh, !!p.asia, league, view.year);
+  const base = foreignSalary(ref, true, !!p.asia, league, view.year);
   const perRun = FOREIGN_KEEP_USD_PER_RUN * foreignCap(league, p.asia ? 'asiaNewCap' : 'foreignNewCap', view.year) / FOREIGN_NEW_CAP;
-  return ref + (want - fresh) / perRun - FOREIGN_KEEP_FAMILIAR;
+  return ref + (want - base) / perRun;
 }
 
 /**
@@ -2165,6 +2170,10 @@ function aiForeignPicks(league: LeagueState, off: OffseasonState, store: Store, 
     for (const id of off.foreign!.pool) {
       const p = league.players.find((x) => x.id === id)!;
       if (!canSignForeign(league, off, team, p).ok) continue; // 관찰 명단에 없는 파견 후보는 여기서 걸린다
+      // 이번 시즌 이 구단에서 뛰고 재계약하지 않은 선수는 다시 데려오지 않는다 (재계약 판단을 시장 계약으로 뒤집지 않게, 2026-11-04)
+      if (p.history.some((h) => h.year === off.year && h.team === league.teams[team].name && (h.bat || h.pit))) continue;
+      // 이번 시즌 다른 구단에서 뛰고 풀린 선수는 재계약 판단과 같은 눈(성적을 섞은 능력)으로, 새 후보 기대보다 나을 때만 (덤 없음, 신규 요구액)
+      if (p.history.some((h) => h.year === off.year && (h.bat || h.pit)) && foreignJudgeRuns(league, store, view, p, off.year) < foreignBar(league, view, p, true)) continue;
       if (!seen.has(id)) seen.set(id, aiSeenForeign(league, store, view, team, view.sim.get(id)!, off.year));
       const gain = signingGain(view, team, seen.get(id)!, 2, tendency, false);
       if (gain > bestGain) {

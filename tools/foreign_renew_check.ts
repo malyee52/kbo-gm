@@ -33,7 +33,7 @@ interface SeedResult {
   usedPerTeam: number; payPerTeam: number; cashAvg: number; rescued: number;
   pool: number[]; signed: number[]; renewed: number[]; released: number[]; renewRate: number;
   /** 계약이 끝난 외국인의 판단 재료 (진짜 능력, 시즌 기여, 출전 몫, 남았나) */
-  form: { truth: number; runs: number; share: number; bar: number; age: number; kept: boolean }[];
+  form: { truth: number; runs: number; share: number; bar: number; age: number; kept: boolean; same?: boolean }[];
 }
 
 function warOfLine(league: LeagueState, year: number, pos: string | null, bat?: number[], pit?: number[]): number {
@@ -69,7 +69,7 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
       if (!f) return;
       const ctx = valueContext(world);
       const inPool = new Set(f.pool);
-      const part = (p: (typeof league.players)[number], kept: boolean) => { const r = probes.get(`${p.id}:${year}`); if (r) form.push({ ...r, kept }); };
+      const part = (p: (typeof league.players)[number], kept: boolean) => { const r = probes.get(`${p.id}:${year}`); if (r) form.push({ ...r, kept, same: kept && p.history.find((h) => h.year === year)?.team === league.teams[p.team]?.name }); };
       for (const p of league.players) {
         if (!p.foreign || p.asia) continue;
         const played = p.history.some((h) => h.year === year);
@@ -155,6 +155,7 @@ function main(): void {
   const dev = full.map((x) => x.runs / x.share - x.truth);
   const sd = Math.sqrt(mean(dev.map((d) => (d - mean(dev)) ** 2)));
   out.push(`## 재계약 판단 재료\n\n출전 몫 0.7 이상 ${full.length}명: 시즌 기여 ÷ 출전 몫 − 진짜 능력 평균 ${f1(mean(dev))}런, 표준편차 ${f1(sd)}런. 출전 몫 평균 ${f2(mean(form.map((x) => x.share)))}, 출전 몫 0.7 이상 몫 ${f1((full.length / (form.length || 1)) * 100)}%\n`);
+  out.push(`남은 선수 ${form.filter((x) => x.kept).length}명 가운데 같은 구단 ${form.filter((x) => x.same).length}명, 다른 구단으로 옮김 ${form.filter((x) => x.kept && !x.same).length}명\n`);
   out.push('| 진짜 능력 구간 | 수 | 남은 비율 | 실제 (2015~2025) |\n|---|---|---|---|');
   for (const [lo, hi, real] of [[-99, 30, '-'], [30, 40, '24%'], [40, 50, '42%'], [50, 999, '61%']] as const) {
     const g = form.filter((x) => x.truth >= lo && x.truth < hi);
