@@ -54,7 +54,7 @@ import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
 import {
-  activeBudgetOf, activeStep, addExpansionCapital, autoBudget, autoPrices, futuresScale, stepAt, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockBudgets,
+  activeBudgetOf, activeStep, addExpansionCapital, bonusNow, payBonus, autoBudget, autoPrices, futuresScale, stepAt, canPayFaBonus, cashOf, coverFaBonus, faSupportLeft, DEVELOP_AGE, DEVELOP_BONUS, DEVELOP_SHARE, ensureFinance, lockBudgets,
   settleSeason, signingBonus, transferFeeUsd, WON_PER_USD, type FinanceYear,
 } from './finance';
 import { changeText, expansionPerk, faEnabled, faFilingRankPerTeam, foreignMixOk, foreignRule, teamChangesFor, teamForeignRule, type TeamChange } from './eras';
@@ -834,7 +834,8 @@ export function applyDiscount(salary: number, pct: number, floor = MIN_SALARY): 
 function signExtension(league: LeagueState, off: OffseasonState, p: LeaguePlayer, salary: number, years: number): number {
   const bonus = Math.round(salary * years * EXT_BONUS_SHARE);
   p.contract = { kind: 'nonFA', salary, until: off.year + years, prepaid: Math.round(bonus / years) };
-  if (bonus) league.ledger.push({ year: off.year + 1, from: p.team, to: -1, amount: bonus, note: `${p.name} 비FA 다년 계약금`, kind: 'signing' });
+  // 계약금 2번 (재정 2 F5): 계약 때 절반, 남은 절반은 다음 개막일 (finance.ts payBonus)
+  if (bonus) payBonus(league, p.team, off.year + 1, bonus, `${p.name} 비FA 다년 계약금`);
   if (off.salary) { delete off.salary.demands[p.id]; delete off.salary.offers[p.id]; }
   return bonus;
 }
@@ -855,7 +856,7 @@ export function extendByUser(league: LeagueState, off: OffseasonState, store: St
     log(off, 'salary', `${p.name}, 에이전트와 합의한 조건으로 비FA 다년 계약 ${years}년 (연 ${(salary / 10000).toFixed(1)}억 원, 계약금 ${(bonus / 10000).toFixed(1)}억 원)`, true, true);
     return { ok: true, message: `${p.name}과(와) 합의한 조건으로 ${years}년 다년 계약을 맺었습니다.` };
   }
-  if (bonus > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%)을 낼 자금이 모자랍니다.` };
+  if (bonusNow(bonus) > cashOf(league, off.userTeam)) return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 ${EXT_BONUS_SHARE * 100}%) 가운데 계약 때 낼 절반 ${(bonusNow(bonus) / 10000).toFixed(1)}억 원을 낼 자금이 모자랍니다.` };
   const limit = spendLimit(league, off.userTeam, off.year + 1);
   if (limit !== null && teamCapPayroll(league, off.userTeam, off.year + 1) - capShareOf(league, off.userTeam, off.year + 1, p) + salary > limit) return { ok: false, message: '이 계약을 하면 샐러리캡 상한을 넘습니다.' };
   signExtension(league, off, p, salary, years);
@@ -878,7 +879,7 @@ function aiExtensions(league: LeagueState, off: OffseasonState, view: LeagueView
     for (const { p } of cands) {
       if (!new Rng(`${league.seed}/extend/${off.year}/${p.id}`).chance(chance[gmStyle(league, t)] ?? 0.35)) continue;
       const salary = extensionDemand(view, p, off.year, 4);
-      if (salary * 4 * EXT_BONUS_SHARE > cashOf(league, t)) continue;
+      if (bonusNow(Math.round(salary * 4 * EXT_BONUS_SHARE)) > cashOf(league, t)) continue;
       signExtension(league, off, p, salary, 4);
       log(off, 'salary', `${league.teams[t].name}, ${p.name}과(와) 비FA 다년 계약 4년 (연 ${(salary / 10000).toFixed(1)}억 원)`, false, true);
     }
@@ -1123,12 +1124,13 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
   // 계약금: 이번 라운드 다른 제시의 계약금까지 합쳐 지금 자금이 모자라면 계약할 때 모기업이 모자란 몫을 대 준다 (finance.ts coverFaBonus)
   const bonus = signingBonus(salary, years);
   const otherBonus = Object.entries(off.fa.userOffers).filter(([k]) => k !== id).reduce((s, [, o]) => s + signingBonus(o.salary, o.years), 0);
-  const short = bonus + otherBonus - Math.max(0, cashOf(league, t));
+  // 계약 때 내는 몫만 (재정 2 F5 계약금 2번: 남은 절반은 다음 개막일)
+  const short = bonusNow(bonus) + bonusNow(otherBonus) - Math.max(0, cashOf(league, t));
   // 모기업 지원에는 한 해 한도가 있다 (finance.ts faSupportLeft, 2026-10-21 사용자 결정)
   const left = faSupportLeft(league, t, off.year + 1);
   if (short > left) {
     const cash = Math.max(0, cashOf(league, t));
-    return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 30%)${otherBonus ? `과 다른 제시의 계약금 ${(otherBonus / 10000).toFixed(1)}억 원` : ''}을 낼 자금이 모자라 제시할 수 없습니다 (자금 ${(cash / 10000).toFixed(1)}억 원, 남은 모기업 지원 한도 ${(left / 10000).toFixed(1)}억 원).` };
+    return { ok: false, message: `계약금 ${(bonus / 10000).toFixed(1)}억 원(총액의 30%, 계약 때 절반)${otherBonus ? `과 다른 제시의 계약금 ${(otherBonus / 10000).toFixed(1)}억 원` : ''}을 낼 자금이 모자라 제시할 수 없습니다 (자금 ${(cash / 10000).toFixed(1)}억 원, 남은 모기업 지원 한도 ${(left / 10000).toFixed(1)}억 원).` };
   }
   const limit = spendLimit(league, t, off.year + 1);
   if (limit !== null) {
@@ -1142,7 +1144,7 @@ export function offerFa(league: LeagueState, off: OffseasonState, id: string, sa
     }
   }
   off.fa.userOffers[id] = { team: t, salary: Math.round(salary), years };
-  const help = short > 0 ? ` 계약하면 자금이 모자란 계약금 약 ${(Math.min(bonus, short) / 10000).toFixed(1)}억 원은 모기업이 지원합니다.` : '';
+  const help = short > 0 ? ` 계약하면 자금이 모자란 계약금 약 ${(Math.min(bonusNow(bonus), short) / 10000).toFixed(1)}억 원은 모기업이 지원합니다.` : '';
   return { ok: true, message: `제시했습니다. 라운드가 끝나면 선수가 답합니다.${help}` };
 }
 
@@ -1623,8 +1625,9 @@ function signFa(league: LeagueState, off: OffseasonState, e: FaEntry, o: FaOffer
   const bonus = signingBonus(o.salary, o.years);
   p.contract = { kind: 'fa', salary: o.salary, until: year + o.years, prepaid: Math.round(bonus / o.years) };
   // 자금이 모자라면 모기업이 모자란 몫을 대 준다 (2026-10-21 사용자 결정, finance.ts coverFaBonus)
-  const support = coverFaBonus(league, o.team, bonus, year + 1, p.name);
-  league.ledger.push({ year: year + 1, from: o.team, to: -1, amount: bonus, note: `${p.name} FA 계약금`, kind: 'signing' });
+  // 계약금 2번 (재정 2 F5): 계약 때 절반(모자란 몫은 모기업 지원), 남은 절반은 다음 개막일
+  const support = coverFaBonus(league, o.team, bonusNow(bonus), year + 1, p.name);
+  payBonus(league, o.team, year + 1, bonus, `${p.name} FA 계약금`);
   if (support) log(off, 'fa', `${p.name} FA 계약금 중 자금이 모자란 ${(support / 10000).toFixed(1)}억 원을 모기업이 지원했습니다.`, o.team === off.userTeam, o.team === off.userTeam);
   p.faCount++;
   p.lastFaYear = year + 1;

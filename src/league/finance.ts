@@ -527,8 +527,24 @@ export interface TeamFinance {
   sponsorOffers?: SponsorOffers;
   /** 구단주 예산 회의 기록 (재정 2 F4b, 최근 몇 해만). AI 구단은 돈 요청만 */
   meetings?: MeetingRecord[];
+  /**
+   * 모기업 부채 (재정 2 F5, 기획안 4.9): 결산 긴급 지원의 절반. left[i] = i해 뒤 시즌 모기업 지원금에서 뺄 몫 (그 해 돈 그대로, 3년 ⅓씩).
+   * 지원금이 모자라 덜 뺀 몫은 다음 해 몫에 붙는다. 없으면 예전 규칙 (전년 긴급 지원 절반을 한 해에)
+   */
+  debt?: { amount: number; left: number[] };
+  /** 나중에 낼 돈 (재정 2 F5, 계약금 2번의 남은 절반): 그 해 개막일에 낸다 */
+  due?: DuePayment[];
   /** 지난 결산들 */
   history: FinanceYear[];
+}
+
+/** 개막일에 낼 돈 (계약금의 남은 절반 등) */
+export interface DuePayment {
+  /** 내는 시즌 (그 시즌 개막일) */
+  year: number;
+  amount: number;
+  note: string;
+  kind: FinanceKind;
 }
 
 /** 한 해 결산 (만 원). 수입은 양수, 지출은 음수로 적는다 */
@@ -543,6 +559,8 @@ export interface FinanceYear {
   rescue: number;
   /** 모기업 환원 (결산 뒤 자금이 DIVIDEND_RESERVE를 넘은 몫의 일부, 수지에는 넣지 않는다) */
   dividend?: number;
+  /** 결산 뒤 남은 모기업 부채 (재정 2 F5, 없으면 0) */
+  debt?: number;
   /** 정규시즌 홈 관중 합과 홈 경기 수 (미래 규칙 변경의 흥행 신호, 2026-10-22. 예전 저장에는 없다) */
   attendance?: number;
   homeGames?: number;
@@ -558,6 +576,7 @@ export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'merch' | 'parent' | 'parentExtra' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
   | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'editor' | 'other'
+  | 'interest' | 'debt'
   | OpsKind;
 
 export const FINANCE_LABEL: Record<FinanceKind, string> = {
@@ -566,7 +585,90 @@ export const FINANCE_LABEL: Record<FinanceKind, string> = {
   payroll: '국내 선수 연봉', foreign: '외국인 연봉', ops: '운영비 (나누기 전·캠프)', invest: '투자', scouting: '스카우트비',
   compensation: 'FA 보상금', fine: '제재금', signing: 'FA 계약금', transfer: '외국인 이적료', trade: '현금 트레이드', event: '이벤트', dividend: '모기업 환원', coach: '감독·코치 연봉', posting: '포스팅 이적료', stadium: '구장 공사비', release: '시즌 중 방출·영입', editor: '에디터', other: '기타',
   opsFront: '프런트', opsGame: '원정·경기 운영', opsPark: '구장 운영', opsFutures: '2군 운영',
+  interest: '단기 대여 이자', debt: '부채 상환 (자금에서)',
 };
+
+// ---- 적자·대여·부채 (재정 2 F5, 기획안 4.9, 결정 Q6)
+
+/** 시즌 중 단기 대여 이자 (연, 임시값): 지급일 뒤 자금이 0 아래면 그 몫을 모기업에서 빌린 것으로 보고 다음 지급일까지 이자 */
+export const LOAN_RATE = 0.04;
+/** 결산 긴급 지원 가운데 부채로 남는 몫과 나눠 갚는 해 수 */
+export const DEBT_SHARE = 0.5;
+export const DEBT_YEARS = 3;
+/** 계약금 2번 (규약 제81조 ③, 시점 임시값): 계약 때 이 몫, 남은 몫은 다음 개막일 */
+export const BONUS_NOW_SHARE = 0.5;
+/** 계약 때 낼 계약금 (나머지는 다음 개막일, dueBonus) */
+export const bonusNow = (bonus: number) => Math.round(bonus * BONUS_NOW_SHARE);
+
+/** 계약금을 두 번에: 지금 몫은 장부(그 장부 연도)로, 남은 몫은 그 해 개막일 지급(due)으로 적는다. 지금 낸 몫을 돌려준다 */
+export function payBonus(league: LeagueState, team: number, year: number, bonus: number, note: string, kind: FinanceKind = 'signing'): number {
+  const now = bonusNow(bonus);
+  if (now) league.ledger.push({ year, from: team, to: -1, amount: now, note, kind });
+  const rest = bonus - now;
+  if (rest) {
+    ensureFinance(league);
+    const f = league.finance![team];
+    f.due = [...(f.due ?? []), { year, amount: rest, note: `${note} (남은 절반, 개막일)`, kind }];
+  }
+  return now;
+}
+
+/** 그 해 개막일에 낼 돈 합 (만 원) */
+export function dueOf(f: TeamFinance | undefined, year: number): number {
+  return (f?.due ?? []).filter((d) => d.year === year).reduce((s, d) => s + d.amount, 0);
+}
+
+/** 남은 부채 (만 원) */
+export const debtOf = (f: TeamFinance | undefined) => f?.debt?.amount ?? 0;
+
+/** 다음 결산 시즌에 모기업 지원금에서 뺄 부채 몫 (예정, 지원금이 모자라면 덜 뺀다) */
+export const debtDueOf = (f: TeamFinance | undefined) => f?.debt?.left[0] ?? 0;
+
+/**
+ * 부채를 일찍 갚는다 (조작 'repay-debt', 오프시즌, 자금에서). 앞 해 몫부터 줄인다. 장부 '부채 상환'(수지에는 넣지 않음, 빌린 돈 갚기)
+ */
+export function repayDebt(league: LeagueState, team: number, ledgerYear: number, amount: number, cash: number): { ok: boolean; message: string } {
+  ensureFinance(league);
+  const f = league.finance![team];
+  const left = debtOf(f);
+  if (left <= 0) return { ok: false, message: '갚을 부채가 없습니다.' };
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, message: '갚을 금액을 정하세요.' };
+  const pay = Math.round(Math.min(amount, left));
+  if (pay > cash) return { ok: false, message: `자금(${eokShort(Math.max(0, cash))})이 모자랍니다.` };
+  let rest = pay;
+  const slots = [...f.debt!.left];
+  for (let i = 0; i < slots.length && rest > 0; i++) {
+    const v = Math.min(slots[i], rest);
+    slots[i] -= v;
+    rest -= v;
+  }
+  while (slots.length && slots[slots.length - 1] <= 0) slots.pop();
+  f.debt = { amount: left - pay, left: slots.map((v) => Math.max(0, v)) };
+  league.ledger.push({ year: ledgerYear, from: team, to: -1, amount: pay, note: `모기업 부채 상환 (일찍 갚음)`, kind: 'debt' });
+  return { ok: true, message: `모기업 부채 ${eokShort(pay)}을 갚았습니다 (남은 부채 ${eokShort(f.debt.amount)}).` };
+}
+
+/**
+ * 결산 때 부채: 이번 시즌 지원금에서 뺀 몫을 지우고, 지원금이 모자라 덜 뺀 몫은 결산 뒤 자금에서 낸다 (cashPay가 낸 만큼, 그래도 남으면 다음 해로).
+ * 새 긴급 지원의 절반을 3년에 나눠 얹는다
+ */
+function settleDebt(f: TeamFinance, paid: number, rescue: number, cashPay: (short: number) => number): void {
+  const d = f.debt ?? { amount: 0, left: [] };
+  const slots = [...d.left];
+  const due = slots.shift() ?? 0;
+  const fromSupport = Math.min(paid, due);
+  const fromCash = due - fromSupport > 0 ? cashPay(due - fromSupport) : 0;
+  const short = Math.max(0, due - fromSupport - fromCash);
+  if (short) slots[0] = (slots[0] ?? 0) + short;
+  let amount = Math.max(0, d.amount - fromSupport - fromCash);
+  const add = Math.round(rescue * DEBT_SHARE);
+  if (add > 0) {
+    const third = Math.floor(add / DEBT_YEARS);
+    for (let i = 0; i < DEBT_YEARS; i++) slots[i] = (slots[i] ?? 0) + (i === DEBT_YEARS - 1 ? add - third * (DEBT_YEARS - 1) : third);
+    amount += add;
+  }
+  f.debt = { amount, left: slots };
+}
 
 /** 새 게임의 투자 단계: 모든 구단 1단계 (임시값) */
 const startInvest = (): Record<InvestKind, number> => ({ scout: 1, scoutPro: 1, develop: 1, medical: 1, marketing: 1 });
@@ -707,6 +809,9 @@ export interface SeasonFlows {
   /** 이번 시즌 확정 가격 */
   prices: SeatPrices;
   months: MonthPoint[];
+  /** 모기업 단기 대여 (재정 2 F5): 지금(마지막 지급일 뒤) 대여 잔액과 지금까지 쌓인 이자 (만 원). 이자는 결산 셈(settle)에서만 items.interest로 */
+  loan: number;
+  interest: number;
 }
 
 const parkOf = (league: LeagueState, team: number) => BALLPARK[league.teams[team].franchise] ?? DEFAULT_PARK;
@@ -989,8 +1094,32 @@ export function seasonFlows(input: SeasonInput, team: number, upToDay: number): 
     ];
     for (const [k, v] of parts) { add(k, v); net[i] += v; }
   });
+  // 개막일에 낼 돈 (재정 2 F5: 계약금의 남은 절반). 개막 날부터 보인다
+  for (const d of fin?.due ?? []) {
+    if (d.year !== year || !d.amount) continue;
+    add(d.kind, -d.amount);
+    net[0] -= d.amount;
+  }
+  // 모기업 단기 대여 (재정 2 F5, 기획안 4.9): 지급일 뒤 자금(장부 + 그때까지 흐름)이 0 아래면 그 몫을 빌린 것으로 보고
+  // 다음 지급일(지금 셈이면 upToDay)까지 연 LOAN_RATE 이자를 쌓는다. 장부의 시즌 중 항목(현금 트레이드 등)은 개막 때 있던 것으로 본다 (임시 단순화)
+  let bal = cashOf(league, team);
+  let loan = 0;
+  let interest = 0;
+  const upTo = Math.min(upToDay, season.schedule.length - 1);
+  pays.forEach((pd, i) => {
+    if (pd.when === 'settle' ? !input.settle : pd.when === 'day' && pd.day >= upToDay) return;
+    bal += net[i];
+    loan = Math.max(0, -bal);
+    if (!loan) return;
+    const next = pays[i + 1];
+    const until = next && (next.when === 'settle' ? input.settle : next.day < upToDay) ? next.day : (pd.when === 'settle' ? pd.day : Math.max(pd.day, upTo));
+    interest += (loan * LOAN_RATE * Math.max(0, until - pd.day)) / 365;
+  });
+  interest = Math.round(interest);
+  if (input.settle && interest) add('interest', -interest);
   const months: MonthPoint[] = pays.map((pd, i) => ({ day: pd.day, month: pd.months[pd.months.length - 1], when: pd.when, months: pd.months, net: net[i] }));
-  return { items, attendance, regular, homeGames, seats, demand, prices, months };
+  if (input.settle && interest) months[months.length - 1].net -= interest;
+  return { items, attendance, regular, homeGames, seats, demand, prices, months, loan, interest };
 }
 
 /**
@@ -1064,6 +1193,8 @@ export interface FinancePlan {
   /** 좌석 등급별 예상 관중·관중 수입 (시즌 합), 가정한 가격 (재정 2 F3). 홈 경기가 없으면 관중 0 */
   seats: Record<SeatGrade, { fans: number; gate: number }>;
   prices: SeatPrices;
+  /** 모기업 지원금에서 빼는 부채 몫 (재정 2 F5, 지원금 줄에 이미 빠져 있음) */
+  debtPay: number;
 }
 
 /** 계획의 입력. season이 그 해 시즌이면 그 일정으로, 아니면(오프시즌에 다음 시즌) 지난 결산 관중으로 관중 수입을 잡는다 */
@@ -1163,10 +1294,14 @@ export function financePlan(input: PlanInput, team: number, year: number, budget
   add('coach', -(coachPayroll(league, team) + managerPayroll(league, team)));
   const build = installment(league.stadiums?.[team], year);
   if (build) add('stadium', -build);
-  // 장부에 이미 적힌 그 해 항목
+  // 장부에 이미 적힌 그 해 항목 (일찍 갚은 부채는 빌린 돈 갚기라 수지에 넣지 않는다), 개막일에 낼 계약금 남은 절반 (재정 2 F5)
   const booked = ledgerItems(league, team, year);
-  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start') add(k, booked[k] ?? 0);
-  return { year, items, homeGames, perGame, winPct, seats, prices };
+  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start' && k !== 'debt') add(k, booked[k] ?? 0);
+  for (const d of fin?.due ?? []) if (d.year === year) add(d.kind, -d.amount);
+  // 이번 시즌 모기업 지원금에서 빼는 부채 몫 (지원금 줄에 이미 빠져 있다, 화면 안내용)
+  const trustNow = league.owner?.team === team ? league.owner.trust : 50;
+  const debtPay = fin?.debt ? parentParts(league, team, trustNow, inSeason ? fin.history.at(-1)?.cash ?? START_CASH : cashOf(league, team), year).debt : 0;
+  return { year, items, homeGames, perGame, winPct, seats, prices, debtPay };
 }
 
 /** 예산안 한 줄 */
@@ -1228,16 +1363,27 @@ export function popularity(league: LeagueState, team: number, winPct: number, po
 }
 
 /**
- * 모기업 지원금: 등급 기본액 × (0.85 + 0.003 × 신뢰도) − 전년 긴급 지원의 절반 − 쌓인 자금 회수분.
- * cash: 지원금을 받기 직전 자금
+ * 모기업 지원금: 등급 기본액 × (0.85 + 0.003 × 신뢰도) − 쌓인 자금 회수분 − 부채 몫 (재정 2 F5: 긴급 지원 절반을 3년 ⅓씩).
+ * 부채 칸이 없는 예전 저장은 예전 규칙 (전년 긴급 지원의 절반을 한 해에). cash: 지원금을 받기 직전 자금
  */
 export function parentSupport(league: LeagueState, team: number, trust: number, cash: number, year = league.year): number {
+  return parentParts(league, team, trust, cash, year).support;
+}
+
+/** 모기업 지원금 셈 나눠 보기: debt = 이번에 실제로 뺀 부채 몫 (지원금보다 크면 지원금만큼) */
+export function parentParts(league: LeagueState, team: number, trust: number, cash: number, year = league.year): { support: number; debt: number; clawback: number } {
   const wage = wageIndex(year, league);
   const base = PARENT_BASE[parentGrade(league, team)] * wage;
-  const prevRescue = league.finance?.[team]?.history.at(-1)?.rescue ?? 0;
+  const f = league.finance?.[team];
   const clawback = Math.max(0, cash - PARENT_RESERVE * wage) * PARENT_CLAWBACK;
   const inc = team === userTeamOf(league) ? settingsOf(league).income : 1;
-  return Math.max(0, Math.round(base * inc * (0.85 + 0.003 * trust) - prevRescue / 2 - clawback));
+  const gross = base * inc * (0.85 + 0.003 * trust) - clawback;
+  if (!f?.debt) {
+    const prevRescue = f?.history.at(-1)?.rescue ?? 0;
+    return { support: Math.max(0, Math.round(gross - prevRescue / 2)), debt: 0, clawback: Math.round(clawback) };
+  }
+  const debt = Math.min(debtDueOf(f), Math.max(0, Math.round(gross)));
+  return { support: Math.max(0, Math.round(gross) - debt), debt, clawback: Math.round(clawback) };
 }
 
 export interface SettleInput extends SeasonInput {
@@ -1264,6 +1410,9 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
   const wage = wageIndex(year, league);
   const reserve = DIVIDEND_RESERVE * wage;
   for (let t = 0; t < league.teams.length; t++) {
+    // 이번 시즌 모기업 지원금에서 실제로 뺀 부채 몫 (seasonIncome과 같은 입력, 지원금을 바꾸기 전에)
+    const fin = league.finance![t];
+    const debtPaid = fin.debt ? parentParts(league, t, league.owner?.team === t ? league.owner.trust : 50, fin.history.at(-1)?.cash ?? START_CASH, year).debt : 0;
     const flows = seasonFlows({ ...input, settle: true }, t, end);
     const items = { ...flows.items };
     const rec = t < world.teams.length ? season.teams[t] : null;
@@ -1285,9 +1434,10 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     // 이 해 장부의 다른 항목(오프시즌 보상금·계약금·이적료, 시즌 중 현금 트레이드 등)도 결산에 넣는다
     const other = ledgerItems(league, t, year);
-    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'faSupport' && k !== 'start' && k !== 'dividend') items[k] = other[k];
-    // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다
+    for (const k of Object.keys(other) as FinanceKind[]) if (!(k in items) && k !== 'rescue' && k !== 'faSupport' && k !== 'start' && k !== 'dividend' && k !== 'debt') items[k] = other[k];
+    // 구장: 장부에 이 해 착공금과 방금 적은 할부가 함께 있다. 계약금도 (오프시즌 계약 때 절반 + 개막일 절반, 재정 2 F5)
     if (other.stadium) items.stadium = other.stadium;
+    if (other.signing) items.signing = other.signing;
     const net = Object.values(items).reduce((s, v) => s + (v ?? 0), 0);
     let cash = cashOf(league, t);
     let rescue = 0;
@@ -1295,6 +1445,19 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
       rescue = -cash;
       league.ledger.push({ year, from: -1, to: t, amount: rescue, note: `${year} 모기업 긴급 지원 (적자 보전)`, kind: 'rescue' });
       cash = 0;
+    }
+    // 부채 (재정 2 F5): 이번 시즌 뺀 몫을 지우고 긴급 지원의 절반을 3년에 나눠 얹는다. 개막일에 낸 돈(due)은 지운다
+    settleDebt(fin, debtPaid, rescue, (short) => {
+      const pay = Math.min(short, Math.max(0, cash));
+      if (pay > 0) {
+        league.ledger.push({ year, from: t, to: -1, amount: pay, note: `${year} 모기업 부채 상환 (지원금이 모자란 몫)`, kind: 'debt' });
+        cash -= pay;
+      }
+      return pay;
+    });
+    if (fin.due?.some((d) => d.year <= year)) {
+      fin.due = fin.due.filter((d) => d.year > year);
+      if (!fin.due.length) delete fin.due;
     }
     let dividend = 0;
     if (cash > reserve) {
@@ -1304,7 +1467,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
     }
     const base = isBasePrices(flows.prices);
     const y: FinanceYear = {
-      year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), attendance: flows.regular, homeGames: flows.homeGames,
+      year, items, net, cash, rescue, ...(dividend ? { dividend } : {}), ...(fin.debt?.amount ? { debt: fin.debt.amount } : {}), attendance: flows.regular, homeGames: flows.homeGames,
       ...(flows.homeGames ? { seats: roundSeats(flows.seats), demand: flows.demand } : {}), ...(base ? {} : { prices: flows.prices }),
     };
     league.finance![t].history.push(y);
@@ -1325,7 +1488,7 @@ export function settleSeason(input: SettleInput): FinanceYear[] {
 }
 
 /**
- * FA 계약금 중 자금이 모자란 몫을 모기업이 대 준다 (2026-10-21 사용자: "대줘"). AI 구단·플레이어 구단 모두.
+ * FA 계약금(계약 때 내는 몫, 재정 2 F5부터 절반) 중 자금이 모자란 몫을 모기업이 대 준다 (2026-10-21 사용자: "대줘"). AI 구단·플레이어 구단 모두.
  * 장부에 '모기업 지원 (FA 계약금)'으로 남기고 지원액을 돌려준다 (없으면 0).
  * 구단주 평가와는 잇지 않는다: 결산 수지(net)와 긴급 지원(rescue)에 넣지 않는다
  */
@@ -1349,9 +1512,10 @@ export function faSupportLeft(league: LeagueState, team: number, year: number): 
   return Math.max(0, faSupportCap(league, team, year) - used);
 }
 
-/** 계약금 bonus를 지금 자금 + 남은 모기업 지원으로 낼 수 있나 */
+/** 계약금 bonus의 계약 때 몫(bonusNow)을 지금 자금 + 남은 모기업 지원으로 낼 수 있나 */
 export function canPayFaBonus(league: LeagueState, team: number, bonus: number, year: number): boolean {
-  return bonus <= Math.max(0, cashOf(league, team)) + faSupportLeft(league, team, year);
+  // 계약 때 내는 몫만 (재정 2 F5 계약금 2번: 남은 절반은 다음 개막일)
+  return bonusNow(bonus) <= Math.max(0, cashOf(league, team)) + faSupportLeft(league, team, year);
 }
 
 /** 적자 보전에 따른 구단주 신뢰도 변화 (−(메운 금액 ÷ 20억), 최대 −15). 흑자면 +2 */
