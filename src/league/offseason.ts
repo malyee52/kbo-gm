@@ -8,7 +8,7 @@ import { aiMeetings, closeMeeting, ownerInput } from './meeting';
 import { judgeTitles } from './titles';
 import { lineTeam } from '../engine/types';
 import { repDemand } from './reputation';
-import { aiFxRegion, FX_OFF_SENDS, fxListCount, fxOpenOff, fxPoolPlan, fxSeasonWindow, fxSendOff, fxSigned, fxSpec, fxState, fxVisible, FX_OFF_UNTIL, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
+import { aiFxRegion, FX_OFF_SENDS, fxListCount, fxMarketRuns, fxOpenOff, fxPoolPlan, fxSeasonWindow, fxSendOff, fxSigned, fxSpec, fxState, fxVisible, FX_OFF_UNTIL, type FxCtx, type FxNews, type FxRegion } from './scoutfx';
 import { applyPickOwners } from './picks';
 import { seasonAwards } from './awards';
 import { archiveDeparting } from './history';
@@ -36,7 +36,7 @@ import {
 } from './careers';
 import { foreignName, josa, koreanName } from './names';
 import {
-  capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_REGULAR, isPreGrade,
+  capShareOf, COMPENSATION, franchiseTag, franchiseTagEligible, FRANCHISE_TAG_FROM, FRANCHISE_TAG_SEASONS, FRANCHISE_TAG_SHARE, faEligible, faGrade, faGradeLabel, faRankGrade, faYears, FOREIGN_ASIA, FOREIGN_NEW_CAP, FOREIGN_REGULAR, isPreGrade,
   FA_RE_ELIGIBLE, foreignCap, foreignContractTotal, foreignSalary, foreignTeamCap, isNewForeign, marketSalary, MIN_SALARY, minSalary, minSalaryNominal, serviceNeeded, nextReserveSalary, reserveTarget, runsForSalary, salaryCap,
   SERVICE_SHARE, salaryFloor, teamCapPayroll, type ForeignCapKey, WON_PER_RUN, wageIndex, rookieSalary, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
@@ -120,8 +120,14 @@ export const DRAFT_ROUNDS = 11;
 export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
 /** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
 const DRAFT_POOL = VIRTUAL_POOL;
-/** 외국인 재계약 기준 (런, 임시값) */
-const FOREIGN_KEEP_RUNS = 12;
+/**
+ * 외국인 재계약 판단 (2026-11-04 사용자 결정: 절대 기준이 아니라 시장 후보와 견주어): 다음 시즌 능력이 시장에서 새로 데려올 후보의 기대 능력
+ * (scoutfx.ts fxMarketRuns) + 몸값 차이(재계약 요구액 − 그 후보 신규 요구액)를 런으로 바꾼 값 − 아는 선수 덤 이상이면 남긴다.
+ * 런당 금액·덤은 임시값 (100시즌 평가 K3·K2와 tools/foreign_renew_check.ts로 맞춤). 37세부터는 남기지 않는다 (예전 규칙 그대로)
+ */
+const FOREIGN_KEEP_USD_PER_RUN = 60_000;
+const FOREIGN_KEEP_FAMILIAR = 3;
+const FOREIGN_KEEP_MAX_AGE = 36;
 /** 3명 총액 상한 안에 이만큼도 남지 않으면 재계약하지 않는다 (달러, 임시값) */
 const FOREIGN_MIN_DEAL = 300_000;
 
@@ -1842,8 +1848,22 @@ function fxRep(league: LeagueState, view: LeagueView, p: LeaguePlayer): number {
 /** 계약 기간이 이번 오프시즌에 끝나는 외국인 */
 const expiring = (p: LeaguePlayer, year: number) => p.foreign && p.contract.until <= year;
 
-function foreignKeepAdvice(view: LeagueView, p: LeaguePlayer, year: number): boolean {
-  return currentRuns(view.sim.get(p.id)!, view.ctx) >= FOREIGN_KEEP_RUNS && ageIn(p, year + 1) <= 36;
+/**
+ * 재계약 문턱 (런, 다음 시즌): 시장 후보 기대 능력 + (재계약 요구액 − 그 후보의 신규 요구액) ÷ 런당 금액 − 아는 선수 덤.
+ * 런당 금액은 금액 상한 인상(foreignCap)과 같은 배율, 아시아쿼터는 신규 상한 비율(20만 ÷ 100만)만큼 작다
+ */
+export function foreignKeepBar(league: LeagueState, view: LeagueView, p: LeaguePlayer): number {
+  const ref = fxMarketRuns(p.isPitcher, !!p.asia);
+  const want = foreignSalary(fxRep(league, view, p), false, !!p.asia, league, view.year);
+  const fresh = foreignSalary(ref, true, !!p.asia, league, view.year);
+  const perRun = FOREIGN_KEEP_USD_PER_RUN * foreignCap(league, p.asia ? 'asiaNewCap' : 'foreignNewCap', view.year) / FOREIGN_NEW_CAP;
+  return ref + (want - fresh) / perRun - FOREIGN_KEEP_FAMILIAR;
+}
+
+/** 재계약 권고: AI 구단은 이대로 정하고, 플레이어 구단은 외국인 단계 화면의 처음 체크 값 (우리 선수 지금 능력은 화면에도 진짜 값, scout.ts nowSigma) */
+function foreignKeepAdvice(league: LeagueState, view: LeagueView, p: LeaguePlayer, year: number): boolean {
+  if (ageIn(p, year + 1) > FOREIGN_KEEP_MAX_AGE) return false;
+  return currentRuns(view.sim.get(p.id)!, view.ctx) >= foreignKeepBar(league, view, p);
 }
 
 /** 재계약 연봉: 원래 받을 금액과 3명 총액 상한의 남은 몫 중 작은 쪽 (아시아쿼터는 상한 없음, 임시 규칙) */
@@ -1892,7 +1912,7 @@ function enterForeign(league: LeagueState, off: OffseasonState, store: Store, pa
     let pay = staying.filter((p) => !p.asia).reduce((sum, p) => sum + foreignContractTotal(p.contract), 0);
     // 총액 상한은 재계약 외국인마다 늘어난다 (salary.ts foreignTeamCap)
     const kept = staying.filter((p) => !p.asia);
-    const cands = mine.filter((p) => expiring(p, year) && foreignKeepAdvice(view, p, year))
+    const cands = mine.filter((p) => expiring(p, year) && foreignKeepAdvice(league, view, p, year))
       .sort((a, b) => currentRuns(view.sim.get(b.id)!, view.ctx) - currentRuns(view.sim.get(a.id)!, view.ctx) || a.id.localeCompare(b.id));
     for (const p of cands) {
       if (p.asia ? asia >= lim.asia : regular >= lim.regular) continue;
