@@ -73,6 +73,8 @@ interface Summary {
   b2: number; b4: number; a6: number; d9: number;
   ageP: Record<number, { n: number; w: number; top: number }>; ageB: Record<number, { n: number; w: number; top: number }>;
   debutP: number[]; debutB: number[];
+  /** 스타(커리어 최고 WAR 6+, 40세까지 지켜본 선수) 나이별 평균 WAR·뛴 비율 */
+  starP: { n: number; at: Record<number, [number, number]> }; starB: { n: number; at: Record<number, [number, number]> };
 }
 
 /** 게임 판: 시작 해 뒤 입단한 국내 선수. 실제 판(real-*): 그 대조 시작 해부터 데뷔한 국내 선수 */
@@ -104,7 +106,18 @@ function summarize(file: string): Summary {
     for (const [a, ws] of Object.entries(by)) o[Number(a)] = { n: ws.length / years.length, w: mean(ws), top: q(ws, 0.9) };
     return o;
   };
+  const starOf = (pit: boolean) => {
+    const xs = gen.filter((p) => p.pit === pit && p.birth && p.birth + 40 <= last && Math.max(...p.s.map((r) => r[2])) >= 6);
+    const at: Record<number, [number, number]> = {};
+    for (let a = 20; a <= 40; a += 2) {
+      const ws = xs.map((p) => p.s.filter((r) => r[8] === a || r[8] === a + 1).map((r) => r[2])).flat();
+      const played = xs.filter((p) => p.s.some((r) => r[8] === a || r[8] === a + 1)).length;
+      at[a] = [mean(ws), xs.length ? played / xs.length : NaN];
+    }
+    return { n: xs.length / years.length, at };
+  };
   return {
+    starP: starOf(true), starB: starOf(false),
     label: real ? `실제 ${start}~` : `${d.meta.seed}`, years: years.length, b2, b4, a6, d9,
     ageP: ageOf(true), ageB: ageOf(false),
     debutP: gen.filter((p) => p.pit).map((p) => p.s[0][2]), debutB: gen.filter((p) => !p.pit).map((p) => p.s[0][2]),
@@ -122,6 +135,12 @@ function report(files: string[]): void {
     console.log(`| 나이 | ${ss.map((s) => s.label).join(' | ')} |`);
     console.log(`|---|${ss.map(() => '---').join('|')}|`);
     for (let a = 18; a <= 42; a++) console.log(`| ${a} | ${ss.map((s) => { const c = s[key][a]; return c ? `${f(c.w)} / ${f(c.top)} (${f(c.n, 1)})` : '-'; }).join(' | ')} |`);
+  }
+  for (const [name, key] of [['투수', 'starP'], ['타자', 'starB']] as const) {
+    console.log(`\n${name} 스타(최고 WAR 6+) 나이별 평균 WAR (그 두 해에 뛴 비율)`);
+    console.log(`| 나이 | ${ss.map((s) => `${s.label} (해마다 ${f(s[key].n)}명)`).join(' | ')} |`);
+    console.log(`|---|${ss.map(() => '---').join('|')}|`);
+    for (let a = 20; a <= 40; a += 2) console.log(`| ${a}~${a + 1} | ${ss.map((s) => { const [w, r] = s[key].at[a]; return `${f(w, 1)} (${f(100 * r, 0)}%)`; }).join(' | ')} |`);
   }
   console.log('\n데뷔 첫해 WAR (분위 50/90/99 · 최대 · 3+ 비율)');
   for (const s of ss) for (const [name, xs] of [['투수', s.debutP], ['타자', s.debutB]] as const) {
