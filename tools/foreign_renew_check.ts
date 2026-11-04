@@ -10,7 +10,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine } from '../src/engine';
 import { valueContext } from '../src/ai/value';
 import { runsNow } from '../src/league/careers';
-import { foreignFormParts, leagueView } from '../src/league/offseason';
+import { foreignFormParts, foreignKeepBar, leagueView } from '../src/league/offseason';
 import { createLeague } from '../src/league/create';
 import { foreignContractTotal } from '../src/league/salary';
 import { batWarOf, pitWarOf } from '../src/league/war';
@@ -33,7 +33,7 @@ interface SeedResult {
   usedPerTeam: number; payPerTeam: number; cashAvg: number; rescued: number;
   pool: number[]; signed: number[]; renewed: number[]; released: number[]; renewRate: number;
   /** 계약이 끝난 외국인의 판단 재료 (진짜 능력, 시즌 기여, 출전 몫, 남았나) */
-  form: { truth: number; runs: number; share: number; kept: boolean }[];
+  form: { truth: number; runs: number; share: number; bar: number; age: number; kept: boolean }[];
 }
 
 function warOfLine(league: LeagueState, year: number, pos: string | null, bat?: number[], pit?: number[]): number {
@@ -68,7 +68,7 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
       const ctx = valueContext(world);
       const inPool = new Set(f.pool);
       const view = leagueView(league, store, DEFAULT_PARAMS);
-      const part = (p: (typeof league.players)[number], kept: boolean) => { if (view.sim.has(p.id)) form.push({ ...foreignFormParts(league, store, view, p, year), kept }); };
+      const part = (p: (typeof league.players)[number], kept: boolean) => { if (view.sim.has(p.id)) form.push({ ...foreignFormParts(league, store, view, p, year), bar: foreignKeepBar(league, view, p), age: year + 1 - (p.birthYear ?? year - 28), kept }); };
       for (const p of league.players) {
         if (!p.foreign || p.asia) continue;
         const played = p.history.some((h) => h.year === year);
@@ -148,6 +148,20 @@ function main(): void {
     out.push(`| ${label} | ${xs.length} | ${f1(mean(xs))} | ${f1(q(xs, 0.1))} | ${f1(q(xs, 0.25))} | ${f1(q(xs, 0.5))} | ${f1(q(xs, 0.75))} | ${f1(q(xs, 0.9))} |`);
   }
   out.push(`\n재계약 비율 (계약이 끝난 외국인 중): ${res.map((r) => f1(r.renewRate * 100) + '%').join(' · ')}\n`);
+  // 판단 재료: 시즌 기여 눈금 영점(많이 뛴 선수의 시즌 기여 ÷ 출전 몫 − 진짜 능력)과 능력 구간별 남는 비율 (실제 24·42·61%)
+  const form = res.flatMap((r) => r.form);
+  const full = form.filter((x) => x.share >= 0.7);
+  const dev = full.map((x) => x.runs / x.share - x.truth);
+  const sd = Math.sqrt(mean(dev.map((d) => (d - mean(dev)) ** 2)));
+  out.push(`## 재계약 판단 재료\n\n출전 몫 0.7 이상 ${full.length}명: 시즌 기여 ÷ 출전 몫 − 진짜 능력 평균 ${f1(mean(dev))}런, 표준편차 ${f1(sd)}런. 출전 몫 평균 ${f2(mean(form.map((x) => x.share)))}, 출전 몫 0.7 이상 몫 ${f1((full.length / (form.length || 1)) * 100)}%\n`);
+  out.push('| 진짜 능력 구간 | 수 | 남은 비율 | 실제 (2015~2025) |\n|---|---|---|---|');
+  for (const [lo, hi, real] of [[-99, 30, '-'], [30, 40, '24%'], [40, 50, '42%'], [50, 999, '61%']] as const) {
+    const g = form.filter((x) => x.truth >= lo && x.truth < hi);
+    out.push(`| ${lo < -50 ? '30 미만' : hi > 500 ? '50 이상' : `${lo}~${hi}`} | ${g.length} | ${f1((g.filter((x) => x.kept).length / (g.length || 1)) * 100)}% | ${real} |`);
+  }
+  out.push('');
+  const dump = arg('dump');
+  if (dump) { mkdirSync(dirname(dump), { recursive: true }); writeFileSync(dump, JSON.stringify(form)); }
   const text = out.join('\n');
   const file = arg('out');
   if (file) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); console.log(`${file}에 썼습니다.`); } else console.log(text);
