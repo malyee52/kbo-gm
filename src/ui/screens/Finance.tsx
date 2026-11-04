@@ -41,7 +41,8 @@ function MoneyTable() {
   const line = (r: Row, label: string, sign: 1 | -1, bold = false) => {
     // 차이: 시즌 끝 예상 − 계획. 수입이 늘거나 지출이 줄면 +
     // 지급마다 반올림한 차이(몇만 원)는 없는 것으로 본다
-    const diff = Math.abs(r.end - r.plan) < 100 ? 0 : (r.end - r.plan) * sign;
+    // 값은 부호째(수입 +, 지출 −)라 end − plan이 곧 좋아진 쪽 + (지출 줄에 sign을 곱하면 뒤집힌다, F5 이자 줄에서 찾음)
+    const diff = Math.abs(r.end - r.plan) < 100 ? 0 : r.end - r.plan;
     const b = bold ? ' strong' : '';
     return (
       <tr key={label}>
