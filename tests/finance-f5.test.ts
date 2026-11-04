@@ -123,7 +123,9 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
     const old = roundTrip(g.league);
     delete old.finance![lg].debt;
     const q = parentParts(old, lg, trust, cashOf(old, lg), 2027);
-    expect(p.support - q.support).toBeCloseTo(rescue / 2 - f.debt!.left[0], -1);
+    // 예전 규칙은 지원금이 0 아래로 내려가지 않는다 (긴급 지원이 지원금의 두 배를 넘는 판: 특기 모양 2026-11-04 뒤 이 시드)
+    const gross = p.support + p.debt;
+    expect(q.support).toBeCloseTo(Math.max(0, gross - rescue / 2), -1);
   });
 
   it('부채가 3년 동안 지원금(모자라면 결산 자금)에서 빠지고 끝나면 없어진다', () => {
