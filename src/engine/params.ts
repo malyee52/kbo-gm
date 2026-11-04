@@ -503,7 +503,17 @@ export interface EngineParams {
    * 가치 총량은 skillForRuns가 다시 맞춘다. bat·pit은 모양 크기 배율 (1 = 실존 선수 능력의 퍼짐 그대로, 0이면 예전처럼 평평한 모양),
    * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다
    */
-  shape: { bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>> };
+  shape: {
+    bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>>;
+    /**
+     * 가운데 맞춤 (2026-11-04 리그 타율 카드): 모양 log 값에서 빼는 상수 (타자 so·bb·s1·d2·t3·hr, 투수 so·bb·hr·hit 순서).
+     * 모양은 선수 사이의 차이(자리·스타 대 후보·특기)만 주고 가상 선수 무리 전체의 사건 구성은 옮기지 않게 한다.
+     * 옮기면 결산 신호의 선수층 압력(futureRules.ts RuleSignal = 1 ÷ 환경 맞춤 계수)이 문턱을 넘어 반발계수·존 미래 규칙이
+     * 한쪽으로만 거듭 바뀌어 장기 리그 타율이 내려갔다. 값은 출전 가중 가상 선수 log 능력 비율의 (모양 켬 − 끔) 차이로 잰다
+     * (tools/league_env_trend.ts, 임시값). 없으면 0
+     */
+    center?: { bat: readonly number[]; pit: readonly number[] };
+  };
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 

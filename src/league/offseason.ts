@@ -3186,7 +3186,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const r = runTerm(T);
     const b = { ...p.bat };
     SHAPE_BAT_KEYS.forEach((k, i) => {
-      b[k] *= Math.exp(size.bat * (T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r + e[i] * (size.noise[k] ?? 1)));
+      b[k] *= Math.exp(size.bat * (T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r + e[i] * (size.noise[k] ?? 1) - (size.center?.bat[i] ?? 0)));
     });
     p.bat = b;
   }
@@ -3197,7 +3197,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const r = runTerm(T);
     const q = { ...p.pit };
     SHAPE_PIT_KEYS.forEach((k, i) => {
-      q[k] *= Math.exp(size.pit * (T.mean[g][i] + T.runSlope[i] * r + e[i]));
+      q[k] *= Math.exp(size.pit * (T.mean[g][i] + T.runSlope[i] * r + e[i] - (size.center?.pit[i] ?? 0)));
     });
     p.pit = q;
   }
