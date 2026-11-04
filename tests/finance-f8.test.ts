@@ -66,7 +66,7 @@ describe('자금이 많은 AI 구단의 공사', () => {
     const M = copy();
     M.stadiums![t] = JSON.parse(JSON.stringify(L.stadiums![t]));
     stadiumYearEnd(L, 2026, (x) => (x === t ? remodel + keep + 10 : 0), 0);
-    expect(L.stadiums![t].project?.kind).toBe('remodel');
+    expect((L.stadiums![t] as { project?: { kind: string } }).project?.kind).toBe('remodel');
     stadiumYearEnd(M, 2026, (x) => (x === t ? remodel + keep - 10_000 : 0), 0);
     expect(M.stadiums![t].project).toBeUndefined();
   });
@@ -78,7 +78,7 @@ describe('자금이 많은 AI 구단의 공사', () => {
     delete L.stadiums![t].project;
     const cost = Math.round(Math.max(...NEW_PARK.options.map((o) => o.cost)) * wage);
     stadiumYearEnd(L, 2026, (x) => (x === t ? cost + keep + 10 : 0), 0);
-    expect(L.stadiums![t].project?.kind).toBe('new');
+    expect((L.stadiums![t] as { project?: { kind: string } }).project?.kind).toBe('new');
   });
   it('실제 구장 이동이 가까우면(잠실 2032 돔) 돈이 많아도 넓힌 문턱으로 짓지 않는다', () => {
     const L = copy();
