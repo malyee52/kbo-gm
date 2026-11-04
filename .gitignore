@@ -17,3 +17,5 @@ data-src/naver_pbp/
 
 # 타구 유형·방향 리그 비율 엑셀 원본 (출처 미확인, 가공값만 data-src/batted_ball_derived/)
 data-src/batted_ball/
+reports/eval100/raw/
+reports/eval100/log/
