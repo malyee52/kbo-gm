@@ -4,8 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession, type GameAction } from '../src/game/session';
-import { foreignHeld, foreignSwapsUsed, INJURY_SWAP_DAYS, INJURY_SWAP_MONTH_USD, movesOf, rehabBlock, rehabsOf } from '../src/league/market';
-import { paydays } from '../src/league/finance';
+import { foreignHeld, foreignSwapsUsed, INJURY_SWAP_DAYS, movesOf, rehabBlock, rehabsOf, remainingShare, swapCap } from '../src/league/market';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -43,13 +42,16 @@ describe('부상 대체 외국인', () => {
     expect(g.rehabSignBlock(sub, p)).toBeNull();
     const lpMap = () => new Map(g.league.players.map((x) => [x.id, x]));
     const held = foreignHeld(g.world, g.teamIdx, lpMap(), g.league);
+    const signDay = g.day;
     expect(g.signRehab(sub, p).ok).toBe(true);
     expect(sub.teamIdx).toBe(g.teamIdx);
     expect(p.teamIdx).toBe(g.teamIdx);
     expect(foreignSwapsUsed(g.marketCtx, g.teamIdx)).toBe(0);
     expect(foreignHeld(g.world, g.teamIdx, lpMap(), g.league)).toEqual(held);
-    // 연봉은 한 달 10만 달러까지
-    expect(g.leaguePlayer(sub.id)!.contract.salary).toBeLessThanOrEqual(INJURY_SWAP_MONTH_USD * paydays(2026, g.season.schedule.length).length);
+    // 이번 시즌 총액은 한 달 10만 달러 × 남은 달까지 (보통 교체와 같은 셈), 계약금 없음
+    const c = g.leaguePlayer(sub.id)!.contract;
+    expect(c.bonus).toBeUndefined();
+    expect(c.salary * remainingShare(2026, g.season.schedule.length, signDay)).toBeLessThanOrEqual(swapCap(g.league, 2026, false, signDay)! + 1);
     // 재활 중에는 둘 다 웨이버할 수 없고, 원래 선수는 나을 때까지 복귀를 고를 수 없다
     expect(g.releaseBlock(p)).toMatch(/재활 명단/);
     expect(g.releaseBlock(sub)).toMatch(/부상 대체/);
