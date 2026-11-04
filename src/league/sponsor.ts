@@ -14,8 +14,13 @@ export const SLOT_LABEL: Record<SponsorSlot, string> = { main: '메인', sub1: '
 export type SponsorStyle = 'stable' | 'perf' | 'pop';
 export const STYLE_LABEL: Record<SponsorStyle, string> = { stable: '안정형', perf: '성적형', pop: '인기형' };
 
-/** 스폰서 계약 몫 (만 원, 2026년 돈, 인기도 1일 때 세 자리 합, 임시값). 상품·식음과 합쳐 예전 SPONSOR_BASE 75억 */
-export const SPONSOR_DEALS_BASE = 550_000;
+/**
+ * 스폰서 계약 몫 (만 원, 2026년 돈, 인기도 1일 때 세 자리 합, 임시값). F4a는 55억(+ 상품·식음 20억 = 예전 SPONSOR_BASE 75억).
+ * 재정 2 F6 (2026-11-04): 55 → 58억. 3시드 20시즌(tools/finance_longrun.ts)에서 스폰서 + 상품·식음이 F3(예전 공식)보다 해마다 약 1.7억,
+ * 입장권 탄력성으로 관중 수입이 약 0.9억 적어 평균 자금이 줄었다. 상품·식음(관중 연동)을 올리면 큰 구장 구단에 몰려
+ * (키움 평균 자금 97 → 65억) 인기도를 따르는 계약 몫으로 되돌렸다 (reports/finance-longrun-f6.md)
+ */
+export const SPONSOR_DEALS_BASE = 580_000;
 /** 자리 몫 (임시값) */
 export const SLOT_SHARE: Record<SponsorSlot, number> = { main: 0.6, sub1: 0.2, sub2: 0.2 };
 /** 성향별 연액 배율 (임시값) */
@@ -29,10 +34,10 @@ export const BONUS_ODDS = { postseason: 0.5, champion: 0.1, pop: 0.5 };
 export const FIRM_RANGE: [number, number] = [0.85, 1.15];
 /**
  * 기준 연액 맞춤 (임시값): 세 제안 중 기대 연액이 가장 큰 것을 고르므로 고른 계약의 평균이 기준보다 크다.
- * 그 몫을 덜어 자동 계약 리그 합이 기준(55억 × 인기도)에 맞게 (tests/sponsor.test.ts 첫 계약 시즌 ±2%)
+ * 그 몫을 덜어 자동 계약 리그 합이 기준(SPONSOR_DEALS_BASE × 인기도)에 맞게 (F4a 때 첫 계약 시즌 ±2%로 맞춤)
  */
 export const SPONSOR_NORM = 0.98;
-/** 상품·식음 1인 구매액 (만 원, 2026년 돈, 임시값): 평균 구단 홈 관중 약 123만 명 → 약 21억 */
+/** 상품·식음 1인 구매액 (만 원, 2026년 돈, 임시값): 평균 구단 홈 관중 약 123만 명 → 약 21억. F6에서 0.19도 재 보았으나 0.17 그대로 (SPONSOR_DEALS_BASE 주석) */
 export const MERCH_PER_FAN = 0.17;
 
 export interface SponsorOffer {
