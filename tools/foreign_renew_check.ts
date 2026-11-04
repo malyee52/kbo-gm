@@ -10,6 +10,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine } from '../src/engine';
 import { valueContext } from '../src/ai/value';
 import { runsNow } from '../src/league/careers';
+import { foreignFormParts, leagueView } from '../src/league/offseason';
 import { createLeague } from '../src/league/create';
 import { foreignContractTotal } from '../src/league/salary';
 import { batWarOf, pitWarOf } from '../src/league/war';
@@ -31,6 +32,8 @@ interface SeedResult {
   stay: number; stayAll: number; leftN: number; top10: number; foreignWarShare: number;
   usedPerTeam: number; payPerTeam: number; cashAvg: number; rescued: number;
   pool: number[]; signed: number[]; renewed: number[]; released: number[]; renewRate: number;
+  /** 계약이 끝난 외국인의 판단 재료 (진짜 능력, 시즌 기여, 출전 몫, 남았나) */
+  form: { truth: number; runs: number; share: number; kept: boolean }[];
 }
 
 function warOfLine(league: LeagueState, year: number, pos: string | null, bat?: number[], pit?: number[]): number {
@@ -53,6 +56,7 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
   let rescued = 0;
   const pool: number[] = [], signed: number[] = [], renewed: number[] = [], released: number[] = [];
   let renewN = 0, expN = 0;
+  const form: SeedResult['form'] = [];
   for (let s = 0; s < seasons; s++) {
     const year = league.year;
     // 개막 때 외국인 연봉 합 (일반 + 아시아쿼터, 달러)
@@ -63,6 +67,8 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
       if (!f) return;
       const ctx = valueContext(world);
       const inPool = new Set(f.pool);
+      const view = leagueView(league, store, DEFAULT_PARAMS);
+      const part = (p: (typeof league.players)[number], kept: boolean) => { if (view.sim.has(p.id)) form.push({ ...foreignFormParts(league, store, view, p, year), kept }); };
       for (const p of league.players) {
         if (!p.foreign || p.asia) continue;
         const played = p.history.some((h) => h.year === year);
@@ -70,11 +76,11 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
         // 계약한 후보는 풀 목록에서 빠지므로: 이번 시즌 기록이 없고 KBO 기록이 없는 소속 외국인 = 신규 계약 (계약 때 fx 칸이 지워진다)
         if (!played && p.team >= 0 && !p.history.length && !p.tenure0 && !inPool.has(p.id)) { pool.push(runs); signed.push(runs); continue; }
         if (inPool.has(p.id)) {
-          if (played) { released.push(runs); expN++; }
+          if (played) { released.push(runs); expN++; part(p, false); }
           else pool.push(runs);
         } else if (played && p.team >= 0 && p.contract.until === year + 1 && p.history.length >= 1) {
           // 계약이 이번에 끝나 다시 1년을 받은 선수 (다년 계약 없음: 외국인은 해마다 1년)
-          renewed.push(runs); renewN++; expN++;
+          renewed.push(runs); renewN++; expN++; part(p, true);
         }
       }
     });
@@ -114,7 +120,7 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
   return {
     seed, start, end: last, stay: mean(leftNew.map((r) => r.seasons.length)), stayAll: mean(left.map((r) => r.seasons.length)), leftN: leftNew.length,
     top10: mean(top10), foreignWarShare: mean(share), usedPerTeam: mean(used), payPerTeam: mean(pay), cashAvg: mean(cash), rescued,
-    pool, signed, renewed, released, renewRate: expN ? renewN / expN : NaN,
+    pool, signed, renewed, released, renewRate: expN ? renewN / expN : NaN, form,
   };
 }
 

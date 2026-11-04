@@ -5,7 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Rng } from '../src/engine';
 import { currentRuns } from '../src/ai/value';
 import { createLeague } from '../src/league/create';
-import { foreignKeepBar, leagueView } from '../src/league/offseason';
+import { foreignFormParts, foreignJudgeRuns, foreignKeepBar, leagueView } from '../src/league/offseason';
 import { foreignSalary } from '../src/league/salary';
 import { FX_MARKET_RUNS, FX_RUNS_LIFT, fxMarketRuns, fxSpec } from '../src/league/scoutfx';
 import type { LeagueState } from '../src/league/types';
@@ -60,5 +60,37 @@ describe('재계약 문턱 (foreignKeepBar)', () => {
       expect(bar, p.name).toBeGreaterThan(FX_MARKET_RUNS.asia - 10);
       expect(bar, p.name).toBeLessThan(FX_MARKET_RUNS.asia + 15);
     }
+  });
+});
+
+describe('재계약 판단값 (foreignJudgeRuns): 진짜 능력에 지난 시즌 성적의 어긋남을 섞는다', () => {
+  it('그 해 기록이 없으면 진짜 능력 그대로, 있으면 성적 쪽으로 일부만 움직인다', () => {
+    const view = leagueView(league, store, DEFAULT_PARAMS);
+    const fs = league.players.filter((p) => p.team >= 0 && p.foreign && !p.asia);
+    for (const p of fs) {
+      // 기록이 없는 해
+      expect(foreignJudgeRuns(league, store, view, p, 2099)).toBeCloseTo(currentRuns(view.sim.get(p.id)!, view.ctx), 9);
+    }
+    // 시작 판의 이력에는 실제 기록이 없다: 가짜 시즌 줄(600타석 · 165이닝 선발)로 잘한 해와 못한 해를 만든다
+    const bat = fs.find((p) => !p.isPitcher)!;
+    const pit = fs.find((p) => p.isPitcher)!;
+    const batLine = (h: number, hr: number) => [140, 600, 530, 80, h, 30, 2, hr, 80, 60, 10, 110, 5, 2];
+    const pitLine = (r: number) => [28, 28, 12, 8, 0, 495, 690, 150, 15, 45, 6, 150, r, r - 5, 0, 15, 0];
+    let moved = 0;
+    for (const [p, good, bad] of [[bat, batLine(190, 35), batLine(120, 8)], [pit, pitLine(55), pitLine(110)]] as const) {
+      const judge = (line: number[]) => {
+        const q = { ...p, history: [...p.history, { year: 2026, team: league.teams[p.team].name, ...(p.isPitcher ? { pit: line } : { bat: line }) }] };
+        const { truth, runs, share } = foreignFormParts(league, store, view, q, 2026);
+        expect(share).toBeCloseTo(1, 6);
+        const gap = runs - share * truth;
+        const d = foreignJudgeRuns(league, store, view, q, 2026) - truth;
+        // 같은 쪽으로, 어긋남보다 작게 (섞는 몫 0~1)
+        expect(Math.abs(d), p.name).toBeLessThanOrEqual(Math.abs(gap) + 1e-9);
+        if (Math.abs(gap) > 1) { expect(Math.sign(d), p.name).toBe(Math.sign(gap)); moved++; }
+        return d + truth;
+      };
+      expect(judge(good as number[]), p.name).toBeGreaterThan(judge(bad as number[]));
+    }
+    expect(moved).toBeGreaterThan(1);
   });
 });
