@@ -10,7 +10,7 @@ import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine } from '../src/engine';
 import { valueContext } from '../src/ai/value';
 import { runsNow } from '../src/league/careers';
-import { foreignFormParts, foreignKeepBar, leagueView } from '../src/league/offseason';
+import { setForeignKeepProbe, type ForeignKeepProbe } from '../src/league/offseason';
 import { createLeague } from '../src/league/create';
 import { foreignContractTotal } from '../src/league/salary';
 import { batWarOf, pitWarOf } from '../src/league/war';
@@ -57,6 +57,8 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
   const pool: number[] = [], signed: number[] = [], renewed: number[] = [], released: number[] = [];
   let renewN = 0, expN = 0;
   const form: SeedResult['form'] = [];
+  const probes = new Map<string, ForeignKeepProbe>();
+  setForeignKeepProbe((r) => probes.set(`${r.id}:${r.year}`, r));
   for (let s = 0; s < seasons; s++) {
     const year = league.year;
     // 개막 때 외국인 연봉 합 (일반 + 아시아쿼터, 달러)
@@ -67,8 +69,7 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
       if (!f) return;
       const ctx = valueContext(world);
       const inPool = new Set(f.pool);
-      const view = leagueView(league, store, DEFAULT_PARAMS);
-      const part = (p: (typeof league.players)[number], kept: boolean) => { if (view.sim.has(p.id)) form.push({ ...foreignFormParts(league, store, view, p, year), bar: foreignKeepBar(league, view, p), age: year + 1 - (p.birthYear ?? year - 28), kept }); };
+      const part = (p: (typeof league.players)[number], kept: boolean) => { const r = probes.get(`${p.id}:${year}`); if (r) form.push({ ...r, kept }); };
       for (const p of league.players) {
         if (!p.foreign || p.asia) continue;
         const played = p.history.some((h) => h.year === year);

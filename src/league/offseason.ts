@@ -130,9 +130,12 @@ const FOREIGN_KEEP_USD_PER_RUN = 60_000;
 const FOREIGN_KEEP_FAMILIAR = 3;
 const FOREIGN_KEEP_MAX_AGE = 36;
 /** 재계약 판단에 지난 시즌 성적을 섞는 몫 (offseason.ts foreignJudgeRuns, 임시값: 실제 재계약 비율 약 50%·구간별 남는 비율에 맞춤) */
-const FOREIGN_KEEP_FORM = 0.6;
-/** 시즌 기여 눈금(war.ts)과 능력 런(ai/value.ts currentRuns)의 영점 차이를 메우는 값 (런, 출전 몫만큼, tools/foreign_renew_check.ts로 잼, 임시값) */
-const FOREIGN_KEEP_FORM_SHIFT = 0;
+export const FOREIGN_KEEP_FORM = 0.6;
+/**
+ * 시즌 기여 눈금(war.ts)과 능력 런(ai/value.ts currentRuns)의 영점 차이를 메우는 값 (런, 출전 몫만큼, 임시값). tools/foreign_renew_check.ts 2026 시작 8시즌:
+ * 많이 뛴 외국인의 시즌 기여 ÷ 출전 몫이 진짜 능력보다 평균 8.7런 낮고(표준편차 14.9), 섞는 몫 0.6과 이 값 8로 판단 재계약 비율 49%·구간별 32/41/70% (실제 약 50%·24/42/61%)
+ */
+export const FOREIGN_KEEP_FORM_SHIFT = 8;
 /** 출전 몫을 셀 때 한 시즌 전부로 보는 양 (임시값): 타자 600타석, 선발 165이닝, 구원 65이닝 */
 const FOREIGN_FULL_PA = 600;
 const FOREIGN_FULL_OUTS_SP = 495;
@@ -1901,9 +1904,15 @@ export function foreignFormParts(league: LeagueState, store: Store, view: League
 
 /** 재계약 권고: AI 구단은 이대로 정하고, 플레이어 구단은 외국인 단계 화면의 처음 체크 값 (우리 선수 지금 능력은 화면에도 진짜 값, scout.ts nowSigma) */
 function foreignKeepAdvice(league: LeagueState, store: Store, view: LeagueView, p: LeaguePlayer, year: number): boolean {
+  if (foreignKeepProbe) foreignKeepProbe({ id: p.id, year, age: ageIn(p, year + 1), bar: foreignKeepBar(league, view, p), ...foreignFormParts(league, store, view, p, year) });
   if (ageIn(p, year + 1) > FOREIGN_KEEP_MAX_AGE) return false;
   return foreignJudgeRuns(league, store, view, p, year) >= foreignKeepBar(league, view, p);
 }
+
+/** 점검 도구용 엿보기 (tools/foreign_renew_check.ts): 재계약 판단 때의 재료를 받는다. 게임은 쓰지 않는다 (null) */
+export interface ForeignKeepProbe { id: string; year: number; age: number; bar: number; truth: number; runs: number; share: number }
+let foreignKeepProbe: ((r: ForeignKeepProbe) => void) | null = null;
+export function setForeignKeepProbe(f: ((r: ForeignKeepProbe) => void) | null): void { foreignKeepProbe = f; }
 
 /** 재계약 연봉: 원래 받을 금액과 3명 총액 상한의 남은 몫 중 작은 쪽 (아시아쿼터는 상한 없음, 임시 규칙) */
 function resignForeignSalary(league: LeagueState, view: LeagueView, p: LeaguePlayer, room: number): number {
@@ -2135,15 +2144,19 @@ export function sendFxOff(league: LeagueState, off: OffseasonState, region: FxRe
  * AI 구단이 보는 외국인 후보 (기획안 17.8·19.4): 진짜 능력 대신 그 구단의 추측(진짜 + z × σ, 프로 스카우트 단계·난이도·관찰 기간)만큼
  * 능력을 옮긴 모습. 계약은 진짜 선수로 한다
  */
-function aiSeenForeign(league: LeagueState, view: LeagueView, team: number, sim: SimPlayer): SimPlayer {
+function aiSeenForeign(league: LeagueState, store: Store, view: LeagueView, team: number, sim: SimPlayer, year: number): SimPlayer {
   const who = { team, user: false };
   const now = currentRuns(sim, view.ctx);
-  const target = guessRuns(league, who, sim.id, now, foreignSigma(league, who, { id: sim.id, sample: sim.bat?.sample ?? sim.pit?.sample ?? null }), view.year);
+  // 이번 시즌 KBO에서 뛴 외국인(재계약하지 않아 시장에 나온 선수)은 재계약 판단과 같이 지난 시즌 성적을 섞어 본다 (foreignJudgeRuns).
+  // 성적이 나빠 풀린 선수를 다른 구단이 진짜 능력으로 바로 데려가면 재계약 판단이 헛돈다 (2026-11-04 외국인 재계약 카드: 시장에 나온 선수의 대부분이 다시 계약)
+  const p = league.players.find((x) => x.id === sim.id);
+  const form = p ? foreignJudgeRuns(league, store, view, p, year) - now : 0;
+  const target = form + guessRuns(league, who, sim.id, now, foreignSigma(league, who, { id: sim.id, sample: sim.bat?.sample ?? sim.pit?.sample ?? null }), view.year);
   const d = shiftForRuns({ ...sim, birthYear: sim.age === null ? null : view.year - sim.age }, target, view.ctx, view.year);
   return { ...sim, bat: sim.bat && shiftBat(sim.bat, d), pit: sim.pit && shiftPit(sim.pit, d) };
 }
 
-function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, view: LeagueView): void {
+function aiForeignPicks(league: LeagueState, off: OffseasonState, store: Store, team: number, view: LeagueView): void {
   const tendency = tendencyFor(league, view, team);
   const seen = new Map<string, SimPlayer>();
   for (let guard = 0; guard < 4; guard++) {
@@ -2152,7 +2165,7 @@ function aiForeignPicks(league: LeagueState, off: OffseasonState, team: number, 
     for (const id of off.foreign!.pool) {
       const p = league.players.find((x) => x.id === id)!;
       if (!canSignForeign(league, off, team, p).ok) continue; // 관찰 명단에 없는 파견 후보는 여기서 걸린다
-      if (!seen.has(id)) seen.set(id, aiSeenForeign(league, view, team, view.sim.get(id)!));
+      if (!seen.has(id)) seen.set(id, aiSeenForeign(league, store, view, team, view.sim.get(id)!, off.year));
       const gain = signingGain(view, team, seen.get(id)!, 2, tendency, false);
       if (gain > bestGain) {
         bestGain = gain;
@@ -2169,7 +2182,7 @@ function runForeignUntilUser(league: LeagueState, off: OffseasonState, store: St
   const f = off.foreign!;
   const view = leagueView(league, store, params);
   while (f.pointer < f.order.length && f.order[f.pointer] !== off.userTeam) {
-    aiForeignPicks(league, off, f.order[f.pointer], view);
+    aiForeignPicks(league, off, store, f.order[f.pointer], view);
     f.pointer++;
   }
 }
@@ -2225,7 +2238,7 @@ function finishForeign(league: LeagueState, off: OffseasonState, store: Store, p
   if (f.order[f.pointer] === off.userTeam) f.pointer++;
   const view = leagueView(league, store, params);
   while (f.pointer < f.order.length) {
-    aiForeignPicks(league, off, f.order[f.pointer], view);
+    aiForeignPicks(league, off, store, f.order[f.pointer], view);
     f.pointer++;
   }
 }

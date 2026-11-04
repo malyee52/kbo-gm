@@ -5,7 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Rng } from '../src/engine';
 import { currentRuns } from '../src/ai/value';
 import { createLeague } from '../src/league/create';
-import { foreignFormParts, foreignJudgeRuns, foreignKeepBar, leagueView } from '../src/league/offseason';
+import { FOREIGN_KEEP_FORM, FOREIGN_KEEP_FORM_SHIFT, foreignFormParts, foreignJudgeRuns, foreignKeepBar, leagueView } from '../src/league/offseason';
 import { foreignSalary } from '../src/league/salary';
 import { FX_MARKET_RUNS, FX_RUNS_LIFT, fxMarketRuns, fxSpec } from '../src/league/scoutfx';
 import type { LeagueState } from '../src/league/types';
@@ -83,11 +83,13 @@ describe('재계약 판단값 (foreignJudgeRuns): 진짜 능력에 지난 시즌
         const { truth, runs, share } = foreignFormParts(league, store, view, q, 2026);
         expect(share).toBeCloseTo(1, 6);
         const gap = runs - share * truth;
-        const d = foreignJudgeRuns(league, store, view, q, 2026) - truth;
+        // 영점 차이 몫(출전 몫만큼)을 뺀 움직임
+        const d = foreignJudgeRuns(league, store, view, q, 2026) - truth - FOREIGN_KEEP_FORM_SHIFT * share;
+        expect(d).toBeCloseTo(FOREIGN_KEEP_FORM * gap, 9);
         // 같은 쪽으로, 어긋남보다 작게 (섞는 몫 0~1)
         expect(Math.abs(d), p.name).toBeLessThanOrEqual(Math.abs(gap) + 1e-9);
         if (Math.abs(gap) > 1) { expect(Math.sign(d), p.name).toBe(Math.sign(gap)); moved++; }
-        return d + truth;
+        return d + truth + FOREIGN_KEEP_FORM_SHIFT * share;
       };
       expect(judge(good as number[]), p.name).toBeGreaterThan(judge(bad as number[]));
     }
