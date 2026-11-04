@@ -278,6 +278,11 @@ export interface PlateParams {
   aggFormula: number[];
   /** 능력별 짐작 쪽으로 당기는 공 수 (존 안·밖 스윙, 맞히기는 스윙, 2S 대처는 2스트라이크 스윙, 끈질김·투구 효율은 맞힘, 제구는 공, 구위는 상대 스윙) */
   regress: { swIn: number; swOut: number; con: number; two: number; tough: number; ctl: number; stuff: number; eff: number };
+  /**
+   * 투수 실측 사슬을 리그 평균 타자 상대 삼진·볼넷 결과 기록 쪽으로 다시 맞추는 몫 (0 = 실측 그대로, 1 = 결과 기록, plate.ts refitPitPlate).
+   * 없으면 0
+   */
+  pitFit?: number;
   /** 등급 눈금 */
   grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
 }
@@ -733,6 +738,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     alpha: 0.209,
     aggFormula: [-0.0297, 0.0122, -0.5357, 0.3956, 1.3251],
     regress: { swIn: 73, swOut: 75, con: 41, two: 742, tough: 215, ctl: 311, stuff: 235, eff: 367 },
+    // 투수 퍼짐 (2026-11-04 사용자 결정): 리그 평균 타자 상대 삼진·볼넷은 결과 기록 그대로 (1). 실측 그대로(0)면 2026 시작 첫 시즌 100이닝 투수
+    // 볼넷 퍼짐이 0.016(실제 2015~25 0.022), 다음 시즌 볼넷 예측도 결과 기록보다 나빴다 (2024~2026 rmse 0.25 대 0.21~0.23). 측정 docs/temp-values.md "투수 퍼짐"
+    pitFit: 1,
     grades: {
       agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
       eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
