@@ -132,7 +132,8 @@ export const ITEMS: Item[] = [
     f: (c) => mean(c.Y.map((y) => c.rows.filter((x) => x.s[S.year] === y.y && x.s[S.war] >= 4).length / c.teams)) },
   { id: 'A8', cat: 'A', name: '레전드 칭호 새 주인', how: '게임 안에서 새로 레전드 칭호를 얻은 선수 수, 100시즌 환산', lo: 3, hi: 30, tol: 15, fmt: f1,
     basis: '야구 게임 상식: 100년이면 구단마다 레전드가 한둘은 나와야 기억할 이야기가 생긴다', weak: true, where: 'league/titles.ts LEGEND_RULES',
-    f: (c) => sum(c.Y.map((y) => y.legendsNew)) * c.per100 },
+    // legendsNew는 플레이어가 정하는 '구단 레전드'(league.legends)라 대리 단장 판에서는 늘 0이다. 레전드 칭호는 league.titles의 'L:' 키(legendTitles, 2026-11-04 더함). 칸이 없는 옛 판은 잴 수 없음.
+    f: (c) => (c.Y.every((y) => y.legendTitles !== undefined) ? sum(c.Y.map((y) => y.legendTitles!)) * c.per100 : NaN) },
   // B 유망주·성장
   { id: 'B1', cat: 'B', name: '역대급 유망주의 탄생', how: '24세 이하 시즌에 WAR 7 이상을 낸 선수 수 (서로 다른 선수), 100시즌 환산', lo: 35, hi: 75, tol: 25, fmt: f1,
     basis: '실제 같은 셈 1982~2025 61.4·2015~2025 45.5 (100년 환산, 게임 WAR 식이 스탯티즈보다 약 1.3배 커서 7WAR가 흔함)', where: 'league/potential.ts 천장·성장 여유분(params.potential.room), offseason.ts 가상 신인',
@@ -172,9 +173,9 @@ export const ITEMS: Item[] = [
   { id: 'C2', cat: 'C', name: '40세 이상 1군 선수', how: '그 해 40세 이상 1군 선수 수 (해마다 평균)', lo: 2, hi: 7, tol: 4, fmt: f1,
     basis: '실제 같은 셈 1982~2025 2.4·2015~2025 5.7', where: 'league/careers.ts 은퇴, growth.ts 노화',
     f: (c) => mean(c.Y.map((y) => c.rows.filter((x) => x.s[S.year] === y.y && x.s[S.age] >= 40).length)) },
-  { id: 'C3', cat: 'C', name: '구단당 해마다 은퇴', how: '해마다 은퇴 선수 수 ÷ 구단 수', lo: 3, hi: 10, tol: 5, fmt: f1,
-    basis: 'KBO는 은퇴·방출로 구단마다 해마다 10명 안팎이 나간다(은퇴만은 그 절반쯤)', weak: true, where: 'league/careers.ts',
-    f: (c) => mean(c.Y.map((y) => y.retired / c.teams)) },
+  { id: 'C3', cat: 'C', name: '구단당 해마다 떠나는 선수', how: '그 해가 1군 마지막 시즌인 선수 수 ÷ 구단 (첫 해와 끝 3시즌 빼고). 은퇴 기록(league.retired)은 은퇴 판정만 담아 방출 뒤 사라지는 선수가 빠지므로 1군 마지막 시즌으로 센다', lo: 7, hi: 11, tol: 4, fmt: f1,
+    basis: '실제 같은 셈 2015~2025 9.7 (은퇴·방출·해외)', where: 'league/careers.ts 은퇴, offseason.ts releaseOrder',
+    f: (c) => { const last = new Map<number, number>(); for (const p of c.P) { const y = p.s.at(-1)?.[S.year]; if (y !== undefined) last.set(y, (last.get(y) ?? 0) + 1); } return mean(c.Y.slice(1, -3).map((y) => (last.get(y.y) ?? 0) / c.teams)); } },
   { id: 'C4', cat: 'C', name: '35세 이상 WAR 몫', how: '양(+) WAR 합 가운데 35세 이상 시즌의 몫', lo: 0.07, hi: 0.14, tol: 0.06, fmt: pc,
     basis: '실제 같은 셈 1982~2025 8.4%·2015~2025 12.5%', where: 'DECLINE_START_AGE·ai/value.ts DECLINE_*',
     f: (c) => { const pos = c.rows.filter((x) => x.s[S.war] > 0 && x.s[S.age] >= 0); return sum(pos.filter((x) => x.s[S.age] >= 35).map((x) => x.s[S.war])) / Math.max(1e-9, sum(pos.map((x) => x.s[S.war]))); } },
@@ -259,11 +260,11 @@ export const ITEMS: Item[] = [
     f: (c) => sum(c.Y.map((y) => y.fin.filter((f) => f.net < 0).length)) / (c.n * c.teams) },
   { id: 'G6', cat: 'G', name: '우리 구단 자금 바닥', how: '처음 맡은 구단의 결산 자금이 0 미만인 시즌 비율', lo: 0, hi: 0.05, tol: 0.2, fmt: pc, team: true, basis: '대리 단장이 추천대로만 해도 돈이 바닥나지 않아야 한다', where: 'finance.ts autoBudget·autoPrices',
     f: (c) => c.Y.filter((y) => y.fin[c.r.meta.focus].cash < 0).length / c.n },
-  { id: 'G7', cat: 'G', name: '연봉 ÷ 수입', how: '구단 캡 연봉 합 ÷ 그 해 수입 합 (평균)', lo: 0.3, hi: 0.75, tol: 0.3, fmt: pc, basis: 'KBO 구단 매출 대비 선수 연봉 약 4~6할', weak: true, where: 'finance.ts 수입 규모·salary.ts',
+  { id: 'G7', cat: 'G', name: '연봉 ÷ 수입', how: '구단 캡 연봉 합 ÷ 그 해 수입 합 (평균)', lo: 0.18, hi: 0.4, tol: 0.2, fmt: pc, basis: 'KBO 구단 매출(모기업 광고 포함) 약 500억 원 안팎 대비 상위 40명 연봉 100억 원 남짓 → 2~3할', weak: true, where: 'finance.ts 수입 규모·salary.ts',
     f: (c) => mean(c.Y.flatMap((y) => y.fin.filter((f) => f.rev > 0).map((f) => f.pay / f.rev))) },
   { id: 'G8', cat: 'G', name: '돈 쌓아 두기', how: '구단-시즌 가운데 (결산 자금 ÷ 그 해 수입)의 최댓값', lo: 0, hi: 2, tol: 3, fmt: f2, basis: '야구 게임 상식: 몇 해 수입을 쌓아 두면 쓸 곳이 없다는 뜻', weak: true, where: 'finance.ts·ai 투자(invest)',
     f: (c) => Math.max(...c.Y.flatMap((y) => y.fin.filter((f) => f.rev > 0).map((f) => f.cash / f.rev))) },
-  { id: 'G9', cat: 'G', name: 'FA 시장 돈 흐름', how: '그 해 FA 계약 총액(연봉 × 연수) ÷ 리그 캡 연봉 합 (평균)', lo: 0.05, hi: 0.3, tol: 0.2, fmt: pc, basis: 'KBO 2015~2025 FA 총액 해마다 약 600~1,000억 원 ÷ 리그 연봉 약 1,000억 원대 → 1할대~', weak: true, where: 'offseason.ts FA 요구액·salary.ts',
+  { id: 'G9', cat: 'G', name: 'FA 시장 돈 흐름', how: '그 해 FA 계약 총액(연봉 × 연수) ÷ 리그 캡 연봉 합 (평균)', lo: 0.3, hi: 0.9, tol: 0.4, fmt: pc, basis: 'KBO 2021~2024 FA 계약 총액 해마다 약 600~990억 원 ÷ 리그 상위 40명 연봉 합 약 1,000~1,100억 원 → 5~9할', weak: true, where: 'offseason.ts FA 요구액·salary.ts',
     f: (c) => mean(c.Y.map((y) => y.fa.money / Math.max(1, sum(y.fin.map((f) => f.pay))))) },
   // H 연봉·FA
   { id: 'H1', cat: 'H', name: 'FA 신청 수', how: '해마다 FA 신청 (해외 복귀 제외)', lo: 10, hi: 30, tol: 15, fmt: f1, basis: 'KBO 2015~2025 해마다 약 15~25명', where: 'offseason.ts faFilingRankPerTeam',
@@ -369,7 +370,7 @@ export const ITEMS: Item[] = [
 ];
 
 /** 실제 KBO 대조 판(tools/eval100_real.ts)으로도 잴 수 있는 항목: 선수 기록·리그 합계만 쓰는 것 */
-export const REAL_OK = new Set(['A1', 'A3', 'A4', 'A6', 'A7', 'B1', 'B2', 'B4', 'B5', 'B6', 'B7', 'C1', 'C2', 'C4', 'C5',
+export const REAL_OK = new Set(['A1', 'A3', 'A4', 'A6', 'A7', 'B1', 'B2', 'B4', 'B5', 'B6', 'B7', 'C1', 'C2', 'C3', 'C4', 'C5',
   'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'E1', 'E2', 'E5', 'F1', 'F2', 'K1', 'K2', 'K3', 'N1', 'N2', 'N3', 'N4', 'N5', 'Q1', 'Q3']);
 
 export function scoreOf(it: Item, v: number): number {
@@ -381,7 +382,7 @@ export function scoreOf(it: Item, v: number): number {
 
 const argv = process.argv.slice(2);
 const opt = (n: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : undefined; };
-const files = argv.filter((a, i) => a.endsWith('.json') && !['--out', '--doc', '--json'].includes(argv[i - 1]));
+const files = argv.filter((a, i) => a.endsWith('.json') && !['--out', '--doc', '--json', '--append'].includes(argv[i - 1]));
 
 function docText(): string {
   const lines: string[] = [];
@@ -415,7 +416,8 @@ function main(): void {
   const realCell = (i: number, f: (v: number) => string) => realVals.map((rv) => (Number.isFinite(rv[i]) ? f(rv[i]) : '-')).join(' · ') || '-';
   const realHead = realRuns.map((r) => r.meta.team.replace('실제 ', '')).join(' · ');
   const ctxs = runs.map(ctxOf);
-  const label = (r: Run) => `${r.meta.team}`;
+  const tail = (r: Run) => (/-[a-z]$/.test(r.meta.seed) ? r.meta.seed.slice(-1) : '');
+  const label = (r: Run) => `${r.meta.team}${tail(r) ? ` ${tail(r)}` : ''}`;
   const vals = ITEMS.map((it) => ctxs.map((c) => { try { return it.f(c); } catch { return NaN; } }));
   const scores = ITEMS.map((it, i) => vals[i].map((v) => scoreOf(it, v)));
   const avgFinite = (xs: number[]) => mean(xs.filter((x) => Number.isFinite(x)));
@@ -437,6 +439,14 @@ function main(): void {
   out.push('## 대분류 평균\n', `| 대분류 | 항목 수 | 평균 | ${runs.map(label).join(' | ')} |`, `|---|---|---|${runs.map(() => '---|').join('')}`,
     ...catRows.map((c) => `| ${c.k}. ${c.name} | ${c.n} | ${c.avg.toFixed(2)} | ${c.perRun.map((x) => (Number.isFinite(x) ? x.toFixed(1) : '-')).join(' | ')} |`),
     `| 총점 (1000점 환산) | ${ITEMS.length} | ${total.toFixed(0)} | ${perRunTotal.map((x) => x.toFixed(0)).join(' | ')} |`, '');
+  // 구단별 (시드 평균)
+  const teamsSeen = [...new Set(runs.map((r) => r.meta.team))];
+  if (teamsSeen.length < runs.length) {
+    const byTeam = teamsSeen.map((t) => runs.map((r, j) => (r.meta.team === t ? j : -1)).filter((j) => j >= 0));
+    out.push('## 구단별 (시드 평균)\n', `| 대분류 | ${teamsSeen.join(' | ')} |`, `|---|${teamsSeen.map(() => '---|').join('')}`,
+      ...catRows.map((c) => `| ${c.k}. ${c.name} | ${byTeam.map((js) => avgFinite(js.map((j) => c.perRun[j])).toFixed(1)).join(' | ')} |`),
+      `| 총점 | ${byTeam.map((js) => avgFinite(js.map((j) => perRunTotal[j])).toFixed(0)).join(' | ')} |`, '');
+  }
   // 항목 × 판
   out.push('## 항목 × 구단 (값 / 점수)\n',
     `"실제"는 실제 KBO 기록(${realHead || '없음'})을 같은 셈으로 잰 값 (tools/eval100_real.ts, 게임과 같은 WAR 식). 100시즌 환산 항목은 그 기간 길이로 환산했다. 점수 평균에는 넣지 않는다.\n`,
@@ -457,8 +467,10 @@ function main(): void {
     out.push(`| ${x.it.id} | ${x.it.name} | ${x.s.toFixed(1)} | ${f(Math.min(...v))} ~ ${f(Math.max(...v))} | ${f(x.it.lo)}~${f(x.it.hi)} | ${realCell(x.i, f)} | ${w ? `\`--team ${w.meta.team} --seed ${w.meta.seed}\` (${f(vals[x.i][worst])})` : '-'} | ${x.it.where ?? ''} |`);
   }
   out.push('');
-  const errs = runs.flatMap((r) => r.errors.map((e) => `- ${r.meta.team}: ${e.split('\n')[0]}`));
+  const errs = runs.flatMap((r) => r.errors.map((e) => `- ${label(r)}: ${e.split('\n')[0]}`));
   if (errs.length) out.push('## 판 오류\n', ...errs, '');
+  const ap = opt('append'); // 손으로 쓴 분석(다음에 고칠 것·물음)을 점수표 뒤에 붙인다
+  if (ap) out.push(readFileSync(ap, 'utf8'));
   const text = out.join('\n');
   const o = opt('out');
   if (o) { mkdirSync(dirname(o), { recursive: true }); writeFileSync(o, text); console.log(`${o}에 썼습니다`); } else console.log(text);

@@ -61,7 +61,7 @@ export interface YearRow {
   inj: number; major: number; events: number; specificReal: number;
   foreign: number[]; asiaN: number; twoWay: number;
   mvp: { id: string; team: number; war: number } | null; rookie: { id: string; team: number; war: number } | null;
-  titlesNew: number; legendsNew: number;
+  titlesNew: number; legendsNew: number; legendTitles?: number;
   owner: { trust: number; achieved: boolean | null; fired: boolean; achievements: number };
   mgrChanges: number; orgMax: number; orgLimit: number; unsignedFa: number;
   stops: { weeks: number; stops: number; zero: number; events: number; stageFail: number };
@@ -323,7 +323,7 @@ function yearRow(g: GameSession, year: number, focus: number, players: Record<st
     asiaN: L.players.filter((p) => p.asia && p.team >= 0).length, twoWay: L.players.filter((p) => p.twoWay && p.team >= 0).length,
     mvp: aw?.mvp ? { id: aw.mvp.id, team: aw.mvp.team, war: r2(aw.mvp.war) } : null,
     rookie: aw?.rookie ? { id: aw.rookie.id, team: aw.rookie.team, war: r2(aw.rookie.war) } : null,
-    titlesNew: (L.titles ?? []).filter((t) => t.year === year).length, legendsNew: (L.legends ?? []).filter((t) => t.year === year).length,
+    titlesNew: (L.titles ?? []).filter((t) => t.year === year).length, legendsNew: (L.legends ?? []).filter((t) => t.year === year).length, legendTitles: (L.titles ?? []).filter((t) => t.year === year && t.key.startsWith('L:')).length,
     owner: { trust: g.owner.trust, achieved: ownerRec ? ownerRec.achieved : null, fired: false, achievements: g.owner.achievements.filter((a) => a.team === focus).length },
     mgrChanges: 0,
     orgMax: 0, orgLimit: 0, unsignedFa: 0,
