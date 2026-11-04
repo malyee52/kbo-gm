@@ -123,7 +123,9 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
     const old = roundTrip(g.league);
     delete old.finance![lg].debt;
     const q = parentParts(old, lg, trust, cashOf(old, lg), 2027);
-    expect(p.support - q.support).toBeCloseTo(rescue / 2 - f.debt!.left[0], -1);
+    // 예전 규칙은 지원금(감액 전 = 이번 지원금 + 부채 몫)에서 긴급 지원 절반을 한 번에 빼고 0에서 멈춘다.
+    // 재정 2 F7 뒤 이 판(LG가 관중 수입 리그 배분을 내는 쪽)은 긴급 지원이 147억으로 커져 예전 규칙이 0에서 멈추므로 0 막기를 넣어 견준다
+    expect(q.support).toBeCloseTo(Math.max(0, p.support + p.debt - rescue / 2), -1);
   });
 
   it('부채가 3년 동안 지원금(모자라면 결산 자금)에서 빠지고 끝나면 없어진다', () => {
