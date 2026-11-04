@@ -19,6 +19,11 @@ export interface DifficultySettings {
   /** 우리 구단 모기업 지원금·스폰서 배율 */
   income: number;
   /**
+   * 구단주 신뢰도가 오를 때(목표 달성)의 배율. 2026-11-04 사용자 결정 (100시즌 평가 물음 3 ③): 쉬움은 그대로(1),
+   * 보통부터 절반(목표 달성 +12 → +6). 임시값. 예전 저장의 사용자 설정에 없으면 보통(0.5)
+   */
+  ownerGain?: number;
+  /**
    * 지명권 트레이드: 1 모든 시대(1982년부터) 허용, 0 실제 규정대로 2020년부터 (2019년 8월 규약 개정).
    * 2026-10-12 사용자 요청으로 설정에 넣었다. AI 구단끼리도 같은 규칙. 예전 저장에 없으면 허용으로 본다
    */
@@ -31,9 +36,9 @@ export interface DifficultySettings {
 }
 
 export const PRESETS: Record<Difficulty, DifficultySettings> = {
-  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, income: 1.15, pickTradeEra: 1, aiLeniency: 4 },
-  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, income: 1, pickTradeEra: 1, aiLeniency: 3 },
-  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, income: 0.9, pickTradeEra: 1, aiLeniency: 2 },
+  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, ownerGain: 1, income: 1.15, pickTradeEra: 1, aiLeniency: 4 },
+  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, ownerGain: 0.5, income: 1, pickTradeEra: 1, aiLeniency: 3 },
+  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, ownerGain: 0.5, income: 0.9, pickTradeEra: 1, aiLeniency: 2 },
 };
 
 /** 화면용: 항목마다 고를 수 있는 값 (쉬움 → 어려움 순) */
@@ -48,6 +53,8 @@ export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note:
     options: [{ v: 0.92, label: '덜 받아도 됨 (쉬움)' }, { v: 1, label: '보통' }, { v: 1.08, label: '더 요구 (어려움)' }, { v: 1.15, label: '훨씬 더 요구' }] },
   { key: 'ownerPressure', label: '구단주 압박', note: '성적이 나쁠 때 구단주 신뢰도가 떨어지는 정도',
     options: [{ v: 0.5, label: '느긋함' }, { v: 0.7, label: '너그러움 (쉬움)' }, { v: 1, label: '보통' }, { v: 1.35, label: '엄격함 (어려움)' }, { v: 1.7, label: '아주 엄격함' }] },
+  { key: 'ownerGain', label: '구단주 칭찬', note: '목표를 이뤘을 때 구단주 신뢰도가 오르는 정도', fallback: 0.5,
+    options: [{ v: 1, label: '후함 (쉬움)' }, { v: 0.75, label: '조금 후함' }, { v: 0.5, label: '보통 (보통·어려움)' }] },
   { key: 'income', label: '수입', note: '우리 구단의 모기업 지원금·스폰서 수입',
     options: [{ v: 1.3, label: '넉넉함' }, { v: 1.15, label: '조금 넉넉함 (쉬움)' }, { v: 1, label: '보통' }, { v: 0.9, label: '빠듯함 (어려움)' }, { v: 0.8, label: '아주 빠듯함' }] },
   { key: 'pickTradeEra', label: '지명권 트레이드', note: '실제 KBO는 2019년 8월부터 허용했다. 과거 시즌에서도 지명권을 주고받을지 (AI 구단끼리도 같은 규칙)',
@@ -61,6 +68,9 @@ export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note:
 export function pickTradeAllowed(league: Pick<LeagueState, 'settings' | 'difficulty'>, year: number, from: number): boolean {
   return (settingsOf(league).pickTradeEra ?? 1) === 1 || year >= from;
 }
+
+/** 목표 달성 때 신뢰도 증가 배율 (칸이 없는 예전 사용자 설정은 보통 0.5) */
+export const ownerGainOf = (league: Pick<LeagueState, 'settings' | 'difficulty'>): number => settingsOf(league).ownerGain ?? 0.5;
 
 /** 지금 리그의 세부 난이도 (사용자 설정이 있으면 그것, 없으면 난이도 묶음) */
 export function settingsOf(league: Pick<LeagueState, 'settings' | 'difficulty'>): DifficultySettings {

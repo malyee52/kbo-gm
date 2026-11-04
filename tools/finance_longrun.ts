@@ -60,14 +60,22 @@ export interface FinRow {
   /** 그 시즌 걸린 스폰서 성향 수 */
   styles: Record<string, number>;
   /** 구단별 (이름, 수지·자금 2026년 돈, 추천안, 관중 수입·스폰서+상품·모기업·연봉+외국인) */
-  teams?: { name: string; net: number; cash: number; preset: string; want?: string; style?: string; gate: number; spon: number; parent: number; pay: number }[];
+  teams?: { name: string; net: number; cash: number; preset: string; want?: string; style?: string; gate: number; spon: number; parent: number; pay: number; rev?: number; rescue?: number; debt?: number; dividend?: number }[];
 }
 
 function presetOf(b: Partial<Record<string, number>> | undefined): string {
   const P = (Fin as unknown as { PRESET_BUDGET?: Record<string, Record<string, number>> }).PRESET_BUDGET;
   if (!b || !P) return '기타';
   for (const [k, v] of Object.entries(P)) if (Object.entries(v).every(([kk, vv]) => b[kk] === vv)) return k;
-  return '기타';
+  // AI 여유 자금 투자(재정 2 F7)를 얹은 예산: 마케팅이 같고 모든 줄이 추천안 이상인 것 가운데 가장 가까운 추천안 + '+'
+  let best = '기타';
+  let gap = Infinity;
+  for (const [k, v] of Object.entries(P)) {
+    if (b.marketing !== v.marketing || !Object.entries(v).every(([kk, vv]) => (b[kk] ?? 0) >= vv)) continue;
+    const d = Object.entries(v).reduce((s, [kk, vv]) => s + (b[kk] ?? 0) - vv, 0);
+    if (d < gap) { gap = d; best = `${k}+`; }
+  }
+  return best;
 }
 
 export function finRow(league: LeagueState, seed: string, year: number): FinRow {
@@ -120,7 +128,9 @@ export function finRow(league: LeagueState, seed: string, year: number): FinRow 
       // want = 다음 개막 때 자금 규칙 전에 고를 추천안 (aiPreset), 다음 해 preset과 견주면 자금 규칙으로 내린 몫이 보인다
       const want = (Fin as unknown as { aiPreset?: (l: LeagueState, t: number) => string }).aiPreset?.(league, i);
       return { name: league.teams[i].name, net: h!.net / wage, cash: h!.cash / wage, preset: presetOf(f.activeBudget ?? f.budget), want, style: league.gm?.[i],
-        gate: g('gate'), spon: g('sponsor') + g('merch'), parent: g('parent') + g('parentExtra'), pay: g('payroll') + g('foreign') };
+        gate: g('gate'), spon: g('sponsor') + g('merch'), parent: g('parent') + g('parentExtra'), pay: g('payroll') + g('foreign'),
+        rev: Object.entries(it).reduce((s, [k, v]) => s + (!NOT_REVENUE.has(k) && (v ?? 0) > 0 ? (v ?? 0) : 0), 0) / wage,
+        rescue: h!.rescue / wage, debt: (h!.debt ?? 0) / wage, dividend: (h!.dividend ?? 0) / wage };
     }),
   };
 }
