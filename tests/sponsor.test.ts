@@ -1,5 +1,5 @@
 // 재정 2 F4 (docs/재정2_기획안.md 4.6·4.7·7장 F4a·F4b): 스폰서 계약·상품·식음, 구단주 예산 회의.
-// ① 스폰서 제안·이름·자동 계약 ② 기본(자동)이면 스폰서+상품 리그 합이 예전 공식 ±2%, 조작·저장·replay
+// ① 스폰서 제안·이름·자동 계약 ② 기본(자동)이면 스폰서+상품 리그 합이 예전 공식 +1~+6% (F6 맞춤), 조작·저장·replay
 // ③ 회의 판정 경계(59·60, 44·45), 목표 상한·하한, 낮추기 → 증가 절반, 단계 순서, 돈 한 번만, 저장·replay
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
@@ -112,7 +112,7 @@ describe('② 돈 흐름·조작·저장', () => {
     toOffseason(g);
   });
 
-  it('기본(자동 계약) 첫 계약 시즌: 스폰서 + 상품·식음 리그 합이 예전 공식(같은 시즌 성적·인기도)의 ±2%', () => {
+  it('기본(자동 계약) 첫 계약 시즌: 스폰서 + 상품·식음 리그 합이 예전 공식(같은 시즌 성적·인기도)의 +1~+6% (F6 맞춤)', () => {
     const r = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
     openNext(r);
     r.advance(100000);
@@ -132,8 +132,10 @@ describe('② 돈 흐름·조작·저장', () => {
     r.beginOffseason();
     const now = L.teams.reduce((s, _, t) => { const h = L.finance![t].history.at(-1)!; return s + (h.items.sponsor ?? 0) + (h.items.merch ?? 0); }, 0);
     const merch = L.teams.reduce((s, _, t) => s + (L.finance![t].history.at(-1)!.items.merch ?? 0), 0);
-    expect(now / legacy).toBeGreaterThan(0.98);
-    expect(now / legacy).toBeLessThan(1.02);
+    // 재정 2 F6 (2026-11-04): 장기 균형 맞춤으로 스폰서 계약 몫 55 → 58억 (예전 75억의 +4%). 첫 계약 시즌은 예전 공식의 +1~+6%
+    // (장기에서는 계약이 지난 시즌 인기도를 따르고 상품·식음이 관중을 따라 F3 수준이 된다, reports/finance-longrun-f6.md)
+    expect(now / legacy).toBeGreaterThan(1.01);
+    expect(now / legacy).toBeLessThan(1.06);
     // 상품·식음은 평균 구단 20억 안팎 (임시값 맞춤)
     expect(merch / L.teams.length).toBeGreaterThan(150_000);
     expect(merch / L.teams.length).toBeLessThan(300_000);

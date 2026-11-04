@@ -1508,6 +1508,7 @@ function MeetingPanel({ act }: { act: Act }) {
       <section className="panel">
         <h2>예산 보고 <span className="muted small">{year} 시즌 예상</span></h2>
         <p className="small">예상 수지 <strong className={b.net >= 0 ? 'up' : 'down'}>{b.net >= 0 ? '+' : '−'}{won(Math.abs(b.net))}</strong> · 모기업 한도 −{won(Math.abs(b.limit))} (자금의 30%까지 적자 허용)</p>
+        {b.booked !== 0 && <p className="small">이미 자금에 들어간 오프시즌 몫 {b.booked >= 0 ? '+' : '−'}{won(Math.abs(b.booked))} (FA 계약금·보상금·추가 지원 등)은 빼고 한도와 견줌: 앞으로의 수지 {b.net - b.booked >= 0 ? '+' : '−'}{won(Math.abs(b.net - b.booked))}</p>}
         {debtDueOf(L.finance?.[me]) > 0 && <p className="small">부채 상환: {year} 시즌 모기업 지원금에서 {won(debtDueOf(L.finance?.[me]))} 빠짐 (예상 수지에 들어 있음, 구단 운영 &gt; 재정에서 일찍 갚기)</p>}
         {b.over
           ? <p className="warn-line small" role="status">구단주: "예산이 너무 크다. 줄여 오라." 그대로 넘기면 시즌 평가 때 신뢰도 −3. <button type="button" className="small-btn" onClick={() => go('budget')}>예산안 열기</button></p>

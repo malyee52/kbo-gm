@@ -4,7 +4,7 @@
 // 판타지 면담(OwnerMeeting.tsx, LLM)은 따로: 그 효과는 판타지 효과 목록으로만 남고 이 회의 돈과 겹치지 않는다.
 // 수치는 모두 임시값.
 import type { World } from '../engine';
-import { cashOf, debtOf, ensureFinance, financePlan, PARENT_BASE } from './finance';
+import { bookedNet, cashOf, debtOf, ensureFinance, financePlan, PARENT_BASE } from './finance';
 import { gmStyle } from './gm';
 import { parentGrade, type GoalKind } from './owner';
 import { wageIndex } from './salary';
@@ -112,12 +112,16 @@ export function askMoney(league: LeagueState, team: number, year: number): numbe
 
 const NO_WORLD = { teams: [], year: -1 } as unknown as World;
 
-/** 다음 시즌 예상 수지와 모기업 한도 (예산 보고) */
-export function budgetCheck(league: LeagueState, team: number, year: number): { net: number; limit: number; over: boolean } {
+/**
+ * 다음 시즌 예상 수지와 모기업 한도 (예산 보고). net = 시즌 전체 예상 수지 (화면), booked = 그중 이미 장부에 적혀 자금에서 나간 몫
+ * (오프시즌 FA 계약금·보상금·회의 추가 지원 등). 한도는 지금 자금으로 정하므로 넘는지는 앞으로의 수지(net − booked)로 본다 (재정 2 F6: 전에는 두 번 셈)
+ */
+export function budgetCheck(league: LeagueState, team: number, year: number): { net: number; booked: number; limit: number; over: boolean } {
   const plan = financePlan({ league, world: NO_WORLD }, team, year);
   const net = Object.values(plan.items).reduce((s, v) => s + (v ?? 0), 0);
+  const booked = bookedNet(league, team, year);
   const limit = -Math.round(Math.max(0, cashOf(league, team)) * BUDGET_CASH_SHARE);
-  return { net, limit, over: net < limit };
+  return { net, booked, limit, over: net - booked < limit };
 }
 
 const eok = (man: number) => `${Math.round(man / 1000) / 10}억 원`;

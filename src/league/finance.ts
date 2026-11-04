@@ -1604,12 +1604,25 @@ export function aiPreset(league: LeagueState, team: number): BudgetPreset {
   return 'balance';
 }
 
+/**
+ * 그 해 장부에 이미 적혀 자금에 들어간 몫의 합 (financePlan이 그대로 넣는 오프시즌 계약금·보상금·회의 추가 지원 등, 시작 자금·부채 갚기 제외).
+ * 예상 수지를 지금 자금과 견줄 때는 이 몫을 빼야 두 번 세지 않는다 (재정 2 F6)
+ */
+export function bookedNet(league: LeagueState, team: number, year: number): number {
+  const booked = ledgerItems(league, team, year);
+  let s = 0;
+  for (const k of Object.keys(booked) as FinanceKind[]) if (k !== 'start' && k !== 'debt') s += booked[k] ?? 0;
+  return s;
+}
+
 /** 오프시즌 셈용 빈 월드 (스타 보정 없음) */
 const NO_WORLD = { teams: [], year: -1 } as unknown as World;
 
 /**
  * 개막 때 예산을 확정한다 (재정 2 F2, 예전 lockInvestments 자리). AI 구단은 추천안을 고르고(aiPreset),
- * 그 추천안의 예상 수지가 −(자금 × AI_BUDGET_CASH)보다 나쁘면 한 단계씩 아래 추천안으로 내린다. 마케팅 쌓인 효과는 확정 금액의 효과 단계 쪽으로
+ * 그 추천안의 예상 수지가 −(자금 × AI_BUDGET_CASH)보다 나쁘면 한 단계씩 아래 추천안으로 내린다. 마케팅 쌓인 효과는 확정 금액의 효과 단계 쪽으로.
+ * 예상 수지는 이미 자금에서 나간 오프시즌 몫(bookedNet)을 뺀 앞으로의 수지로 견준다 (재정 2 F6: 전에는 FA 계약금을 두 번 세어
+ * FA를 잡은 구단이 긴축으로 내려갔다. 3시즌 세션 점검 2027~28 긴축 22/40 구단-해)
  */
 export function lockBudgets(league: LeagueState, userTeam: number): void {
   ensureFinance(league);
@@ -1618,9 +1631,10 @@ export function lockBudgets(league: LeagueState, userTeam: number): void {
     if (t !== userTeam) {
       let preset = aiPreset(league, t);
       const cash = cashOf(league, t);
+      const booked = bookedNet(league, t, league.year);
       for (let guard = 0; guard < 3; guard++) {
         const plan = financePlan({ league, world: NO_WORLD }, t, league.year, PRESET_BUDGET[preset]);
-        const net = Object.values(plan.items).reduce((s, v) => s + (v ?? 0), 0);
+        const net = Object.values(plan.items).reduce((s, v) => s + (v ?? 0), 0) - booked;
         const down = PRESET_DOWN[preset];
         if (net >= -(Math.max(0, cash) * AI_BUDGET_CASH) || !down) break;
         preset = down;
