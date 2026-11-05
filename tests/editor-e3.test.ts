@@ -115,8 +115,11 @@ describe('에디터 E3 (시즌 중)', () => {
     const pv = editorPreview(g, ops)!;
     expect(pv.error).toBeUndefined();
     expect(pv.lines.length).toBe(4);
+    // 팬을 깎으면 스폰서 예상도 줄 수 있다 (인기도가 상한 1.4에 걸려 있을 때만 그대로): 그 몫을 뺀 자금이 정확히 +5억
+    const sponsor = () => g.seasonFinance(3)!.items.sponsor ?? 0;
+    const s0 = sponsor();
     expect(g.editPlayer(ops).ok).toBe(true);
-    expect(g.cashNow(3)).toBe(c0 + 50000);
+    expect(g.cashNow(3)).toBe(c0 + 50000 + sponsor() - s0);
     expect(g.league.ledger.at(-1)).toMatchObject({ to: 3, amount: 50000, kind: 'editor' });
     expect(g.owner.trust).toBe(90);
     expect(pickOwner(g.league, { draft: 2027, round: 1, from: 5 })).toBe(0);
