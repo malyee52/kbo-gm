@@ -59,7 +59,7 @@ interface Row {
 
 let keyMemo: { titles: unknown; keys: ReturnType<typeof titleKeysOf> } | null = null;
 const keysOf = (g: GameSession) => {
-  if (keyMemo?.titles !== g.league.titles) keyMemo = { titles: g.league.titles, keys: titleKeysOf(g.league) };
+  if (!keyMemo || keyMemo.titles !== g.league.titles) keyMemo = { titles: g.league.titles, keys: titleKeysOf(g.league) };
   return keyMemo.keys;
 };
 
