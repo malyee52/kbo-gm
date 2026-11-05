@@ -60,6 +60,8 @@ export interface FinRow {
   /** 그 시즌 걸린 스폰서 성향 수 */
   styles: Record<string, number>;
   /** 구단별 (이름, 수지·자금 2026년 돈, 추천안, 관중 수입·스폰서+상품·모기업·연봉+외국인) */
+  /** 그 해 결산 뒤 AI가 잡은 구장 공사 (stadiumYearEnd 소식 중 착공·리모델링, 재정 2 F8) */
+  works?: string[];
   teams?: { name: string; net: number; cash: number; preset: string; want?: string; style?: string; gate: number; spon: number; parent: number; pay: number; rev?: number; rescue?: number; debt?: number; dividend?: number }[];
 }
 
@@ -122,6 +124,7 @@ export function finRow(league: LeagueState, seed: string, year: number): FinRow 
     debtSum: fins.reduce((s, x) => s + (x.h!.debt ?? 0), 0),
     dividendSum: fins.reduce((s, x) => s + (x.h!.dividend ?? 0), 0),
     payRatio: rev ? pay / rev : 0, presets, prices: pr, styles,
+    works: (league.stadiumNews ?? []).filter((x) => x.includes('착공') || x.includes('구장 리모델링')),
     teams: fins.map(({ f, i, h }) => {
       const it = h!.items;
       const g = (k: string) => ((it as Record<string, number | undefined>)[k] ?? 0) / wage;
