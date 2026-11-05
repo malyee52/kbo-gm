@@ -80,10 +80,11 @@ describe('등급 판정', () => {
   it('시작 때 실존 선수는 시작 전 실제 기록으로 등급이 있다', () => {
     const { league: L } = createLeague(store, 2026, 'franchise-real', FAST);
     const keys = titleKeysOf(L);
-    const tierOf = (name: string) => { const x = L.players.find((q) => q.name === name && q.team >= 0)!; return franchiseTier(x, L, x.team, keys); };
-    expect(tierOf('최정')).toBe(2);
-    expect(tierOf('양현종')).toBe(2);
-    expect(tierOf('노시환')).toBeGreaterThanOrEqual(1);
+    // 이름만으로 찾으면 동명이인(키움 양현종)이 잡혀 구단까지 본다
+    const tierOf = (name: string, team: string) => { const x = L.players.find((q) => q.name === name && q.team >= 0 && L.teams[q.team].name === team)!; return franchiseTier(x, L, x.team, keys); };
+    expect(tierOf('최정', 'SSG')).toBe(2);
+    expect(tierOf('양현종', 'KIA')).toBe(2);
+    expect(tierOf('노시환', '한화')).toBeGreaterThanOrEqual(1);
     const n = L.players.filter((x) => x.team >= 0 && franchiseTier(x, L, x.team, keys) === 2).length;
     expect(n).toBeGreaterThanOrEqual(L.teams.length / 2);
     expect(n).toBeLessThanOrEqual(L.teams.length * 3);

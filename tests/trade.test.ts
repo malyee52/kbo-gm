@@ -1,6 +1,6 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { evaluateTrade, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
+import { evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
 import { currentRuns } from '../src/ai/value';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
@@ -206,7 +206,12 @@ describe('프랜차이즈 가산치 (2026-11-05, 기획안 docs/프랜차이즈_
     const g = newGame('fr-e9');
     let tested = 0;
     for (const star of stars(g, 2)) {
-      const fair = byNow(g, g.team.org).reverse().find((p) => bare(g, () => g.evaluateTrade(star.teamIdx, [p], [star])).verdict === 'accept');
+      // 가산치만큼 값을 더 치른 제안은 받아도 맞다 (금지가 아니라 값, 정수빈 ← 문성주: 여유 41런 > 가산치 19.6런). 그래서 여유가 가산치보다 작은 제안만 본다
+      const premium = franchisePremium(star, star.teamIdx, g.tendency(star.teamIdx), g.values);
+      const fair = byNow(g, g.team.org).reverse().find((p) => {
+        const b = bare(g, () => g.evaluateTrade(star.teamIdx, [p], [star]));
+        return b.verdict === 'accept' && b.detail.gain - b.detail.need < premium;
+      });
       if (!fair) continue;
       const ev = g.evaluateTrade(star.teamIdx, [fair], [star]);
       expect(ev.verdict, `${star.name} ← ${fair.name}`).toBe('reject-value');
