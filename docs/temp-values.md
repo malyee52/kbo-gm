@@ -410,3 +410,17 @@
 - 규칙 값(보도 기준, 규약 원문 미확인): 2019~ 이번 시즌 계약 총액 ≤ 신규 상한 ÷ 10 × 11월 말까지 남은 달 (일반 한 달 10만, 아시아쿼터 2026~ 한 달 2만 달러). 부상 대체(2024~)도 같은 셈.
 - 임시값·임시 해석: 영입한 달은 그달 남은 날 ÷ 그달 날 수 (부분 달 처리 미확인, 보도 예시 "6월 중순 55만"과 맞음), 시즌 중 이적료 없음, 아시아쿼터 부상 대체도 한 달 2만, 2014~2018·2013 전은 상한 없음 (2013 전 30만 달러 상한은 사문화 보도라 걸지 않음).
 - 측정: `npx tsx tools/swap_cap_check.ts` → `reports/swap-cap.md`.
+
+## 프랜차이즈 트레이드 가산치
+
+2026-11-05, 기획안 `docs/프랜차이즈_트레이드_기획안.md`. 세기·현금 몫은 사용자 결정 값이고, 문턱과 칭호 규칙은 근거가 약한 임시값이다.
+
+| 이름 | 값 | 자리 |
+|---|---|---|
+| A 문턱 | 재직 10시즌, 구단 WAR 25 | `league/franchise.ts TIER_A` |
+| B 문턱 | 재직 7시즌, 구단 WAR 15 | `league/franchise.ts TIER_B` |
+| 칭호 재직 | 레전드 칭호·원클럽맨 + 재직 7시즌이면 A | `league/franchise.ts TITLE_SEASONS` |
+| 프랜차이즈 스타 칭호 | W 15 이상이면 A, 아니면 B | `league/franchise.ts franchiseTier` |
+| 가산치 | A 40런, B 15런 | `ai/trade.ts FRANCHISE_PREMIUM` |
+| 완화 | 리빌딩 × 0.7, FA 임박 × 0.7 | `ai/trade.ts FRANCHISE_EASE_REBUILD`·`FRANCHISE_EASE_FA` |
+| 현금 몫 | A 0, B 0.5 | `ai/trade.ts FRANCHISE_CASH_SHARE` |

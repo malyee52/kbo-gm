@@ -13,6 +13,7 @@ import { currentRuns, playerValue } from '../src/ai/value';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine, type SimPlayer } from '../src/engine';
 import { GameSession } from '../src/game/session';
+import { franchiseTier, titleKeysOf } from '../src/league/franchise';
 import { faEligible } from '../src/league/salary';
 import { seasonsWith } from '../src/league/stadium';
 import { realTitleSeasons } from '../src/league/titles';
@@ -52,7 +53,15 @@ interface Row {
   /** 그 구단 프랜차이즈 스타 칭호, 원클럽맨, 레전드 칭호, 칭호 건수 */
   fstar: boolean; one: boolean; legend: boolean; titles: number;
   salary: number; until: number; faNext: boolean; tendency: string; style: string;
+  /** 게임 코드의 프랜차이즈 등급 (0 없음, 1 B, 2 A, league/franchise.ts) */
+  tier: number;
 }
+
+let keyMemo: { titles: unknown; keys: ReturnType<typeof titleKeysOf> } | null = null;
+const keysOf = (g: GameSession) => {
+  if (keyMemo?.titles !== g.league.titles) keyMemo = { titles: g.league.titles, keys: titleKeysOf(g.league) };
+  return keyMemo.keys;
+};
 
 function rowOf(g: GameSession, sp: SimPlayer, team: number, rankOf: Map<number, number>): Row | null {
   const L = g.league;
@@ -68,6 +77,7 @@ function rowOf(g: GameSession, sp: SimPlayer, team: number, rankOf: Map<number, 
     T: seasonsWith(lp, L, team), W: Math.round(W * 10) / 10, runs: Math.round(currentRuns(sp, g.values) * 10) / 10, rank: rankOf.get(sp.idx) ?? 99,
     fstar: recs.some((r) => r.key === `fstar:${t.franchise}`), one: recs.some((r) => r.key === 'one15'), legend: recs.some((r) => r.key.startsWith('L:')), titles: recs.length,
     salary: lp.contract.salary, until: lp.contract.until, faNext: lp.contract.until <= g.year && faEligible(lp, g.year), tendency: g.tendency(team), style: L.gm?.[team] ?? 'balanced',
+    tier: franchiseTier(lp, L, team, keysOf(g)),
   };
 }
 

@@ -1,6 +1,6 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { horizonWeights, suggestPackageWhy } from '../src/ai/trade';
+import { evaluateTrade, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
 import { currentRuns } from '../src/ai/value';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
@@ -187,6 +187,115 @@ describe('AI가 받아들일 거래는 받아들인다', () => {
     expect(g.trades).toHaveLength(1);
     expect(g.news.at(-1)?.kind).toBe('trade');
   });
+});
+
+describe('프랜차이즈 가산치 (2026-11-05, 기획안 docs/프랜차이즈_트레이드_기획안.md)', () => {
+  const FACE = '구단을 상징하는 선수라 내줄 수 없습니다.';
+  const tierOf = (g: GameSession, p: SimPlayer, team = p.teamIdx) => g.values.franchise!(p, team).tier;
+  /** AI 구단의 등급 선수 (국내), 지금 기여 순 */
+  const stars = (g: GameSession, tier: 1 | 2) => g.world.teams.filter((t) => t.idx !== g.teamIdx)
+    .flatMap((t) => byNow(g, t.org).filter((p) => tierOf(g, p) === tier));
+  /** 가산치를 끄고 평가 */
+  const bare = <T>(g: GameSession, f: () => T): T => {
+    const keep = g.values.franchise;
+    g.values.franchise = undefined;
+    try { return f(); } finally { g.values.franchise = keep; }
+  };
+
+  it('E9 얼굴 헐값: 가산치 없이는 받았을 값어치 선수로 A 선수를 달라고 하면 거절하고, 문구가 A 문구다', () => {
+    const g = newGame('fr-e9');
+    let tested = 0;
+    for (const star of stars(g, 2)) {
+      const fair = byNow(g, g.team.org).reverse().find((p) => bare(g, () => g.evaluateTrade(star.teamIdx, [p], [star])).verdict === 'accept');
+      if (!fair) continue;
+      const ev = g.evaluateTrade(star.teamIdx, [fair], [star]);
+      expect(ev.verdict, `${star.name} ← ${fair.name}`).toBe('reject-value');
+      expect(ev.detail.franchiseBlock).toBe(true);
+      expect(ev.message).toBe(FACE);
+      expect(ev.message).not.toMatch(/\d/);
+      tested++;
+    }
+    expect(tested).toBeGreaterThanOrEqual(3);
+  }, 120_000);
+
+  it('E10 현금으로 얼굴 사기: A는 현금을 치지 않고 B는 절반만, AI가 내는 현금은 그대로 다 친다', () => {
+    const g = newGame('fr-e10');
+    g.advance(10);
+    const cash = Math.min(600_000, g.cashNow());
+    const a = stars(g, 2)[0];
+    const b = stars(g, 1)[0];
+    const per = cash / 6000;
+    const gainOf = (p: SimPlayer, c: number) => g.evaluateTrade(p.teamIdx, [], [p], c).detail.gain;
+    expect(g.evaluateTrade(a.teamIdx, [], [a], cash).verdict).toBe('reject-value');
+    expect(gainOf(a, cash)).toBeCloseTo(gainOf(a, 0));
+    expect(gainOf(b, cash) - gainOf(b, 0)).toBeCloseTo(per / 2);
+    // 등급 선수가 없는 거래는 그대로
+    const plain = byNow(g, g.world.teams[a.teamIdx].org).find((p) => tierOf(g, p) === 0)!;
+    expect(gainOf(plain, cash) - gainOf(plain, 0)).toBeCloseTo(per);
+    // E12 현금 빼 가기: 등급 선수를 사면서 AI에게서 현금을 받는 쪽은 깎아 주지 않는다
+    const fromAi = Math.min(100_000, g.cashNow(a.teamIdx));
+    expect(gainOf(a, 0) - gainOf(a, -fromAi)).toBeCloseTo(fromAi / 6000);
+  }, 120_000);
+
+  it('E11 사서 되팔기: 데려온 뒤에는 우리 구단 등급이 없고, AI가 살 때는 가산치를 내지 않는다', () => {
+    const g = newGame('fr-e11');
+    const star = stars(g, 2)[0];
+    const home = star.teamIdx;
+    g.season.transfer(star.idx, g.teamIdx);
+    expect(tierOf(g, star)).toBe(0);
+    expect(tierOf(g, star, home)).toBe(2);
+    const backup = byNow(g, g.world.teams[home].org).at(-1)!;
+    const ev = g.evaluateTrade(home, [star], [backup]);
+    expect(ev.detail.premium).toBeUndefined();
+  }, 120_000);
+
+  it('E13 묶어서 팔기: 등급 선수를 여럿 내주면 가산치가 쌓인다', () => {
+    const g = newGame('fr-e13');
+    const team = g.world.teams.find((t) => t.idx !== g.teamIdx && byNow(g, t.org).filter((p) => tierOf(g, p) > 0).length >= 2)!;
+    const two = byNow(g, team.org).filter((p) => tierOf(g, p) > 0).slice(0, 2);
+    const one = g.evaluateTrade(team.idx, [], [two[0]]).detail.premium!;
+    const other = g.evaluateTrade(team.idx, [], [two[1]]).detail.premium!;
+    expect(g.evaluateTrade(team.idx, [], two).detail.premium).toBeCloseTo(one + other);
+  }, 120_000);
+
+  it('E14 연봉 떠안기: 우승 도전 구단의 A 선수를 우리 최하위 선수 하나로 데려올 수 없다', () => {
+    const g = newGame('fr-e14');
+    const worst = byNow(g, g.team.org).at(-1)!;
+    let tested = 0;
+    for (const star of stars(g, 2)) {
+      if (g.tendency(star.teamIdx) !== 'contend') continue;
+      expect(g.evaluateTrade(star.teamIdx, [worst], [star]).verdict, star.name).not.toBe('accept');
+      tested++;
+    }
+    expect(tested).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('S3 드문 일 남기기: 리빌딩 구단의 FA 임박 B 선수는 크게 얹어 주면 수락', () => {
+    const g = newGame('fr-s3');
+    const star = stars(g, 1)[0];
+    const team = star.teamIdx;
+    const ctx = { ...g.values, franchise: () => ({ tier: 1 as const, faSoon: true }) };
+    const sit: TeamSituation = { ...g.situation(team), rank: g.world.teams.length, inPlace: false, coreAge: 26, style: undefined };
+    const big = byNow(g, g.team.org).filter((p) => (p.age ?? 99) <= 30).slice(0, 2);
+    const ev = evaluateTrade({ aiTeam: team, give: [star], receive: big }, g.world.teams[team].org, sit, ctx);
+    expect(ev.detail.tendency).toBe('rebuild');
+    expect(ev.detail.premium).toBeCloseTo(7.35);
+    expect(ev.verdict).toBe('accept');
+  }, 120_000);
+
+  it('S2 A 선수도 요구안이 나오면 그대로 제안해 수락되고, 없으면 얼굴 문구로 답한다', () => {
+    const g = newGame('fr-s2');
+    let found = 0;
+    let refused = 0;
+    for (const star of stars(g, 2)) {
+      const r = g.askPackageWhy(star.teamIdx, [star]);
+      if (r.pkg) {
+        expect(g.evaluateTrade(star.teamIdx, r.pkg, [star]).verdict, star.name).toBe('accept');
+        found++;
+      } else if (r.message === FACE) refused++;
+    }
+    expect(found + refused).toBeGreaterThan(0);
+  }, 240_000);
 });
 
 describe('트레이드 뒤 상태', () => {
