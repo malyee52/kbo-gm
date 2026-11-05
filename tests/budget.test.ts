@@ -190,9 +190,13 @@ describe('③④⑤ 저장·조작 기록·자동 배분', () => {
     expect(budgetOf(r.league.finance![lg], true)).toEqual({ ...PRESET_BUDGET.winnow, medical: 50_000 });
     openNext(r);
     expect(budgetOf(r.league.finance![lg], false)).toEqual({ ...PRESET_BUDGET.winnow, medical: 50_000 });
-    // AI 구단: 확정 예산은 추천안 넷 중 하나
-    const presets = Object.values(PRESET_BUDGET).map((p) => JSON.stringify(p));
-    for (let t = 0; t < 10; t++) if (t !== lg) expect(presets).toContain(JSON.stringify(budgetOf(r.league.finance![t], false)));
+    // AI 구단: 확정 예산은 추천안 넷 중 하나. 여유 자금이 문턱을 넘은 구단은 그 위에 더 쓴다 (aiSurplusBudget, 재정 2 F7·F8: 마케팅은 그대로, 다른 갈래는 추천안 이상)
+    const presets = Object.values(PRESET_BUDGET);
+    for (let t = 0; t < 10; t++) {
+      if (t === lg) continue;
+      const b = budgetOf(r.league.finance![t], false);
+      expect(presets.some((p) => b.marketing === p.marketing && BUDGET_KINDS.every((k) => b[k] >= p[k])), JSON.stringify(b)).toBe(true);
+    }
     toOffseason(r);
     const f = r.league.finance![lg];
     expect(budgetOf(f, true)).toEqual({ ...PRESET_BUDGET.balance, medical: 50_000 });

@@ -7,7 +7,7 @@
 //   기여 기울기 c: 실존 스타는 성장 방향 w보다 홈런·볼넷 쪽으로 크다 (단타는 거의 같음). 가상 선수는 천장(잠재력) 런으로 모양을 뽑는다.
 // - 투수: x = log(so, bb, hr, hit), w = PIT_SHIFT. 무리는 국내 선발·국내 구원·외국인. 언더·사이드는 빼고 잰다 (makeVirtual이 따로 곱한다).
 // - 표본: 국내·외국인 모두, 타자 가중 타석 400 이상, 투수 가중 상대 타자 300 이상. 같은 선수가 여러 해 들어간다.
-// 결과는 src/league/shapeTable.ts (자동 생성, 고치지 않는다). 쓰는 곳: league/offseason.ts makeVirtual (가상 선수만), 크기 배율 params.shape.
+// 결과는 src/league/shapeTable.ts (자동 생성, 고치지 않는다). 쓰는 곳: league/offseason.ts makeVirtual (가상 선수·기록이 모자란 실존 지명 신인), 크기 배율 params.shape.
 // 실행: npx tsx tools/fit_shapes.ts [--from 2001 --to 2025] [--out src/league/shapeTable.ts]   (약 1~2분)
 import { writeFileSync } from 'node:fs';
 import { loadDataStore } from '../src/data/loadNode';
