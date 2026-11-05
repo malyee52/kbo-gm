@@ -16,6 +16,7 @@ import * as Off from '../src/league/offseason';
 import { lineWarOf } from '../src/league/history';
 import { worldFromLeague } from '../src/league/world';
 import { installCalCache } from './calCache';
+import { applySets } from './setParams';
 
 const arg = (n: string, d = '') => { const i = process.argv.indexOf(`--${n}`); return i < 0 ? d : process.argv[i + 1]; };
 const PK = Object.keys(emptyPitLine()) as (keyof ReturnType<typeof emptyPitLine>)[];
@@ -155,21 +156,6 @@ function report(files: string[]): void {
   for (const s of ss) for (const [name, xs] of [['투수', s.debutP], ['타자', s.debutB]] as const) {
     console.log(`  ${s.label} ${name}: ${f(q(xs, 0.5))} / ${f(q(xs, 0.9))} / ${f(q(xs, 0.99))} · ${f(Math.max(...xs))} · ${f(xs.filter((x) => x >= 3).length / xs.length, 3)} (${xs.length}명)`);
   }
-}
-
-/**
- * 조정값 덮어쓰기 (맞춤용): --set aging.pit=-3.5/-4.5/-6.5,aging.lateRate=0.15/0,aging.startGap.slope=0.3
- * DEFAULT_PARAMS를 그 자리에서 바꾼다 (AI 가치 계산처럼 params를 받지 않는 곳도 같은 값을 보게)
- */
-function applySets(spec: string): void {
-  for (const kv of spec.split(',').filter(Boolean)) {
-    const [path, v] = kv.split('=');
-    const keys = path.split('.');
-    let o = DEFAULT_PARAMS as unknown as Record<string, unknown>;
-    for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
-    o[keys[keys.length - 1]] = v.includes('/') ? v.split('/').map(Number) : Number(v);
-  }
-  if (spec) console.log(`조정값: ${spec}`);
 }
 
 if (arg('report')) report(arg('report').split(','));
