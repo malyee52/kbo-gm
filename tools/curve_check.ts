@@ -71,6 +71,8 @@ const f = (x: number, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : '-');
 interface Summary {
   label: string; years: number;
   b2: number; b4: number; a6: number; d9: number;
+  /** 투수 몫: B2 투수만, B4 해마다 투수 최고 WAR 평균, A6 투수만, 투수 WAR 8+ 시즌 수(10시즌당) */
+  b2p: number; b4p: number; a6p: number; p8: number;
   ageP: Record<number, { n: number; w: number; top: number }>; ageB: Record<number, { n: number; w: number; top: number }>;
   debutP: number[]; debutB: number[];
   /** 스타(커리어 최고 WAR 6+, 40세까지 지켜본 선수) 나이별 평균 WAR·뛴 비율 */
@@ -97,6 +99,13 @@ function summarize(file: string): Summary {
   // A6: WAR 4+ 시즌이 3번 이상인 입단 무리 선수(마지막 해 5년 전에 끝난 커리어)의 WAR 4+ 시즌 수 평균
   const done = gen.filter((p) => p.s[p.s.length - 1][0] <= last - 5 || p.retired);
   const a6 = mean(done.map((p) => p.s.filter((r) => r[2] >= 4).length).filter((n) => n >= 3));
+  const isPit = new Map(Object.values(d.players).flatMap((p) => p.s.map((r) => [r, p.pit] as const)));
+  const topP = new Map<number, number>();
+  for (const r of allRows) if (isPit.get(r)) topP.set(r[0], Math.max(topP.get(r[0]) ?? -99, r[2]));
+  const b4p = mean(half.map((y) => topP.get(y)!));
+  const b2p = gen.filter((p) => p.pit).reduce((n, p) => n + p.s.slice(0, 2).filter((r) => r[2] >= 3).length, 0) / years.length * 10;
+  const a6p = mean(done.filter((p) => p.pit).map((p) => p.s.filter((r) => r[2] >= 4).length).filter((n) => n >= 3));
+  const p8 = gen.filter((p) => p.pit).reduce((n, p) => n + p.s.filter((r) => r[2] >= 8).length, 0) / years.length * 10;
   // D9: 통산 150승 (게임 안 입단 투수), 100시즌 환산
   const d9 = gen.filter((p) => p.pit && p.s.reduce((s, r) => s + r[6], 0) >= 150).length / years.length * 100;
   const ageOf = (pit: boolean) => {
@@ -118,7 +127,7 @@ function summarize(file: string): Summary {
   };
   return {
     starP: starOf(true), starB: starOf(false),
-    label: real ? `실제 ${start}~` : `${d.meta.seed}`, years: years.length, b2, b4, a6, d9,
+    label: real ? `실제 ${start}~` : file.replace(/^.*[/\\]|\.json$/g, ''), years: years.length, b2, b4, a6, d9, b2p, b4p, a6p, p8,
     ageP: ageOf(true), ageB: ageOf(false),
     debutP: gen.filter((p) => p.pit).map((p) => p.s[0][2]), debutB: gen.filter((p) => !p.pit).map((p) => p.s[0][2]),
   };
@@ -126,9 +135,9 @@ function summarize(file: string): Summary {
 
 function report(files: string[]): void {
   const ss = files.map(summarize);
-  console.log('| 판 | 시즌 | B2 즉시 전력 신인(10시즌당) | B4 리그 최고 WAR | A6 전성기 | D9 150승(100시즌) |');
-  console.log('|---|---|---|---|---|---|');
-  for (const s of ss) console.log(`| ${s.label} | ${s.years} | ${f(s.b2, 1)} | ${f(s.b4)} | ${f(s.a6)} | ${f(s.d9, 1)} |`);
+  console.log('| 판 | 시즌 | B2 즉시 전력 신인(10시즌당) | B4 리그 최고 WAR | A6 전성기 | D9 150승(100시즌) | 투수 B2 | 투수 B4 | 투수 A6 | 투수 WAR 8+(10시즌당) |');
+  console.log('|---|---|---|---|---|---|---|---|---|---|');
+  for (const s of ss) console.log(`| ${s.label} | ${s.years} | ${f(s.b2, 1)} | ${f(s.b4)} | ${f(s.a6)} | ${f(s.d9, 1)} | ${f(s.b2p, 1)} | ${f(s.b4p)} | ${f(s.a6p)} | ${f(s.p8, 1)} |`);
   console.log('기준: B2 6~16, B4 7.5~10, A6 4~7, D9 5~18');
   for (const [name, key] of [['투수', 'ageP'], ['타자', 'ageB']] as const) {
     console.log(`\n${name} 나이별 평균 WAR / 상위 10% (해마다 시즌 수)`);
