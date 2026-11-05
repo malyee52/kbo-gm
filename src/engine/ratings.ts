@@ -14,7 +14,7 @@ import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './sched
 import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { applyRunSkills } from './runskills';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
-import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
+import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, refitPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -474,7 +474,9 @@ export function buildWorld(input: BuildWorldInput): World {
       const pitPlate = plateRows(input.plate?.pit[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
       if (pitPlate.length) {
         const solved = solvedPitPlate(pit, lg, lpOf());
-        pit.plateRes = addPit(measuredPitPlate(pitPlate, solved, params.plate), solved, -1);
+        // 리그 평균 타자 상대 삼진·볼넷은 결과 기록 쪽으로 다시 맞춘다 (params.plate.pitFit, 투수 퍼짐 2026-11-04)
+        const measured = refitPitPlate(lpOf(), measuredPitPlate(pitPlate, solved, params.plate), pit.so * lg.so, pit.bb * lg.bb, params.plate.pitFit ?? 0);
+        pit.plateRes = addPit(measured, solved, -1);
       }
       // 마무리 지정용 세이브: 예측은 직전 시즌, 역사 재현은 그 시즌 (그 해 실제 마무리)
       lastSaves = (seasonBasis ? pRow?.sv : histPit[0]?.get(id)?.sv) ?? (debutEstimate ? (pRow?.sv ?? 0) : 0);

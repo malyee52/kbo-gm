@@ -278,6 +278,11 @@ export interface PlateParams {
   aggFormula: number[];
   /** 능력별 짐작 쪽으로 당기는 공 수 (존 안·밖 스윙, 맞히기는 스윙, 2S 대처는 2스트라이크 스윙, 끈질김·투구 효율은 맞힘, 제구는 공, 구위는 상대 스윙) */
   regress: { swIn: number; swOut: number; con: number; two: number; tough: number; ctl: number; stuff: number; eff: number };
+  /**
+   * 투수 실측 사슬을 리그 평균 타자 상대 삼진·볼넷 결과 기록 쪽으로 다시 맞추는 몫 (0 = 실측 그대로, 1 = 결과 기록, plate.ts refitPitPlate).
+   * 없으면 0
+   */
+  pitFit?: number;
   /** 등급 눈금 */
   grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
 }
@@ -497,6 +502,13 @@ export interface EngineParams {
    * 경기력(이벤트 ctx.form)과 따로다: 모든 선수가 같은 규칙이고 화면·AI 판단·컨디션 낱말 어디에도 들어가지 않는다
    */
   seasonForm: { bat: number; pit: number };
+  /**
+   * 가상 선수 특기 모양 (2026-10-26 사용자 결정, league/offseason.ts makeVirtual, 표는 자동 생성 league/shapeTable.ts ← tools/fit_shapes.ts):
+   * 실존 선수 능력 비율에서 가치 방향을 뺀 모양(거포·삼진형·준족·컨택형, 구위형·제구형 등)을 가상 선수(real: false)에게 뽑아 주고,
+   * 가치 총량은 skillForRuns가 다시 맞춘다. bat·pit은 모양 크기 배율 (1 = 실존 선수 능력의 퍼짐 그대로, 0이면 예전처럼 평평한 모양),
+   * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다
+   */
+  shape: { bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>> };
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -733,6 +745,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     alpha: 0.209,
     aggFormula: [-0.0297, 0.0122, -0.5357, 0.3956, 1.3251],
     regress: { swIn: 73, swOut: 75, con: 41, two: 742, tough: 215, ctl: 311, stuff: 235, eff: 367 },
+    // 투수 퍼짐 (2026-11-04 사용자 결정): 리그 평균 타자 상대 삼진·볼넷은 결과 기록 그대로 (1). 실측 그대로(0)면 2026 시작 첫 시즌 100이닝 투수
+    // 볼넷 퍼짐이 0.016(실제 2015~25 0.022), 다음 시즌 볼넷 예측도 결과 기록보다 나빴다 (2024~2026 rmse 0.25 대 0.21~0.23). 측정 docs/temp-values.md "투수 퍼짐"
+    pitFit: 1,
     grades: {
       agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
       eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
@@ -965,6 +980,10 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 100이닝 투수 ERA÷리그 0.171 → 0.186 (실제 0.187·0.204)이 되게. 타자 쪽은 폼 없이도 실제만큼 퍼져 작게 둔다.
   // 180이닝 1.6 → 2.0명, 15승 1.0 → 1.3명 (실제 2015~25 5.2·3.8)
   seasonForm: { bat: 0.02, pit: 0.07 },
+  // 가상 선수 특기 모양 크기 (2026-11-04, 임시값). 2026 시작 3시드 20시즌 (title_dist, 열 해째부터): s1 1이면 타율 .390+ 해마다 0.10 → 0.27명이라
+  // 단타 나머지 퍼짐만 절반으로 (.390+ 0.10명 그대로). 삼진은 갈래 천장 엇갈림·해마다 운 위에 얹혀 규정 타자 삼진률 퍼짐이 0.055로 첫해(실존) 0.048보다
+  // 넓어 0.7로 (0.042, 0.5면 0.035). 홈런 30+ 해마다 2.4 → 4.2명, 마지막 5해 홈런왕 26.3 → 39.3개. 전체 0.75는 홈런이 덜 돌아오고 타율 꼬리는 그대로였다
+  shape: { bat: 1, pit: 1, noise: { s1: 0.5, so: 0.7 } },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md

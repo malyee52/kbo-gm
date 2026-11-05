@@ -125,6 +125,7 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
     const q = parentParts(old, lg, trust, cashOf(old, lg), 2027);
     // 예전 규칙은 지원금(감액 전 = 이번 지원금 + 부채 몫)에서 긴급 지원 절반을 한 번에 빼고 0에서 멈춘다.
     // 재정 2 F7 뒤 이 판(LG가 관중 수입 리그 배분을 내는 쪽)은 긴급 지원이 147억으로 커져 예전 규칙이 0에서 멈추므로 0 막기를 넣어 견준다
+    // (특기 모양 2026-11-04 뒤에도 긴급 지원이 지원금의 두 배를 넘는 판이 된다)
     expect(q.support).toBeCloseTo(Math.max(0, p.support + p.debt - rescue / 2), -1);
   });
 
@@ -136,6 +137,9 @@ describe('③ 부채 3년 ⅓ · ④ repay-debt · ⑤ 계약금 2번', () => {
       money(r, lg, 1_500_000); // 새 긴급 지원이 생기지 않게 (자금 150억, 환원 문턱 위로는 안 감)
       toStage(r, 'ready');
       expect(r.openNextSeason().ok).toBe(true);
+      // 해고는 이 시험 대상이 아닌 운이라 막는다 (결산 앞 신뢰도 100). 투수 퍼짐(plate.pitFit 1)과 특기 모양을 합친 판에서
+      // 2027 결산 신뢰도 23으로 LG가 해고되어 오프시즌이 'fa'에서 멈췄다 (2026-11-04)
+      r.league.owner!.trust = 100;
       toOffseason(r);
       amounts.push(debtOf(r.league.finance![lg]));
       expect(r.league.finance![lg].history.at(-1)!.rescue).toBe(0);

@@ -316,6 +316,23 @@ export function solvePit(lp: LeaguePlate, K: number, W: number, ppa: number | un
 }
 
 /**
+ * 실측으로 만든 투수 사슬 능력을 리그 평균 타자 상대 삼진·볼넷 목표에 다시 맞춘다 (투수 퍼짐, 2026-11-04).
+ * 목표 = 결과 기록(K·W)과 실측 사슬 결과를 로그로 fit : (1 − fit) 섞은 값. 투구 효율은 실측 그대로 두고 제구·구위만 푼다.
+ * 실측 존 비율·맞힘만으로는 볼넷이 덜 퍼지고(2025·2026 100이닝 투수 실측 사슬 볼넷 퍼짐이 결과 기록의 약 65%) 다음 시즌도 덜 맞혀서다
+ */
+export function refitPitPlate(lp: LeaguePlate, measured: PitPlate, K: number, W: number, fit: number): PitPlate {
+  if (!(fit > 0)) return measured;
+  const e = plateChain(lp, ZERO_BAT, measured).e;
+  const lK = fit * Math.log(K) + (1 - fit) * Math.log(e[End.K]);
+  const lW = fit * Math.log(W) + (1 - fit) * Math.log(e[End.W]);
+  const u = newton(2, (v) => {
+    const ch = plateChain(lp, ZERO_BAT, { ctl: measured.ctl + v[0], stuff: measured.stuff + v[1], eff: measured.eff });
+    return [Math.log(ch.e[End.K]) - lK, Math.log(ch.e[End.W]) - lW];
+  });
+  return { ctl: measured.ctl + u[0], stuff: measured.stuff + u[1], eff: measured.eff };
+}
+
+/**
  * 결과 기록으로 짐작한 적극성 (2022년 이전 짐작 식, tools/fit_plate_estimate.ts가 2023~2025 실측으로 맞춤, 기획안 1.12·9.6).
  * 입력은 모두 리그 대비: 삼진·볼넷 로짓 차, 안타당 추가 루 차(파워), 인플레이(홈런 포함)당 안타 차(컨택)
  */
