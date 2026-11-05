@@ -14,7 +14,7 @@ import { pctRankedFromSeason, pickOpeningHosts, rankedFromSeason } from './sched
 import { defenseV2, fieldLeague, fieldYears, homeOf, type DefenseV2 } from './fielding';
 import { applyRunSkills } from './runskills';
 import { chainShapeFor, DEFAULT_PARAMS, estimatedStarts, type EngineParams } from './params';
-import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, refitPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
+import { addBat, addPit, leaguePlateFor, measuredBatPlate, measuredPitPlate, refitBatPlate, refitPitPlate, solvedBatPlate, solvedPitPlate, type LeaguePlate, type PlateSeason } from './plate';
 import { traitsOf } from './traits';
 import type { BatSkill, LeagueEnv, PitSkill, SimPlayer, SimTeam, World } from './types';
 
@@ -503,7 +503,9 @@ export function buildWorld(input: BuildWorldInput): World {
       const batPlate = plateRows(input.plate?.bat[id], debutEstimate ? [current] : rateSeasons, debutEstimate ? [params.debutSeasonWeight] : rateW);
       if (batPlate.length) {
         const solved = solvedBatPlate(bat, lg, lpOf(), params.plate);
-        bat.plateRes = addBat(measuredBatPlate(batPlate, solved, params.plate), solved, -1);
+        // 리그 평균 투수 상대 삼진·볼넷은 결과 기록 쪽으로 다시 맞춘다 (params.plate.batFit, 타자 실측 사슬 2026-11-05)
+        const measured = refitBatPlate(lpOf(), measuredBatPlate(batPlate, solved, params.plate), bat.so * lg.so, bat.bb * lg.bb, params.plate.batFit ?? 0);
+        bat.plateRes = addBat(measured, solved, -1);
       }
       // 포지션: 가장 최근 시즌에 기록된 세부 포지션 → 마스터의 주포지션 → 해당 시즌의 포지션 구분
       // 포지션: 직전 시즌들에 맡은 세부 포지션을 타석 수로 가중해 가장 많이 맡은 자리 (지명타자는 지명 타석이 70%를 넘을 때만).
