@@ -127,7 +127,7 @@ export interface FxSpec { age: number; isPitcher: boolean; starter: boolean; run
  * 일반 외국인 후보 능력 올림 (런, 2026-11-04 외국인 재계약 카드): 예전 후보(평균 약 31런)는 실제 KBO 신규 외국인 첫해(게임 눈금 평균 45런,
  * tools/foreign_real.ts)보다 약했다. 계약한 후보가 실제 첫해 분포에 오도록 맞춘 임시값 (tools/foreign_renew_check.ts)
  */
-export const FX_RUNS_LIFT = 9;
+export const FX_RUNS_LIFT = 11;
 
 /**
  * 지역 후보 하나의 모양. season이면 시즌 중 후보(개막 전 시장보다 한 단계 아래).

@@ -132,10 +132,10 @@ const FOREIGN_KEEP_MAX_AGE = 36;
 /** 재계약 판단에 지난 시즌 성적을 섞는 몫 (offseason.ts foreignJudgeRuns, 임시값: 실제 재계약 비율 약 50%·구간별 남는 비율에 맞춤) */
 export const FOREIGN_KEEP_FORM = 0.6;
 /**
- * 시즌 기여 눈금(war.ts)과 능력 런(ai/value.ts currentRuns)의 영점 차이를 메우는 값 (런, 출전 몫만큼, 임시값). tools/foreign_renew_check.ts 2026 시작 8시즌:
- * 많이 뛴 외국인의 시즌 기여 ÷ 출전 몫이 진짜 능력보다 평균 8.7런 낮고(표준편차 14.9), 섞는 몫 0.6과 이 값 8로 판단 재계약 비율 49%·구간별 32/41/70% (실제 약 50%·24/42/61%)
+ * 판단값에 출전 몫만큼 더하는 값 (런, 임시값). 시즌 기여 ÷ 출전 몫이 진짜 능력보다 평균 5~7런 낮아 0이면 판단값이 진짜보다 3~4런 낮게 나온다 (재계약에 조금 박하다).
+ * tools/foreign_renew_check.ts 2026 시작 20시즌 3시드(올림 11)에서 0일 때 재계약 비율 47~54%·구간별 남는 비율 23/40~47/67~78% (실제 약 50%·24/42/61%)라 메우지 않는다
  */
-export const FOREIGN_KEEP_FORM_SHIFT = 6;
+export const FOREIGN_KEEP_FORM_SHIFT = 0;
 /** 출전 몫을 셀 때 한 시즌 전부로 보는 양 (임시값): 타자 600타석, 선발 165이닝, 구원 65이닝 */
 const FOREIGN_FULL_PA = 600;
 const FOREIGN_FULL_OUTS_SP = 495;
