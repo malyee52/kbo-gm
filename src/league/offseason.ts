@@ -2201,8 +2201,11 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const age = univ ? 23 : 19;
     // 시작 능력은 천장에서 학력 시작 식만큼 아래 (잠재력 v2 18.5, 고졸 19세 = 입단 전 1년 "기타 경로")
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, params.aging), years, path) * devRng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    // 시작 격차가 투수·타자로 갈려서 투타를 먼저 뽑는다 (난수 순서는 예전과 같다: 운 → 투타)
+    const luck = devRng.range(0.7, 1.3);
+    const isPitcher = devRng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     devRng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
@@ -2219,8 +2222,10 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 시작 능력 (잠재력 v2 18.5): 천장 − 고졸 18세 격차 × (1 − 성장 몫)^(입단 전 해 수 × 경로 배율). 대졸은 대학 4년 = 프로 3년 꼴로 자란 채 들어온다
     // (예전 식 고졸 0.1P − 14 · 대졸 0.35P − 8은 같은 천장의 대졸이 22세에 8~9등급 뒤였다)
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, params.aging), years, path) * rng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    const luck = rng.range(0.7, 1.3);
+    const isPitcher = rng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
     if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;

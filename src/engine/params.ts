@@ -560,7 +560,7 @@ export interface EngineParams {
    * 성장·노화 곡선 (2026-11-04 가상 투수 곡선 카드, ai/value.ts agingDelta·expectedGrowth, league/growth.ts growthRuns).
    * bat·pit: 하락 나이(DECLINE_START_AGE)부터 해마다 하락 (런/시즌, 색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에 쓴다),
    * lateRate: 28세부터 하락 전까지 잠재력 격차를 좁히는 한 해 몫 [타자, 투수] (27세 이하는 0.35·0.3·0.25),
-   * startGap: 가상 신인 고졸 18세 시작 격차 = gap + slope × max(0, 천장 − pivot) (런, 입단 전 경로는 potential.ts entryGap)
+   * startGap: 가상 신인 고졸 18세 시작 격차 (런) = 투수 gap + slope × max(0, 천장 − pivot), 타자 gap (입단 전 경로는 potential.ts entryGap)
    */
   aging: {
     bat: number[]; pit: number[]; lateRate: [number, number];
