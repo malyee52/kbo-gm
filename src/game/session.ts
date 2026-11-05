@@ -65,7 +65,7 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  budgetRows, cashOf, ensureFinance, repayDebt, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
+  budgetRows, cashOf, ensureFinance, repayDebt, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance, rescueStreak,
   type BudgetKind, type BudgetPreset, type SeatGrade, type SeatPrices,
   type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
@@ -3612,13 +3612,15 @@ export class GameSession {
     say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
     // 재정: 적자를 모기업이 메우면 신뢰도가 떨어지고, 흑자면 조금 오른다 (finance.ts)
     if (fin) {
-      const fd = trustFromFinance(fin);
+      // 긴급 지원 감점은 이어 받은 해 수·난이도 압박 배율을 따른다 (재정 2 F8, finance.ts RESCUE_TRUST)
+      const streak = fin.rescue > 0 ? rescueStreak(L.finance?.[team]?.history ?? [], fin.year) : 0;
+      const fd = trustFromFinance(fin, streak, wageIndex(fin.year, L), settingsOf(L).ownerPressure);
       const b2 = o.trust;
       o.trust = Math.max(0, Math.min(100, o.trust + fd));
       o.history[o.history.length - 1].trustAfter = o.trust;
       const money = (v: number) => `${(v / 10000).toFixed(1)}억 원`;
       say(fin.rescue > 0
-        ? `재정 결산: 적자 ${money(-fin.net)}, 모기업이 ${money(fin.rescue)}을 메웠습니다. 신뢰도 ${b2} → ${o.trust}.`
+        ? `재정 결산: 적자 ${money(-fin.net)}, 모기업이 ${money(fin.rescue)}을 긴급 지원으로 메웠습니다${streak ? ` (${streak + 1}년 연속)` : ''}. 신뢰도 ${b2} → ${o.trust}.`
         : `재정 결산: ${fin.net >= 0 ? '흑자' : '적자'} ${money(Math.abs(fin.net))}, 자금 ${money(fin.cash)}.${fd ? ` 신뢰도 ${b2} → ${o.trust}.` : ''}`);
     }
     const prevLast = !!prevStandings && prevStandings[prevStandings.length - 1] === team;
