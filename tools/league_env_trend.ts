@@ -54,7 +54,7 @@ for (const seed of seeds) {
     const t = season.totals;
     // 규정 타석 3할 (경기 수 × 3.1)
     const games = Math.max(...season.teams.map((x) => x.g));
-    let q = 0, q300 = 0, qAvg = 0;
+    let q = 0, q300 = 0, qAvg = 0, q390 = 0, q400 = 0, hrTop = 0;
     // 규정 타자의 천장(잠재력)과 지금 기여(런): 가상·실존 따로 (특기 모양 기울기가 천장으로 쓰이는지 점검)
     const ctx = valueContext(world);
     const potOf = new Map(league.players.map((lp) => [lp.id, lp.potential ?? NaN]));
@@ -62,8 +62,9 @@ for (const seed of seeds) {
     for (const sp of world.players) {
       if (sp.isPitcher) continue;
       const b = season.bat[sp.idx];
+      hrTop = Math.max(hrTop, b.hr);
       if (b.pa < Math.ceil(3.1 * games)) continue;
-      q++; const a = b.ab ? b.h / b.ab : 0; qAvg += a; if (a >= 0.3) q300++;
+      q++; const a = b.ab ? b.h / b.ab : 0; qAvg += a; if (a >= 0.3) q300++; if (a >= 0.39) q390++; if (a >= 0.4) q400++;
       const pot = potOf.get(sp.id) ?? NaN;
       if (Number.isFinite(pot)) { const o = sp.real === false ? pr.v : pr.r; o[0]++; o[1] += pot; o[2] += currentRuns(sp, ctx); }
     }
@@ -93,7 +94,7 @@ for (const seed of seeds) {
       tot: { pa: t.pa, ab: t.ab, h: t.h, d: t.d, t: t.t, hr: t.hr, bb: t.bb, hbp: t.hbp, so: t.so, sf: (t as unknown as Record<string, number>).sf ?? 0 },
       target: { ...world.league }, cal: { ...season.cal },
       hrMul: ballHrMul(league, world.year), ball: futureValue(league, 'ball', world.year), zone: futureValue(league, 'zone', world.year),
-      q, q300, qAvg: q ? qAvg / q : 0, virt,
+      q, q300, q390, q400, hrTop, qAvg: q ? qAvg / q : 0, virt,
       logBat: lb.v.map((x) => x / (lb.w || 1)), logPit: lq.v.map((x) => x / (lq.w || 1)),
       // 출전 가중 산술 평균 비율의 log (리그 합계·선수층 압력에 닿는 것은 이쪽)
       amBat: lb.a.map((x) => Math.log(x / (lb.w || 1))), amPit: lq.a.map((x) => Math.log(x / (lq.w || 1))),
