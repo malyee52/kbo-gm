@@ -124,11 +124,17 @@ export function fxVisible(league: LeagueState, team: number, p: Pick<LeaguePlaye
 export interface FxSpec { age: number; isPitcher: boolean; starter: boolean; runs: number; asia: boolean; control?: boolean }
 
 /**
+ * 일반 외국인 후보 능력 올림 (런, 2026-11-04 외국인 재계약 카드): 예전 후보(평균 약 31런)는 실제 KBO 신규 외국인 첫해(게임 눈금 평균 45런,
+ * tools/foreign_real.ts)보다 약했다. 계약한 후보가 실제 첫해 분포에 오도록 맞춘 임시값 (tools/foreign_renew_check.ts)
+ */
+export const FX_RUNS_LIFT = 11;
+
+/**
  * 지역 후보 하나의 모양. season이면 시즌 중 후보(개막 전 시장보다 한 단계 아래).
- * 일반 외국인 능력은 예전 한꺼번에 만들던 후보(일반 20~46런, 시즌 중 16~38런)와 평균이 같게, 지역마다 폭·나이만 다르게
+ * 일반 외국인 능력은 예전 한꺼번에 만들던 후보(일반 20~46런, 시즌 중 16~38런)와 평균이 같게, 지역마다 폭·나이만 다르게 (2026-11-04부터 FX_RUNS_LIFT만큼 올림)
  */
 export function fxSpec(rng: Rng, region: FxRegion, asia: boolean, season: boolean): FxSpec {
-  const down = season ? 4 : 0;
+  const down = (season ? 4 : 0) - FX_RUNS_LIFT;
   if (asia) {
     const wide = region === 'pacific';
     const isPitcher = rng.chance(region === 'japan' ? 0.7 : 0.6);
@@ -157,9 +163,18 @@ export function fxSpec(rng: Rng, region: FxRegion, asia: boolean, season: boolea
   }
 }
 
-/** 지역별 후보 수 (임시값). asia = 아시아쿼터 제도가 있는 해. 일본은 반은 아시아쿼터, 대만·호주는 모두 아시아쿼터 (없는 해는 일반) */
+/**
+ * 시장에서 새로 데려올 외국인의 기대 능력 (런, 다음 시즌): 실제 KBO 신규 외국인 첫해 능력 중앙값 (tools/foreign_real.ts, 2015~2025 시작 판 게임 눈금:
+ * 투수 48.0·타자 42.9, 아시아쿼터는 2026 시작 판 12명 평균 6.6). 외국인 재계약 판단의 견줄 값 (offseason.ts foreignKeepBar, 2026-11-04 사용자 결정)
+ */
+export const FX_MARKET_RUNS = { pit: 48, bat: 43, asia: 6 };
+export function fxMarketRuns(isPitcher: boolean, asia: boolean): number {
+  return asia ? FX_MARKET_RUNS.asia : isPitcher ? FX_MARKET_RUNS.pit : FX_MARKET_RUNS.bat;
+}
+
+/** 지역별 후보 수 (임시값, 2026-11-04 재계약이 줄어 빈 자리가 늘어 북미·중남미를 늘림). asia = 아시아쿼터 제도가 있는 해. 일본은 반은 아시아쿼터, 대만·호주는 모두 아시아쿼터 (없는 해는 일반) */
 export function fxPoolPlan(asia: boolean, season: boolean): { region: FxRegion; asia: boolean }[] {
-  const n = season ? { na: 6, latam: 5, japan: 4, pacific: 3 } : { na: 10, latam: 8, japan: 6, pacific: 6 };
+  const n = season ? { na: 8, latam: 6, japan: 4, pacific: 3 } : { na: 14, latam: 10, japan: 6, pacific: 6 };
   const out: { region: FxRegion; asia: boolean }[] = [];
   for (let i = 0; i < n.na; i++) out.push({ region: 'na', asia: false });
   for (let i = 0; i < n.latam; i++) out.push({ region: 'latam', asia: false });
