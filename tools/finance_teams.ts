@@ -19,7 +19,9 @@ let teamSeasons = 0, rescued = 0, debted = 0;
 const presets: Record<string, number> = {};
 const gini: number[] = [];
 let surplus = 0;
+const works: string[] = [];
 for (const r of rows) {
+  for (const w of r.works ?? []) works.push(`${r.seed} ${r.year}: ${w}`);
   for (const [k, v] of Object.entries(r.presets)) presets[k.replace('+', '')] = (presets[k.replace('+', '')] ?? 0) + v;
   for (const [k, v] of Object.entries(r.presets)) if (k.endsWith('+')) surplus += v;
   if (!r.teams) continue;
@@ -46,6 +48,7 @@ const lines = [
   `- 부채 빈도 (결산 뒤 부채가 있는 구단-시즌): ${pct(debted / Math.max(1, teamSeasons))}`,
   `- 마지막 해 자금 지니 (시드 평균): ${(gini.reduce((a, b) => a + b, 0) / Math.max(1, gini.length)).toFixed(2)}`,
   `- 여유 자금 투자를 얹은 구단-시즌: ${pct(surplus / Math.max(1, Object.values(presets).reduce((s, x) => s + x, 0)))}`,
+  `- AI 구장 공사 (재정 2 F8, 시드 합): 신구장 ${works.filter((w) => w.includes('신구장')).length}번 · 리모델링 ${works.filter((w) => w.includes('리모델링')).length}번${works.length ? ` (${works.join(' / ')})` : ''}`,
   `- AI 추천안 (구단-시즌, 여유 자금 투자는 원래 추천안으로): ${Object.entries(presets).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v / Math.max(1, Object.values(presets).reduce((s, x) => s + x, 0)))}`).join(' · ')}`, '',
   '| 구단 | 평균 자금 | 마지막 해 자금 (시드별) | 긴급 지원 | 부채 | 수지 ÷ 수입 | 평균 수지 | 평균 환원 |',
   '|---|---|---|---|---|---|---|---|',

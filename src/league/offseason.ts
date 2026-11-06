@@ -25,7 +25,7 @@ import { FIELD_POS } from '../engine/defense';
 import { familiarityShift, fieldYears, gameFieldYear, homeOf, refreshPlayable, type FieldYear } from '../engine/fielding';
 import { currentRuns, playerValue, teamStrength, twoWayFace, valueContext, type ValueContext } from '../ai/value';
 import { coreAge, horizonWeights, tendencyOf, type Tendency } from '../ai/trade';
-import { asSim, careerIndex, growthRoom, growthRuns, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex } from './growth';
+import { asSim, BAT_SHIFT, careerIndex, careerShapeOf, growthRoom, growthRuns, PIT_SHIFT, realPeakRuns, runsOf, shiftBat, shiftForRuns, shiftPit, skillForRuns, type CareerIndex, type CareerShape } from './growth';
 import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenValue, type BoardRow } from './scout';
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
@@ -3160,6 +3160,7 @@ export function makeDraftee(league: LeagueState, view: LeagueView, rng: Rng, tak
     real: true, name: m?.name ?? d.name, isPitcher, pos, id,
     birthYear: m ? m.birthYear ?? estimatedBirthYear(m) : undefined, bats: m?.bats, throws: m?.throws, underhand: m?.underhand,
     starter: m?.pos === 'SP' ? true : m?.pos === 'RP' || m?.pos === 'CL' ? false : undefined,
+    career: m ? careerShapeOf(m.id, isPitcher, m.bats, career(), store, view.params ?? DEFAULT_PARAMS) : null,
   }, entryYear - 1);
   p.school = m?.school ?? (d.univ ? 'UNIV' : 'HS');
   // 겸업 재능 (league/twoway.ts): 실제 지명 표기가 투타겸업 (예: 하현승 2027 키움 1순위)
@@ -3206,6 +3207,8 @@ interface VirtualSpec {
   starter?: boolean;
   /** 실존 선수의 언더·사이드 여부 (가상 선수는 makeVirtual이 실제 비율로 정한다) */
   underhand?: boolean;
+  /** 실존 지명 신인의 실제 커리어 모양 재료 (applyShape). 없으면 가상 선수와 같은 분포에서 뽑는다 */
+  career?: CareerShape | null;
   /** 제구형 투수 (외국인 일본 지역 후보, scoutfx.ts): 삼진·볼넷을 함께 낮추고 가치는 skillForRuns가 다시 맞춘다 */
   control?: boolean;
 }
@@ -3240,15 +3243,23 @@ function virtualRunning(rng: Rng): Pick<BatSkill, 'sbAtt' | 'sbPct' | 'speed'> {
 /** 표준정규 (선수별 시드 줄기) */
 const normalOf = (rng: Rng) => invNorm(Math.min(0.9999, Math.max(0.0001, rng.next())));
 
+/** log 비율에서 성장 방향을 사영해 뺀 나머지 = 모양 (tools/fit_shapes.ts와 같은 셈) */
+function shapeOf(x: number[], w: number[]): number[] {
+  const c = x.reduce((s, v, i) => s + v * w[i], 0) / w.reduce((s, v) => s + v * v, 0);
+  return x.map((v, i) => v - c * w[i]);
+}
+
 /**
  * 가상 선수 특기 모양 (league/shapeTable.ts, tools/fit_shapes.ts): 실존 선수 능력 비율에서 성장 방향을 뺀 모양을 자리(외국인)·역할 무리 평균
  * + 천장(잠재력 런) 기울기 + (타자) 도루 시도율 기울기 + 다변량 정규로 뽑아 능력 비율에 곱한다. 거포(홈런↑·삼진↑)·컨택형(단타↑·삼진↓)·
  * 준족(3루타↑)·구위형·제구형 같은 퍼짐이 실존 선수만큼 생기고, 천장이 높은 선수는 실존 스타처럼 홈런·볼넷 쪽 모양을 갖는다
  * (갈래 천장 makeCeiling은 지금 모양에서 성장 방향으로 옮기므로, 천장 런에서 뽑은 모양이 천장에서 거의 그대로 나온다).
  * 리그 전체 구성이 조금 옮겨 가도 시즌마다 환경 맞춤(season.ts calibrate)이 리그 평균을 목표에 맞춘다.
- * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다
+ * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다.
+ * career (실존 지명 신인): 실제 커리어 모양. 몫 c만큼 그 모양으로 옮기고 나머지 운은 √(1 − c²)만 남긴다. c = 1이면 기록의 모양 그대로, 기록이 없으면 가상 선수와 같다
  */
-export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: EngineParams['shape'], starter: boolean, ceiling: number): void {
+export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: EngineParams['shape'], starter: boolean, ceiling: number,
+                           career?: CareerShape | null): void {
   const rng = new Rng(stream);
   const draw = (chol: readonly (readonly number[])[]) => {
     const z = chol.map(() => normalOf(rng));
@@ -3256,6 +3267,8 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
   };
   const runTerm = (t: { runMean: number; runRange: readonly [number, number] | readonly number[] }) =>
     Math.min(t.runRange[1], Math.max(t.runRange[0], ceiling)) - t.runMean;
+  const c = career?.weight ?? 0;
+  const rest = Math.sqrt(1 - c * c);
   if (p.bat && size.bat) {
     const T = SHAPE_BAT;
     const g = p.foreign ? 'F' : p.pos && T.mean[p.pos] ? p.pos : '1B';
@@ -3263,8 +3276,10 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const lsb = Math.log(Math.max(0.005, p.bat.sbAtt)) - T.sbMean;
     const r = runTerm(T);
     const b = { ...p.bat };
+    const real = career?.bat && shapeOf(SHAPE_BAT_KEYS.map((k) => Math.log(career.bat![k])), SHAPE_BAT_KEYS.map((k) => BAT_SHIFT[k]));
     SHAPE_BAT_KEYS.forEach((k, i) => {
-      b[k] *= Math.exp(size.bat * (T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r + e[i] * (size.noise[k] ?? 1)));
+      const mu = T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r;
+      b[k] *= Math.exp(size.bat * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i] * (size.noise[k] ?? 1)));
     });
     p.bat = b;
   }
@@ -3274,8 +3289,10 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const e = draw(T.chol);
     const r = runTerm(T);
     const q = { ...p.pit };
+    const real = career?.pit && shapeOf(SHAPE_PIT_KEYS.map((k) => Math.log(career.pit![k])), SHAPE_PIT_KEYS.map((k) => PIT_SHIFT[k]));
     SHAPE_PIT_KEYS.forEach((k, i) => {
-      q[k] *= Math.exp(size.pit * (T.mean[g][i] + T.runSlope[i] * r + e[i]));
+      const mu = T.mean[g][i] + T.runSlope[i] * r;
+      q[k] *= Math.exp(size.pit * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i]));
     });
     p.pit = q;
   }
@@ -3316,6 +3333,14 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     service: 0, faCount: 0, lastFaYear: null, lastSaves: 0, history: [],
     ...(spec.foreign ? {} : { military: { state: 'pending' as const } }),
   };
+  // 실존 지명 신인의 도루 시도율·성공률·주력은 실제 커리어 쪽으로 (표본 몫만큼. 시도율은 비율이라 로그로 섞는다)
+  const run = spec.career?.run;
+  if (p.bat && run) {
+    const mix = (a: number, b: number) => a + run.weight * (b - a);
+    p.bat.sbAtt = Math.exp(mix(Math.log(p.bat.sbAtt), Math.log(run.skill.sbAtt)));
+    p.bat.sbPct = mix(p.bat.sbPct, run.skill.sbPct);
+    p.bat.speed = mix(p.bat.speed, run.skill.speed);
+  }
   if (p.bat) Object.assign(p.bat, leagueDefense(league, p.id, pos, p.bat.speed, spec.age));
   // 투구 유형 (2026-10-22): 실존은 자료 그대로, 가상 국내 투수는 실제 비율로. 공유 난수 흐름을 바꾸지 않게 선수별 시드로 정한다.
   // 언더·사이드는 삼진·볼넷을 함께 낮추고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
@@ -3323,13 +3348,15 @@ function makeVirtual(league: LeagueState, view: LeagueView, rng: Rng, taken: Set
     : isPitcher && !spec.foreign && new Rng(`${league.seed}/pitchtype/${p.id}`).chance(UNDERHAND_SHARE[p.throws ?? 'R']);
   if (underhand && p.pit) {
     p.underhand = true;
-    p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so, bb: p.pit.bb * UNDERHAND_SKILL.bb };
+    // 실제 커리어 모양에는 언더·사이드 몫이 이미 들어 있어 나머지 몫에만 곱한다
+    const rest = 1 - (spec.career?.pit ? spec.career.weight : 0);
+    p.pit = { ...p.pit, so: p.pit.so * UNDERHAND_SKILL.so ** rest, bb: p.pit.bb * UNDERHAND_SKILL.bb ** rest };
   }
   if (spec.control && p.pit) p.pit = { ...p.pit, so: p.pit.so * CONTROL_SKILL.so, bb: p.pit.bb * CONTROL_SKILL.bb };
-  // 특기 모양 (2026-10-26 사용자 결정): 가상 선수만. 실존 선수 분포에서 뽑은 모양을 곱하고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
+  // 특기 모양 (2026-10-26 사용자 결정, 실존 지명 신인은 2026-11-04): 실존 선수 분포에서 뽑은 모양이나 실제 커리어 모양을 곱하고, 아래 skillForRuns가 가치(목표 런)를 다시 맞춘다
   // (잠재력을 먼저 정한다: 모양은 천장 런에서 뽑는다. skillForRuns는 난수를 쓰지 않아 공유 난수 순서는 예전과 같다)
   const potential = Math.max(spec.runs, spec.potential ?? spec.runs + 4 * rng.next());
-  if (!p.real) applyShape(p, `${league.seed}/shape/${p.id}`, (view.params ?? DEFAULT_PARAMS).shape, starter, potential);
+  applyShape(p, `${league.seed}/shape/${p.id}`, (view.params ?? DEFAULT_PARAMS).shape, starter, potential, spec.career);
   Object.assign(p, skillForRuns(p, spec.runs, view.ctx, nextYear));
   p.potential = potential;
   // 숨은 성장 성향 (잠재력 v2, potential.ts): 선수별 시드라 공유 난수 흐름을 바꾸지 않는다

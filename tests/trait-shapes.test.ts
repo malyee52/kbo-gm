@@ -1,7 +1,7 @@
 // 가상 선수 특기 모양 (2026-10-26 사용자 결정, 2026-11-04 특기 모양 카드): league/offseason.ts applyShape, 표 league/shapeTable.ts ← tools/fit_shapes.ts.
 // - 같은 줄기면 같은 모양 (선수별 시드), 크기 0이면 예전처럼 평평한 모양 그대로.
 // - 자리 무리 모양: 1루수가 유격수보다 홈런 쪽, 천장이 높은 선수가 낮은 선수보다 홈런 쪽 (실존 스타처럼), 준족(도루 시도율↑)은 3루타 쪽.
-// - 시작 해 실존 선수 능력은 모양과 관계없다 (모양 0 · 기본값으로 만든 시작 리그의 실존 선수 능력이 같다).
+// - 시작 해 기록이 있는 실존 선수 능력은 모양과 관계없다 (모양 0 · 기본값으로 만든 시작 리그의 실존 선수 능력이 같다).
 // - 가치 총량은 makeVirtual의 skillForRuns가 모양 뒤에 목표 런으로 맞춘다 (growth.ts 이분법, 여기서는 따로 보지 않는다).
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
@@ -34,7 +34,7 @@ describe('특기 모양 (applyShape)', () => {
     expect(a.bat).toEqual(b.bat);
     expect(a.bat.hr).not.toBe(1);
     const c = { bat: flatBat(), pit: flatPit(), pos: 'SS', foreign: false };
-    applyShape(c, 'x/shape/v1', { bat: 0, pit: 0, noise: {} }, true, 20);
+    applyShape(c, 'x/shape/v1', { ...size, bat: 0, pit: 0, noise: {} }, true, 20);
     expect(c.bat).toEqual(flatBat());
     expect(c.pit).toEqual(flatPit());
   });
@@ -71,10 +71,12 @@ describe('실존 선수는 그대로', () => {
   let store: DataStore;
   beforeAll(() => { store = loadDataStore(); });
 
-  it('시작 해 실존 선수 능력은 모양 크기와 관계없다', () => {
+  it('시작 해 기록이 있는 실존 선수 능력은 모양 크기와 관계없다', () => {
     const a = createLeague(store, 2026, 'shape-real', FAST).league;
-    const b = createLeague(store, 2026, 'shape-real', { ...FAST, shape: { bat: 0, pit: 0, noise: {} } }).league;
-    const skill = (l: typeof a) => new Map(l.players.filter((p) => p.real !== false).map((p) => [p.id, JSON.stringify([p.bat, p.pit, p.potential])]));
+    const b = createLeague(store, 2026, 'shape-real', { ...FAST, shape: { ...size, bat: 0, pit: 0, noise: {} } }).league;
+    // 시작 해 1군 기록이 없는 지명 신인(makeDraftee, id d… · 시작 뒤 데뷔)은 신인 생성기라 모양을 받는다 (tests/rookie-shape.test.ts)
+    const recorded = (id: string) => (store.players.get(id)?.first ?? Infinity) <= 2026;
+    const skill = (l: typeof a) => new Map(l.players.filter((p) => p.real !== false && recorded(p.id)).map((p) => [p.id, JSON.stringify([p.bat, p.pit, p.potential])]));
     const sa = skill(a);
     const sb = skill(b);
     expect(sa.size).toBeGreaterThan(500);

@@ -333,6 +333,23 @@ export function refitPitPlate(lp: LeaguePlate, measured: PitPlate, K: number, W:
 }
 
 /**
+ * 실측으로 만든 타자 사슬 능력을 리그 평균 투수 상대 삼진·볼넷 목표에 다시 맞춘다 (타자 실측 사슬, 2026-11-05, refitPitPlate와 같은 꼴).
+ * 목표 = 결과 기록(K·W)과 실측 사슬 결과를 로그로 fit : (1 − fit) 섞은 값. 적극성·2S 대처·끈질김은 실측 그대로 두고 선구·맞히기만 푼다
+ * (solveBat가 K·W에 맞추는 두 손잡이). 실측 칸만으로는 투수가 피해 가는 몫이 없어 거포 볼넷이 기록보다 적기 때문이다 (김도영 −21%)
+ */
+export function refitBatPlate(lp: LeaguePlate, measured: BatPlate, K: number, W: number, fit: number): BatPlate {
+  if (!(fit > 0)) return measured;
+  const e = plateChain(lp, measured, ZERO_PIT).e;
+  const lK = fit * Math.log(K) + (1 - fit) * Math.log(e[End.K]);
+  const lW = fit * Math.log(W) + (1 - fit) * Math.log(e[End.W]);
+  const u = newton(2, (v) => {
+    const ch = plateChain(lp, { ...measured, eye: measured.eye + v[0], con: measured.con + v[1] }, ZERO_PIT);
+    return [Math.log(ch.e[End.K]) - lK, Math.log(ch.e[End.W]) - lW];
+  });
+  return { ...measured, eye: measured.eye + u[0], con: measured.con + u[1] };
+}
+
+/**
  * 결과 기록으로 짐작한 적극성 (2022년 이전 짐작 식, tools/fit_plate_estimate.ts가 2023~2025 실측으로 맞춤, 기획안 1.12·9.6).
  * 입력은 모두 리그 대비: 삼진·볼넷 로짓 차, 안타당 추가 루 차(파워), 인플레이(홈런 포함)당 안타 차(컨택)
  */

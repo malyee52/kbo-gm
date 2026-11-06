@@ -283,6 +283,8 @@ export interface PlateParams {
    * 없으면 0
    */
   pitFit?: number;
+  /** 타자 실측 사슬을 리그 평균 투수 상대 삼진·볼넷 결과 기록 쪽으로 다시 맞추는 몫 (pitFit과 같은 뜻, plate.ts refitBatPlate). 없으면 0 */
+  batFit?: number;
   /** 등급 눈금 */
   grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
 }
@@ -506,9 +508,11 @@ export interface EngineParams {
    * 가상 선수 특기 모양 (2026-10-26 사용자 결정, league/offseason.ts makeVirtual, 표는 자동 생성 league/shapeTable.ts ← tools/fit_shapes.ts):
    * 실존 선수 능력 비율에서 가치 방향을 뺀 모양(거포·삼진형·준족·컨택형, 구위형·제구형 등)을 가상 선수(real: false)에게 뽑아 주고,
    * 가치 총량은 skillForRuns가 다시 맞춘다. bat·pit은 모양 크기 배율 (1 = 실존 선수 능력의 퍼짐 그대로, 0이면 예전처럼 평평한 모양),
-   * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다
+   * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다.
+   * 실존 지명 신인(2026-11-04 사용자 결정)은 실제 커리어 기록의 모양을 쓰고 기록이 없으면 가상 선수와 같은 분포에서 뽑는다. career: 커리어 타석·상대 타자가
+   * 이만큼이면 기록만 믿고, 적으면 그 몫만큼 분포와 섞는다 (모양 표의 표본 문턱과 같은 값, 임시값)
    */
-  shape: { bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>> };
+  shape: { bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>>; career: { pa: number; bf: number } };
   /** 부상과 이탈 이벤트 (injury.ts) */
   injury: InjuryParams;
 
@@ -748,6 +752,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     // 투수 퍼짐 (2026-11-04 사용자 결정): 리그 평균 타자 상대 삼진·볼넷은 결과 기록 그대로 (1). 실측 그대로(0)면 2026 시작 첫 시즌 100이닝 투수
     // 볼넷 퍼짐이 0.016(실제 2015~25 0.022), 다음 시즌 볼넷 예측도 결과 기록보다 나빴다 (2024~2026 rmse 0.25 대 0.21~0.23). 측정 docs/temp-values.md "투수 퍼짐"
     pitFit: 1,
+    batFit: 1,
     grades: {
       agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
       eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
@@ -983,7 +988,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 가상 선수 특기 모양 크기 (2026-11-04, 임시값). 2026 시작 3시드 20시즌 (title_dist, 열 해째부터): s1 1이면 타율 .390+ 해마다 0.10 → 0.27명이라
   // 단타 나머지 퍼짐만 절반으로 (.390+ 0.10명 그대로). 삼진은 갈래 천장 엇갈림·해마다 운 위에 얹혀 규정 타자 삼진률 퍼짐이 0.055로 첫해(실존) 0.048보다
   // 넓어 0.7로 (0.042, 0.5면 0.035). 홈런 30+ 해마다 2.4 → 4.2명, 마지막 5해 홈런왕 26.3 → 39.3개. 전체 0.75는 홈런이 덜 돌아오고 타율 꼬리는 그대로였다
-  shape: { bat: 1, pit: 1, noise: { s1: 0.5, so: 0.7 } },
+  shape: { bat: 1, pit: 1, noise: { s1: 0.5, so: 0.7 }, career: { pa: 400, bf: 300 } },
   injury: {
     // 2026-10-12 사용자 "부상 빈도가 너무 잦다": 0.008에서 낮춤. 0.008이면 주축(100타석·30이닝+)이 구단당 시즌 28번 다쳤다
     // (실제 부상자 명단 첫해 2020년 최다 삼성이 8월 중순까지 28회). 낮춘 뒤 측정값은 docs/engine.md

@@ -13,8 +13,8 @@ import { currentRuns, expectedGrowth, growthCap, type ValueContext } from '../ai
 import { driveScale } from './potential';
 
 /** 성장 방향: 각 사건 비율이 이동량 1당 얼마나 바뀌는지 (지수). 장타·볼넷이 더 많이 는다 (임시값) */
-const BAT_SHIFT = { hr: 1.2, d2: 0.7, t3: 0.3, s1: 0.4, bb: 0.7, hbp: 0, so: -0.6 } as const;
-const PIT_SHIFT = { so: 0.6, bb: -0.6, hr: -0.8, hit: -0.3, hbp: 0 } as const;
+export const BAT_SHIFT = { hr: 1.2, d2: 0.7, t3: 0.3, s1: 0.4, bb: 0.7, hbp: 0, so: -0.6 } as const;
+export const PIT_SHIFT = { so: 0.6, bb: -0.6, hr: -0.8, hit: -0.3, hbp: 0 } as const;
 
 export function shiftBat(s: BatSkill, d: number): BatSkill {
   const out = { ...s };
@@ -152,6 +152,47 @@ export function realPeakRuns(p: SimPlayer, idx: CareerIndex, store: Pick<DataSto
     }
   }
   return best;
+}
+
+/** 실제 커리어 전체 기록의 능력 비율 (실존 지명 신인의 특기 모양, offseason.ts applyShape). weight는 그 기록을 믿는 몫 0~1 */
+export interface CareerShape {
+  weight: number;
+  bat?: BatSkill;
+  pit?: PitSkill;
+  /** 도루 시도율·성공률·주력과 그 몫 (도루 기록이 있는 시즌만 센다). 없으면 null */
+  run?: { weight: number; skill: BatSkill } | null;
+}
+
+/**
+ * 실존 지명 신인의 특기 모양 재료: 시즌 전체 기록을 게임 능력 산출과 같은 식(리그 대비·구장 걷어 냄)으로 묶은 능력 비율.
+ * 쓰는 쪽은 비율의 모양만 가져가고 총량은 skillForRuns로 지명 규칙의 런에 다시 맞춘다 (미래 성적이 능력에 그대로 새지 않게).
+ * 표본이 size.career(모양 표의 표본 문턱)보다 적으면 그 몫만큼만 믿는다. 기록이 없거나 모양 크기가 0이면 null
+ */
+export function careerShapeOf(id: string, isPitcher: boolean, bats: SimPlayer['bats'] | undefined, idx: CareerIndex,
+                              store: Pick<DataStore, 'meta' | 'season'> & Partial<Pick<DataStore, 'parks'>>, params: EngineParams = DEFAULT_PARAMS): CareerShape | null {
+  const size = params.shape;
+  const meta: Meta = store.meta;
+  const reg = seasonRegress(params);
+  if (isPitcher) {
+    if (!size.pit) return null;
+    const rows = (idx.pit.get(id) ?? []).flatMap(({ year, row }) => {
+      const s = store.season(year);
+      return s && row.tbf > 0 ? [{ row, w: 1, lg: s.league.rates, park: seasonPark(meta, s, row.team, null, store.parks, params.park) }] : [];
+    });
+    if (!rows.length) return null;
+    const pit = pitSkillFrom(rows, meta.priors.pitcher, reg);
+    return { weight: Math.min(1, pit.sample / size.career.bf), pit };
+  }
+  if (!size.bat) return null;
+  const rows = (idx.bat.get(id) ?? []).flatMap(({ year, row }) => {
+    const s = store.season(year);
+    return s && row.pa > 0 ? [{ row, w: 1, lg: s.league.rates, park: seasonPark(meta, s, row.team, bats ?? null, store.parks, params.park), sbPct: params.sbPctByYear[s.year] }] : [];
+  });
+  if (!rows.length) return null;
+  const bat = batSkillFrom(rows, meta.priors.batter, reg);
+  const sbRows = rows.filter((x) => x.row.sb !== null);
+  const run = sbRows.length ? batSkillFrom(sbRows, meta.priors.batter, reg) : null;
+  return { weight: Math.min(1, bat.sample / size.career.pa), bat, run: run && { weight: Math.min(1, run.sample / size.career.pa), skill: run } };
 }
 
 /** 젊은 선수의 성장 여유분 (런, 임시값). 실제로 얼마나 클지는 0.5~1.5배의 운 */
