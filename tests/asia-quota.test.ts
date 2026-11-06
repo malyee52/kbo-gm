@@ -64,6 +64,11 @@ describe('오프시즌 외국인 단계: 웰스 + 일반 외국인 2명 (2026-10
     // 2026 개막 명단이 나무위키 계약표로 바뀌어 LG 일반 외국인이 3명(오스틴·톨허스트·치리노스)이 됐다.
     // 사용자 재현(웰스 + 일반 2명)을 맞추려고 치리노스는 재계약하지 않는다
     if (g.offseason!.foreign!.keep['55146']) expect(g.setForeignKeep('55146', false).ok).toBe(true);
+    // 처음 체크 값은 시장과 견준 판단(offseason.ts foreignKeepAdvice)이라 그 시즌 성적으로 바뀐다. 재현 조건이므로 두 선수는 직접 남긴다
+    for (const name of ['오스틴', '톨허스트']) {
+      const p = g.league.players.find((q) => q.name === name && q.team === lg)!;
+      if (!g.offseason!.foreign!.keep[p.id]) expect(g.setForeignKeep(p.id, true).ok).toBe(true);
+    }
     // 새 후보는 관찰 명단에 있어야 계약할 수 있다 (league/scoutfx.ts): 이 시험은 상한 규칙만 보므로 모두 올려 둔다
     const st = g.league.scoutFx!.teams[lg];
     for (const id of g.offseason!.foreign!.pool) if (g.leaguePlayer(id)!.fx && !st.list.some((e) => e.id === id)) st.list.push({ id, at: -1, weeks: 0 });
