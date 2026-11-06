@@ -118,12 +118,12 @@ describe('가산치', () => {
   const ctxOf = (tier: 0 | 1 | 2, soon: boolean): ValueContext => ({ franchise: () => ({ tier, faSoon: soon }) }) as unknown as ValueContext;
   const sp = {} as SimPlayer;
 
-  it('값은 A 40·B 15런이고 리빌딩·FA 임박은 각각 0.7배로 곱한다 (S4)', () => {
-    expect(FRANCHISE_PREMIUM).toEqual([0, 15, 40]);
-    expect(franchisePremium(sp, 0, 'contend', ctxOf(2, false))).toBe(40);
+  it('값은 A 120·B 15런이고 리빌딩·FA 임박은 각각 0.7배로 곱한다 (S4)', () => {
+    expect(FRANCHISE_PREMIUM).toEqual([0, 15, 120]);
+    expect(franchisePremium(sp, 0, 'contend', ctxOf(2, false))).toBe(120);
     expect(franchisePremium(sp, 0, 'contend', ctxOf(1, false))).toBe(15);
-    expect(franchisePremium(sp, 0, 'rebuild', ctxOf(2, false))).toBeCloseTo(28);
-    expect(franchisePremium(sp, 0, 'contend', ctxOf(2, true))).toBeCloseTo(28);
+    expect(franchisePremium(sp, 0, 'rebuild', ctxOf(2, false))).toBeCloseTo(84);
+    expect(franchisePremium(sp, 0, 'contend', ctxOf(2, true))).toBeCloseTo(84);
     expect(franchisePremium(sp, 0, 'rebuild', ctxOf(1, true))).toBeCloseTo(7.35);
     expect(franchisePremium(sp, 0, 'contend', ctxOf(0, true))).toBe(0);
     expect(franchisePremium(sp, 0, 'contend', {} as ValueContext)).toBe(0);

@@ -32,7 +32,7 @@ const CASH_WON_PER_RUN = 6_000;
  * 프랜차이즈 가산치 (런, 임시값, 2026-11-05 사용자 결정): AI가 내주는 등급 선수마다 이득에서 뺀다. 색인 = 등급 (0 없음, 1 B, 2 A).
  * 금지가 아니라 값이다: 크게 손해를 보는 제안이면 드물게 성사된다
  */
-export const FRANCHISE_PREMIUM = [0, 15, 40];
+export const FRANCHISE_PREMIUM = [0, 15, 120];
 /** 리빌딩 구단, FA 임박 선수 완화 배율 (둘 다면 곱한다, 임시값) */
 export const FRANCHISE_EASE_REBUILD = 0.7;
 export const FRANCHISE_EASE_FA = 0.7;
