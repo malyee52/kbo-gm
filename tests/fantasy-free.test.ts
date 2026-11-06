@@ -98,7 +98,10 @@ describe('자유 모드', () => {
     expect(gradeOfRuns(currentRuns(sp, g.values), 2000)).toBeGreaterThanOrEqual(70);
     expect(g.registered().some((p) => p.idx === sp.idx)).toBe(true);
     g.advance(40); // 30일이면 세이브 기회가 적은 해에 등판 5번에 걸린다 (16-3 수비 v2 뒤)
-    expect(g.season.teamSeasons[g.teamIdx].closer?.idx).toBe(sp.idx);
+    // 그날의 closer는 부상이면 바뀐다 (경기 운). 마무리로 던졌는지는 팀 세이브 1위로 본다
+    const saves = g.world.teams[g.teamIdx].org.filter((p) => p.isPitcher).map((p) => g.season.pit[p.idx].sv);
+    expect(g.season.pit[sp.idx].sv).toBeGreaterThan(0);
+    expect(g.season.pit[sp.idx].sv).toBe(Math.max(...saves));
     expect(g.season.pit[sp.idx].g).toBeGreaterThan(5);
   }, 300_000);
 
