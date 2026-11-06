@@ -4,11 +4,11 @@
 // ①②는 시즌마다 전부, ③④는 --sample-every 해마다 개막 때 표본으로 묻는다. 시즌 진행을 바꾸지 않는다 (③④는 평가만 한다).
 // 재직 시즌·구단 WAR·칭호를 함께 남겨, 정의·가산치를 나중에 JSON에서 바꿔 보며 잰다 (margin = gain − need: 이 값보다 큰 가산치면 그 거래가 막힌다).
 //
-// 실행: npx tsx tools/franchise_trade_check.ts --seasons 15 --seeds fr-a,fr-b [--year 2026] [--team LG] [--sample-every 5] --out <파일.json>
+// 실행: npx tsx tools/franchise_trade_check.ts --seasons 15 --seeds fr-a,fr-b [--year 2026] [--team LG] [--sample-every 5] [--ask-premia 60,80,120] --out <파일.json>
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { evaluateTrade } from '../src/ai/trade';
+import { evaluateTrade, FRANCHISE_PREMIUM } from '../src/ai/trade';
 import { currentRuns, playerValue } from '../src/ai/value';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, emptyBatLine, emptyPitLine, type SimPlayer } from '../src/engine';
@@ -28,6 +28,8 @@ const seeds = arg('seeds', 'fr-a').split(',');
 const teamName = arg('team', 'LG');
 const every = Number(arg('sample-every', '5'));
 const out = arg('out', 'reports/tmp/franchise-trade.json');
+/** 요구안 표본을 다른 A 가산치로도 물어 본다 (쉼표, 런). 측정 안에서만 잠깐 바꾸고 되돌린다. 시즌 진행은 바뀌지 않는다 */
+const askPremia = arg('ask-premia', '').split(',').filter(Boolean).map(Number);
 
 installCalCache();
 const store = loadDataStore();
@@ -84,7 +86,13 @@ function rowOf(g: GameSession, sp: SimPlayer, team: number, rankOf: Map<number, 
 const rankMap = (g: GameSession, team: number) => new Map([...g.world.teams[team].org].sort((a, b) => currentRuns(b, g.values) - currentRuns(a, g.values) || a.idx - b.idx).map((p, i) => [p.idx, i + 1]));
 const row = (g: GameSession, sp: SimPlayer, team: number) => rowOf(g, sp, team, rankMap(g, team));
 
-interface Rec { seed: string; year: number; path: 'ai' | 'offer' | 'shop' | 'ask'; out: Row | null; other?: Row | null; margin?: number; found?: boolean; fromRank?: number }
+interface Rec {
+  seed: string; year: number; path: 'ai' | 'offer' | 'shop' | 'ask'; out: Row | null; other?: Row | null; margin?: number; found?: boolean; fromRank?: number;
+  /** 요구안 조합: 선수마다 한 시즌 기여(런)·나이·우리 구단 기여 순위 */
+  pkg?: { runs: number; age: number | null; rank: number }[];
+  /** 요구안: 다른 A 가산치(런)에서도 값이 나오는가 */
+  alt?: Record<string, boolean>;
+}
 const recs: Rec[] = [];
 const census: (Row & { seed: string; year: number })[] = [];
 const yearly: { seed: string; year: number; ai: number; offers: number }[] = [];
@@ -159,7 +167,15 @@ for (const seed of seeds) {
           const sp = t.org.find((p) => p.id === r.id)!;
           const a = g.askPackageWhy(t.idx, [sp]);
           const ev = a.pkg ? g.evaluateTrade(t.idx, a.pkg, [sp]) : null;
-          recs.push({ seed, year: y, path: 'ask', out: r, found: !!a.pkg, ...(ev ? { margin: ev.detail.gain - ev.detail.need } : {}) });
+          const myRank = rankMap(g, g.teamIdx);
+          const pkg = a.pkg?.map((p) => ({ runs: Math.round(currentRuns(p, g.values) * 10) / 10, age: p.age ?? null, rank: myRank.get(p.idx) ?? 99 }));
+          const alt: Record<string, boolean> = {};
+          if (r.tier === 2) {
+            const a0 = FRANCHISE_PREMIUM[2];
+            for (const v of askPremia) { FRANCHISE_PREMIUM[2] = v; alt[v] = !!g.askPackageWhy(t.idx, [sp]).pkg; }
+            FRANCHISE_PREMIUM[2] = a0;
+          }
+          recs.push({ seed, year: y, path: 'ask', out: r, found: !!a.pkg, ...(ev ? { margin: ev.detail.gain - ev.detail.need } : {}), ...(pkg ? { pkg } : {}), ...(askPremia.length ? { alt } : {}) });
         }
       }
     }
