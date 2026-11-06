@@ -28,6 +28,16 @@ const GAIN_SHARE = 0.08;
 export const SALARY_WON_PER_RUN = 9000;
 /** 현금 1런의 값 (만 원). league/finance.ts의 CASH_WON_PER_RUN과 같다 (ai가 league를 가져오지 않게 숫자로 둔다) */
 const CASH_WON_PER_RUN = 6_000;
+/**
+ * 프랜차이즈 가산치 (런, 임시값, 2026-11-05 사용자 결정): AI가 내주는 등급 선수마다 이득에서 뺀다. 색인 = 등급 (0 없음, 1 B, 2 A).
+ * 금지가 아니라 값이다: 크게 손해를 보는 제안이면 드물게 성사된다
+ */
+export const FRANCHISE_PREMIUM = [0, 15, 120];
+/** 리빌딩 구단, FA 임박 선수 완화 배율 (둘 다면 곱한다, 임시값) */
+export const FRANCHISE_EASE_REBUILD = 0.7;
+export const FRANCHISE_EASE_FA = 0.7;
+/** 등급 선수를 내주는 거래에서 AI가 받는 현금을 쳐주는 몫 (임시값): A는 치지 않고 B는 절반. 현금 1런이 싸서 가산치를 돈으로 메우지 못하게 */
+export const FRANCHISE_CASH_SHARE = [1, 0.5, 0];
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
 /** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값). 화면은 보내기 전 경고에 쓴다 (ui/tradeDesk.ts) */
@@ -111,7 +121,20 @@ export interface TradeEvaluation {
   /** 화면에 보여줄 AI 단장의 답 */
   message: string;
   /** 판정 근거 (테스트·디버그용. 화면에는 수치를 그대로 보여주지 않는다) */
-  detail: { gain: number; need: number; before: number; after: number; tendency: Tendency };
+  detail: {
+    gain: number; need: number; before: number; after: number; tendency: Tendency;
+    /** 프랜차이즈 가산치 (런, gain에서 이미 뺐다) */
+    premium?: number;
+    /** 가산치·현금 제한이 없었으면 수락했을 제안 */
+    franchiseBlock?: boolean;
+  };
+}
+
+/** AI 구단(team)이 p를 내줄 때의 프랜차이즈 가산치 (런). ctx.franchise가 없으면 0 */
+export function franchisePremium(p: SimPlayer, team: number, tendency: Tendency, ctx: ValueContext): number {
+  const f = ctx.franchise?.(p, team);
+  if (!f?.tier) return 0;
+  return FRANCHISE_PREMIUM[f.tier] * (tendency === 'rebuild' ? FRANCHISE_EASE_REBUILD : 1) * (f.faSoon ? FRANCHISE_EASE_FA : 1);
 }
 
 /** 제안을 AI 구단 입장에서 평가한다. 실행은 하지 않는다 */
@@ -145,12 +168,19 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const pay = (ps: SimPlayer[]) => ps.reduce((s, p) => s + (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0)), 0);
   // 짠돌이형 단장은 연봉 부담을 두 배로 본다 (league/gm.ts)
   const salaryCost = ((pay(prop.receive) - pay(prop.give)) / SALARY_WON_PER_RUN) * (situation.style === 'frugal' ? 2 : 1);
-  // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN)
-  const gain = afterV - before - salaryCost + (prop.cash ?? 0) / CASH_WON_PER_RUN + (prop.picks ? prop.picks.receive - prop.picks.give : 0) + (prop.goodwill ?? 0);
+  // 프랜차이즈 가산치: 내주는 쪽에만. need가 아니라 gain에서 빼서 세부 난이도(strict)가 가산치를 줄이지 않게 한다
+  const tier = Math.max(0, ...prop.give.map((p) => ctx.franchise?.(p, prop.aiTeam).tier ?? 0));
+  const premium = prop.give.reduce((s, p) => s + franchisePremium(p, prop.aiTeam, tendency, ctx), 0);
+  // 현금: AI는 현금을 선수 가치보다 조금 박하게 쳐준다 (CASH_WON_PER_RUN). 등급 선수를 내줄 때 받는 현금은 몫만 친다 (AI가 내는 현금은 그대로 다 친다)
+  const cash = (prop.cash ?? 0) / CASH_WON_PER_RUN;
+  const cashCut = cash > 0 ? cash * (1 - FRANCHISE_CASH_SHARE[tier]) : 0;
+  const gain = afterV - before - salaryCost + cash - cashCut - premium + (prop.picks ? prop.picks.receive - prop.picks.give : 0) + (prop.goodwill ?? 0);
   const outgoing = prop.give.reduce((s, p) => s + Math.max(0, playerValue(p, ctx, weights)), 0) + (prop.picks?.give ?? 0);
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE) * (prop.strict ?? 1);
-  const detail = { gain, need, before, after: afterV, tendency };
+  const franchiseBlock = gain < need && gain + premium + cashCut >= need;
+  const detail = { gain, need, before, after: afterV, tendency, ...(premium ? { premium } : {}), ...(franchiseBlock ? { franchiseBlock } : {}) };
   if (gain >= need) return { verdict: 'accept', message: '좋습니다. 그 조건으로 하죠.', detail };
+  if (franchiseBlock) return { verdict: 'reject-value', message: tier === 2 ? '구단을 상징하는 선수라 내줄 수 없습니다.' : '오래 함께한 선수라 그 조건으로는 어렵습니다.', detail };
 
   // 거절 사유: 얼마나 모자란지, 성향 때문인지에 따라 말을 바꾼다
   const youngOut = prop.give.some((p) => (p.age ?? 28) <= 25 && playerValue(p, ctx, horizonWeights('rebuild', 1)) > 15);
@@ -192,9 +222,11 @@ export function suggestPackageWhy(want: SimPlayer[], aiTeam: number, aiOrg: SimP
     .map((p) => ({ p, v: playerValue(p, ctx, userWeights) }))
     .sort((a, b) => a.v - b.v || a.p.idx - b.p.idx);
   const seen: Partial<Record<TradeVerdict, string>> = {};
+  let franchiseNo: string | null = null;
   const ok = (receive: SimPlayer[]) => {
     const ev = evaluateTrade({ aiTeam, give: want, receive }, aiOrg, situation, ctx);
     seen[ev.verdict] ??= ev.message;
+    if (ev.detail.franchiseBlock) franchiseNo ??= ev.message;
     return ev.verdict === 'accept';
   };
   const found = (pkg: SimPlayer[]): PackageResult => ({ pkg, verdict: 'accept', message: '' });
@@ -205,7 +237,7 @@ export function suggestPackageWhy(want: SimPlayer[], aiTeam: number, aiOrg: SimP
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push({ ps: [top[i].p, top[j].p], v: top[i].v + top[j].v });
   pairs.sort((a, b) => a.v - b.v);
   for (const x of pairs) if (ok(x.ps)) return found(x.ps);
-  if (seen['reject-value'] !== undefined) return { pkg: null, verdict: 'reject-value', message: '지금 우리 선수단과 맞바꿀 만한 조합이 없습니다.' };
+  if (seen['reject-value'] !== undefined) return { pkg: null, verdict: 'reject-value', message: franchiseNo ?? '지금 우리 선수단과 맞바꿀 만한 조합이 없습니다.' };
   if (seen['reject-roster'] !== undefined) return { pkg: null, verdict: 'reject-roster', message: seen['reject-roster'] };
   return { pkg: null, verdict: 'reject-invalid', message: seen['reject-invalid'] ?? '내줄 수 있는 선수가 없습니다.' };
 }

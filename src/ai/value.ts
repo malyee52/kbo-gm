@@ -87,6 +87,11 @@ export interface ValueContext {
   potential?: Map<string, number>;
   /** 선수 id → 연봉 (만 원, 외국인은 달러를 원화 환산하지 않고 빼둔다). 없으면 연봉 부담을 보지 않는다 */
   salary?: Map<string, number>;
+  /**
+   * 그 구단에서의 프랜차이즈 등급(0 없음, 1 B, 2 A)과 FA 임박 (league/franchise.ts, ai가 league를 가져오지 않게 함수로 받는다).
+   * 없으면 가산치를 보지 않는다
+   */
+  franchise?: (p: SimPlayer, team: number) => { tier: 0 | 1 | 2; faSoon: boolean };
 }
 
 /**

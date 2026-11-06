@@ -113,7 +113,7 @@ export function archiveDeparting(league: LeagueState, year: number): void {
 }
 
 /** 게임 안 시즌 줄의 구단 이름 → 계보 (그 해 연표, 없으면 지금 구단 목록) */
-function gameFranchise(league: LeagueState, year: number, name: string): string {
+export function gameFranchise(league: LeagueState, year: number, name: string): string {
   return league.yearbook?.find((y) => y.year === year)?.teams.find((t) => t.name === name)?.franchise
     ?? league.teams.find((t) => t.name === name)?.franchise ?? name;
 }
