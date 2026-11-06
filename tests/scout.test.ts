@@ -201,7 +201,8 @@ describe('외국인 (19.4): 시장 평판 몸값, AI는 추측으로', () => {
     const strip = (s: string) => s.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const f of ['src/league/offseason.ts', 'src/league/create.ts', 'src/league/market.ts']) {
       const src = strip(readFileSync(f, 'utf8'));
-      for (const m of src.matchAll(/foreignSalary\(([^,]+(?:\([^)]*\))?[^,]*),/g)) expect(m[1], f).toMatch(/marketReputation|fxRep/);
+      // ref는 재계약 문턱의 시장 기대 능력(offseason.ts foreignBar, 공개 상수 fxMarketRuns)이라 선수의 진짜 값이 아니다
+      for (const m of src.matchAll(/foreignSalary\(([^,]+(?:\([^)]*\))?[^,]*),/g)) expect(m[1], f).toMatch(/marketReputation|fxRep|^ref$/);
     }
     const off = strip(readFileSync('src/league/offseason.ts', 'utf8'));
     const picks = off.slice(off.indexOf('function aiForeignPicks'), off.indexOf('function runForeignUntilUser'));
