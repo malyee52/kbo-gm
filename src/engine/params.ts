@@ -564,10 +564,11 @@ export interface EngineParams {
    * 성장·노화 곡선 (2026-11-04 가상 투수 곡선 카드, ai/value.ts agingDelta·expectedGrowth, league/growth.ts growthRuns).
    * bat·pit: 하락 나이(DECLINE_START_AGE)부터 해마다 하락 (런/시즌, 색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에 쓴다),
    * lateRate: 28세부터 하락 전까지 잠재력 격차를 좁히는 한 해 몫 [타자, 투수] (27세 이하는 0.35·0.3·0.25),
+   * prePit: 투수만 하락 나이 앞 28~31세에 해마다 더하는 완만한 하락 (런/시즌, 색인 0 = 28세, 2026-11-06 사용자: 하락 시작 32세는 그대로 두고 투수 28~31세에만),
    * startGap: 가상 신인 고졸 18세 시작 격차 (런) = 투수 gap + slope × max(0, 천장 − pivot), 타자 gap (입단 전 경로는 potential.ts entryGap)
    */
   aging: {
-    bat: number[]; pit: number[]; lateRate: [number, number];
+    bat: number[]; pit: number[]; prePit: number[]; lateRate: [number, number];
     startGap: { gap: number; slope: number; pivot: number };
   };
   /**
@@ -1042,6 +1043,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   aging: {
     bat: [-1, -1.5, -2, -2.5, -3, -4, -4, -6],
     pit: [-3.5, -4.5, -6, -7, -8, -9],
+    prePit: [0, 0, 0, 0], // 값은 curve_check로 맞춘 뒤 정한다 (임시값)
     lateRate: [0.15, 0],
     startGap: { gap: 30, slope: 0.6, pivot: 20 },
   },

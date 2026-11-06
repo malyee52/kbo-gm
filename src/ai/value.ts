@@ -32,6 +32,14 @@ const POS_ADJ: Record<string, number> = {
 
 type AgingParams = EngineParams['aging'];
 
+/** 투수 완만한 하락(params.aging.prePit)이 시작되는 나이 */
+const PRE_DECLINE_AGE = 28;
+
+/** 하락 나이 앞 투수의 완만한 하락 (런/시즌). 타자와 범위 밖 나이는 0 */
+function preDecline(age: number, isPitcher: boolean, ap: AgingParams): number {
+  return isPitcher && age >= PRE_DECLINE_AGE && age < DECLINE_START_AGE ? ap.prePit[age - PRE_DECLINE_AGE] ?? 0 : 0;
+}
+
 /**
  * 나이별 연간 능력 변화량 (런/시즌). 잠재력이 없는 선수와 하락 나이(DECLINE_START_AGE, 지금 32세) 이후에 쓴다.
  * 하락 전은 임시값. 하락 뒤는 params.aging.bat·pit (색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에).
@@ -40,7 +48,7 @@ type AgingParams = EngineParams['aging'];
  */
 export function agingDelta(age: number, isPitcher = false, ap: AgingParams = DEFAULT_PARAMS.aging): number {
   const k = age - DECLINE_START_AGE;
-  if (k < 0) return age <= 23 ? 6 : age <= 26 ? 3 : 0;
+  if (k < 0) return (age <= 23 ? 6 : age <= 26 ? 3 : 0) + preDecline(age, isPitcher, ap);
   const t = isPitcher ? ap.pit : ap.bat;
   return t[Math.min(k, t.length - 1)];
 }
@@ -61,13 +69,15 @@ export function growthCap(age: number): number {
  * 한 해 동안의 기대 성장 (런). 성장 판정(league/growth.ts)이 여기에 출전 기회와 운을 더한다.
  * 잠재력과의 격차를 나이에 따라 좁히되(27세까지 빠르게, 28세부터 천천히) 한 해 상한(growthCap)을 넘지 않고,
  * 하락 나이(DECLINE_START_AGE)부터 떨어진다 (임시값). 잠재력보다 이미 높으면 그 차이의 20%만큼 내려온다.
+ * 투수는 28세부터 하락 나이 앞까지 완만한 하락(params.aging.prePit)을 더한다.
  */
 export function expectedGrowth(age: number, runs: number, potential: number, isPitcher = false, cap = true, ap: AgingParams = DEFAULT_PARAMS.aging): number {
   if (age >= DECLINE_START_AGE) return agingDelta(age, isPitcher, ap);
   const gap = potential - runs;
-  if (gap < 0) return gap * 0.2;
+  const pre = preDecline(age, isPitcher, ap);
+  if (gap < 0) return gap * 0.2 + pre;
   const rate = age <= 22 ? 0.35 : age <= 25 ? 0.3 : age <= 27 ? 0.25 : ap.lateRate[isPitcher ? 1 : 0];
-  return cap ? Math.min(gap * rate, growthCap(age)) : gap * rate;
+  return (cap ? Math.min(gap * rate, growthCap(age)) : gap * rate) + pre;
 }
 /** 앞으로 몇 시즌을 내다보는지 (이번 시즌 포함) */
 export const HORIZON = 4;

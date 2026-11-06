@@ -5,8 +5,8 @@ import {
   absenceLabel, DEFAULT_PARAMS, eventLabel, INJURY_PARTS, isSpecificEvent, NEUTRAL_EVENTS, pickEvent, Rng, Season, SPECIFIC_EVENTS, worldForYear,
   type EngineParams, type InjuryPart, type World,
 } from '../src/engine';
-import { agingDelta, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
-import { DECLINE_START_AGE } from '../src/engine';
+import { agingDelta, expectedGrowth, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
+import { DECLINE_START_AGE, DEFAULT_PARAMS } from '../src/engine';
 import { initialMilitary, isServing, retireChance } from '../src/league/careers';
 import { createLeague } from '../src/league/create';
 import { careerIndex } from '../src/league/growth';
@@ -144,6 +144,18 @@ describe('노화와 대체 선수 기준', () => {
     for (let a = DECLINE_START_AGE; a <= DECLINE_START_AGE + 9; a++) expect(agingDelta(a)).toBeLessThan(0);
     const sum = (pit: boolean) => [0, 1, 2, 3, 4].reduce((s, k) => s + agingDelta(DECLINE_START_AGE + k, pit), 0);
     expect(sum(true)).toBeLessThan(sum(false));
+  });
+
+  it('28~31세 완만한 하락(aging.prePit)은 투수에게만, 그 나이에만 붙는다', () => {
+    const ap = { ...DEFAULT_PARAMS.aging, prePit: [-1, -2, -3, -4], lateRate: [0, 0] as [number, number] };
+    expect(agingDelta(27, true, ap)).toBe(0);
+    expect(agingDelta(28, true, ap)).toBe(-1);
+    expect(agingDelta(31, true, ap)).toBe(-4);
+    expect(agingDelta(30, false, ap)).toBe(0);
+    expect(agingDelta(DECLINE_START_AGE, true, ap)).toBe(ap.pit[0]);
+    expect(expectedGrowth(30, 10, 10, true, true, ap)).toBe(-3);
+    expect(expectedGrowth(30, 10, 5, true, true, ap)).toBe(-4);
+    expect(expectedGrowth(30, 10, 10, false, true, ap)).toBe(0);
   });
 
   it('대체 선수 기준은 리그 평균 대비 고정 비율이라 선수 구성과 상관없다', () => {
