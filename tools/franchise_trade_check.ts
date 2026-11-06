@@ -95,7 +95,7 @@ interface Rec {
 }
 const recs: Rec[] = [];
 const census: (Row & { seed: string; year: number })[] = [];
-const yearly: { seed: string; year: number; ai: number; offers: number }[] = [];
+const yearly: { seed: string; year: number; ai: number; offers: number; sd?: number; faFiled?: number; faMoved?: number }[] = [];
 
 for (const seed of seeds) {
   const t0 = Date.now();
@@ -180,7 +180,11 @@ for (const seed of seeds) {
       }
     }
     g.advance(100000);
-    yearly.push({ seed, year: y, ai: (g.league.aiTrades ?? []).filter((t) => t.year === y).length, offers });
+    // 구단 격차: 승률 표준편차 (longsim은 시즌 중 트레이드를 돌리지 않아 이 도구에서 잰다)
+    const pct = g.season.teams.map((t) => t.w / Math.max(1, t.w + t.l));
+    const mean = pct.reduce((a, b) => a + b, 0) / pct.length;
+    const sd = Math.sqrt(pct.reduce((a, b) => a + (b - mean) ** 2, 0) / pct.length);
+    yearly.push({ seed, year: y, ai: (g.league.aiTrades ?? []).filter((t) => t.year === y).length, offers, sd });
     console.log(`[${seed}] ${y} 끝: AI끼리 ${yearly.at(-1)!.ai}, 제안 ${offers}, ${Math.round((Date.now() - t0) / 1000)}초`);
     if (k === nSeasons - 1) break;
     g.beginOffseason();
@@ -195,6 +199,8 @@ for (const seed of seeds) {
       if (!r.ok && g.owner.offers?.length) g.acceptOffer(g.owner.offers[0]);
     }
     g.offseason!.userTeam = g.teamIdx;
+    const faE = (g.offseason!.fa?.entries ?? []).filter((e) => !e.returnee);
+    Object.assign(yearly.at(-1)!, { faFiled: faE.length, faMoved: faE.filter((e) => e.status === 'signed' && e.team !== undefined && e.team !== e.from).length });
     const o = g.openNextSeason();
     if (!o.ok) throw new Error(o.message);
   }
