@@ -283,6 +283,8 @@ export interface PlateParams {
    * 없으면 0
    */
   pitFit?: number;
+  /** 타자 실측 사슬을 리그 평균 투수 상대 삼진·볼넷 결과 기록 쪽으로 다시 맞추는 몫 (pitFit과 같은 뜻, plate.ts refitBatPlate). 없으면 0 */
+  batFit?: number;
   /** 등급 눈금 */
   grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
 }
@@ -506,15 +508,17 @@ export interface EngineParams {
    * 가상 선수 특기 모양 (2026-10-26 사용자 결정, league/offseason.ts makeVirtual, 표는 자동 생성 league/shapeTable.ts ← tools/fit_shapes.ts):
    * 실존 선수 능력 비율에서 가치 방향을 뺀 모양(거포·삼진형·준족·컨택형, 구위형·제구형 등)을 가상 선수(real: false)에게 뽑아 주고,
    * 가치 총량은 skillForRuns가 다시 맞춘다. bat·pit은 모양 크기 배율 (1 = 실존 선수 능력의 퍼짐 그대로, 0이면 예전처럼 평평한 모양),
-   * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다
+   * noise는 타자 갈래별로 나머지(정규 운) 몫에만 더 곱하는 배율 (없으면 1). 숨겨진 특수능력(traits.ts)과 따로이고 화면 어디에도 이름표가 없다.
+   * 실존 지명 신인(2026-11-04 사용자 결정)은 실제 커리어 기록의 모양을 쓰고 기록이 없으면 가상 선수와 같은 분포에서 뽑는다. career: 커리어 타석·상대 타자가
+   * 이만큼이면 기록만 믿고, 적으면 그 몫만큼 분포와 섞는다 (모양 표의 표본 문턱과 같은 값, 임시값)
    */
   shape: {
-    bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>>;
+    bat: number; pit: number; noise: Partial<Record<'so' | 'bb' | 's1' | 'd2' | 't3' | 'hr', number>>; career: { pa: number; bf: number };
     /**
      * 가운데 맞춤 (2026-11-04 리그 타율 카드): 모양 log 값에서 빼는 상수 (타자 so·bb·s1·d2·t3·hr, 투수 so·bb·hr·hit 순서).
      * 모양은 선수 사이의 차이(자리·스타 대 후보·특기)만 주고 가상 선수 무리 전체의 사건 구성은 옮기지 않게 한다.
      * 옮기면 결산 신호의 선수층 압력(futureRules.ts RuleSignal = 1 ÷ 환경 맞춤 계수)이 문턱을 넘어 반발계수·존 미래 규칙이
-     * 한쪽으로만 거듭 바뀌어 장기 리그 타율이 내려갔다. 값은 출전 가중 가상 선수 산술 평균 능력 비율 log의 (모양 켬 − 끔) 차이로 잰다
+     * 한쪽으로만 거듭 바뀌어 장기 리그 타율이 내려갔다. 분포 평균을 옮기는 값이라 실존 지명 신인은 기록을 믿지 않는 몫만큼만 받는다. 값은 출전 가중 가상 선수 산술 평균 능력 비율 log의 (모양 켬 − 끔) 차이로 잰다
      * (tools/league_env_trend.ts, 임시값). 없으면 0
      */
     center?: { bat: readonly number[]; pit: readonly number[] };
@@ -758,6 +762,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     // 투수 퍼짐 (2026-11-04 사용자 결정): 리그 평균 타자 상대 삼진·볼넷은 결과 기록 그대로 (1). 실측 그대로(0)면 2026 시작 첫 시즌 100이닝 투수
     // 볼넷 퍼짐이 0.016(실제 2015~25 0.022), 다음 시즌 볼넷 예측도 결과 기록보다 나빴다 (2024~2026 rmse 0.25 대 0.21~0.23). 측정 docs/temp-values.md "투수 퍼짐"
     pitFit: 1,
+    batFit: 1,
     grades: {
       agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
       eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
@@ -995,7 +1000,7 @@ export const DEFAULT_PARAMS: EngineParams = {
   // 넓어 0.7로 (0.042, 0.5면 0.035). 홈런 30+ 해마다 2.4 → 4.2명, 마지막 5해 홈런왕 26.3 → 39.3개. 전체 0.75는 홈런이 덜 돌아오고 타율 꼬리는 그대로였다
   // 가운데 맞춤 값 (임시값, docs/temp-values.md "가상 선수 특기 모양"): 30시즌 2시드로 잰 (켬 − 끔)에서 출발해, 결산 신호가 보지 않는 단타·2루타는 0, 홈런은 4시드 50시즌으로 손으로 맞춘 값
   shape: {
-    bat: 1, pit: 1, noise: { s1: 0.5, so: 0.7 },
+    bat: 1, pit: 1, noise: { s1: 0.5, so: 0.7 }, career: { pa: 400, bf: 300 },
     center: { bat: [-0.0378, 0.0107, 0, 0, -0.1236, 0.055], pit: [0.0278, -0.0146, 0.0117, -0.0018] },
   },
   injury: {

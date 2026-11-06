@@ -7,7 +7,7 @@ import { ballMix, batTarget, pitTarget } from '../src/engine/angle';
 import { cellProbs, End, endFrom, solveKnobs } from '../src/engine/chain';
 import { chainShapeFor } from '../src/engine/params';
 import {
-  addBat, leaguePlateFor, measuredBatPlate, measuredPitPlate, plateCells, plateChain, plateGrade, plateSteps, plateValue, refitPitPlate, solveBat, solvedBatPlate,
+  addBat, leaguePlateFor, measuredBatPlate, measuredPitPlate, plateCells, plateChain, plateGrade, plateSteps, plateValue, refitBatPlate, refitPitPlate, solveBat, solvedBatPlate,
   solvedPitPlate, solvePit, ZERO_BAT, ZERO_PIT, type BatPlate, type PitPlate,
 } from '../src/engine/plate';
 
@@ -110,9 +110,17 @@ describe('결과 기록으로 푸는 길과 실측', () => {
       if (p.bat) {
         const solved = solvedBatPlate(p.bat, lg, lp, pp);
         const rows = store.plate!.bat[p.id];
-        const want = p.bat.plateRes ? measuredBatPlate(rowsOf(p.debutEstimate, rows), solved, pp) : solved;
+        // 타자도 리그 평균 투수 상대 삼진·볼넷을 결과 기록 쪽으로 다시 맞춘 값 (plate.batFit, 타자 실측 사슬 2026-11-05)
+        const want = p.bat.plateRes
+          ? refitBatPlate(lp, measuredBatPlate(rowsOf(p.debutEstimate, rows), solved, pp), p.bat.so * lg.so, p.bat.bb * lg.bb, pp.batFit ?? 0)
+          : solved;
         if (p.bat.plateRes) measuredBat++;
         for (const k of ['agg', 'eye', 'con', 'two', 'tough'] as const) expect(Math.abs(ctx.bat[p.idx][k] - want[k])).toBeLessThan(1e-9);
+        if (p.bat.plateRes && pp.batFit === 1) {
+          const e = plateChain(lp, ctx.bat[p.idx], ZERO_PIT).e;
+          expect(Math.abs(e[End.K] / (p.bat.so * lg.so) - 1), p.name).toBeLessThan(1e-6);
+          expect(Math.abs(e[End.W] / (p.bat.bb * lg.bb) - 1), p.name).toBeLessThan(1e-6);
+        }
       }
       if (p.pit) {
         const solved = solvedPitPlate(p.pit, lg, lp);
@@ -141,9 +149,11 @@ describe('결과 기록으로 푸는 길과 실측', () => {
 });
 
 describe('사슬 실측 몫은 삼진·볼넷만 바꾼다 (2026-10-25 홈런 원인 점검)', () => {
-  it('2026 시작 월드: 실측이 있는 선수도 리그 평균 상대 타석당 단타·2루타·3루타·홈런이 실측 몫 없을 때와 같다 (1e-9)', () => {
-    const world = worldForYear(store, 2026);
-    const ctx = plateContext(world.players, world.league, DEFAULT_PARAMS, 2026);
+  // batFit 1(기본)은 타자 맞힌 공이 기록과 거의 같아져서, 맞힌 공 배율(batContactOf)이 실제로 일하는 batFit 0 판도 같이 본다 (타자 실측 사슬 2026-11-05)
+  it.each([0, 1])('2026 시작 월드 (batFit %i): 실측이 있는 선수도 리그 평균 상대 타석당 단타·2루타·3루타·홈런이 실측 몫 없을 때와 같다 (1e-9)', (batFit) => {
+    const params = { ...DEFAULT_PARAMS, plate: { ...pp, batFit } };
+    const world = worldForYear(store, 2026, params);
+    const ctx = plateContext(world.players, world.league, params, 2026);
     const lg = world.league;
     const lp = lpFor(2026);
     let bat = 0;
@@ -172,8 +182,9 @@ describe('사슬 실측 몫은 삼진·볼넷만 바꾼다 (2026-10-25 홈런 �
     }
     expect(bat).toBeGreaterThan(200);
     expect(pit).toBeGreaterThan(200);
-    // 실측 몫이 맞힌 공 수를 3% 넘게 바꾸는 선수가 있어야 이 시험이 뜻이 있다 (김도영 약 +8%)
-    expect(moved).toBeGreaterThan(10);
+    // batFit 0: 실측 몫이 맞힌 공 수를 3% 넘게 바꾸는 선수가 있어야 이 시험이 뜻이 있다 (김도영 약 +8%). batFit 1: 삼진·볼넷이 기록이라 그런 선수가 없다
+    if (batFit === 0) expect(moved).toBeGreaterThan(10);
+    else expect(moved).toBe(0);
   });
 });
 
@@ -198,6 +209,30 @@ describe('투수 사슬 다시 맞추기 (refitPitPlate, 투수 퍼짐 2026-11-0
     const same = refitPitPlate(lp, measured, e0[End.K], e0[End.W], 1);
     expect(same.ctl).toBeCloseTo(measured.ctl, 9);
     expect(same.stuff).toBeCloseTo(measured.stuff, 9);
+  });
+});
+
+describe('타자 사슬 다시 맞추기 (refitBatPlate, 타자 실측 사슬 2026-11-05)', () => {
+  const lp = lpFor(2025);
+  const measured: BatPlate = { agg: 0.12, eye: 0.2, con: -0.15, two: 0.05, tough: 0.08 };
+  const e0 = plateChain(lp, measured, ZERO_PIT).e;
+  it('fit 0은 그대로, 1은 리그 평균 투수 상대 목표 K·W, 0.5는 로그 가운데. 적극성·2S 대처·끈질김은 그대로', () => {
+    expect(refitBatPlate(lp, measured, 0.15, 0.12, 0)).toEqual(measured);
+    const one = refitBatPlate(lp, measured, 0.15, 0.12, 1);
+    const e1 = plateChain(lp, one, ZERO_PIT).e;
+    expect(e1[End.K]).toBeCloseTo(0.15, 9);
+    expect(e1[End.W]).toBeCloseTo(0.12, 9);
+    for (const k of ['agg', 'two', 'tough'] as const) expect(one[k]).toBe(measured[k]);
+    const half = plateChain(lp, refitBatPlate(lp, measured, 0.15, 0.12, 0.5), ZERO_PIT).e;
+    expect(half[End.K]).toBeCloseTo(Math.sqrt(0.15 * e0[End.K]), 9);
+    expect(half[End.W]).toBeCloseTo(Math.sqrt(0.12 * e0[End.W]), 9);
+    // 같은 입력이면 늘 같은 답
+    expect(refitBatPlate(lp, measured, 0.15, 0.12, 1)).toEqual(one);
+  });
+  it('목표가 실측 사슬 결과와 같으면 움직이지 않는다', () => {
+    const same = refitBatPlate(lp, measured, e0[End.K], e0[End.W], 1);
+    expect(same.eye).toBeCloseTo(measured.eye, 9);
+    expect(same.con).toBeCloseTo(measured.con, 9);
   });
 });
 
