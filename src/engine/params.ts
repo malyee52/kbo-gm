@@ -283,6 +283,8 @@ export interface PlateParams {
    * 없으면 0
    */
   pitFit?: number;
+  /** 타자 실측 사슬을 리그 평균 투수 상대 삼진·볼넷 결과 기록 쪽으로 다시 맞추는 몫 (pitFit과 같은 뜻, plate.ts refitBatPlate). 없으면 0 */
+  batFit?: number;
   /** 등급 눈금 */
   grades: Record<'agg' | 'eye' | 'con' | 'two' | 'tough' | 'ctl' | 'stuff' | 'eff', PlateAbility>;
 }
@@ -750,6 +752,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     // 투수 퍼짐 (2026-11-04 사용자 결정): 리그 평균 타자 상대 삼진·볼넷은 결과 기록 그대로 (1). 실측 그대로(0)면 2026 시작 첫 시즌 100이닝 투수
     // 볼넷 퍼짐이 0.016(실제 2015~25 0.022), 다음 시즌 볼넷 예측도 결과 기록보다 나빴다 (2024~2026 rmse 0.25 대 0.21~0.23). 측정 docs/temp-values.md "투수 퍼짐"
     pitFit: 1,
+    batFit: 1,
     grades: {
       agg: { mid: -0.0168, half: 0.1948, a: 0, b: 0 },
       eye: { mid: 0.0416, half: 0.2787, a: 0.1, b: 0.1 },
