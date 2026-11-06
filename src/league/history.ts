@@ -113,7 +113,7 @@ export function archiveDeparting(league: LeagueState, year: number): void {
 }
 
 /** 게임 안 시즌 줄의 구단 이름 → 계보 (그 해 연표, 없으면 지금 구단 목록) */
-function gameFranchise(league: LeagueState, year: number, name: string): string {
+export function gameFranchise(league: LeagueState, year: number, name: string): string {
   return league.yearbook?.find((y) => y.year === year)?.teams.find((t) => t.name === name)?.franchise
     ?? league.teams.find((t) => t.name === name)?.franchise ?? name;
 }
@@ -140,7 +140,7 @@ export function lineWarOf(league: LeagueState, s: SeasonLine, pos: string | null
 }
 
 /** 게임 안 시즌 줄의 가치 (war.ts). 그 해 시뮬 환경이 없으면(예전 저장) 실제 자료의 그 해(가까운 해) 환경, 그것도 없으면 0 */
-function lineWar(league: LeagueState, store: Store | null, s: SeasonLine, pos: string | null | undefined): number {
+export function lineWar(league: LeagueState, store: Store | null, s: SeasonLine, pos: string | null | undefined): number {
   const env = league.seasonEnv?.[String(s.year)] ?? (store ? realEnvOf(store, s.year) : undefined);
   if (!env) return 0;
   let w = 0;

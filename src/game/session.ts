@@ -58,6 +58,7 @@ import {
   seasonBests, yearbook,
 } from '../league/history';
 import { addArticle, crossed, josa, MILESTONES, STREAK_FROM, type ArticleKind } from '../league/articles';
+import { ensureTenureWar, faSoon, franchiseTier, titleKeysOf, type FranchiseTier } from '../league/franchise';
 import { ensureTitles, judgeTitles, tierText, titleEvents, titlesOf, type TitleLookup, type TitleView } from '../league/titles';
 import {
   ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
@@ -65,7 +66,7 @@ import {
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
 import {
-  budgetRows, cashOf, ensureFinance, repayDebt, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance,
+  budgetRows, cashOf, ensureFinance, repayDebt, FINANCE_LABEL, financePlan, seasonFlows, setBudget, setBudgetAuto, setBudgetPreset, setInvest, setTicketAuto, setTicketPrice, settleSeason, trustFromFinance, rescueStreak,
   type BudgetKind, type BudgetPreset, type SeatGrade, type SeatPrices,
   type BudgetRow, type FinanceKind, type FinancePlan, type FinanceYear, type InvestKind, type SeasonFlows, type TradeMove,
 } from '../league/finance';
@@ -1049,6 +1050,8 @@ export class GameSession {
     g.rebuildTrades();
     // 칭호 칸이 없는 예전 저장 (2026-10-26 전): 시작 전 실제 기록과 남아 있는 게임 안 시즌으로 채운다 (titles.ts, 화면용)
     ensureTitles(g.league, store, g.league.lastSeason?.year ?? g.league.startYear - 1);
+    // 시작 전 구단 WAR 칸이 없는 예전 저장 (2026-11-05 전, league/franchise.ts)
+    ensureTenureWar(g.league, store);
     // 예전 저장에는 없다: 불러온 직후 엔진 명단은 비어 있으므로 지금 날짜로 짜 본 임시 승격으로 대신한다
     g.lastCallUps = new Set(save.callUps ?? season.activeAt(save.teamIdx).callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -2634,13 +2637,15 @@ export class GameSession {
     const w = [1, 0.6];
     const val = (p: SimPlayer) => playerValue(p, this.values, w);
     const ok = (p: SimPlayer) => !p.foreign && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
-    const mine = this.team.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx).slice(7, 25);
+    const tier = (p: SimPlayer, team: number) => this.values.franchise?.(p, team).tier ?? 0;
+    // AI가 먼저 거는 제안: 우리 A·B 선수는 달라고 하지 않고, 자기 A 선수는 꺼내지 않는다 (프랜차이즈 기획안 4·5장)
+    const mine = this.team.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx).slice(7, 25).filter((p) => tier(p, this.teamIdx) === 0);
     const others = this.world.teams.filter((t) => t.idx !== this.teamIdx);
     if (!mine.length || !others.length) return null;
     for (let tries = 0; tries < 4; tries++) {
       const ai = others[rng.int(others.length)];
       const give = mine[rng.int(mine.length)];
-      const cands = ai.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx);
+      const cands = ai.org.filter((p) => ok(p) && tier(p, ai.idx) < 2).sort((a, b) => val(b) - val(a) || a.idx - b.idx);
       for (const get of cands) {
         if (val(get) < val(give) * 0.85) break;
         if (this.evaluateTrade(ai.idx, [give], [get]).verdict === 'accept') {
@@ -2919,9 +2924,30 @@ export class GameSession {
       // 연봉은 그 해 연봉 상승 지수로 나눠 2026년 돈으로 (AI의 연봉 부담 단가가 2026년 값이다)
       const wage = wageIndex(this.year, this.league);
       ctx.salary = new Map(this.league.players.filter((p) => !p.foreign).map((p) => [p.id, p.contract.salary / wage]));
+      ctx.franchise = this.franchiseLookup();
       this.valueCtx = ctx;
     }
     return this.valueCtx;
+  }
+
+  /**
+   * 트레이드 판단이 묻는 프랜차이즈 등급 (league/franchise.ts). 시즌 중 리그 기록은 개막 때 그대로라 선수·구단마다 한 번만 센다.
+   * 구단을 인자로 받아 시즌 중 소속이 바뀌어도 맞다 (데려온 구단에서는 재직이 없어 등급이 없다)
+   */
+  private franchiseLookup(): NonNullable<ValueContext['franchise']> {
+    const keys = titleKeysOf(this.league);
+    const byId = new Map(this.league.players.map((p) => [p.id, p]));
+    const memo = new Map<string, { tier: FranchiseTier; faSoon: boolean }>();
+    return (sp, team) => {
+      const key = `${sp.id}/${team}`;
+      let v = memo.get(key);
+      if (!v) {
+        const lp = byId.get(sp.id);
+        v = lp ? { tier: franchiseTier(lp, this.league, team, keys), faSoon: faSoon(lp, this.year) } : { tier: 0, faSoon: false };
+        memo.set(key, v);
+      }
+      return v;
+    };
   }
 
   /**
@@ -3612,13 +3638,15 @@ export class GameSession {
     say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
     // 재정: 적자를 모기업이 메우면 신뢰도가 떨어지고, 흑자면 조금 오른다 (finance.ts)
     if (fin) {
-      const fd = trustFromFinance(fin);
+      // 긴급 지원 감점은 이어 받은 해 수·난이도 압박 배율을 따른다 (재정 2 F8, finance.ts RESCUE_TRUST)
+      const streak = fin.rescue > 0 ? rescueStreak(L.finance?.[team]?.history ?? [], fin.year) : 0;
+      const fd = trustFromFinance(fin, streak, wageIndex(fin.year, L), settingsOf(L).ownerPressure);
       const b2 = o.trust;
       o.trust = Math.max(0, Math.min(100, o.trust + fd));
       o.history[o.history.length - 1].trustAfter = o.trust;
       const money = (v: number) => `${(v / 10000).toFixed(1)}억 원`;
       say(fin.rescue > 0
-        ? `재정 결산: 적자 ${money(-fin.net)}, 모기업이 ${money(fin.rescue)}을 메웠습니다. 신뢰도 ${b2} → ${o.trust}.`
+        ? `재정 결산: 적자 ${money(-fin.net)}, 모기업이 ${money(fin.rescue)}을 긴급 지원으로 메웠습니다${streak ? ` (${streak + 1}년 연속)` : ''}. 신뢰도 ${b2} → ${o.trust}.`
         : `재정 결산: ${fin.net >= 0 ? '흑자' : '적자'} ${money(Math.abs(fin.net))}, 자금 ${money(fin.cash)}.${fd ? ` 신뢰도 ${b2} → ${o.trust}.` : ''}`);
     }
     const prevLast = !!prevStandings && prevStandings[prevStandings.length - 1] === team;

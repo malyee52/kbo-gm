@@ -140,8 +140,11 @@ export interface LeaguePlayer {
   penTrust?: number;
   /** 지난 시즌 기록 (게임 안에서 치른 시즌만) */
   history: SeasonLine[];
-  /** 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다 */
-  tenure0?: { franchise: string; seasons: number };
+  /**
+   * 게임 시작 전 실제 기록에서 시작 구단 계보로 뛴 시즌 수 (팬덤의 프랜차이즈 스타 판정, stadium.ts). 게임 안 시즌은 history로 센다.
+   * war: 그 시즌들의 구단 WAR (프랜차이즈 등급, league/franchise.ts). 선택 칸, 없는 저장은 불러올 때 채운다
+   */
+  tenure0?: { franchise: string; seasons: number; war?: number };
   // ---- M6 (없으면 기본값. M5 저장 호환)
   /** 병역. 외국인은 없음. 국내 선수인데 없으면 careers.ts의 ensureMilitary가 채운다 */
   military?: Military;

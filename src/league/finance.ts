@@ -1574,9 +1574,35 @@ export function canPayFaBonus(league: LeagueState, team: number, bonus: number, 
   return bonusNow(bonus) <= Math.max(0, cashOf(league, team)) + faSupportLeft(league, team, year);
 }
 
-/** 적자 보전에 따른 구단주 신뢰도 변화 (−(메운 금액 ÷ 20억), 최대 −15). 흑자면 +2 */
-export function trustFromFinance(y: FinanceYear): number {
-  if (y.rescue > 0) return -Math.min(15, Math.round(y.rescue / 200_000));
+/**
+ * 긴급 지원 신뢰도 감점 (재정 2 F8, 2026-11-04 사용자 결정 ②, 임시값): 받은 해마다 기본 base + 메운 금액(2026년 돈) ÷ per (최대 cap),
+ * 바로 앞 해들에 이어 받았으면 이어진 해 수(최대 streakMax)마다 streak 더. 합에 구단주 압박 배율(난이도)을 곱한다.
+ * F7까지는 −(메운 금액 ÷ 20억, 반올림) 최대 −15라 10억 아래는 0이었다
+ */
+export const RESCUE_TRUST = { base: 4, per: 200_000, cap: 15, streak: 4, streakMax: 3 };
+
+/** 이 해(history 마지막) 바로 앞에 긴급 지원을 이어 받은 해 수 */
+export function rescueStreak(history: FinanceYear[], year: number): number {
+  let n = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h.year >= year) continue;
+    if (h.year !== year - 1 - n || !(h.rescue > 0)) break;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * 재정 결산에 따른 구단주 신뢰도 변화. 흑자면 +2, 긴급 지원을 받았으면 RESCUE_TRUST 감점.
+ * streak: 바로 앞에 이어 받은 해 수(rescueStreak), wage: 그 해 연봉 상승 지수(2026년 돈으로 나눔), pressure: 구단주 압박 배율
+ */
+export function trustFromFinance(y: FinanceYear, streak = 0, wage = 1, pressure = 1): number {
+  if (y.rescue > 0) {
+    const r = RESCUE_TRUST;
+    const pts = r.base + Math.min(r.cap, Math.round(y.rescue / wage / r.per)) + r.streak * Math.min(r.streakMax, streak);
+    return -Math.round(pts * pressure);
+  }
   return y.net > 0 ? 2 : 0;
 }
 
@@ -1650,9 +1676,10 @@ export const AI_BUDGET_CASH = 0.5;
  * AI 여유 자금 투자 (재정 2 F7, 임시값): 개막 때 자금(2026년 돈)이 AI_SURPLUS_FROM을 넘으면, 넘는 몫의 AI_SURPLUS_RATE를
  * 이번 시즌 예산 위에 더 쓴다. 돈으로 돌아오지 않는 갈래(육성·의료·스카우트 둘·2군 운영·프런트)에 남은 상한 비율대로 나누고 상한에서 멈춘다.
  * 환원을 없앤 뒤 잠실 두 구단 자금이 끝없이 쌓이지 않게 하는 '쓸 곳'이다 (플레이어 구단은 스스로 정한다)
+ * F8 (2026-11-04 사용자 결정 ②): 비율 0.25 → 0.5, 문턱 200억 → 150억
  */
-export const AI_SURPLUS_FROM = 2_000_000;
-export const AI_SURPLUS_RATE = 0.25;
+export const AI_SURPLUS_FROM = 1_500_000;
+export const AI_SURPLUS_RATE = 0.5;
 const SURPLUS_KINDS: BudgetKind[] = ['develop', 'medical', 'scoutPro', 'scout', 'futures', 'front'];
 
 /** 추천안 예산에 여유 자금 투자를 얹는다 (cash: 그 해 돈) */

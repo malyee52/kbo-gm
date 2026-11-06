@@ -182,6 +182,12 @@ export const QUALITY_TICKET = 0.15;
 export const HONEYMOON = [0.08, 0.05, 0.03];
 /** AI 구단 리모델링: 시설이 이 아래이고 자금이 공사비의 1.5배 이상이면 (임시값) */
 export const AI_REMODEL_BELOW = 35;
+/**
+ * 자금이 많은 AI 구단의 공사 (재정 2 F8, 2026-11-04 사용자 결정 ④, 임시값): 공사비 + keep(2026년 돈, 공사 뒤 남길 돈)만큼 자금이 있으면
+ * 시설이 remodelBelow 아래일 때 리모델링, 구장이 newAge년 넘고 시설이 newBelow 아래일 때 신구장을 짓는다 (위 기본 조건보다 넓다).
+ * 실제 구장 이동이 guard년 안에 있으면 하지 않는다 (실제 역사의 신구장 직전에 다른 구장을 짓거나 고치지 않게). 새 지출 종류는 없다
+ */
+export const AI_RICH = { keep: 1_500_000, remodelBelow: 70, newBelow: 60, newAge: 15, guard: 8 };
 
 /** 구장 상태가 없는 리그(새 게임, 예전 저장)에 채운다. capacity: 구단 계보의 기본 수용 인원 */
 export function ensureStadiums(league: LeagueState, capacity: (team: number) => number): StadiumState[] {
@@ -392,6 +398,19 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
         && !realParkOpening(league.teams[t].franchise, year + 1 + NEW_PARK.years)) {
       startProject(league, t, year, 'new', NEW_PARK.years, newCost, opt.capacity, { fence: FENCE_PRESETS.neutral.fence, dome: false });
       out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
+      continue;
+    }
+    // 자금이 많은 AI 구단: 문턱을 넓혀 짓는다 (AI_RICH)
+    const keep = AI_RICH.keep * wage;
+    const realSoon = Array.from({ length: AI_RICH.guard }, (_, i) => year + 1 + i).some((y) => !!realParkOpening(league.teams[t].franchise, y));
+    if (t !== userTeam && !s.project && !realSoon && s.quality < AI_RICH.newBelow && age >= AI_RICH.newAge && cashOf(t) >= newCost + keep) {
+      startProject(league, t, year, 'new', NEW_PARK.years, newCost, opt.capacity, { fence: FENCE_PRESETS.neutral.fence, dome: false });
+      out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
+      continue;
+    }
+    if (t !== userTeam && !s.project && !realSoon && s.quality < AI_RICH.remodelBelow && cashOf(t) >= remodelCost + keep) {
+      startProject(league, t, year, 'remodel', REMODEL.years, remodelCost, s.capacity + REMODEL.capacity);
+      out.push(`${league.teams[t].name}, ${year + 1} 시즌 구장 리모델링`);
       continue;
     }
     if (t !== userTeam && !s.project && s.quality < AI_REMODEL_BELOW && cashOf(t) >= remodelCost * 1.5) {
