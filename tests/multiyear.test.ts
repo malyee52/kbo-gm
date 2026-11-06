@@ -6,7 +6,7 @@ import {
   type EngineParams, type InjuryPart, type World,
 } from '../src/engine';
 import { agingDelta, expectedGrowth, REPL_BAT_RATIO, REPL_PIT_RATIO, valueContext } from '../src/ai/value';
-import { DECLINE_START_AGE, DEFAULT_PARAMS } from '../src/engine';
+import { DECLINE_START_AGE } from '../src/engine';
 import { initialMilitary, isServing, retireChance } from '../src/league/careers';
 import { createLeague } from '../src/league/create';
 import { careerIndex } from '../src/league/growth';
