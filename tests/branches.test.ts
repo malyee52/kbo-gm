@@ -141,13 +141,13 @@ describe('갈래 성장', () => {
     expect(b.bat!.s1 / p.bat!.s1).toBeGreaterThan(a.bat!.s1 / p.bat!.s1);
   });
 
-  it('시기 τ: 대기만성(+2)은 21세에 덜 크고 28세에 더 크며, 일찍 크는 선수(−2)는 반대 (노화에는 안 씀)', () => {
-    // 한 해 상한(growthCap)에 걸리지 않는 작은 격차로 본다
+  it('시기 τ: 대기만성(+2)은 21세에 덜 크고 26세에 더 크며, 일찍 크는 선수(−2)는 반대 (노화에는 안 씀)', () => {
+    // 한 해 상한(growthCap)에 걸리지 않는 작은 격차로 본다. 늦은 쪽은 26세 (2026-11-10 타자 곡선: 28세 뒤 성장 lateRate가 타자·투수 모두 0이라 28세에는 τ와 관계없이 크지 않는다)
     const grow = (a: number, t: number) => growthRuns(a, 0, 8, 1, new Rng('br/tau'), false, 1, 0, undefined, t) - growthRuns(a, 0, 8, 1, new Rng('br/tau'), false, 1, 0, undefined, 0);
     expect(grow(21, 2)).toBeLessThan(0);
-    expect(grow(28, 2)).toBeGreaterThan(0);
+    expect(grow(26, 2)).toBeGreaterThan(0);
     expect(grow(21, -2)).toBeGreaterThan(0);
-    expect(grow(28, -2)).toBeLessThan(0);
+    expect(grow(26, -2)).toBeLessThan(0);
     expect(growthRuns(34, 10, 30, 1, new Rng('br/old'), false, 1, 0, undefined, 2)).toBe(growthRuns(34, 10, 30, 1, new Rng('br/old'), false, 1, 0, undefined, 0));
   });
 

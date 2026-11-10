@@ -145,7 +145,9 @@ describe('부상 대체 외국인', () => {
     g.advance(8); // 21일째 AI 검토
     const m = movesOf(g.league, 2026).find((x) => x.kind === 'rehab' && x.to === t);
     expect(m?.rehab).toBe(p.id);
-    expect(foreignSwapsUsed(g.marketCtx, t)).toBe(0);
+    // 대체 영입은 교체 횟수에 들지 않는다. 같은 8일 안에 AI가 부진한 다른 외국인을 보통 교체할 수 있어 (운, 2026-11-10 타자 곡선 값에서 28일째 한 건)
+    // 0이 아니라 보통 교체 기록(sign)만 센 수와 견준다
+    expect(foreignSwapsUsed(g.marketCtx, t)).toBe(movesOf(g.league, 2026).filter((x) => x.kind === 'sign' && x.to === t).length);
     expect(rehabsOf(g.marketCtx, t).length).toBe(1);
     g.advance(50);
     expect(rehabsOf(g.marketCtx, t).length).toBe(0);
