@@ -134,6 +134,11 @@ function archiveOf(league: LeagueState, p: LeaguePlayer, why: ArchivedPlayer['wh
   };
 }
 
+/** 게임 안 시즌 줄의 가치 (점검 도구용, store 없이): 그 해 시뮬 환경이 없으면 0 */
+export function lineWarOf(league: LeagueState, s: SeasonLine, pos: string | null | undefined): number {
+  return lineWar(league, null, s, pos);
+}
+
 /** 게임 안 시즌 줄의 가치 (war.ts). 그 해 시뮬 환경이 없으면(예전 저장) 실제 자료의 그 해(가까운 해) 환경, 그것도 없으면 0 */
 export function lineWar(league: LeagueState, store: Store | null, s: SeasonLine, pos: string | null | undefined): number {
   const env = league.seasonEnv?.[String(s.year)] ?? (store ? realEnvOf(store, s.year) : undefined);

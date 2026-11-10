@@ -30,7 +30,7 @@ import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenVal
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
-import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, VIRTUAL_POOL } from './potential';
+import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, virtualStartGap, VIRTUAL_POOL } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
   type CareerNews,
@@ -116,7 +116,7 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
- * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5, 2026-11-05 투수 곡선 뒤 10
  */
 export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
 /** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
@@ -2290,8 +2290,11 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const age = univ ? 23 : 19;
     // 시작 능력은 천장에서 학력 시작 식만큼 아래 (잠재력 v2 18.5, 고졸 19세 = 입단 전 1년 "기타 경로")
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * devRng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    // 시작 격차가 투수·타자로 갈려서 투타를 먼저 뽑는다 (난수 순서는 예전과 같다: 운 → 투타)
+    const luck = devRng.range(0.7, 1.3);
+    const isPitcher = devRng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     devRng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
@@ -2308,8 +2311,10 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 시작 능력 (잠재력 v2 18.5): 천장 − 고졸 18세 격차 × (1 − 성장 몫)^(입단 전 해 수 × 경로 배율). 대졸은 대학 4년 = 프로 3년 꼴로 자란 채 들어온다
     // (예전 식 고졸 0.1P − 14 · 대졸 0.35P − 8은 같은 천장의 대졸이 22세에 8~9등급 뒤였다)
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * rng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    const luck = rng.range(0.7, 1.3);
+    const isPitcher = rng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
     if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;

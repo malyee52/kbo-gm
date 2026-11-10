@@ -571,6 +571,17 @@ export interface EngineParams {
     floor: number; room: number; yearSd: number; ceilSd: number; peakPull: number; tauSpan: number; tauSlope: number; tauPivot: number; breakout: number;
   };
   /**
+   * 성장·노화 곡선 (2026-11-04 가상 투수 곡선 카드, ai/value.ts agingDelta·expectedGrowth, league/growth.ts growthRuns).
+   * bat·pit: 하락 나이(DECLINE_START_AGE)부터 해마다 하락 (런/시즌, 색인 0 = 하락 첫해, 마지막 값을 그 뒤 모든 해에 쓴다),
+   * lateRate: 28세부터 하락 전까지 잠재력 격차를 좁히는 한 해 몫 [타자, 투수] (27세 이하는 0.35·0.3·0.25),
+   * prePit: 투수만 하락 나이 앞 28~31세에 해마다 더하는 완만한 하락 (런/시즌, 색인 0 = 28세, 2026-11-06 사용자: 하락 시작 32세는 그대로 두고 투수 28~31세에만),
+   * startGap: 가상 신인 고졸 18세 시작 격차 (런) = 투수 gap + slope × max(0, 천장 − pivot), 타자 gap (입단 전 경로는 potential.ts entryGap)
+   */
+  aging: {
+    bat: number[]; pit: number[]; prePit: number[]; lateRate: [number, number];
+    startGap: { gap: number; slope: number; pivot: number };
+  };
+  /**
    * 잠재력 v2: 숨은 천장과 숨은 성장 성향 (능력치 v2 기획안 17·18장, league/potential.ts, 모두 임시값).
    * width: 나이 폭(등급, 다음 시즌 나이 ≤21·22~24·25~27·28~31·32~), sampleFull·sampleExtra: 표본 배율 1 + extra × (1 − min(1, 표본 ÷ full)),
    * fixWar·extremeWar: 시작 연도 전 한 시즌 가치(승) 고정·극단 문턱, fixedWidth: 고정 선수 폭(나이 폭에 곱함), extremeDrive: 극단 선수 d 배율,
@@ -1041,6 +1052,17 @@ export const DEFAULT_PARAMS: EngineParams = {
   },
   // 잠재력 v2 (기획안 17.3·17.4·18.2~18.5, 사용자 2026-10-24 확정 꼴): 폭 두 배(Q2 ③), 고정 2승·극단 8승(Q7·Q3), 고정 폭 ½(Q8 ③), k ¼(Q10 ②).
   // 크기(바닥 47·44·41, 4런, 성장 성향 0.25·0.85·0.15, c 0.75·0.9·0.5, 0.28)는 모두 임시값이고 16-5에서 맞춘다
+  // 타자는 예전 값 그대로. 투수는 2026-11-05 가상 투수 곡선 카드에서 tools/curve_check.ts로 스타 곡선·통산 150승에 맞춘 임시값
+  // (예전 pit −1.5·−2·−2.5·−3.5·−4·−5·−5·−7, 늦은 성장 0.15, 천장 비례 0)
+  // 2026-11-10 타자 곡선 카드: 타자 하락과 투수 28~31세 완만한 하락을 curve_check 3시드 50시즌 스타 나이별 WAR에 맞춘 임시값
+  // (예전 bat −1·−1.5·−2·−2.5·−3·−4·−4·−6, 타자 늦은 성장 0.15, prePit 0). docs/temp-values.md "타자 곡선"
+  aging: {
+    bat: [-3, -4, -4.5, -5, -6, -7.5],
+    pit: [-3.5, -4.5, -6, -7, -8, -9],
+    prePit: [-2, -3, -4, -4.5],
+    lateRate: [0, 0],
+    startGap: { gap: 30, slope: 0.6, pivot: 20 },
+  },
   potential: {
     width: [14, 10, 6, 3, 0], sampleFull: 1500, sampleExtra: 0.5,
     fixWar: 2, extremeWar: 8, fixedWidth: 0.5, extremeDrive: 0.25,
@@ -1050,7 +1072,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     room: [10.5, 6, 4.5, 1.5],
     // 가상 신인 배율 (16-5): 여유분 실측 뒤 tools/flow_longterm.ts 3시드 20시즌 2043~2045 평균이 시작 대비 −1.7·+0.7·+3.1% (10.5면 +17~23%, 9.25면 −3.1~+5.7%, 8.5면 −6~−16%).
     // 16-5b: 지명 순위 표가 이 배율의 분위 값을 따르게 바꾼 뒤 9 → 9.5 (2043~2045 +1.0·−3.9·+1.1%, 9면 −2.6·−7.5·−7.5%, 9.75면 0.0·−3.9·+2.1%, 임시값)
-    draftScale: 9.5,
+    // 2026-11-05 가상 투수 곡선 카드: 투수 곡선을 고친 뒤 4시드 20시즌 2043~2045 평균이 9.5면 −5.3%, 9.75면 −2.3%, 10이면 +0.8% (임시값)
+    // 2026-11-10 타자 곡선 카드: 새 타자·투수 곡선 위에서 9면 2043~2045 −12.0%, 10이면 −2.8% (4시드)라 10 그대로 (임시값)
+    draftScale: 10,
     driveSpeed: 0.25, reachBase: 0.85, reachDrive: 0.15,
     eduRate: 0.28, eduPath: { univ: 0.75, abroad: 0.9, other: 0.5 },
   },

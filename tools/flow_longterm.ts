@@ -9,8 +9,10 @@ import { createLeague } from '../src/league/create';
 import * as Off from '../src/league/offseason';
 import type { LeaguePlayer } from '../src/league/types';
 import { worldFromLeague } from '../src/league/world';
+import { applySets } from './setParams';
 
 const arg = (n: string, d: string) => { const i = process.argv.indexOf(`--${n}`); return i < 0 ? d : process.argv[i + 1]; };
+applySets(arg('set', '')); // 성장·노화 곡선 같은 조정값 덮어쓰기 (--set aging.pit=-3/-4,…)
 const seasons = Number(arg('seasons', '15'));
 const seeds = arg('seeds', 'diag-a,diag-b').split(',');
 const startYear = Number(arg('start', '2026'));
