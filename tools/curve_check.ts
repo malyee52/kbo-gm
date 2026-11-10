@@ -139,7 +139,8 @@ function report(files: string[]): void {
   console.log('| 판 | 시즌 | B2 즉시 전력 신인(10시즌당) | B4 리그 최고 WAR | A6 전성기 | D9 150승(100시즌) | 투수 B2 | 투수 B4 | 투수 A6 | 투수 WAR 8+(10시즌당) |');
   console.log('|---|---|---|---|---|---|---|---|---|---|');
   for (const s of ss) console.log(`| ${s.label} | ${s.years} | ${f(s.b2, 1)} | ${f(s.b4)} | ${f(s.a6)} | ${f(s.d9, 1)} | ${f(s.b2p, 1)} | ${f(s.b4p)} | ${f(s.a6p)} | ${f(s.p8, 1)} |`);
-  console.log('기준: B2 6~16, B4 7.5~10, A6 4~7, D9 5~18');
+  // B2 기준은 2026-11-10 사용자 결정으로 실제 1982~ 기록 55.0(10시즌당)이 들어가게 6~16 → 6~60 (임시값: 아래는 2015~ 실제 10.9 쪽 그대로, 위는 55.0에 약 10% 여유)
+  console.log('기준: B2 6~60 (실제 1982~ 55.0 · 2015~ 10.9), B4 7.5~10, A6 4~7, D9 5~18');
   for (const [name, key] of [['투수', 'ageP'], ['타자', 'ageB']] as const) {
     console.log(`\n${name} 나이별 평균 WAR / 상위 10% (해마다 시즌 수)`);
     console.log(`| 나이 | ${ss.map((s) => s.label).join(' | ')} |`);
