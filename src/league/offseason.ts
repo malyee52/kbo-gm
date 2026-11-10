@@ -3268,6 +3268,7 @@ function shapeOf(x: number[], w: number[]): number[] {
  * 리그 전체 구성이 조금 옮겨 가도 시즌마다 환경 맞춤(season.ts calibrate)이 리그 평균을 목표에 맞춘다.
  * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다.
  * career (실존 지명 신인): 실제 커리어 모양. 몫 c만큼 그 모양으로 옮기고 나머지 운은 √(1 − c²)만 남긴다. c = 1이면 기록의 모양 그대로, 기록이 없으면 가상 선수와 같다
+ * 가운데 맞춤 size.center는 분포 평균 쪽에서 빼므로 기록 몫 c에는 닿지 않는다 (c = 1이면 기록 그대로, 나머지 몫만큼만 받는다)
  */
 export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: EngineParams['shape'], starter: boolean, ceiling: number,
                            career?: CareerShape | null): void {
@@ -3289,7 +3290,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const b = { ...p.bat };
     const real = career?.bat && shapeOf(SHAPE_BAT_KEYS.map((k) => Math.log(career.bat![k])), SHAPE_BAT_KEYS.map((k) => BAT_SHIFT[k]));
     SHAPE_BAT_KEYS.forEach((k, i) => {
-      const mu = T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r;
+      const mu = T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r - (size.center?.bat[i] ?? 0);
       b[k] *= Math.exp(size.bat * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i] * (size.noise[k] ?? 1)));
     });
     p.bat = b;
@@ -3302,7 +3303,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const q = { ...p.pit };
     const real = career?.pit && shapeOf(SHAPE_PIT_KEYS.map((k) => Math.log(career.pit![k])), SHAPE_PIT_KEYS.map((k) => PIT_SHIFT[k]));
     SHAPE_PIT_KEYS.forEach((k, i) => {
-      const mu = T.mean[g][i] + T.runSlope[i] * r;
+      const mu = T.mean[g][i] + T.runSlope[i] * r - (size.center?.pit[i] ?? 0);
       q[k] *= Math.exp(size.pit * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i]));
     });
     p.pit = q;

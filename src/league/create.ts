@@ -281,10 +281,10 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   // 시작 전 드래프트에서 지명한 선수(나성범 등)는 아래 보충에서 이 구단으로 들어간다
   const futures = addFuturesTeams(league, store, startYear);
   const recordedIds = new Set(league.players.map((p) => p.id));
-  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx, params.potential)
+  const added = addUnrecordedRookies(league, store, ctx, startYear, seed, idx, params)
     + addAbroadAtStart(league, store, startYear, params, special, toLeague, idx)
     + addAbsentVeterans(league, store, startYear, params, special, toLeague)
-    + addLateDebuts(league, store, ctx, startYear, idx);
+    + addLateDebuts(league, store, ctx, startYear, idx, params);
   trimToOrgLimit(league, recordedIds);
   // 투타 겸업 (league/twoway.ts): 실제 지명 자료에 투타겸업으로 표기된 선수는 겸업 재능, 모든 선수에게 반대쪽 능력
   const twoWayIds = new Set(Object.values(store.drafts ?? {}).flat().filter((d) => d.twoWay && d.pid).map((d) => d.pid!));
@@ -315,12 +315,12 @@ export function createLeague(store: Store, startYear: number, seed: string, para
  * 같은 이름이 같은 구단에 이미 있으면 넣지 않는다 (1군에 올라온 신인). 넣은 수를 돌려준다.
  */
 function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, seed: string,
-                              idx: CareerIndex, pp: EngineParams['potential']): number {
+                              idx: CareerIndex, params: EngineParams): number {
   const rows = (store.drafts?.[String(startYear)] ?? []).filter((d) => d.kind !== '원년 멤버' && d.games === 0);
   if (!rows.length) return 0;
   const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
   const have = new Set(league.players.map((p) => `${p.team}/${p.name}`));
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear), params };
   const rng = new Rng(`${seed}/rookies/${startYear}`);
   const taken = takenNames(league, store);
   const all = store.drafts![String(startYear)];
@@ -328,7 +328,7 @@ function addUnrecordedRookies(league: LeagueState, store: Store, ctx: ReturnType
   for (const d of rows) {
     const t = teamIdx.get(d.team);
     if (t === undefined || have.has(`${t}/${d.name}`)) continue;
-    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx, pp);
+    const p = makeDraftee(league, view, rng, taken, d, all.indexOf(d), startYear, store, () => idx, params.potential);
     p.team = t;
     p.military = { state: 'pending' };
     n++;
@@ -459,10 +459,10 @@ function addAbsentVeterans(league: LeagueState, store: Store, startYear: number,
 }
 
 /** 시작 전에 지명됐지만 시작 연도까지 1군 기록이 없는 선수를 지명 구단에 넣는다. 지명 구단이 아직 없으면 창단 때 넣는다 (missing.ts) */
-function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex): number {
+function addLateDebuts(league: LeagueState, store: Store, ctx: ReturnType<typeof valueContext>, startYear: number, idx: CareerIndex, params: EngineParams): number {
   const list = lateDebutDraftees(store, league, startYear);
   if (!list.length) return 0;
-  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear) };
+  const view = { year: startYear, ctx, sim: new Map<string, SimPlayer>(), orgs: [] as SimPlayer[][], wage: wageIndex(startYear), minPay: minSalary(startYear), params };
   const taken = takenNames(league, store);
   let n = 0;
   for (const x of list) {
