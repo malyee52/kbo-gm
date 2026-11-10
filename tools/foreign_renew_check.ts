@@ -1,5 +1,6 @@
 // 외국인 재계약·시장 후보 장기 점검 (2026-11-04 외국인 재계약 카드): 모든 구단 AI로 여러 시즌을 돌려
 // 외국인 머무는 시즌(평가 K3), WAR 상위 10명 중 외국인(K2), 외국인 연봉 합, 한 구단 외국인 사용 수, 재정, 시장 후보·신규 계약·재계약 능력을 잰다.
+// 시즌 기록(머무는 시즌·WAR 상위 10명·양수 WAR 몫·구단당 외국인 사용)은 오프시즌 고리에서 closeOffseason 전에 센다 (떠나는 선수의 마지막 시즌까지).
 //
 // 사용법:  npx tsx tools/foreign_renew_check.ts --start 2026 --seasons 20 --seeds a,b,c [--out reports/foreign-renew.md]
 // 실제 값은 tools/foreign_real.ts (게임 눈금 첫해 능력 분포)와 reports/eval100.md K2·K3 실제 셈
@@ -64,7 +65,33 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
     // 개막 때 외국인 연봉 합 (일반 + 아시아쿼터, 달러)
     const fs = league.players.filter((p) => p.team >= 0 && p.foreign);
     pay.push(fs.reduce((a, p) => a + foreignContractTotal(p.contract), 0) / league.teams.length);
+    const countSeason = () => {
+      const rows: { foreign: boolean; war: number }[] = [];
+      const teamsUsed = new Map<number, Set<string>>();
+      const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
+      for (const p of league.players) {
+        const h = p.history.find((x) => x.year === year);
+        if (!h || (!h.bat?.[B.pa] && !h.pit?.[P.outs])) continue;
+        let r = recs.get(p.id);
+        if (!r) recs.set(p.id, (r = { foreign: p.foreign, asia: !!p.asia, seasons: [], teams: new Set(), firstGame: year }));
+        r.seasons.push(year);
+        const w = warOfLine(league, year, p.pos ?? null, h.bat, h.pit);
+        rows.push({ foreign: p.foreign, war: w });
+        if (p.foreign) {
+          const t = teamIdx.get(h.team) ?? -1;
+          (teamsUsed.get(t) ?? teamsUsed.set(t, new Set()).get(t)!).add(p.id);
+        }
+      }
+      rows.sort((a, b) => b.war - a.war);
+      top10.push(rows.slice(0, 10).filter((x) => x.foreign).length / 10);
+      const pos = rows.filter((x) => x.war > 0);
+      share.push(pos.filter((x) => x.foreign).reduce((a, x) => a + x.war, 0) / Math.max(1e-9, pos.reduce((a, x) => a + x.war, 0)));
+      used.push(mean([...teamsUsed.values()].map((x) => x.size)));
+    };
     const { m } = runYear(league, store, DEFAULT_PARAMS, (off, world) => {
+      // 이 시즌(year) 1군 기록은 closeOffseason이 소속 없는 선수(풀린 외국인·은퇴 선수)를 지우기 전에 센다 (2026-11-10 고침:
+      // 전에는 runYear 뒤에 세어 떠나는 선수의 마지막 시즌이 빠졌고, 한 시즌만 뛴 외국인은 머무는 시즌에서 아예 빠졌다)
+      countSeason();
       const f = off.foreign;
       if (!f) return;
       const ctx = valueContext(world);
@@ -87,28 +114,6 @@ function runSeed(store: ReturnType<typeof loadDataStore>, start: number, seasons
     });
     cash.push(m.econ.cashAvg);
     rescued += m.econ.rescued;
-    // 결산·오프시즌이 끝났다: 이 시즌(year) 1군 기록
-    const rows: { foreign: boolean; war: number }[] = [];
-    const teamsUsed = new Map<number, Set<string>>();
-    const teamIdx = new Map(league.teams.map((t, i) => [t.name, i]));
-    for (const p of league.players) {
-      const h = p.history.find((x) => x.year === year);
-      if (!h || (!h.bat?.[B.pa] && !h.pit?.[P.outs])) continue;
-      let r = recs.get(p.id);
-      if (!r) recs.set(p.id, (r = { foreign: p.foreign, asia: !!p.asia, seasons: [], teams: new Set(), firstGame: year }));
-      r.seasons.push(year);
-      const w = warOfLine(league, year, p.pos ?? null, h.bat, h.pit);
-      rows.push({ foreign: p.foreign, war: w });
-      if (p.foreign) {
-        const t = teamIdx.get(h.team) ?? -1;
-        (teamsUsed.get(t) ?? teamsUsed.set(t, new Set()).get(t)!).add(p.id);
-      }
-    }
-    rows.sort((a, b) => b.war - a.war);
-    top10.push(rows.slice(0, 10).filter((x) => x.foreign).length / 10);
-    const pos = rows.filter((x) => x.war > 0);
-    share.push(pos.filter((x) => x.foreign).reduce((a, x) => a + x.war, 0) / Math.max(1e-9, pos.reduce((a, x) => a + x.war, 0)));
-    used.push(mean([...teamsUsed.values()].map((x) => x.size)));
     process.stderr.write(`${seed} ${year} `);
   }
   process.stderr.write('\n');
