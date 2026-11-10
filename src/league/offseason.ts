@@ -136,6 +136,12 @@ export const FOREIGN_KEEP_FORM = 0.6;
  * tools/foreign_renew_check.ts 2026 시작 20시즌 3시드(올림 11)에서 0일 때 재계약 비율 47~54%·구간별 남는 비율 23/40~47/67~78% (실제 약 50%·24/42/61%)라 메우지 않는다
  */
 export const FOREIGN_KEEP_FORM_SHIFT = 0;
+/**
+ * 일반 외국인 투수(아시아쿼터 제외)만 판단값에 출전 몫만큼 더 얹는 값 (런, 임시값, 2026-11-10 사용자 결정 "투수 영점 +5 + 투타 문턱 같음").
+ * 많이 뛴 외국인 투수는 시즌 기여 ÷ 출전 몫이 진짜보다 약 12런 낮고 타자는 약 4런 낮아(2026-11-06 측정, 4시드 50시즌 2035년부터),
+ * 재계약에서 투수만 덜 남았다 (남는 비율 타자 .56·투수 .21). 그 측정에서 고른 값이고 맞춘 값이 아니다. 왜 투수만 낮게 재는지는 아직 재지 않았다
+ */
+export const FOREIGN_KEEP_PIT_SHIFT = 5;
 /** 출전 몫을 셀 때 한 시즌 전부로 보는 양 (임시값): 타자 600타석, 선발 165이닝, 구원 65이닝 */
 const FOREIGN_FULL_PA = 600;
 const FOREIGN_FULL_OUTS_SP = 495;
@@ -1885,9 +1891,14 @@ function foreignBar(league: LeagueState, view: LeagueView, p: LeaguePlayer, fres
  * 30~40런 24%·40~50런 42%·50런 이상 61%). 판단값 = 진짜 + 섞는 몫 × (시즌 기여 − 출전 몫 × 진짜), 시즌 기여 = 시즌 가치(war.ts) × 1승당 런 ÷ 눈금.
  * 출전 몫이 작으면(시즌 중 영입·부상) 진짜 능력 쪽으로 남는다. 기록은 공개 값이라 숨은 값이 새지 않는다
  */
+/** 판단값에 출전 몫만큼 더하는 영점 (런): 모두 FOREIGN_KEEP_FORM_SHIFT, 일반 외국인 투수는 FOREIGN_KEEP_PIT_SHIFT를 더 */
+export function foreignKeepShift(p: LeaguePlayer): number {
+  return FOREIGN_KEEP_FORM_SHIFT + (p.isPitcher && !p.asia ? FOREIGN_KEEP_PIT_SHIFT : 0);
+}
+
 export function foreignJudgeRuns(league: LeagueState, store: Store, view: LeagueView, p: LeaguePlayer, year: number): number {
   const { truth, runs, share } = foreignFormParts(league, store, view, p, year);
-  return truth + FOREIGN_KEEP_FORM * (runs - share * truth) + FOREIGN_KEEP_FORM_SHIFT * share;
+  return truth + FOREIGN_KEEP_FORM * (runs - share * truth) + foreignKeepShift(p) * share;
 }
 
 /** 판단값의 재료: 진짜 능력, 그 시즌 기여(런), 출전 몫 (0~1). 점검 도구(tools/foreign_renew_check.ts)도 쓴다 */

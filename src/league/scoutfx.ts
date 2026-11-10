@@ -166,8 +166,10 @@ export function fxSpec(rng: Rng, region: FxRegion, asia: boolean, season: boolea
 /**
  * 시장에서 새로 데려올 외국인의 기대 능력 (런, 다음 시즌): 실제 KBO 신규 외국인 첫해 능력 중앙값 (tools/foreign_real.ts, 2015~2025 시작 판 게임 눈금:
  * 투수 48.0·타자 42.9, 아시아쿼터는 2026 시작 판 12명 평균 6.6). 외국인 재계약 판단의 견줄 값 (offseason.ts foreignKeepBar, 2026-11-04 사용자 결정)
+ * 타자는 2026-11-10 사용자 결정("투수 영점 +5 + 투타 문턱 같음")으로 실측 43 대신 투수와 같은 48 (임시값): 43이면 재계약에서 타자가 투수보다 훨씬 많이 남아
+ * 외국인 타자가 늘고 장타 압력이 문턱을 넘었다. 실측값을 버린 결정이다
  */
-export const FX_MARKET_RUNS = { pit: 48, bat: 43, asia: 6 };
+export const FX_MARKET_RUNS = { pit: 48, bat: 48, asia: 6 };
 export function fxMarketRuns(isPitcher: boolean, asia: boolean): number {
   return asia ? FX_MARKET_RUNS.asia : isPitcher ? FX_MARKET_RUNS.pit : FX_MARKET_RUNS.bat;
 }
