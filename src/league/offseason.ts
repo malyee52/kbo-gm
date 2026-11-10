@@ -116,7 +116,7 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
- * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5, 2026-11-05 투수 곡선 뒤 10
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5, 2026-11-05 투수 곡선 뒤 10, 2026-11-10 장타 압력 카드 뒤 9.75
  */
 export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
 /** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
