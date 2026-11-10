@@ -5,7 +5,7 @@
 // 사용법: npx tsx tools/league_env_trend.ts --seasons 50 --seeds long-a,long-b [--start 2026] [--shape0] [--set 키=값,…] --out reports/tmp/env.json
 //   --shape0: 가상 선수 특기 모양 끄기 (params.shape bat·pit 0, 특기 모양 전과 견주기)
 //   --center JSON·--center0: 특기 모양 가운데 맞춤 덮어쓰기·끄기
-//   --set:    params 덮어쓰기 (점 경로, 예: shape.bat=0.5)
+//   --set:    params 덮어쓰기 (점 경로, 배열은 /로, 예: shape.bat=0.5,aging.bat=-1/-1.5). DEFAULT_PARAMS에 바로 쓴다 (tools/setParams.ts)
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -16,6 +16,7 @@ import * as Off from '../src/league/offseason';
 import { worldFromLeague } from '../src/league/world';
 import { ballHrMul, futureValue } from '../src/league/futureRules';
 import { installCalCache } from './calCache';
+import { applySets } from './setParams';
 import { currentRuns, valueContext } from '../src/ai/value';
 
 function arg(name: string): string | undefined {
@@ -27,18 +28,13 @@ const start = Number(arg('start') ?? 2026);
 const n = Number(arg('seasons') ?? 20);
 const seeds = (arg('seeds') ?? 'long-a').split(',');
 const out = arg('out') ?? 'reports/tmp/env.json';
+// --set은 DEFAULT_PARAMS를 그 자리에서 바꾼다 (ai/value.ts agingDelta처럼 params를 받지 않고 기본값을 읽는 곳에도 닿게, tools/setParams.ts)
+applySets(arg('set') ?? '');
 const params: EngineParams = structuredClone(DEFAULT_PARAMS);
 if (process.argv.includes('--shape0')) params.shape = { ...params.shape, bat: 0, pit: 0 };
 // --center '{"bat":[…6],"pit":[…4]}': 특기 모양 가운데 맞춤 덮어쓰기, --center0: 가운데 맞춤 끄기
 if (arg('center')) params.shape = { ...params.shape, center: JSON.parse(arg('center')!) };
 if (process.argv.includes('--center0')) params.shape = { ...params.shape, center: undefined };
-for (const kv of (arg('set') ?? '').split(',').filter(Boolean)) {
-  const [path, val] = kv.split('=');
-  const keys = path.split('.');
-  let o = params as unknown as Record<string, unknown>;
-  for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
-  o[keys.at(-1)!] = Number(val);
-}
 
 installCalCache();
 const store = loadDataStore();
