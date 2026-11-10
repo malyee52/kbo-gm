@@ -75,10 +75,10 @@ export function lateDebutDraftees(store: Store, league: LeagueState, startYear: 
 export function makeLateDraftee(league: LeagueState, view: LeagueView, x: LateDraftee, team: number, year: number,
                                 store: Store, career: () => CareerIndex, taken: Set<string>): LeaguePlayer {
   const rng = new Rng(`${league.seed}/late/${x.m.id}`);
-  const p = makeDraftee(league, view, rng, taken, x.d, x.index, x.entry, store, career);
+  const p = makeDraftee(league, view, rng, taken, x.d, x.index, x.entry, store, career, view.params?.potential);
   const age = p.birthYear ? year - p.birthYear : 22;
   // 지금 능력은 뽑힌 천장이 아니라 천장 중심에서 낸다 (잠재력 v2 18.3 ③: 지금 능력이 천장을 흘리지 않게). 천장 위로는 두지 않는다
-  const center = drafteeCenterOf(store, x.m, x.d, x.entry, p.isPitcher, p.pos, view, career);
+  const center = drafteeCenterOf(store, x.m, x.d, x.entry, p.isPitcher, p.pos, view, career, view.params?.potential);
   const runs = Math.min(p.potential, Math.max(-15, center - growthRoom(age) * rng.range(0.7, 1.3)));
   Object.assign(p, skillForRuns({ ...p }, runs, view.ctx as ValueContext, year));
   p.team = team;

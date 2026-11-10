@@ -30,7 +30,7 @@ import { draftBoard, foreignSigma, guessRuns, marketReputation, seenFor, seenVal
 export type { BoardRow } from './scout';
 import { ceilingFor, growBranches, timingOf } from './branches';
 import { applyDrill, focusOf, futuresTrainSlots, rollTraining, trainingFrac, trainingPlans } from './training';
-import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, VIRTUAL_POOL } from './potential';
+import { capAtCeiling, draftRank, drafteeCeiling, drafteeCenter, driveOf, entryGap, entryPathOf, virtualStartGap, VIRTUAL_POOL } from './potential';
 import {
   asianGames, ensureMilitary, injuryEffect, isAsianGamesYear, isServing, militaryStep, retirements, rollForm, SERVICE_DECAY, serviceName,
   type CareerNews,
@@ -116,7 +116,7 @@ export const DRAFT_ROUNDS = 11;
  * 2026-10-12 기준표 정렬(투수 가치 눈금·고점 회귀 완화·역사 재현 기본)로 시작 리그가 높게 잡혀 10.5
  * (역사 재현, 2시드 20시즌: 2045년 시작 대비 -1.9%·-0.4%, 9면 -20%).
  * 배율을 바꾸면 reports/flow-longterm.md처럼 다시 잰다. docs/longterm-plan.md 7장.
- * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5
+ * 16-5부터 값은 params.potential.draftScale (드래프트는 그 값을 쓰고, 이 상수는 AI 지명권 가치용 기본값). 2026-10-25 잠재력 v2·여유분 실측 위에서 10.5 → 9, 16-5b(지명 순위 표를 이 배율의 분위 값으로) 뒤 9.5, 2026-11-05 투수 곡선 뒤 10
  */
 export const DRAFT_POTENTIAL_SCALE = DEFAULT_PARAMS.potential.draftScale;
 /** 드래프트 풀 인원 (임시값, 지명 순위 표의 분위도 이 인원으로 센다: potential.ts VIRTUAL_POOL) */
@@ -136,6 +136,12 @@ export const FOREIGN_KEEP_FORM = 0.6;
  * tools/foreign_renew_check.ts 2026 시작 20시즌 3시드(올림 11)에서 0일 때 재계약 비율 47~54%·구간별 남는 비율 23/40~47/67~78% (실제 약 50%·24/42/61%)라 메우지 않는다
  */
 export const FOREIGN_KEEP_FORM_SHIFT = 0;
+/**
+ * 일반 외국인 투수(아시아쿼터 제외)만 판단값에 출전 몫만큼 더 얹는 값 (런, 임시값, 2026-11-10 사용자 결정 "투수 영점 +5 + 투타 문턱 같음").
+ * 많이 뛴 외국인 투수는 시즌 기여 ÷ 출전 몫이 진짜보다 약 12런 낮고 타자는 약 4런 낮아(2026-11-06 측정, 4시드 50시즌 2035년부터),
+ * 재계약에서 투수만 덜 남았다 (남는 비율 타자 .56·투수 .21). 그 측정에서 고른 값이고 맞춘 값이 아니다. 왜 투수만 낮게 재는지는 아직 재지 않았다
+ */
+export const FOREIGN_KEEP_PIT_SHIFT = 5;
 /** 출전 몫을 셀 때 한 시즌 전부로 보는 양 (임시값): 타자 600타석, 선발 165이닝, 구원 65이닝 */
 const FOREIGN_FULL_PA = 600;
 const FOREIGN_FULL_OUTS_SP = 495;
@@ -1885,9 +1891,14 @@ function foreignBar(league: LeagueState, view: LeagueView, p: LeaguePlayer, fres
  * 30~40런 24%·40~50런 42%·50런 이상 61%). 판단값 = 진짜 + 섞는 몫 × (시즌 기여 − 출전 몫 × 진짜), 시즌 기여 = 시즌 가치(war.ts) × 1승당 런 ÷ 눈금.
  * 출전 몫이 작으면(시즌 중 영입·부상) 진짜 능력 쪽으로 남는다. 기록은 공개 값이라 숨은 값이 새지 않는다
  */
+/** 판단값에 출전 몫만큼 더하는 영점 (런): 모두 FOREIGN_KEEP_FORM_SHIFT, 일반 외국인 투수는 FOREIGN_KEEP_PIT_SHIFT를 더 */
+export function foreignKeepShift(p: LeaguePlayer): number {
+  return FOREIGN_KEEP_FORM_SHIFT + (p.isPitcher && !p.asia ? FOREIGN_KEEP_PIT_SHIFT : 0);
+}
+
 export function foreignJudgeRuns(league: LeagueState, store: Store, view: LeagueView, p: LeaguePlayer, year: number): number {
   const { truth, runs, share } = foreignFormParts(league, store, view, p, year);
-  return truth + FOREIGN_KEEP_FORM * (runs - share * truth) + FOREIGN_KEEP_FORM_SHIFT * share;
+  return truth + FOREIGN_KEEP_FORM * (runs - share * truth) + foreignKeepShift(p) * share;
 }
 
 /** 판단값의 재료: 진짜 능력, 그 시즌 기여(런), 출전 몫 (0~1). 점검 도구(tools/foreign_renew_check.ts)도 쓴다 */
@@ -2279,8 +2290,11 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     const age = univ ? 23 : 19;
     // 시작 능력은 천장에서 학력 시작 식만큼 아래 (잠재력 v2 18.5, 고졸 19세 = 입단 전 1년 "기타 경로")
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * devRng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    // 시작 격차가 투수·타자로 갈려서 투타를 먼저 뽑는다 (난수 순서는 예전과 같다: 운 → 투타)
+    const luck = devRng.range(0.7, 1.3);
+    const isPitcher = devRng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, devRng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     devRng.next(); // 예전 스카우트 평가(scoutPotential, 16-7에서 버림) 자리: 뒤 난수 흐름을 그대로 두려고 하나 버린다
     view.ctx.potential?.set(p.id, aiPotential(league, p));
@@ -2297,8 +2311,10 @@ function enterDraft(league: LeagueState, off: OffseasonState, store: Store, para
     // 시작 능력 (잠재력 v2 18.5): 천장 − 고졸 18세 격차 × (1 − 성장 몫)^(입단 전 해 수 × 경로 배율). 대졸은 대학 4년 = 프로 3년 꼴로 자란 채 들어온다
     // (예전 식 고졸 0.1P − 14 · 대졸 0.35P − 8은 같은 천장의 대졸이 22세에 8~9등급 뒤였다)
     const { path, years } = entryPathOf(univ ? 'UNIV' : 'HS', age, 18);
-    const runs = Math.max(-15, potential - entryGap(growthRoom(18), years, path) * rng.range(0.7, 1.3));
-    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential }, year);
+    const luck = rng.range(0.7, 1.3);
+    const isPitcher = rng.chance(0.5);
+    const runs = Math.max(-15, potential - entryGap(virtualStartGap(potential, isPitcher, params.aging), years, path) * luck);
+    const p = makeVirtual(league, view, rng, taken, { foreign: false, asia: false, age, runs, potential, isPitcher }, year);
     p.school = univ ? 'UNIV' : 'HS';
     // 겸업 재능 (league/twoway.ts): 가상 신인의 아주 드문 몇 명. 따로 둔 난수라 드래프트 흐름은 그대로
     if (new Rng(`${league.seed}/two-way-talent/${p.id}`).chance(VIRTUAL_TWO_WAY_SHARE)) p.twoWayTalent = true;
@@ -3257,6 +3273,7 @@ function shapeOf(x: number[], w: number[]): number[] {
  * 리그 전체 구성이 조금 옮겨 가도 시즌마다 환경 맞춤(season.ts calibrate)이 리그 평균을 목표에 맞춘다.
  * 난수는 선수별 시드 줄기라 공유 난수 흐름을 바꾸지 않는다. 가치 총량은 부르는 쪽(skillForRuns)이 맞춘다.
  * career (실존 지명 신인): 실제 커리어 모양. 몫 c만큼 그 모양으로 옮기고 나머지 운은 √(1 − c²)만 남긴다. c = 1이면 기록의 모양 그대로, 기록이 없으면 가상 선수와 같다
+ * 가운데 맞춤 size.center는 분포 평균 쪽에서 빼므로 기록 몫 c에는 닿지 않는다 (c = 1이면 기록 그대로, 나머지 몫만큼만 받는다)
  */
 export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreign'>, stream: string, size: EngineParams['shape'], starter: boolean, ceiling: number,
                            career?: CareerShape | null): void {
@@ -3278,7 +3295,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const b = { ...p.bat };
     const real = career?.bat && shapeOf(SHAPE_BAT_KEYS.map((k) => Math.log(career.bat![k])), SHAPE_BAT_KEYS.map((k) => BAT_SHIFT[k]));
     SHAPE_BAT_KEYS.forEach((k, i) => {
-      const mu = T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r;
+      const mu = T.mean[g][i] + T.sbSlope[i] * lsb + T.runSlope[i] * r - (size.center?.bat[i] ?? 0);
       b[k] *= Math.exp(size.bat * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i] * (size.noise[k] ?? 1)));
     });
     p.bat = b;
@@ -3291,7 +3308,7 @@ export function applyShape(p: Pick<LeaguePlayer, 'bat' | 'pit' | 'pos' | 'foreig
     const q = { ...p.pit };
     const real = career?.pit && shapeOf(SHAPE_PIT_KEYS.map((k) => Math.log(career.pit![k])), SHAPE_PIT_KEYS.map((k) => PIT_SHIFT[k]));
     SHAPE_PIT_KEYS.forEach((k, i) => {
-      const mu = T.mean[g][i] + T.runSlope[i] * r;
+      const mu = T.mean[g][i] + T.runSlope[i] * r - (size.center?.pit[i] ?? 0);
       q[k] *= Math.exp(size.pit * (mu + (real ? c * (real[i] - mu) : 0) + rest * e[i]));
     });
     p.pit = q;

@@ -145,7 +145,9 @@ describe('부상 대체 외국인', () => {
     g.advance(8); // 21일째 AI 검토
     const m = movesOf(g.league, 2026).find((x) => x.kind === 'rehab' && x.to === t);
     expect(m?.rehab).toBe(p.id);
-    expect(foreignSwapsUsed(g.marketCtx, t)).toBe(0);
+    // 부상 대체는 교체 횟수를 쓰지 않는다: 대체 선수 영입이 교체 횟수(foreignSwapsUsed가 세는 sign·keep)로 남지 않는지 본다.
+    // 같은 구단의 다른 외국인 부진 교체는 경기 운이라 세지 않는다 (두 브랜치가 따로 고친 것을 합침, 2026-11-10)
+    expect(movesOf(g.league, 2026).filter((x) => (x.kind === 'sign' || x.kind === 'keep') && x.id === m!.id)).toEqual([]);
     expect(rehabsOf(g.marketCtx, t).length).toBe(1);
     g.advance(50);
     expect(rehabsOf(g.marketCtx, t).length).toBe(0);

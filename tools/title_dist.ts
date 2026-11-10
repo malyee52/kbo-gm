@@ -1,6 +1,6 @@
 // 칭호 조건 분포 (칭호 기획안, 2026-10-26): 칭호 후보 조건마다 "리그에 몇 명쯤" 붙는지 실제 KBO 기록과 게임 장기 진행에서 같은 셈으로 잰다.
 //
-// 사용법:  npx tsx tools/title_dist.ts [--real-only] [--start 2026] [--seasons 20] [--seeds a,b] [--out reports/title-dist.md] [--dump 파일 | --load 파일]
+// 사용법:  npx tsx tools/title_dist.ts [--real-only] [--start 2026] [--seasons 20] [--seeds a,b] [--out reports/title-dist.md] [--dump 파일 | --load 파일] [--center0]
 //          --dump: 게임 시즌을 JSON으로 남김, --load: 남긴 시즌으로 시뮬레이션 없이 다시 셈 (조건만 바꿔 볼 때)
 //
 // 셈 기준
@@ -427,6 +427,7 @@ async function main(): Promise<void> {
   const seeds = (arg('seeds') ?? 'title-a').split(',');
   const out = arg('out');
   const params: EngineParams = { ...DEFAULT_PARAMS };
+  if (process.argv.includes('--center0')) params.shape = { ...params.shape, center: undefined }; // 특기 모양 가운데 맞춤 끄기 (전 → 후 견주기)
   const store = loadDataStore();
   for (const m of store.players.values()) { if (m.throws === 'L') throwsLSet.add(m.id); if (m.foreign) foreignSet.add(m.id); }
   const real = realSeasons(store, 2026);
