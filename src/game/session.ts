@@ -4,7 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
-import { GUESS_SET, guessMid, guessRuns, nowSigma, seenFor, seenGrade, seenPhrase, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
+import { GUESS_SET, guessMid, guessRuns, nowSigma, seenFor, seenGrade, seenPhrase, seenProjection, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
 import type { DataStore } from '../data/types';
@@ -13,7 +13,7 @@ import {
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
 import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackageWhy, tendencyOf, type PackageResult, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
-import { currentRuns, playerValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
+import { currentRuns, playerValue, projectedValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
 import type { VoteChoice } from '../ai/vote';
@@ -3155,9 +3155,11 @@ export class GameSession {
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
     const myTendency = this.tendency(this.teamIdx);
     const ctx = this.values;
-    // 우리 쪽에서 본 가치: 기여에서 연봉 부담을 뺀다 (AI가 고액 연봉자를 떠넘기는 제안이 맨 위에 오지 않게, evaluateTrade와 같은 환산)
+    // 우리 쪽에서 본 가치: 기여에서 연봉 부담을 뺀다 (AI가 고액 연봉자를 떠넘기는 제안이 맨 위에 오지 않게, evaluateTrade와 같은 환산).
+    // 기여는 우리 스카우트 추측(shopWorth)으로 잰다. AI 난이도 오차가 든 잠재력(ctx.potential = aiPotential)으로 재면 정렬 순서로 AI 오차를 짐작할 수 있어서
+    // (2026-11-11 사용자, 기획서 v2 부록 B 물음 11). AI가 받아들일지는 그대로 evaluateTrade(AI 값)로 판단한다
     const years = mine.reduce((a, b) => a + b, 0);
-    const worth = (p: SimPlayer) => playerValue(p, ctx, mine) - (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0) / SALARY_WON_PER_RUN) * years;
+    const worth = (p: SimPlayer) => this.shopWorth(p, mine) - (p.foreign ? 0 : (ctx.salary?.get(p.id) ?? 0) / SALARY_WON_PER_RUN) * years;
     type Item = { p?: SimPlayer; k?: DraftPick; v: number };
     const out: ShopOffer[] = [];
     for (const t of this.world.teams) {
@@ -3192,6 +3194,21 @@ export class GameSession {
       }
     }
     return out.sort((a, b) => b.value - a.value);
+  }
+
+  /**
+   * 우리 스카우트가 보는 여러 해 가치 (런, 선수 내놓기 정렬용): 추측 지금 기여·추측 천장(scout.ts seenProjection)을 playerValue와 같은 꼴로 (ai/value.ts projectedValue).
+   * 플레이어 화면의 우리 스카우트 가치(seenValue)와 같은 추측이고 AI 난이도 오차가 없다. 시즌 중에만 부른다 (트레이드 창, 시험도 부른다)
+   */
+  shopWorth(p: SimPlayer, weights: number[]): number {
+    const lp = this.leaguePlayer(p.id);
+    const nowRuns = currentRuns(p, this.values);
+    if (!lp) return projectedValue(p, nowRuns, nowRuns, weights);
+    const year = this.world.year;
+    const ageNext = lp.birthYear ? year + 1 - lp.birthYear : 25;
+    const seen = seenFor(this.league, this.teamIdx, p.id, lp, p.bat?.sample ?? p.pit?.sample ?? 0, p.teamIdx === this.teamIdx);
+    const v = seenProjection(this.league, { team: this.teamIdx, user: true }, seen, nowRuns, lp.potential, ageNext, year);
+    return projectedValue(p, v.now, v.ceiling, weights);
   }
 
   /** AI 구단에게 "이 선수를 주려면 무엇을 원하나"를 묻는다. 수락할 만한 조합이 없으면 null */
