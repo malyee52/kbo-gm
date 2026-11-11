@@ -44,7 +44,7 @@ import { isPlayerOp, type EditOp } from './editOps';
 import { applyGrow, editorPreview } from './editor';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
+import { batValue, defenseAt, defenseGrade, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { shiftBat, shiftPit, skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
@@ -377,9 +377,11 @@ export type GameAction =
   | { year: number; day: number; type: 'ai-choice'; id: string; choice: number }
   | { year: number; type: 'ai-choice-off'; id: string; choice: number }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
-  /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런 */
-  | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense }
-  | { year: number; type: 'def-edit-off'; id: string; def: Defense }
+  /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런.
+   *  2026-11-05 사용자(부록 B 물음 4): 에디터로 옮김. ed = 에디터에서 고친 조작 (사용 표시를 남기고 고친 기록에 나온다).
+   *  ed가 없는 예전 조작은 재현 때 예전처럼 값만 넣는다. names·log는 고친 기록 화면용 (재현에는 쓰지 않는다) */
+  | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense; ed?: true; names?: string[]; log?: string[] }
+  | { year: number; type: 'def-edit-off'; id: string; def: Defense; ed?: true; names?: string[]; log?: string[] }
   /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
   | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
   /** 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4): 시즌 중 'fx-send'(4주, 주마다 발견), 오프시즌 'fx-send-off'(외국인 단계, 4주를 바로).
@@ -1145,7 +1147,7 @@ export class GameSession {
     else if (a.type === 'ai') this.applyFantasy(a.entry);
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
-    else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
+    else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def, a.ed ? a.day : null);
     else if (a.type === 'editor') this.applyEditor(a.on, a.day);
     else if (a.type === 'edit') this.applyEdits(a.ops, a.day);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
@@ -3526,7 +3528,7 @@ export class GameSession {
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'franchise-tag': res = Off.setFranchiseTagByUser(L, off!, a.id); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
-      case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
+      case 'def-edit-off': this.applyDefenseEdit(a.id, a.def, a.ed ? -1 : null); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'editor-off': res = this.applyEditor(a.on, -1); break;
       case 'edit-off': this.applyEdits(a.ops, -1); res = { ok: true, message: '에디터로 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
@@ -4287,22 +4289,35 @@ export class GameSession {
   }
   /**
    * 수비 능력치를 직접 고친다 (2026-10-13 사용자 선택 "공개 수상·평가로 보정 + 직접 고치기"). 수비 기록 자료가 없어 추정값이라,
-   * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다
+   * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다.
+   * 2026-11-05 사용자(부록 B 물음 4): 에디터 고치기로 옮김. 에디터가 켜져 있을 때만 되고, 사용 표시(firstEdit·edits)를 남긴다.
+   * 바뀌지 않은 자리는 조작에 넣지 않는다 (log는 고친 기록의 "수비 SS 50 → 60")
    */
   editDefense(id: string, def: Defense): { ok: boolean; message: string } {
+    if (!this.editorOn) return { ok: false, message: '에디터가 꺼져 있습니다 (저장·설정에서 켭니다).' };
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return { ok: false, message: '타자 능력이 없는 선수입니다.' };
     if (this.gameLock) return { ok: false, message: this.gameLock };
+    const sp = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : undefined;
+    const base = sp ?? { pos: lp.pos ?? '', isPitcher: lp.isPitcher, bat: lp.bat };
     const clean: Defense = {};
+    const log: string[] = [];
     for (const q of FIELD_POS) {
       const v = def[q];
-      if (typeof v === 'number' && Number.isFinite(v)) clean[q] = Math.round(Math.max(-40, Math.min(25, v)) * 10) / 10;
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      const c = Math.round(Math.max(-40, Math.min(25, v)) * 10) / 10;
+      const was = defenseAt(base, q);
+      if (lp.bat.def?.[q] !== undefined && Math.abs(was - c) < 0.05) continue;
+      clean[q] = c;
+      if (defenseGrade(was) !== defenseGrade(c)) log.push(`수비 ${q} ${defenseGrade(was)} → ${defenseGrade(c)}`);
     }
+    if (!Object.keys(clean).length) return { ok: false, message: '바뀐 수비 값이 없습니다.' };
+    const extra = { ed: true as const, names: [lp.name], log: log.length ? log : ['수비 값 고침 (등급 같음)'] };
     if (this.phase === 'season') {
-      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'def-edit', id, def: clean });
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'def-edit', id, def: clean, ...extra });
       return { ok: true, message: '수비 능력치를 고쳤습니다.' };
     }
-    return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean });
+    return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean, ...extra });
   }
 
   /**
@@ -4448,9 +4463,11 @@ export class GameSession {
     return true;
   }
 
-  private applyDefenseEdit(id: string, def: Defense): void {
+  /** markDay: 에디터 사용 표시를 남길 날 (시즌 중 일정 색인, 오프시즌 -1). null = 표시 없이 값만 (에디터 전 예전 조작의 재현) */
+  private applyDefenseEdit(id: string, def: Defense, markDay: number | null): void {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
+    if (markDay !== null) this.markEditorUse(markDay);
     // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
     const edited = (p: FieldPos[] | undefined, was: FieldPos[] | undefined) => (p ? {
       playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined),
@@ -4515,15 +4532,20 @@ export class GameSession {
     return { ok: r.ok, message: r.ok ? message : r.message, warnings: r.ok ? pv.warnings : [] };
   }
 
+  /** 에디터 사용 표시: 처음 고친 때(firstEdit)와 연도별 횟수(edits). 고치기(edit)·수비 고치기(def-edit ed) 공통 */
+  private markEditorUse(day: number): void {
+    const e = (this.league.editor ??= { on: true, firstOn: { year: this.year, day } });
+    e.firstEdit ??= { year: this.year, day };
+    (e.edits ??= {})[this.year] = (e.edits[this.year] ?? 0) + 1;
+  }
+
   /**
    * 에디터 고침 적용 (난수 없음, 값을 그대로 넣는다). 자유 모드 조작(move·ability·contract)은 applyFreeOps를 다시 쓰고, 생년·병역·부상은 여기서.
    * 사용 표시: 처음 고친 때(firstEdit)와 연도별 횟수(edits)
    */
   private applyEdits(ops: EditOp[], day: number): void {
     const L = this.league;
-    const e = (L.editor ??= { on: true, firstOn: { year: this.year, day } });
-    e.firstEdit ??= { year: this.year, day };
-    (e.edits ??= {})[this.year] = (e.edits[this.year] ?? 0) + 1;
+    this.markEditorUse(day);
     const season = this.phase === 'season';
     const free: FreeOp[] = [];
     let aged = false;

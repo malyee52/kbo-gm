@@ -793,51 +793,21 @@ function TwoWayInfo({ p, full }: { p: SimPlayer; full: boolean }) {
   );
 }
 
-/** 포지션별 수비 등급 (20~80, 50 = 그 자리 평균 수비수). 직접 고치기 (2026-10-13 사용자 선택) */
+/** 포지션별 수비 등급 (20~80, 50 = 그 자리 평균 수비수). 고치기는 에디터로 옮김 (2026-11-05 사용자, 부록 B 물음 4: 선수 상세 '에디터' 탭) */
 function DefenseInfo({ p, full }: { p: SimPlayer; full: boolean }) {
-  const { session, changed, autosave } = useGame();
-  const [edit, setEdit] = useState<Record<string, number> | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const { session } = useGame();
   const playable = playablePositions(p.bat);
   const seen = useSeen();
   const dv = (q: FieldPos) => seen.grade(p.id, 'defense', defenseGrade(defenseAt(p, q)));
-  // 고치기 칸은 보이는 값(추측 가운데값)에서 시작한다 (진짜 값을 채워 넣지 않는다)
-  const open = () => setEdit(Object.fromEntries(FIELD_POS.map((q) => { const v = dv(q); return [q, v ? guessMid(v) : 50]; })));
-  const save = () => {
-    if (!edit) return;
-    // 등급 → 수비 런 (5런 = 10점)
-    const def = Object.fromEntries(FIELD_POS.map((q) => [q, (edit[q] - 50) / 2]));
-    const r = session.editDefense(p.id, def);
-    setMsg(r.message);
-    if (r.ok) { setEdit(null); changed(); void autosave(); }
-  };
   return (
     <div className="defense">
       <h4 className="small">
         수비{full && session.phase === 'season' && (session.season.errors[p.idx] ?? 0) > 0 ? <span className="muted"> 이번 시즌 실책 {session.season.errors[p.idx]}개 ·</span> : null} <span className="muted">포지션별, 50이 그 자리 평균 · 맡길 만한 자리: {playable.length ? playable.map((q) => posName(q)).join(', ') : '없음 (DH)'}</span>
-        {!edit && p.bat && <button type="button" className="link small" onClick={open}>고치기</button>}
       </h4>
-      {edit ? (
-        <div className="defense-edit">
-          {FIELD_POS.map((q) => (
-            <label key={q} className="small" title={POS_KO[q]}>
-              {posName(q)}
-              <input type="number" min={20} max={80} step={1} value={edit[q]} onChange={(e) => setEdit({ ...edit, [q]: Math.max(20, Math.min(80, Number(e.target.value) || 20)) })} />
-            </label>
-          ))}
-          <span className="inline">
-            <button type="button" className="small-btn" onClick={save}>저장</button>
-            <button type="button" className="small-btn ghost" onClick={() => setEdit(null)}>취소</button>
-          </span>
-          <p className="muted small">20~80 (50 = 그 자리 평균, 40 아래면 맡기기 어렵다). 고친 값은 조작 기록에 남고 경기·선수 가치에 바로 들어갑니다.</p>
-        </div>
-      ) : (
-        <div className="grades">
-          {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} title={POS_KO[q]} v={dv(q)} />)}
-        </div>
-      )}
-      {msg && <p className="muted small">{msg}</p>}
-      {full && <p className="muted small">KBO가 수비 기록의 자동 수집을 막고 있어, 커리어에 맡은 포지션·주력·나이와 KBO 수비상(2023~) 순위로 만든 추정값입니다. 실제와 다르면 "고치기"로 바꾸세요. 실책률은 그 자리 수비 등급에 따라 달라집니다 (실책 출루 기준).</p>}
+      <div className="grades">
+        {FIELD_POS.map((q) => <GradeBar key={q} label={posName(q)} title={POS_KO[q]} v={dv(q)} />)}
+      </div>
+      {full && <p className="muted small">KBO가 수비 기록의 자동 수집을 막고 있어, 커리어에 맡은 포지션·주력·나이와 KBO 수비상(2023~) 순위로 만든 추정값입니다. 실제와 다르면 에디터를 켜고 '에디터' 탭에서 고칠 수 있습니다. 실책률은 그 자리 수비 등급에 따라 달라집니다 (실책 출루 기준).</p>}
     </div>
   );
 }
