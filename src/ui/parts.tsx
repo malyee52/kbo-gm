@@ -157,7 +157,7 @@ export function ScoutNote({ notes, full }: { notes: string[]; full: boolean }) {
  * 공통 표: 머리 눌러 정렬, 이름 거르기, (상세) 열 고르기·묶음 전환·리그 평균 줄, 표본 미만 줄 흐림·빼기.
  * 고른 열·정렬·거르기는 표(id)마다 이 브라우저에 기억한다 (결정 8)
  */
-export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, thinToggle = true, rowClass, foot, label, empty }: {
+export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, thinToggle = true, rowClass, foot, label, empty, onRow, tableClass, searchHint }: {
   id: string; cols: Column<R>[]; rows: R[]; rowKey: (r: R) => string; full: boolean;
   /** 거르기에 쓰는 글자 (없으면 거르기 칸 없음) */
   searchText?: (r: R) => string;
@@ -171,6 +171,12 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, t
   foot?: { label: ReactNode; cells: Partial<Record<string, ReactNode>> }[];
   label?: string;
   empty?: ReactNode;
+  /** 줄 누르기 (단추·고르기·링크·입력 칸을 누른 것은 빼고). shown은 지금 보이는 순서 그대로의 줄 (선수 창 이전·다음 등) */
+  onRow?: (r: R, shown: R[]) => void;
+  /** table 요소의 class (화면별 모양) */
+  tableClass?: string;
+  /** 거르기 칸 안내 글 (기본 '이름') */
+  searchHint?: string;
 }) {
   const [view, setViewState] = useState<TableView>(() => loadView(id));
   useEffect(() => setViewState(loadView(id)), [id]);
@@ -187,7 +193,7 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, t
         <div className="dt-tools">
           {searchText && (
             <label className="small dt-find" htmlFor={fid}>
-              거르기 <input id={fid} type="search" value={view.filter} placeholder="이름" onChange={(e) => setView({ ...view, filter: e.target.value })} />
+              거르기 <input id={fid} type="search" value={view.filter} placeholder={searchHint ?? '이름'} onChange={(e) => setView({ ...view, filter: e.target.value })} />
             </label>
           )}
           {full && groups.length > 1 && (
@@ -218,7 +224,7 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, t
         </div>
       )}
       <div className="scroll dt-scroll">
-        <table aria-label={label}>
+        <table aria-label={label} className={tableClass}>
           <thead>
             <tr>
               {shown.map((c) => {
@@ -236,9 +242,10 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, t
           <tbody>
             {list.length === 0 && <tr><td colSpan={shown.length} className="l muted">{empty ?? '보일 줄이 없습니다.'}</td></tr>}
             {list.map((r) => {
-              const cls = [rowClass?.(r, view.sort !== null), thin?.(r) ? 'thin' : ''].filter(Boolean).join(' ');
+              const cls = [onRow ? 'pick' : '', rowClass?.(r, view.sort !== null), thin?.(r) ? 'thin' : ''].filter(Boolean).join(' ');
               return (
-                <tr key={rowKey(r)} className={cls || undefined} title={thin?.(r) ? '표본이 기준보다 적습니다' : undefined}>
+                <tr key={rowKey(r)} className={cls || undefined} title={thin?.(r) ? '표본이 기준보다 적습니다' : undefined}
+                  onClick={onRow ? (e) => { if (!(e.target as HTMLElement).closest('button, select, input, a, label')) onRow(r, list); } : undefined}>
                   {shown.map((c) => <td key={c.key} className={c.text ? 'l' : undefined}>{c.cell ? c.cell(r) : cellText(c.value(r))}</td>)}
                 </tr>
               );

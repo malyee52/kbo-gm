@@ -450,6 +450,10 @@ dialog.player::backdrop { background: var(--scrim); backdrop-filter: blur(2px); 
 .cand-act .small-btn { padding: 2px 8px; min-height: 26px; font-size: 12px; }
 .dt tr.blocked td { color: var(--faint); }
 .dt tr.blocked td .link { color: var(--muted); }
+.dt tr.pick { cursor: pointer; }
+.dt tr.pick:hover td { background: var(--hover); }
+.dt tr.sel td, .dt tr.sel:hover td { background: var(--me-bg); color: var(--me-fg, inherit); }
+.dt tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--team); }
 .dt tr.in-cmp td, .dt-scroll tr.in-cmp td:first-child { background: var(--panel-2); }
 .dt tr.in-cmp td:first-child { box-shadow: inset 3px 0 0 var(--fg); }
 .cmp-slots { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: var(--panel-2); }
