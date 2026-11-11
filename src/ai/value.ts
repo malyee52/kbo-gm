@@ -204,6 +204,21 @@ export function playerValue(p: SimPlayer, ctx: ValueContext, weights: number[]):
   return v;
 }
 
+/**
+ * playerValue와 같은 꼴이지만 지금 기여(now)와 천장(potential)을 바깥에서 받는다 (플레이어 쪽 스카우트 추측으로 보는 가치).
+ * now·potential에 진짜 currentRuns·잠재력을 넣으면 playerValue와 같다
+ */
+export function projectedValue(p: SimPlayer, now: number, potential: number, weights: number[]): number {
+  let age = p.age ?? DEFAULT_AGE;
+  let r = now;
+  let v = 0;
+  for (let y = 0; y < weights.length; y++) {
+    if (y > 0) r += expectedGrowth(++age, r, potential, p.isPitcher);
+    v += weights[y] * Math.max(-5, r);
+  }
+  return v;
+}
+
 /** 전력 계산에서 주전 아닌 선수에게 주는 몫 (부상 대비 등, 임시값) */
 const DEPTH_SHARE = 0.15;
 const BENCH_HITTERS = 4;

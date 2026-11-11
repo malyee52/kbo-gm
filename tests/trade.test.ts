@@ -1,7 +1,8 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
 import { evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
-import { currentRuns } from '../src/ai/value';
+import { currentRuns, playerValue } from '../src/ai/value';
+import { PRESETS } from '../src/league/difficulty';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession } from '../src/game/session';
@@ -410,6 +411,42 @@ describe('선수 내놓기 (2026-10-12 사용자 요청)', () => {
     for (const o of g.shopOffers(offer, 200_000, 'picks')) expect(o.get).toEqual([]);
     for (const o of g.shopOffers(offer, 200_000, 'players')) expect(o.picks).toEqual([]);
     expect(g.shopOffers(offer, 200_000, 'picks').length).toBeGreaterThan(0);
+  }, 120_000);
+});
+
+describe('선수 내놓기 정렬은 우리 스카우트 가치 (2026-11-11 사용자, 기획서 v2 부록 B 물음 11)', () => {
+  it('AI 평가 오차만 다른 두 판에서 우리 쪽 가치·정렬이 같다 (AI 쪽 가치는 다르다)', () => {
+    // AI 평가 오차(scoutNoise)만 다르고 나머지 난이도 값은 같은 두 판
+    const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
+    const mk = (scoutNoise: number) => GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'shop-scout', settings: { ...PRESETS.normal, scoutNoise } }, FAST);
+    const a = mk(12);
+    const b = mk(2);
+    const w = horizonWeights(a.tendency(a.teamIdx), a.situation(a.teamIdx).remaining);
+    expect(horizonWeights(b.tendency(b.teamIdx), b.situation(b.teamIdx).remaining)).toEqual(w);
+    let aiDiffers = 0;
+    for (const t of a.world.teams) {
+      if (t.idx === a.teamIdx) continue;
+      const ps = t.org.filter((p) => !p.foreign);
+      const pb = b.world.teams[t.idx].org.filter((p) => !p.foreign);
+      expect(pb.map((p) => p.id)).toEqual(ps.map((p) => p.id));
+      // 우리 쪽 가치는 두 판에서 똑같다 → 정렬도 같다
+      const sa = ps.map((p) => a.shopWorth(p, w));
+      const sb = pb.map((p) => b.shopWorth(p, w));
+      expect(sb).toEqual(sa);
+      const order = (vs: number[]) => vs.map((v, i) => ({ v, i })).sort((x, y) => y.v - x.v || x.i - y.i).map((x) => ps[x.i].id);
+      expect(order(sb)).toEqual(order(sa));
+      // AI 쪽 가치(aiPotential)는 두 판에서 다르다: 예전처럼 이것으로 정렬하면 순서로 AI 오차가 드러난다
+      const va = ps.map((p) => playerValue(p, a.values, w));
+      const vb = pb.map((p) => playerValue(p, b.values, w));
+      if (va.some((v, i) => Math.abs(v - vb[i]) > 1e-9)) aiDiffers++;
+    }
+    expect(aiDiffers).toBeGreaterThan(0);
+    // 두 판에 같은 조합으로 나온 제안은 우리 쪽 가치도 같다
+    const offer = (g: GameSession) => [byNow(g, g.team.org)[6]];
+    const key = (o: { team: number; get: SimPlayer[]; picks: { draft: number; round: number; from: number }[] }) =>
+      `${o.team}|${o.get.map((p) => p.id).sort().join(',')}|${o.picks.map((k) => `${k.draft}-${k.round}-${k.from}`).sort().join(',')}`;
+    const oa = new Map(a.shopOffers(offer(a)).map((o) => [key(o), o.value]));
+    for (const o of b.shopOffers(offer(b))) if (oa.has(key(o))) expect(o.value).toBeCloseTo(oa.get(key(o))!, 9);
   }, 120_000);
 });
 
