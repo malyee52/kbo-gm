@@ -328,6 +328,17 @@ export function seenValue(league: LeagueState, who: Observer, p: Seen, nowRuns: 
 }
 
 /**
+ * 우리 스카우트가 보는 지금 기여와 천장 (런, 추측): 지금 = seenValue의 추측 지금, 천장 = 추측 지금 + 추측 격차.
+ * 문구가 없는 나이(32세부터)는 격차를 보지 않아 천장 = 지금. 여러 해 가치(ai/value.ts projectedValue)를 플레이어 쪽 값으로 셀 때 쓴다.
+ * AI 난이도 오차(owner.ts aiPotential)는 들어가지 않는다 (플레이어 쪽 σ에는 난이도가 없다, Q5 ①)
+ */
+export function seenProjection(league: LeagueState, who: Observer, p: Seen, nowRuns: number, potential: number, ageNext: number, year: number): { now: number; ceiling: number } {
+  const now = guessRuns(league, who, p.id, nowRuns, nowSigma(league, who, p, 'clear'), year);
+  if (ageNext > PHRASE_MAX_AGE) return { now, ceiling: now };
+  return { now, ceiling: now + seenGap(league, who, p, nowRuns, potential, year) * runsPerGrade(year) };
+}
+
+/**
  * 보는 구단이 보는 선수 정보 (Seen): sample = 그 시점 능력 산출 표본, mine = 지금 보는 구단 소속인가.
  * 우리 구단에서 보낸 시즌 = 게임 안 이력 + 게임 시작 전 실제 기록의 같은 계보 시즌 (stadium.ts 프랜차이즈 판정과 같은 셈)
  */
