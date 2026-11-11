@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
 import { createLeague } from '../src/league/create';
 import {
-  aiPotential, applyCapSanctions, budgetFor, CAP_PICK_DROP, draftSlots, FIRE_BELOW, goalFor, offersFor, outcomeTier, trustDelta,
+  aiPotential, applyCapSanctions, budgetFor, CAP_PICK_DROP, draftSlots, CAP_OVER_TRUST, FIRE_BELOW, goalFor, offersFor, outcomeTier, seasonTrustChange, trustDelta,
   type Difficulty, type SeasonOutcome,
 } from '../src/league/owner';
 import { salaryCap } from '../src/league/salary';
@@ -33,15 +33,30 @@ describe('목표와 신뢰도', () => {
 
   it('달성하면 오르고 놓치면 내린다. 목표보다 잘하거나 못할수록 더 크다', () => {
     expect(outcomeTier(outcome({ champion: true, finalist: true, rank: 3 }))).toBe(3);
-    expect(trustDelta('postseason', outcome({ rank: 4 }))).toEqual({ achieved: true, delta: 12 });
+    expect(trustDelta('postseason', outcome({ rank: 4 }))).toEqual({ achieved: true, delta: 12, cap: 0 });
     expect(trustDelta('notLast', outcome({ rank: 4 })).delta).toBe(20);
-    expect(trustDelta('postseason', outcome({ rank: 7 }))).toEqual({ achieved: false, delta: -10 });
+    expect(trustDelta('postseason', outcome({ rank: 7 }))).toEqual({ achieved: false, delta: -10, cap: 0 });
     expect(trustDelta('postseason', outcome({ rank: 10 })).delta).toBe(-16);
     expect(trustDelta('champion', outcome({ rank: 10 })).delta).toBe(-22);
-    // 캡 초과는 따로 -10
-    expect(trustDelta('postseason', outcome({ rank: 4, capOver: true })).delta).toBe(2);
+    // 캡 초과는 따로 -10 (성적 몫과 나눠 돌려준다, 부록 B 물음 5)
+    expect(trustDelta('postseason', outcome({ rank: 4, capOver: true }))).toEqual({ achieved: true, delta: 12, cap: -10 });
     // 한 시즌 미달만으로는 시작 신뢰도 50에서 해고되지 않는다
     expect(50 + Math.min(...(['champion', 'postseason', 'notLast'] as const).map((g) => trustDelta(g, outcome({ rank: 10 })).delta))).toBeGreaterThanOrEqual(FIRE_BELOW);
+  });
+
+  it('캡 초과 -10은 난이도 칭찬·압박 배율 밖: 배율을 곱한 뒤 더한다 (2026-11-05 사용자, 부록 B 물음 5)', () => {
+    const hit = trustDelta('postseason', outcome({ rank: 4, capOver: true }));
+    // 보통 칭찬 0.5배: 12 × 0.5 = 6, 그 뒤 −10 (예전엔 (12 − 10) × 0.5 = 1)
+    expect(seasonTrustChange(hit, { gain: 0.5, pressure: 1 })).toBe(-4);
+    // 어려움 압박 1.35배: 미달 −10 × 1.35 = −13.5 → −14, 그 뒤 −10 (예전엔 (−10 − 10) × 1.35 = −27)
+    const miss = trustDelta('postseason', outcome({ rank: 7, capOver: true }));
+    expect(seasonTrustChange(miss, { gain: 0.5, pressure: 1.35 })).toBe(-24);
+    // 쉬움 압박 0.7배도 캡 감점은 −10 그대로
+    expect(seasonTrustChange(miss, { gain: 1, pressure: 0.7 }) - seasonTrustChange(trustDelta('postseason', outcome({ rank: 7 })), { gain: 1, pressure: 0.7 })).toBe(CAP_OVER_TRUST);
+    // 캡 초과가 없으면 예전 식과 같다 (목표 낮춤 절반·약속 못 지킴·예산 회의)
+    const ok = trustDelta('postseason', outcome({ rank: 4 }));
+    expect(seasonTrustChange(ok, { gain: 0.5, pressure: 1, halfGain: true, meeting: 1 })).toBe(Math.round(6 / 2) + 1);
+    expect(seasonTrustChange(trustDelta('champion', outcome({ rank: 4 })), { gain: 0.5, pressure: 1.35, raiseCapped: -15 })).toBe(Math.round((-10 - 15) * 1.35));
   });
 
   it('영입 제의는 하위권 구단에서, 원래 구단은 빼고', () => {

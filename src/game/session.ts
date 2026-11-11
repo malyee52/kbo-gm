@@ -74,7 +74,7 @@ import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, goalForLeague, newAchievements, newOwner, outcomeLabel,
-  outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
+  outcomeOf, seasonTrustChange, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
   bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, semiSkipText, seriesHome, seriesToday, startPostseason, stillAlive,
@@ -3638,13 +3638,12 @@ export class GameSession {
     const achieved = td.achieved;
     // 구단주 예산 회의 (재정 2 F4b): 목표를 낮췄으면 오르는 몫은 절반, 회의의 신뢰도 변화(요청 없음 +1·거절 −2·낮추기 −4·예산 초과 −3)를 더한다
     const meet = meetingOf(L, team, this.year);
-    // 목표 달성 때 오르는 몫은 난이도 배율 (2026-11-04 사용자: 보통부터 +12 → +6, difficulty.ts ownerGain)
-    const scaled = td.delta > 0 ? Math.round(td.delta * ownerGainOf(L)) : td.delta;
-    // 이미 우승 목표인데 목표를 올리는 약속으로 돈을 받았으면, 우승을 못 할 때 더 뺀다 (재정 2 F7, meeting.ts TRUST_RAISE_CAPPED)
+    // 목표 달성 때 오르는 몫은 난이도 배율 (2026-11-04 사용자: 보통부터 +12 → +6, difficulty.ts ownerGain).
+    // 이미 우승 목표인데 목표를 올리는 약속으로 돈을 받았으면, 우승을 못 할 때 더 뺀다 (재정 2 F7, meeting.ts TRUST_RAISE_CAPPED).
+    // 캡 초과 감점은 배율 밖 (2026-11-05 사용자, 부록 B 물음 5, owner.ts seasonTrustChange)
     const baseGoal = goal.projectedLeague ? goalForLeague(goal.projectedRank) : goalFor(goal.projectedRank, this.world.rules.postseasonTeams);
     const capped = raiseCapped(meet, baseGoal) && !outcome.champion ? TRUST_RAISE_CAPPED : 0;
-    const gain = (scaled > 0 && meet?.halfGain ? Math.round(scaled / 2) : scaled) + capped;
-    const delta = (gain < 0 ? Math.round(gain * settingsOf(this.league).ownerPressure) : gain) + (meet?.trust ?? 0);
+    const delta = seasonTrustChange(td, { gain: ownerGainOf(L), pressure: settingsOf(this.league).ownerPressure, halfGain: meet?.halfGain, raiseCapped: capped, meeting: meet?.trust ?? 0 });
     const before = o.trust;
     o.trust = Math.max(0, Math.min(100, before + delta));
     o.history.push({
@@ -3654,7 +3653,7 @@ export class GameSession {
       ...(outcome.league ? { league: outcome.league } : {}),
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
-    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
+    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? `, 샐러리캡 초과 ${td.cap}` : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
     // 재정: 적자를 모기업이 메우면 신뢰도가 떨어지고, 흑자면 조금 오른다 (finance.ts)
     if (fin) {
       // 긴급 지원 감점은 이어 받은 해 수·난이도 압박 배율을 따른다 (재정 2 F8, finance.ts RESCUE_TRUST)
