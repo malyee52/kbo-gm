@@ -168,6 +168,14 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     }
   }, [session]);
 
+  // 긴 진행 멈추기 (편의 U1): 'can' = 단추를 띄움, 'asked' = 눌러서 이번 묶음 끝을 기다림
+  const stopReq = useRef(false);
+  const [stop, setStop] = useState<'can' | 'asked' | null>(null);
+  const askStop = () => { stopReq.current = true; setStop('asked'); };
+  const stopButton = stop && (
+    <button type="button" className="ghost" onClick={askStop} disabled={stop === 'asked'} title="이번 일주일 묶음을 마치고 멈춥니다">{stop === 'asked' ? '멈추는 중' : '멈추기'}</button>
+  );
+
   // 진행 멈춤 설정 (브라우저에 저장, stops.ts)
   const [stops, setStopsState] = useState<StopRules>(loadStops);
   const setStops = (r: StopRules) => { setStopsState(r); saveStops(r); };
@@ -188,6 +196,9 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     const rules = override ?? (full ? NO_STOPS : stops);
     setProgressOpen(false);
     setBusy(label);
+    // 일주일 넘는 진행은 "멈추기"를 띄운다 (2026-11-11 편의 U1). 진행은 날짜 단위라 멈춘 결과 = 그날까지 진행한 결과
+    stopReq.current = false;
+    setStop(days > 7 ? 'can' : null);
     await nextFrame();
     // 여러 날 진행이면 끝나고 요약 창을 띄운다 (AdvanceSummary)
     const snap = days >= 7 ? takeSnapshot(session) : null;
@@ -201,8 +212,11 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
       if (left > 0) {
         setVersion((v) => v + 1);
         await nextFrame();
+        if (stopReq.current) break; // 이번 7일 묶음까지 치르고 멈춘다
       }
     }
+    stopReq.current = false;
+    setStop(null);
     autoAnswer(rules);
     changed();
     await autosave();
@@ -548,6 +562,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
             <DensityToggle />
             <div className="sb-advance">
               {busy && <span className="sb-busy" role="status">{busy}</span>}
+              {stopButton}
               <button type="button" className="go" onClick={primary.act} disabled={primary.disabled} title={pending ? '이벤트에 답한 뒤 진행할 수 있습니다' : primary.title}>{primary.label} ▶</button>
               <button type="button" className="ghost" aria-expanded={progressOpen} onClick={() => setProgressOpen((o) => !o)}>진행 설정</button>
               {progressOpen && progressMenu}
@@ -661,6 +676,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
         <div className="dock">
           <div className="dock-advance">
             {busy && <span className="sb-busy" role="status">{busy}</span>}
+            {stopButton}
             <button type="button" className="go" onClick={primary.act} disabled={primary.disabled}>{primary.label} ▶</button>
             <button type="button" className="ghost" aria-expanded={progressOpen} onClick={() => setProgressOpen((o) => !o)}>진행 설정</button>
           </div>

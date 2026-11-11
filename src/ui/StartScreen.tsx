@@ -7,8 +7,9 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, editorMarkOfSave, isAutoSlot, listSaves, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveRecord } from '../game/storage';
-import { isSeasonDone, whenText } from './saving';
+import { deleteSave, getSave, isAutoSlot, listSaveInfos, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveInfo } from '../game/storage';
+import { whenText } from './saving';
+import { afterPaint } from './paint';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
 import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../league/synopses';
@@ -47,7 +48,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saves, setSaves] = useState<SaveRecord[] | null>(null);
+  const [saves, setSaves] = useState<SaveInfo[] | null>(null);
   const [tier, setTier] = useState<Tier>('쉬움');
   const [kind, setKind] = useState<PlanKind>('season');
   const [startTab, setStartTab] = useState<'menu' | 'new' | 'challenge' | 'load'>('menu');
@@ -59,7 +60,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     return () => { alive = false; };
   }, [store, year]);
 
-  const refreshSaves = () => listSaves().then(setSaves, () => setSaves([]));
+  const refreshSaves = () => listSaveInfos().then(setSaves, () => setSaves([]));
   // 불러올 수 없는 예전 형식 저장은 지우고 한 번 알린다 (지운 뒤에는 남은 칸이 없어 다시 뜨지 않는다)
   const [purged, setPurged] = useState(false);
   // 가장 최근에 저장한 게임 (이어 하기)
@@ -80,8 +81,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     setError(null);
     try {
       await store.ensureAll();
-      setBusy('리그를 만들고 시즌을 준비하는 중입니다 (잠재력 산출, 리그 환경 맞춤)');
-      await nextFrame();
+      setBusy('개막 준비 중: 리그를 만들고 환경을 맞추는 중입니다 (잠재력 산출, 리그 환경 맞춤, 몇 초 걸립니다)');
+      await afterPaint();
       onStart(withEditor(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty, ...extra })));
     } catch (e) {
       setError((e as Error).message);
@@ -99,7 +100,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       await store.ensureAll();
       const t = planTeam(store, ch);
       if (t === null) throw new Error(`${plan.year}년 자료에서 구단을 찾을 수 없습니다`);
-      await nextFrame();
+      setBusy(`「${ch.title}」 개막 준비 중: 리그를 만들고 환경을 맞추는 중입니다 (몇 초 걸립니다)`);
+      await afterPaint();
       onStart(withEditor(GameSession.create(store, { year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra })));
     } catch (e) {
       setError((e as Error).message);
@@ -120,6 +122,19 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       setError(`불러오지 못했습니다: ${(e as Error).message}`);
       setBusy(null);
     }
+  };
+
+  /** 저장 칸을 데이터째 읽어 불러온다 (목록은 요약만 들고 있다) */
+  const loadSlot = async (slot: string) => {
+    let rec;
+    try {
+      rec = await getSave(slot);
+    } catch (e) {
+      setError(`불러오지 못했습니다: ${(e as Error).message}`);
+      return;
+    }
+    if (!rec) { setError('저장 칸이 비어 있습니다'); void refreshSaves(); return; }
+    await load(rec.data);
   };
 
   const importFile = async (file: File | undefined) => {
@@ -147,9 +162,9 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       {startTab === 'menu' ? (
         <nav className="title-menu" aria-label="시작 메뉴">
           {latest && (
-            <button type="button" className="title-btn primary" onClick={() => void load(latest.data)} disabled={!!busy}>
+            <button type="button" className="title-btn primary" onClick={() => void loadSlot(latest.slot)} disabled={!!busy}>
               <strong>이어 하기</strong>
-              <span>{latest.year} {latest.teamName} · {whenText(latest, isSeasonDone(latest))}</span>
+              <span>{latest.year} {latest.teamName} · {whenText(latest)}</span>
               <small>{latest.summary}</small>
             </button>
           )}
@@ -360,10 +375,10 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
                 <div>
                   <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot}{s.label ? ` "${s.label}"` : ''} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
                   <br />
-                  <strong>{s.year} {s.teamName}</strong>{editorMarkOfSave(s.data) && <span className="tag">에디터 ({editorMarkOfSave(s.data)})</span>} <span className="muted">· {whenText(s, isSeasonDone(s))}</span>
+                  <strong>{s.year} {s.teamName}</strong>{s.editor && <span className="tag">에디터 ({s.editor})</span>} <span className="muted">· {whenText(s)}</span>
                 </div>
                 <div className="r-actions">
-                  <button type="button" onClick={() => void load(s.data)} disabled={!!busy}>불러오기</button>
+                  <button type="button" onClick={() => void loadSlot(s.slot)} disabled={!!busy}>불러오기</button>
                   <ConfirmButton label="지우기" confirmLabel="정말 지우기" disabled={!!busy}
                     onConfirm={() => void deleteSave(s.slot).then(refreshSaves)} />
                 </div>
