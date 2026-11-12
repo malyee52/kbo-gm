@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { EVENT_BASE, EVENT_STEP, EVENTS } from '../src/league/events';
+import { EVENT_BASE, EVENT_STEP, EVENTS, isNoticeEvent, NOTICE_EVENT_IDS } from '../src/league/events';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -84,5 +84,66 @@ describe('무작위 이벤트', () => {
     const offers = log.filter((l) => l.id === 'trade-offer');
     expect(offers.length).toBeGreaterThanOrEqual(2);
     expect(offers.every((l) => l.day <= g.tradeDeadlineDay)).toBe(true);
+  });
+
+  // 2026-11-12 사용자 결정 Q35: 선택지 차이가 미미한 57종은 묻지 않고 소식으로만 (첫 선택지 효과 그대로)
+  it('소식 이벤트: 57종, 모두 있는 이벤트이고 트레이드 제안은 아니다. 묻는 이벤트는 선택지가 둘 이상', () => {
+    expect(NOTICE_EVENT_IDS.length).toBe(57);
+    expect(new Set(NOTICE_EVENT_IDS).size).toBe(57);
+    for (const id of NOTICE_EVENT_IDS) {
+      const def = EVENTS.find((e) => e.id === id);
+      expect(def, id).toBeDefined();
+      expect(def!.notice).toBe(true);
+      expect(def!.manual).toBeFalsy();
+    }
+    expect(isNoticeEvent('trade-offer')).toBe(false);
+    for (const e of EVENTS) if (!e.notice) expect(e.choices.length, e.id).toBeGreaterThanOrEqual(2);
+  });
+
+  it('소식 이벤트에서는 멈추지 않고 답할 것도 없다. 소식으로 알리고 첫 선택지 효과를 적용한다', () => {
+    const g = GameSession.create(store, opts('ev-notice'), FAST);
+    let notices = 0;
+    for (let i = 0; i < 40 && notices < 3; i++) {
+      g.advance(200, { event: true });
+      const raw = g.league.events!.pending;
+      if (raw && isNoticeEvent(raw.id)) throw new Error(`소식 이벤트 ${raw.id}에서 멈췄다`);
+      if (g.pendingEvent) g.answerEvent(0);
+      notices = g.league.events!.log.filter((l) => isNoticeEvent(l.id)).length;
+      if (g.done) break;
+    }
+    expect(notices).toBeGreaterThanOrEqual(1);
+    const logs = g.league.events!.log.filter((l) => isNoticeEvent(l.id));
+    expect(logs.every((l) => l.choice === 0)).toBe(true);
+    expect(g.news.some((n) => n.kind === 'event' && n.text.startsWith('소식: '))).toBe(true);
+    // 소식 이벤트는 조작 기록에 남지 않는다 (화면이 답하지 않음)
+    for (const a of g.actions) {
+      if (a.type !== 'event') continue;
+      const l = g.league.events!.log.find((x) => x.year === (a.year ?? 2026) && x.day === a.day);
+      expect(l && isNoticeEvent(l.id)).toBe(false);
+    }
+  });
+
+  it('예전 저장의 조작 기록이 소식 이벤트에 고른 선택(둘째 선택지)은 재현할 때 그대로 읽힌다', () => {
+    // 소식 이벤트가 생긴 날을 찾는다 (진행은 자동, 생긴 날 끝에 답을 기다리는 상태가 된다)
+    const g = GameSession.create(store, opts('ev-old'), FAST);
+    let at: { year: number; day: number; id: string } | null = null;
+    for (let d = 0; d < 190 && !at; d++) {
+      g.advance(1);
+      const raw = g.league.events!.pending;
+      if (raw && isNoticeEvent(raw.id) && EVENTS.find((e) => e.id === raw.id)!.choices.length >= 2) at = { year: g.year, day: g.day, id: raw.id };
+    }
+    expect(at).not.toBeNull();
+    // 예전 판에서 그날 둘째 선택지를 고른 조작 기록
+    const old = [{ year: at!.year, day: at!.day, type: 'event' as const, choice: 1 }];
+    const r = GameSession.replay(store, opts('ev-old'), old, { year: at!.year, day: at!.day + 3 }, FAST);
+    const hit = r.league.events!.log.find((l) => l.year === at!.year && l.day === at!.day && l.id === at!.id);
+    expect(hit?.choice).toBe(1);
+    // 조작 기록이 없으면 같은 자리에서 첫 선택지로 자동
+    const auto = GameSession.replay(store, opts('ev-old'), [], { year: at!.year, day: at!.day + 3 }, FAST);
+    expect(auto.league.events!.log.find((l) => l.year === at!.year && l.day === at!.day && l.id === at!.id)?.choice).toBe(0);
+    // 저장했다 불러온 판에서도 같은 자리에서 고를 수 있다 (소식이라도 기다리는 상태는 저장에 남는다)
+    const h = GameSession.load(store, roundTrip(g.toSave()) as GameSaveV2, FAST);
+    expect(h.league.events!.pending?.id).toBe(at!.id);
+    expect(h.pendingEvent).toBeNull();
   });
 });

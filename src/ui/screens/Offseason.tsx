@@ -1,7 +1,7 @@
 // 오프시즌: 단계별 진행 (FA → 외국인 → 드래프트 → 연봉 협상 → 정원 정리 → 개막).
 import { fxVisible } from '../../league/scoutfx';
 import { isStarterSkill } from '../../engine';
-import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS as CAMP_FOCUS, PLACE as CAMP_PLACE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
+import { CAMP_FOCUSES, CAMP_PLACES, campInjuryOf, campYoung, FOCUS as CAMP_FOCUS, injuryWord, PLACE as CAMP_PLACE, YOUTH_AGE, type CampFocus, type CampPick, type CampPlace } from '../../league/camp';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ConfirmButton } from '../ConfirmButton';
 import { OfferPanel } from './Club';
@@ -963,7 +963,7 @@ function ExtensionPanel({ act }: { act: Act }) {
 }
 
 /** 우리 선수의 포스팅(해외 진출) 요청과 해외에서 뛰는 선수 (league/overseas.ts) */
-/** 스프링캠프 (league/camp.ts): 다음 시즌 캠프 장소·훈련 방향. 개막 때 비용을 내고 효과가 난다 */
+/** 스프링캠프 (league/camp.ts): 다음 시즌 캠프 장소·훈련 방향. 개막 때 비용을 내고 유망주 성장·시즌 부상 위험에 효과가 난다 (2026-11-12 Q36) */
 function CampPanel({ act }: { act: Act }) {
   const { session } = useGame();
   const won = useWon();
@@ -971,9 +971,12 @@ function CampPanel({ act }: { act: Act }) {
   const set = (p: Partial<CampPick>) => act(session.setCamp({ ...pick, ...p }), '스프링캠프를 바꿨습니다.');
   const place = CAMP_PLACE[pick.place];
   const focus = CAMP_FOCUS[pick.focus];
+  const year = session.year + 1;
+  const young = campYoung(session.league, session.teamIdx, year);
+  const youngPit = young.filter((p) => p.isPitcher).length;
   return (
     <section className="panel">
-      <h2>{session.year + 1} 스프링캠프</h2>
+      <h2>{year} 스프링캠프</h2>
       <div className="form-row">
         <label>장소
           <select value={pick.place} onChange={(e) => set({ place: e.target.value as CampPlace })}>
@@ -986,8 +989,8 @@ function CampPanel({ act }: { act: Act }) {
           </select>
         </label>
       </div>
-      <p className="small">비용 {won(place.cost)} · 효과 배율 {place.factor}{place.injury > 1 ? ' · 추운 날씨로 부상 조금 늘어남' : ''}</p>
-      <p className="muted small">{focus.label}: {focus.note}. 경기력 효과는 개막 뒤 {CAMP_DAYS}일 동안 이어지고, 개막할 때 비용을 냅니다.</p>
+      <p className="small">비용 {won(place.cost)} · 성장 배율 {place.factor} · 시즌 {injuryWord(campInjuryOf(pick))}</p>
+      <p className="muted small">{focus.label}: {focus.note}. 우리 {YOUTH_AGE}세 이하 선수 {young.length}명 (투수 {youngPit}·타자 {young.length - youngPit}). 잠재력을 넘겨 자라지는 않습니다. 개막할 때 비용을 냅니다.</p>
     </section>
   );
 }
