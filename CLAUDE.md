@@ -10,7 +10,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 - M8 과거 시대 확장: 코드 쪽 완료 (2026-10-08). 1982년 시작 → 2026년 자동 진행이 돌아가고 구단 변화·제도 도입이 실제 연도를 따른다. 자료 보완(타자 결측 329행, 제도연표 확인)은 사용자 몫.
 - 경기 엔진 2 (2026-10-24 병합 준비 `merge/prep-1`): 볼카운트 사슬·투구 수 운용·타구와 담당 수비수·주루·AI 감독 경기 중 교체·부상과 혹사·선수 컨디션·시대 배율·기록 규정(연장·무승부·세이브), 1\~15단계 끝. 17\~20단계는 2026-10-25 병합 준비 `merge/prep-2`. 17단계 A 해결기 (2026-10-24 `feat/engine2-17`): 직접 지휘하는 경기는 공 단위로 치르고 지휘 화면에 볼카운트·투구 수·공 목록, 다음 공·공마다 지켜보기·멈춤(공 사이 지시). 18단계 수동 경기 저장·재현·전환 (같은 브랜치): 경기 중 저장(`pendingGame`), 지휘 기록 압축, 빠르게 끝내기(A → B), 위기 끼어들기(B → A). UI U2-10 수동 경기 화면(점수판·공 단위 중계·작전 판·속도·자동으로 끝내기·잠시 닫기)과 U2-11 위기 끼어들기 창(진행 설정 "위기 때 멈추기", 기본 켬)도 같은 브랜치. 19단계 문서 정리: 엔진 2 구조·검증·한계는 `docs/engine.md` 6장, 임시값 자리는 `docs/temp-values.md` "경기 엔진 2". 20단계 구종·코스 (2026-10-25 같은 브랜치): 투수 구종(`World.arsenals`, 실측 → 위키 → 짐작), AI 포수 볼 배합(카운트별), 지휘 화면 공 사이 수비에 구종·코스 지시, 중계 구종 표시, 노림수 손해와 균형 점검 `tools/pitch_balance.ts` (`docs/engine.md` 6.4).
 - 일정 개편 (2026-10-23): 연도별 규칙 표로 만드는 연전 일정, 우천 취소·순연·더블헤더·잔여 경기, 강우 콜드·노게임, 1999·2000 드림·매직 양대 리그. 1\~16단계 끝 (15단계 일정 화면 포함). 임시값은 `docs/temp-values.md` "일정 개편".
-- 리그 규칙 변경 알림·미래 규칙·창단 특례·외국인 출전 한도, 구단 투표(단장 회의), UI 대개편(브리핑·공통 표): 2026-10-24 병합 준비.
+- 리그 규칙 변경 알림·미래 규칙·창단 특례·외국인 출전 한도, UI 대개편(브리핑·공통 표): 2026-10-24 병합 준비. 구단 투표(단장 회의)는 같이 들어갔다가 2026-11-12에 뺐다 (`remove/club-vote`, 아래 '미래 규칙 변경').
 - 출처 표기·제도 고침과 옛 규칙 실제화 (2026-10-24 `feat/rule-fidelity`, 2026-10-25 병합 준비 `merge/prep-2`): 정보·출처 화면과 `DATA_LICENSES.md`(자료별 출처·라이선스), FA 도입 때 자격 10시즌, 위키 병역 현역·보충역 구분 없앰, 1군 등록·출장 인원 분리와 엔트리 확대, 가을야구 시리즈 승수·1993\~1998 준PO 생략·1986\~1988 3팀.
 - 구장 효과 (2026-10-24 main, PR #131): 1982\~2027년 뒤 모든 해 구장 배율, 신구장 펜스 제원·펜스 조정·가벽 공사, 구장 화면 지수. 능력치 v2 16-1(볼카운트 사슬 칸 함수 `plate.ts`)·16-2(타구각 갈래 `angle.ts`)·16-3 첫 단계(수비 v2 `fielding.ts`)도 같이 main에 들어갔다. 16-3 나머지(주루·작전·어깨 `runskills.ts`)와 16-4\~16-7(잠재력 v2·갈래 성장·집중 훈련·스카우트·외국인 파견·숨은 값 화면)은 2026-10-25 병합 준비 `merge/prep-2`에 들어갔다 (`feat/ratings-v2`). 16-5 장기 맞춤(성장 여유분 실측·가상 신인 배율)과 16-5b(지명 순위 표를 가상 신인 눈금으로)도 같은 브랜치. 남은 것: 16-6 공개 특수능력 (갈래 성장 크기를 측정값으로 바꾸는 일은 따로 남김).
 - 선수 칭호 첫 범위 (2026-10-26 `feat/titles`, 기획 `docs/칭호_기획안.md`): 효과 없는 명예 칭호 (타이틀·시즌 기록·통산·수상·구단·가을야구·롱런·다관왕·레전드 37개), 결산 판정(`league.titles`)·시작 때 실제 기록·예전 저장 채우기, 선수 상세 머리 칩·'계약·이력' 칭호 칸, 소식 `titleNews`·기사 갈래 `honor`. 나중 묶음(명단 칭호 열·기록실 칭호 화면·명예의 전당 칩·구단주 업적)은 기획안 8장.
@@ -42,7 +42,7 @@ python tools/build_data.py --titles-only    # 레전드 칭호 표만 (data-src/
 python tools/build_data.py --rules-only     # 연도별 규칙(meta.json rules)과 규칙 변경(rule_changes.json)만. --schedule-only 일정 규칙, --ppa-only 선수별 P/PA, --homes-only 연고지, --contracts-only 계약 연도별 연봉(계약_연도별.csv → contracts.json)
 npm run validate -- --years 2025 --seasons 1000   # 엔진 검증 (validate·park_check·longsim도 같은 맞춤 캐시를 쓴다)
 python3 tools/fit_regression.py                    # 능력 산출 회귀 상수 다시 맞추기
-npx tsx tools/longsim.ts --seasons 20 --seeds a,b --out reports/longsim-20.md   # 장기 진행 점검 (모든 구단 AI). FA·캡·미래 규칙·단장 회의 열. 50시즌은 시드 하나에 약 10~18분 (--vote-dump <파일>)
+npx tsx tools/longsim.ts --seasons 20 --seeds a,b --out reports/longsim-20.md   # 장기 진행 점검 (모든 구단 AI). FA·캡·미래 규칙 열, 시드마다 규칙 변경·되돌림 집계. 50시즌은 시드 하나에 약 10~18분
 npx tsx tools/fit_aging.ts > reports/aging-fit.txt  # 노화 곡선 추정과 나이 보정 효과 측정
 npx tsx tools/fit_aging_components.ts             # 갈래별 나이 곡선 (fit_aging 뒤, params.growth2)
 npx tsx tools/error_slope.ts                      # 수비 런 → 실책 기울기 (state.ts ERROR_PER_RUN)
@@ -81,8 +81,8 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 | `src/engine/` | 경기 엔진. 순수 TypeScript, 화면·브라우저에 의존하지 않는다 |
 | `src/engine/index.ts` | 엔진 공개 진입점. 화면과 도구는 여기서만 가져다 쓴다 |
 | `src/data/` | 데이터 타입, Node용·브라우저용 로더 |
-| `src/ai/` | AI 단장: 선수 가치·구단 전력(`value.ts`), 성향·트레이드 판단·요구안(`trade.ts`), 구단 투표 AI(`vote.ts`, `VOTE_PARAMS` 임시값). 난수 없이 결정적 |
-| `src/league/` | 여러 해 리그 상태: 선수 능력·잠재력·계약·이력(`types.ts`), 새 리그 만들기(`create.ts`), 리그 → 월드(`world.ts`), 잠재력·성장(`growth.ts`), 연봉·FA·캡·외국인 규정(`salary.ts`), 오프시즌 단계(`offseason.ts`), 은퇴·병역·부상 후유증·슬럼프(`careers.ts`), 포스트시즌(`postseason.ts`), 구단주 평가·난이도·예산·캡 제재·업적(`owner.ts`), 프랜차이즈 등급(`franchise.ts`, 재직·구단 WAR·칭호로 트레이드 가산치의 A·B 판정), 선수 칭호(`titles.ts`, 이름표: 공개 기록만 읽고 엔진·AI 선수 가치·연봉은 보지 않는다. 트레이드 프랜차이즈 등급만 읽는다. 레전드 칭호 조건 `LEGEND_RULES`, 이름·주인·출처는 `legend_titles.json`), 가상 이름(`names.ts`), 연고지 거리(`distance.ts`), 개막 '달라지는 규칙' 알림(`ruleNews.ts`)과 일정 소식(`scheduleNews.ts`), 2028년 이후 미래 규칙 변경(`futureRules.ts`, 게임 속 가상 결정), 숨은 천장·성장 성향(`potential.ts`, 잠재력 v2), 갈래 성장·갈래 천장(`branches.ts`), 집중 훈련(`training.ts`), 스카우트 추측·드래프트 보드·외국인 시장 평판·화면 추측·우리 스카우트 가치(`scout.ts`), 외국인 파견·관찰 명단(`scoutfx.ts`) |
+| `src/ai/` | AI 단장: 선수 가치·구단 전력(`value.ts`), 성향·트레이드 판단·요구안(`trade.ts`), 난수 없이 결정적 |
+| `src/league/` | 여러 해 리그 상태: 선수 능력·잠재력·계약·이력(`types.ts`), 새 리그 만들기(`create.ts`), 리그 → 월드(`world.ts`), 잠재력·성장(`growth.ts`), 연봉·FA·캡·외국인 규정(`salary.ts`), 오프시즌 단계(`offseason.ts`), 은퇴·병역·부상 후유증·슬럼프(`careers.ts`), 포스트시즌(`postseason.ts`), 구단주 평가·난이도·예산·캡 제재·업적(`owner.ts`), 프랜차이즈 등급(`franchise.ts`, 재직·구단 WAR·칭호로 트레이드 가산치의 A·B 판정), 선수 칭호(`titles.ts`, 이름표: 공개 기록만 읽고 엔진·AI 선수 가치·연봉은 보지 않는다. 트레이드 프랜차이즈 등급만 읽는다. 레전드 칭호 조건 `LEGEND_RULES`, 이름·주인·출처는 `legend_titles.json`), 가상 이름(`names.ts`), 개막 '달라지는 규칙' 알림(`ruleNews.ts`)과 일정 소식(`scheduleNews.ts`), 2028년 이후 미래 규칙 변경(`futureRules.ts`, 게임 속 가상 결정), 숨은 천장·성장 성향(`potential.ts`, 잠재력 v2), 갈래 성장·갈래 천장(`branches.ts`), 집중 훈련(`training.ts`), 스카우트 추측·드래프트 보드·외국인 시장 평판·화면 추측·우리 스카우트 가치(`scout.ts`), 외국인 파견·관찰 명단(`scoutfx.ts`) |
 | `src/game/` | 게임 진행 계층: 세션(플레이어 구단, 엔트리, 알림, 조작 기록), 달력(시즌 개막일 기준), 순위 문장(`rank.ts`), 기록 계산, 화면 구장 지수·wRC+ 구장 보정(`parkView.ts`), 브라우저 저장. `storage.ts`만 브라우저 전용 |
 | `src/ui/` | 화면. `App.tsx` → 시작 화면 / `GameShell.tsx`(왼쪽 메뉴·상태 줄·진행 버튼, 메뉴 구조 `menu.ts`, 결정함 `decisions.ts`, 틀 공유 `shell.tsx`) → `screens/` (홈은 `Briefing.tsx`). 공통 표는 `parts`의 `DataTable`(`table.ts`). 진짜 등급은 `parts.tsx`의 `useSeen`으로만 꺼내고 추측 칸은 `GuessCell`·`guessColumn`, 전망 세 단계는 `game/rank.ts strengthTier`. `ui/grades.ts`는 `runsGrade`·`runsWar`만. 훈련 `screens/Training.tsx`, 영입 > 스카우트 `screens/Scout.tsx`. 엔진 시험 화면은 `EngineLab.tsx` |
 | `tools/` | 데이터 변환·검사(Python), 엔진 검증(TypeScript), 숨겨진 특수능력 후보 추천(`suggest_traits.py`) |
@@ -268,9 +268,9 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - **전수조사(2026-10-09, `docs/qa-survey.md`)에서 남긴 문제**: 첫 오프시즌 입대 폭증(한 구단 10명 → 2026-10-21 AI 한 해 5명으로 고침, 옛 시대 시작은 강제 입대만으로 한 구단 12명까지), 20시즌 기량 하락, 우리 FA 제시가 밀렸을 때 알림 없음, 고령 FA 요구액에 나이 미반영, 표본 미만 세이버 극단값, 홀드 타이틀 없음. 빠진 기능 제안 10가지는 같은 문서 4장.
 - 숨겨진 특수능력(2026-10-08): 효과 크기(`params.ts`의 `traits`)와 후보 선정 기준(`tools/suggest_traits.py`)은 모두 임시값. 가을 사나이·좌완 킬러·우완 킬러는 기록으로 가릴 수 없어 자동으로 주지 않는다 (CSV에서 직접). 능력은 선수 ID로 붙으므로 2025년 이전 검증 월드에도 들어간다 (리그 평균 영향은 `reports/`에서 확인). 데이터 파일 자체는 브라우저 개발자 도구로 열 수 있다 (해시는 가림막일 뿐).
 
-### 구단 투표 (단장 회의)
-- 오프시즌 첫 단계 `vote`(안건 있는 해만). 우리 표는 `GameSession.voteRule`, 안 내면 반대. 문턱 ceil(n×2/3), 부결 안건은 2시즌 쉰다. 조작 `rule-vote`는 `dispatchOff`를 거친다.
-- 큰 안건(지명타자 폐지·포스트시즌 팀 수·경기 수·창단)은 `BIG_AGENDAS_ON = false`로 꺼 두었다. `VOTE_PARAMS`(`src/ai/vote.ts`)는 임시값 (가결률 69%·결정표 23%, `reports/longsim-vote-50.md`). 화면은 `Offseason.tsx` `VotePanel`, 이력은 `Rules.tsx`.
+### 미래 규칙 변경 (리그 결정)
+- 구단 투표(단장 회의, 2026-10-23~11-11)는 2026-11-12 사용자 결정으로 뺐다 (`docs/구단투표_기획안.md` 머리 안내). 신호가 2시즌 이어 벗어나면 결산 때 리그가 바로 다음 시즌 규칙을 바꾸고(`judgeFutureRules`, 한 해 최대 1개), 개막 알림 결정 줄은 "리그 결정 (게임 속 가상 결정)". 바뀐 항목은 3시즌 쉬고(`SHIFT_COOLDOWN`), 바로 반대 방향은 5시즌 동안 못 간다(`REVERSE_BAN`, 임시값). 항목마다 시작 값에서 누적 ±2칸까지만 움직인다(`SHIFT_MAX_STEPS`, 2026-11-12 사용자 Q34, 임시값: 공 ×0.88\~1.12, 존 ×0.94\~1.06, 연장 10\~13회, 엔트리 28\~31명). 한도에 닿은 방향 신호는 무시하고 이력에 남기지 않으며, 이미 한도 밖인 예전 저장 값은 그대로 두고 안쪽으로만 움직인다. 이력은 `Rules.tsx` '리그 규칙 변경 이력'.
+- 예전 저장 호환 (`league/legacyVote.ts`, `tests/legacy-vote.test.ts`): 단장 회의 단계(`stage 'vote'`)에 멈춘 저장은 불러올 때(`GameSession.load` → `Off.settleLegacyVote`) 저장된 AI 표와 우리 표(없으면 반대, 결산에서 해고됐으면 AI 표만)로 개표하고 FA를 연다. 지난 표결 이력(`league.ruleVotes`)과 가결 변경의 표결 결과(`RuleShift.vote`)는 '리그 규칙' 화면·개막 알림에 그대로 보인다. 예전 조작 `rule-vote`는 재현 때 읽고 아무것도 하지 않는다(기록에서 빠짐). 단장 회의 단계가 있던 판의 조작 기록을 지금 코드로 처음부터 재현하면 그 해 '다음'(개표) 조작이 FA 라운드 마감으로 읽혀 어긋난다 (규칙 결정 방식이 바뀌어 같은 결과를 낼 수 없다).
 - 미래 규칙 ②는 신호로 정한다 (`FUTURE_RULES_FROM` 2028. 신호는 2027 시즌부터 남기고 두 시즌 연속이어야 해서, 첫 변경은 2028 시즌 결산에 정해 2029년부터 적용된다). 2027년부터 시즌 반발계수(`seasonCor`)로 홈런 목표가 해마다 바뀐다. 외국인 한도 신호 문턱(`FOREIGN_JUDGE`)은 관중 2년 이어 2% 이상 감소 → +1, 외국인 연봉 부담 12%·적자 5곳 3년 → −1.
 
 ### 일정 개편 (2026-10-23)

@@ -18,7 +18,7 @@ function Line({ l }: { l: RuleLine }) {
         <strong>{l.title}</strong>
         {(l.before || l.after) && <span className="rule-change">{l.before ? <>{l.before} → {l.after}</> : l.after}</span>}
       </div>
-      {l.vote && <div className="small rule-vote">{l.vote}</div>}
+      {l.decision && <div className="small rule-vote">{l.decision}</div>}
       {l.real && <div className="muted small">실제: {l.real}</div>}
       {l.detail?.map((d) => <div key={d} className="muted small">{d}</div>)}
       {l.simplified && <div className="muted small">게임은 단순화: {l.simplified}</div>}

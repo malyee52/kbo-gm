@@ -1,9 +1,10 @@
 // 구단 연고지 사이 거리 (경기 엔진 2 12단계에서 만듦, docs/경기엔진2_기획안.md 3.10·5장). 원정 거리 컨디션은
 // 2026-10-22 사용자 결정으로 없앴고(docs/컨디션_기획안.md 0장), 지금은 측정 도구(tools/condition_check.ts)만 쓴다.
+// 게임 코드가 쓰지 않아 2026-11-12 src/league에서 tools로 옮겼다 (찌꺼기 정리).
 // 자료: data-src/연고지.csv → public/data/homes.json (tools/build_data.py build_homes). 위·경도로 계산한 직선 거리라
 // 실제 이동 경로·제2구장·연전 이동은 반영하지 않는다 (임시값).
 
-import type { HomeCity } from '../data/types';
+import type { HomeCity } from '../src/data/types';
 
 const EARTH_KM = 6371;
 

@@ -42,9 +42,8 @@ import {
   SERVICE_SHARE, salaryFloor, teamCapPayroll, type ForeignCapKey, WON_PER_RUN, wageIndex, rookieSalary, FA_COMP, wonText, dollarText, type FaGrade,
 } from './salary';
 import { aiPotential, draftSlots, spendLimit } from './owner';
-import { FUTURE_RULE_LABEL, futureValueText, judgeFutureRules, proposeFutureRule, type RuleShift, type RuleSignal } from './futureRules';
-import { agendaOf, agendaText, openVoteStage, ruleVoteOn, tallyAgenda, tallyText, voteFacts, type VoteStage } from './ruleVote';
-import type { VoteChoice } from '../ai/vote';
+import { FUTURE_RULE_LABEL, futureValueText, judgeFutureRules, type RuleShift, type RuleSignal } from './futureRules';
+import { tallyAgenda, tallyText, type LegacyVoteStage } from './legacyVote';
 import type { Contract, LeaguePlayer, LeagueState } from './types';
 import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
 import { settingsOf } from './difficulty';
@@ -65,15 +64,18 @@ import { AI_TWO_WAY_GRADE, altSkillFor, ensureAlts, gradeAt, setTwoWay, VIRTUAL_
 
 type Store = Pick<DataStore, 'meta' | 'season' | 'players' | 'drafts' | 'traits' | 'defense'>;
 
-/** vote: 단장 회의 (구단 투표, 안건이 있는 해만 열린다. league/ruleVote.ts) */
-export type Stage = 'vote' | 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'meeting' | 'ready';
-export const STAGES: Stage[] = ['vote', 'fa', 'comp', 'second', 'foreign', 'draft', 'salary', 'release', 'meeting', 'ready'];
+/**
+ * 오프시즌 단계. 2026-10-23~11-11에는 FA 앞에 단장 회의('vote', 구단 투표)가 있었으나 2026-11-12에 뺐다.
+ * 그 단계에 멈춘 예전 저장은 불러올 때 settleLegacyVote가 개표하고 FA로 넘긴다
+ */
+export type Stage = 'fa' | 'comp' | 'second' | 'foreign' | 'draft' | 'salary' | 'release' | 'meeting' | 'ready';
+export const STAGES: Stage[] = ['fa', 'comp', 'second', 'foreign', 'draft', 'salary', 'release', 'meeting', 'ready'];
 export const STAGE_LABEL: Record<Stage, string> = {
-  vote: '단장 회의', fa: 'FA', comp: 'FA 보상선수', second: '2차 드래프트·특별 지명', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', meeting: '구단주 예산 회의', ready: '개막 준비',
+  fa: 'FA', comp: 'FA 보상선수', second: '2차 드래프트·특별 지명', foreign: '외국인 선수', draft: '신인 드래프트', salary: '연봉 협상', release: '정원 정리', meeting: '구단주 예산 회의', ready: '개막 준비',
 };
-/** 오프시즌 기록의 구분: 단계 + 결산(은퇴·병역 등) */
-export type LogStage = Stage | 'settle';
-export const LOG_LABEL: Record<LogStage, string> = { ...STAGE_LABEL, settle: '결산' };
+/** 오프시즌 기록의 구분: 단계 + 결산(은퇴·병역 등). 'vote'는 예전 저장의 단장 회의 기록 */
+export type LogStage = Stage | 'settle' | 'vote';
+export const LOG_LABEL: Record<LogStage, string> = { ...STAGE_LABEL, settle: '결산', vote: '단장 회의' };
 
 /** FA 시장 라운드 수 (임시값) */
 export const FA_ROUNDS = 3;
@@ -247,8 +249,8 @@ export interface OffseasonState {
   expansion?: ProtectDraft;
   /** 시즌 중 방출돼 소속 없이 시즌을 마친 선수 (market.ts). 방출 단계에서 방출 선수 시장에 함께 나온다 */
   seasonReleased?: { id: string; from: number }[];
-  /** 단장 회의 (구단 투표, 2026-10-23 추가). 안건이 있는 해만, 개표 뒤에도 남는다 */
-  vote?: VoteStage;
+  /** 단장 회의 (구단 투표, 2026-10-23~11-11 저장에만). 그 단계에 멈춘 저장을 불러오면 settleLegacyVote가 개표하고 지운다 */
+  vote?: LegacyVoteStage;
 }
 
 /** FA 보상 한 건: 영입 구단(to)이 보호선수 명단을 내고, 원 소속 구단(from)이 보상선수 또는 보상금만을 고른다 */
@@ -450,8 +452,20 @@ export function stepContract(p: LeaguePlayer, season: number): void {
   p.contract = { ...base, ...(hit ? { salary: hit[1] } : {}), ...(rest.length ? { steps: rest } : {}) };
 }
 
+/** 결산하고 오프시즌을 연다 (FA 단계부터): settleOffseason → openStages */
 export function beginOffseason(league: LeagueState, world: World, season: Season, store: Store, userTeam: number,
                                params: EngineParams = DEFAULT_PARAMS, userEnlist?: string[], userApply?: string[]): OffseasonState {
+  const off = settleOffseason(league, world, season, store, userTeam, params, userEnlist, userApply);
+  openStages(league, off, store, params);
+  return off;
+}
+
+/**
+ * 결산만 한다 (성장·은퇴·병역·규칙 변경 등, FA 시장을 열기 전). beginOffseason이 이 뒤에 openStages를 부른다.
+ * 따로 내보내는 까닭: 단장 회의 단계(결산 뒤 FA 전)에 멈춘 예전 저장을 시험에서 다시 만든다 (tests/legacy-vote.test.ts)
+ */
+export function settleOffseason(league: LeagueState, world: World, season: Season, store: Store, userTeam: number,
+                                params: EngineParams = DEFAULT_PARAMS, userEnlist?: string[], userApply?: string[]): OffseasonState {
   const year = league.year;
   if (!season.done) throw new Error('시즌이 끝나지 않았습니다');
   const lp = byId(league);
@@ -652,11 +666,8 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
   rollTraining(league);
   const divisions = season.divisionStandings();
   league.lastSeason = { year, teams: season.teams.map((t) => ({ ...t })), standings: season.standings(), hr: season.bat.reduce((n, b) => n + b.hr, 0), ...(divisions ? { divisions } : {}) };
-  // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 정한다.
-  // 구단 투표가 켜진 리그(ruleVote.ts)는 바로 넣지 않고 안건으로 올려 단장 회의에서 표결한다
-  const voting = ruleVoteOn(league);
-  const proposed = voting ? proposeFutureRule(league, ruleSignalOf(league, season)) : null;
-  const shift = voting ? null : judgeFutureRules(league, ruleSignalOf(league, season));
+  // 미래 규칙 변경 ② (2028~, futureRules.ts): 이 시즌 신호를 남기고 다음 시즌 규칙을 리그가 정한다 (구단 투표는 2026-11-12에 뺐다)
+  const shift = judgeFutureRules(league, ruleSignalOf(league, season));
   // 계약하지 못한 FA (freeAgent): 시즌 중 구단을 찾았으면 보통 선수, 끝내 못 찾았으면 은퇴 (리그 명단에는 오프시즌 끝까지 남아 통산이 보관된다)
   for (const p of league.players) {
     if (!p.freeAgent) continue;
@@ -680,7 +691,7 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     foreign: null, draft: null, salary: null, log: [],
     ...(seasonReleased ? { seasonReleased } : {}),
   };
-  // 코치: 계약이 끝난 코치는 나간다. 올해 후보 시장은 다음 해 연봉 지수(규칙 표결 결과)를 따라 openStages에서 (coaches.ts)
+  // 코치: 계약이 끝난 코치는 나간다. 올해 후보 시장은 다음 해 연봉 지수(규칙 변경 결과)를 따라 openStages에서 (coaches.ts)
   expireCoaches(league, year);
 
   // 조기 노쇠·슬럼프, 은퇴, 병역, 아시안게임 (careers.ts)
@@ -714,21 +725,12 @@ export function beginOffseason(league: LeagueState, world: World, season: Season
     if (inService(p) && !servingBefore.has(p.id)) g.tags = [...(g.tags ?? []), '입대'];
     off.growth.push(g);
   }
-
-  // 단장 회의 (구단 투표): 안건이 있으면 오프시즌 첫 단계로 멈춘다. AI 표는 지금(결산 직후) 리그 상태로 계산해 저장한다
-  if (proposed) {
-    off.vote = openVoteStage(league, [agendaOf(proposed)], voteFacts(league, world, season, year, nextRuns));
-    off.stage = 'vote';
-    off.vote.agendas.forEach((a, i) => log(off, 'vote', agendaText(a, off.vote!.ai[i], userTeam), true, true));
-    return off;
-  }
-  openStages(league, off, store, params);
   return off;
 }
 
 /**
- * 결산 뒤 다음 시즌 규칙(캡 상향률 → 연봉 지수, 외국인 한도)을 읽는 일과 FA 시장 열기. 단장 회의가 있는 해는 개표 뒤에 한다
- * (안건이 없는 해는 예전 순서 그대로: 코치 시장 → 구단 변화 → 해외 → AI 비FA 연장 → FA). 모두 시드 갈래 난수라 늦춰도 결과가 같다
+ * 결산 뒤 다음 시즌 규칙(캡 상향률 → 연봉 지수, 외국인 한도)을 읽는 일과 FA 시장 열기: 코치 시장 → 구단 변화 → 해외 → AI 비FA 연장 → FA.
+ * 단장 회의에 멈춘 예전 저장은 개표 뒤에 한다 (settleLegacyVote). 모두 시드 갈래 난수라 늦춰도 결과가 같다
  */
 function openStages(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams): void {
   off.coachMarket = coachMarket(league, off.year);
@@ -738,48 +740,35 @@ function openStages(league: LeagueState, off: OffseasonState, store: Store, para
   enterFa(league, off, store, params);
 }
 
-// ---- 단장 회의 (구단 투표, ruleVote.ts)
-
-/** 우리 표를 낸다 (몇 번이고 바꿀 수 있다, 마지막 표로 개표). agenda가 없으면 첫 안건 */
-export function castVote(off: OffseasonState, choice: VoteChoice, agenda?: string): OfferCheck {
-  if (off.stage !== 'vote' || !off.vote) return { ok: false, message: '단장 회의 단계가 아닙니다.' };
-  if (off.userTeam < 0) return { ok: false, message: '맡은 구단이 없습니다.' };
-  if (choice !== 'yes' && choice !== 'no') return { ok: false, message: '찬성 또는 반대만 낼 수 있습니다.' };
-  const a = agenda === undefined ? off.vote.agendas[0] : off.vote.agendas.find((x) => x.id === agenda);
-  if (!a) return { ok: false, message: '없는 안건입니다.' };
-  off.vote.user[a.id] = choice;
-  return { ok: true, message: `${a.year} 시즌 안건에 ${choice === 'yes' ? '찬성' : '반대'}표를 냈습니다.` };
-}
+// ---- 예전 저장의 단장 회의 (구단 투표는 2026-11-12에 뺐다, legacyVote.ts)
 
 /**
- * 이번 단장 회의에 우리 표를 낼 수 없는가: 이 결산에서 해고되었으면 (2026-10-23 클사장 결정).
- * 영입 제의를 받아 새 구단에 부임해도 이번 회의는 모든 구단 AI 표로 개표한다. 상태(firedYears)에서 읽으므로 저장·재현에 따로 남기지 않는다
+ * 단장 회의 단계('vote')에 멈춘 예전 저장을 이어 간다: 저장된 AI 표와 우리 표(없으면 반대)로 개표하고 FA 단계를 연다.
+ * 결산에서 해고된 채 맞은 회의는 예전 규칙대로 우리 표를 버리고 모든 구단 AI 표로 센다. 그 단계가 아니면 아무것도 하지 않고 false
  */
-export const VOTE_LOCKED_TEXT = '해고 중이라 표를 낼 수 없습니다.';
-
-export function voteLockedByFiring(league: LeagueState, off: OffseasonState): boolean {
-  return off.stage === 'vote' && !!off.vote && !!league.owner?.firedYears.includes(off.year);
-}
-
-/** 개표: 우리 표가 없으면 반대 (결정 4). 해고로 막힌 회의는 모든 구단 AI 표. 가결은 ruleShifts에, 가결·부결 모두 ruleVotes에 */
-function finishVote(league: LeagueState, off: OffseasonState): void {
+export function settleLegacyVote(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams = DEFAULT_PARAMS): boolean {
+  if ((off.stage as string) !== 'vote') return false;
   const v = off.vote;
-  if (!v) return;
-  const locked = voteLockedByFiring(league, off);
-  if (locked) log(off, 'vote', '해고 중이라 우리 표 없이 모든 구단 표를 AI가 냈습니다.', true, false);
-  v.agendas.forEach((a, i) => {
-    const { record, shift } = locked ? tallyAgenda(a, v.ai[i], -1) : tallyAgenda(a, v.ai[i], off.userTeam, v.user[a.id]);
-    (league.ruleVotes ??= []).push(record);
-    log(off, 'vote', tallyText(record, (t) => league.teams[t]?.name ?? ''), true, true);
-    if (shift) {
-      (league.ruleShifts ??= []).push(shift);
-      logShift(off, shift);
-    }
-  });
+  if (v) {
+    const fired = !!league.owner?.firedYears.includes(off.year);
+    v.agendas.forEach((a, i) => {
+      const { record, shift } = fired ? tallyAgenda(a, v.ai[i], -1) : tallyAgenda(a, v.ai[i], off.userTeam, v.user[a.id]);
+      (league.ruleVotes ??= []).push(record);
+      log(off, 'settle', tallyText(record, (t) => league.teams[t]?.name ?? ''), true, true);
+      if (shift) {
+        (league.ruleShifts ??= []).push(shift);
+        logShift(off, shift);
+      }
+    });
+  }
+  delete off.vote;
+  off.stage = 'fa';
+  openStages(league, off, store, params);
+  return true;
 }
 
 function logShift(off: OffseasonState, shift: RuleShift): void {
-  log(off, shift.vote ? 'vote' : 'settle', `${shift.year} 시즌 규칙 변경: ${FUTURE_RULE_LABEL[shift.key]} ${futureValueText(shift.key, shift.before)} → ${futureValueText(shift.key, shift.after)}. ${shift.reason}`, true, true);
+  log(off, 'settle', `${shift.year} 시즌 규칙 변경 (${shift.vote ? '단장 회의 가결' : '리그 결정'}): ${FUTURE_RULE_LABEL[shift.key]} ${futureValueText(shift.key, shift.before)} → ${futureValueText(shift.key, shift.after)}. ${shift.reason}`, true, true);
 }
 
 // ---- 비FA 다년 계약 (2026-10-12 사용자 요청)
@@ -802,8 +791,6 @@ export function seasonsToFa(p: LeaguePlayer, year: number): number {
 
 /** 다년 계약을 맺을 수 있는 우리 선수: 국내, 보류·신인 계약, 육성선수·복무 중 아님, 이번 FA 시장에 나오지 않음 */
 export function extensionCandidates(league: LeagueState, off: OffseasonState): LeaguePlayer[] {
-  // 단장 회의 중에는 FA 시장이 아직 열리지 않아 FA로 나갈 선수를 가릴 수 없다 (다음 해 연봉 지수도 개표 뒤에 정해진다)
-  if (off.stage === 'vote') return [];
   const fa = new Set(off.fa.entries.filter((e) => e.status === 'open').map((e) => e.id));
   return league.players.filter((p) => p.team === off.userTeam && !p.foreign && !p.dev && !isServing(p) && !fa.has(p.id)
     && (p.contract.kind === 'reserve' || p.contract.kind === 'rookie'));
@@ -2899,13 +2886,10 @@ export function blockedReason(league: LeagueState, off: OffseasonState): string 
  * 'ready'에서 부르면 아무것도 하지 않는다 (개막은 openNextSeason).
  */
 export function advanceStage(league: LeagueState, off: OffseasonState, store: Store, params: EngineParams = DEFAULT_PARAMS): void {
+  // 단장 회의에 멈춘 예전 저장 (세션은 불러올 때 이미 넘긴다): 개표하고 FA로
+  if (settleLegacyVote(league, off, store, params)) return;
   if (blockedReason(league, off)) return;
   switch (off.stage) {
-    case 'vote':
-      finishVote(league, off);
-      off.stage = 'fa';
-      openStages(league, off, store, params);
-      return;
     case 'fa':
       resolveFaRound(league, off, store, params);
       return;
