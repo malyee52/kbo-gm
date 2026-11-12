@@ -20,6 +20,7 @@ import { dollarText } from '../../league/salary';
 import { ForeignMark, HAND, POS_KO, posName, TeamLink, useGame, useWon } from '../context';
 import { altOf, gradeAt } from '../../league/twoway';
 import { teamVars } from '../teams';
+import { modalOpen, shortcutOk } from '../keys';
 import { seasonWar } from '../../league/awards';
 import { allStarHistory } from '../../league/allstar';
 import { babip, bbPct, fip, iso, kPct, leagueBase, pct1, pitBabip, pitBbPct, pitKPct, realLeagueBase, woba, wrcPlus, type LeagueBase } from '../../game/saber';
@@ -60,7 +61,8 @@ const RANK_MIN_OUTS = 30;
 const THIN_PA = 100;
 const THIN_OUTS = 90;
 
-export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => void }) {
+/** order: 이전·다음으로 넘길 선수 순서 (연 표의 지금 정렬·거르기 순서, U5). null이면 넘기기 단추를 숨긴다 */
+export function PlayerDetail({ idx, order = null, onMove, onClose }: { idx: number; order?: number[] | null; onMove?: (idx: number) => void; onClose: () => void }) {
   const { session, store, go } = useGame();
   const { density } = useShell();
   const full = density === 'full';
@@ -88,12 +90,32 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
     // 모달이 아닌 판은 Esc를 스스로 받는다 (다른 모달 창이 열려 있으면 그쪽이 먼저)
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if ([...document.querySelectorAll('dialog[open]')].some((d) => d !== ref.current && d.matches(':modal'))) return;
+      if (modalOpen(ref.current)) return;
       ref.current?.close();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [narrow]);
+
+  // 이전·다음 선수 (U5): 단추와 ←/→ 키. 끝에서는 더 가지 않는다
+  const pos = order ? order.indexOf(idx) : -1;
+  const nav = order && pos >= 0 && onMove ? {
+    at: pos + 1, total: order.length,
+    prev: pos > 0 ? () => onMove(order[pos - 1]) : null,
+    next: pos < order.length - 1 ? () => onMove(order[pos + 1]) : null,
+  } : null;
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || e.shiftKey || !shortcutOk(e) || modalOpen(ref.current)) return;
+      const go = e.key === 'ArrowLeft' ? nav.prev : nav.next;
+      if (!go) return;
+      e.preventDefault();
+      go();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [nav]);
 
   const team = lineTeam(p);
   const pitchLog = useMemo(() => pitchingLog(session, p), [session, p, session.season.log.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -107,7 +129,7 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
       onClose={onClose} onClick={(e) => { if (narrow && e.target === ref.current) close(); }} aria-labelledby="player-name">
       <div className="dialog-body">
         <header className="pd-head">
-          <Head p={p} narrow={narrow} onClose={close} onTitles={() => setTab('deal')} />
+          <Head p={p} narrow={narrow} onClose={close} onTitles={() => setTab('deal')} nav={nav} />
           <div className="pd-more"><HeadMore p={p} onClose={close} go={go} /></div>
           <div className="pd-tabs" role="tablist" aria-label="선수 상세">
             {TABS.filter((t) => (t.key !== 'pit' || throws) && (t.key !== 'edit' || session.editorOn)).map((t) => (
@@ -135,7 +157,9 @@ export function PlayerDetail({ idx, onClose }: { idx: number; onClose: () => voi
 
 // ---- 머리 (탭과 상관없이 늘 보임)
 
-function Head({ p, narrow, onClose, onTitles }: { p: SimPlayer; narrow: boolean; onClose: () => void; onTitles: () => void }) {
+interface PlayerNav { at: number; total: number; prev: (() => void) | null; next: (() => void) | null }
+
+function Head({ p, narrow, onClose, onTitles, nav }: { p: SimPlayer; narrow: boolean; onClose: () => void; onTitles: () => void; nav: PlayerNav | null }) {
   const { session, store } = useGame();
   const year = session.world.year;
   const mine = p.teamIdx === session.teamIdx;
@@ -159,7 +183,16 @@ function Head({ p, narrow, onClose, onTitles }: { p: SimPlayer; narrow: boolean;
             {!narrow && master?.entryYear ? <span className="muted">{master.entryYear}년 입단</span> : null}
           </p>
         </div>
-        <button type="button" className="ghost" onClick={onClose} aria-label="닫기">{narrow ? '← 닫기' : '닫기 ×'}</button>
+        <div className="pd-nav">
+          {nav && (
+            <span className="pd-step" role="group" aria-label="이전·다음 선수">
+              <button type="button" className="ghost small-btn" onClick={nav.prev ?? undefined} disabled={!nav.prev} aria-label="이전 선수" title="이전 선수 (←)">‹</button>
+              <span className="num small muted">{nav.at}/{nav.total}</span>
+              <button type="button" className="ghost small-btn" onClick={nav.next ?? undefined} disabled={!nav.next} aria-label="다음 선수" title="다음 선수 (→)">›</button>
+            </span>
+          )}
+          <button type="button" className="ghost" onClick={onClose} aria-label="닫기">{narrow ? '← 닫기' : '닫기 ×'}</button>
+        </div>
       </div>
       <p className="pd-line small">
         <span>{mine ? (p.dev ? '육성선수' : registered ? '1군' : '2군') : p.teamIdx < 0 ? '시장 (영입은 선수단 → 선수 시장)' : '다른 구단'}</span>

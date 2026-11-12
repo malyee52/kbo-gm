@@ -128,3 +128,12 @@ export function filterRows<R>(rows: readonly R[], view: TableView, textOf?: (r: 
     return textOf(r).replace(/\s+/g, '').toLowerCase().includes(q);
   });
 }
+
+/**
+ * 저장된 보기(거르기·정렬)대로 지금 표에 보이는 줄 순서. DataTable이 그리는 순서와 같다.
+ * 표 밖에서 순서가 필요할 때 (선수 창 이전·다음 등) 쓴다
+ */
+export function orderedRows<R>(id: string, rows: readonly R[], cols: readonly Column<R>[], textOf?: (r: R) => string, thin?: (r: R) => boolean): R[] {
+  const view = loadView(id);
+  return sortRows(filterRows(rows, view, textOf, thin), cols, view.sort);
+}

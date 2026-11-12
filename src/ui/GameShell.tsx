@@ -64,6 +64,7 @@ import { rivalDue, rivalMove } from '../fantasy/rivals';
 import { About } from './screens/About';
 import { chronicleDue, writeChronicle } from '../fantasy/chronicle';
 import { OpeningBoard } from './screens/OpeningBoard';
+import { modalOpen, shortcutOk } from './keys';
 import { blockOf, entryOf, GROUPS, hidden, itemBlock, itemOf, itemsOf, MOBILE_GROUPS, tabLabel, type Group, type MenuItem } from './menu';
 import { countByGroup, decisions, loadAcked, saveAcked, type Acked } from './decisions';
 import { DensityToggle, loadDensity, saveDensity, ShellProvider, type Density, type ScreenPrimary, type ShellUi } from './shell';
@@ -99,6 +100,12 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const [screen, setScreen] = useState<Screen>('home');
   const [screenArg, setScreenArg] = useState<number | undefined>(undefined);
   const [player, setPlayer] = useState<number | null>(null);
+  // 선수 창 이전·다음 순서 (연 표의 지금 순서, U5). 2명 미만이거나 연 선수가 없으면 null
+  const [playerOrder, setPlayerOrder] = useState<number[] | null>(null);
+  const openPlayer = useCallback((idx: number, order?: number[]) => {
+    setPlayer(idx);
+    setPlayerOrder(order && order.length >= 2 && order.includes(idx) ? order : null);
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 오프시즌 단계 화면이 맡은 주 진행 단추 (shell.tsx ScreenPrimary)
@@ -129,6 +136,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   // 상태 줄 검색 칸 → 전체 검색 (선수·은퇴 선수·구단·경기·소식). 영입 > 선수 검색의 이름 조건으로도 넘긴다
   const [searchText, setSearchText] = useState('');
   const [searchKey, setSearchKey] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [density, setDensityState] = useState<Density>(loadDensity);
   const setDensity = (d: Density) => { setDensityState(d); saveDensity(d); };
   // 결정함에서 "확인"한 알림 (게임마다 이 브라우저에 기억, decisions.ts)
@@ -433,7 +441,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
 
-  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer: setPlayer, autosave, command: () => void (session.commandInProgress ? resumeCommand() : startCommand()) };
+  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer, autosave, command: () => void (session.commandInProgress ? resumeCommand() : startCommand()) };
   const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
   const { when, left, rec: head } = (cast && castHead) || headOf(session);
@@ -512,6 +520,39 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     </div>
   );
 
+  // 단축키 (U7, 표는 keys.ts SHORTCUTS → 저장·설정 화면): N 주 진행 단추, / 검색 칸, 1~6 대분류, Esc 진행 설정 닫기.
+  // 글을 넣는 칸에 초점이 있거나 모달 창(지휘·중계·이벤트·확인 창 등)이 열려 있으면 받지 않는다. 선수 창 ←/→·Esc는 PlayerDetail이 받는다
+  const keyAct = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyAct.current = (e) => {
+    if (!shortcutOk(e) || modalOpen()) return;
+    if (e.key === 'Escape') {
+      if (progressOpen) { e.preventDefault(); setProgressOpen(false); }
+      return;
+    }
+    if (e.shiftKey) return;
+    if (e.code === 'KeyN') {
+      e.preventDefault();
+      if (!primary.disabled) primary.act();
+      return;
+    }
+    if (e.key === '/' || e.code === 'Slash') {
+      e.preventDefault();
+      const box = searchRef.current;
+      if (box && box.offsetParent !== null) { box.focus(); box.select(); } else go('find');
+      return;
+    }
+    const n = /^Digit([1-9])$/.exec(e.code)?.[1] ?? (/^[1-9]$/.test(e.key) ? e.key : null);
+    if (n !== null && Number(n) <= GROUPS.length) {
+      e.preventDefault();
+      goGroup(GROUPS[Number(n) - 1]);
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyAct.current(e);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const navButton = (g: Group, mobile = false) => {
     const n = badges[g] ?? 0;
     const on = curGroup === g && !allOpen;
@@ -556,14 +597,14 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
               {off && lastPlace && lastPlace.rank > 0 && <><b>{placeLabel(lastPlace)}</b> <span className="muted small">지난 시즌</span></>}
             </span>
             <form className="sb-search" role="search" onSubmit={(e) => { e.preventDefault(); setSearchKey((k) => k + 1); go('find'); }}>
-              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="검색: 선수·구단·날짜" aria-label="전체 검색 (선수·은퇴 선수·구단·경기·소식)" />
+              <input ref={searchRef} type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="검색: 선수·구단·날짜 (/)" aria-label="전체 검색 (선수·은퇴 선수·구단·경기·소식)" />
             </form>
             <span className={`sb-save${saveError ? ' error-text' : ''}`} role="status">{saveText}</span>
             <DensityToggle />
             <div className="sb-advance">
               {busy && <span className="sb-busy" role="status">{busy}</span>}
               {stopButton}
-              <button type="button" className="go" onClick={primary.act} disabled={primary.disabled} title={pending ? '이벤트에 답한 뒤 진행할 수 있습니다' : primary.title}>{primary.label} ▶</button>
+              <button type="button" className="go" onClick={primary.act} disabled={primary.disabled} title={pending ? '이벤트에 답한 뒤 진행할 수 있습니다' : primary.title ? `${primary.title} (N)` : '단축키 N'}>{primary.label} ▶</button>
               <button type="button" className="ghost" aria-expanded={progressOpen} onClick={() => setProgressOpen((o) => !o)}>진행 설정</button>
               {progressOpen && progressMenu}
             </div>
@@ -724,7 +765,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
         )}
 
         {/* 판을 연 채 다른 선수를 누르면 내용만 바뀐다 (key 없음, U2-2) */}
-        {player !== null && <PlayerDetail idx={player} onClose={() => setPlayer(null)} />}
+        {player !== null && <PlayerDetail idx={player} order={playerOrder} onMove={setPlayer} onClose={() => { setPlayer(null); setPlayerOrder(null); }} />}
       </div>
       </ShellProvider>
     </GameProvider>

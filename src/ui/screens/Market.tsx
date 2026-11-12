@@ -8,7 +8,9 @@ import { availableDay, foreignHeld, foreignSwapsUsed, INJURY_SWAP_FROM, monthsLe
 import { dollarText } from '../../league/salary';
 import { ConfirmButton } from '../ConfirmButton';
 import { PlayerLink, posName, TeamName, useGame, useWon } from '../context';
-import { GuessCell, useSeen } from '../parts';
+import { DataTable, guessColumn, useSeen } from '../parts';
+import type { Column } from '../table';
+import { WON_PER_USD } from '../../league/finance';
 import { ruleDate, ruleOf } from '../../league/rules';
 
 type Kind = 'foreign' | 'free';
@@ -85,6 +87,51 @@ export function Market() {
   };
   const left = (p: SimPlayer) => Math.max(0, session.season.states.absentUntil[p.idx] - session.day);
 
+  /** 영입 칸: 영입·부상 대체 영입 단추와 막힌 까닭 */
+  const actions = (p: SimPlayer) => {
+    const why = session.signBlock(p);
+    const rehabWhy = kind === 'foreign' && injured ? session.rehabSignBlock(p, injured) : null;
+    return (
+      <>
+        <button type="button" onClick={() => sign(p)} disabled={!!why} title={why ?? '영입합니다 (2군에 들어갑니다)'}>영입</button>
+        {why && <div className="muted small">{why}</div>}
+        {injured && kind === 'foreign' && (
+          <>
+            <button type="button" onClick={() => signRehab(p)} disabled={!!rehabWhy} title={rehabWhy ?? `${injured.name}을(를) 재활 명단에 올리고 부상 대체로 영입합니다`}>부상 대체 영입</button>
+            {rehabWhy && <div className="muted small">{rehabWhy}</div>}
+          </>
+        )}
+      </>
+    );
+  };
+  /** 올해 기록 열 정렬: 타자 OPS, 투수 평균자책의 반대 (기록이 없으면 맨 뒤) */
+  const lineSort = (p: SimPlayer): number | null => {
+    const b = session.season.bat[p.idx];
+    const x = session.season.pit[p.idx];
+    return p.isPitcher ? (x.bf ? -era(x) : null) : (b.pa ? ops(b) : null);
+  };
+  /** 연봉 열 정렬: 외국인은 달러(올해 총액)를 원으로 환산, 자유계약은 최저 연봉 */
+  const salarySort = (p: SimPlayer): number | null => {
+    const l = lp.get(p.id);
+    if (!l) return null;
+    if (!p.foreign) return 3000;
+    return (contractOf(p)?.total ?? l.contract.salary) * WON_PER_USD;
+  };
+  const cols: Column<SimPlayer>[] = [
+    { key: 'name', label: '이름', fixed: true, text: true, value: (p) => p.name, cell: (p) => <PlayerLink p={p} /> },
+    { key: 'role', label: '자리', text: true, value: (p) => role(p) },
+    { key: 'age', label: '나이', lower: true, value: (p) => p.age },
+    // 능력은 우리 스카우트 추측으로만 정렬한다 (능력치 v2 17.6)
+    guessColumn((p) => guessOf.get(p.idx)),
+    { key: 'line', label: '올해', text: true, title: '올해 1군 기록. 정렬은 타자 OPS, 투수 평균자책 낮은 순', value: lineSort, cell: (p) => <span className="small">{line(p)}</span> },
+    { key: 'from', label: kind === 'free' ? '전 소속' : '구분', text: true,
+      value: (p) => (kind === 'free' && p.formerTeam !== undefined ? session.teamInfo(p.formerTeam).name : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'),
+      cell: (p) => <span className="small">{kind === 'free' && p.formerTeam !== undefined ? <TeamName idx={p.formerTeam} /> : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'}{from(p) > session.day && <span className="muted"> · {shortDate(year, from(p))}부터</span>}</span> },
+    { key: 'salary', label: '연봉', value: salarySort,
+      cell: (p) => <span className="small">{salary(p)}{kind === 'foreign' && totalLine(contractOf(p))}{injured && kind === 'foreign' && totalLine(contractOf(p, true), '부상 대체')}</span> },
+    { key: 'act', label: '', fixed: true, text: true, value: () => null, cell: actions },
+  ];
+
   const moves = movesOf(session.league, year).slice().reverse();
   const nameOf = (id: string) => session.world.players.find((p) => p.id === id)?.name ?? lp.get(id)?.name ?? id;
 
@@ -160,38 +207,8 @@ export function Market() {
             ? (rule.total ? '지금 영입할 수 있는 외국인 후보가 없습니다. 새 외국인 후보는 관찰 명단에 오른 선수만 보입니다: 영입 > 스카우트 > 해외에서 스카우트 팀을 보내 찾으세요 (파견이 없어도 에이전트가 몇 주마다 한 명을 추천합니다).' : `${year}년에는 외국인 선수 제도가 없습니다.`)
             : '지금 자유계약 선수가 없습니다.'}</p>
         ) : (
-          <div className="scroll flat">
-            <table>
-              <thead><tr><th className="l">이름</th><th>자리</th><th>나이</th><th>능력 추측</th><th className="l">올해</th><th className="l">{kind === 'free' ? '전 소속' : '구분'}</th><th>연봉</th><th /></tr></thead>
-              <tbody>
-                {list.map((p) => {
-                  const why = session.signBlock(p);
-                  const rehabWhy = kind === 'foreign' && injured ? session.rehabSignBlock(p, injured) : null;
-                  return (
-                    <tr key={p.idx}>
-                      <td className="l"><PlayerLink p={p} /></td>
-                      <td>{role(p)}</td>
-                      <td>{p.age ?? '-'}</td>
-                      <td><GuessCell g={guessOf.get(p.idx)} /></td>
-                      <td className="l small">{line(p)}</td>
-                      <td className="l small">{kind === 'free' && p.formerTeam !== undefined ? <TeamName idx={p.formerTeam} /> : lp.get(p.id)?.asia ? '아시아쿼터' : '외국인'}{from(p) > session.day && <span className="muted"> · {shortDate(year, from(p))}부터</span>}</td>
-                      <td className="small">{salary(p)}{kind === 'foreign' && totalLine(contractOf(p))}{injured && kind === 'foreign' && totalLine(contractOf(p, true), '부상 대체')}</td>
-                      <td className="l">
-                        <button type="button" onClick={() => sign(p)} disabled={!!why} title={why ?? '영입합니다 (2군에 들어갑니다)'}>영입</button>
-                        {why && <div className="muted small">{why}</div>}
-                        {injured && kind === 'foreign' && (
-                          <>
-                            <button type="button" onClick={() => signRehab(p)} disabled={!!rehabWhy} title={rehabWhy ?? `${injured.name}을(를) 재활 명단에 올리고 부상 대체로 영입합니다`}>부상 대체 영입</button>
-                            {rehabWhy && <div className="muted small">{rehabWhy}</div>}
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <DataTable id={`market-${kind}`} cols={cols} rows={list} rowKey={(p) => String(p.idx)} full searchText={(p) => p.name}
+            label={kind === 'foreign' ? '외국인 후보' : '자유계약 선수'} />
         )}
       </section>
 

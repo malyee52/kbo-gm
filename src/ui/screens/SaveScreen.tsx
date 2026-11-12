@@ -1,5 +1,5 @@
 // 저장·설정: 저장 칸, 파일 내보내기·가져오기, 버그 보고용 재현 정보.
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { deleteSave, isAutoSlot, listSaveInfos, renameSave, type SaveInfo } from '../../game/storage';
 import { EditorPanel } from '../editor/EditorToggle';
 import { DIFFICULTY_LABEL } from '../../league/owner';
@@ -8,6 +8,7 @@ import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
 import { DifficultyEditor } from '../DifficultyEditor';
 import { autoSlotFor, exportSession, reproOf, saveSession, whenText } from '../saving';
 import { ConfirmButton } from '../ConfirmButton';
+import { SHORTCUTS } from '../keys';
 
 const SLOTS = ['저장 1', '저장 2', '저장 3'];
 
@@ -117,6 +118,14 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
         <div className="actions">
           <button type="button" onClick={() => void copyRepro()}>{copied ? '복사했습니다' : '재현 정보 복사'}</button>
         </div>
+      </section>
+
+      <section className="panel">
+        <h2>단축키</h2>
+        <p className="muted small">글을 넣는 칸에 초점이 있거나 확인 창·지휘 창이 열려 있으면 단축키는 듣지 않습니다.</p>
+        <dl className="facts">
+          {SHORTCUTS.map((k) => <Fragment key={k.keys}><dt><kbd>{k.keys}</kbd></dt><dd>{k.what}</dd></Fragment>)}
+        </dl>
       </section>
     </div>
   );
