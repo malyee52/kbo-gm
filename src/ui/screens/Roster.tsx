@@ -195,7 +195,8 @@ export function Roster() {
             </p>
           )}
 
-          <DataTable id={`roster-${kind}-${page}`} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
+          {/* 2군은 보기를 따로 기억한다 (1군에서 고른 열 목록에 2군 전용 '퓨처스' 열이 없어 꺼진 채로 남지 않게) */}
+          <DataTable id={`roster-${kind}-${page}${inFirst ? '' : '-2'}`} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
             searchText={(p) => p.name} rowClass={(p) => (picked?.idx === p.idx ? 'sel' : undefined)} onRow={(p) => pick(p)}
             label={`${kind === 'hit' ? '야수' : '투수'} ${inFirst ? '1군' : '2군'} 명단`} empty="이 구분에 선수가 없습니다." />
         </section>
