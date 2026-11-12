@@ -2539,13 +2539,17 @@ export class GameSession {
     const day = s.day;
     const year = this.world.year;
     const team = this.teamIdx;
+    const wage = wageIndex(year, L);
     return {
       league: L, team, teamName: this.team.name, year, day, seasonDays: s.schedule.length,
       rank: st.indexOf(team) + 1, teams: st.length, rankLabel: placeLabel(seasonPlace(s, team)),
       winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
       cash: this.cashNow(),
+      wage,
       roster: L.players.filter((p) => p.team === team),
-      addCash: (amount, note) => {
+      // 이벤트 금액은 2026년 물가로 적혀 있어 그 해 연봉 지수를 곱한다 (부록 B 물음 9, 2026-11-05 사용자. 신뢰 변화는 그대로)
+      addCash: (base, note) => {
+        const amount = Math.round(base * wage);
         if (!amount) return;
         L.ledger.push(amount > 0
           ? { year, from: -1, to: team, amount, note, kind: 'event' }
