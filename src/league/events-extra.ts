@@ -335,7 +335,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     ] },
   // 선택지 차이 키움 ×1.8 (2026-11-12 Q35, 임시값)
   { id: 'x-parent-cost-cut', title: '모기업 비용 절감 지시', weight: 3,
-    vars: (_c, rng) => ({ amount: Math.round(rng.range(20000, 40000) / 1000) * 1000 }),
+    vars: (_c, rng) => ({ amount: Math.round(rng.range(36000, 72000) / 1000) * 1000 }),
     text: (_c, v) => `모기업이 계열사 전체에 비용 절감을 지시했습니다. 구단도 ${won(_c, v, 'amount')}을 줄여야 합니다.`,
     choices: [
       ch('따른다', (_c, v) => `자금 −${won(_c, v, 'amount')}`, (c, v) => { cash(c, -num(v, 'amount'), '모기업 비용 절감'); return '지시에 따라 예산을 줄였습니다.'; }),
