@@ -8,7 +8,8 @@ import type { LeaguePlayer } from '../../league/types';
 import { guessMid, guessText, type GuessSet } from '../../league/scout';
 import { era, fixed2, ops, rate3 } from '../../game/stats';
 import { Pos, TeamName, useGame } from '../context';
-import { GuessGrade } from '../parts';
+import { DataTable, GuessGrade } from '../parts';
+import type { Column } from '../table';
 
 type Scope = 'mine' | 'league';
 
@@ -114,6 +115,17 @@ export function Growth() {
     );
   };
 
+  type MineRow = (typeof mine)[number] & { p: LeaguePlayer };
+  const mineRows: MineRow[] = mine.flatMap((r) => { const p = session.leaguePlayer(r.g.id); return p ? [{ ...r, p }] : []; });
+  // 능력 열 정렬은 추측 가운데값 평균의 움직임(shift)으로만 (진짜 성장 폭으로 늘어놓지 않는다, 능력치 v2 17.6)
+  const mineCols: Column<MineRow>[] = [
+    { key: 'name', label: '선수', fixed: true, text: true, value: (r) => r.p.name, cell: (r) => open(r.g.id, r.p.name) },
+    { key: 'role', label: '자리', value: (r) => (r.p.isPitcher ? (isStarterSkill(r.p.pit) ? '선발' : '구원') : r.p.pos ?? null), cell: (r) => role(r.p) },
+    { key: 'age', label: '나이', lower: true, value: (r) => r.g.age ?? null },
+    { key: 'change', label: '능력 (전 → 후)', text: true, title: '정렬은 추측 가운데값 평균이 움직인 크기', value: (r) => r.shift, cell: (r) => change(r.before, r.after) },
+    { key: 'tags', label: '비고', text: true, value: (r) => r.g.tags?.join(', ') || null, cell: (r) => <span className="small">{r.g.tags?.join(', ')}</span> },
+  ];
+
   return (
     <div className="stack">
       {(off.stage === 'fa' || off.stage === 'vote') && <FlowNext step="선수 성장" label="다음: 오프시즌" onNext={() => go('offseason')} />}
@@ -138,21 +150,8 @@ export function Growth() {
             <span className="muted small">상승 {upN}명 · 하락 {downN}명</span>
           </h2>
           {mine.length ? (
-            <table>
-              <thead><tr><th className="l">선수</th><th>자리</th><th>나이</th><th className="l">능력 (전 → 후)</th><th className="l">비고</th></tr></thead>
-              <tbody>
-                {mine.map(({ g, before, after }) => {
-                  const p = session.leaguePlayer(g.id);
-                  if (!p) return null;
-                  return (
-                    <tr key={g.id}>
-                      <td className="l">{open(g.id, p.name)}</td><td>{role(p)}</td><td>{g.age ?? '-'}</td>
-                      <td className="l">{change(before, after)}</td><td className="l small">{g.tags?.join(', ')}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <DataTable id="growth-mine" cols={mineCols} rows={mineRows} rowKey={(r) => r.g.id} full searchText={(r) => r.p.name}
+              label="우리 선수 성장" />
           ) : <p className="muted small">판정한 선수가 없습니다.</p>}
         </section>
       ) : (
