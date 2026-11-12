@@ -157,7 +157,7 @@ export function ScoutNote({ notes, full }: { notes: string[]; full: boolean }) {
  * 공통 표: 머리 눌러 정렬, 이름 거르기, (상세) 열 고르기·묶음 전환·리그 평균 줄, 표본 미만 줄 흐림·빼기.
  * 고른 열·정렬·거르기는 표(id)마다 이 브라우저에 기억한다 (결정 8)
  */
-export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, thinToggle = true, rowClass, foot, label, empty, onRow, tableClass, searchHint, pageSize }: {
+export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, thinToggle = true, rowClass, foot, label, empty, onRow, tableClass, searchHint, pageSize, onViewChange }: {
   id: string; cols: Column<R>[]; rows: R[]; rowKey: (r: R) => string; full: boolean;
   /** 거르기에 쓰는 글자 (없으면 거르기 칸 없음) */
   searchText?: (r: R) => string;
@@ -179,10 +179,12 @@ export function DataTable<R>({ id, cols, rows, rowKey, full, searchText, thin, t
   searchHint?: string;
   /** 줄이 많은 표: 처음에 이만큼만 그리고 '더 보기'로 늘린다 (정렬·거르기는 늘 전체 줄에) */
   pageSize?: number;
+  /** 보기(거르기·정렬·열)가 바뀔 때. 표 밖에서 보이는 순서(orderedRows)를 다시 계산할 때 */
+  onViewChange?: (v: TableView) => void;
 }) {
   const [view, setViewState] = useState<TableView>(() => loadView(id));
   useEffect(() => setViewState(loadView(id)), [id]);
-  const setView = (v: TableView) => { setViewState(v); saveView(id, v); };
+  const setView = (v: TableView) => { setViewState(v); saveView(id, v); onViewChange?.(v); };
   const shown = visibleColumns(cols, view, full);
   const list = sortRows(filterRows(rows, view, searchText, thin), cols, view.sort);
   const [limit, setLimit] = useState(pageSize ?? Infinity);

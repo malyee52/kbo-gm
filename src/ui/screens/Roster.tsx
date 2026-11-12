@@ -45,6 +45,8 @@ export function Roster() {
   const [kind, setKind] = useState<Kind>('hit');
   const [inFirst, setInFirst] = useState(true);
   const [sel, setSel] = useState<number | null>(null);
+  // 표 보기가 바뀌면 다시 그려 오른쪽 요약·'자세히' 순서를 맞춘다
+  const [, setViewTick] = useState(0);
   const [msg, setMsg] = useState<(EntryCheck & { who?: string }) | null>(null);
   const [page, setPageState] = useState<Page>(savedPage);
   const setPage = (v: Page) => {
@@ -111,8 +113,6 @@ export function Roster() {
   const roleOf = (p: SimPlayer): string => (inFirst || view.callUps.has(p.idx) ? (view.role.get(p.idx) ?? (session.isAbsent(p) ? '결장' : '-')) : '');
   const rows = list(inFirst);
   const nOther = list(!inFirst).length;
-  // 고른 선수가 지금 표에 없으면 첫 줄
-  const picked = rows.find((p) => p.idx === sel) ?? rows[0];
   /** 줄 누르기: 넓은 화면은 오른쪽 요약, 좁은 화면은 바로 상세 창 */
   const pick = (p: SimPlayer, order?: number[]) => {
     if (window.matchMedia('(max-width: 1100px)').matches) openPlayer(p.idx, order);
@@ -134,6 +134,9 @@ export function Roster() {
       value: (p: SimPlayer) => futuresSort(fut.get(p.idx), kind), cell: (p: SimPlayer) => <span className="small">{futuresText(fut.get(p.idx))}</span> }] : []),
     { key: 'act', label: '', fixed: true, value: () => null, cell: (p) => moveBtn(p) },
   ];
+  // 표에 지금 보이는 순서 (저장된 거르기·정렬대로). 고른 선수가 지금 표에 없으면 보이는 첫 줄
+  const shownOrder = orderedRows(tableId, rows, cols, (x) => x.name);
+  const picked = rows.find((p) => p.idx === sel) ?? shownOrder[0] ?? rows[0];
   /** 육성선수 정식 등록 (1군·2군 이동은 기용 보드에서) */
   const moveBtn = (p: SimPlayer, big = false) => {
     const cls = big ? 'ghost' : 'small-btn';
@@ -197,13 +200,13 @@ export function Roster() {
             </p>
           )}
 
-          <DataTable id={tableId} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
+          <DataTable id={tableId} onViewChange={() => setViewTick((n) => n + 1)} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
             searchText={(p) => p.name} rowClass={(p) => (picked?.idx === p.idx ? 'sel' : undefined)} onRow={(p, shown) => pick(p, shown.map((x) => x.idx))}
             label={`${kind === 'hit' ? '야수' : '투수'} ${inFirst ? '1군' : '2군'} 명단`} empty="이 구분에 선수가 없습니다." />
         </section>
 
         {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, true)} war={war.get(picked.idx)}
-          order={orderedRows(tableId, rows, cols, (x) => x.name).map((x) => x.idx)} />}
+          order={shownOrder.map((x) => x.idx)} />}
       </div>
 
     </div>
