@@ -87,8 +87,8 @@ export function campYoung(league: LeagueState, team: number, year: number, scope
     && p.military?.state !== 'serving' && (scope === 'all' || (scope === 'pit') === !!p.isPitcher));
 }
 
-/** AI가 유망주 집중을 고르는 젊은 선수 수 (24세 이하, 임시값) */
-export const AI_YOUTH_MIN = 14;
+/** AI가 유망주 집중을 고르는 젊은 선수 수 (24세 이하, 임시값. 2026 시작 구단마다 18~33명, 가운데 21명) */
+export const AI_YOUTH_MIN = 24;
 
 /**
  * AI 구단의 선택: 자금으로 장소, 단장 성향·젊은 선수 수·약한 쪽으로 방향 (2026-11-12 Q36에서 다시 맞춤, 임시값).
@@ -102,7 +102,7 @@ export function aiCamp(league: LeagueState, team: number, cash: number, strength
   let focus: CampFocus;
   if (style === 'frugal') focus = 'balanced';
   else if (style === 'develop') focus = 'youth';
-  else if (style === 'winnow') focus = young >= AI_YOUTH_MIN + 4 ? 'balanced' : 'fitness';
+  else if (style === 'winnow') focus = young >= AI_YOUTH_MIN + 6 ? 'balanced' : 'fitness';
   else if (young >= AI_YOUTH_MIN) focus = 'youth';
   else if (Math.abs(strength.bat - strength.pit) < 0.03) focus = 'def';
   else focus = strength.bat < strength.pit ? 'bat' : 'pit';
