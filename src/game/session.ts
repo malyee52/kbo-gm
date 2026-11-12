@@ -23,7 +23,7 @@ import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText, foreignRule, teamForeignRule } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
-import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { condToday, ensureEvents, eventDef, formToday, isNoticeEvent, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
 import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, strengthTier, type RankPlace, type StrengthTier } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
@@ -95,6 +95,9 @@ import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
+
+/** 이 이벤트에서 멈추나. 소식 이벤트(묻지 않음)에서는 멈추지 않는다 (2026-11-12 Q35) */
+const stopsOnEventOf = (r: StopRules, ev: PendingEvent) => !isNoticeEvent(ev.id) && stopsOnEvent(r, ev);
 
 /** 중계·하이라이트용 우리 경기 (정규시즌 또는 가을야구) */
 export interface CastGame {
@@ -2330,7 +2333,7 @@ export class GameSession {
       this.settlePending();
       const ev = this.league.events?.pending;
       if (ev) {
-        if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
+        if (stopsOnEventOf(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
       // 위기 멈춤 (직접 지휘, B → A 끼어들기, 엔진 2 18단계): 오늘 우리 경기를 지휘 없이 미리 돌려 위기가 오면 그날을 진행하지 않고,
@@ -2358,7 +2361,7 @@ export class GameSession {
       n++;
       this.checkStops(r, streak0);
       const now = this.league.events?.pending;
-      if ((now && stopsOnEvent(r, now)) || this.attention.length) { this.stopped = true; break; }
+      if ((now && stopsOnEventOf(r, now)) || this.attention.length) { this.stopped = true; break; }
     }
     return n;
   }
@@ -2501,8 +2504,15 @@ export class GameSession {
       this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
-      const ev = rollEvent(ensureEvents(this.league), this.eventContext());
-      if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
+      const ctx = this.eventContext();
+      const ev = rollEvent(ensureEvents(this.league), ctx);
+      if (ev) {
+        const def = eventDef(ev.id)!;
+        // 소식 이벤트 (2026-11-12 Q35): 묻지 않는다. 효과는 다음 진행 첫머리에 첫 선택지로 적용한다 (예전 자동 처리와 같은 때라
+        // 예전 저장의 조작 기록이 이 이벤트에 고른 선택도 그 자리에서 그대로 읽힌다)
+        if (def.notice) this.addNews(this.season.day, 'event', `소식: ${def.title} — ${def.text(ctx, ev.vars)} 프런트 처리: ${def.choices[0].label} (${def.choices[0].note(ctx, ev.vars)})`);
+        else this.addNews(this.season.day, 'event', `이벤트: ${def.title}`);
+      }
     }
     this.watchCheck(day);
   }
@@ -2525,9 +2535,10 @@ export class GameSession {
 
   // ---- 무작위 이벤트 (events.ts)
 
-  /** 답을 기다리는 이벤트 */
+  /** 답을 기다리는 이벤트. 소식 이벤트(묻지 않음)는 답할 것이 없어 null */
   get pendingEvent(): PendingEvent | null {
-    return this.league.events?.pending ?? null;
+    const ev = this.league.events?.pending ?? null;
+    return ev && !isNoticeEvent(ev.id) ? ev : null;
   }
 
   /** 이벤트 효과를 적용할 도구 */
@@ -2674,13 +2685,17 @@ export class GameSession {
     return { ok: true, message: result };
   }
 
-  /** auto: 답하지 않고 진행해 첫 번째 선택지로 자동 처리 (조작 기록에 남기지 않는다. 다시 돌려도 같은 자리에서 자동 처리된다) */
+  /**
+   * auto: 답하지 않고 진행해 첫 번째 선택지로 자동 처리 (조작 기록에 남기지 않는다. 다시 돌려도 같은 자리에서 자동 처리된다).
+   * 소식 이벤트도 여기서 처리한다: 자동이면 굴릴 때 소식을 이미 냈으니 더 쓰지 않고, 예전 저장의 조작 기록이 고른 선택이면 그대로 적용한다
+   */
   private applyEventChoice(choice: number, auto = false): string {
-    const ev = this.pendingEvent;
+    const ev = this.league.events?.pending;
     if (!ev) return '';
     const def = eventDef(ev.id)!;
+    if (!def.choices[choice]) return '';
     const result = resolveEvent(ensureEvents(this.league), this.eventContext(), choice);
-    this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
+    if (!(def.notice && auto)) this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
     return result;
   }
 
