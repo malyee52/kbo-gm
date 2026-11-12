@@ -27,7 +27,7 @@ import { createLeague } from '../src/league/create';
 import { worldFromLeague } from '../src/league/world';
 import { ensureEvents, EVENTS, type EventContext, type EventDef } from '../src/league/events';
 import { campInjuryOf, FOCUS, PLACE, type CampFocus, type CampPlace } from '../src/league/camp';
-import { COACH_DECLINE, COACH_EDGE, COACH_GROWTH, COACH_ROLES, COACH_SALARY } from '../src/league/coaches';
+import { COACH_DECLINE, COACH_EDGE, COACH_GROWTH, COACH_ROLES, coachSalaryAt } from '../src/league/coaches';
 import { REP, REP_FA, REP_TRADE } from '../src/league/reputation';
 import { infoOf, NEUTRAL_TACTICS as NEUTRAL, tacticsOf, type Tactics } from '../src/league/managers';
 import { runsOf } from '../src/league/growth';
@@ -570,20 +570,20 @@ async function partReport(): Promise<void> {
   const gBat = mean(allGrowth.map((g) => g.bat));
   const gPit = mean(allGrowth.map((g) => g.pit));
   P.push(`시즌 경기력: 타격 코치 (등급 − 3) × ${COACH_EDGE} (타자), 투수 코치 (등급 − 3) × ${COACH_EDGE}·수비 코치 그 절반 (투수 쪽). 성장: 오른 몫 × (1 + (등급 − 3) × ${COACH_GROWTH}), 베테랑형은 31세 이상 하락 (등급 − 3) × ${COACH_DECLINE} 줄임. 구단 상위 25명 안 같은 구단에 남은 선수의 한 해 오른 몫 합 (세션 평균): 타자 ${f1(gBat)}런·투수 ${f1(gPit)}런.\n`);
-  P.push('| 등급 | 연봉(억) | 타격 코치 시즌 승수 | 투수 코치 시즌 승수 | 수비 코치 시즌 승수 | 타격 코치 성장 몫(다음 해, 승) | 투수 코치 성장 몫(다음 해, 승) |', '|---|---|---|---|---|---|---|');
+  P.push('| 등급 | 연봉(억, 타격·투수·수비·2군) | 타격 코치 시즌 승수 | 투수 코치 시즌 승수 | 수비 코치 시즌 승수 | 타격 코치 성장 몫(다음 해, 승) | 투수 코치 성장 몫(다음 해, 승) |', '|---|---|---|---|---|---|---|');
   for (let lv = 1; lv <= 5; lv++) {
     const w = lvWins(lv);
-    P.push(`| ${lv} | ${eok(COACH_SALARY[lv])} | ${f1(w.bat, 2)} | ${f1(w.pit, 2)} | ${f1(w.pit / 2, 2)} | ${f1((gBat * (lv - 3) * COACH_GROWTH) / E.runsPerWin, 2)} | ${f1((gPit * (lv - 3) * COACH_GROWTH) / E.runsPerWin, 2)} |`);
+    P.push(`| ${lv} | ${COACH_ROLES.map((r) => eok(coachSalaryAt(r, lv))).join("·")} | ${f1(w.bat, 2)} | ${f1(w.pit, 2)} | ${f1(w.pit / 2, 2)} | ${f1((gBat * (lv - 3) * COACH_GROWTH) / E.runsPerWin, 2)} | ${f1((gPit * (lv - 3) * COACH_GROWTH) / E.runsPerWin, 2)} |`);
   }
   const best = lvWins(5);
   const worst = lvWins(1);
   const fullSpan = (best.bat - worst.bat) + (best.pit - worst.pit) * 1.5 + ((gBat + gPit) * 4 * COACH_GROWTH) / E.runsPerWin;
-  const pay = (COACH_SALARY[5] - COACH_SALARY[1]) * 4;
+  const pay = COACH_ROLES.reduce((s, r) => s + coachSalaryAt(r, 5) - coachSalaryAt(r, 1), 0); // 역할별 연봉 (2026-11-12 코치 개편)
   P.push('', `5등급 넷 − 1등급 넷: 시즌 ${f1((best.bat - worst.bat) + (best.pit - worst.pit) * 1.5, 2)}승 + 성장 몫 ${f1(((gBat + gPit) * 4 * COACH_GROWTH) / E.runsPerWin, 2)}승 (다음 해부터, 쌓임) = 약 ${f1(fullSpan, 2)}승에 연봉 차 ${eok(pay)}억 (1승당 ${eok(pay / Math.max(1e-9, fullSpan), 0)}억).`);
   const lvAll = Y.flatMap((y) => y.coaches.filter((_, t) => t !== y.team).flat());
   const lvMine = Y.flatMap((y) => y.coaches[y.team] ?? []);
   const dist = (xs: number[]) => [0, 1, 2, 3, 4, 5].map((l) => `${l}:${f1((xs.filter((x) => x === l).length / Math.max(1, xs.length)) * 100, 0)}%`).join(' ');
-  P.push(`세션 코치 등급 분포: AI 구단 ${dist(lvAll)} · 플레이어 자리(빈자리를 가장 싼 후보로 채움) ${dist(lvMine)} (0 = 빈자리).`, '');
+  P.push(`세션 코치 등급 분포: AI 구단 ${dist(lvAll)} · 플레이어 자리(빈자리는 직원 추천 가성비 후보) ${dist(lvMine)} (0 = 빈자리).`, '');
 
   // ---- 4. 평판
   P.push('## 4. 단장 평판\n');
