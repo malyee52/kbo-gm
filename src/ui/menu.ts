@@ -84,9 +84,12 @@ export function itemsOf(group: MenuItem['group']): MenuItem[] {
   return MENU.filter((m) => m.group === group);
 }
 
-/** 기본 모드에서 아예 안 보이는 칸 (판타지 모드 전용 '대화') */
+/**
+ * 기본 모드에서 아예 안 보이는 칸: 판타지 모드 전용 '대화', 경영 > 구단주 (2026-11-12 사용자: 기본 모드는 신뢰도 추이·예산 회의 기록을
+ * 구단 현황에 합쳤다. 판타지 모드는 정기 면담이 있어 그대로)
+ */
 export function hidden(s: GameSession, item: MenuItem): boolean {
-  return item.key === 'fantasy' && !s.fantasy;
+  return (item.key === 'fantasy' || item.key === 'owner') && !s.fantasy;
 }
 
 /**

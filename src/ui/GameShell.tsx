@@ -691,7 +691,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'budget' && <Club tab="budget" />}
                 {screen === 'stadium' && <Club tab="stadium" />}
                 {screen === 'staff' && <Club tab="coach" />}
-                {screen === 'owner' && <Club tab="owner" />}
+                {screen === 'owner' && <Club tab={session.fantasy ? 'owner' : 'overview'} />}
                 {screen === 'club-history' && <Club tab="history" />}
                 {screen === 'postseason' && <Postseason />}
                 {screen === 'growth' && <Growth />}

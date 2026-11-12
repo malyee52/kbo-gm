@@ -1,4 +1,5 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
+// 2026-11-12 사용자: 기본 모드에는 경영 > 구단주 칸이 없고 신뢰도 추이·예산 회의 기록을 여기(개요)에 둔다. 판타지 모드는 구단주 칸 그대로.
 import { strengthTier } from '../../game/rank';
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
@@ -13,6 +14,7 @@ import {
 import { ROUND_LABEL } from '../../league/postseason';
 import { useGame, useWon } from '../context';
 import { OwnerMeeting } from './OwnerMeeting';
+import { ASK_LABEL, meetingOf, RESULT_LABEL, userMeetings } from '../../league/meeting';
 import { ruleOf } from '../../league/rules';
 import { REP_FA, REP_TRADE, repLabel, repOf } from '../../league/reputation';
 
@@ -67,6 +69,9 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
         <OwnerCard />
 
         <RepCard />
+
+        {!session.fantasy && <TrustTrendCard />}
+        {!session.fantasy && <MeetingCard />}
 
         <div className="card">
           <h2>연봉·샐러리캡 <span className="muted small">{year} 시즌</span></h2>
@@ -232,6 +237,63 @@ function RepCard() {
           {log.map((x, i) => <li key={i}><span className="muted">{x.year}</span> {x.reason} <strong>{x.delta > 0 ? '+' : ''}{x.delta}</strong></li>)}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** 신뢰도 추이 (기본 모드 구단 현황): 지난 시즌들의 평가 전 → 후, 지금 값 */
+function TrustTrendCard() {
+  const { session } = useGame();
+  const o = session.owner;
+  const L = session.league;
+  const rows = o.history.slice(-10).reverse();
+  return (
+    <div className="card">
+      <h2>신뢰도 추이</h2>
+      {rows.length === 0 ? <p className="muted small">아직 평가받은 시즌이 없습니다. 시즌이 끝나면 목표 달성에 따라 신뢰도가 오르내립니다.</p> : (
+        <ul className="plain trust-trend">
+          {rows.map((h) => {
+            const d = h.trustAfter - h.trustBefore;
+            return (
+              <li key={`${h.year}-${h.team}`}>
+                <span className="muted small">{h.year} {h.teamName ?? L.teams[h.team].name}</span>
+                <span className="track" aria-label={`${h.year} 시즌 뒤 신뢰도 ${h.trustAfter} / 100`}><i className={d >= 0 ? 'g-up' : 'g-dn'} style={{ width: `${Math.max(0, Math.min(100, h.trustAfter))}%` }} /></span>
+                <span className="small">{h.trustBefore} → <strong>{h.trustAfter}</strong> <span className="muted">({d > 0 ? '+' : ''}{d}, {h.achieved ? '달성' : '미달'})</span></span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="muted small">지금 신뢰도 {o.trust}. 최근 10시즌, 위가 최근입니다. 구단을 옮기면 새 구단 줄부터 {START_TRUST}에서 다시 시작합니다.</p>
+    </div>
+  );
+}
+
+/** 구단주 예산 회의 기록 (기본 모드 구단 현황, league/meeting.ts) */
+function MeetingCard() {
+  const { session } = useGame();
+  const won = useWon();
+  const me = session.teamIdx;
+  const rows = userMeetings(session.owner.history, session.league.finance?.[me]?.meetings, me);
+  const next = session.phase === 'offseason' && !meetingOf(session.league, me, session.year + 1);
+  return (
+    <div className="card">
+      <h2>예산 회의 기록</h2>
+      {rows.length === 0 ? <p className="muted small">아직 연 회의가 없습니다.</p> : (
+        <ul className="plain small">
+          {rows.map((m) => (
+            <li key={m.year}>
+              <span className="muted">{m.year} 시즌</span> <strong>{ASK_LABEL[m.ask]}</strong> → {RESULT_LABEL[m.result]}
+              {m.money ? ` · 모기업 추가 지원 ${won(m.money)}` : ''}{m.goalShift ? ` · 목표 한 단계 ${m.goalShift > 0 ? '위' : '아래'}` : ''}
+              {m.faCapYear ? ' · 다음 FA 때 지원 한도 1.5배' : ''}{m.trust ? ` · 신뢰도 ${m.trust > 0 ? '+' : ''}${m.trust}` : ''}
+              {m.reason && <span className="muted"> "{m.reason}"</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="muted small">
+        예산 회의(요청 하나: 운영 자금·FA 지원 한도·목표)는 오프시즌 마지막(개막 준비 앞) 단계에서 열립니다{next ? ' (이번 오프시즌 회의는 아직)' : ''}. 최근 몇 시즌 기록만 남습니다.
+      </p>
     </div>
   );
 }
