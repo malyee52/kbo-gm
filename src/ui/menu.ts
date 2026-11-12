@@ -52,7 +52,6 @@ export const MENU: MenuItem[] = [
   one('standings', '시즌', '순위', 'standings', '지난 시즌 순위'),
   one('teams', '시즌', '구단들', 'team'),
   one('leaders', '시즌', '개인 기록', 'leaders', '지난 시즌 기록'),
-  one('allstar', '시즌', '올스타', 'allstar'),
   one('postseason', '시즌', '가을야구', 'postseason'),
   { key: 'season-end', group: '시즌', label: '결산·시상', tabs: [{ screen: 'season-end', label: '결산' }, { screen: 'awards', label: '시상' }] },
 

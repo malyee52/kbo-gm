@@ -31,7 +31,7 @@
 | 일정·결과 (Schedule, 박스스코어·중계 다시 보기) | 시즌 > 일정·결과 | schedule |
 | 순위 (Standings) | 시즌 > 순위 | standings |
 | 개인 기록 (Leaders) | 시즌 > 개인 기록 | leaders |
-| 올스타전 (AllStar) | 시즌 > 올스타 | allstar |
+| 올스타전 (화면 없음, 2026-11-12) | 소식·기사(선발 명단·결과·MVP·홈런 더비), 선수 상세 이력 | - |
 | 가을야구 (Postseason) | 시즌 > 가을야구 | postseason |
 | 시즌 결과 (SeasonEnd) | 시즌 > 결산·시상 > 결산 | season-end |
 | 시상식 (Awards) | 시즌 > 결산·시상 > 시상 | awards |
