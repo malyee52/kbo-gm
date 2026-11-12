@@ -201,6 +201,17 @@ export function suggestPackage(want: SimPlayer[], aiTeam: number, aiOrg: SimPlay
   return suggestPackageWhy(want, aiTeam, aiOrg, userOrg, situation, ctx, userWeights).pkg;
 }
 
+/**
+ * 요구안 옵션 (부록 B 물음 6, 2026-11-05 사용자: 요구안은 AI 판단과 같은 조건으로).
+ * prop: 플레이어 제안 평가와 같은 인원 한도·세부 난이도 배율·호의. tradable: 내줄 수 있는 우리 선수 (첫해 트레이드 불가 거르기).
+ * worth: 우리 선수를 '덜 아까운 순'으로 세울 값 (없으면 playerValue. 세션은 우리 스카우트 가치 shopWorth, AI 오차가 정렬로 새지 않게)
+ */
+export interface PackageOptions {
+  prop?: Pick<TradeProposal, 'maxPerSide' | 'strict' | 'goodwill'>;
+  tradable?: (p: SimPlayer) => boolean;
+  worth?: (p: SimPlayer) => number;
+}
+
 /** 요구안과, 찾지 못했을 때 그 이유 (평가 결과의 세 구분 그대로. 2026-10-23 UI 2단계 U2-6 엔진 메모) */
 export interface PackageResult {
   pkg: SimPlayer[] | null;
@@ -216,15 +227,16 @@ export interface PackageResult {
  * 내줄 선수가 없거나 모든 조합이 잘못된 제안이면 'reject-invalid'
  */
 export function suggestPackageWhy(want: SimPlayer[], aiTeam: number, aiOrg: SimPlayer[], userOrg: SimPlayer[], situation: TeamSituation,
-                                  ctx: ValueContext, userWeights: number[]): PackageResult {
-  // 외국인 선수는 트레이드할 수 없다 (규정, 2026-10-08 사용자 지시)
-  const pool = userOrg.filter((p) => !p.foreign)
-    .map((p) => ({ p, v: playerValue(p, ctx, userWeights) }))
+                                  ctx: ValueContext, userWeights: number[], opts: PackageOptions = {}): PackageResult {
+  // 외국인 선수는 트레이드할 수 없다 (규정, 2026-10-08 사용자 지시). 첫해 트레이드 불가 같은 리그 규정은 opts.tradable
+  const worth = opts.worth ?? ((p: SimPlayer) => playerValue(p, ctx, userWeights));
+  const pool = userOrg.filter((p) => !p.foreign && (opts.tradable?.(p) ?? true))
+    .map((p) => ({ p, v: worth(p) }))
     .sort((a, b) => a.v - b.v || a.p.idx - b.p.idx);
   const seen: Partial<Record<TradeVerdict, string>> = {};
   let franchiseNo: string | null = null;
   const ok = (receive: SimPlayer[]) => {
-    const ev = evaluateTrade({ aiTeam, give: want, receive }, aiOrg, situation, ctx);
+    const ev = evaluateTrade({ ...opts.prop, aiTeam, give: want, receive }, aiOrg, situation, ctx);
     seen[ev.verdict] ??= ev.message;
     if (ev.detail.franchiseBlock) franchiseNo ??= ev.message;
     return ev.verdict === 'accept';

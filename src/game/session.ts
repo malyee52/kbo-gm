@@ -2638,7 +2638,8 @@ export class GameSession {
     if (!this.tradeOpen) return null;
     const w = [1, 0.6];
     const val = (p: SimPlayer) => playerValue(p, this.values, w);
-    const ok = (p: SimPlayer) => !p.foreign && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
+    // 육성선수는 AI 제안에 넣지 않는다 (부록 B 물음 6, 선수 내놓기·AI끼리 트레이드와 같게). 정렬 값(val)은 그대로
+    const ok = (p: SimPlayer) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
     const tier = (p: SimPlayer, team: number) => this.values.franchise?.(p, team).tier ?? 0;
     // AI가 먼저 거는 제안: 우리 A·B 선수는 달라고 하지 않고, 자기 A 선수는 꺼내지 않는다 (프랜차이즈 기획안 4·5장)
     const mine = this.team.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx).slice(7, 25).filter((p) => tier(p, this.teamIdx) === 0);
@@ -3075,10 +3076,14 @@ export class GameSession {
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
-    // 판타지 설득의 호의 + 단장 평판 (league/reputation.ts)
-    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
-    return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
+    return evaluateTrade({ aiTeam, ...this.tradeTerms(aiTeam), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals },
       this.world.teams[aiTeam].org, sit, this.values);
+  }
+
+  /** 플레이어 제안 평가와 요구안이 같이 쓰는 조건: 인원 한도, 세부 난이도 배율, 판타지 설득의 호의 + 단장 평판 (league/reputation.ts) */
+  private tradeTerms(aiTeam: number): { maxPerSide: number; strict: number; goodwill?: number } {
+    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
+    return { maxPerSide: ruleOf(this.league, 'maxPerSide'), strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) };
   }
 
   /** 트레이드를 제안한다. AI가 수락하면 바로 실행한다 */
@@ -3223,8 +3228,17 @@ export class GameSession {
     if (want.length === 0) return invalid('받을 선수를 고르세요.');
     if (want.some((p) => p.foreign)) return invalid('외국인 선수는 트레이드할 수 없습니다.');
     if (want.some((p) => p.teamIdx !== aiTeam)) return invalid('상대 구단 소속이 아닌 선수가 있습니다.');
+    if (this.gameLock) return invalid(this.gameLock);
+    const locked = want.filter((p) => this.leaguePlayer(p.id)?.noTradeYear === this.year);
+    if (locked.length) return invalid(`넘겨받은 지명권으로 입단한 선수는 입단 첫해 트레이드할 수 없습니다 (${locked.map((p) => p.name).join(', ')}).`);
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
-    return suggestPackageWhy(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
+    // 요구안은 직접 제안(evaluateTrade)과 같은 조건으로 찾고, 첫해 트레이드 불가 선수는 내줄 후보에서 뺀다 (부록 B 물음 6, 2026-11-05 사용자: 버그로 고침).
+    // 덜 아까운 순 정렬은 우리 스카우트 가치(shopWorth)로: AI 난이도 오차가 정렬로 새지 않게 (2026-11-11 사용자, 선수 내놓기와 같게)
+    return suggestPackageWhy(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine, {
+      prop: this.tradeTerms(aiTeam),
+      tradable: (p) => this.leaguePlayer(p.id)?.noTradeYear !== this.year,
+      worth: (p) => this.shopWorth(p, mine),
+    });
   }
 
   private applyTrade(aiTeam: number, give: number[], get: number[], cash = 0, picks: PickSwap = NO_PICKS): void {
