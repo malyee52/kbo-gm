@@ -40,7 +40,11 @@ export const YOUTH_AGE = 24;
 const KEEP_YEARS = 5;
 
 export interface CampPick { place: CampPlace; focus: CampFocus }
-export interface CampRecord extends CampPick { year: number; team: number; cost: number }
+export interface CampRecord extends CampPick {
+  year: number; team: number; cost: number;
+  /** 유망주 성장으로 끌어올린 선수 수와 런 합 (2026-11-12, 측정용 선택 칸. 예전 저장에는 없다. 화면에는 런을 보이지 않는다) */
+  grown?: number; grownRuns?: number;
+}
 
 export const DEFAULT_CAMP: CampPick = { place: 'japan', focus: 'balanced' };
 
@@ -103,8 +107,9 @@ export function runCamps(league: LeagueState, year: number, teams: number[], use
       if (focus.pit) forms.push({ team: t, year, from: 0, until: CAMP_DAYS, edge: edge(focus.pit), note, side: 'pit' });
     }
     let grown = 0;
-    if (focus.youth) grown = youthGrowth(league, t, year, focus.youth * place.factor, sim, ctx);
-    league.camps.push({ year, team: t, ...pick, cost: place.cost });
+    let grownRuns = 0;
+    if (focus.youth) ({ n: grown, runs: grownRuns } = youthGrowth(league, t, year, focus.youth * place.factor, sim, ctx));
+    league.camps.push({ year, team: t, ...pick, cost: place.cost, ...(grown ? { grown, grownRuns: Math.round(grownRuns * 100) / 100 } : {}) });
     if (t === userTeam) {
       news.push(`스프링캠프: ${place.label}, ${focus.label} 훈련 (비용 ${(place.cost / 10000).toFixed(0)}억 원). 개막 뒤 ${CAMP_DAYS}일 동안 ${focus.note}${grown ? `, 유망주 ${grown}명 성장` : ''}`);
     }
@@ -112,9 +117,10 @@ export function runCamps(league: LeagueState, year: number, teams: number[], use
   return news;
 }
 
-/** 24세 이하 선수를 잠재력 안에서 runs만큼 끌어올린다. 끌어올린 선수 수 */
-function youthGrowth(league: LeagueState, team: number, year: number, runs: number, sim: Map<string, SimPlayer>, ctx: ValueContext): number {
+/** 24세 이하 선수를 잠재력 안에서 runs만큼 끌어올린다. 끌어올린 선수 수와 런 합 */
+function youthGrowth(league: LeagueState, team: number, year: number, runs: number, sim: Map<string, SimPlayer>, ctx: ValueContext): { n: number; runs: number } {
   let n = 0;
+  let sum = 0;
   for (const p of league.players) {
     if (p.team !== team || p.reserve !== undefined || p.birthYear === null || year - p.birthYear > YOUTH_AGE || !sim.get(p.id)) continue;
     const now = runsOf(p, ctx, year);
@@ -122,6 +128,7 @@ function youthGrowth(league: LeagueState, team: number, year: number, runs: numb
     if (target <= now + 0.05) continue;
     Object.assign(p, skillForRuns(p, target, ctx, year));
     n++;
+    sum += target - now;
   }
-  return n;
+  return { n, runs: sum };
 }
