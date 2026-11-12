@@ -10,7 +10,7 @@ import { voteOutlook } from '../ai/vote';
 import { ASK_LABEL, budgetCheck, meetingOf, RESULT_LABEL, TRUST_BUDGET } from '../league/meeting';
 
 /** 남은 처리를 한 번에 해결하고 넘기는 길 (조작 하나 + 다음 단계) */
-export type LeftoverFix = 'auto-comp' | 'auto-draft' | 'auto-release';
+export type LeftoverFix = 'auto-comp' | 'auto-draft' | 'auto-release' | 'offer-own-fa';
 
 export interface Leftover {
   key: string;
@@ -27,6 +27,8 @@ export const FIX_LABEL: Record<LeftoverFix, string> = {
   'auto-comp': '추천대로 고르고 넘기기',
   'auto-draft': '남은 지명 자동으로 하고 넘기기',
   'auto-release': '정원까지 자동 방출하고 넘기기',
+  // 우리 FA마다 기존 'fa-offer' 조작을 보낸다 (session.offerAllOwnFa). 하나라도 거절되면 넘기지 않고 모아 보여 준다
+  'offer-own-fa': '우리 FA 모두 요구 조건대로 제시하고 넘기기',
 };
 
 /** 지금 단계에서 우리 구단이 아직 하지 않은 일 (기획안 2.5.1 "남은 처리"). 없으면 빈 목록 */
@@ -54,7 +56,7 @@ export function stageLeftovers(s: GameSession): Leftover[] {
       if (open.length) {
         const last = off.fa.round >= Off.FA_ROUNDS;
         out.push({
-          key: 'fa-own', title: `우리 FA ${open.length}명 제시 전 (${names(open)})`,
+          key: 'fa-own', title: `우리 FA ${open.length}명 제시 전 (${names(open)})`, fix: 'offer-own-fa',
           then: last
             ? '마지막 라운드라 계약하지 못한 우리 FA는 떠납니다 (무적 선수).'
             : `이번 라운드에 우리 제시가 없어 다른 구단이 제시하면 그 구단과 계약할 수 있습니다 (남은 라운드 ${Off.FA_ROUNDS - off.fa.round}).`,

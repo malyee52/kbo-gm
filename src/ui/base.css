@@ -167,3 +167,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .lab { max-width: 1080px; margin: 0 auto; padding-block: 28px 64px; padding-inline: 20px; display: flex; flex-direction: column; gap: 22px; }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
 .controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+
+/* 단축키 표 (저장·설정) */
+kbd { font: inherit; font-size: 0.85em; padding: 1px 6px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--panel-2); color: var(--fg); white-space: nowrap; }

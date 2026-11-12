@@ -31,7 +31,7 @@ import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, en
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
 import { ownerGainOf, pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeStep, medicalScale } from '../league/finance';
-import { dollarText, foreignCap, minSalary, wageIndex, wonText } from '../league/salary';
+import { capShareOf, dollarText, foreignCap, minSalary, teamCapPayroll, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
 import { challengeById, challengeProgress, judgeChallenge, newChallenge } from '../league/challenges';
 import { HOMEGROWN, type SeasonMark } from '../league/campaigns';
@@ -74,7 +74,7 @@ import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, goalForLeague, newAchievements, newOwner, outcomeLabel,
-  outcomeOf, START_TRUST, trustDelta, type Difficulty, type OwnerState,
+  outcomeOf, spendLimit, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
   bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, semiSkipText, seriesHome, seriesToday, startPostseason, stillAlive,
@@ -4190,6 +4190,52 @@ export class GameSession {
     return teamLineRange(this.league, this.teamIdx, `fa/${off.year}/${off.fa.round}/${id}`, Off.faAcceptLine(this.league, off, e));
   }
   offerFa(id: string, salary: number, years: number) { return this.dispatchOff({ year: this.year, type: 'fa-offer', id, salary, years }); }
+  /**
+   * 아직 제시하지 않은 우리 FA (열린 FA, 원 소속 우리 구단). 요구 연봉이 큰 순서 (공개 값만, 숨은 값으로 고르지 않는다).
+   * "우리 FA 모두 요구 조건대로 제시"(편의 U2)의 대상과 순서
+   */
+  ownFaOpen(): Off.FaEntry[] {
+    const off = this.offseason;
+    if (this.phase !== 'offseason' || off?.stage !== 'fa') return [];
+    return off.fa.entries
+      .filter((e) => e.from === this.teamIdx && e.status === 'open' && !off.fa.userOffers[e.id])
+      .sort((a, b) => b.ask - a.ask || (a.id < b.id ? -1 : 1));
+  }
+  /**
+   * 우리 FA 모두 요구 조건대로 제시하기 전 미리보기 (편의 U2): 요구 총액(연), 다음 시즌 캡 대상 총액 전 → 후, 지출 상한(캡·예산, 없으면 null).
+   * 총액 셈은 Off.offerFa의 검사와 같다: 캡 대상 합계 − 제시한 선수의 지금 몫 + 제시 연봉
+   */
+  ownFaOfferPreview(): { count: number; total: number; before: number; after: number; limit: number | null } {
+    const off = this.offseason;
+    const list = this.ownFaOpen();
+    if (!off) return { count: 0, total: 0, before: 0, after: 0, limit: null };
+    const y = off.year + 1;
+    const L = this.league;
+    const share = (id: string) => { const p = L.players.find((x) => x.id === id); return p ? capShareOf(L, this.teamIdx, y, p) : 0; };
+    const offered = Object.entries(off.fa.userOffers);
+    const before = teamCapPayroll(L, this.teamIdx, y) + offered.reduce((s, [id, o]) => s + o.salary - share(id), 0);
+    const total = list.reduce((s, e) => s + e.ask, 0);
+    const after = before + list.reduce((s, e) => s + e.ask - share(e.id), 0);
+    return { count: list.length, total, before, after, limit: spendLimit(L, this.teamIdx, y) };
+  }
+  /**
+   * 우리 FA 모두 요구 조건대로 제시 (편의 U2). 새 조작 없이 선수마다 'fa-offer' 조작을 보낸다 (조작 기록·재현 그대로).
+   * 요구 연봉이 큰 선수부터 보내므로 캡이 모자라면 작은 요구부터 거절된다. 거절은 선수별로 모아 돌려준다
+   */
+  offerAllOwnFa(): { ok: boolean; message: string; offered: string[]; failed: { id: string; name: string; message: string }[] } {
+    const list = this.ownFaOpen();
+    const offered: string[] = [];
+    const failed: { id: string; name: string; message: string }[] = [];
+    for (const e of list) {
+      const r = this.offerFa(e.id, e.ask, e.years);
+      if (r.ok) offered.push(e.id);
+      else failed.push({ id: e.id, name: this.leaguePlayer(e.id)?.name ?? e.id, message: r.message });
+    }
+    const message = !list.length
+      ? '제시할 우리 FA가 없습니다.'
+      : `우리 FA ${offered.length}명에게 요구 조건대로 제시했습니다.${failed.length ? ` 제시하지 못한 ${failed.length}명: ${failed.map((f) => `${f.name} (${f.message})`).join(' / ')}` : ''}`;
+    return { ok: list.length > 0 && failed.length === 0, message, offered, failed };
+  }
   withdrawFa(id: string) { return this.dispatchOff({ year: this.year, type: 'fa-withdraw', id }); }
   setForeignKeep(id: string, keep: boolean) { return this.dispatchOff({ year: this.year, type: 'foreign-keep', id, keep }); }
   signForeign(id: string) { return this.dispatchOff({ year: this.year, type: 'foreign-sign', id }); }
