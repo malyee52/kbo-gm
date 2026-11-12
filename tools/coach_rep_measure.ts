@@ -142,29 +142,32 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 const pct = (xs: number[], q: number) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : NaN; };
 const read = (paths: string) => paths.split(',').filter(Boolean).map((p) => readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as YearRec));
 
-/** 성장 지속: 그 해 오른 몫(같은 구단)이 그 뒤 H년 안에 같은 구단 상위 25명으로 남은 햇수 (오른 몫 가중 평균). fut = 2군 유망주만 */
-function persistence(runs: YearRec[], fut: boolean, H = 6): { k: number; gainPerTeam: number } {
+/**
+ * 성장 지속: 한 해 오른 몫(양수, 같은 구단)마다 그 뒤 H년 동안 같은 구단 상위 25명으로 남은 해를 D^h로 줄여 센 '런·해' (구단·해당).
+ * D = 0.7: 잠재력 격차를 해마다 약 30%씩 메우는 성장 속도(ai/value.ts expectedGrowth)라 코치가 앞당긴 몫은 뒤에서 그만큼 줄어든다.
+ * kind: 'bat' 타자 전부, 'pit' 투수 전부, 'fut' 2군 유망주(1군 출전량 절반 미만)만
+ */
+function runYears(runs: YearRec[], kind: 'bat' | 'pit' | 'fut', H = 8, D = 0.7): { runYears: number; gain: number; k: number } {
   const byYear = runs.map((r) => new Map(r.players.map((p) => [p.id, p])));
-  let w = 0;
-  let wk = 0;
+  let ry = 0;
   let gainSum = 0;
   let teamYears = 0;
   for (let i = 0; i + H < runs.length; i++) {
     teamYears += runs[i].teams;
     for (const p of runs[i].players) {
-      if (p.gain <= 0 || p.fut !== fut || (!fut && !p.top)) continue;
+      if (p.gain <= 0) continue;
+      if (kind === 'fut' ? !p.fut : p.pit !== (kind === 'pit')) continue;
       let yrs = 0;
       for (let h = 0; h < H; h++) {
         const q = byYear[i + h].get(p.id);
         if (!q || q.t !== p.t) break;
-        if (q.top) yrs++;
+        if (q.top) yrs += D ** h;
       }
-      w += p.gain;
-      wk += p.gain * yrs;
+      ry += p.gain * yrs;
       gainSum += p.gain;
     }
   }
-  return { k: w ? wk / w : NaN, gainPerTeam: teamYears ? gainSum / teamYears : NaN };
+  return { runYears: teamYears ? ry / teamYears : NaN, gain: teamYears ? gainSum / teamYears : NaN, k: gainSum ? ry / gainSum : NaN };
 }
 
 /** 평판 식을 오프라인으로 다시 돌린다: 그 해 항목(지금 식으로 낸 값)을 새 배율로 바꿔 더하고 revert */
@@ -187,11 +190,12 @@ async function partReport(): Promise<void> {
   const sets: [string, YearRec[][]][] = [['전', B], ...(A.length ? [['후', A] as [string, YearRec[][]]] : [])];
 
   // 1. 성장 지속
-  P.push('## 1. 성장 지속 (코치 값 셈의 재료)', '', '| 판 | 시드 | 상위 25명 오른 몫 (구단·해, 런) | 지속 K (해) | 2군 유망주 오른 몫 (구단·해, 런) | 유망주 지속 K_dev (해) |', '|---|---|---|---|---|---|');
-  for (const [name, runs] of sets) for (const r of runs) {
-    const a = persistence(r, false);
-    const d = persistence(r, true);
-    P.push(`| ${name} | ${r[0].seed} | ${f1(a.gainPerTeam)} | ${f1(a.k, 2)} | ${f1(d.gainPerTeam)} | ${f1(d.k, 2)} |`);
+  P.push('## 1. 성장 지속 (코치 값 셈의 재료)', '',
+    '한 해 오른 몫(양수, 같은 구단)마다 그 뒤 같은 구단 상위 25명으로 남은 해를 0.7^h로 줄여 센 런·해 (구단·해당, 8년까지). 0.7은 잠재력 격차를 해마다 약 30%씩 메우는 성장 속도라 코치가 앞당긴 몫이 뒤에서 줄어드는 몫이다. 한 등급 성장 승수 = 런·해 × COACH_GROWTH 0.04 ÷ 11점.', '',
+    '| 판 | 시드 | 갈래 | 오른 몫 (런/구단·해) | 런·해 | 지속 (해) | 한 등급 성장 승수 |', '|---|---|---|---|---|---|---|');
+  for (const [name, runs] of sets) for (const r of runs) for (const kind of ['bat', 'pit', 'fut'] as const) {
+    const x = runYears(r, kind);
+    P.push(`| ${name} | ${r[0].seed} | ${{ bat: '타자', pit: '투수', fut: '2군 유망주' }[kind]} | ${f1(x.gain)} | ${f1(x.runYears)} | ${f1(x.k, 2)} | ${f1(x.runYears * 0.04 / 11, 3)} |`);
   }
   P.push('');
 

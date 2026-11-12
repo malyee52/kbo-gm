@@ -3,7 +3,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession, type GameSaveV2 } from '../src/game/session';
-import { COACH_EDGE, COACH_ROLES, coachEdge, coachGrowth, coachOf, type Coach } from '../src/league/coaches';
+import {
+  aiCoachBudget, COACH_BASE_SALARY, COACH_EDGE, COACH_ROLES, COACH_WIN_PER_LEVEL, coachEdge, coachGrowth, coachMarket, coachOf, coachSalaryAt, coachSurplus,
+  FA_WIN_WON, fillUserCoaches, recommendCoach, type Coach,
+} from '../src/league/coaches';
+import { wageIndex, WON_PER_RUN } from '../src/league/salary';
 import { cashOf } from '../src/league/finance';
 import type { LeagueState } from '../src/league/types';
 
@@ -38,6 +42,66 @@ describe('코치 효과', () => {
     const vet = { coaches: [[coach('bat', 5, 'veteran')]] } as unknown as LeagueState;
     expect(coachGrowth(vet, 0, false, 33, 20, 16, false)).toBeGreaterThan(16);
     expect(coachGrowth(avg, 0, false, 33, 20, 16, false)).toBe(16);
+  });
+});
+
+describe('코치 연봉 (2026-11-12 사용자 그릴 Q37: FA 1승당 값 수준)', () => {
+  it('FA 1승당 값은 시장 단가 × 득실 1승 11점 (약 5억)', () => {
+    expect(Math.abs(FA_WIN_WON - WON_PER_RUN * 11)).toBeLessThan(1000);
+  });
+
+  it('등급이 하나 오를 때 늘어나는 연봉 = 그 역할 한 등급 승수 × FA 1승당 값, 1등급은 1억', () => {
+    for (const r of COACH_ROLES) {
+      expect(coachSalaryAt(r, 1)).toBe(COACH_BASE_SALARY);
+      for (let lv = 2; lv <= 5; lv++) expect(Math.abs(coachSalaryAt(r, lv) - coachSalaryAt(r, lv - 1) - COACH_WIN_PER_LEVEL[r] * FA_WIN_WON)).toBeLessThanOrEqual(1000);
+    }
+    // 타격·투수 코치 5등급은 예전 7억보다 비싸고, 효과가 작은 수비 코치는 싸다
+    expect(coachSalaryAt('bat', 5)).toBeGreaterThan(70_000);
+    expect(coachSalaryAt('pit', 5)).toBeGreaterThan(70_000);
+    expect(coachSalaryAt('def', 5)).toBeLessThan(70_000);
+  });
+
+  it('직원 추천은 가성비(1등급 대비 효과를 FA 값으로 친 돈 − 더 내는 연봉)가 가장 큰 후보: 늘 최고 등급도, 늘 가장 싼 후보도 아니다', () => {
+    const c = (id: string, level: number, mult: number): Coach => ({ id, role: 'bat', level, style: 'balanced', salary: Math.round(coachSalaryAt('bat', level) * mult), until: 2028, career: '' });
+    const cands = [c('top-dear', 5, 1.15), c('mid-cheap', 3, 0.85), c('low', 1, 1)];
+    expect(recommendCoach(cands, 1)!.id).toBe('mid-cheap');
+    expect(coachSurplus(cands[0], 1)).toBeLessThan(0);
+    // 같은 값이면 높은 등급
+    expect(recommendCoach([c('a', 2, 1), c('b', 4, 1)], 1)!.level).toBe(4);
+    // 연봉 한도 밖은 고르지 않는다
+    expect(recommendCoach(cands, 1, 20_000)!.id).toBe('low');
+  });
+
+  it('시장 후보 연봉은 새 표를 따르고, 시장 전체에서 추천이 늘 5등급은 아니다', () => {
+    const lv = new Map<number, number>();
+    for (let y = 2026; y < 2046; y++) {
+      const m = coachMarket({ seed: 'coach-pay', ruleShifts: undefined } as unknown as LeagueState, y);
+      const w = wageIndex(y + 1);
+      for (const x of m) {
+        const base = coachSalaryAt(x.role, x.level) * w;
+        expect(x.salary).toBeGreaterThanOrEqual(base * 0.85 - 1000);
+        expect(x.salary).toBeLessThanOrEqual(base * 1.15 + 1000);
+      }
+      for (const r of COACH_ROLES) { const p = recommendCoach(m.filter((x) => x.role === r), w)!; lv.set(p.level, (lv.get(p.level) ?? 0) + 1); }
+    }
+    // 80번 고른 가운데 5등급이 절반을 넘지 않는다 (예전 규칙이면 시장 최고 등급)
+    expect(lv.get(5) ?? 0).toBeLessThan(40);
+    expect([...lv.keys()].length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('플레이어 빈자리 채우기: 직원 추천 (예전에는 가장 싼 후보)', () => {
+    const L = { seed: 'fill', teams: [{}, {}], coaches: [[], []], ledger: [] } as unknown as LeagueState;
+    const c = (id: string, role: Coach['role'], level: number, mult: number): Coach => ({ id, role, level, style: 'balanced', salary: Math.round(coachSalaryAt(role, level) * mult), until: 2028, career: '' });
+    const left = [c('cheap', 'bat', 1, 0.85), c('good', 'bat', 4, 0.86), c('p1', 'pit', 2, 1)];
+    const picks = fillUserCoaches(L, left, 2026, 1, 1);
+    expect(picks.find((x) => x.role === 'bat')!.id).toBe('good');
+    for (const r of COACH_ROLES) expect(coachOf(L, 1, r)).toBeDefined();
+  });
+
+  it('AI 연봉 한도: 자금 80억(× 지수) 이상은 제한 없음, 30억 이상은 4등급 몫, 그 밑은 3등급 몫', () => {
+    expect(aiCoachBudget('bat', 900_000, 1)).toBe(Infinity);
+    expect(aiCoachBudget('bat', 400_000, 1)).toBeCloseTo(coachSalaryAt('bat', 4) * 1.15, 0);
+    expect(aiCoachBudget('bat', 100_000, 1)).toBeCloseTo(coachSalaryAt('bat', 3) * 1.15, 0);
   });
 });
 

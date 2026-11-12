@@ -50,7 +50,7 @@ import { GM_FA_COST, GM_FA_YOUNG, gmStyle } from './gm';
 import { settingsOf } from './difficulty';
 import { DEPARTURES_PER_YEAR, isAbroad, POSTING_CHANCE, POSTING_SERVICE, postingFee, returnDecision, sendAbroad } from './overseas';
 import { addArticle } from './articles';
-import { aiHireCoaches, COACH_ROLE_LABEL, COACH_ROLES, coachGrowth, coachMarket, coachOf, expireCoaches, fallbackCoach, hireCoach, type Coach } from './coaches';
+import { aiHireCoaches, COACH_ROLE_LABEL, coachGrowth, coachMarket, expireCoaches, fillUserCoaches, type Coach } from './coaches';
 import { isFuturesTeam, leagueDefense, worldFromLeague } from './world';
 import { starLeaves, starStays } from './stadium';
 import { futuresExtras, futuresForm, registeredOf, futuresOpportunity, futuresRecord, futuresSeason, FUT_FORM_RUNS, FUTURES_WEIGHT } from './futures';
@@ -2957,15 +2957,11 @@ export function closeOffseason(league: LeagueState, off: OffseasonState): void {
   // 아무도 데려가지 않은 무적 FA는 다음 시즌 중 자유계약 선수(market.ts)로 남는다
   for (const p of league.players) if (p.team === -1 && p.freeAgent) p.market = off.year + 1;
   league.players = league.players.filter((p) => p.team >= 0 || isAbroad(p) || (p.team === -1 && !!p.freeAgent));
-  // 코치 빈자리: AI 구단은 자금에 맞춰, 플레이어 구단은 가장 싼 후보로 임시로 채운다 (coaches.ts)
+  // 코치 빈자리: AI 구단은 자금에 맞춰, 플레이어 구단은 직원 추천(가성비, 2026-11-12 사용자 그릴 Q37. 예전에는 가장 싼 후보)으로 채운다 (coaches.ts)
   const left = aiHireCoaches(league, off.coachMarket ?? [], off.year, off.userTeam, (t) => cashOf(league, t));
   if (off.userTeam >= 0) {
-    for (const role of COACH_ROLES) {
-      if (coachOf(league, off.userTeam, role)) continue;
-      const pick = left.filter((c) => c.role === role).sort((a, b) => a.salary - b.salary || a.id.localeCompare(b.id))[0]
-        ?? fallbackCoach(league, role, off.year, off.userTeam);
-      hireCoach(league, off.userTeam, pick, off.year);
-      log(off, 'settle', `${COACH_ROLE_LABEL[role]} 빈자리를 ${pick.level}등급 코치로 채웠습니다`, true);
+    for (const pick of fillUserCoaches(league, left, off.year, off.userTeam, wageIndex(off.year + 1, league))) {
+      log(off, 'settle', `${COACH_ROLE_LABEL[pick.role]} 빈자리를 직원 추천 ${pick.level}등급 코치로 채웠습니다`, true);
     }
   }
   // 예산 확정 (AI 구단은 이때 추천안을 고른다, finance.ts lockBudgets)
