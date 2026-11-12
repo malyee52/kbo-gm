@@ -3014,7 +3014,10 @@ export class GameSession {
     addArticle(this.league, {
       year, day, kind: 'allstar', title: `올스타전 ${result}, MVP ${nameOf(rec.game.mvp)}`,
       body: `${josa(sides[0], '과', '와')} ${josa(sides[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
-        + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다.`,
+        + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다. `
+        // 올스타 화면을 빼서 (2026-11-12 사용자) 선발 명단은 기사에 남긴다
+        + `선발 명단은 ${([0, 1] as const).map((side) => `${sides[side]} ${rec.roster.filter((x) => x.side === side && x.starter)
+          .map((x) => `${x.name}(${x.pos} ${this.world.teams[x.team].name})`).join(', ')}`).join(' / ')}.`,
       ...(mvpTeam !== undefined ? { franchise: this.world.teams[mvpTeam].franchise } : {}),
     });
   }

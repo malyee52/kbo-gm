@@ -18,6 +18,7 @@ KBO 실제 선수와 구단으로 하는 단장(구단 운영) 시뮬레이션 �
 - 재정 2 (2026-11-03\~05, PR #143·#146·#149·#150·#151·#153·#156, 기획 `docs/재정2_기획안.md`): F1\~F8 끝. 옛 `docs/finance.md`는 재정 1 판이라 지금 코드와 다르다.
 - 시즌 중 교체 외국인 연봉 상한 (2026-11-04, PR #152). 프랜차이즈 스타 트레이드 가산치 (2026-11-06, PR #160, A 120런·B 15런, `docs/프랜차이즈_트레이드_기획안.md`).
 - 밸런스 (2026-11-04\~10): 가상 선수 특기 모양 PR #154, 투수 K%·BB% 퍼짐 PR #155, 실존 지명 신인 기록 모양 PR #157, 타자 실측 사슬 PR #158, 외국인 재계약(시장 후보와 견줌) PR #159, 세 줄 합침(외국인 투수 영점·리그 타율 가운데 맞춤·선수 노화 곡선) PR #161, `draftScale` 10 → 9.75 PR #162 (장기 장타 압력 1.105 → 1.050).
+- 코치·평판·감독 (2026-11-12 `rework/coach-rep-manager`, 사용자 그릴 Q37\~39): 코치 연봉은 역할별로 한 등급 승수 × FA 1승당 값 5억(`coaches.ts COACH_WIN_PER_LEVEL`·`FA_WIN_WON`), 플레이어 빈자리 기본값과 AI 고용은 가성비(`recommendCoach`, AI는 자금 한도 `aiCoachBudget`). 단장 평판 효과 FA 요구 ±15%·트레이드 ±4런, 가을야구 +3·시리즈 +3·우승 +8. 감독 작전 스타일 낱말(`league/managerStyle.ts`, 숫자 배율은 화면에 없음)을 감독 화면·구단 보기·구단 현황에. 측정 `tools/coach_rep_measure.ts` → `reports/coach-rep.md`, 임시값은 `docs/temp-values.md` '코치 연봉'·'단장 평판'.
 - **다음 작업: M9 확장과 공개 검토** (`docs/milestones.md`). 시작 전에 아래 "마일스톤별 문제점과 빠진 점"을 본다.
 
 읽는 순서: `docs/milestones.md` (할 일) → `docs/design.md` (기획서 v1.0, 옛 판이라 지금 코드와 다른 곳이 많다. 지금 코드 기준 기획서 v2는 `docs/design-v2` 브랜치의 `docs/기획서_v2.md`, 아직 main에 없다) → `docs/engine.md` (엔진 구조, 검증 결과, 한계. 엔진 2는 6장).
@@ -214,7 +215,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 플레이어 구단 FA는 제시하지 않으면 떠난다 (화면에 경고를 띄운다).
 - FA 보상선수(A·B등급 이적)에서 AI 원 소속 구단은 보호 밖 최고 가치 선수를 고른다 (후보가 없을 때만 보상금만). 2026-10-08 수정 전에는 보상금과 비교하는 기준 때문에 사실상 늘 보상금만 골라 "보상선수가 적용되지 않는" 것으로 보였다. 플레이어 화면의 "추천대로 고르기"도 같은 기준이다.
 - 오프시즌 중에는 트레이드를 할 수 없다.
-- 구장 공사: 신구장은 펜스 제원(좌·중·우·높이)을 고르고 단순 규칙(홈런 147\~70, 임시값)으로 착공 때 배율을 계산해 저장한다 (`engine/park.ts fenceParkEvents`, 예시값 `FENCE_PRESETS`). 펜스 조정 공사·가벽은 조작 `{type: 'stadium', id: 'fence' | 'wall' | 'wall-off'}` (`dispatchOff`), 저장 `StadiumState.fenceFrom`·`wall`·`done`. 펜스 조정 30억 원·5년 간격(`FENCE_WORK`), 비용은 연봉 지수를 따른다.
+- 구장 공사: 신구장은 펜스 제원(좌·중·우·높이)을 고르고 단순 규칙(홈런 147\~70, 임시값)으로 착공 때 배율을 계산해 저장한다 (`engine/park.ts fenceParkEvents`, 예시값 `FENCE_PRESETS`). 펜스 조정 공사·가벽은 조작 `{type: 'stadium', id: 'fence' | 'wall' | 'wall-off'}` (`dispatchOff`), 저장 `StadiumState.fenceFrom`·`wall`·`done`. 펜스 조정 30억 원·5년 간격(`FENCE_WORK`), 비용은 연봉 지수를 따른다. AI 리모델링은 시설 45 아래·자금 ≥ 공사비 × 0.9 (`AI_RICH`, 2026-11-12, 모든 구단 AI 5시드 20시즌 22번·긴급 지원 0.5 → 1.5%, `reports/ai-stadium.md`). AI 신구장은 아직 0번 (400억 넘게 필요).
 
 ### M6 추가 작업 (외국인 개막 명단, 수비, 기용표)
 - 수비 능력은 2001년 이후 수비 이닝·평판·수상으로 만든다 (능력치 v2 16-3, `fielding.ts defenseV2`). 엔진 수비 런 = (등급 − m) ÷ 2, m은 시작 연도 리그 평균 등급 (`LeagueEnv.defZero`). 포지션 이동 손해·운의 크기 등 임시값 목록은 `docs/milestones.md` "M6 추가 작업".

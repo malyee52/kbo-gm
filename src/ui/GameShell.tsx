@@ -28,7 +28,6 @@ import { Watch } from './screens/Watch';
 import { Training } from './screens/Training';
 import { Scout } from './screens/Scout';
 import { Find } from './screens/Find';
-import { AllStar } from './screens/AllStar';
 import { Fantasy } from './screens/Fantasy';
 import { autoEventDue, makeEvent } from '../fantasy/ai';
 import { loadAiSettings } from '../fantasy/settings';
@@ -681,7 +680,6 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'trade' && <Trade />}
                 {screen === 'market' && <Market />}
                 {screen === 'search' && <Search key={searchKey} initialText={searchText.trim()} />}
-                {screen === 'allstar' && <AllStar />}
                 {screen === 'fantasy' && <Fantasy />}
                 {screen === 'save' && <SaveScreen onQuit={onQuit} />}
                 {screen === 'editor' && <EditorScreen />}
@@ -693,7 +691,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'budget' && <Club tab="budget" />}
                 {screen === 'stadium' && <Club tab="stadium" />}
                 {screen === 'staff' && <Club tab="coach" />}
-                {screen === 'owner' && <Club tab="owner" />}
+                {screen === 'owner' && <Club tab={session.fantasy ? 'owner' : 'overview'} />}
                 {screen === 'club-history' && <Club tab="history" />}
                 {screen === 'postseason' && <Postseason />}
                 {screen === 'growth' && <Growth />}

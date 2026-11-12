@@ -272,6 +272,8 @@ button.go { min-height: 40px; padding: 8px 18px; border-radius: 10px; font-size:
   display: inline-block; margin-left: 4px; padding: 0 5px; font-size: 10px; line-height: 16px; border-radius: 4px;
   border: 1px solid var(--line-strong); color: var(--muted); font-weight: 700; vertical-align: 1px; letter-spacing: 0.02em;
 }
+.style-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: 1px; }
+.style-tags .tag { margin-left: 0; }
 .grade {
   display: inline-flex; justify-content: center; min-width: 2.6em; padding: 0 5px; border-radius: 4px; font-weight: 700; font-size: 12.5px; line-height: 20px;
   background: var(--panel-2); color: var(--muted);
@@ -528,6 +530,10 @@ dialog.off-confirm { width: min(560px, calc(100vw / var(--z) - 32px)); }
 /* ---- 구단 현황 */
 .track.trust { margin: 8px 0; height: 10px; }
 .track.trust i { background: var(--accent); }
+/* 신뢰도 추이 (기본 모드 구단 현황, 2026-11-12): 시즌 · 막대 · 전 → 후, 좁으면 막대가 한 줄 아래로 */
+.trust-trend li { display: grid; grid-template-columns: minmax(84px, max-content) minmax(60px, 1fr) max-content; gap: 4px 10px; align-items: center; padding: 3px 0; }
+.trust-trend .track { height: 6px; }
+@media (max-width: 760px) { .trust-trend li { grid-template-columns: 1fr max-content; } .trust-trend .track { grid-column: 1 / -1; grid-row: 2; } }
 .achievements { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .achievements li { padding: 6px 10px; border-radius: var(--radius-sm); background: var(--panel-2); }
 .achievements li.on { background: var(--accent-soft); }

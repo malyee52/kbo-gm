@@ -55,7 +55,10 @@ describe('올스타전', () => {
     if (a !== b) expect(rec.roster.find((x) => x.id === rec.game.mvp)!.side).toBe(a > b ? 0 : 1);
     expect(rec.derby.round1.length).toBe(8);
     expect(rec.derby.final.map((x) => x[0])).toContain(rec.derby.winner);
-    expect(g.league.articles!.some((x) => x.kind === 'allstar' && x.year === 2026)).toBe(true);
+    // 올스타 화면이 없어 (2026-11-12) 기사 본문에 양 편 선발 명단(타자 9명 + 선발 투수)이 다 들어간다
+    const art = g.league.articles!.find((x) => x.kind === 'allstar' && x.year === 2026)!;
+    expect(art.body).toContain('선발 명단은');
+    for (const x of rec.roster.filter((y) => y.starter)) expect(art.body).toContain(`${x.name}(${x.pos} `);
     expect(allStarHistory(g.league, rec.game.mvp!).mvp).toEqual([2026]);
     // 저장 → 불러와 같은 날을 진행하면 같은 올스타전
     const h = GameSession.load(store, saved, FAST);

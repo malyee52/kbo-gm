@@ -12,10 +12,11 @@ export const REP_LOG_KEEP = 30;
 export const REP = {
   /** (승률 − .500) × 이 값 */
   winPct: 40,
-  postseason: 2,
+  /** 2026-11-12 사용자 그릴 Q38 (70에 닿게): 가을야구 2 → 3, 시리즈 2 → 3, 우승 4 → 8. 50에서 우승 한 시즌(승률 .600, 3시리즈, 목표 달성)이면 약 72 */
+  postseason: 3,
   /** 가을야구 시리즈를 이길 때마다 */
-  series: 2,
-  champion: 4,
+  series: 3,
+  champion: 8,
   goalMet: 2,
   goalMissed: -2,
   capOver: -2,
@@ -25,9 +26,12 @@ export const REP = {
   /** 50과의 차이 중 해마다 돌아가는 몫 */
   revert: 0.1,
 };
-/** 효과 (임시값): 평판 100이면 FA·다년 계약 요구 −5%, 0이면 +5%. 트레이드 호의 ±1.5런 */
-export const REP_FA = 0.05;
-export const REP_TRADE = 1.5;
+/**
+ * 효과 (임시값): 평판 100이면 FA·다년 계약 요구 −15%, 0이면 +15%. 트레이드 호의 ±4런.
+ * 2026-11-12 사용자 그릴 Q38로 ±5%·±1.5런에서 키웠다 (예전 크기는 최고 FA 요구 ±2.3억·트레이드 ±0.14승이라 느낄 수 없었다, reports/nominal-content.md 4장)
+ */
+export const REP_FA = 0.15;
+export const REP_TRADE = 4;
 
 export interface RepState {
   value: number;

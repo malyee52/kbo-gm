@@ -16,6 +16,7 @@ import { wageIndex } from '../src/league/salary';
 import * as Fin from '../src/league/finance';
 import type { LeagueState } from '../src/league/types';
 import { runYear } from './longsim';
+import { AI_RICH } from '../src/league/stadium';
 import { installCalCache } from './calCache';
 
 function arg(name: string): string | undefined {
@@ -62,7 +63,7 @@ export interface FinRow {
   /** 구단별 (이름, 수지·자금 2026년 돈, 추천안, 관중 수입·스폰서+상품·모기업·연봉+외국인) */
   /** 그 해 결산 뒤 AI가 잡은 구장 공사 (stadiumYearEnd 소식 중 착공·리모델링, 재정 2 F8) */
   works?: string[];
-  teams?: { name: string; net: number; cash: number; preset: string; want?: string; style?: string; gate: number; spon: number; parent: number; pay: number; rev?: number; rescue?: number; debt?: number; dividend?: number }[];
+  teams?: { name: string; net: number; cash: number; preset: string; want?: string; style?: string; gate: number; spon: number; parent: number; pay: number; rev?: number; rescue?: number; debt?: number; dividend?: number; quality?: number; project?: string }[];
 }
 
 function presetOf(b: Partial<Record<string, number>> | undefined): string {
@@ -133,7 +134,9 @@ export function finRow(league: LeagueState, seed: string, year: number): FinRow 
       return { name: league.teams[i].name, net: h!.net / wage, cash: h!.cash / wage, preset: presetOf(f.activeBudget ?? f.budget), want, style: league.gm?.[i],
         gate: g('gate'), spon: g('sponsor') + g('merch'), parent: g('parent') + g('parentExtra'), pay: g('payroll') + g('foreign'),
         rev: Object.entries(it).reduce((s, [k, v]) => s + (!NOT_REVENUE.has(k) && (v ?? 0) > 0 ? (v ?? 0) : 0), 0) / wage,
-        rescue: h!.rescue / wage, debt: (h!.debt ?? 0) / wage, dividend: (h!.dividend ?? 0) / wage };
+        rescue: h!.rescue / wage, debt: (h!.debt ?? 0) / wage, dividend: (h!.dividend ?? 0) / wage,
+        // 결산 뒤 구장 시설과 잡힌 공사 (AI 구장 공사 문턱 맞추기, 2026-11-12)
+        quality: league.stadiums?.[i]?.quality, project: league.stadiums?.[i]?.project?.kind };
     }),
   };
 }
@@ -153,6 +156,12 @@ export function finTable(rows: FinRow[]): string {
 
 async function main(): Promise<void> {
   installCalCache();
+  // AI 구장 공사 문턱 덮어쓰기 (맞추기용): --ai-stadium remodelBelow=45,remodelCash=0.9
+  for (const kv of (arg('ai-stadium') ?? '').split(',').filter(Boolean)) {
+    const [k, v] = kv.split('=');
+    if (!(k in AI_RICH)) throw new Error(`AI_RICH에 없는 칸: ${k}`);
+    (AI_RICH as Record<string, number>)[k] = Number(v);
+  }
   const start = Number(arg('start') ?? 2026);
   const n = Number(arg('seasons') ?? 20);
   const seeds = (arg('seeds') ?? 'f6a').split(',');

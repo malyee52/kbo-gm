@@ -52,7 +52,6 @@ export const MENU: MenuItem[] = [
   one('standings', '시즌', '순위', 'standings', '지난 시즌 순위'),
   one('teams', '시즌', '구단들', 'team'),
   one('leaders', '시즌', '개인 기록', 'leaders', '지난 시즌 기록'),
-  one('allstar', '시즌', '올스타', 'allstar'),
   one('postseason', '시즌', '가을야구', 'postseason'),
   { key: 'season-end', group: '시즌', label: '결산·시상', tabs: [{ screen: 'season-end', label: '결산' }, { screen: 'awards', label: '시상' }] },
 
@@ -85,9 +84,12 @@ export function itemsOf(group: MenuItem['group']): MenuItem[] {
   return MENU.filter((m) => m.group === group);
 }
 
-/** 기본 모드에서 아예 안 보이는 칸 (판타지 모드 전용 '대화') */
+/**
+ * 기본 모드에서 아예 안 보이는 칸: 판타지 모드 전용 '대화', 경영 > 구단주 (2026-11-12 사용자: 기본 모드는 신뢰도 추이·예산 회의 기록을
+ * 구단 현황에 합쳤다. 판타지 모드는 정기 면담이 있어 그대로)
+ */
 export function hidden(s: GameSession, item: MenuItem): boolean {
-  return item.key === 'fantasy' && !s.fantasy;
+  return (item.key === 'fantasy' || item.key === 'owner') && !s.fantasy;
 }
 
 /**
