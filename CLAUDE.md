@@ -214,7 +214,7 @@ npx tsx tools/fit_plate_estimate.ts                    # 사슬 능력 짐작식
 - 플레이어 구단 FA는 제시하지 않으면 떠난다 (화면에 경고를 띄운다).
 - FA 보상선수(A·B등급 이적)에서 AI 원 소속 구단은 보호 밖 최고 가치 선수를 고른다 (후보가 없을 때만 보상금만). 2026-10-08 수정 전에는 보상금과 비교하는 기준 때문에 사실상 늘 보상금만 골라 "보상선수가 적용되지 않는" 것으로 보였다. 플레이어 화면의 "추천대로 고르기"도 같은 기준이다.
 - 오프시즌 중에는 트레이드를 할 수 없다.
-- 구장 공사: 신구장은 펜스 제원(좌·중·우·높이)을 고르고 단순 규칙(홈런 147\~70, 임시값)으로 착공 때 배율을 계산해 저장한다 (`engine/park.ts fenceParkEvents`, 예시값 `FENCE_PRESETS`). 펜스 조정 공사·가벽은 조작 `{type: 'stadium', id: 'fence' | 'wall' | 'wall-off'}` (`dispatchOff`), 저장 `StadiumState.fenceFrom`·`wall`·`done`. 펜스 조정 30억 원·5년 간격(`FENCE_WORK`), 비용은 연봉 지수를 따른다.
+- 구장 공사: 신구장은 펜스 제원(좌·중·우·높이)을 고르고 단순 규칙(홈런 147\~70, 임시값)으로 착공 때 배율을 계산해 저장한다 (`engine/park.ts fenceParkEvents`, 예시값 `FENCE_PRESETS`). 펜스 조정 공사·가벽은 조작 `{type: 'stadium', id: 'fence' | 'wall' | 'wall-off'}` (`dispatchOff`), 저장 `StadiumState.fenceFrom`·`wall`·`done`. 펜스 조정 30억 원·5년 간격(`FENCE_WORK`), 비용은 연봉 지수를 따른다. AI 리모델링은 시설 45 아래·자금 ≥ 공사비 × 0.9 (`AI_RICH`, 2026-11-12, 모든 구단 AI 5시드 20시즌 22번·긴급 지원 0.5 → 1.5%, `reports/ai-stadium.md`). AI 신구장은 아직 0번 (400억 넘게 필요).
 
 ### M6 추가 작업 (외국인 개막 명단, 수비, 기용표)
 - 수비 능력은 2001년 이후 수비 이닝·평판·수상으로 만든다 (능력치 v2 16-3, `fielding.ts defenseV2`). 엔진 수비 런 = (등급 − m) ÷ 2, m은 시작 연도 리그 평균 등급 (`LeagueEnv.defZero`). 포지션 이동 손해·운의 크기 등 임시값 목록은 `docs/milestones.md` "M6 추가 작업".

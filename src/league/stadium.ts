@@ -183,11 +183,13 @@ export const HONEYMOON = [0.08, 0.05, 0.03];
 /** AI 구단 리모델링: 시설이 이 아래이고 자금이 공사비의 1.5배 이상이면 (임시값) */
 export const AI_REMODEL_BELOW = 35;
 /**
- * 자금이 많은 AI 구단의 공사 (재정 2 F8, 2026-11-04 사용자 결정 ④, 임시값): 공사비 + keep(2026년 돈, 공사 뒤 남길 돈)만큼 자금이 있으면
- * 시설이 remodelBelow 아래일 때 리모델링, 구장이 newAge년 넘고 시설이 newBelow 아래일 때 신구장을 짓는다 (위 기본 조건보다 넓다).
+ * 자금이 넉넉한 AI 구단의 공사 (재정 2 F8, 2026-11-04 사용자 결정 ④, 임시값). 위 기본 조건보다 넓다.
+ * - 신구장: 구장이 newAge년 넘고 시설이 newBelow 아래이고 자금이 공사비 + keep(2026년 돈, 공사 뒤 남길 돈)이면.
+ * - 리모델링: 시설이 remodelBelow 아래이고 자금이 공사비 × remodelCash이면 (2026-11-12 사용자: F8 문턱(공사비 + 150억)으로는 5시드 20시즌에
+ *   한 번도 걸리지 않아, AI 구단마다 20시즌에 0.5~1번쯤 하도록 낮춤. 맞춤 근거는 docs/temp-values.md "AI 구장 공사").
  * 실제 구장 이동이 guard년 안에 있으면 하지 않는다 (실제 역사의 신구장 직전에 다른 구장을 짓거나 고치지 않게). 새 지출 종류는 없다
  */
-export const AI_RICH = { keep: 1_500_000, remodelBelow: 70, newBelow: 60, newAge: 15, guard: 8 };
+export const AI_RICH = { keep: 1_500_000, remodelBelow: 45, remodelCash: 0.9, newBelow: 60, newAge: 15, guard: 8 };
 
 /** 구장 상태가 없는 리그(새 게임, 예전 저장)에 채운다. capacity: 구단 계보의 기본 수용 인원 */
 export function ensureStadiums(league: LeagueState, capacity: (team: number) => number): StadiumState[] {
@@ -408,7 +410,7 @@ export function stadiumYearEnd(league: LeagueState, year: number, cashOf: (team:
       out.push(`${league.teams[t].name}, 신구장 착공 (${year + 1 + NEW_PARK.years} 시즌 개장 예정, ${opt.capacity.toLocaleString()}석)`);
       continue;
     }
-    if (t !== userTeam && !s.project && !realSoon && s.quality < AI_RICH.remodelBelow && cashOf(t) >= remodelCost + keep) {
+    if (t !== userTeam && !s.project && !realSoon && s.quality < AI_RICH.remodelBelow && cashOf(t) >= remodelCost * AI_RICH.remodelCash) {
       startProject(league, t, year, 'remodel', REMODEL.years, remodelCost, s.capacity + REMODEL.capacity);
       out.push(`${league.teams[t].name}, ${year + 1} 시즌 구장 리모델링`);
       continue;
