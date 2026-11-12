@@ -44,7 +44,7 @@ import { isPlayerOp, type EditOp } from './editOps';
 import { applyGrow, editorPreview } from './editor';
 import { applyPromises, type Now } from '../fantasy/promises';
 import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
-import { batValue, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
+import { batValue, defenseAt, defenseGrade, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { shiftBat, shiftPit, skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
 import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
@@ -74,7 +74,7 @@ import { ballHrMul, corRange, seasonCor, shiftsFor } from '../league/futureRules
 import { aiEnlistPicks, enlistCandidates, normalizeApply, normalizeEnlist, runsNow, type EnlistCandidate } from '../league/careers';
 import {
   ACHIEVEMENTS, aiPotential, applyCapSanctions, applyFloorSanctions, FIRE_BELOW, GOAL_LABEL, goalFor, goalForLeague, newAchievements, newOwner, outcomeLabel,
-  outcomeOf, spendLimit, START_TRUST, trustDelta, type Difficulty, type OwnerState,
+  outcomeOf, seasonTrustChange, spendLimit, START_TRUST, trustDelta, type Difficulty, type OwnerState,
 } from '../league/owner';
 import {
   bracketText, currentSeries, playNextGame, postseasonLines, PS_BAT_KEYS, PS_PIT_KEYS, resultOf, ROUND_LABEL, semiCheckText, semiSkipText, seriesHome, seriesToday, startPostseason, stillAlive,
@@ -377,9 +377,11 @@ export type GameAction =
   | { year: number; day: number; type: 'ai-choice'; id: string; choice: number }
   | { year: number; type: 'ai-choice-off'; id: string; choice: number }
   | { year?: number; day: number; type: 'settings'; s: DifficultySettings }
-  /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런 */
-  | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense }
-  | { year: number; type: 'def-edit-off'; id: string; def: Defense }
+  /** 수비 능력치 직접 고치기 (2026-10-13 사용자 선택). def는 포지션별 수비 런.
+   *  2026-11-05 사용자(부록 B 물음 4): 에디터로 옮김. ed = 에디터에서 고친 조작 (사용 표시를 남기고 고친 기록에 나온다).
+   *  ed가 없는 예전 조작은 재현 때 예전처럼 값만 넣는다. names·log는 고친 기록 화면용 (재현에는 쓰지 않는다) */
+  | { year?: number; day: number; type: 'def-edit'; id: string; def: Defense; ed?: true; names?: string[]; log?: string[] }
+  | { year: number; type: 'def-edit-off'; id: string; def: Defense; ed?: true; names?: string[]; log?: string[] }
   /** 이도류로 쓰기·그만두기 (league/twoway.ts, 우리 구단 선수) */
   | { year?: number; day: number; type: 'two-way'; id: string; on: boolean }
   /** 외국인 스카우트 파견 (league/scoutfx.ts, 기획안 19.4): 시즌 중 'fx-send'(4주, 주마다 발견), 오프시즌 'fx-send-off'(외국인 단계, 4주를 바로).
@@ -1145,7 +1147,7 @@ export class GameSession {
     else if (a.type === 'ai') this.applyFantasy(a.entry);
     else if (a.type === 'ai-choice') this.applyFantasyChoice(a.id, a.choice);
     else if (a.type === 'settings') this.applySettings(a.s);
-    else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def);
+    else if (a.type === 'def-edit') this.applyDefenseEdit(a.id, a.def, a.ed ? a.day : null);
     else if (a.type === 'editor') this.applyEditor(a.on, a.day);
     else if (a.type === 'edit') this.applyEdits(a.ops, a.day);
     else if (a.type === 'two-way') this.applyTwoWay(a.id, a.on);
@@ -2537,13 +2539,17 @@ export class GameSession {
     const day = s.day;
     const year = this.world.year;
     const team = this.teamIdx;
+    const wage = wageIndex(year, L);
     return {
       league: L, team, teamName: this.team.name, year, day, seasonDays: s.schedule.length,
       rank: st.indexOf(team) + 1, teams: st.length, rankLabel: placeLabel(seasonPlace(s, team)),
       winPct: rec.w + rec.l > 0 ? rec.w / (rec.w + rec.l) : 0.5,
       cash: this.cashNow(),
+      wage,
       roster: L.players.filter((p) => p.team === team),
-      addCash: (amount, note) => {
+      // 이벤트 금액은 2026년 물가로 적혀 있어 그 해 연봉 지수를 곱한다 (부록 B 물음 9, 2026-11-05 사용자. 신뢰 변화는 그대로)
+      addCash: (base, note) => {
+        const amount = Math.round(base * wage);
         if (!amount) return;
         L.ledger.push(amount > 0
           ? { year, from: -1, to: team, amount, note, kind: 'event' }
@@ -2636,7 +2642,8 @@ export class GameSession {
     if (!this.tradeOpen) return null;
     const w = [1, 0.6];
     const val = (p: SimPlayer) => playerValue(p, this.values, w);
-    const ok = (p: SimPlayer) => !p.foreign && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
+    // 육성선수는 AI 제안에 넣지 않는다 (부록 B 물음 6, 선수 내놓기·AI끼리 트레이드와 같게). 정렬 값(val)은 그대로
+    const ok = (p: SimPlayer) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year;
     const tier = (p: SimPlayer, team: number) => this.values.franchise?.(p, team).tier ?? 0;
     // AI가 먼저 거는 제안: 우리 A·B 선수는 달라고 하지 않고, 자기 A 선수는 꺼내지 않는다 (프랜차이즈 기획안 4·5장)
     const mine = this.team.org.filter(ok).sort((a, b) => val(b) - val(a) || a.idx - b.idx).slice(7, 25).filter((p) => tier(p, this.teamIdx) === 0);
@@ -3073,10 +3080,14 @@ export class GameSession {
     const sit = this.situation(aiTeam);
     const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
-    // 판타지 설득의 호의 + 단장 평판 (league/reputation.ts)
-    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
-    return evaluateTrade({ aiTeam, maxPerSide: ruleOf(this.league, 'maxPerSide'), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals, strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) },
+    return evaluateTrade({ aiTeam, ...this.tradeTerms(aiTeam), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals },
       this.world.teams[aiTeam].org, sit, this.values);
+  }
+
+  /** 플레이어 제안 평가와 요구안이 같이 쓰는 조건: 인원 한도, 세부 난이도 배율, 판타지 설득의 호의 + 단장 평판 (league/reputation.ts) */
+  private tradeTerms(aiTeam: number): { maxPerSide: number; strict: number; goodwill?: number } {
+    const goodwill = goodwillFor(this.league.fantasy, aiTeam, this.world.year, this.currentDay) + repGoodwill(this.league);
+    return { maxPerSide: ruleOf(this.league, 'maxPerSide'), strict: settingsOf(this.league).tradeStrict, ...(goodwill ? { goodwill } : {}) };
   }
 
   /** 트레이드를 제안한다. AI가 수락하면 바로 실행한다 */
@@ -3221,8 +3232,17 @@ export class GameSession {
     if (want.length === 0) return invalid('받을 선수를 고르세요.');
     if (want.some((p) => p.foreign)) return invalid('외국인 선수는 트레이드할 수 없습니다.');
     if (want.some((p) => p.teamIdx !== aiTeam)) return invalid('상대 구단 소속이 아닌 선수가 있습니다.');
+    if (this.gameLock) return invalid(this.gameLock);
+    const locked = want.filter((p) => this.leaguePlayer(p.id)?.noTradeYear === this.year);
+    if (locked.length) return invalid(`넘겨받은 지명권으로 입단한 선수는 입단 첫해 트레이드할 수 없습니다 (${locked.map((p) => p.name).join(', ')}).`);
     const mine = horizonWeights(this.tendency(this.teamIdx), this.situation(this.teamIdx).remaining);
-    return suggestPackageWhy(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine);
+    // 요구안은 직접 제안(evaluateTrade)과 같은 조건으로 찾고, 첫해 트레이드 불가 선수는 내줄 후보에서 뺀다 (부록 B 물음 6, 2026-11-05 사용자: 버그로 고침).
+    // 덜 아까운 순 정렬은 우리 스카우트 가치(shopWorth)로: AI 난이도 오차가 정렬로 새지 않게 (2026-11-11 사용자, 선수 내놓기와 같게)
+    return suggestPackageWhy(want, aiTeam, this.world.teams[aiTeam].org, this.team.org, this.situation(aiTeam), this.values, mine, {
+      prop: this.tradeTerms(aiTeam),
+      tradable: (p) => this.leaguePlayer(p.id)?.noTradeYear !== this.year,
+      worth: (p) => this.shopWorth(p, mine),
+    });
   }
 
   private applyTrade(aiTeam: number, give: number[], get: number[], cash = 0, picks: PickSwap = NO_PICKS): void {
@@ -3543,7 +3563,7 @@ export class GameSession {
       case 'extend': res = Off.extendByUser(L, off!, this.store, this.params, a.id, a.years); break;
       case 'franchise-tag': res = Off.setFranchiseTagByUser(L, off!, a.id); break;
       case 'settings-off': this.applySettings(a.s); res = { ok: true, message: '난이도를 바꿨습니다.' }; break;
-      case 'def-edit-off': this.applyDefenseEdit(a.id, a.def); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
+      case 'def-edit-off': this.applyDefenseEdit(a.id, a.def, a.ed ? -1 : null); res = { ok: true, message: '수비 능력치를 고쳤습니다.' }; break;
       case 'editor-off': res = this.applyEditor(a.on, -1); break;
       case 'edit-off': this.applyEdits(a.ops, -1); res = { ok: true, message: '에디터로 고쳤습니다.' }; break;
       case 'two-way-off': this.applyTwoWay(a.id, a.on); res = { ok: true, message: a.on ? '이도류로 씁니다.' : '본업만 맡깁니다.' }; break;
@@ -3636,13 +3656,12 @@ export class GameSession {
     const achieved = td.achieved;
     // 구단주 예산 회의 (재정 2 F4b): 목표를 낮췄으면 오르는 몫은 절반, 회의의 신뢰도 변화(요청 없음 +1·거절 −2·낮추기 −4·예산 초과 −3)를 더한다
     const meet = meetingOf(L, team, this.year);
-    // 목표 달성 때 오르는 몫은 난이도 배율 (2026-11-04 사용자: 보통부터 +12 → +6, difficulty.ts ownerGain)
-    const scaled = td.delta > 0 ? Math.round(td.delta * ownerGainOf(L)) : td.delta;
-    // 이미 우승 목표인데 목표를 올리는 약속으로 돈을 받았으면, 우승을 못 할 때 더 뺀다 (재정 2 F7, meeting.ts TRUST_RAISE_CAPPED)
+    // 목표 달성 때 오르는 몫은 난이도 배율 (2026-11-04 사용자: 보통부터 +12 → +6, difficulty.ts ownerGain).
+    // 이미 우승 목표인데 목표를 올리는 약속으로 돈을 받았으면, 우승을 못 할 때 더 뺀다 (재정 2 F7, meeting.ts TRUST_RAISE_CAPPED).
+    // 캡 초과 감점은 배율 밖 (2026-11-05 사용자, 부록 B 물음 5, owner.ts seasonTrustChange)
     const baseGoal = goal.projectedLeague ? goalForLeague(goal.projectedRank) : goalFor(goal.projectedRank, this.world.rules.postseasonTeams);
     const capped = raiseCapped(meet, baseGoal) && !outcome.champion ? TRUST_RAISE_CAPPED : 0;
-    const gain = (scaled > 0 && meet?.halfGain ? Math.round(scaled / 2) : scaled) + capped;
-    const delta = (gain < 0 ? Math.round(gain * settingsOf(this.league).ownerPressure) : gain) + (meet?.trust ?? 0);
+    const delta = seasonTrustChange(td, { gain: ownerGainOf(L), pressure: settingsOf(this.league).ownerPressure, halfGain: meet?.halfGain, raiseCapped: capped, meeting: meet?.trust ?? 0 });
     const before = o.trust;
     o.trust = Math.max(0, Math.min(100, before + delta));
     o.history.push({
@@ -3652,7 +3671,7 @@ export class GameSession {
       ...(outcome.league ? { league: outcome.league } : {}),
     });
     const say = (text: string) => this.news.push({ year: this.year, day: -1, kind: 'owner', text });
-    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? ', 샐러리캡 초과' : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
+    say(`구단주 평가: 목표 ${GOAL_LABEL[goal.kind]} ${achieved ? '달성' : '미달'} (${outcomeLabel(outcome)}${capOver ? `, 샐러리캡 초과 ${td.cap}` : ''}${meet?.trust ? `, 예산 회의 ${meet.trust > 0 ? '+' : ''}${meet.trust}` : ''}${meet?.halfGain && td.delta > 0 ? ', 목표를 낮춰 증가 절반' : ''}${capped ? `, 우승 목표에서 더 올린 약속을 못 지킴 ${capped}` : ''}). 신뢰도 ${before} → ${o.trust}.`);
     // 재정: 적자를 모기업이 메우면 신뢰도가 떨어지고, 흑자면 조금 오른다 (finance.ts)
     if (fin) {
       // 긴급 지원 감점은 이어 받은 해 수·난이도 압박 배율을 따른다 (재정 2 F8, finance.ts RESCUE_TRUST)
@@ -4350,22 +4369,35 @@ export class GameSession {
   }
   /**
    * 수비 능력치를 직접 고친다 (2026-10-13 사용자 선택 "공개 수상·평가로 보정 + 직접 고치기"). 수비 기록 자료가 없어 추정값이라,
-   * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다
+   * 플레이어가 아는 실제에 맞게 포지션별 수비 런을 바꿀 수 있다. 조작 기록에 남아 재현된다.
+   * 2026-11-05 사용자(부록 B 물음 4): 에디터 고치기로 옮김. 에디터가 켜져 있을 때만 되고, 사용 표시(firstEdit·edits)를 남긴다.
+   * 바뀌지 않은 자리는 조작에 넣지 않는다 (log는 고친 기록의 "수비 SS 50 → 60")
    */
   editDefense(id: string, def: Defense): { ok: boolean; message: string } {
+    if (!this.editorOn) return { ok: false, message: '에디터가 꺼져 있습니다 (저장·설정에서 켭니다).' };
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return { ok: false, message: '타자 능력이 없는 선수입니다.' };
     if (this.gameLock) return { ok: false, message: this.gameLock };
+    const sp = this.phase === 'season' ? this.world.players.find((p) => p.id === id) : undefined;
+    const base = sp ?? { pos: lp.pos ?? '', isPitcher: lp.isPitcher, bat: lp.bat };
     const clean: Defense = {};
+    const log: string[] = [];
     for (const q of FIELD_POS) {
       const v = def[q];
-      if (typeof v === 'number' && Number.isFinite(v)) clean[q] = Math.round(Math.max(-40, Math.min(25, v)) * 10) / 10;
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+      const c = Math.round(Math.max(-40, Math.min(25, v)) * 10) / 10;
+      const was = defenseAt(base, q);
+      if (lp.bat.def?.[q] !== undefined && Math.abs(was - c) < 0.05) continue;
+      clean[q] = c;
+      if (defenseGrade(was) !== defenseGrade(c)) log.push(`수비 ${q} ${defenseGrade(was)} → ${defenseGrade(c)}`);
     }
+    if (!Object.keys(clean).length) return { ok: false, message: '바뀐 수비 값이 없습니다.' };
+    const extra = { ed: true as const, names: [lp.name], log: log.length ? log : ['수비 값 고침 (등급 같음)'] };
     if (this.phase === 'season') {
-      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'def-edit', id, def: clean });
+      this.dispatchSeason({ year: this.year, day: this.currentDay, type: 'def-edit', id, def: clean, ...extra });
       return { ok: true, message: '수비 능력치를 고쳤습니다.' };
     }
-    return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean });
+    return this.dispatchOff({ year: this.year, type: 'def-edit-off', id, def: clean, ...extra });
   }
 
   /**
@@ -4511,9 +4543,11 @@ export class GameSession {
     return true;
   }
 
-  private applyDefenseEdit(id: string, def: Defense): void {
+  /** markDay: 에디터 사용 표시를 남길 날 (시즌 중 일정 색인, 오프시즌 -1). null = 표시 없이 값만 (에디터 전 예전 조작의 재현) */
+  private applyDefenseEdit(id: string, def: Defense, markDay: number | null): void {
     const lp = this.leaguePlayer(id);
     if (!lp?.bat) return;
+    if (markDay !== null) this.markEditorUse(markDay);
     // 능력치 v2 (16.4 다): 고친 자리는 익숙함이 다 찬 것으로 본다 (수비 가능)
     const edited = (p: FieldPos[] | undefined, was: FieldPos[] | undefined) => (p ? {
       playable: FIELD_POS.filter((q) => p.includes(q) || def[q] !== undefined),
@@ -4578,15 +4612,20 @@ export class GameSession {
     return { ok: r.ok, message: r.ok ? message : r.message, warnings: r.ok ? pv.warnings : [] };
   }
 
+  /** 에디터 사용 표시: 처음 고친 때(firstEdit)와 연도별 횟수(edits). 고치기(edit)·수비 고치기(def-edit ed) 공통 */
+  private markEditorUse(day: number): void {
+    const e = (this.league.editor ??= { on: true, firstOn: { year: this.year, day } });
+    e.firstEdit ??= { year: this.year, day };
+    (e.edits ??= {})[this.year] = (e.edits[this.year] ?? 0) + 1;
+  }
+
   /**
    * 에디터 고침 적용 (난수 없음, 값을 그대로 넣는다). 자유 모드 조작(move·ability·contract)은 applyFreeOps를 다시 쓰고, 생년·병역·부상은 여기서.
    * 사용 표시: 처음 고친 때(firstEdit)와 연도별 횟수(edits)
    */
   private applyEdits(ops: EditOp[], day: number): void {
     const L = this.league;
-    const e = (L.editor ??= { on: true, firstOn: { year: this.year, day } });
-    e.firstEdit ??= { year: this.year, day };
-    (e.edits ??= {})[this.year] = (e.edits[this.year] ?? 0) + 1;
+    this.markEditorUse(day);
     const season = this.phase === 'season';
     const free: FreeOp[] = [];
     let aged = false;

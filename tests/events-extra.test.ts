@@ -5,7 +5,7 @@ import { EVENTS, type EventContext, type EventPlayer } from '../src/league/event
 import { EXTRA_EVENTS } from '../src/league/events-extra';
 import type { LeaguePlayer, LeagueState } from '../src/league/types';
 
-function fakeContext(month: number, rank: number, streak: number) {
+function fakeContext(month: number, rank: number, streak: number, wage = 1) {
   const calls: string[] = [];
   const pl = (id: string, o: Partial<EventPlayer>): EventPlayer => ({
     id, name: `선수${id}`, isPitcher: false, starter: false, age: 27, foreign: false, pa: 200, ops: 0.8, outs: 0, era: 0, fatigue: 0, ...o,
@@ -20,7 +20,7 @@ function fakeContext(month: number, rank: number, streak: number) {
   ] as unknown as LeaguePlayer[];
   const c: EventContext = {
     league: { seed: 's' } as LeagueState, team: 0, teamName: 'LG', year: 2026, day: 50, seasonDays: 140, rank, teams: 10, winPct: 0.5,
-    cash: 500000, roster, seenValue: (p) => (p.id === 'y1' ? 2 : 1), players, recent: { w: 5, l: 5 }, streak, month, hasRival: true, tradeOpen: true,
+    cash: 500000, wage, roster, seenValue: (p) => (p.id === 'y1' ? 2 : 1), players, recent: { w: 5, l: 5 }, streak, month, hasRival: true, tradeOpen: true,
     addCash: (a) => calls.push(`cash ${a}`), addTrust: (d) => calls.push(`trust ${d}`), addFill: (f) => calls.push(`fill ${f}`),
     addForm: (e) => calls.push(`form ${e}`), addCond: (v, d, r) => calls.push(`cond ${v} ${d} ${r}`), restPitchers: () => calls.push('restPitchers'), rest: (id, d) => calls.push(`rest ${id} ${d}`),
     tradeOffer: () => null, trade: () => '', addFans: (d) => calls.push(`fans ${d}`), addPotential: (id, d) => calls.push(`pot ${id} ${d}`),
@@ -70,5 +70,20 @@ describe('확장 이벤트', () => {
       if (e.choices.some((ch) => /−/.test(ch.note(c, v)) && !/\+/.test(ch.note(c, v)))) negative++;
     }
     expect(negative).toBeGreaterThan(30);
+  });
+});
+
+describe('이벤트 금액은 연봉 지수를 따른다 (부록 B 물음 9)', () => {
+  it('문구의 금액은 2026년 물가 × wage, 효과에 넘기는 값은 2026년 물가 그대로 (자금 반영 때 세션이 곱한다)', () => {
+    const ev = EVENTS.find((e) => e.id === 'x-merch-boom')!;
+    const sell = ev.choices[0];
+    expect(sell.note(fakeContext(6, 5, 0).c, {})).toBe('자금 +1.0억 원');
+    const { c, calls } = fakeContext(6, 5, 0, 1.5);
+    expect(sell.note(c, {})).toBe('자금 +1.5억 원');
+    sell.apply(c, {}, new Rng('w'));
+    expect(calls).toContain('cash 10000');
+    // 변수 금액도 같은 배율로 보인다
+    const ad = EVENTS.find((e) => e.id === 'sponsor-patch')!;
+    expect(ad.choices.find((x) => x.label === '받아들인다')!.note(c, { amount: 40000 })).toMatch(/^자금 \+6\.0억 원/);
   });
 });

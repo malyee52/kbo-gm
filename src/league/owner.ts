@@ -270,16 +270,35 @@ export function outcomeLabel(o: SeasonOutcome): string {
   return place;
 }
 
-/** 신뢰도 변화 (임시값): 달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25) / 캡 초과 -10 */
-export function trustDelta(goal: GoalKind, o: SeasonOutcome): { achieved: boolean; delta: number } {
+/**
+ * 신뢰도 변화 (임시값): 달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25).
+ * delta = 성적 몫 (난이도 칭찬·압박 배율을 받는다), cap = 캡 초과 -10 (2026-11-05 사용자, 기획서 v2 부록 B 물음 5: 배율 밖, 곱한 뒤 더한다)
+ */
+export function trustDelta(goal: GoalKind, o: SeasonOutcome): { achieved: boolean; delta: number; cap: number } {
   const diff = outcomeTier(o) - GOAL_TIER[goal];
   const achieved = diff >= 0;
-  let delta = achieved ? 12 + 8 * diff : Math.max(-25, -10 + 6 * (diff + 1));
-  if (o.capOver) delta -= 10;
-  return { achieved, delta: Math.round(delta) };
+  const delta = achieved ? 12 + 8 * diff : Math.max(-25, -10 + 6 * (diff + 1));
+  return { achieved, delta: Math.round(delta), cap: o.capOver ? CAP_OVER_TRUST : 0 };
 }
 
-/** 신뢰도가 이 값보다 낮아지면 해고 (임시값). 시작 50에서 한 시즌 미달(최대 -25)로는 해고되지 않는다 */
+/** 캡 초과 시즌의 신뢰도 감점 (임시값). 난이도 배율을 받지 않는다 (부록 B 물음 5) */
+export const CAP_OVER_TRUST = -10;
+
+/**
+ * 시즌 평가의 신뢰도 변화 합 (세션 evaluateOwner): 성적 몫이 오르면 칭찬 배율(gain), 목표를 낮춘 해는 그 절반,
+ * 올린 약속을 못 지킨 감점(raiseCapped)을 더한 합이 내리면 압박 배율(pressure). 그 뒤에 캡 초과 감점과 예산 회의 변화를 그대로 더한다
+ */
+export function seasonTrustChange(td: { delta: number; cap: number }, o: { gain: number; pressure: number; halfGain?: boolean; raiseCapped?: number; meeting?: number }): number {
+  const scaled = td.delta > 0 ? Math.round(td.delta * o.gain) : td.delta;
+  const g = (scaled > 0 && o.halfGain ? Math.round(scaled / 2) : scaled) + (o.raiseCapped ?? 0);
+  return (g < 0 ? Math.round(g * o.pressure) : g) + td.cap + (o.meeting ?? 0);
+}
+
+/**
+ * 신뢰도가 이 값보다 낮아지면 해고 (임시값). 시작 50에서 성적 몫만으로는 쉬움·보통 난이도의 한 시즌 미달(최대 -25)로 해고되지 않는다.
+ * 다만 어려움(압박 1.35배, 최대 -34), 캡 초과 -10, 예산 회의 감점, 재정 긴급 지원 감점이 겹치면 한 시즌 만에도 해고될 수 있다
+ * (2026-11-05 사용자, 기획서 v2 부록 B 물음 7: 한 시즌 해고는 그대로 두고 주석만 사실대로)
+ */
 export const FIRE_BELOW = 25;
 export const START_TRUST = 50;
 /** 해고되면 받는 영입 제의 수 (하위권 구단에서, 임시값) */

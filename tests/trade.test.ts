@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
 import { currentRuns, playerValue } from '../src/ai/value';
 import { PRESETS } from '../src/league/difficulty';
+import { Rng } from '../src/engine/rng';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, type SimPlayer } from '../src/engine';
 import { GameSession } from '../src/game/session';
@@ -487,4 +488,71 @@ describe('요구안 실패 이유 (askPackageWhy, UI 2단계 U2-6 엔진 메모)
     expect(value.verdict).toBe('reject-value');
     expect(value.message).not.toMatch(/\d/); // 수치를 보이지 않는다
   });
+});
+
+describe('요구안은 AI 판단과 같은 조건 (부록 B 물음 6)', () => {
+  it('세부 난이도가 엄격해도 요구안은 직접 제안으로 그대로 성사된다', () => {
+    const g = newGame('pkg-strict');
+    expect(g.setDifficulty({ ...PRESETS.normal, tradeStrict: 1.5 }).ok).toBe(true);
+    let found = 0;
+    for (const t of g.world.teams) {
+      if (t.idx === g.teamIdx) continue;
+      for (const k of [2, 5]) {
+        const want = byNow(g, t.org)[k];
+        const pkg = g.askPackage(t.idx, [want]);
+        if (!pkg) continue;
+        found++;
+        // 고치기 전에는 strict 없이 찾아서, 요구안 그대로 내도 거절될 수 있었다
+        expect(g.evaluateTrade(t.idx, pkg, [want]).verdict).toBe('accept');
+      }
+    }
+    expect(found).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('첫해 트레이드 불가 선수는 내줄 후보에서 빠지고, 받을 선수면 잘못된 제안', () => {
+    const g = newGame('pkg-locked');
+    const kt = teamIdx(g, 'KT');
+    const want = byNow(g, g.world.teams[kt].org)[4];
+    const first = g.askPackage(kt, [want]);
+    expect(first).not.toBeNull();
+    for (const p of first!) g.leaguePlayer(p.id)!.noTradeYear = g.year;
+    const again = g.askPackageWhy(kt, [want]);
+    for (const p of again.pkg ?? []) expect(g.leaguePlayer(p.id)!.noTradeYear).not.toBe(g.year);
+    g.leaguePlayer(want.id)!.noTradeYear = g.year;
+    expect(g.askPackageWhy(kt, [want])).toMatchObject({ pkg: null, verdict: 'reject-invalid' });
+  });
+
+  it('덜 아까운 순은 우리 스카우트 가치(shopWorth): 한 명 요구안은 받아들여지는 선수 가운데 shopWorth가 가장 낮다', () => {
+    const g = newGame('pkg-worth');
+    const w = horizonWeights(g.tendency(g.teamIdx), g.situation(g.teamIdx).remaining);
+    let checked = 0;
+    for (const t of g.world.teams) {
+      if (t.idx === g.teamIdx) continue;
+      const want = byNow(g, t.org)[6];
+      const pkg = g.askPackage(t.idx, [want]);
+      if (pkg?.length !== 1) continue;
+      checked++;
+      const v = g.shopWorth(pkg[0], w);
+      for (const p of g.team.org) {
+        if (p.foreign || p.idx === pkg[0].idx || g.shopWorth(p, w) >= v) continue;
+        expect(g.evaluateTrade(t.idx, [p], [want]).verdict).not.toBe('accept');
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('AI가 먼저 거는 제안에 육성선수를 넣지 않는다', () => {
+    const g = newGame('pkg-dev');
+    g.advance(10);
+    // 모든 국내 선수를 육성선수로 두면 제안이 나오지 않는다 (고치기 전에는 dev를 보지 않았다)
+    const G = g as unknown as { aiTradeOffer(r: Rng): { give: string; get: string } | null };
+    const domestic = g.world.players.filter((p) => !p.foreign && p.teamIdx >= 0);
+    const mark = (on: boolean) => { for (const p of domestic) { const lp = g.leaguePlayer(p.id); if (lp) lp.dev = on || undefined; } };
+    let before = 0;
+    for (let i = 0; i < 40; i++) if (G.aiTradeOffer(new Rng(`dev/${i}`))) before++;
+    expect(before).toBeGreaterThan(0);
+    mark(true);
+    for (let i = 0; i < 40; i++) expect(G.aiTradeOffer(new Rng(`dev/${i}`))).toBeNull();
+    mark(false);
+  }, 120_000);
 });

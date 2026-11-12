@@ -4,11 +4,10 @@
 // 사람의 잘못·사생활로 읽힐 수 있는 일은 실명 없이(선수단·관계자) 쓴다. 효과 크기는 모두 임시값.
 
 import type { Rng } from '../engine';
-import type { EventChoice, EventContext, EventDef, EventPlayer, PendingEvent } from './events';
+import { eok, type EventChoice, type EventContext, type EventDef, type EventPlayer, type PendingEvent } from './events';
 import type { LeaguePlayer } from './types';
 
 type V = PendingEvent['vars'];
-const eok = (man: number) => `${(man / 10000).toFixed(1)}억 원`;
 const num = (v: V, k: string) => Number(v[k]);
 const str = (v: V, k: string) => String(v[k]);
 /** 경기력 표기 (타석당 %p) */
@@ -39,11 +38,11 @@ const losing = (c: EventContext) => c.rank >= c.teams - 2 || c.streak <= -4;
 
 // ---- 공통 효과
 const cash = (c: EventContext, man: number, note: string) => c.addCash(man, note);
-const won = (_c: EventContext, v: V, k: string) => eok(num(v, k));
+const won = (c: EventContext, v: V, k: string) => eok(c, num(v, k));
 
 /** 비용을 쓰고 효과를 얻는 선택 */
-const pay = (label: string, k: string, extra: string, fx: (c: EventContext, v: V, rng: Rng) => string, note: string) =>
-  ch(label, (_c, v) => `자금 −${eok(num(v, k))}${extra ? `, ${extra}` : ''}`, (c, v, rng) => { cash(c, -num(v, k), note); return fx(c, v, rng); });
+const pay = (label: string, k: string, extra: string | ((c: EventContext) => string), fx: (c: EventContext, v: V, rng: Rng) => string, note: string) =>
+  ch(label, (c, v) => { const x = typeof extra === 'string' ? extra : extra(c); return `자금 −${eok(c, num(v, k))}${x ? `, ${x}` : ''}`; }, (c, v, rng) => { cash(c, -num(v, k), note); return fx(c, v, rng); });
 
 const amt = (lo: number, hi: number) => (_c: EventContext, rng: Rng): V => ({ cost: Math.round(rng.range(lo, hi) / 1000) * 1000 });
 
@@ -167,7 +166,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '새 시즌 스페셜 유니폼 디자인이 나왔습니다. 공개 행사를 열지 결정해야 합니다.',
     choices: [
       none('조용히 바꾼다', '유니폼만 바꿨습니다.'),
-      pay('공개 행사를 연다', 'cost', `20일 동안 관중률 ${fp(0.04)}, 굿즈 수입 +2.0억 원`, (c) => { c.addFill(0.04, 20, '새 유니폼'); cash(c, 20000, '스페셜 유니폼 판매'); return '새 유니폼이 화제가 됐습니다.'; }, '유니폼 공개 행사'),
+      pay('공개 행사를 연다', 'cost', (c) => `20일 동안 관중률 ${fp(0.04)}, 굿즈 수입 +${eok(c, 20000)}`, (c) => { c.addFill(0.04, 20, '새 유니폼'); cash(c, 20000, '스페셜 유니폼 판매'); return '새 유니폼이 화제가 됐습니다.'; }, '유니폼 공개 행사'),
     ] },
 
   // ======== 부상·건강 (12)
@@ -262,7 +261,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: (_c, v) => `스폰서 한 곳이 경영 사정을 이유로 남은 계약 ${won(_c, v, 'amount')}을 줄이겠다고 통보했습니다.`,
     choices: [
       ch('받아들인다', (_c, v) => `자금 −${won(_c, v, 'amount')}`, (c, v) => { cash(c, -num(v, 'amount'), '스폰서 계약 축소'); return '계약 축소를 받아들였습니다.'; }),
-      ch('재협상한다', (_c, v) => `반반: 자금 −${eok(num(v, 'amount') / 2)} / −${eok(num(v, 'amount') * 1.5)}·신뢰도 −1`, (c, v, rng) => { if (rng.chance(0.5)) { cash(c, -num(v, 'amount') / 2, '스폰서 재협상'); return '절반만 줄이는 선에서 합의했습니다.'; } cash(c, -num(v, 'amount') * 1.5, '스폰서 계약 해지'); c.addTrust(-1); return '협상이 틀어져 계약이 아예 끝났습니다.'; }),
+      ch('재협상한다', (c, v) => `반반: 자금 −${eok(c, num(v, 'amount') / 2)} / −${eok(c, num(v, 'amount') * 1.5)}·신뢰도 −1`, (c, v, rng) => { if (rng.chance(0.5)) { cash(c, -num(v, 'amount') / 2, '스폰서 재협상'); return '절반만 줄이는 선에서 합의했습니다.'; } cash(c, -num(v, 'amount') * 1.5, '스폰서 계약 해지'); c.addTrust(-1); return '협상이 틀어져 계약이 아예 끝났습니다.'; }),
     ] },
   { id: 'x-ticket-system', title: '예매 시스템 장애', weight: 4,
     vars: amt(10000, 20000),
@@ -283,14 +282,14 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: (_c, v) => `세무 조사 결과 구단 회계 처리가 문제가 돼 ${won(_c, v, 'amount')} 추징이 나왔습니다.`,
     choices: [
       ch('납부한다', (_c, v) => `자금 −${won(_c, v, 'amount')}`, (c, v) => { cash(c, -num(v, 'amount'), '세무 추징'); return '추징금을 냈습니다.'; }),
-      ch('이의를 신청한다', (_c, v) => `반반: 변화 없음 / 자금 −${eok(num(v, 'amount') * 1.5)}`, (c, v, rng) => { if (rng.chance(0.5)) return '이의가 받아들여졌습니다.'; cash(c, -num(v, 'amount') * 1.5, '세무 추징 가산세'); return '이의가 기각돼 가산세까지 붙었습니다.'; }),
+      ch('이의를 신청한다', (c, v) => `반반: 변화 없음 / 자금 −${eok(c, num(v, 'amount') * 1.5)}`, (c, v, rng) => { if (rng.chance(0.5)) return '이의가 받아들여졌습니다.'; cash(c, -num(v, 'amount') * 1.5, '세무 추징 가산세'); return '이의가 기각돼 가산세까지 붙었습니다.'; }),
     ] },
   { id: 'x-merch-boom', title: '굿즈 판매 호조', weight: 5,
     vars: amt(8000, 12000),
     text: () => '구단 굿즈가 날개 돋친 듯 팔리고 있습니다. 추가 생산을 할지 정해야 합니다.',
     choices: [
-      ch('그대로 판다', '자금 +1.0억 원', (c) => { cash(c, 10000, '굿즈 판매'); return '준비한 물량을 모두 팔았습니다.'; }),
-      pay('추가 생산한다', 'cost', '반반: 자금 +3.0억 원 / +0.5억 원', (c, _v, rng) => { const g = rng.chance(0.5) ? 30000 : 5000; cash(c, g, '굿즈 추가 판매'); return g > 10000 ? '추가 물량도 다 팔렸습니다.' : '재고가 조금 남았습니다.'; }, '굿즈 추가 생산'),
+      ch('그대로 판다', (c) => `자금 +${eok(c, 10000)}`, (c) => { cash(c, 10000, '굿즈 판매'); return '준비한 물량을 모두 팔았습니다.'; }),
+      pay('추가 생산한다', 'cost', (c) => `반반: 자금 +${eok(c, 30000)} / +${eok(c, 5000)}`, (c, _v, rng) => { const g = rng.chance(0.5) ? 30000 : 5000; cash(c, g, '굿즈 추가 판매'); return g > 10000 ? '추가 물량도 다 팔렸습니다.' : '재고가 조금 남았습니다.'; }, '굿즈 추가 생산'),
     ] },
   { id: 'x-food-vendor', title: '구장 먹거리 업체 교체', weight: 3,
     vars: amt(8000, 12000),
@@ -344,7 +343,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '모바일 야구 게임사가 구단 협업 이벤트를 제안했습니다.',
     choices: [
       none('거절한다', '제안을 거절했습니다.'),
-      ch('계약한다', `자금 +2.0억 원, 15일 동안 관중률 ${fp(0.02)}`, (c) => { cash(c, 20000, '게임사 협업'); c.addFill(0.02, 15, '게임 협업'); return '협업 이벤트가 젊은 팬들의 관심을 끌었습니다.'; }),
+      ch('계약한다', (c) => `자금 +${eok(c, 20000)}, 15일 동안 관중률 ${fp(0.02)}`, (c) => { cash(c, 20000, '게임사 협업'); c.addFill(0.02, 15, '게임 협업'); return '협업 이벤트가 젊은 팬들의 관심을 끌었습니다.'; }),
     ] },
   { id: 'x-rain-refund', title: '우천 취소 환불', weight: 3, when: (c) => c.month >= 5 && c.month <= 8,
     vars: amt(5000, 12000),
@@ -363,7 +362,7 @@ export const EXTRA_EVENTS: EventDef[] = [
   { id: 'x-memorabilia', title: '기념품 경매 수익', weight: 3,
     text: () => '자선 경매에 내놓은 구단 기념품이 예상보다 비싸게 팔렸습니다.',
     choices: [
-      ch('구단 운영비로 쓴다', '자금 +1.5억 원', (c) => { cash(c, 15000, '기념품 경매'); return '수익을 운영비로 돌렸습니다.'; }),
+      ch('구단 운영비로 쓴다', (c) => `자금 +${eok(c, 15000)}`, (c) => { cash(c, 15000, '기념품 경매'); return '수익을 운영비로 돌렸습니다.'; }),
       ch('전액 기부한다', '구단주 신뢰도 +2, 팬 만족도 +2', (c) => { c.addTrust(2); c.addFans(2, '경매 수익 기부'); return '수익을 지역 사회에 기부했습니다.'; }),
     ] },
 
@@ -399,7 +398,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '다음 홈 경기에 상대 원정 팬이 대거 몰려올 것이라는 예고입니다.',
     choices: [
       ch('홈 팬석을 지킨다', '팬 만족도 +1', (c) => { c.addFans(1, '홈석 유지'); return '홈 팬들의 자리를 지켰습니다.'; }),
-      ch('원정석을 늘려 판다', '자금 +1.0억 원, 팬 만족도 −1', (c) => { cash(c, 10000, '원정석 확대'); c.addFans(-1, '원정석 확대'); return '표는 더 팔렸지만 홈 팬들은 서운해합니다.'; }),
+      ch('원정석을 늘려 판다', (c) => `자금 +${eok(c, 10000)}, 팬 만족도 −1`, (c) => { cash(c, 10000, '원정석 확대'); c.addFans(-1, '원정석 확대'); return '표는 더 팔렸지만 홈 팬들은 서운해합니다.'; }),
     ] },
   { id: 'x-kids-day', title: '어린이날 행사', weight: 6, when: (c) => c.month === 5,
     vars: amt(8000, 12000),
@@ -445,7 +444,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '구단 마스코트의 춤 영상이 인기를 끌고 있습니다.',
     choices: [
       none('그대로 둔다'),
-      pay('마스코트 굿즈를 낸다', 'cost', '자금 +1.5억 원', (c) => { cash(c, 15000, '마스코트 굿즈'); return '마스코트 인형이 매진됐습니다.'; }, '마스코트 굿즈 제작'),
+      pay('마스코트 굿즈를 낸다', 'cost', (c) => `자금 +${eok(c, 15000)}`, (c) => { cash(c, 15000, '마스코트 굿즈'); return '마스코트 인형이 매진됐습니다.'; }, '마스코트 굿즈 제작'),
     ] },
   { id: 'x-parking', title: '구장 주차난 민원', weight: 3,
     vars: amt(8000, 12000),
@@ -487,7 +486,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '방송사가 한 시즌을 따라가는 다큐멘터리를 찍고 싶다고 합니다.',
     choices: [
       none('거절한다', '정중히 거절했습니다.'),
-      ch('허락한다', `자금 +1.0억 원, 팬 만족도 +2, 5일 동안 팀 경기력 ${ed(-0.005)}`, (c) => { cash(c, 10000, '다큐 촬영'); c.addFans(2, '다큐 촬영'); c.addForm(-0.005, 5, '카메라 부담'); return '카메라가 더그아웃에 들어왔습니다.'; }),
+      ch('허락한다', (c) => `자금 +${eok(c, 10000)}, 팬 만족도 +2, 5일 동안 팀 경기력 ${ed(-0.005)}`, (c) => { cash(c, 10000, '다큐 촬영'); c.addFans(2, '다큐 촬영'); c.addForm(-0.005, 5, '카메라 부담'); return '카메라가 더그아웃에 들어왔습니다.'; }),
     ] },
   { id: 'x-variety-show', title: '예능 출연 제안', weight: 3, when: (c) => regulars(c).length > 0,
     vars: (c, rng) => who(pick(regulars(c), rng)),
@@ -507,7 +506,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '구단 유튜브의 더그아웃 비하인드 영상이 조회 수 100만을 넘었습니다.',
     choices: [
       ch('그대로 운영한다', '팬 만족도 +1', (c) => { c.addFans(1, '유튜브 화제'); return '구독자가 늘었습니다.'; }),
-      pay('콘텐츠 투자를 늘린다', 'cost', '자금 +2.0억 원, 팬 만족도 +2', (c) => { cash(c, 20000, '유튜브 수익'); c.addFans(2, '유튜브 투자'); return '구단 채널이 자리를 잡았습니다.'; }, '유튜브 제작비'),
+      pay('콘텐츠 투자를 늘린다', 'cost', (c) => `자금 +${eok(c, 20000)}, 팬 만족도 +2`, (c) => { cash(c, 20000, '유튜브 수익'); c.addFans(2, '유튜브 투자'); return '구단 채널이 자리를 잡았습니다.'; }, '유튜브 제작비'),
     ] },
   { id: 'x-youtube-backlash', title: '구단 영상 역풍', weight: 3,
     text: () => '구단이 올린 영상이 패배 직후 너무 가볍다는 비판을 받고 있습니다.',
@@ -531,7 +530,7 @@ export const EXTRA_EVENTS: EventDef[] = [
     text: () => '경기 시작 지연으로 리그가 구단에 벌금을 매겼습니다.',
     choices: [
       ch('납부한다', (_c, v) => `자금 −${won(_c, v, 'cost')}`, (c, v) => { cash(c, -num(v, 'cost'), '리그 벌금'); return '벌금을 냈습니다.'; }),
-      ch('이의를 제기한다', (_c, v) => `반반: 변화 없음 / 자금 −${eok(num(v, 'cost') * 2)}·구단주 신뢰도 −1`, (c, v, rng) => { if (rng.chance(0.5)) return '이의가 받아들여졌습니다.'; cash(c, -num(v, 'cost') * 2, '리그 벌금 가중'); c.addTrust(-1); return '이의가 기각되고 벌금이 늘었습니다.'; }),
+      ch('이의를 제기한다', (c, v) => `반반: 변화 없음 / 자금 −${eok(c, num(v, 'cost') * 2)}·구단주 신뢰도 −1`, (c, v, rng) => { if (rng.chance(0.5)) return '이의가 받아들여졌습니다.'; cash(c, -num(v, 'cost') * 2, '리그 벌금 가중'); c.addTrust(-1); return '이의가 기각되고 벌금이 늘었습니다.'; }),
     ] },
   { id: 'x-bench-clear', title: '벤치 클리어링', weight: 3,
     vars: amt(4000, 6000),
