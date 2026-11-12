@@ -277,6 +277,8 @@ interface YearRec {
   coaches: number[][];
   managerChanges: { team: number; reason: string; to: string }[];
   tactics: Tactics[];
+  /** 그 시즌 구단별 감독 이름 */
+  managers: string[];
   rivals: number; myRivals: number;
   stats: { sb: number; cs: number; topSb: number; ip180: number; ip150: number; w20: number; w15: number; sv40: number; sv30: number; topIp: number; topW: number; topSv: number; teams: number; games: number };
   faAsks: number[];
@@ -366,9 +368,10 @@ async function partSession(): Promise<void> {
     }
     if (!faAsks.length) faAsks = (g.offseason!.fa?.entries ?? []).filter((e) => !e.returnee).map((e) => e.ask).sort((a, b) => b - a).slice(0, 15);
     g.offseason!.userTeam = g.teamIdx;
-    const managerChanges = (L2.managerLog ?? []).slice(mgrBefore).filter((c) => c.to).map((c) => ({ team: c.team, reason: c.reason, to: c.to }));
     const o = g.openNextSeason();
     if (!o.ok) throw new Error(o.message);
+    // 감독 교체는 개막(openManagers) 때 기록된다: 시즌 중 경질 + 오프시즌 + 개막을 모두 센다
+    const managerChanges = (g.league.managerLog ?? []).slice(mgrBefore).filter((c) => c.to).map((c) => ({ team: c.team, reason: c.reason, to: c.to }));
     // 성장 폭 (구단별 타자·투수, 같은 구단에 남은 선수의 상위 25명 안 오른 몫 합, 런)
     const ctx1 = valueContext(g.world);
     const growth = Array.from({ length: T }, () => ({ bat: 0, pit: 0 }));
@@ -390,7 +393,7 @@ async function partSession(): Promise<void> {
       events, eventCash, eventForm, eventFill,
       revenue, gate: items.gate ?? 0, attendance: fin?.attendance ?? 0, homeGames: fin?.homeGames ?? 0, capacity: BALLPARK[myRow.name]?.capacity ?? 0,
       trustBefore, trustAfter: hist?.trustAfter ?? g.owner.trust, rep: L2.reputation?.value ?? 50, fired: g.owner.firedYears.length > firedBefore, achievements: ach,
-      camps, coaches, managerChanges, tactics, rivals, myRivals, stats, faAsks, growth, scSeasonDays,
+      camps, coaches, managerChanges, tactics, managers: s.teamSeasons.map((_, t) => L.managers?.[t]?.name ?? ''), rivals, myRivals, stats, faAsks, growth, scSeasonDays,
     };
     appendFileSync(out, JSON.stringify(rec) + '\n');
     console.log(`[${seed}] ${year} ${myRow.name} ${wins[teamIdx]}승, 이벤트 ${events.length}, 신뢰 ${rec.trustAfter}, 평판 ${rec.rep}, 도루 ${stats.sb}, 180이닝 ${stats.ip180} (${((Date.now() - t0) / 1000).toFixed(0)}초)`);
@@ -429,6 +432,10 @@ function realStats(store: DataStore, from: number, to: number) {
 }
 
 async function partReport(): Promise<void> {
+  // 손으로 쓴 해석 (원인 짐작·판정 의견): --notes 파일의 '<!-- causes -->'·'<!-- verdict -->' 아래 글
+  const notesPath = arg('notes', 'reports/nominal-content-notes.md')!;
+  const notesText = existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '';
+  const note = (k: string) => (notesText.split(`<!-- ${k} -->`)[1]?.split('<!-- ')[0] ?? '').trim() + '\n';
   const store = loadDataStore();
   const edgeRaw = JSON.parse(readFileSync(arg('edge', 'reports/tmp/nominal-edge.json')!, 'utf8'));
   const E = fitEdge(edgeRaw);
@@ -489,7 +496,7 @@ async function partReport(): Promise<void> {
     `| 이벤트 관중률 × 날 | ${f1(mean(Y.map((y) => y.eventFill)), 2)} (≈ ${eok(fillMan(mean(Y.map((y) => y.eventFill))), 2)}억) | | |`, '');
   // 선택지 표
   P.push('### 1.1 선택지별 효과 (모의 상황, 2026년 돈)\n');
-  P.push(`2026 ${C.team} 시즌 45·90·125일 상황과 바꾼 상황(1위·꼴찌·5연패·5연승·7월 라이벌·8월·마감 뒤)에서 \`when\`이 맞는 곳만, 상황마다 난수 ${arg('samples', '24')}번. 승수 = 경기력·컨디션 효과를 0장 눈금으로 바꾼 값 (선수 하나는 타자 1/9·선발 12%·구원 5% 몫, 근사). 관중률은 관중 수입 근사(억). '선택지 차' = 가장 좋은 선택지와 가장 나쁜 선택지의 승수·자금 차이.\n`);
+  P.push(`2026 ${C.team} 시즌 45·90·125일 상황과 바꾼 상황(1위·꼴찌·5연패·5연승·7월 라이벌·8월·마감 뒤)에서 \`when\`이 맞는 곳만, 상황마다 난수 ${arg('samples', '24')}번. 승수 = 경기력·컨디션 효과를 0절 눈금으로 바꾼 값 (선수 하나는 타자 1/9·선발 12%·구원 5% 몫, 근사). 관중률은 관중 수입 근사(억). '선택지 차' = 가장 좋은 선택지와 가장 나쁜 선택지의 승수·자금 차이.\n`);
   P.push('| 이벤트 | 가중치 | 50시즌 횟수 | 맞는 상황 | 선택지: 자금(억)·신뢰·팬·관중(억)·승수·잠재(런) | 선택지 차 승수·자금(억) |', '|---|---|---|---|---|---|');
   const evSummary: { id: string; n50: number; maxWins: number; maxCash: number; spreadWins: number; spreadCash: number }[] = [];
   for (const ev of C.events) {
@@ -514,11 +521,33 @@ async function partReport(): Promise<void> {
   const money = evSummary.filter((e) => e.spreadCash >= 50_000).length;
   const tiny = evSummary.filter((e) => e.spreadWins < 0.05 && e.spreadCash < 10_000).length;
   P.push(`요약: 선택지 차가 0.3승 이상인 이벤트 ${big}개, 5억 이상 ${money}개, 둘 다 미미한(0.05승·1억 미만) 이벤트 ${tiny}개 (모의 상황에서 안 맞는 이벤트 포함). 50시즌 2번 이하 이벤트: ${rare.map((id) => `\`${id}\``).join(', ') || '없음'}.\n`);
-  P.push(`신뢰·팬: 첫 선택지 자동일 때 시즌 신뢰 변화(이벤트 몫만은 세션에서 따로 셀 수 없어 선택지 표의 평균 × 횟수로 본다).\n`);
+  // 시즌당 합: 세션에서 나온 횟수 × 선택지 평균 효과 (자동 = 첫 선택지, 고르기 = 그 기준으로 가장 좋은 선택지)
+  const byId = new Map(C.events.map((e) => [e.id, e]));
+  const policy = (pick: (cs: ChoiceRow[]) => ChoiceRow | undefined) => {
+    const acc = { cash: 0, trust: 0, fans: 0, wins: 0, fill: 0 };
+    for (const [id, n] of cnt) {
+      const ev = byId.get(id);
+      const ch = ev && pick(ev.choices.filter((c) => c.n > 0));
+      if (!ch) continue;
+      const k = n / nSeasons;
+      acc.cash += k * ch.mean.cash; acc.trust += k * ch.mean.trust; acc.fans += k * ch.mean.fans; acc.wins += k * choiceWins(ch.mean); acc.fill += k * fillMan(ch.mean.fillDays);
+    }
+    return acc;
+  };
+  const by = (f: (c: ChoiceRow) => number) => (cs: ChoiceRow[]) => [...cs].sort((a, b) => f(b) - f(a))[0];
+  const pols: [string, ReturnType<typeof policy>][] = [
+    ['자동 (첫 선택지)', policy((cs) => cs[0])],
+    ['늘 자금 최대', policy(by((c) => c.mean.cash + fillMan(c.mean.fillDays)))],
+    ['늘 신뢰 최대', policy(by((c) => c.mean.trust))],
+    ['늘 승수 최대', policy(by((c) => choiceWins(c.mean)))],
+  ];
+  P.push('시즌당 합 (세션 횟수 × 선택지 평균 효과, 2026년 돈):\n');
+  P.push('| 선택 방식 | 자금(억) | 관중(억) | 신뢰 | 팬 만족도 | 승수 |', '|---|---|---|---|---|---|',
+    ...pols.map(([l, a]) => `| ${l} | ${eok(a.cash)} | ${eok(a.fill, 2)} | ${f1(a.trust, 1)} | ${f1(a.fans, 1)} | ${f1(a.wins, 2)} |`), '');
 
   // ---- 2. 캠프
   P.push('## 2. 스프링캠프\n');
-  P.push(`개막 뒤 ${CAMP_DAYS}일 경기력 (장소 배율 × 방향 값). 승수 = 0장 눈금. 체력의 부상 0.85배와 유망주 성장은 승수에 넣지 않았다 (아래 줄).\n`);
+  P.push(`개막 뒤 ${CAMP_DAYS}일 경기력 (장소 배율 × 방향 값). 승수 = 0절 눈금. 체력의 부상 0.85배와 유망주 성장은 승수에 넣지 않았다 (아래 줄).\n`);
   P.push(`| 장소 \\ 방향 | 비용(억) | ${CAMP_FOCUSES.map((f) => FOCUS[f].label).join(' | ')} |`, `|---|---|${CAMP_FOCUSES.map(() => '---|').join('')}`);
   for (const pl of CAMP_PLACES) {
     const pp = PLACE[pl];
@@ -601,13 +630,13 @@ async function partReport(): Promise<void> {
     row('20승 투수 수', (s) => s.w20, 2), row('15승 투수 수', (s) => s.w15, 1), row('개인 최다 승', (s) => s.topW, 1),
     row('40세이브 투수 수', (s) => s.sv40, 2), row('30세이브 투수 수', (s) => s.sv30, 1), row('개인 최다 세이브', (s) => s.topSv, 1), '');
   P.push(`실제는 자료집 시즌 기록(같은 선수 여러 구단 줄은 합침). 실제 도루 실패는 ${real.filter((r) => r.csKnown).length}/${real.length}해만 자료가 있다. 2015~2025 구단 수 10, 경기 수 144.\n`);
-  P.push('<!-- CAUSES -->\n');
+  P.push(note('causes'));
 
   // ---- 6. 감독·라이벌·업적
   P.push('## 6. 감독·라이벌·희귀 업적\n');
   const mc = Y.flatMap((y) => y.managerChanges);
   P.push(`감독 교체: ${nSeasons}시즌에 ${mc.length}번 (시즌당 ${f1(mc.length / nSeasons, 2)}), 사유 ${[...new Set(mc.map((m) => m.reason))].map((r) => `${r} ${mc.filter((m) => m.reason === r).length}`).join(', ')}.\n`);
-  P.push('작전 배율 효과 (0장 회귀, 배율 1 대비 +0.1일 때 승수, 실존 감독 무작위):\n');
+  P.push('작전 배율 효과 (0절 회귀, 배율 1 대비 +0.1일 때 승수, 실존 감독 무작위):\n');
   P.push('| 배율 | 실존 감독 범위 | 표준편차 | +0.1 → 승 (표준오차) | 범위 끝 차 → 승 |', '|---|---|---|---|---|');
   for (const k of TACTIC_KEYS) {
     const t = E.tactic[k];
@@ -621,7 +650,7 @@ async function partReport(): Promise<void> {
   const fired = Y.filter((y) => y.fired).length;
   const moved = seeds.map((s) => new Set(Y.filter((y) => y.seed === s).map((y) => y.teamName)).size);
   P.push(`해고 ${fired}번, 맡은 구단 수 (시드별) ${moved.join('·')}. 업적 (${nSeasons}시즌, 플레이어 자리 AI 운영): ${Object.keys(ACHIEVEMENTS).map((id) => `${ACHIEVEMENTS[id as keyof typeof ACHIEVEMENTS].label} ${achCnt.get(id) ?? 0}`).join(', ')}.`, '');
-  P.push('<!-- VERDICT -->\n');
+  P.push(note('verdict'));
   writeOut(outPath, P.join('\n'));
 }
 
