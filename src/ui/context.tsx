@@ -28,7 +28,8 @@ export interface GameUi {
   /** 자동 저장 칸에 저장 */
   autosave(): Promise<void>;
   go(screen: Screen, arg?: number): void;
-  openPlayer(idx: number): void;
+  /** 선수 창 열기. order = 이전·다음으로 넘길 선수 순서 (그 표의 지금 정렬·거르기 순서, U5). 없으면 넘기기 단추를 숨긴다 */
+  openPlayer(idx: number, order?: number[]): void;
   /** 직접 지휘 시작 (오늘 또는 다음 우리 경기). 시즌 중에만 */
   command(): void;
 }
@@ -100,11 +101,25 @@ export function ForeignMark({ p, long = false }: { p: SimPlayer; long?: boolean 
   return t && <span className="tag" title={t.title}>{long ? t.long : t.short}</span>;
 }
 
+/** 누른 선수 링크가 든 표(tbody, 없으면 목록)에 지금 보이는 선수 링크 순서. 화면에 그려진 순서라 정렬·거르기가 그대로 담긴다 (U5).
+ *  같은 선수가 한 줄에 두 번 나오면 처음 것만 */
+export function linkOrder(el: Element): number[] | undefined {
+  const box = el.closest('tbody, ul, ol');
+  if (!box) return undefined;
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const a of box.querySelectorAll<HTMLElement>('[data-pidx]')) {
+    const i = Number(a.dataset.pidx);
+    if (Number.isInteger(i) && !seen.has(i)) { seen.add(i); out.push(i); }
+  }
+  return out.length >= 2 ? out : undefined;
+}
+
 /** 선수 이름. 누르면 선수 상세가 열린다 */
 export function PlayerLink({ p, showTeam = false }: { p: SimPlayer; showTeam?: boolean }) {
   const { openPlayer, session } = useGame();
   return (
-    <button type="button" className="link" onClick={() => openPlayer(p.idx)}>
+    <button type="button" className="link" data-pidx={p.idx} onClick={(e) => openPlayer(p.idx, linkOrder(e.currentTarget))}>
       {p.name}
       <ForeignMark p={p} />
       {showTeam && <span className="muted small"> {lineTeam(p) >= 0 ? session.teamInfo(lineTeam(p)).name : '자유계약'}{p.teamIdx < 0 && p.formerTeam !== undefined ? ' (방출)' : ''}</span>}

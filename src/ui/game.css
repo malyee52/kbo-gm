@@ -1194,6 +1194,9 @@ dialog.player.side {
 dialog.player.side .dialog-body { max-height: none; height: 100%; }
 .pd-head { display: grid; gap: 2px; }
 .pd-head .row-between { align-items: flex-start; }
+.pd-nav { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.pd-step { display: inline-flex; align-items: center; gap: 4px; }
+.pd-step .small-btn { min-width: 2em; }
 .pd-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .pd-tabs { display: flex; gap: 2px; margin: 10px -22px -12px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
 .pd-tabs > button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-weight: 700; padding: 8px 12px; min-height: 40px; box-shadow: none; white-space: nowrap; }
