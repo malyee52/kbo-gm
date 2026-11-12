@@ -45,6 +45,15 @@ export const SHIFT_COOLDOWN = 3;
  * SHIFT_COOLDOWN과 같은 셈법: 변경의 적용 해가 Y이면 반대 방향 변경은 Y+6 시즌부터 (같은 방향은 SHIFT_COOLDOWN대로 Y+4 시즌부터)
  */
 export const REVERSE_BAN = 5;
+/**
+ * 항목마다 시작 값(FUTURE_RULE_SPEC.base)에서 움직일 수 있는 누적 칸 수 (2026-11-12 사용자 결정 Q34, 임시값).
+ * 구단 투표를 뺀 뒤 longsim 50시즌에서 장타·삼진 압력이 선수 재능에서 나와 규칙이 한쪽으로만 흘렀다
+ * (반발계수 기준 4번 내려 ×0.76, 존 최대, 2028년부터 경기당 최소 득점 3.95 → 3.28, reports/longsim-league-50.md).
+ * 한도는 base ± 칸 × step과 항목 누적 범위(min·max)가 겹치는 곳: 공 ×0.88~1.12, 존 ×0.94~1.06, 연장 10~13회, 엔트리 28~31명,
+ * 외국인 2~4명, 캡 상향률 3~9%. 한도에 닿으면 그 방향 신호는 후보가 되지 않는다 (이력에도 남지 않는다).
+ * 예전 저장(한도 전 판)이 이미 한도 밖이면 그 값은 그대로 두고 한도 안쪽 방향으로만 움직인다
+ */
+export const SHIFT_MAX_STEPS = 2;
 
 export type FutureRuleKey = 'ball' | 'zone' | 'extra' | 'roster' | 'foreign' | 'capGrowth';
 
@@ -65,6 +74,15 @@ export const FUTURE_RULE_SPEC: Record<FutureRuleKey, { base: number; step: numbe
   foreign: { base: 3, step: 1, min: 2, max: 4 },
   capGrowth: { base: 0.05, step: 0.02, min: 0.03, max: 0.09 },
 };
+
+/** 항목이 움직일 수 있는 범위: 시작 값 ± SHIFT_MAX_STEPS칸과 누적 범위(min·max)가 겹치는 곳 */
+export function futureLimits(key: FutureRuleKey): { lo: number; hi: number } {
+  const spec = FUTURE_RULE_SPEC[key];
+  return {
+    lo: round(Math.max(spec.min, spec.base - SHIFT_MAX_STEPS * spec.step)),
+    hi: round(Math.min(spec.max, spec.base + SHIFT_MAX_STEPS * spec.step)),
+  };
+}
 
 /** 2루타 목표 배율: 홈런 배율 변화의 1/3 (홈런 ×0.94 → 2루타 ×0.98, 임시값) */
 export function ballD2(hr: number): number {
@@ -209,6 +227,9 @@ export function proposeFutureRule(league: LeagueState, signal: RuleSignal): Rule
     const cur = futureValue(league, key, signal.year);
     const after = round(cur + dir * spec.step);
     if (after < spec.min - 1e-9 || after > spec.max + 1e-9) return;
+    // 누적 한도 (SHIFT_MAX_STEPS): 한도 밖으로 나가는 쪽만 막는다. 이미 한도 밖인 예전 저장은 안쪽으로 돌아오는 변경만 된다
+    const lim = futureLimits(key);
+    if ((dir > 0 && after > lim.hi + 1e-9) || (dir < 0 && after < lim.lo - 1e-9)) return;
     const last = (league.ruleShifts ?? []).filter((s) => s.key === key).at(-1);
     if (last && next - last.year < SHIFT_COOLDOWN + 1) return;
     if (last && Math.sign(last.after - last.before) === -dir && next - last.year < REVERSE_BAN + 1) return;
