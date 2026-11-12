@@ -32,7 +32,7 @@ import { REP, REP_FA, REP_TRADE } from '../src/league/reputation';
 import { infoOf, NEUTRAL_TACTICS as NEUTRAL, tacticsOf, type Tactics } from '../src/league/managers';
 import { runsOf } from '../src/league/growth';
 import { valueContext } from '../src/ai/value';
-import { ACHIEVEMENTS } from '../src/league/owner';
+import { ACHIEVEMENTS, FIRE_BELOW } from '../src/league/owner';
 import { BALLPARK } from '../src/league/finance';
 import { installCalCache } from './calCache';
 
@@ -619,12 +619,13 @@ async function partReport(): Promise<void> {
   // ---- 5. 도루·이닝
   P.push('## 5. 도루·이닝 (게임 vs 실제)\n');
   const real = realStats(store, 2015, 2025);
+  const real2 = realStats(store, 2023, 2025);
   const S = Y.map((y) => y.stats);
   const early = Y.filter((y) => y.year <= 2030).map((y) => y.stats);
   const late = Y.filter((y) => y.year >= 2046).map((y) => y.stats);
   type St = YearRec['stats'];
-  const row = (label: string, k: (s: St) => number, d = 1) => `| ${label} | ${f1(mean(real.map(k as (s: unknown) => number)), d)} | ${f1(mean(early.map(k)), d)} | ${f1(mean(S.map(k)), d)} | ${f1(mean(late.map(k)), d)} |`;
-  P.push('| 지표 (한 시즌) | 실제 2015~2025 평균 | 게임 2026~2030 | 게임 전체 | 게임 2046~ |', '|---|---|---|---|---|',
+  const row = (label: string, k: (s: St) => number, d = 1) => `| ${label} | ${f1(mean(real.map(k as (s: unknown) => number)), d)} | ${f1(mean(real2.map(k as (s: unknown) => number)), d)} | ${f1(mean(early.map(k)), d)} | ${f1(mean(S.map(k)), d)} | ${f1(mean(late.map(k)), d)} |`;
+  P.push('| 지표 (한 시즌) | 실제 2015~2025 평균 | 실제 2023~2025 평균 | 게임 2026~2030 | 게임 전체 | 게임 2046~ |', '|---|---|---|---|---|---|',
     row('리그 도루 합', (s) => s.sb, 0), row('리그 도루 실패 합', (s) => s.cs, 0), row('도루 성공률 %', (s) => (s.sb / Math.max(1, s.sb + s.cs)) * 100, 1),
     row('개인 최다 도루', (s) => s.topSb, 1), row('180이닝 투수 수', (s) => s.ip180, 1), row('150이닝 투수 수', (s) => s.ip150, 1), row('개인 최다 이닝', (s) => s.topIp, 1),
     row('20승 투수 수', (s) => s.w20, 2), row('15승 투수 수', (s) => s.w15, 1), row('개인 최다 승', (s) => s.topW, 1),
@@ -650,8 +651,14 @@ async function partReport(): Promise<void> {
   const fired = Y.filter((y) => y.fired).length;
   const moved = seeds.map((s) => new Set(Y.filter((y) => y.seed === s).map((y) => y.teamName)).size);
   P.push(`해고 ${fired}번, 맡은 구단 수 (시드별) ${moved.join('·')}. 업적 (${nSeasons}시즌, 플레이어 자리 AI 운영): ${Object.keys(ACHIEVEMENTS).map((id) => `${ACHIEVEMENTS[id as keyof typeof ACHIEVEMENTS].label} ${achCnt.get(id) ?? 0}`).join(', ')}.`, '');
+  const trusts = Y.map((y) => y.trustAfter);
+  P.push(`구단주 신뢰 (결산 뒤, 플레이어 자리): 평균 ${f1(mean(trusts))}, 최소 ${f1(Math.min(...trusts), 0)}, 10% ${f1(pct(trusts, 0.1), 0)}, 해고선 ${FIRE_BELOW} 미만 ${trusts.filter((t) => t < FIRE_BELOW).length}번.`);
+  const mgrNames = Y.flatMap((y) => (y.managers ?? []).map((m, t) => `${y.seed}/${t}/${m}`));
+  if (mgrNames.length) P.push(`감독 이름 기록: 구단·시드마다 50시즌에 거친 감독 수 평균 ${f1(mean(seeds.flatMap((sd) => Y[0].teams.map((_, t) => new Set(Y.filter((y) => y.seed === sd).map((y) => y.managers?.[t])).size))), 1)}명.`);
+  P.push('');
   P.push(note('verdict'));
-  writeOut(outPath, P.join('\n'));
+  // 범위 물결표는 \~ (GitHub 취소선 방지). 이미 \~인 곳은 그대로
+  writeOut(outPath, P.join('\n').replace(/(?<!\\)~/g, '\\~'));
 }
 
 const parts: Record<string, () => Promise<void>> = { edge: partEdge, choices: partChoices, session: partSession, report: partReport };
