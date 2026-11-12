@@ -26,7 +26,7 @@ import { GameSession } from '../src/game/session';
 import { createLeague } from '../src/league/create';
 import { worldFromLeague } from '../src/league/world';
 import { ensureEvents, EVENTS, type EventContext, type EventDef } from '../src/league/events';
-import { CAMP_DAYS, CAMP_FOCUSES, CAMP_PLACES, FOCUS, PLACE } from '../src/league/camp';
+import { campInjuryOf, FOCUS, PLACE, type CampFocus, type CampPlace } from '../src/league/camp';
 import { COACH_DECLINE, COACH_EDGE, COACH_GROWTH, COACH_ROLES, COACH_SALARY } from '../src/league/coaches';
 import { REP, REP_FA, REP_TRADE } from '../src/league/reputation';
 import { infoOf, NEUTRAL_TACTICS as NEUTRAL, tacticsOf, type Tactics } from '../src/league/managers';
@@ -557,21 +557,9 @@ async function partReport(): Promise<void> {
   P.push('| 선택 방식 | 자금(억) | 관중(억) | 신뢰 | 팬 만족도 | 승수 |', '|---|---|---|---|---|---|',
     ...pols.map(([l, a]) => `| ${l} | ${eok(a.cash)} | ${eok(a.fill, 2)} | ${f1(a.trust, 1)} | ${f1(a.fans, 1)} | ${f1(a.wins, 2)} |`), '');
 
-  // ---- 2. 캠프
+  // ---- 2. 캠프 (2026-11-12 개편 뒤에는 경기력이 없어 세션에서 잰 유망주 성장·부상으로 본다)
   P.push('## 2. 스프링캠프\n');
-  P.push(`개막 뒤 ${CAMP_DAYS}일 경기력 (장소 배율 × 방향 값). 승수 = 0절 눈금. 체력의 부상 0.85배와 유망주 성장은 승수에 넣지 않았다 (아래 줄).\n`);
-  P.push(`| 장소 \\ 방향 | 비용(억) | ${CAMP_FOCUSES.map((f) => FOCUS[f].label).join(' | ')} |`, `|---|---|${CAMP_FOCUSES.map(() => '---|').join('')}`);
-  for (const pl of CAMP_PLACES) {
-    const pp = PLACE[pl];
-    P.push(`| ${pp.label} | ${eok(pp.cost, 1)} | ${CAMP_FOCUSES.map((fc) => f1(winsOf(FOCUS[fc].bat * pp.factor * CAMP_DAYS, FOCUS[fc].pit * pp.factor * CAMP_DAYS), 3)).join(' | ')} |`);
-  }
-  const campW = (pl: string, fc: string) => winsOf(FOCUS[fc as keyof typeof FOCUS].bat * PLACE[pl as keyof typeof PLACE].factor * CAMP_DAYS, FOCUS[fc as keyof typeof FOCUS].pit * PLACE[pl as keyof typeof PLACE].factor * CAMP_DAYS);
-  P.push('', `가장 비싼 캠프(미국·균형) − 가장 싼 캠프(국내·균형): ${f1(campW('usa', 'balanced') - campW('home', 'balanced'), 3)}승에 ${eok(PLACE.usa.cost - PLACE.home.cost)}억 (1승당 ${eok((PLACE.usa.cost - PLACE.home.cost) / Math.max(1e-9, campW('usa', 'balanced') - campW('home', 'balanced')), 0)}억). 국내 장소는 부상 1.05배.`);
-  P.push(`유망주 집중: 24세 이하 선수마다 잠재력 안에서 ${FOCUS.youth.youth}런 × 장소 배율 (미국 ${f1(FOCUS.youth.youth * PLACE.usa.factor, 2)}런). 체력: 시즌 부상 빈도 ${FOCUS.fitness.injury}배.`);
-  const campCnt = new Map<string, number>();
-  for (const y of Y) for (const c of y.camps) if (c.team !== y.team) campCnt.set(`${c.place}/${c.focus}`, (campCnt.get(`${c.place}/${c.focus}`) ?? 0) + 1);
-  const campTot = [...campCnt.values()].reduce((a, b) => a + b, 0);
-  P.push('', `AI 구단의 선택 (세션 ${nSeasons}시즌): ${[...campCnt.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${PLACE[k.split('/')[0] as keyof typeof PLACE].label}·${FOCUS[k.split('/')[1] as keyof typeof FOCUS].label} ${f1((v / campTot) * 100, 0)}%`).join(', ')}.`, '');
+  P.push(...campSection(Y, E.runsPerWin), '');
 
   // ---- 3. 코치
   P.push('## 3. 코치\n');
@@ -673,7 +661,160 @@ async function partReport(): Promise<void> {
   writeOut(outPath, P.join('\n').replace(/(?<!\\)~/g, '\\~'));
 }
 
-const parts: Record<string, () => Promise<void>> = { edge: partEdge, choices: partChoices, session: partSession, report: partReport };
+
+// ---------------------------------------------------------------- 캠프 표 (세션 기록)
+
+/** 캠프 (장소·방향)별 AI 구단 시즌: 비용, 유망주 성장 인원·런, 정규시즌 부상 결장 횟수·일 (구단 시즌 평균) */
+function campSection(Y: YearRec[], runsPerWin: number): string[] {
+  const rows = new Map<string, { n: number; cost: number; grown: number; runs: number; inj: number; days: number }>();
+  const byFocus = new Map<string, { n: number; cost: number; grown: number; runs: number; inj: number; days: number }>();
+  const byPlace = new Map<string, { n: number; cost: number; grown: number; runs: number; inj: number; days: number }>();
+  const add = (m: Map<string, { n: number; cost: number; grown: number; runs: number; inj: number; days: number }>, k: string, c: YearRec['camps'][number], inj: { n: number; days: number }) => {
+    const r = m.get(k) ?? { n: 0, cost: 0, grown: 0, runs: 0, inj: 0, days: 0 };
+    r.n++; r.cost += c.cost ?? PLACE[c.place as CampPlace].cost; r.grown += c.grown ?? 0; r.runs += c.grownRuns ?? 0; r.inj += inj.n; r.days += inj.days;
+    m.set(k, r);
+  };
+  let all = 0;
+  for (const y of Y) {
+    if (!y.injuries) continue;
+    for (const c of y.camps) {
+      if (c.team === y.team || c.team >= y.injuries.length) continue;
+      const inj = y.injuries[c.team];
+      add(rows, `${c.place}/${c.focus}`, c, inj); add(byFocus, c.focus, c, inj); add(byPlace, c.place, c, inj);
+      all++;
+    }
+  }
+  if (!all) return ['(세션 기록에 캠프 성장·부상 칸이 없다)'];
+  const line = (label: string, r: { n: number; cost: number; grown: number; runs: number; inj: number; days: number }) =>
+    `| ${label} | ${r.n} (${f1((r.n / all) * 100, 0)}%) | ${eok(r.cost / r.n)} | ${f1(r.grown / r.n, 1)} | ${f1(r.runs / r.n, 1)} | ${f1(r.runs / r.n / runsPerWin, 2)} | ${f1(r.inj / r.n, 1)} | ${f1(r.days / r.n, 0)} |`;
+  const head = ['| 캠프 | AI 구단 시즌 (몫) | 비용(억) | 성장 인원 | 성장 런 | ≈ 승 (런 ÷ 1승 득실) | 부상 결장 수 | 부상 결장 일 |', '|---|---|---|---|---|---|---|---|'];
+  const out: string[] = [];
+  out.push(`세션의 AI 구단 시즌 ${all}개 (플레이어 자리 뺌). 성장 런 = 개막 때 캠프가 24세 이하 선수를 잠재력 안에서 끌어올린 런 합 (그 뒤 해마다 이어지는 몫, 잠재력 상한이라 앞당김에 가깝다). 부상 = 그 시즌 정규시즌 부상 결장 (이탈 이벤트 뺌). 캠프 방향은 구단 사정(젊은 선수 수·성향)으로 골라 구단끼리 바로 견주면 고른 까닭이 섞인다.\n`);
+  out.push('방향별:\n', ...head, ...[...byFocus.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, r]) => line(FOCUS[k as CampFocus]?.label ?? k, r)), '');
+  out.push('장소별:\n', ...head, ...[...byPlace.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, r]) => line(PLACE[k as CampPlace]?.label ?? k, r)), '');
+  out.push('장소·방향별 (5번 이상):\n', ...head, ...[...rows.entries()].filter(([, r]) => r.n >= 5).sort((a, b) => b[1].n - a[1].n)
+    .map(([k, r]) => line(`${PLACE[k.split('/')[0] as CampPlace]?.label ?? k}·${FOCUS[k.split('/')[1] as CampFocus]?.label ?? ''}`, r)), '');
+  return out;
+}
+
+// ---------------------------------------------------------------- compare (이벤트·캠프 개편 전 → 후)
+
+/**
+ * 2026-11-12 이벤트·캠프 개편 카드: 전 → 후 보고서. 선택지 표(choices JSON)와 세션(JSONL)을 전·후 한 벌씩 받는다.
+ *   npx tsx tools/nominal_measure.ts --part compare --edge reports/tmp/nominal-edge.json --choices-before A.json --choices-after B.json
+ *        --before a1.jsonl,a2.jsonl --after b1.jsonl,b2.jsonl --out reports/events-camp.md
+ */
+async function partCompare(): Promise<void> {
+  const E = fitEdge(JSON.parse(readFileSync(arg('edge', 'reports/tmp/nominal-edge.json')!, 'utf8')));
+  const days = E.seasonDays;
+  const winsOf = (bat: number, pit: number) => (bat / days) * E.winsPerBat + (pit / days) * E.winsPerPit;
+  const ONE = { bat: 1 / 9, sp: 0.12, rp: 0.05 };
+  const condEdge = DEFAULT_PARAMS.cond.edge;
+  const choiceWins = (e: ChoiceEffect) => winsOf(e.formBat, e.formPit) + (e.formOneBat * ONE.bat / days) * E.winsPerBat + ((e.formOneSp * ONE.sp + e.formOneRp * ONE.rp) / days) * E.winsPerPit
+    + winsOf(e.condTeam * condEdge, e.condTeam * condEdge) + (e.condOne * condEdge * ONE.bat / days) * E.winsPerBat;
+  const load = (f: string) => JSON.parse(readFileSync(f, 'utf8')) as { events: EventRow[] };
+  const sessions = (fs: string) => fs.split(',').filter((x) => x && existsSync(x)).flatMap((f) => readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as YearRec));
+  const CB = load(arg('choices-before')!);
+  const CA = load(arg('choices-after')!);
+  const YB = sessions(arg('before', '')!);
+  const YA = sessions(arg('after', '')!);
+  const spreadOf = (ev: EventRow) => {
+    const chs = ev.choices.filter((c) => c.n > 0);
+    const w = chs.map((c) => choiceWins(c.mean));
+    const cs = chs.map((c) => c.mean.cash);
+    return { w: w.length ? Math.max(...w) - Math.min(...w) : 0, c: cs.length ? Math.max(...cs) - Math.min(...cs) : 0, n: chs.length };
+  };
+  const notice = new Set(EVENTS.filter((e) => e.notice).map((e) => e.id));
+  const manual = new Set(EVENTS.filter((e) => e.manual).map((e) => e.id));
+  const P: string[] = [];
+  P.push('# 무작위 이벤트·스프링캠프 개편 전 → 후 (2026-11-12)\n');
+  P.push(`도구: \`tools/nominal_measure.ts --part compare\`. 세션: 2026 시작, 플레이어 자리 ${YA[0]?.teamName ?? '-'} (AI 운영, 이벤트는 첫 선택지 자동), 시드 ${[...new Set(YA.map((y) => y.seed))].join('·')}, 전 ${YB.length}시즌·후 ${YA.length}시즌. 승수 눈금은 reports/nominal-content.md 0절 (타자 edge +0.01 시즌 내내 ${f1(E.winsPerBat * 0.01, 2)}승, 투수 ${f1(E.winsPerPit * 0.01, 2)}승).\n`);
+  // ---- 1. 선택지 차이 분포
+  P.push('## 1. 이벤트 선택지 차이 (모의 상황, 2026년 돈)\n');
+  P.push('선택지 차이 = 가장 좋은 선택지와 가장 나쁜 선택지의 평균 승수·자금 차이 (reports/nominal-content.md 1.1과 같은 방법). 기준: 0.3승 또는 5억 원 이상.\n');
+  const bucket = (rows: EventRow[], filter: (ev: EventRow) => boolean) => {
+    const xs = rows.filter(filter).map(spreadOf);
+    return {
+      n: xs.length,
+      tiny: xs.filter((x) => x.w < 0.05 && x.c < 10_000).length,
+      mid: xs.filter((x) => !(x.w < 0.05 && x.c < 10_000) && !(x.w >= 0.3 || x.c >= 50_000)).length,
+      big: xs.filter((x) => x.w >= 0.3 || x.c >= 50_000).length,
+      medW: pct(xs.map((x) => x.w), 0.5), medC: pct(xs.map((x) => x.c), 0.5),
+    };
+  };
+  const bB = bucket(CB.events, (ev) => !ev.manual);
+  const bA = bucket(CA.events, (ev) => !ev.manual && !notice.has(ev.id));
+  P.push('| | 선택지 이벤트 수 | 미미 (0.05승·1억 미만) | 중간 | 기준 넘음 (0.3승 또는 5억) | 승수 차 가운데값 | 자금 차 가운데값(억) |', '|---|---|---|---|---|---|---|',
+    `| 전 | ${bB.n} | ${bB.tiny} | ${bB.mid} | ${bB.big} | ${f1(bB.medW, 2)} | ${eok(bB.medC)} |`,
+    `| 후 (소식 ${notice.size}종 뺌) | ${bA.n} | ${bA.tiny} | ${bA.mid} | ${bA.big} | ${f1(bA.medW, 2)} | ${eok(bA.medC)} |`, '');
+  P.push(`트레이드 제안(trade-offer, 따로 굴림)은 두 줄 모두 뺐다. 소식 이벤트 ${notice.size}종: ${[...notice].map((x) => `\`${x}\``).join(', ')}.\n`);
+  const fails = CA.events.filter((ev) => !ev.manual && !notice.has(ev.id)).map((ev) => ({ ev, s: spreadOf(ev) })).filter((x) => !(x.s.w >= 0.3 || x.s.c >= 50_000));
+  P.push(fails.length ? `기준에 못 미친 선택지 이벤트: ${fails.map((x) => `\`${x.ev.id}\` (${f1(x.s.w, 2)}승·${eok(x.s.c)}억)`).join(', ')}.\n` : '모든 선택지 이벤트가 기준을 넘는다.\n');
+  const before = new Map(CB.events.map((e) => [e.id, spreadOf(e)]));
+  P.push('<details><summary>선택지 이벤트별 차이 (전 → 후)</summary>\n');
+  P.push('| 이벤트 | 승수 차 | 자금 차(억) |', '|---|---|---|');
+  for (const ev of CA.events) {
+    if (ev.manual || notice.has(ev.id)) continue;
+    const a = spreadOf(ev);
+    const b = before.get(ev.id);
+    P.push(`| ${ev.title} (\`${ev.id}\`) | ${b ? f1(b.w, 2) : '-'} → ${f1(a.w, 2)} | ${b ? eok(b.c) : '-'} → ${eok(a.c)} |`);
+  }
+  P.push('\n</details>\n');
+  // ---- 2. 시즌당 이벤트
+  P.push('## 2. 시즌당 이벤트 (세션, 플레이어 자리, 첫 선택지 자동)\n');
+  const byIdA = new Map(CA.events.map((e) => [e.id, e]));
+  const byIdB = new Map(CB.events.map((e) => [e.id, e]));
+  const season = (Y: YearRec[], C: Map<string, EventRow>, isNotice: (id: string) => boolean) => {
+    const evs = Y.map((y) => y.events.filter((e) => !manual.has(e.id)));
+    const per = (f: (id: string) => boolean) => mean(evs.map((es) => es.filter((e) => f(e.id)).length));
+    const cash = Y.map((y) => y.eventCash);
+    const wins = Y.map((y) => winsOf(y.eventForm.bat, y.eventForm.pit) + (y.eventForm.one * ONE.bat / days) * E.winsPerBat);
+    // 고르기 방식별 합 (세션 횟수 × 선택지 평균)
+    const pol = (pick: (cs: ChoiceRow[]) => ChoiceRow | undefined) => {
+      const acc = { cash: 0, wins: 0 };
+      for (const es of evs) for (const e of es) {
+        const ev = C.get(e.id);
+        const ch = ev && pick(ev.choices.filter((c) => c.n > 0));
+        if (!ch) continue;
+        acc.cash += ch.mean.cash / Y.length; acc.wins += choiceWins(ch.mean) / Y.length;
+      }
+      return acc;
+    };
+    const by = (f: (c: ChoiceRow) => number) => (cs: ChoiceRow[]) => [...cs].sort((a, b) => f(b) - f(a))[0];
+    return {
+      all: per(() => true), choice: per((id) => !isNotice(id)), notice: per(isNotice),
+      offers: mean(Y.map((y) => y.events.filter((e) => manual.has(e.id)).length)),
+      cash: mean(cash), cash10: pct(cash, 0.1), cash90: pct(cash, 0.9), wins: mean(wins), wins10: pct(wins, 0.1), wins90: pct(wins, 0.9),
+      auto: pol((cs) => cs[0]), maxCash: pol(by((c) => c.mean.cash)), maxWins: pol(by((c) => choiceWins(c.mean))),
+    };
+  };
+  const sB = season(YB, byIdB, () => false);
+  const sA = season(YA, byIdA, (id) => notice.has(id));
+  P.push('| 시즌당 | 전 | 후 |', '|---|---|---|',
+    `| 무작위 이벤트 수 | ${f1(sB.all)} | ${f1(sA.all)} |`,
+    `| 그중 묻는 이벤트 | ${f1(sB.choice)} | ${f1(sA.choice)} |`,
+    `| 그중 소식 (묻지 않음) | ${f1(sB.notice)} | ${f1(sA.notice)} |`,
+    `| AI 트레이드 제안 (따로) | ${f1(sB.offers)} | ${f1(sA.offers)} |`,
+    `| 이벤트 자금 (억, 장부, 평균·10%·90%) | ${eok(sB.cash)} (${eok(sB.cash10)}~${eok(sB.cash90)}) | ${eok(sA.cash)} (${eok(sA.cash10)}~${eok(sA.cash90)}) |`,
+    `| 이벤트 경기력 → 승수 (자동, 평균·10%·90%) | ${f1(sB.wins, 2)} (${f1(sB.wins10, 2)}~${f1(sB.wins90, 2)}) | ${f1(sA.wins, 2)} (${f1(sA.wins10, 2)}~${f1(sA.wins90, 2)}) |`,
+    `| 선택지 평균으로 본 자동(첫 선택지) 자금·승수 | ${eok(sB.auto.cash)}억 · ${f1(sB.auto.wins, 2)}승 | ${eok(sA.auto.cash)}억 · ${f1(sA.auto.wins, 2)}승 |`,
+    `| 늘 자금 최대로 고르면 | ${eok(sB.maxCash.cash)}억 · ${f1(sB.maxCash.wins, 2)}승 | ${eok(sA.maxCash.cash)}억 · ${f1(sA.maxCash.wins, 2)}승 |`,
+    `| 늘 승수 최대로 고르면 | ${eok(sB.maxWins.cash)}억 · ${f1(sB.maxWins.wins, 2)}승 | ${eok(sA.maxWins.cash)}억 · ${f1(sA.maxWins.wins, 2)}승 |`, '');
+  P.push('장부 자금은 그 해 연봉 지수가 곱해진 값(2027년부터 오른다), 선택지 평균은 2026년 돈. 고르기 방식 두 줄은 묻는 이벤트만 고르고 소식은 첫 선택지다 (후).\n');
+  // ---- 3. 캠프
+  P.push('## 3. 스프링캠프\n');
+  P.push('### 전\n', ...campSection(YB, E.runsPerWin));
+  P.push('### 후\n', ...campSection(YA, E.runsPerWin));
+  P.push('후 값표 (league/camp.ts, 임시값): 장소 비용·성장 배율·부상 배율, 방향 성장 런·대상·부상 배율. 시즌 부상 배율 = 장소 × 방향.\n');
+  P.push('| 장소 | 비용(억) | 성장 배율 | 부상 배율 |', '|---|---|---|---|', ...(Object.keys(PLACE) as CampPlace[]).map((k) => `| ${PLACE[k].label} | ${eok(PLACE[k].cost)} | ${PLACE[k].factor} | ${PLACE[k].injury} |`), '');
+  P.push('| 방향 | 성장 런 (24세 이하, × 장소 배율) | 대상 | 부상 배율 | 일본 오키나와에서 시즌 부상 배율 |', '|---|---|---|---|---|',
+    ...(Object.keys(FOCUS) as CampFocus[]).map((k) => `| ${FOCUS[k].label} | ${FOCUS[k].youth} | ${FOCUS[k].scope === 'all' ? '모두' : FOCUS[k].scope === 'bat' ? '타자' : '투수'} | ${FOCUS[k].injury} | ${f1(campInjuryOf({ place: 'japan', focus: k }), 3)} |`), '');
+  const growthAll = (Y: YearRec[]) => mean(Y.flatMap((y) => y.growth.map((g) => g.bat + g.pit)));
+  P.push(`리그 전체 성장 (구단 상위 25명 안 같은 구단에 남은 선수의 한 해 오른 몫 합, 구단 평균): 전 ${f1(growthAll(YB))}런 → 후 ${f1(growthAll(YA))}런.\n`);
+  writeOut(outPath, P.join('\n').replace(/(?<!\\)~/g, '\\~'));
+}
+
+const parts: Record<string, () => Promise<void>> = { edge: partEdge, choices: partChoices, session: partSession, report: partReport, compare: partCompare };
 if (!parts[part]) throw new Error(`없는 갈래: ${part}`);
 void parts[part]();
 
