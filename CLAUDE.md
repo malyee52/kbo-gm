@@ -58,6 +58,7 @@ npx tsx tools/engine2_baseline.ts --years 2025 --seasons 10   # 투수 운용·�
 npx tsx tools/running_check.ts --years 2025,2019,2012 --seasons 20   # 주루·작전 점검
 npx tsx tools/manager_check.ts --years 2025,2019,2012 --seasons 10   # 상위 9명 타석·경기당 교체·4칸 OPS
 npx tsx tools/pen_check.ts --years 2025,2024,2023 --seasons 6        # 선발·구원·세이브·블론·고의4구 (--neutral은 감독 성향 없이)
+npx tsx tools/saves_wins.ts --years 2025,2024,2023 --seasons 6 --out reports/saves-wins.md   # 세이브·15승·180이닝 원인 나눠 재기 (마무리 몰림·그날 마무리 상태·선발 이닝, params 실험 --exp all|none|base,ace2,…)
 npx tsx tools/injury_check.ts --years 2025 --seasons 6               # 결장 비율·경기 중 부상·혹사 부상률
 npx tsx tools/condition_check.ts --years 2025,2019,2012 --seasons 6  # 선수 컨디션 점검
 npx tsx tools/time_limit_fit.ts --seasons 40                         # 시간 제한 흉내(params.timeLimit) 해마다 맞춤
