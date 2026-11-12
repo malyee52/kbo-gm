@@ -3465,7 +3465,8 @@ export class GameSession {
           const w = worldFromLeague(L, this.store, this.params, { form: false });
           const userPick = L.campPlan?.year === L.year ? L.campPlan.pick : null;
           const teams = L.teams.map((_, i) => i).filter((i) => !isFuturesTeam(L, i, L.year));
-          twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w)));
+          twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w),
+            (id) => this.seenValue(id)));
           delete L.campPlan;
         }
         twoWayNews.push(...openNaming(L, this.teamIdx)); // 구장 명명권 (league/naming.ts)

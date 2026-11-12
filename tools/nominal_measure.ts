@@ -301,6 +301,8 @@ async function partSession(): Promise<void> {
   const g = GameSession.create(store, { year: 2026, teamIdx, seed, difficulty: 'normal' }, FAST);
   const t0 = Date.now();
   for (let i = 0; i < n; i++) {
+    // 해고 뒤 다른 구단으로 옮기면 그 시즌 맡은 구단을 잰다 (2026-11-12: 예전에는 시작 구단을 계속 읽었다)
+    const teamIdx = g.teamIdx;
     const L = g.league;
     const year = g.year;
     const T = g.world.teams.length;
@@ -795,6 +797,9 @@ async function partCompare(): Promise<void> {
     `| 그중 묻는 이벤트 | ${f1(sB.choice)} | ${f1(sA.choice)} |`,
     `| 그중 소식 (묻지 않음) | ${f1(sB.notice)} | ${f1(sA.notice)} |`,
     `| AI 트레이드 제안 (따로) | ${f1(sB.offers)} | ${f1(sA.offers)} |`,
+    `| 플레이어 자리 승수 (맡은 구단) | ${f1(mean(YB.map((y) => y.wins[y.team])))} | ${f1(mean(YA.map((y) => y.wins[y.team])))} |`,
+    `| 결산 뒤 구단주 신뢰 평균 | ${f1(mean(YB.map((y) => y.trustAfter)))} | ${f1(mean(YA.map((y) => y.trustAfter)))} |`,
+    `| 해고 (시즌 수 중) | ${YB.filter((y) => y.fired).length} | ${YA.filter((y) => y.fired).length} |`,
     `| 이벤트 자금 (억, 장부, 평균·10%·90%) | ${eok(sB.cash)} (${eok(sB.cash10)}~${eok(sB.cash90)}) | ${eok(sA.cash)} (${eok(sA.cash10)}~${eok(sA.cash90)}) |`,
     `| 이벤트 경기력 → 승수 (자동, 평균·10%·90%) | ${f1(sB.wins, 2)} (${f1(sB.wins10, 2)}~${f1(sB.wins90, 2)}) | ${f1(sA.wins, 2)} (${f1(sA.wins10, 2)}~${f1(sA.wins90, 2)}) |`,
     `| 선택지 평균으로 본 자동(첫 선택지) 자금·승수 | ${eok(sB.auto.cash)}억 · ${f1(sB.auto.wins, 2)}승 | ${eok(sA.auto.cash)}억 · ${f1(sA.auto.wins, 2)}승 |`,

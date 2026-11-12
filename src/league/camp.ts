@@ -2,7 +2,7 @@
 // 2026-11-12 개편 (사용자 결정 Q36, reports/nominal-content.md 2장): 개막 뒤 30일 경기력(최대 0.23승, 1승당 78억 원)을 빼고
 // 효과를 유망주 성장과 시즌 부상 위험으로 옮겼다.
 // - 장소: 비용, 시설 배율(유망주 성장), 시즌 부상 배율. 국내는 싸지만 추워서 부상이 늘고, 따뜻한 해외일수록 부상이 줄고 성장이 크다.
-// - 훈련 방향: 유망주 성장(24세 이하 선수를 잠재력 안에서 끌어올린다. 상한을 넘기지 않아 장기 재능 총량은 그대로)과 시즌 부상 배율의 맞바꿈.
+// - 훈련 방향: 유망주 성장(24세 이하 앞선 YOUTH_TOP명을 잠재력 안에서 끌어올린다. 상한을 넘기지 않아 장기 재능 총량은 그대로)과 시즌 부상 배율의 맞바꿈.
 //   유망주 집중은 성장이 가장 크지만 훈련 강도로 부상이 늘고, 체력은 성장이 없는 대신 부상이 가장 준다.
 //   어느 쪽이 나은지는 구단의 젊은 선수 수와 주전 나이에 달려 있어 늘 같은 답이 아니다.
 // - AI 구단은 자금으로 장소를, 단장 성향·젊은 선수 수·약한 쪽으로 방향을 고른다 (진짜 잠재는 보지 않고 나이만 센다).
@@ -87,23 +87,26 @@ export function campYoung(league: LeagueState, team: number, year: number, scope
     && p.military?.state !== 'serving' && (scope === 'all' || (scope === 'pit') === !!p.isPitcher));
 }
 
-/** AI가 유망주 집중을 고르는 젊은 선수 수 (24세 이하, 임시값. 2026 시작 구단마다 18~33명, 가운데 21명) */
-export const AI_YOUTH_MIN = 24;
+/** 캠프가 끌어올리는 젊은 선수 수 (방향 대상 가운데 앞선 선수부터, 임시값). 2군까지 모두면 구단마다 30~40명이라 성장 쪽이 늘 이겨서 줄였다 */
+export const YOUTH_TOP = 10;
+/** AI가 유망주 집중을 고르는 젊은 선수 수: 리그 평균의 배수 (24세 이하, 임시값. 해가 갈수록 구단마다 30~40명으로 늘어 절대 수가 아니라 리그 평균에 견준다) */
+export const AI_YOUTH_REL = 1.1;
 
 /**
  * AI 구단의 선택: 자금으로 장소, 단장 성향·젊은 선수 수·약한 쪽으로 방향 (2026-11-12 Q36에서 다시 맞춤, 임시값).
  * 우승 도전형은 부상을 줄이는 체력, 육성형은 유망주 집중, 짠돌이는 대만·균형, 나머지는 젊은 선수가 많으면 유망주 집중,
  * 아니면 약한 쪽(타격·투구)이나 수비·주루
  */
-export function aiCamp(league: LeagueState, team: number, cash: number, strength: { bat: number; pit: number }, year = league.year): CampPick {
+export function aiCamp(league: LeagueState, team: number, cash: number, strength: { bat: number; pit: number }, year = league.year,
+                       leagueYoung = campYoung(league, team, year).length): CampPick {
   const place: CampPlace = cash >= 1_000_000 ? 'usa' : cash >= 600_000 ? 'australia' : cash >= 200_000 ? 'japan' : cash >= 50_000 ? 'taiwan' : 'home';
   const style = gmStyle(league, team);
-  const young = campYoung(league, team, year).length;
+  const young = campYoung(league, team, year).length / Math.max(1, leagueYoung);
   let focus: CampFocus;
   if (style === 'frugal') focus = 'balanced';
   else if (style === 'develop') focus = 'youth';
-  else if (style === 'winnow') focus = young >= AI_YOUTH_MIN + 6 ? 'balanced' : 'fitness';
-  else if (young >= AI_YOUTH_MIN) focus = 'youth';
+  else if (style === 'winnow') focus = young >= AI_YOUTH_REL + 0.15 ? 'balanced' : 'fitness';
+  else if (young >= AI_YOUTH_REL) focus = 'youth';
   else if (Math.abs(strength.bat - strength.pit) < 0.03) focus = 'def';
   else focus = strength.bat < strength.pit ? 'bat' : 'pit';
   return { place: style === 'frugal' && place !== 'home' ? 'taiwan' : place, focus };
@@ -112,9 +115,10 @@ export function aiCamp(league: LeagueState, team: number, cash: number, strength
 /**
  * 개막 때 모든 구단의 캠프: 비용을 장부에, 유망주 성장을 능력에 (부상 배율은 campInjury로 world.ts가 읽는다). 우리 구단 소식 문장을 돌려준다.
  * teams: 이번 시즌 1군 구단 색인, sim: 선수 ID → 능력 계산용 선수 (leagueView)
+ * userRank: 우리 구단에서 성장시킬 젊은 선수를 고르는 순서 (우리 스카우트 가치, 진짜 잠재·능력이 새지 않게). 없으면 AI와 같이 지금 능력 순
  */
 export function runCamps(league: LeagueState, year: number, teams: number[], userTeam: number, userPick: CampPick | null,
-                         cashOf: (t: number) => number, sim: Map<string, SimPlayer>, ctx: ValueContext): string[] {
+                         cashOf: (t: number) => number, sim: Map<string, SimPlayer>, ctx: ValueContext, userRank?: (id: string) => number): string[] {
   const news: string[] = [];
   const strength = (t: number) => {
     // 구단 상위 타자 13명·투수 12명의 지금 기여(런) 평균, 리그 평균 대비 비율
@@ -127,14 +131,18 @@ export function runCamps(league: LeagueState, year: number, teams: number[], use
   const lgBat = all.reduce((a, x) => a + x.s.bat, 0) / Math.max(1, all.length) || 1;
   const lgPit = all.reduce((a, x) => a + x.s.pit, 0) / Math.max(1, all.length) || 1;
   league.camps = (league.camps ?? []).filter((c) => c.year > year - KEEP_YEARS && c.year !== year);
+  const lgYoung = teams.reduce((a, t) => a + campYoung(league, t, year).length, 0) / Math.max(1, teams.length);
   for (const { t, s } of all) {
-    const pick = t === userTeam ? (userPick ?? DEFAULT_CAMP) : aiCamp(league, t, cashOf(t), { bat: s.bat / lgBat, pit: s.pit / lgPit }, year);
+    const pick = t === userTeam ? (userPick ?? DEFAULT_CAMP) : aiCamp(league, t, cashOf(t), { bat: s.bat / lgBat, pit: s.pit / lgPit }, year, lgYoung);
     const place = PLACE[pick.place];
     const focus = FOCUS[pick.focus];
     league.ledger.push({ year, from: t, to: -1, amount: place.cost, note: `${league.teams[t].name} 스프링캠프 (${place.label})`, kind: 'ops' });
     let grown = 0;
     let grownRuns = 0;
-    if (focus.youth) ({ n: grown, runs: grownRuns } = youthGrowth(league, t, year, focus.youth * place.factor, focus.scope, sim, ctx));
+    if (focus.youth) {
+      const rank = t === userTeam && userRank ? userRank : (id: string) => (sim.get(id) ? currentRuns(sim.get(id)!, ctx) : -1e9);
+      ({ n: grown, runs: grownRuns } = youthGrowth(league, t, year, focus.youth * place.factor, focus.scope, sim, ctx, rank));
+    }
     league.camps.push({ year, team: t, ...pick, cost: place.cost, ...(grown ? { grown, grownRuns: Math.round(grownRuns * 100) / 100 } : {}) });
     if (t === userTeam) {
       news.push(`스프링캠프: ${place.label}, ${focus.label} 훈련 (비용 ${(place.cost / 10000).toFixed(0)}억 원). ${grown ? `유망주 ${grown}명 성장` : '성장한 유망주 없음'}, 시즌 ${injuryWord(campInjuryOf(pick))}`);
@@ -143,13 +151,15 @@ export function runCamps(league: LeagueState, year: number, teams: number[], use
   return news;
 }
 
-/** 24세 이하 선수(scope 쪽)를 잠재력 안에서 runs만큼 끌어올린다. 끌어올린 선수 수와 런 합 */
+/** 24세 이하 선수(scope 쪽) 가운데 rank 앞선 YOUTH_TOP명을 잠재력 안에서 runs만큼 끌어올린다. 끌어올린 선수 수와 런 합 */
 function youthGrowth(league: LeagueState, team: number, year: number, runs: number, scope: 'all' | 'bat' | 'pit',
-                     sim: Map<string, SimPlayer>, ctx: ValueContext): { n: number; runs: number } {
+                     sim: Map<string, SimPlayer>, ctx: ValueContext, rank: (id: string) => number): { n: number; runs: number } {
   let n = 0;
   let sum = 0;
-  for (const p of campYoung(league, team, year, scope)) {
-    if (!sim.get(p.id)) continue;
+  const cands = campYoung(league, team, year, scope).filter((p) => sim.get(p.id));
+  const r = new Map(cands.map((p) => [p.id, rank(p.id)]));
+  cands.sort((a, b) => r.get(b.id)! - r.get(a.id)! || a.id.localeCompare(b.id));
+  for (const p of cands.slice(0, YOUTH_TOP)) {
     const now = runsOf(p, ctx, year);
     const target = Math.min(p.potential, now + runs);
     if (target <= now + 0.05) continue;
