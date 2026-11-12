@@ -6,6 +6,7 @@ import { guessText } from '../../league/scout';
 import { useGame } from '../context';
 import { EditorEdit, type EditNote } from './EditorEdit';
 import { EditorCurve } from './EditorCurve';
+import { EditorDefense } from './EditorDefense';
 
 const fmt = (x: number, d = 1) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
 
@@ -72,6 +73,7 @@ function EditorPlayerBody({ v }: { v: EditorPlayerView }) {
       </section>
       <EditorCurve id={v.id} />
       <EditorEdit key={`${v.id}:${epoch}`} v={v} note={note} onSaved={(n, ok) => { setNote(n); if (ok) setEpoch(epoch + 1); }} />
+      {v.defense && <EditorDefense key={`${v.id}:def:${epoch}`} id={v.id} rows={v.defense} onSaved={(text, ok) => { setNote({ text, warn: [] }); if (ok) setEpoch(epoch + 1); }} />}
     </div>
   );
 }

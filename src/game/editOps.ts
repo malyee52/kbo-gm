@@ -165,8 +165,10 @@ export function editWarnings(s: GameSession, ops: EditOp[]): string[] {
 export function editRecords(s: GameSession): EditRecord[] {
   const out: EditRecord[] = [];
   for (const a of s.actions) {
-    if (a.type !== 'edit' && a.type !== 'edit-off') continue;
-    out.push({ year: a.year ?? s.league.startYear, day: a.type === 'edit' ? a.day : -1, names: a.names ?? [], lines: a.log ?? [] });
+    // 수비 고치기는 에디터로 옮긴 뒤(ed, 2026-11-05 부록 B 물음 4)의 것만. 예전 수비 고치기는 에디터 고침이 아니었다
+    if (a.type !== 'edit' && a.type !== 'edit-off' && a.type !== 'def-edit' && a.type !== 'def-edit-off') continue;
+    if ((a.type === 'def-edit' || a.type === 'def-edit-off') && !a.ed) continue;
+    out.push({ year: a.year ?? s.league.startYear, day: a.type === 'edit' || a.type === 'def-edit' ? a.day : -1, names: a.names ?? [], lines: a.log ?? [] });
   }
   return out.reverse();
 }

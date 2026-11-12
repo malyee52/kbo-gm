@@ -16,6 +16,7 @@ import {
 } from '../../league/salary';
 import { seasonsWith } from '../../league/stadium';
 import type { LeaguePlayer } from '../../league/types';
+import type { GameSession } from '../../game/session';
 import { posName, TeamName, useGame, usePriceIndex, useWon } from '../context';
 import { DataTable, GuessCell, guessColumn, useSeen } from '../parts';
 import { phraseRank } from '../../league/scout';
@@ -28,6 +29,7 @@ import { FIX_LABEL, stageHeadline, stageLeftovers, stageRecord, type Leftover, t
 import { teamVars } from '../teams';
 import { useNarrow } from '../BoxScore';
 import { expansionPerk } from '../../league/eras';
+import { afterPaint } from '../paint';
 import { openingEdits, openWithPreview } from '../openingBoard';
 import { countVotes, interestBreakdown, SWING_LABEL, voteOutlook, type FactKey, type InterestPart, type RuleAgenda, type RuleVoteRecord, type VoteChoice, type VoteFacts } from '../../ai/vote';
 import { agendaChange, agendaLabel } from '../../league/ruleVote';
@@ -61,6 +63,8 @@ export function Offseason() {
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 개막 준비(환경 맞춤) 중: 굳기 전에 문구를 먼저 그린다 (편의 P4 단기)
+  const [opening, setOpening] = useState(false);
   // 지난 단계 기록 보기 (단계 표시줄에서 지난 단계를 누름, 읽기 전용). null이면 지금 단계 판
   const [record, setRecord] = useState<LogStage | null>(null);
   // 남은 처리 확인 창: 남은 처리가 있는데 '다음'을 눌렀을 때 (기획안 2.5.1)
@@ -75,12 +79,23 @@ export function Offseason() {
     if (r.ok) void autosave();
   };
 
+  // 우리 FA 모두 제시 결과: 일부만 제시돼도 그만큼은 기록됐으니 저장한다
+  const offerAllDone = (f: ReturnType<typeof session.offerAllOwnFa>) => {
+    setMsg({ text: f.message, error: f.failed.length > 0 });
+    changed();
+    if (f.offered.length) void autosave();
+  };
+
   // 단계 넘기기. fix가 있으면 그 자동 처리(조작 하나)를 먼저 하고 넘긴다
   const step = async (fix?: LeftoverFix) => {
     setConfirm(null);
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
-    if (fix) {
+    if (fix === 'offer-own-fa') {
+      // 우리 FA 모두 요구 조건대로 제시 (편의 U2). 한 명이라도 거절되면 넘기지 않고 선수별 거절을 보여 준다
+      const f = session.offerAllOwnFa();
+      if (f.failed.length) { setBusy(false); offerAllDone(f); return; }
+    } else if (fix) {
       const f = fix === 'auto-comp' ? session.autoComp() : fix === 'auto-draft' ? session.autoDraft() : session.autoRelease();
       if (!f.ok) { setBusy(false); act(f); return; }
     }
@@ -95,11 +110,13 @@ export function Offseason() {
 
   const open = async () => {
     setBusy(true);
-    setMsg({ text: `${session.year + 1} 시즌을 준비하는 중입니다 (리그 환경 맞춤)` });
-    await new Promise((r) => setTimeout(r, 30));
+    setOpening(true);
+    setMsg({ text: `${session.year + 1} 시즌 개막 준비 중입니다 (리그 환경 맞춤, 몇 초 걸립니다)` });
+    await afterPaint();
     // 개막 준비에서 기용 보드를 미리 고쳤으면 개막 직후 그대로 옮긴다 (openingBoard.ts)
     const r = openWithPreview(session);
     setBusy(false);
+    setOpening(false);
     if (!r.ok) {
       setMsg({ text: r.message, error: true });
       return;
@@ -128,7 +145,7 @@ export function Offseason() {
   // 주 진행 단추(상태 줄·휴대폰 아래 고정)가 이 화면의 '다음'·'개막'을 맡는다
   const nextRef = useRef(next);
   nextRef.current = next;
-  const label = busy ? '처리 중' : nextLabel;
+  const label = opening ? '개막 준비 중' : busy ? '처리 중' : nextLabel;
   useEffect(() => {
     if (!off) return;
     setPrimary({ label, act: () => nextRef.current(), disabled: busy, title: left.length ? `남은 처리 ${left.length}건 (넘기기 전에 확인 창이 뜹니다)` : undefined });
@@ -186,7 +203,7 @@ export function Offseason() {
         </p>
       )}
       {off.stage === 'vote' && <VotePanel act={act} />}
-      {off.stage === 'fa' && <FaPanel act={act} />}
+      {off.stage === 'fa' && <FaPanel act={act} onOfferAll={offerAllDone} />}
       {off.stage === 'comp' && <CompPanel act={act} />}
       {off.stage === 'second' && <SecondPanel act={act} />}
       {off.stage === 'foreign' && <ForeignPanel act={act} />}
@@ -260,6 +277,7 @@ function LeftoverDialog({ items, stage, label, onCancel, onGo }: {
             </li>
           ))}
         </ul>
+        {fixes.includes('offer-own-fa') && <OfferAllPreview />}
         <div className="actions">
           {fixes.map((f) => <button key={f} type="button" onClick={() => onGo(f)}>{FIX_LABEL[f]}</button>)}
           {!blocked && <button type="button" onClick={() => onGo()}>그대로 넘기기 ({label})</button>}
@@ -792,7 +810,53 @@ function CapLine() {
   );
 }
 
-function FaPanel({ act }: { act: Act }) {
+/** 우리 FA 모두 요구 조건대로 제시하기 전 미리보기 (편의 U2): 요구 총액, 캡 대상 총액과 여유 전 → 후 */
+function OfferAllPreview() {
+  const { session } = useGame();
+  const won = useWon();
+  const v = session.ownFaOfferPreview();
+  if (!v.count) return null;
+  const what = v.limit === null ? null : salaryCap(session.year + 1, session.league) === null || v.limit < salaryCap(session.year + 1, session.league)! ? '구단 예산' : '샐러리캡';
+  return (
+    <div className="note small" aria-label="우리 FA 모두 제시 미리보기">
+      <div>우리 FA {v.count}명 · 요구 연봉 합계 <strong>{won(v.total)}</strong> (요구 기간대로)</div>
+      <div>{session.year + 1} 캡 대상 연봉 총액 {won(v.before)} → <strong>{won(v.after)}</strong></div>
+      {v.limit !== null && (
+        <div className={v.after > v.limit ? 'warn-line' : undefined}>
+          {what} {won(v.limit)}까지 여유 {won(v.limit - v.before)} → <strong>{won(v.limit - v.after)}</strong>
+          {v.after > v.limit && ' (넘는 만큼 요구가 작은 선수부터 거절됩니다. 에이전트와 합의한 조건은 예외)'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "우리 FA 모두 요구 조건대로 제시" 확인 창 (편의 U2) */
+function OfferAllDialog({ onCancel, onGo }: { onCancel: () => void; onGo: () => void }) {
+  const { session } = useGame();
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+  }, []);
+  const list = session.ownFaOpen();
+  return (
+    <dialog ref={ref} className="player summary off-confirm" onClose={onCancel} aria-label="우리 FA 모두 제시 확인" style={teamVars(session.team.franchise, session.team.name)}>
+      <div className="dialog-body">
+        <h2>우리 FA {list.length}명에게 요구 조건대로 제시</h2>
+        <p className="small">{list.map((e) => session.leaguePlayer(e.id)?.name ?? e.id).join(', ')}</p>
+        <OfferAllPreview />
+        <p className="muted small">선수마다 요구 연봉·기간 그대로 제시합니다. 거절된 선수는 까닭을 모아 보여 줍니다. 제시는 라운드를 마감하기 전까지 거둘 수 있습니다.</p>
+        <div className="actions">
+          <button type="button" onClick={() => { ref.current?.close(); onGo(); }}>제시하기</button>
+          <button type="button" className="ghost" onClick={() => { ref.current?.close(); onCancel(); }}>취소</button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function FaPanel({ act, onOfferAll }: { act: Act; onOfferAll: (f: ReturnType<GameSession['offerAllOwnFa']>) => void }) {
   const { session } = useGame();
   const px = usePriceIndex();
   const won = useWon();
@@ -800,6 +864,8 @@ function FaPanel({ act }: { act: Act }) {
   const off = session.offseason!;
   const info = useInfo();
   const [draft, setDraft] = useState<Record<string, { salary: string; years: string }>>({});
+  const [askAll, setAskAll] = useState(false);
+  const ownOpen = session.ownFaOpen();
   const players = new Map(session.league.players.map((p) => [p.id, p]));
   const names = session.league.teams.map((t) => t.name);
   const entries = off.fa.entries;
@@ -884,11 +950,17 @@ function FaPanel({ act }: { act: Act }) {
         {mineLeaving.length > 0 && (
           <p className="note small">우리 구단 FA {mineLeaving.length}명이 시장에 나와 있습니다. 붙잡으려면 제시하세요. 마지막 라운드까지 계약하지 못하면 떠납니다.</p>
         )}
+        {ownOpen.length > 0 && (
+          <div className="actions">
+            <button type="button" onClick={() => setAskAll(true)}>우리 FA 모두 요구 조건대로 제시 ({ownOpen.length}명)</button>
+          </div>
+        )}
         {full && <p className="muted small">보상 규정: A·B등급 FA를 데려가면 원 소속 구단이 보호 명단 밖 선수 1명 + 보상금, 또는 보상금만을 고릅니다 (다음 단계). C등급은 보상금만.</p>}
       </div>
       <DataTable id="off-fa" label="FA 시장" cols={cols} rows={rows} rowKey={(r) => r.e.id} full={full} searchText={byName}
         rowClass={(r) => (r.e.from === session.teamIdx ? 'me' : undefined)} empty="이번 오프시즌 FA가 없습니다." />
       <p className="muted small">능력은 우리 스카우트 팀의 다음 시즌 추측이라 범위로 보입니다 (20~80, 50 = 리그 평균 주전). FA 제시 연봉은 억 원 단위로 입력합니다 (소수 한 자리, 예: 3.5 = 3억 5,000만 원).</p>
+      {askAll && <OfferAllDialog onCancel={() => setAskAll(false)} onGo={() => { setAskAll(false); onOfferAll(session.offerAllOwnFa()); }} />}
     </section>
   );
 }

@@ -34,24 +34,71 @@ export interface SaveRecord {
   data: GameSave;
 }
 
+/**
+ * 저장 칸 요약 (2026-11-11 편의 P1): 목록·자동 저장 정리는 이것만 읽는다.
+ * 큰 data는 STORE에, 요약은 INFO_STORE에 같은 칸 이름으로 둔다. 저장 데이터 형식(GameSave)은 그대로다.
+ */
+export interface SaveInfo extends Omit<SaveRecord, 'data'> {
+  /** 에디터 사용 표시 (editorMarkOfSave) */
+  editor: '보기' | '고침' | null;
+  /** 오프시즌 저장 */
+  offseason: boolean;
+  /** 그 시즌 정규시즌이 끝난 저장 (오프시즌 포함) */
+  done: boolean;
+  /** 불러올 수 없는 예전 형식 (isOutdatedSave) */
+  outdated: boolean;
+}
+
+/** 저장 기록이 그 시즌 종료(또는 오프시즌) 상태인지. 지난 시즌의 "정규시즌 종료" 소식은 세지 않는다 */
+export function seasonDoneOf(year: number, data: GameSave): boolean {
+  if (data.format === 3 && data.phase === 'offseason') return true;
+  return (data.news ?? []).some((n) => (n.year ?? year) === year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
+}
+
+/** 저장 기록 → 요약 */
+export function infoOf(rec: SaveRecord): SaveInfo {
+  const { data, ...head } = rec;
+  const offseason = (data as { format?: unknown; phase?: unknown } | undefined)?.format === 3 && (data as { phase?: unknown }).phase === 'offseason';
+  let done = offseason;
+  try { done = offseason || seasonDoneOf(rec.year, data); } catch { /* 깨진 저장: 종료 아님으로 */ }
+  return { ...head, editor: editorMarkOfSave(data), offseason, done, outdated: isOutdatedSave(data) };
+}
+
+const INFO_STORE = 'save-info';
+/** DB 버전 2 (2026-11-11): 요약 store를 더했다. 1 → 2로 올릴 때 있던 칸의 요약을 채운다 */
+const DB_VERSION = 2;
+
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE, { keyPath: 'slot' });
+      const db = req.result;
+      const t = req.transaction!;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'slot' });
+      if (!db.objectStoreNames.contains(INFO_STORE)) {
+        const info = db.createObjectStore(INFO_STORE, { keyPath: 'slot' });
+        // 예전 칸의 요약 채우기: 한 번만 모든 칸을 읽는다
+        const cur = t.objectStore(STORE).openCursor();
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return;
+          info.put(infoOf(c.value as SaveRecord));
+          c.continue();
+        };
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('브라우저 저장소를 열 수 없습니다'));
   });
 }
 
-async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function tx<T>(mode: IDBTransactionMode, stores: string[], fn: (t: IDBTransaction) => IDBRequest<T> | undefined): Promise<T> {
   const db = await open();
   try {
     return await new Promise<T>((resolve, reject) => {
-      const t = db.transaction(STORE, mode);
-      const req = fn(t.objectStore(STORE));
-      t.oncomplete = () => resolve(req.result);
+      const t = db.transaction(stores, mode);
+      const req = fn(t);
+      t.oncomplete = () => resolve(req?.result as T);
       t.onerror = () => reject(t.error ?? new Error('저장소 작업에 실패했습니다'));
       t.onabort = () => reject(t.error ?? new Error('저장소 작업이 취소됐습니다 (저장 공간 부족일 수 있습니다)'));
     });
@@ -60,12 +107,22 @@ async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
   }
 }
 
+/** 칸에 저장한다: 데이터와 요약을 한 트랜잭션으로 */
 export function putSave(rec: SaveRecord): Promise<IDBValidKey> {
-  return tx('readwrite', (s) => s.put(rec));
+  return tx('readwrite', [STORE, INFO_STORE], (t) => {
+    t.objectStore(INFO_STORE).put(infoOf(rec));
+    return t.objectStore(STORE).put(rec);
+  });
 }
 
+/** 칸 하나를 데이터째 읽는다 (불러오기) */
 export function getSave(slot: string): Promise<SaveRecord | undefined> {
-  return tx('readonly', (s) => s.get(slot) as IDBRequest<SaveRecord | undefined>);
+  return tx('readonly', [STORE], (t) => t.objectStore(STORE).get(slot) as IDBRequest<SaveRecord | undefined>);
+}
+
+/** 칸 하나의 요약만 */
+export function getSaveInfo(slot: string): Promise<SaveInfo | undefined> {
+  return tx('readonly', [INFO_STORE], (t) => t.objectStore(INFO_STORE).get(slot) as IDBRequest<SaveInfo | undefined>);
 }
 
 /** 저장 칸에 이름을 붙인다 (빈 문자열이면 지운다) */
@@ -79,13 +136,30 @@ export async function renameSave(slot: string, label: string): Promise<void> {
 }
 
 export function deleteSave(slot: string): Promise<undefined> {
-  return tx('readwrite', (s) => s.delete(slot) as IDBRequest<undefined>);
+  return tx('readwrite', [STORE, INFO_STORE], (t) => {
+    t.objectStore(INFO_STORE).delete(slot);
+    return t.objectStore(STORE).delete(slot) as IDBRequest<undefined>;
+  });
 }
 
-/** 저장 목록 (최근 저장 순). 큰 data는 빼지 않고 그대로 돌려준다 */
-export async function listSaves(): Promise<SaveRecord[]> {
-  const all = await tx('readonly', (s) => s.getAll() as IDBRequest<SaveRecord[]>);
+/** 저장 목록 요약 (최근 저장 순). 큰 data는 읽지 않는다 */
+export async function listSaveInfos(): Promise<SaveInfo[]> {
+  const all = await tx('readonly', [INFO_STORE], (t) => t.objectStore(INFO_STORE).getAll() as IDBRequest<SaveInfo[]>);
   return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
+/** 저장 목록 (최근 저장 순), 데이터째. 진행마다 부르지 않는다 (목록은 listSaveInfos) */
+export async function listSaves(): Promise<SaveRecord[]> {
+  const all = await tx('readonly', [STORE], (t) => t.objectStore(STORE).getAll() as IDBRequest<SaveRecord[]>);
+  return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
+/** 자동 저장 칸 정리: 이 게임 칸(keep)과 예전 'auto' 칸을 빼고 다른 게임의 자동 저장은 최근 AUTO_KEEP − 1개만 남긴다. 지운 칸 */
+export async function pruneAutoSaves(keep: string): Promise<string[]> {
+  const autos = (await listSaveInfos()).filter((r) => isAutoSlot(r.slot) && r.slot !== AUTO_SLOT && r.slot !== keep);
+  const gone = autos.slice(Math.max(0, AUTO_KEEP - 1)).map((r) => r.slot);
+  for (const slot of gone) await deleteSave(slot);
+  return gone;
 }
 
 /** 저장의 에디터 사용 표시 (docs/에디터_기획안.md 2.2): 켠 적 없으면 null */
@@ -106,7 +180,7 @@ export function isOutdatedSave(data: GameSave | undefined): boolean {
 
 /** 불러올 수 없는 예전 형식 저장 칸(자동 저장·예전 'auto'·수동 칸)을 지운다. 지운 칸 수 */
 export async function purgeOutdatedSaves(): Promise<number> {
-  const old = (await listSaves()).filter((r) => isOutdatedSave(r.data));
+  const old = (await listSaveInfos()).filter((r) => r.outdated);
   for (const r of old) await deleteSave(r.slot);
   return old.length;
 }

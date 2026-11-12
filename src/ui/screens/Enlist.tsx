@@ -3,7 +3,8 @@ import { isStarterSkill } from '../../engine';
 import { MILITARY_LAST_AGE, MILITARY_MIN_AGE, serviceName, serviceTerms, UNIT_MAX_AGE } from '../../league/careers';
 import type { LeaguePlayer } from '../../league/types';
 import { PlayerLink, Pos, useGame } from '../context';
-import { GuessCell, useSeen } from '../parts';
+import { DataTable, guessColumn, useSeen } from '../parts';
+import type { Column } from '../table';
 
 /** 병역 상태의 근거 (실제 자료 / 짐작 / 게임 신인) */
 function basisText(p: LeaguePlayer): string {
@@ -62,6 +63,34 @@ export function EnlistPanel() {
   };
   const unitName = terms.quota.police ? '상무·경찰' : '상무';
 
+  type Cand = (typeof cands)[number];
+  const valueOf = (c: Cand) => (!picked.has(c.id) ? 'stay' : applying.has(c.id) ? 'unit' : 'go');
+  const tagsOf = (c: Cand) => [c.forced ? `강제 (${MILITARY_LAST_AGE}세)` : '', c.reserve ? '보충역 판정' : '', recommended.includes(c.id) && !c.forced ? '추천' : '', lp.get(c.id)!.contract.until > year + 1 ? '다년 계약' : '']
+    .filter(Boolean).join(' · ');
+  const CHOICE_ORDER = { stay: 0, unit: 1, go: 2 } as const;
+  // 능력은 우리 스카우트 추측(가운데값 평균), 스카우트 보고는 문구로만 늘어놓는다 (능력치 v2 17.6)
+  const cols: Column<Cand>[] = [
+    { key: 'choice', label: '입대', fixed: true, text: true, title: '정렬: 미룸 → 군 야구단 지원 → 입대', value: (c) => CHOICE_ORDER[valueOf(c)],
+      cell: (c) => {
+        const p = lp.get(c.id)!;
+        return (
+          <select value={valueOf(c)} onChange={(e) => choose(c.id, e.target.value as 'stay' | 'unit' | 'go')} aria-label={`${p.name} 입대`}>
+            {!c.forced && <option value="stay">미룸</option>}
+            {c.canApply && <option value="unit">{unitName} 지원</option>}
+            <option value="go">{c.reserve ? (terms.homeOnly ? '방위병' : '보충역') : '현역'} 입대</option>
+          </select>
+        );
+      } },
+    { key: 'name', label: '선수', fixed: true, text: true, value: (c) => lp.get(c.id)!.name, cell: (c) => { const sp = sim.get(c.id); return sp ? <PlayerLink p={sp} /> : lp.get(c.id)!.name; } },
+    { key: 'role', label: '자리', value: (c) => { const p = lp.get(c.id)!; return p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : p.pos ?? null; },
+      cell: (c) => { const p = lp.get(c.id)!; return p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />; } },
+    { key: 'age', label: '다음 시즌 나이', lower: true, value: (c) => c.age },
+    guessColumn((c) => seen.set(c.id)),
+    { key: 'note', label: '스카우트 보고', text: true, value: (c) => session.scoutPhrase(c.id), cell: (c) => <span className="small">{session.scoutPhrase(c.id) ?? '-'}</span> },
+    { key: 'tags', label: '구분', text: true, value: (c) => tagsOf(c) || null, cell: (c) => <span className="small">{tagsOf(c) || '-'}</span> },
+    { key: 'basis', label: '병역 근거', text: true, value: (c) => basisText(lp.get(c.id)!), cell: (c) => <span className="small muted">{basisText(lp.get(c.id)!)}</span> },
+  ];
+
   // 우리 구단 병역 현황 (참고)
   const mine = session.league.players.filter((p) => (sim.get(p.id)?.teamIdx ?? p.team) === session.teamIdx && !p.foreign);
   const count = (f: (p: LeaguePlayer) => boolean) => mine.filter(f).length;
@@ -96,41 +125,8 @@ export function EnlistPanel() {
       {cands.length === 0 ? (
         <p className="muted">올해 입대할 수 있는 미필 선수가 없습니다 (다음 시즌 {MILITARY_MIN_AGE}세 이상 미필 국내 선수).</p>
       ) : (
-        <div className="scroll">
-          <table>
-            <thead>
-              <tr><th className="l">입대</th><th className="l">선수</th><th>자리</th><th>다음 시즌 나이</th><th>능력 추측</th><th className="l">스카우트 보고</th><th className="l">구분</th><th className="l">병역 근거</th></tr>
-            </thead>
-            <tbody>
-              {cands.map((c) => {
-                const p = lp.get(c.id)!;
-                const sp = sim.get(c.id);
-                const on = picked.has(c.id);
-                const value = !on ? 'stay' : applying.has(c.id) ? 'unit' : 'go';
-                const tags = [c.forced ? `강제 (${MILITARY_LAST_AGE}세)` : '', c.reserve ? '보충역 판정' : '', recommended.includes(c.id) && !c.forced ? '추천' : '', p.contract.until > year + 1 ? '다년 계약' : '']
-                  .filter(Boolean).join(' · ');
-                return (
-                  <tr key={c.id} className={on ? 'me' : ''}>
-                    <td className="l">
-                      <select value={value} onChange={(e) => choose(c.id, e.target.value as 'stay' | 'unit' | 'go')} aria-label={`${p.name} 입대`}>
-                        {!c.forced && <option value="stay">미룸</option>}
-                        {c.canApply && <option value="unit">{unitName} 지원</option>}
-                        <option value="go">{c.reserve ? (terms.homeOnly ? '방위병' : '보충역') : '현역'} 입대</option>
-                      </select>
-                    </td>
-                    <td className="l">{sp ? <PlayerLink p={sp} /> : p.name}</td>
-                    <td>{p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />}</td>
-                    <td>{c.age}</td>
-                    <td><GuessCell g={seen.set(c.id)} /></td>
-                    <td className="l small">{session.scoutPhrase(c.id) ?? '-'}</td>
-                    <td className="l small">{tags || '-'}</td>
-                    <td className="l small muted">{basisText(p)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable id="enlist" cols={cols} rows={cands} rowKey={(c) => c.id} full searchText={(c) => lp.get(c.id)?.name ?? ''}
+          rowClass={(c) => (picked.has(c.id) ? 'me' : undefined)} label="입대 후보" />
       )}
 
       <section className="panel">

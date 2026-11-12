@@ -4,6 +4,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS, Rng } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { ensureEvents, EVENTS, formToday } from '../src/league/events';
+import { wageIndex } from '../src/league/salary';
 
 let store: DataStore;
 const FAST = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
@@ -92,6 +93,24 @@ describe('경기에 영향을 주는 이벤트', () => {
     expect(msg).toContain('성사');
     expect(g.world.players.find((p) => p.id === offer!.give)!.teamIdx).toBe(offer!.team);
     expect(g.world.players.find((p) => p.id === offer!.get)!.teamIdx).toBe(lg);
+  });
+
+  it('이벤트 자금은 그 해 연봉 지수를 곱해 장부에 남는다 (부록 B 물음 9, 2026년까지는 1배)', () => {
+    const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'wage' }, FAST);
+    const last = () => g.league.ledger.at(-1)!;
+    const c = g.eventContext();
+    expect(c.wage).toBe(1);
+    c.addCash(10000, '시험');
+    expect(last()).toMatchObject({ amount: 10000, to: lg, kind: 'event' });
+    // 같은 세션을 2030년으로 본 도구: 금액만 연봉 지수만큼 커진다
+    const later = Object.create(g) as GameSession;
+    Object.defineProperty(later, 'world', { value: { ...g.world, year: 2030 } });
+    const w = wageIndex(2030, g.league);
+    expect(w).toBeGreaterThan(1);
+    const c2 = later.eventContext();
+    expect(c2.wage).toBe(w);
+    c2.addCash(-10000, '시험');
+    expect(last()).toMatchObject({ amount: Math.round(10000 * w), from: lg, kind: 'event' });
   });
 
   it('휴식 처방: 쉬게 한 선수는 그 기간 결장하고, 불펜 휴식은 피로를 없앤다', () => {

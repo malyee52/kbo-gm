@@ -5,6 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { fieldYears, homeOf } from '../src/engine/fielding';
 import { DEFAULT_PARAMS, defenseAt, defenseGrade, FIELD_POS } from '../src/engine';
 import { GameSession } from '../src/game/session';
+import { editRecords } from '../src/game/editOps';
 import { rookiePosition } from '../src/league/offseason';
 
 let store: DataStore;
@@ -46,18 +47,44 @@ describe('수비 포지션·능력치', () => {
     expect(defenseGrade(defenseAt(p, 'C'))).toBeLessThan(30);
   });
 
-  it('직접 고치기: 경기에 들어가고 저장·재현이 같다', () => {
+  it('직접 고치기 (에디터, 부록 B 물음 4): 에디터가 꺼져 있으면 막고, 켜면 경기에 들어가며 사용 표시·고친 기록이 남고 저장·재현이 같다', () => {
     const h = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'def-edit' }, FAST);
     const p = h.team.org.find((x) => !x.isPitcher && x.pos === 'SS') ?? h.team.org.find((x) => !x.isPitcher)!;
+    const before = defenseAt(p, 'SS');
+    const off = h.editDefense(p.id, { SS: 12, '2B': 10 });
+    expect(off.ok).toBe(false);
+    expect(off.message).toContain('에디터');
+    expect(defenseAt(p, 'SS')).toBe(before);
+    expect(h.actions.some((a) => a.type === 'def-edit')).toBe(false);
+    h.setEditor(true);
+    expect(h.editorMark).toBe('보기');
     expect(h.editDefense(p.id, { SS: 12, '2B': 10 }).ok).toBe(true);
     expect(defenseAt(p, 'SS')).toBe(12);
     expect(h.leaguePlayer(p.id)!.bat!.def!.SS).toBe(12);
+    expect(h.editorMark).toBe('고침');
+    expect(h.league.editor!.edits![2026]).toBe(1);
+    const rec = editRecords(h)[0];
+    expect(rec.names).toEqual([p.name]);
+    expect(rec.lines).toContain(`수비 SS ${defenseGrade(before)} → ${defenseGrade(12)}`);
+    // 바뀐 값이 없으면 조작을 남기지 않는다
+    expect(h.editDefense(p.id, { SS: 12 }).ok).toBe(false);
     h.advance(5);
     const info = h.reproInfo();
     const r = GameSession.replay(store, info.opts, info.actions, info.at, FAST);
     expect(roundTrip(r.toSave().league)).toEqual(roundTrip(h.toSave().league));
     const l = GameSession.load(store, roundTrip(h.toSave()), FAST);
     expect(defenseAt(l.world.players.find((x) => x.id === p.id)!, 'SS')).toBe(12);
+  }, 300_000);
+
+  it('에디터 전 예전 수비 고치기 조작(ed 없음)은 재현 때 그대로 들어가고 사용 표시를 남기지 않는다', () => {
+    const h = GameSession.create(store, { year: 2026, teamIdx: 0, seed: 'def-edit' }, FAST);
+    const p = h.team.org.find((x) => !x.isPitcher && x.pos === 'SS') ?? h.team.org.find((x) => !x.isPitcher)!;
+    const r = GameSession.replay(store, h.reproInfo().opts, [{ year: 2026, day: 0, type: 'def-edit', id: p.id, def: { SS: 12 } }], { year: 2026, day: 2 }, FAST);
+    expect(r.leaguePlayer(p.id)!.bat!.def!.SS).toBe(12);
+    expect(defenseAt(r.world.players.find((x) => x.id === p.id)!, 'SS')).toBe(12);
+    expect(r.league.editor).toBeUndefined();
+    expect(r.editorMark).toBeNull();
+    expect(editRecords(r)).toEqual([]);
   }, 300_000);
 
   it('신인은 지명타자로 시작하지 않는다 (이대호: 커리어 끝 프로필은 지명타자지만 신인 때는 수비 자리)', () => {

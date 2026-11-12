@@ -2,7 +2,7 @@
 import { formatDate } from '../game/calendar';
 import type { GameSession, ReproInfo } from '../game/session';
 import { rankText } from '../game/rank';
-import { AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, exportFile, isAutoSlot, listSaves, putSave, type SaveRecord, getSave } from '../game/storage';
+import { autoSlotOf, exportFile, getSaveInfo, pruneAutoSaves, putSave, type SaveInfo, type SaveRecord } from '../game/storage';
 
 export function summaryOf(s: GameSession): string {
   if (s.phase === 'offseason') {
@@ -27,7 +27,7 @@ export function recordOf(s: GameSession, slot: string): SaveRecord {
 
 /** 칸에 저장한다. 붙여 둔 이름은 그대로 둔다 */
 export async function saveSession(s: GameSession, slot: string): Promise<unknown> {
-  const label = (await getSave(slot))?.label;
+  const label = (await getSaveInfo(slot))?.label;
   return putSave({ ...recordOf(s, slot), ...(label ? { label } : {}) });
 }
 
@@ -36,12 +36,12 @@ export function autoSlotFor(s: GameSession): string {
   return autoSlotOf(s.league.startYear, s.league.seed);
 }
 
-/** 자동 저장: 이 게임의 칸에 덮어쓰고, 다른 게임의 자동 저장은 최근 AUTO_KEEP개만 남긴다 (예전 'auto' 칸은 건드리지 않는다) */
+/** 자동 저장: 이 게임의 칸에 덮어쓰고, 다른 게임의 자동 저장은 최근 AUTO_KEEP개만 남긴다 (예전 'auto' 칸은 건드리지 않는다).
+ *  정리는 요약 store만 읽는다 (2026-11-11 편의 P1: 예전에는 진행마다 모든 칸을 데이터째 읽었다) */
 export async function autosaveSession(s: GameSession): Promise<void> {
   const slot = autoSlotFor(s);
   await putSave(recordOf(s, slot));
-  const autos = (await listSaves()).filter((r) => isAutoSlot(r.slot) && r.slot !== AUTO_SLOT && r.slot !== slot);
-  for (const old of autos.slice(Math.max(0, AUTO_KEEP - 1))) await deleteSave(old.slot);
+  await pruneAutoSaves(slot);
 }
 
 export function exportSession(s: GameSession): void {
@@ -62,15 +62,9 @@ export function reproOf(s: GameSession): ReproReport {
   return { app: 'kbo-gm', ...info, team: s.league.teams[info.opts.teamIdx]?.name ?? '', data: s.season.baseRoster };
 }
 
-/** 저장 기록이 그 시즌 종료(또는 오프시즌) 상태인지. 지난 시즌의 "정규시즌 종료" 소식은 세지 않는다 */
-export function isSeasonDone(s: Pick<SaveRecord, 'year' | 'data'>): boolean {
-  if (s.data.format === 3 && s.data.phase === 'offseason') return true;
-  return s.data.news.some((n) => (n.year ?? s.year) === s.year && n.kind === 'season' && n.text.startsWith('정규시즌 종료'));
-}
-
-/** 저장 목록에 보여줄 진행 시점 */
-export function whenText(rec: Pick<SaveRecord, 'year' | 'day' | 'data'>, done: boolean): string {
-  if (rec.data.format === 3 && rec.data.phase === 'offseason') return `${rec.year} 오프시즌`;
-  if (done) return `${rec.year} 시즌 종료`;
+/** 저장 목록에 보여줄 진행 시점 (요약만으로) */
+export function whenText(rec: Pick<SaveInfo, 'year' | 'day' | 'offseason' | 'done'>): string {
+  if (rec.offseason) return `${rec.year} 오프시즌`;
+  if (rec.done) return `${rec.year} 시즌 종료`;
   return formatDate(rec.year, rec.day, true);
 }

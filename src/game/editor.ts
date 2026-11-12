@@ -4,7 +4,7 @@
 // 화면은 src/ui/editor/ 폴더만 이 파일을 부른다 (tests/editor.test.ts·hidden-values.test.ts가 검사).
 // 보기만 하므로 상태를 바꾸지 않고 난수를 쓰지 않는다 (같은 판에서 몇 번 불러도 같은 값, 조회를 끼워도 진행 결과가 같다).
 // 고치기 미리보기(editorPreview, E2)도 상태를 바꾸지 않는다. 실제 고침은 session.editPlayer → 조작 edit·edit-off.
-import { agingScale, computeGrades, conditionOf, isStarterSkill, TRAIT_INFO, traitsOf, type DisplayGrades, type SimPlayer, type World } from '../engine';
+import { agingScale, computeGrades, conditionOf, defenseAt, defenseGrade, FIELD_POS, isStarterSkill, TRAIT_INFO, traitsOf, type DisplayGrades, type FieldPos, type SimPlayer, type World } from '../engine';
 import { currentRuns, teamStrength, type ValueContext } from '../ai/value';
 import { aiPotential } from '../league/owner';
 import { BAT_BRANCHES, BAT_GOOD, PIT_BRANCHES, PIT_GOOD, timingOf, ceilingFor, type BranchCeiling } from '../league/branches';
@@ -91,6 +91,15 @@ export interface EditorPlayerView extends EditorRow {
   branches: EditorBranch[];
   /** 고치기 칸이 쓰는 지금 값 (E2) */
   edit: EditorEditBase;
+  /** 진짜 포지션별 수비 (수비 고치기 칸). 타자 능력이 없으면 null */
+  defense: EditorDefense[] | null;
+}
+
+/** 포지션 하나의 진짜 수비: 수비 런과 20~80 등급 (50 = 그 자리 평균, 5런 = 10점) */
+export interface EditorDefense {
+  pos: FieldPos;
+  runs: number;
+  grade: number;
 }
 
 /** 갈래 하나 (능력치 v2 16-4a 갈래: 타자 so·bb·s1·d2·t3·hr, 투수 so·bb·hr·hit) */
@@ -310,7 +319,22 @@ export function editorView(s: GameSession, id: string): EditorPlayerView | null 
     traits: (traitsOf(s.store.traits, id) ?? []).map((t) => ({ label: TRAIT_INFO[t].label, note: TRAIT_INFO[t].note })),
     branches: branchesOf(s, f, lp),
     edit: editBase(s, lp, sim),
+    defense: defenseOf(s, lp),
   };
+}
+
+/**
+ * 진짜 포지션별 수비 (수비 고치기 칸, 2026-11-05 부록 B 물음 4로 선수 상세에서 에디터로 옮김).
+ * 시즌 중은 월드 선수, 오프시즌은 리그 선수 값 (session.editDefense와 같은 기준). 타자 능력이 없으면 null
+ */
+function defenseOf(s: GameSession, lp: LeaguePlayer): EditorDefense[] | null {
+  if (!lp.bat) return null;
+  const sp = s.phase === 'season' ? s.world.players.find((p) => p.id === lp.id) : undefined;
+  const base = sp ?? { pos: lp.pos ?? '', isPitcher: lp.isPitcher, bat: lp.bat };
+  return FIELD_POS.map((pos) => {
+    const runs = defenseAt(base, pos);
+    return { pos, runs: Math.round(runs * 10) / 10, grade: defenseGrade(runs) };
+  });
 }
 
 /** 구단별 진짜 전력과 순위. 에디터가 꺼져 있으면 null */
