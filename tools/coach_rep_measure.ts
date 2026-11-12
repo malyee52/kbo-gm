@@ -243,12 +243,18 @@ async function partReport(): Promise<void> {
   }
   P.push('');
 
-  // 5. 효과 크기
-  P.push('## 5. 평판 효과 (FA 요구액 상위 15명 평균, 전 판 값으로 셈)', '');
+  // 5. 효과 크기: 플레이어 자리 평판으로 본 FA 요구 배율과 트레이드 호의 (전 = 예전 식 ±5%·±1.5런, 후 = 지금 식)
+  P.push('## 5. 평판 효과 (플레이어 자리 평판으로 셈)', '', '| 판 | FA 요구 배율 평균 | 배율 범위 (10%~90%) | 상위 15명 평균 요구액 차 (억, 평판 50 대비) | 트레이드 호의 평균 (런) | 호의 범위 (런) |', '|---|---|---|---|---|---|');
   const asks = B.flat().map((y) => mean(y.faAsks) / y.wage).filter(Number.isFinite);
-  const top = B.flat().map((y) => (y.faAsks[0] ?? NaN) / y.wage).filter(Number.isFinite);
-  P.push(`FA 요구액 상위 15명 평균 ${eok(mean(asks), 2)}억, 최고 평균 ${eok(mean(top), 2)}억 (2026년 돈). 평판 100 대비 0의 요구 배율 차는 지금 식 ±${REP_FA * 100}%, 트레이드 호의 ±${REP_TRADE}런.`, '');
-  P.push(`평판 식 지금 값: 승률 ×${REP.winPct}, 가을야구 +${REP.postseason}, 시리즈 +${REP.series}, 우승 +${REP.champion}, 목표 +${REP.goalMet}/${REP.goalMissed}, 캡 ${REP.capOver}, 긴급 ${REP.rescue}, 해고 ${REP.fired}, 해마다 50 쪽 ${REP.revert * 100}%.`, '');
+  for (const [name, runs] of sets) {
+    const [fa, tr] = name === '전' ? [0.05, 1.5] : [REP_FA, REP_TRADE];
+    const v = runs.flat().map((y) => y.rep);
+    const dem = v.map((x) => 1 - ((x - 50) / 50) * fa);
+    const gw = v.map((x) => ((x - 50) / 50) * tr);
+    P.push(`| ${name} | ${f1(mean(dem), 3)} | ${f1(pct(dem, 0.1), 3)}~${f1(pct(dem, 0.9), 3)} | ${eok(mean(asks) * (mean(dem) - 1), 2)} (${eok(mean(asks) * (pct(dem, 0.1) - 1), 2)}~${eok(mean(asks) * (pct(dem, 0.9) - 1), 2)}) | ${f1(mean(gw), 2)} | ${f1(pct(gw, 0.1), 2)}~${f1(pct(gw, 0.9), 2)} |`);
+  }
+  P.push('', `FA 요구액 상위 15명 평균 ${eok(mean(asks), 2)}억 (2026년 돈, 전 판). 트레이드 호의 1런 ≈ 0.09승 (득실 11점).`, '');
+  P.push(`평판 식 지금 값: 승률 ×${REP.winPct}, 가을야구 +${REP.postseason}, 시리즈 +${REP.series}, 우승 +${REP.champion}, 목표 +${REP.goalMet}/${REP.goalMissed}, 캡 ${REP.capOver}, 긴급 ${REP.rescue}, 해고 ${REP.fired}, 해마다 50 쪽 ${REP.revert * 100}%. 전 판은 가을야구 +2·시리즈 +2·우승 +4.`, '');
   writeFileSync(arg('out', 'reports/coach-rep.md')!, P.join('\n') + '\n');
   console.log(`${arg('out', 'reports/coach-rep.md')}에 썼습니다.`);
 }
