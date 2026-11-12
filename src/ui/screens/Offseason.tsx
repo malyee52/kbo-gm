@@ -28,6 +28,7 @@ import { FIX_LABEL, stageHeadline, stageLeftovers, stageRecord, type Leftover, t
 import { teamVars } from '../teams';
 import { useNarrow } from '../BoxScore';
 import { expansionPerk } from '../../league/eras';
+import { afterPaint } from '../paint';
 import { openingEdits, openWithPreview } from '../openingBoard';
 import { countVotes, interestBreakdown, SWING_LABEL, voteOutlook, type FactKey, type InterestPart, type RuleAgenda, type RuleVoteRecord, type VoteChoice, type VoteFacts } from '../../ai/vote';
 import { agendaChange, agendaLabel } from '../../league/ruleVote';
@@ -61,6 +62,8 @@ export function Offseason() {
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 개막 준비(환경 맞춤) 중: 굳기 전에 문구를 먼저 그린다 (편의 P4 단기)
+  const [opening, setOpening] = useState(false);
   // 지난 단계 기록 보기 (단계 표시줄에서 지난 단계를 누름, 읽기 전용). null이면 지금 단계 판
   const [record, setRecord] = useState<LogStage | null>(null);
   // 남은 처리 확인 창: 남은 처리가 있는데 '다음'을 눌렀을 때 (기획안 2.5.1)
@@ -95,11 +98,13 @@ export function Offseason() {
 
   const open = async () => {
     setBusy(true);
-    setMsg({ text: `${session.year + 1} 시즌을 준비하는 중입니다 (리그 환경 맞춤)` });
-    await new Promise((r) => setTimeout(r, 30));
+    setOpening(true);
+    setMsg({ text: `${session.year + 1} 시즌 개막 준비 중입니다 (리그 환경 맞춤, 몇 초 걸립니다)` });
+    await afterPaint();
     // 개막 준비에서 기용 보드를 미리 고쳤으면 개막 직후 그대로 옮긴다 (openingBoard.ts)
     const r = openWithPreview(session);
     setBusy(false);
+    setOpening(false);
     if (!r.ok) {
       setMsg({ text: r.message, error: true });
       return;
@@ -128,7 +133,7 @@ export function Offseason() {
   // 주 진행 단추(상태 줄·휴대폰 아래 고정)가 이 화면의 '다음'·'개막'을 맡는다
   const nextRef = useRef(next);
   nextRef.current = next;
-  const label = busy ? '처리 중' : nextLabel;
+  const label = opening ? '개막 준비 중' : busy ? '처리 중' : nextLabel;
   useEffect(() => {
     if (!off) return;
     setPrimary({ label, act: () => nextRef.current(), disabled: busy, title: left.length ? `남은 처리 ${left.length}건 (넘기기 전에 확인 창이 뜹니다)` : undefined });
