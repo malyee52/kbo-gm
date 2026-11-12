@@ -1335,9 +1335,8 @@ function MeetingPanel({ act }: { act: Act }) {
   const o = L.owner;
   const last = o?.history.at(-1);
   const items = ledgerItems(L, me, offYear);
-  // 시즌 수지: 시작 자금·모기업 환원은 빼고 (환원은 아래 문장에 따로)
+  // 시즌 수지: 시작 자금은 빼고. 모기업 환원(재정 2 F7에서 없앰)도 수지가 아니라 예전 장부 줄이 있어도 뺀다
   const net = Object.entries(items).reduce((a, [k, v]) => a + (k === 'start' || k === 'dividend' ? 0 : v ?? 0), 0);
-  const dividend = -(items.dividend ?? 0);
   const debt = debtOf(L.finance?.[me]);
   const b = budgetCheck(L, me, year);
   const input = ownerInput(L, me, offYear);
@@ -1358,7 +1357,6 @@ function MeetingPanel({ act }: { act: Act }) {
           {last && last.year === offYear && last.team === me
             ? `지난 시즌 목표 ${GOAL_LABEL[last.goal]}: ${last.achieved ? '달성' : '미달'} (${last.result}). `
             : '지난 시즌 평가 기록이 없습니다. '}
-          {dividend > 0 ? `쌓인 자금 가운데 ${won(dividend)}을 모기업에 돌려보냈습니다. ` : ''}
           {debt > 0 ? `긴급 지원으로 생긴 부채 ${won(debt)}이 남아 있어 돈 요청 판정이 어렵습니다 (−15). ` : ''}
           {year} 시즌 목표는 개막 때 구단주 전망으로 정하고, 이 회의 결과만큼 한 단계 오르내립니다.
         </p>

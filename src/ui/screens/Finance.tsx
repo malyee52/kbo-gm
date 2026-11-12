@@ -417,6 +417,8 @@ export function FinancePanel() {
   const cash = session.cashNow();
   const flows = session.seasonFinance();
   const fin = L.finance?.[me];
+  // 모기업 환원 열은 그 값이 남은 예전 저장에만 (재정 2 F7에서 환원을 없앰)
+  const oldDividend = !!fin?.history.some((y) => y.dividend);
   // 투자비는 그 해 연봉 상승 지수만큼 오른다 (오프시즌에는 계획이 적용될 다음 시즌 값)
   const investWage = wageIndex(session.phase === 'offseason' ? session.year + 1 : session.year, L);
   const last = fin?.history.at(-1);
@@ -493,7 +495,7 @@ export function FinancePanel() {
         <>
           <h3>지난 결산</h3>
           <table>
-            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th><th title="결산 뒤 자금이 100억 원을 넘으면 넘는 금액의 절반을 모기업에 돌려준다">모기업 환원</th><th>결산 뒤 자금</th><th title="결산 뒤 남은 모기업 부채 (긴급 지원의 절반, 3년 ⅓씩)">부채</th></tr></thead>
+            <thead><tr><th className="l">시즌</th><th>수입</th><th>지출</th><th>수지</th><th>모기업 긴급 지원</th>{oldDividend && <th title="재정 2 전 규칙: 결산 뒤 자금이 100억 원을 넘으면 넘는 금액의 절반을 모기업에 돌려주었다 (2026-11-04에 없앰, 예전 저장의 기록)">모기업 환원</th>}<th>결산 뒤 자금</th><th title="결산 뒤 남은 모기업 부채 (긴급 지원의 절반, 3년 ⅓씩)">부채</th></tr></thead>
             <tbody>
               {[...fin.history].reverse().map((y) => {
                 const vals = Object.values(y.items).map((v) => v ?? 0);
@@ -504,7 +506,7 @@ export function FinancePanel() {
                     <td>{won(-vals.filter((v) => v < 0).reduce((s, v) => s + v, 0))}</td>
                     <td className={y.net < 0 ? 'down' : 'up'}>{won(y.net)}</td>
                     <td>{y.rescue ? won(y.rescue) : '-'}</td>
-                    <td>{y.dividend ? won(y.dividend) : '-'}</td>
+                    {oldDividend && <td>{y.dividend ? won(y.dividend) : '-'}</td>}
                     <td>{won(y.cash)}</td>
                     <td>{y.debt ? won(y.debt) : '-'}</td>
                   </tr>

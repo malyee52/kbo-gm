@@ -81,7 +81,8 @@ export const NAMING_SPONSOR: Record<string, number> = { 히어로즈: 500_000 };
 export const PARENT_RESERVE = 800_000;
 export const PARENT_CLAWBACK = 0.5;
 // 모기업 환원(결산 뒤 자금 100억 넘는 몫의 50%)은 재정 2 F7에서 없앴다 (2026-11-04 사용자 결정: 흑자는 모두 구단에 남는다).
-// 예전 결산 기록의 dividend 칸은 화면에 그대로 보인다. 지원금 회수(PARENT_RESERVE·PARENT_CLAWBACK)는 지원금만 줄이고 자금을 가져가지 않아 남긴다
+// 남은 흔적은 예전 저장 읽기뿐이다: 결산 기록의 dividend 칸(재정 화면 '모기업 환원' 열은 그 값이 있는 저장에만)과 장부 구분 'dividend'(예전 장부 줄).
+// 새 결산은 둘 다 만들지 않는다. 지원금 회수(PARENT_RESERVE·PARENT_CLAWBACK)는 지원금만 줄이고 자금을 가져가지 않아 남긴다
 /** 우승 보너스 (리그 배분, 만 원) */
 export const CHAMPION_BONUS = 200_000;
 /** 새 게임 시작 자금 (만 원) */
@@ -563,7 +564,7 @@ export interface FinanceYear {
   cash: number;
   /** 모기업 긴급 지원 (적자 보전) */
   rescue: number;
-  /** 모기업 환원 (예전 결산만: 자금 100억 넘는 몫의 50%, 재정 2 F7에서 없앰. 수지에는 넣지 않는다) */
+  /** 모기업 환원 (재정 2 F7 전 예전 저장의 결산에만: 자금 100억 넘는 몫의 50%. 새 결산은 적지 않는다. 수지에는 넣지 않는다) */
   dividend?: number;
   /** 결산 뒤 남은 모기업 부채 (재정 2 F5, 없으면 0) */
   debt?: number;
@@ -581,7 +582,7 @@ export interface FinanceYear {
 export type FinanceKind =
   | 'start' | 'gate' | 'postseason' | 'broadcast' | 'sponsor' | 'merch' | 'parent' | 'parentExtra' | 'rescue' | 'faSupport' | 'champion'
   | 'payroll' | 'foreign' | 'ops' | 'invest' | 'scouting'
-  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'editor' | 'other'
+  | 'compensation' | 'fine' | 'signing' | 'transfer' | 'trade' | 'event' | /** 모기업 환원: 재정 2 F7 전 예전 장부 줄만 (새로 적지 않는다) */ 'dividend' | 'coach' | 'posting' | 'stadium' | 'release' | 'editor' | 'other'
   | 'interest' | 'debt'
   | OpsKind;
 

@@ -1,7 +1,7 @@
 // 구단 연고지 거리 표 (경기 엔진 2 D단계 ③): 대칭, 같은 도시 0, 연도별 연고 이전
 import { describe, expect, it } from 'vitest';
 import { loadDataStore } from '../src/data/loadNode';
-import { cityDistanceKm, distanceTable, homeOf } from '../src/league/distance';
+import { cityDistanceKm, distanceTable, homeOf } from '../tools/distance';
 
 const store = loadDataStore();
 const homes = store.homes!;

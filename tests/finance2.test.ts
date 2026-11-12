@@ -180,7 +180,7 @@ describe('재정 2 F1b 지급 달력 10번', () => {
     const rest = rows.reduce((s, r) => s + r.end - r.sofar, 0);
     h.beginOffseason();
     const y = h.league.finance![lg].history.at(-1)!;
-    const after = y.cash - y.rescue + (y.dividend ?? 0);
+    const after = y.cash - y.rescue; // 모기업 환원은 재정 2 F7에서 없앴다 (2026-11-12 찌꺼기 정리)
     // 스폰서는 가을야구 깊이까지 매기므로 그 몫만 다르다
     const sponsorRow = rows.find((r) => r.kind === 'sponsor')!;
     expect(after - before - (rest - (sponsorRow.end - sponsorRow.sofar)) - ((y.items.sponsor ?? 0) - sponsorRow.sofar) - (y.items.champion ?? 0)).toBe(0);
