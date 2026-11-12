@@ -3,6 +3,7 @@ import { useState } from 'react';
 import {
   CANDIDATE_MAX, careerLine, candidates, infoOf, MANAGER_BUYOUT, MANAGER_YEARS, managerOf, managerSalary, tacticsOf, tendencyLabel,
 } from '../../league/managers';
+import { managerStyle } from '../../league/managerStyle';
 import type { ManagerInfo } from '../../data/types';
 import { TeamName, useGame, useWon } from '../context';
 import { ConfirmButton } from '../ConfirmButton';
@@ -32,6 +33,20 @@ function Tendency({ info, name }: { info: ManagerInfo | undefined; name?: string
   );
 }
 
+/**
+ * 작전 스타일 문구 (2026-11-12 사용자 그릴 Q39, league/managerStyle.ts): 경기에 실제로 쓰는 작전 배율을 낱말로. 숫자는 보이지 않는다.
+ * year: 그 해 투구 단위 값(byYear)이 있으면 그것으로
+ */
+export function StyleTags({ name, year }: { name: string; year?: number }) {
+  const { session } = useGame();
+  const info = infoOf(session.store, name);
+  return (
+    <span className="style-tags">
+      {managerStyle(tacticsOf(info, name, year)).map((t) => <span key={t.label} className="tag" title={t.note}>{t.label}</span>)}
+    </span>
+  );
+}
+
 export function ManagerPanel() {
   const { session, changed, autosave } = useGame();
   const won = useWon();
@@ -43,9 +58,10 @@ export function ManagerPanel() {
   if (!store.managers || !L.managers) return null;
   const off = session.phase === 'offseason' ? session.offseason : null;
   const year = off ? off.year : session.year;
+  // 경기를 치르는 해 (오프시즌이면 다음 시즌): 작전 스타일은 그 해 배율로 (session.ts가 개막 때 tacticsOf(…, 그 해)로 건다)
+  const playYear = off ? year + 1 : year;
   const m = managerOf(L, me);
   const info = m ? infoOf(store, m.name) : undefined;
-  const t = tacticsOf(info);
   // 시즌 중(정규시즌)에도, 오프시즌에도 후보를 보여 준다 (2026-10-14 사용자 "감독을 교체할 방법이 없어")
   const inSeason = session.phase === 'season' && !session.done;
   const pool = off ? candidates(L, store, year + 1).slice(0, CANDIDATE_MAX) : inSeason ? candidates(L, store, year).slice(0, CANDIDATE_MAX) : [];
@@ -69,10 +85,11 @@ export function ManagerPanel() {
               <div className="stat"><span className="stat-label">계약</span><strong className="stat-value">{m.until}년까지</strong></div>
             </div>
             <p className="small">실제 경력: {careerLine(info)}</p>
-            <p>운영 경향: <Tendency info={info} name={m.name} /></p>
+            <p>작전 스타일: <StyleTags name={m.name} year={playYear} /></p>
+            <p className="small">기록으로 본 운영 경향: <Tendency info={info} name={m.name} /></p>
             <p className="muted small">
-              운영 경향은 이 감독이 시즌 내내 맡은 해의 팀 기록을 그 해 리그 평균과 견준 것입니다 (성격·능력 평가가 아닙니다). 팀 기록에는 선수 구성도 섞여 있어 경기에는 일부만 반영합니다:
-              도루 시도 ×{t.steal.toFixed(2)}, 희생번트 ×{t.bunt.toFixed(2)}, 선발 투구 한계 ×{t.hook.toFixed(2)}. 경기 중 작전은 지금처럼 감독이 합니다.
+              작전 스타일은 AI 감독이 경기에서 실제로 쓰는 작전 경향입니다. 운영 경향은 이 감독이 시즌 내내 맡은 해의 팀 기록을 그 해 리그 평균과 견준 것이고 (성격·능력 평가가 아닙니다),
+              팀 기록에는 선수 구성도 섞여 있어 경기에는 일부만 반영합니다. 경기 중 작전은 지금처럼 감독이 합니다.
             </p>
             {m.interim && <p className="note small">수석코치가 시즌 끝까지 감독 대행을 맡고 있습니다. 오프시즌에 정식 감독을 고르세요 (고르지 않으면 개막 때 첫 후보).</p>}
             {off && seated && (confirmFire
@@ -93,13 +110,13 @@ export function ManagerPanel() {
             <p className="muted small">실제 KBO 감독(대행 포함)을 맡았던 사람 가운데 지금 다른 구단에 없는 사람입니다. 경력이 긴 순서입니다.</p>
             <div className="scroll">
               <table>
-                <thead><tr><th className="l">이름</th><th className="l">경력</th><th className="l">운영 경향</th><th>연봉</th><th /></tr></thead>
+                <thead><tr><th className="l">이름</th><th className="l">경력</th><th className="l">작전 스타일</th><th className="l">운영 경향 (기록)</th><th>연봉</th><th /></tr></thead>
                 <tbody>
                   {pool.map((name) => {
                     const i = infoOf(store, name);
                     return (
                       <tr key={name}>
-                        <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><Tendency info={i} name={name} /></td>
+                        <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><StyleTags name={name} year={playYear} /></td><td className="l"><Tendency info={i} name={name} /></td>
                         <td>{won(managerSalary(i))}</td>
                         <td>
                           {inSeason
@@ -122,14 +139,14 @@ export function ManagerPanel() {
         <h2>리그 감독</h2>
         <div className="scroll">
           <table>
-            <thead><tr><th className="l">구단</th><th className="l">감독</th><th>부임</th><th>계약</th><th className="l">운영 경향</th></tr></thead>
+            <thead><tr><th className="l">구단</th><th className="l">감독</th><th>부임</th><th>계약</th><th className="l">작전 스타일</th></tr></thead>
             <tbody>
               {L.teams.map((_, k) => {
                 const x = managerOf(L, k);
                 return (
                   <tr key={k} className={k === me ? 'me' : ''}>
                     <td className="l"><TeamName idx={k} /></td><td className="l">{x?.name ?? '공석'}</td><td>{x?.since ?? ''}</td><td>{x ? `${x.until}년까지` : ''}</td>
-                    <td className="l">{x && <Tendency info={infoOf(store, x.name)} name={x.name} />}</td>
+                    <td className="l">{x && <StyleTags name={x.name} year={playYear} />}</td>
                   </tr>
                 );
               })}

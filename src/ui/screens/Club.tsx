@@ -6,7 +6,9 @@ import { CoachPanel } from './Coaches';
 import { ScenarioBanner } from '../ScenarioBanner';
 import { BudgetPanel, FinancePanel } from './Finance';
 import { StadiumPanel } from './Stadium';
-import { ManagerPanel } from './Manager';
+import { ManagerPanel, StyleTags } from './Manager';
+import { managerOf } from '../../league/managers';
+import { coachOf, COACH_ROLES, COACH_ROLE_LABEL } from '../../league/coaches';
 import { franchiseTag, salaryCap, salaryFloor, teamCapPayroll } from '../../league/salary';
 import {
   ACHIEVEMENTS, budgetFor, capSanctionRule, FIRE_BELOW, GOAL_LABEL, parentGrade, START_TRUST,
@@ -69,6 +71,8 @@ export function Club({ tab = 'overview' }: { tab?: ClubTab }) {
         <OwnerCard />
 
         <RepCard />
+
+        <StaffCard />
 
         {!session.fantasy && <TrustTrendCard />}
         {!session.fantasy && <MeetingCard />}
@@ -214,6 +218,30 @@ function OwnerCard() {
         {' '}달성 +12, 목표보다 한 단계 높을 때마다 +8 / 미달 -10, 한 단계 낮을 때마다 -6 (최대 -25), 샐러리캡 초과 -10.
       </p>
       <p className="muted small">난이도: {settingsLabel(L)}</p>
+    </div>
+  );
+}
+
+/** 감독·코치 한눈에 (2026-11-12 사용자 그릴 Q39): 감독 작전 스타일 문구와 코치 등급. 고르기는 '감독·코치' 칸에서 */
+function StaffCard() {
+  const { session, go } = useGame();
+  const L = session.league;
+  const me = session.teamIdx;
+  const m = managerOf(L, me);
+  const playYear = session.phase === 'offseason' ? session.year + 1 : session.year;
+  return (
+    <div className="card">
+      <h2>감독·코치</h2>
+      {m ? (
+        <>
+          <p><strong>{m.name}</strong>{m.interim ? ' (대행)' : ''} <span className="muted small">{m.until}년까지</span></p>
+          <p className="small">작전 스타일: <StyleTags name={m.name} year={playYear} /></p>
+        </>
+      ) : <p className="muted small">감독 자리가 비어 있습니다.</p>}
+      <p className="small">
+        {COACH_ROLES.map((r) => { const c = coachOf(L, me, r); return `${COACH_ROLE_LABEL[r]} ${c ? `${c.level}등급` : '비어 있음'}`; }).join(' · ')}
+      </p>
+      <button type="button" className="ghost" onClick={() => go('staff')}>감독·코치 보기</button>
     </div>
   );
 }
