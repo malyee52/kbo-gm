@@ -7,7 +7,7 @@ import { FlowNext } from '../FlowNext';
 import type { LeaguePlayer } from '../../league/types';
 import { guessMid, guessText, type GuessSet } from '../../league/scout';
 import { era, fixed2, ops, rate3 } from '../../game/stats';
-import { Pos, TeamName, useGame } from '../context';
+import { linkOrder, Pos, TeamName, useGame } from '../context';
 import { DataTable, GuessGrade } from '../parts';
 import type { Column } from '../table';
 
@@ -93,7 +93,7 @@ export function Growth() {
 
   const open = (id: string, name: string) => {
     const sp = session.world.players.find((x) => x.id === id);
-    return sp ? <button type="button" className="link" onClick={() => openPlayer(sp.idx)}>{name}</button> : name;
+    return sp ? <button type="button" className="link" data-pidx={sp.idx} onClick={(e) => openPlayer(sp.idx, linkOrder(e.currentTarget))}>{name}</button> : name;
   };
   const role = (p: LeaguePlayer) => (p.isPitcher ? (isStarterSkill(p.pit) ? '선발' : '구원') : <Pos pos={p.pos} />);
   const change = (before: GuessSet | null, after: GuessSet | null) => {

@@ -5,7 +5,7 @@
 import { serviceName } from '../../league/careers';
 import { useMemo, useState, type ReactNode } from 'react';
 import { DataTable, GradeBar, GuessGrade, useSeen } from '../parts';
-import type { Column as TableColumn } from '../table';
+import { orderedRows, type Column as TableColumn } from '../table';
 import { guessMid } from '../../league/scout';
 import { seasonWar } from '../../league/awards';
 import { defenseAt, defenseGrade, FIELD_POS, fieldPosOf, type SimPlayer } from '../../engine';
@@ -16,7 +16,7 @@ import {
   babip, bbPct, bbPerK, fip, int0, iso, kPct, leagueBase, lobPct, pct1, per9, pitBabip, pitBbPct, pitKPct, sbPct, woba, wraa, wrcPlus,
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
-import { ForeignMark, HAND, posName, useGame, useWon } from '../context';
+import { ForeignMark, HAND, linkOrder, posName, useGame, useWon } from '../context';
 import { dollarText } from '../../league/salary';
 import type { FuturesLine } from '../../league/futures';
 import { ruleOf } from '../../league/rules';
@@ -114,14 +114,16 @@ export function Roster() {
   // 고른 선수가 지금 표에 없으면 첫 줄
   const picked = rows.find((p) => p.idx === sel) ?? rows[0];
   /** 줄 누르기: 넓은 화면은 오른쪽 요약, 좁은 화면은 바로 상세 창 */
-  const pick = (p: SimPlayer) => {
-    if (window.matchMedia('(max-width: 1100px)').matches) openPlayer(p.idx);
+  const pick = (p: SimPlayer, order?: number[]) => {
+    if (window.matchMedia('(max-width: 1100px)').matches) openPlayer(p.idx, order);
     else setSel(p.idx);
   };
+  // 2군은 보기를 따로 기억한다 (1군에서 고른 열 목록에 2군 전용 '퓨처스' 열이 없어 꺼진 채로 남지 않게)
+  const tableId = `roster-${kind}-${page}${inFirst ? '' : '-2'}`;
   const cols: Col[] = [
     { key: 'name', label: '이름', fixed: true, text: true, value: (p) => p.name, cell: (p) => (
       <>
-        <button type="button" className="link name-btn" onClick={(e) => { e.stopPropagation(); pick(p); }}>{p.name}</button>
+        <button type="button" className="link name-btn" data-pidx={p.idx} onClick={(e) => { e.stopPropagation(); pick(p, linkOrder(e.currentTarget)); }}>{p.name}</button>
         <ForeignMark p={p} />
         {p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}
       </>
@@ -195,13 +197,13 @@ export function Roster() {
             </p>
           )}
 
-          {/* 2군은 보기를 따로 기억한다 (1군에서 고른 열 목록에 2군 전용 '퓨처스' 열이 없어 꺼진 채로 남지 않게) */}
-          <DataTable id={`roster-${kind}-${page}${inFirst ? '' : '-2'}`} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
-            searchText={(p) => p.name} rowClass={(p) => (picked?.idx === p.idx ? 'sel' : undefined)} onRow={(p) => pick(p)}
+          <DataTable id={tableId} cols={cols} rows={rows} rowKey={(p) => String(p.idx)} full tableClass="roster"
+            searchText={(p) => p.name} rowClass={(p) => (picked?.idx === p.idx ? 'sel' : undefined)} onRow={(p, shown) => pick(p, shown.map((x) => x.idx))}
             label={`${kind === 'hit' ? '야수' : '투수'} ${inFirst ? '1군' : '2군'} 명단`} empty="이 구분에 선수가 없습니다." />
         </section>
 
-        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, true)} war={war.get(picked.idx)} />}
+        {picked && <RosterSide p={picked} inFirst={inFirst} status={statusOf(picked)} moveBtn={moveBtn(picked, true)} war={war.get(picked.idx)}
+          order={orderedRows(tableId, rows, cols, (x) => x.name).map((x) => x.idx)} />}
       </div>
 
     </div>
@@ -323,7 +325,8 @@ function futuresSort(l: FuturesLine | undefined, kind: Kind): number | null {
 }
 
 /** 선수단 오른쪽 요약 칸: 능력 막대, 올해 기록 한 줄, 계약 */
-function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number }) {
+/** order: 표에 지금 보이는 순서 (선수 창 이전·다음) */
+function RosterSide({ p, inFirst, status, moveBtn, war, order }: { p: SimPlayer; inFirst: boolean; status: ReactNode; moveBtn: ReactNode; war?: number; order: number[] }) {
   const { session, openPlayer } = useGame();
   const seen = useSeen();
   const won = useWon();
@@ -364,7 +367,7 @@ function RosterSide({ p, inFirst, status, moveBtn, war }: { p: SimPlayer; inFirs
           </p>
         )}
         <p className="inline">
-          <button type="button" onClick={() => openPlayer(p.idx)}>자세히</button>
+          <button type="button" onClick={() => openPlayer(p.idx, order.length >= 2 ? order : undefined)}>자세히</button>
           {moveBtn}
         </p>
       </div>
