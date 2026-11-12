@@ -10,7 +10,7 @@ import { EXPANSION_PERK_FROM, EXPANSION_PERK_SEASONS, faEnabled, faServiceNeeded
 import { dollarText, foreignCap, MIN_SALARY_STEP_YEARS, minSalary, ruleStepYear, salaryCap } from './salary';
 import type { LeagueState } from './types';
 import { FUTURE_RULE_LABEL, futureDelta, futureValueText, type FutureRuleKey, type RuleShift } from './futureRules';
-import { BIG_RULE_LABEL, type BigRuleKey, type RuleVoteRecord, type VoteChoice } from '../ai/vote';
+import { voteAgendaText, voteResultText, type RuleVoteRecord } from './legacyVote';
 
 /** 게임 규칙 값 키 (tools/build_data.py의 RULE_KEYS와 같아야 한다) */
 export const RULE_KEYS = ['rosterSize', 'foreignLimit', 'maxInnings', 'postseasonTeams', 'faEnabled', 'faService', 'salaryCap'] as const;
@@ -107,8 +107,8 @@ export interface RuleLine {
   /** 규칙이 바뀐 것이 아니라 알려 주기만 하는 줄 (기준 그대로인 해의 공인구 검사값). 가짓수에 세지 않는다 */
   info?: boolean;
   key?: RuleValueKey;
-  /** 단장 회의 표결 결과 (구단 투표로 정한 미래 규칙 변경) */
-  vote?: string;
+  /** 미래 규칙 변경을 정한 곳: "리그 결정 (게임 속 가상 결정)", 예전 저장의 단장 회의 가결은 표결 결과 */
+  decision?: string;
 }
 
 /** 시즌 중 날짜 소식 (개막 뒤 날짜의 규칙 변경, 공인구 2·3차 검사) */
@@ -136,7 +136,7 @@ export interface RuleNews {
   headline: string;
   /** 지난 시즌 리그 한 줄 */
   lastSeason?: string;
-  /** 이 해 적용을 두고 단장 회의에서 부결된 안건 (구단 투표). 가짓수에 세지 않는다 */
+  /** 이 해 적용을 두고 단장 회의에서 부결된 안건 (예전 저장의 구단 투표 기록). 가짓수에 세지 않는다 */
   rejected?: string[];
 }
 
@@ -154,7 +154,7 @@ export interface RuleNewsInput {
   lastSeason?: { year: number; runsPerGame: number; hrPerGame: number };
   /** 이 해에 적용되는 미래 규칙 변경 ② (게임 속 가상 결정, futureRules.ts shiftsFor) */
   shifts?: RuleShift[];
-  /** 이 해 적용을 두고 단장 회의에서 부결된 안건 (league.ruleVotes 중 passed가 아닌 것) */
+  /** 이 해 적용을 두고 단장 회의에서 부결된 안건 (예전 저장의 league.ruleVotes 중 passed가 아닌 것) */
   rejected?: RuleVoteRecord[];
   /** 창단 특례가 시작·진행·끝나는 구단 (perkTeamsFor) */
   perks?: PerkTeam[];
@@ -342,7 +342,7 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
     lines.push({
       cat: m.cat, title: `${FUTURE_RULE_LABEL[s.key]} (게임 속 가상 결정)`, before: futureValueText(s.key, s.before), after: futureValueText(s.key, s.after),
       effect: m.effect, status: 'virtual', note: s.reason, ...(m.key ? { key: m.key } : {}),
-      ...(s.vote ? { vote: voteResultText(s.vote, true) } : {}),
+      decision: s.vote ? voteResultText(s.vote, true) : LEAGUE_DECISION,
     });
   }
 
@@ -402,18 +402,8 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
   return { year, start: !!input.start, main, other, summary, dated, closing, headline, ...(lastSeason ? { lastSeason } : {}), ...(rejected.length ? { rejected } : {}) };
 }
 
-/** 표결 결과 한 줄: "단장 회의 7 : 3 가결 (문턱 7, 우리 구단 반대)". user가 없으면 모든 구단 AI (우리 표 줄 없음) */
-export function voteResultText(v: { yes: number; no: number; need: number; user?: VoteChoice; userTeam?: number }, passed: boolean): string {
-  const mine = v.user ? `, 우리 구단 ${v.user === 'yes' ? '찬성' : '반대'}` : v.userTeam !== undefined ? ', 우리 구단 반대 (표를 내지 않음)' : '';
-  return `단장 회의 찬성 ${v.yes} : 반대 ${v.no} ${passed ? '가결' : '부결'} (문턱 ${v.need}${mine})`;
-}
-
-/** 안건 이름과 전 → 후: "샐러리캡 연간 상향률 연 5% → 연 7%" */
-export function voteAgendaText(v: Pick<RuleVoteRecord, 'key' | 'big' | 'before' | 'after'>): string {
-  if (v.big) return `${BIG_RULE_LABEL[v.key as BigRuleKey]} ${v.before} → ${v.after}`;
-  const k = v.key as FutureRuleKey;
-  return `${FUTURE_RULE_LABEL[k]} ${futureValueText(k, v.before)} → ${futureValueText(k, v.after)}`;
-}
+/** 미래 규칙 변경을 리그가 정했을 때 알림의 결정 줄 (2026-11-12 구단 투표를 뺀 뒤) */
+export const LEAGUE_DECISION = '리그 결정 (게임 속 가상 결정)';
 
 /** 공인구 줄. 기준·단일 여부가 바뀌었거나 개막 전 발표 검사값이 있을 때 (시작 연도는 늘) */
 function ballLine(data: RuleChangeData | undefined, year: number, seasonDays: number | undefined, dated: DatedRuleNews[], closing: string[], start: boolean): RuleLine | null {

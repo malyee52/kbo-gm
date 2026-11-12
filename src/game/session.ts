@@ -16,7 +16,7 @@ import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPack
 import { currentRuns, playerValue, projectedValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
-import type { VoteChoice } from '../ai/vote';
+import type { VoteChoice } from '../league/legacyVote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
@@ -206,6 +206,9 @@ function commandMode(c: CommandCtl | undefined): CommandMode | undefined {
   const from = c.from;
   return { ...(from !== undefined ? { takeover: (_r: CommandRequest, k: number) => k === from } : {}), ...(c.handoff !== undefined ? { handoff: c.handoff } : {}) };
 }
+
+/** 예전 조작 기록의 단장 회의 표 (구단 투표, 2026-11-12에 뺐다)를 재현할 때 돌려주는 문구 */
+export const RULE_VOTE_GONE = '구단 투표(단장 회의)는 없어졌습니다. 규칙은 리그가 정합니다.';
 
 /** 조작 기록의 지휘 선택을 물음 번호로 돌려주는 지휘자 (없으면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
 function replayCommander(team: number, cmds: PendingCommand[]): GameCommand | null {
@@ -404,7 +407,10 @@ export type GameAction =
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
-  /** 단장 회의 우리 표 (구단 투표, league/ruleVote.ts). agenda = 안건 id (없으면 첫 안건). 마지막 표로 개표, 안 내면 반대 */
+  /**
+   * 단장 회의 우리 표 (구단 투표, 2026-10-23~11-11에만). 구단 투표는 2026-11-12에 뺐다: 예전 조작 기록에 남은 이 조작은 읽기만 하고
+   * 재현 때 아무것도 하지 않는다 (그 저장의 표는 오프시즌 상태에 남아 있어 불러올 때 개표한다, offseason.ts settleLegacyVote)
+   */
   | { year: number; type: 'rule-vote'; choice: VoteChoice; agenda?: string }
   | { year: number; type: 'next' }
   | { year: number; type: 'accept-offer'; team: number }
@@ -1054,6 +1060,11 @@ export class GameSession {
     ensureTitles(g.league, store, g.league.lastSeason?.year ?? g.league.startYear - 1);
     // 시작 전 구단 WAR 칸이 없는 예전 저장 (2026-11-05 전, league/franchise.ts)
     ensureTenureWar(g.league, store);
+    // 단장 회의 단계에 멈춘 예전 저장 (구단 투표는 2026-11-12에 뺐다): 저장된 AI 표와 우리 표(없으면 반대)로 개표하고 FA로 넘긴다
+    if (g.offseason) {
+      const before = g.offseason.log.length;
+      if (Off.settleLegacyVote(g.league, g.offseason, store, params)) g.offNews(before);
+    }
     // 예전 저장에는 없다: 불러온 직후 엔진 명단은 비어 있으므로 지금 날짜로 짜 본 임시 승격으로 대신한다
     g.lastCallUps = new Set(save.callUps ?? season.activeAt(save.teamIdx).callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -3576,8 +3587,8 @@ export class GameSession {
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
       case 'rule-vote':
-        // 해고된 채 맞은 단장 회의는 표를 막는다. 예전에 해고 중 낸 표가 기록에 있으면 재현 때 여기서 버려져 AI 표로 개표된다
-        res = Off.voteLockedByFiring(L, off) ? { ok: false, message: Off.VOTE_LOCKED_TEXT } : Off.castVote(off!, a.choice, a.agenda);
+        // 구단 투표는 2026-11-12에 뺐다. 예전 기록의 표는 버리고 기록에도 다시 남기지 않는다
+        res = { ok: false, message: RULE_VOTE_GONE };
         break;
       case 'accept-offer': {
         const o = L.owner;
@@ -4832,10 +4843,6 @@ export class GameSession {
   }
   /** 다른 구단이 방출한 선수를 데려온다 (정원 정리 단계, 방출 선수 시장) */
   claim(id: string) { return this.dispatchOff({ year: this.year, type: 'claim', id }); }
-  /** 이번 단장 회의에 우리 표를 낼 수 없는가 (이 결산에서 해고됨) */
-  get voteLocked(): boolean { return !!this.offseason && Off.voteLockedByFiring(this.league, this.offseason); }
-  /** 단장 회의 우리 표 (구단 투표). 단장 회의 단계에서만, 몇 번이고 바꿀 수 있다. 해고된 채 맞은 회의는 막힌다 */
-  voteRule(choice: VoteChoice, agenda?: string) { return this.dispatchOff({ year: this.year, type: 'rule-vote', choice, ...(agenda ? { agenda } : {}) }); }
   nextStage() { return this.dispatchOff({ year: this.year, type: 'next' }); }
   /** 해고된 뒤 영입 제의를 받아들인다 (M7) */
   acceptOffer(team: number) { return this.dispatchOff({ year: this.year, type: 'accept-offer', team }); }

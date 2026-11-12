@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { createLeague } from '../src/league/create';
 import { foreignRule } from '../src/league/eras';
 import {
-  ballD2, ballHrMul, COR_HIGH, COR_LOW, corRange, FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureValue, judgeFutureRules, seasonCor, SHIFT_COOLDOWN, type FutureRuleKey, type RuleShift, type RuleSignal,
+  ballD2, ballHrMul, COR_HIGH, COR_LOW, corRange, FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureValue, judgeFutureRules, REVERSE_BAN, seasonCor, SHIFT_COOLDOWN, type FutureRuleKey, type RuleShift, type RuleSignal,
 } from '../src/league/futureRules';
 import { ruleNews, ruleSnapshot } from '../src/league/ruleNews';
 import { salaryCap } from '../src/league/salary';
@@ -52,6 +52,31 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     expect(L.ruleShifts!.every((s) => s.after >= FUTURE_RULE_SPEC.ball.min && s.after <= FUTURE_RULE_SPEC.ball.max)).toBe(true);
   });
 
+  it('왕복 막기 (2026-11-12 사용자 결정): 바뀐 항목을 바로 반대 방향으로는 5시즌 동안 되돌리지 않는다 (같은 방향은 3시즌)', () => {
+    expect(REVERSE_BAN).toBe(5);
+    // 2027·2028 장타 압력 높음 → 2029 시즌 반발계수 기준 하향. 그 뒤로 내내 낮음(올리는 쪽) 신호
+    const L = bare();
+    const got: RuleShift[] = [];
+    for (let y = 2027; y < 2045; y++) { const s = judgeFutureRules(L, calm(y, { hr: y < 2029 ? 1.3 : 0.8 })); if (s) got.push(s); }
+    expect(got[0]).toMatchObject({ year: 2029, key: 'ball', after: 0.94 });
+    // 쉼(3시즌)만이면 2033 시즌에 되돌렸겠지만, 반대 방향이라 2029 + 5 + 1 = 2035 시즌부터
+    expect(got[1]).toMatchObject({ year: 2035, key: 'ball', before: 0.94, after: 1 });
+    // 되돌린 뒤 같은 방향(올림)은 쉼 3시즌만: 2039 시즌
+    expect(got[2]).toMatchObject({ year: 2039, key: 'ball', before: 1, after: 1.06 });
+    // 같은 방향만 이어지는 판은 쉼 3시즌 그대로 (2029 → 2033)
+    const M = bare();
+    const same: RuleShift[] = [];
+    for (let y = 2027; y < 2036; y++) { const s = judgeFutureRules(M, calm(y, { hr: 1.3 })); if (s) same.push(s); }
+    expect(same.map((s) => s.year)).toEqual([2029, 2033]);
+  });
+
+  it('예전 저장의 부결 기록(ruleVotes)은 판정에 쓰지 않는다 (구단 투표를 뺀 뒤)', () => {
+    const L = bare();
+    (L as LeagueState).ruleVotes = [{ id: '2029-ball', year: 2029, key: 'ball', before: 1, after: 0.94, reason: 'x', signal: 1.2, votes: [], yes: 2, no: 8, need: 7, passed: false }];
+    judgeFutureRules(L, calm(2027, { hr: 1.3 }));
+    expect(judgeFutureRules(L, calm(2028, { hr: 1.3 }))).toMatchObject({ year: 2029, key: 'ball' });
+  });
+
   it('후보가 여럿이어도 한 해에 하나, 같은 시드 → 같은 선택', () => {
     const run = (seed: string) => {
       const L = bare(seed);
@@ -78,7 +103,7 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     expect(up[0]).toMatchObject({ year: 2030, before: 3, after: 4 });
     expect(up[0].reason).toContain('관중이 2년 이어 줄어');
     expect(up[0].reason).toContain('12,000명');
-    expect(up[0].reason).toContain('외국인 보유 한도 확대에 합의');
+    expect(up[0].reason).toContain('리그가 볼거리를 늘리려 외국인 보유 한도를 1명 늘린다'); // 2026-11-12 구단 투표를 빼고 리그 결정 문구로
     // 줄다가 한 해 늘면 이어지지 않는다 (2029 시즌에 늘어 2029~2031 시즌으로 다시 세어 2032년), 줄어든 폭이 2% 밑이면 그대로
     expect(run((y) => ({ attendance: y === 2029 ? 12500 : 12000 - 300 * (y - 2027) }))[0]?.year).toBe(2032);
     expect(run((y) => ({ attendance: 12000 - 110 * (y - 2027) }))).toEqual([]); // 두 해 −1.8% 안팎
@@ -165,6 +190,11 @@ describe('반영 (자료 없는 해만)', () => {
     expect(roster).toHaveLength(1);
     expect(roster[0]).toMatchObject({ status: 'virtual', before: '29명', after: '30명' });
     expect(roster[0].title).toContain('게임 속 가상 결정');
+    // 정한 곳 (2026-11-12 구단 투표를 뺀 뒤): 리그 결정. 예전 저장의 단장 회의 가결은 표결 결과
+    expect(roster[0].decision).toBe('리그 결정 (게임 속 가상 결정)');
+    const voted = ruleNews({ year: 2031, data: store.ruleChanges, now: ruleSnapshot(store.meta, 2031, L), prev: ruleSnapshot(store.meta, 2030, L),
+      shifts: [{ ...shift('roster', 2031, 30), vote: { yes: 8, no: 2, need: 7, user: 'yes' } }] });
+    expect(voted.main.find((l) => l.key === 'rosterSize')!.decision).toBe('단장 회의 찬성 8 : 반대 2 가결 (문턱 7, 우리 구단 찬성)');
     expect(ruleSnapshot(store.meta, 2031, L).rosterSize).toBe(30);
     expect(ruleSnapshot(store.meta, 2031, L).sources.rosterSize).toBe('virtual');
     const b = ruleNews({ year: 2035, data: store.ruleChanges, now: ruleSnapshot(store.meta, 2035, L), prev: ruleSnapshot(store.meta, 2034, L), shifts: L.ruleShifts!.filter((s) => s.year === 2035) });
