@@ -48,9 +48,9 @@ describe('목표와 신뢰도', () => {
     const hit = trustDelta('postseason', outcome({ rank: 4, capOver: true }));
     // 보통 칭찬 0.5배: 12 × 0.5 = 6, 그 뒤 −10 (예전엔 (12 − 10) × 0.5 = 1)
     expect(seasonTrustChange(hit, { gain: 0.5, pressure: 1 })).toBe(-4);
-    // 어려움 압박 1.35배: 미달 −10 × 1.35 = −13.5 → −14, 그 뒤 −10 (예전엔 (−10 − 10) × 1.35 = −27)
+    // 어려움 압박 1.35배: 미달 −10 × 1.35 = −13.5 → Math.round로 −13 (예전 식과 같은 반올림), 그 뒤 −10 (예전엔 (−10 − 10) × 1.35 = −27)
     const miss = trustDelta('postseason', outcome({ rank: 7, capOver: true }));
-    expect(seasonTrustChange(miss, { gain: 0.5, pressure: 1.35 })).toBe(-24);
+    expect(seasonTrustChange(miss, { gain: 0.5, pressure: 1.35 })).toBe(-23);
     // 쉬움 압박 0.7배도 캡 감점은 −10 그대로
     expect(seasonTrustChange(miss, { gain: 1, pressure: 0.7 }) - seasonTrustChange(trustDelta('postseason', outcome({ rank: 7 })), { gain: 1, pressure: 0.7 })).toBe(CAP_OVER_TRUST);
     // 캡 초과가 없으면 예전 식과 같다 (목표 낮춤 절반·약속 못 지킴·예산 회의)
