@@ -196,7 +196,7 @@ export function Roster() {
           {page === 'saber' && (
             <p className="muted small">
               세이버 기록은 이번 시즌 리그 전체 시뮬레이션 기록이 기준입니다 (리그 wOBA {rate3(lg.woba)}, FIP 상수 {fixed2(lg.fipConst)}).
-              wRC+는 100이 리그 평균이고 구장 보정이 없습니다. 피BABIP는 희생타 기록이 없어 근사값입니다.
+              wRC+는 100이 리그 평균이고 소속 구단 홈 구장 효과를 보정한 값입니다 (칸에 마우스를 올리면 보정 전 → 후). 피BABIP는 희생타 기록이 없어 근사값입니다.
             </p>
           )}
 

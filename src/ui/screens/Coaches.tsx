@@ -55,7 +55,7 @@ export function CoachPanel() {
                     <td className="stars">{stars(c.level)}</td><td>{COACH_STYLE_LABEL[c.style]}</td><td className="l small">{c.career}</td>
                     <td>{won(c.salary)}</td><td>{c.until}년까지</td><td className="l small">{effect(c)}</td>
                   </>
-                ) : <td colSpan={6} className="muted small">비어 있음 (오프시즌에 고용)</td>}
+                ) : <td colSpan={6} className="muted small">비어 있음: 아래 후보에서 고르세요 (고르지 않으면 개막 때 직원 추천으로 채웁니다)</td>}
               </tr>
             );
           })}

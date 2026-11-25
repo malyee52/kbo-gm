@@ -71,7 +71,7 @@ export function TeamView({ team: arg }: { team?: number }) {
         ))}
       </div>
       {ours && <p className="muted small">우리 구단도 같은 틀로 봅니다 (읽기 전용). 바꾸려면 전력 &gt; 선수 명단·기용 보드에서.</p>}
-      {off && <p className="muted small">오프시즌: 명단은 지금 계약 기준, 종합은 다음 시즌 예상입니다. 예상 기용은 개막 뒤에 열립니다.</p>}
+      {off && <p className="muted small">오프시즌: 명단은 지금 계약 기준, 능력 추측은 다음 시즌 기준입니다. 예상 기용은 개막 뒤에 열립니다.</p>}
 
       {tab === 'over' && <Overview team={team} />}
       {tab === 'roster' && <RosterTable team={team} />}
@@ -167,11 +167,11 @@ function Overview({ team }: { team: number }) {
 
       {!off && (
         <section className="card">
-          <h2>자리별 등급 <span className="muted small">보이는 종합 기준</span></h2>
+          <h2>자리별 등급 <span className="muted small">스카우트 추측 기준</span></h2>
           <div className="slot-grades">
             {depth.map((d) => <span key={d.slot}><span className="muted small">{d.slot}</span> <Grade v={d.g} /></span>)}
           </div>
-          <p className="muted small">야수는 그 자리 최고 종합, SP·RP는 상위 5명 평균 (트레이드 작업대와 같은 임시 기준).</p>
+          <p className="muted small">스카우트 추측 기여를 20~80으로 바꾼 등급입니다. 야수는 그 자리 최고 선수, SP·RP는 상위 5명 평균 (트레이드 작업대와 같은 임시 기준).</p>
         </section>
       )}
 

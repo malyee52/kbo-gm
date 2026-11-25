@@ -1,7 +1,7 @@
 // 감독 (league/managers.ts): 지금 감독과 기록으로 본 운영 경향, 오프시즌 해임·선임, 리그 감독 목록.
 import { useState } from 'react';
 import {
-  CANDIDATE_MAX, careerLine, candidates, infoOf, MANAGER_BUYOUT, MANAGER_YEARS, managerOf, managerSalary, tacticsOf, tendencyLabel,
+  CANDIDATE_MAX, careerLine, candidates, infoOf, MANAGER_BUYOUT, MANAGER_YEARS, managerOf, managerSalaryAt, tacticsOf, tendencyLabel,
 } from '../../league/managers';
 import { managerStyle } from '../../league/managerStyle';
 import type { ManagerInfo } from '../../data/types';
@@ -117,7 +117,7 @@ export function ManagerPanel() {
                     return (
                       <tr key={name}>
                         <td className="l">{name}</td><td className="l small">{careerLine(i)}</td><td className="l"><StyleTags name={name} year={playYear} /></td><td className="l"><Tendency info={i} name={name} /></td>
-                        <td>{won(managerSalary(i))}</td>
+                        <td>{won(managerSalaryAt(session.league, i, off ? year + 1 : year))}</td>
                         <td>
                           {inSeason
                             ? <ConfirmButton label={seated ? '교체' : '선임'} confirmLabel={seated ? `정말 교체 (위약금 ${won(buyout)})` : '정말 선임'} className="small-btn" onConfirm={() => act(session.changeManager(name))} />

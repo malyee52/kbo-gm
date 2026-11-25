@@ -199,7 +199,7 @@ function Candidates() {
         <button type="button" disabled={!desk.compare.length} onClick={() => updateDesk(session, () => ({ step: 'compare' }))}>비교하기 ▶</button>
       </div>
       {note && <p className="muted small" role="status">{note}</p>}
-      <p className="muted small">종합·잠재는 보이는 능력 기준입니다. 우승 도전 구단은 당장 쓸 선수를, 리빌딩 구단은 젊은 선수를 높게 칩니다.</p>
+      <p className="muted small">능력 추측은 우리 스카우트가 본 값이라 진짜 능력과 어긋날 수 있습니다 (우리 구단 선수는 어긋남 없음). 우승 도전 구단은 당장 쓸 선수를, 리빌딩 구단은 젊은 선수를 높게 칩니다.</p>
     </section>
   );
 }
@@ -518,7 +518,7 @@ function Impact({ draft }: { draft: TradeDraft }) {
       </p>
       {im.depth.length > 0 && (
         <p>우리 자리 등급 {im.depth.map((r, i) => <span key={r.slot}>{i ? ' · ' : ''}{r.slot} {ba(r.before, r.after)}</span>)}
-          <span className="muted"> (야수는 그 자리 최고 종합, SP·RP는 상위 5명 평균)</span></p>
+          <span className="muted"> (스카우트 추측 기여를 20~80으로 바꾼 등급: 야수는 그 자리 최고 선수, SP·RP는 상위 5명 평균)</span></p>
       )}
       {full && (
         <p className="muted">
