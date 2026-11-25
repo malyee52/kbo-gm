@@ -172,9 +172,16 @@ export function lastDataYear(store: Pick<DataStore, 'managers'>): number {
   return Math.max(0, ...Object.keys(store.managers?.seasons ?? {}).map(Number));
 }
 
-/** 연봉은 계약이 시작되는 해(year)의 연봉 상승 지수(salary.ts wageIndex)만큼 (2026-10-22 사용자 결정) */
+/**
+ * 계약이 시작되는 해(year)의 감독 연봉: 기본 연봉 × 그 해 연봉 상승 지수(salary.ts wageIndex) (2026-10-22 사용자 결정).
+ * 실제 계약(makeManager)과 감독 화면 후보 연봉이 같이 쓴다. 오프시즌 후보는 다음 시즌 계약이라 year = 오프시즌 해 + 1
+ */
+export function managerSalaryAt(league: Pick<LeagueState, 'ruleShifts'>, info: ManagerInfo | undefined, year: number): number {
+  return Math.round((managerSalary(info) * wageIndex(year, league)) / 1000) * 1000;
+}
+
 function makeManager(league: Pick<LeagueState, 'ruleShifts'>, store: Pick<DataStore, 'managers'>, name: string, year: number, years = MANAGER_YEARS): Manager {
-  return { name, since: year, until: year + years - 1, salary: Math.round((managerSalary(infoOf(store, name)) * wageIndex(year, league)) / 1000) * 1000 };
+  return { name, since: year, until: year + years - 1, salary: managerSalaryAt(league, infoOf(store, name), year) };
 }
 
 const employed = (league: LeagueState) => new Set((league.managers ?? []).filter(Boolean).map((m) => m!.name));

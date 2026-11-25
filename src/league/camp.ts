@@ -35,7 +35,8 @@ export const FOCUS: Record<CampFocus, { label: string; note: string; youth: numb
   balanced: { label: '균형', note: '젊은 선수가 조금씩 성장', youth: 0.6, scope: 'all', injury: 1 },
   bat: { label: '타격', note: '젊은 타자가 성장', youth: 1.4, scope: 'bat', injury: 1 },
   pit: { label: '투구', note: '젊은 투수가 성장', youth: 1.4, scope: 'pit', injury: 1 },
-  def: { label: '수비·주루', note: '젊은 타자가 조금 성장하고 부상이 조금 준다', youth: 0.8, scope: 'bat', injury: 0.93 },
+  // 키 def는 예전 저장 호환으로 그대로 (2026-11-25 이름만 실제 효과대로: 예전 이름 '수비·주루'였지만 수비·주루 값은 바꾸지 않는다)
+  def: { label: '가벼운 타격·부상 관리', note: '젊은 타자가 조금 성장하고 부상이 조금 준다', youth: 0.8, scope: 'bat', injury: 0.93 },
   fitness: { label: '체력', note: '성장은 없지만 시즌 내내 부상이 크게 준다', youth: 0, scope: 'all', injury: 0.82 },
   youth: { label: '유망주 집중', note: '젊은 선수가 크게 성장하지만 훈련 강도로 부상이 늘어난다', youth: 2, scope: 'all', injury: 1.08 },
 };
@@ -95,7 +96,7 @@ export const AI_YOUTH_REL = 1.1;
 /**
  * AI 구단의 선택: 자금으로 장소, 단장 성향·젊은 선수 수·약한 쪽으로 방향 (2026-11-12 Q36에서 다시 맞춤, 임시값).
  * 우승 도전형은 부상을 줄이는 체력, 육성형은 유망주 집중, 짠돌이는 대만·균형, 나머지는 젊은 선수가 많으면 유망주 집중,
- * 아니면 약한 쪽(타격·투구)이나 수비·주루
+ * 아니면 약한 쪽(타격·투구)이나 가벼운 타격·부상 관리(def)
  */
 export function aiCamp(league: LeagueState, team: number, cash: number, strength: { bat: number; pit: number }, year = league.year,
                        leagueYoung = campYoung(league, team, year).length): CampPick {

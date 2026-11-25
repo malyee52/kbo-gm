@@ -143,7 +143,7 @@ export function overall(s: GameSession, p: SimPlayer): number {
   return runsGrade(s.seenRuns(p.id), s.world.year);
 }
 
-/** 자리 등급: 야수는 그 자리 최고 종합, SP/RP는 상위 5명 평균. 그 자리 선수가 없으면 null */
+/** 자리 등급 (스카우트 추측 기여 등급 overall): 야수는 그 자리 최고, SP/RP는 상위 5명 평균. 그 자리 선수가 없으면 null */
 export function slotGrade(s: GameSession, org: SimPlayer[], slot: string): number | null {
   const gs = org.filter((p) => slotOf(p) === slot).map((p) => overall(s, p)).sort((a, b) => b - a);
   if (!gs.length) return null;
