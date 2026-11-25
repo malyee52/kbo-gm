@@ -1063,6 +1063,11 @@ export class GameSession {
     ensureTitles(g.league, store, g.league.lastSeason?.year ?? g.league.startYear - 1);
     // 시작 전 구단 WAR 칸이 없는 예전 저장 (2026-11-05 전, league/franchise.ts)
     ensureTenureWar(g.league, store);
+    // 반발계수 방식 칸이 없는 예전 저장 (2026-11-25 Q54 전): 이미 쓴 해(지금 월드 해)까지는 예전 값, 다음 해부터 AR(1)
+    if (!g.league.ballCor) {
+      g.league.ballCor = { legacyTo: world.year };
+      if (g.finishedLeague) g.finishedLeague.ballCor = { legacyTo: world.year };
+    }
     // 단장 회의 단계에 멈춘 예전 저장 (구단 투표는 2026-11-12에 뺐다): 저장된 AI 표와 우리 표(없으면 반대)로 개표하고 FA로 넘긴다
     if (g.offseason) {
       const before = g.offseason.log.length;

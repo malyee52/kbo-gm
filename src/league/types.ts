@@ -317,6 +317,11 @@ export interface LeagueState {
   /** 미래 규칙 변경 ② (2028~, league/futureRules.ts): 바뀐 기록과 결산 때 남긴 신호. 2026-10-22부터, 예전 저장에는 없다 (변경 없음) */
   ruleShifts?: import('./futureRules').RuleShift[];
   ruleSignals?: import('./futureRules').RuleSignal[];
+  /**
+   * 시즌 반발계수 뽑는 방식 (futureRules.ts corDraw, 2026-11-25 Q54). 칸이 있으면 2027년부터 지난해 값에 가까운 평균 회귀(AR(1)),
+   * 없으면 해마다 따로 뽑는 예전 방식 (예전 저장). legacyTo: 예전 저장을 불러올 때 이미 쓴 해 (그 해까지는 예전 값 그대로, 다음 해부터 AR(1))
+   */
+  ballCor?: { legacyTo?: number };
   /** 구단 투표 단장 회의 기록 (가결·부결 모두). 구단 투표가 있던 2026-10-23~11-11 저장에만 있고 읽기만 한다 (league/legacyVote.ts) */
   ruleVotes?: import('./legacyVote').RuleVoteRecord[];
   /** 구단별 샐러리캡 하한(2027~) 연속 미달 횟수 (owner.ts applyFloorSanctions). 예전 저장에는 없다 */

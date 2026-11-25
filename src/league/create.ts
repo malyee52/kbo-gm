@@ -273,7 +273,7 @@ export function createLeague(store: Store, startYear: number, seed: string, para
   const league: LeagueState = {
     format: 1, seed, startYear, year: startYear,
     teams: recorded.teams.map((t) => ({ name: t.name, franchise: t.franchise })),
-    players, lastSeason: null, ledger: [], nextVirtualId: 1,
+    players, lastSeason: null, ledger: [], nextVirtualId: 1, ballCor: {},
     ...(recorded.env.defZero !== undefined ? { defZero: recorded.env.defZero } : {}),
     ...(recorded.defPool ? { defPool: recorded.defPool } : {}),
   };

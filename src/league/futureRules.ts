@@ -305,7 +305,7 @@ export function intlForeignSignal(_league: Pick<LeagueState, 'seed'>, _year: num
 }
 
 // ---- 시즌마다 바뀌는 반발계수 (2026-10-22 사용자 결정 "반발계수 변경")
-// 2027년부터 매 시즌 반발계수 검사값을 실제 퍼짐 안에서 시드 난수로 정하고, 그만큼 리그 홈런 목표 배율을 바꾼다.
+// 2027년부터 매 시즌 반발계수 검사값을 실제 퍼짐 안에서 시드 난수로 정하고(지난해 값에 가까운 평균 회귀, 2026-11-25 Q54), 그만큼 리그 홈런 목표 배율을 바꾼다.
 // "2017처럼 40홈런이 뻥뻥 터지는 시즌도, 1점대 투수가 즐비한 시즌도" 나오게. 기준 범위 변경(ball 항목)은 이 값의 가운데를 옮긴다.
 
 /** 실제 반발계수 1차 수시검사 평균 (2018~2026, data-src/공인구.csv, 조사값)의 평균·최저·최고 */
@@ -337,25 +337,48 @@ export function corRange(league: Pick<LeagueState, 'ruleShifts'> | null | undefi
 }
 
 /**
- * 그 해 반발계수 검사값 (소수 넷째 자리). 실제 퍼짐(COR_LOW~COR_HIGH)에서 고르게, 기준 이동만큼 옮긴다.
+ * 그 해 반발계수 검사값 (소수 넷째 자리). 지난해 값에 가깝게 움직이는 평균 회귀(corDraw), 기준 이동만큼 옮긴다.
  * 난수는 `${seed}/ball-cor/${year}` 갈래만 쓴다 (다른 진행의 난수를 건드리지 않는다). 쓰지 않는 해는 null
  */
-export function seasonCor(league: Pick<LeagueState, 'fantasy' | 'ruleShifts' | 'seed'> | null | undefined, year: number): number | null {
+export function seasonCor(league: CorLeague | null | undefined, year: number): number | null {
   const raw = corDraw(league, year);
   return raw === null ? null : round4(raw + corShift(league, year));
 }
 
+type CorLeague = Pick<LeagueState, 'fantasy' | 'ruleShifts' | 'seed' | 'ballCor'>;
+
+/**
+ * 평균 회귀 AR(1) (2026-11-25 사용자 Q54): x(해) = 가운데 + COR_AR_PHI × (x(지난해) − 가운데) + COR_AR_SIGMA × 정규 난수,
+ * COR_LOW~COR_HIGH 안으로 자른다. 해마다 따로 고르게 뽑던 때(0.647~1.466배가 아무 해에나)보다 한 해 변동이 작고
+ * 높은 해·낮은 해가 몇 해씩 이어진다.
+ * 임시값 근거: 실제 해마다 평균(공인구.csv 2019~2026: 0.4180·0.4147·0.4149·0.4061·0.4175·0.4179·0.4123·0.4093)의
+ * 표준편차 0.0044를 정상 분포 표준편차로 둔다 (σ = 0.0044 × √(1 − φ²)). φ 0.7은 짐작값 (실제 8해로는 잴 수 없다):
+ * 해마다 차이의 표준편차는 0.0044 × √(2 × (1 − φ)) ≈ 0.0034 (따로 뽑을 때 0.0076).
+ */
+export const COR_AR_PHI = 0.7;
+export const COR_AR_SIGMA = 0.0044 * Math.sqrt(1 - 0.7 * 0.7);
+/** AR(1)의 출발점: 실제 2026 1차 수시검사 (공인구.csv, 조사값). 2027 값은 여기서 가운데 쪽으로 움직인다 */
+export const COR_START_2026 = 0.4093;
+
 /** 기준 이동 전 검사값 (반올림 전) */
-function corDraw(league: Pick<LeagueState, 'fantasy' | 'seed'> | null | undefined, year: number): number | null {
+function corDraw(league: CorLeague | null | undefined, year: number): number | null {
   if (!league || !seasonBallOn(league, year)) return null;
-  return COR_LOW + (COR_HIGH - COR_LOW) * new Rng(`${league.seed}/ball-cor/${year}`).next();
+  const m = league.ballCor;
+  // 예전 저장 (칸 없음), 또는 예전 저장에서 이미 쓴 해: 해마다 따로 고르게 뽑던 값 그대로
+  if (!m || (m.legacyTo !== undefined && year <= m.legacyTo)) return COR_LOW + (COR_HIGH - COR_LOW) * new Rng(`${league.seed}/ball-cor/${year}`).next();
+  const prev = seasonBallOn(league, year - 1) ? corDraw(league, year - 1)! : COR_START_2026;
+  const r = new Rng(`${league.seed}/ball-cor/${year}`);
+  // Box-Muller (0을 피하려고 1 − next)
+  const z = Math.sqrt(-2 * Math.log(1 - r.next())) * Math.cos(2 * Math.PI * r.next());
+  const x = COR_CENTER + COR_AR_PHI * (prev - COR_CENTER) + COR_AR_SIGMA * z;
+  return Math.min(COR_HIGH, Math.max(COR_LOW, x));
 }
 
 /**
  * 그 해 리그 홈런 목표 배율: ball 항목 값 × exp(K × (검사값 − 가운데)). 시즌 반발계수를 쓰지 않는 해는 ball 항목 값.
  * 기준 이동(ball 항목)은 검사값의 가운데를 옮기는 것과 같아 곱으로 쓴다 (반올림 전 값으로 계산)
  */
-export function ballHrMul(league: Pick<LeagueState, 'fantasy' | 'ruleShifts' | 'seed'> | null | undefined, year: number): number {
+export function ballHrMul(league: CorLeague | null | undefined, year: number): number {
   const ball = futureValue(league, 'ball', year);
   const raw = corDraw(league, year);
   return raw === null ? ball : ball * Math.exp(COR_HR_K * (raw - COR_CENTER));
