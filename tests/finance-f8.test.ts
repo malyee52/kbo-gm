@@ -5,7 +5,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
 import { AI_SURPLUS_FROM, AI_SURPLUS_RATE, RESCUE_TRUST, rescueStreak, trustFromFinance, type FinanceYear } from '../src/league/finance';
-import { AI_RICH, REMODEL, NEW_PARK, stadiumYearEnd } from '../src/league/stadium';
+import { AI_RICH, REMODEL, NEW_PARK, QUALITY_DECAY, stadiumYearEnd } from '../src/league/stadium';
 import { wageIndex } from '../src/league/salary';
 import type { LeagueState } from '../src/league/types';
 
@@ -57,7 +57,7 @@ describe('자금이 많은 AI 구단의 공사', () => {
   const remodel = Math.round(REMODEL.cost * wage);
   const keep = AI_RICH.keep * wage;
   const find = (L: LeagueState, name: string) => L.teams.findIndex((t) => t.name === name);
-  it('시설이 remodelBelow 아래이고 자금이 공사비 + 남길 돈이면 리모델링, 모자라면 하지 않는다', () => {
+  it('시설이 remodelBelow 아래이고 자금이 공사비 × remodelCash면 리모델링, 모자라면 하지 않는다', () => {
     const L = copy();
     const t = find(L, 'KIA');
     L.stadiums![t].quality = AI_RICH.remodelBelow - 5;
@@ -65,10 +65,22 @@ describe('자금이 많은 AI 구단의 공사', () => {
     delete L.stadiums![t].project;
     const M = copy();
     M.stadiums![t] = JSON.parse(JSON.stringify(L.stadiums![t]));
-    stadiumYearEnd(L, 2026, (x) => (x === t ? remodel + keep + 10 : 0), 0);
+    stadiumYearEnd(L, 2026, (x) => (x === t ? remodel * AI_RICH.remodelCash + 10 : 0), 0);
     expect((L.stadiums![t] as { project?: { kind: string } }).project?.kind).toBe('remodel');
-    stadiumYearEnd(M, 2026, (x) => (x === t ? remodel + keep - 10_000 : 0), 0);
+    stadiumYearEnd(M, 2026, (x) => (x === t ? remodel * AI_RICH.remodelCash - 10_000 : 0), 0);
     expect(M.stadiums![t].project).toBeUndefined();
+  });
+  it('시설이 remodelBelow 이상이면 돈이 많아도 리모델링하지 않는다 (2026-11-12 문턱 45)', () => {
+    expect(AI_RICH.remodelBelow).toBe(45);
+    expect(AI_RICH.remodelCash).toBe(0.9);
+    const L = copy();
+    const t = find(L, 'KIA');
+    // 결산 때 먼저 QUALITY_DECAY만큼 낡은 뒤 문턱을 본다: 낡은 뒤 값이 문턱과 같으면 하지 않는다
+    L.stadiums![t].quality = AI_RICH.remodelBelow + QUALITY_DECAY;
+    L.stadiums![t].opened = 2020;
+    delete L.stadiums![t].project;
+    stadiumYearEnd(L, 2026, (x) => (x === t ? remodel * 3 : 0), 0);
+    expect(L.stadiums![t].project).toBeUndefined();
   });
   it('구장이 newAge년 넘고 시설이 newBelow 아래면 신구장 (중립 펜스)', () => {
     const L = copy();

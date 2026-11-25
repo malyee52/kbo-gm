@@ -1,5 +1,6 @@
 // 2028년 이후 미래의 규칙 변경 ② "리그 흐름에 따라 바뀜" (리그 규칙 변경 기획안 4장, 1차 묶음 1-8).
-// 결산(beginOffseason) 때 그 시즌의 신호를 남기고, 같은 쪽으로 2시즌 이어서 벗어난 항목 중 하나를 다음 시즌에 바꾼다.
+// 결산(beginOffseason) 때 그 시즌의 신호를 남기고, 같은 쪽으로 2시즌 이어서 벗어난 항목 중 하나를 다음 시즌에 바꾼다 (리그 결정).
+// 2026-10-23~11-11에는 구단 투표(단장 회의)로 정했으나 2026-11-12 사용자 결정으로 뺐다. 그때 기록(league.ruleVotes, RuleShift.vote)은 읽기만 한다 (legacyVote.ts).
 // 바뀐 기록(league.ruleShifts)은 리그 상태 선택 항목이라 예전 저장도 열린다 (없으면 빈 목록).
 // 게임이 만든 가상 결정이다. 실제 KBO 결정이 아니며, 항목과 폭은 KBO 연표에 실제로 있었던 종류 안에서 정했다.
 // 기본 모드만 (판타지·자유 모드는 league.rules로 규정을 바꾸는 장치가 따로 있어 끈다). 값은 모두 임시값.
@@ -19,7 +20,7 @@ export const SHIFT_STREAK = 2;
  * 문턱은 규칙 알림 5차 결정 5(2026-10-23, "15~20년에 한 번쯤 켜지게")와 구단 투표 기획 결정 9(C2)로 낮췄다.
  * 전 값(관중 3년·3%, 부담 15%)은 longsim 50시즌 × 시드 a·b에서 외국인 한도 변경이 0.5번(100년에 한 번)이었고,
  * 관중이 해마다 ±1% 안팎으로 흔들려 4개 값이 내리 줄어드는 일이 드물었다. C2(관중 2년·2%, 부담 12%)는
- * 같은 실측에서 2.5번(약 20년에 한 번, 구단투표 기획안 6장). 표결이 없어도(② 신호가 곧 변경) 이 값을 쓴다
+ * 같은 실측에서 2.5번(약 20년에 한 번, 구단투표 기획안 6장). 표결을 뺀 뒤(2026-11-12, 신호가 곧 변경)에도 이 값을 쓴다
  */
 export const FOREIGN_JUDGE = {
   /** 리그 경기당 관중이 이만큼 시즌 이어서 줄면 (해마다 전해보다 적으면) 볼거리를 늘리려 한도 +1 (전 3, 결정 9 C2) */
@@ -40,10 +41,19 @@ export const FOREIGN_JUDGE = {
 /** 바뀐 항목은 이만큼 시즌 동안 다시 후보가 되지 않는다 (임시값) */
 export const SHIFT_COOLDOWN = 3;
 /**
- * 단장 회의에서 부결된 항목·방향은 이만큼 시즌 동안 다시 안건이 되지 않는다 (구단 투표 결정 5).
- * SHIFT_COOLDOWN과 같은 셈법: 부결된 안건의 적용 해가 Y이면 Y·Y+1 해 결산을 건너뛰고 Y+2 해 결산(Y+3 시즌 안건)부터. 반대 방향은 쉬지 않는다
+ * 바뀐 항목을 바로 반대 방향으로 되돌리지 않는 기간 (왕복 막기, 2026-11-12 사용자 결정, 임시값).
+ * SHIFT_COOLDOWN과 같은 셈법: 변경의 적용 해가 Y이면 반대 방향 변경은 Y+6 시즌부터 (같은 방향은 SHIFT_COOLDOWN대로 Y+4 시즌부터)
  */
-export const REJECT_COOLDOWN = 2;
+export const REVERSE_BAN = 5;
+/**
+ * 항목마다 시작 값(FUTURE_RULE_SPEC.base)에서 움직일 수 있는 누적 칸 수 (2026-11-12 사용자 결정 Q34, 임시값).
+ * 구단 투표를 뺀 뒤 longsim 50시즌에서 장타·삼진 압력이 선수 재능에서 나와 규칙이 한쪽으로만 흘렀다
+ * (반발계수 기준 4번 내려 ×0.76, 존 최대, 2028년부터 경기당 최소 득점 3.95 → 3.28, reports/longsim-league-50.md).
+ * 한도는 base ± 칸 × step과 항목 누적 범위(min·max)가 겹치는 곳: 공 ×0.88~1.12, 존 ×0.94~1.06, 연장 10~13회, 엔트리 28~31명,
+ * 외국인 2~4명, 캡 상향률 3~9%. 한도에 닿으면 그 방향 신호는 후보가 되지 않는다 (이력에도 남지 않는다).
+ * 예전 저장(한도 전 판)이 이미 한도 밖이면 그 값은 그대로 두고 한도 안쪽 방향으로만 움직인다
+ */
+export const SHIFT_MAX_STEPS = 2;
 
 export type FutureRuleKey = 'ball' | 'zone' | 'extra' | 'roster' | 'foreign' | 'capGrowth';
 
@@ -64,6 +74,15 @@ export const FUTURE_RULE_SPEC: Record<FutureRuleKey, { base: number; step: numbe
   foreign: { base: 3, step: 1, min: 2, max: 4 },
   capGrowth: { base: 0.05, step: 0.02, min: 0.03, max: 0.09 },
 };
+
+/** 항목이 움직일 수 있는 범위: 시작 값 ± SHIFT_MAX_STEPS칸과 누적 범위(min·max)가 겹치는 곳 */
+export function futureLimits(key: FutureRuleKey): { lo: number; hi: number } {
+  const spec = FUTURE_RULE_SPEC[key];
+  return {
+    lo: round(Math.max(spec.min, spec.base - SHIFT_MAX_STEPS * spec.step)),
+    hi: round(Math.min(spec.max, spec.base + SHIFT_MAX_STEPS * spec.step)),
+  };
+}
 
 /** 2루타 목표 배율: 홈런 배율 변화의 1/3 (홈런 ×0.94 → 2루타 ×0.98, 임시값) */
 export function ballD2(hr: number): number {
@@ -134,7 +153,9 @@ export interface RuleShift {
   reason: string;
   /** 판단에 쓴 신호 값 */
   signal: number;
-  /** 단장 회의 표결 결과 (구단 투표, 2026-10-23부터. 표결 없이 바뀐 예전 기록에는 없다). user: 플레이어 구단이 낸 표 */
+  /**
+   * 단장 회의 표결 결과 (구단 투표가 있던 2026-10-23~11-11 저장의 기록만, 읽기 전용). 없으면 리그 결정. user: 플레이어 구단이 낸 표
+   */
   vote?: { yes: number; no: number; need: number; user?: 'yes' | 'no' };
 }
 
@@ -173,8 +194,8 @@ function streak(signals: RuleSignal[], side: (s: RuleSignal) => number): 1 | -1 
 }
 
 /**
- * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정해 곧바로 넣는다 (한 해 최대 1개, 표결 없이).
- * 돌려주는 값은 새로 생긴 변경 (없으면 null). 구단 투표가 켜진 리그는 proposeFutureRule로 안건만 받아 단장 회의에서 표결한다 (league/ruleVote.ts)
+ * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경을 정해 곧바로 넣는다 (한 해 최대 1개, 리그 결정).
+ * 돌려주는 값은 새로 생긴 변경 (없으면 null)
  */
 export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleShift | null {
   const shift = proposeFutureRule(league, signal);
@@ -185,7 +206,7 @@ export function judgeFutureRules(league: LeagueState, signal: RuleSignal): RuleS
 /**
  * 결산 때 한 번: 그 시즌(signal.year)의 신호를 남기고 다음 시즌 규칙 변경 후보를 하나 고른다 (넣지는 않는다).
  * 난수는 후보가 여럿일 때만 `${seed}/rules/${다음 해}` 갈래에서 하나 쓴다 (다른 진행의 난수를 건드리지 않는다).
- * 가결 뒤 3시즌(SHIFT_COOLDOWN), 부결된 같은 방향은 2시즌(REJECT_COOLDOWN) 후보가 되지 않는다
+ * 바뀐 항목은 3시즌(SHIFT_COOLDOWN) 후보가 되지 않고, 바로 반대 방향은 5시즌(REVERSE_BAN) 동안 못 간다
  */
 export function proposeFutureRule(league: LeagueState, signal: RuleSignal): RuleShift | null {
   if (!futureRulesOn(league)) return null;
@@ -206,10 +227,12 @@ export function proposeFutureRule(league: LeagueState, signal: RuleSignal): Rule
     const cur = futureValue(league, key, signal.year);
     const after = round(cur + dir * spec.step);
     if (after < spec.min - 1e-9 || after > spec.max + 1e-9) return;
+    // 누적 한도 (SHIFT_MAX_STEPS): 한도 밖으로 나가는 쪽만 막는다. 이미 한도 밖인 예전 저장은 안쪽으로 돌아오는 변경만 된다
+    const lim = futureLimits(key);
+    if ((dir > 0 && after > lim.hi + 1e-9) || (dir < 0 && after < lim.lo - 1e-9)) return;
     const last = (league.ruleShifts ?? []).filter((s) => s.key === key).at(-1);
     if (last && next - last.year < SHIFT_COOLDOWN + 1) return;
-    const rejected = (league.ruleVotes ?? []).filter((v) => v.key === key && !v.passed && Math.sign(v.after - v.before) === dir).at(-1);
-    if (rejected && next - rejected.year < REJECT_COOLDOWN + 1) return;
+    if (last && Math.sign(last.after - last.before) === -dir && next - last.year < REVERSE_BAN + 1) return;
     cands.push({ key, dir, signal: round(signalValue), why });
   };
   const avg = (f: (s: RuleSignal) => number) => recent.reduce((a, s) => a + f(s), 0) / recent.length;
@@ -261,7 +284,7 @@ export function foreignJudge(sig: RuleSignal[]): ForeignJudgement | null {
     const falling = a.every((v, i) => i === 0 || v < a[i - 1]);
     const ratio = a.at(-1)! / a[0];
     if (falling && ratio <= 1 - J.attendanceDrop) {
-      up = { dir: 1, signal: round(ratio), why: `관중이 ${J.attendanceYears}년 이어 줄어 (${att[0].year}년 경기당 ${man(a[0])}명 → ${att.at(-1)!.year}년 ${man(a.at(-1)!)}명, −${pct(ratio)}) 구단들이 볼거리를 늘리려 외국인 보유 한도 확대에 합의했다` };
+      up = { dir: 1, signal: round(ratio), why: `관중이 ${J.attendanceYears}년 이어 줄어 (${att[0].year}년 경기당 ${man(a[0])}명 → ${att.at(-1)!.year}년 ${man(a.at(-1)!)}명, −${pct(ratio)}) 리그가 볼거리를 늘리려 외국인 보유 한도를 1명 늘린다` };
     }
   }
   let down: ForeignJudgement | null = null;
@@ -269,7 +292,7 @@ export function foreignJudge(sig: RuleSignal[]): ForeignJudgement | null {
   if (bur.length === J.burdenYears && bur.every((s) => (s.foreignShare ?? 0) >= J.foreignShare && (s.deficit ?? 0) >= J.deficitTeams)) {
     const share = bur.reduce((x, s) => x + s.foreignShare!, 0) / bur.length;
     const fewest = Math.min(...bur.map((s) => s.deficit!));
-    down = { dir: -1, signal: round(share), why: `외국인 연봉이 구단 수입의 평균 ${Math.round(share * 100)}%로 무겁고 적자 구단이 ${J.burdenYears}년 이어 ${fewest}곳 이상이라 구단들이 외국인 보유 한도 축소에 합의했다` };
+    down = { dir: -1, signal: round(share), why: `외국인 연봉이 구단 수입의 평균 ${Math.round(share * 100)}%로 무겁고 적자 구단이 ${J.burdenYears}년 이어 ${fewest}곳 이상이라 리그가 외국인 보유 한도를 1명 줄인다` };
   }
   return up && down ? null : up ?? down;
 }

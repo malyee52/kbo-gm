@@ -148,6 +148,16 @@ function reasonOf(parts: [string, number][], verdict: Verdict): string {
 }
 
 /**
+ * 지금 구단에서 플레이어가 연 예산 회의 기록, 최근 시즌부터 (구단 현황 화면, 2026-11-12). 구단을 맡은 시즌만 남긴다:
+ * 그 시즌 구단주 평가(history)의 구단이 지금 구단이거나, 아직 평가 전인 시즌(마지막 평가 뒤)이면 지금 맡은 구단으로 본다. 맡기 전 AI 회의는 빠진다
+ */
+export function userMeetings(history: { year: number; team: number }[], meetings: MeetingRecord[] | undefined, team: number): MeetingRecord[] {
+  const last = history.length ? history[history.length - 1].year : -Infinity;
+  return (meetings ?? []).filter((m) => (history.find((h) => h.year === m.year)?.team ?? (m.year > last ? team : -1)) === team)
+    .sort((a, b) => b.year - a.year);
+}
+
+/**
  * 요청 하나 (오프시즌 offYear, 결과는 offYear + 1 시즌). accept는 조건부 판정에 대한 답 (두 번째 조작).
  * 한 해에 한 번만. 돈은 바로 장부(parentExtra, 다음 시즌)에 들어온다
  */

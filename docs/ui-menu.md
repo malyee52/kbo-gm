@@ -31,7 +31,7 @@
 | 일정·결과 (Schedule, 박스스코어·중계 다시 보기) | 시즌 > 일정·결과 | schedule |
 | 순위 (Standings) | 시즌 > 순위 | standings |
 | 개인 기록 (Leaders) | 시즌 > 개인 기록 | leaders |
-| 올스타전 (AllStar) | 시즌 > 올스타 | allstar |
+| 올스타전 (화면 없음, 2026-11-12) | 소식·기사(선발 명단·결과·MVP·홈런 더비), 선수 상세 이력 | - |
 | 가을야구 (Postseason) | 시즌 > 가을야구 | postseason |
 | 시즌 결과 (SeasonEnd) | 시즌 > 결산·시상 > 결산 | season-end |
 | 시상식 (Awards) | 시즌 > 결산·시상 > 시상 | awards |
@@ -39,7 +39,7 @@
 | 재정 | 경영 > 재정 | finance |
 | 구장·팬 | 경영 > 구장·팬 | stadium |
 | 감독·코치 | 경영 > 감독·코치 | staff |
-| 구단주 평가 카드, 구단주 면담 (OwnerMeeting, 판타지) | 경영 > 구단주 (구단 현황에도 평가 카드는 그대로) | owner |
+| 구단주 평가 카드, 구단주 면담 (OwnerMeeting, 판타지) | 판타지 모드만 경영 > 구단주. 기본 모드는 칸이 없고 구단 현황에 평가 카드·신뢰도 추이·예산 회의 기록 (2026-11-12) | owner |
 | 해고 뒤 영입 제의 (OfferPanel) | 경영 > 구단 현황 맨 위 (결정함에서 연결) | club |
 | 연표 (Records) | 아카이브 > 연표 (리그 연표 탭) | records |
 | 통산 순위 / 단일 시즌 기록 | 아카이브 > 통산·시즌 > 통산 / 단일 시즌 | rec-career, rec-season |

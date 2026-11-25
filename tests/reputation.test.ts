@@ -17,8 +17,10 @@ describe('단장 평판', () => {
     const L = { reputation: undefined } as unknown as LeagueState;
     expect(repOf(L)).toBe(50);
     const r = updateReputation(L, { ...base, winPct: 0.6, postseason: true, seriesWon: 2, champion: true, achievements: 1 });
-    // 승률 +4, 진출 +2, 2시리즈 +4, 우승 +4, 목표 +2, 업적 +1 = +17 → 67, 50 쪽으로 10% → 65.3
-    expect(r.after).toBeCloseTo(65.3, 1);
+    // 승률 +4, 진출 +3, 2시리즈 +6, 우승 +8, 목표 +2, 업적 +1 = +24 → 74, 50 쪽으로 10% → 71.6
+    // (2026-11-12 사용자 그릴 Q38: 진출·시리즈·우승을 키워 우승 한 시즌이면 70(강팀 제의 기준)에 닿게. 예전 값은 65.3)
+    expect(r.after).toBeCloseTo(71.6, 1);
+    expect(r.after).toBeGreaterThanOrEqual(70);
     const f = updateReputation(L, { ...base, year: 2027, winPct: 0.4, goalMet: false, fired: true });
     expect(f.after).toBeLessThan(r.after - 10);
     expect(L.reputation!.log.some((x) => x.reason === '해고')).toBe(true);
@@ -31,9 +33,20 @@ describe('단장 평판', () => {
     const at = (v: number) => ({ reputation: { value: v, log: [] } }) as unknown as LeagueState;
     expect(repDemand(at(50))).toBe(1);
     expect(repGoodwill(at(50))).toBe(0);
-    expect(repDemand(at(100))).toBeCloseTo(0.95);
-    expect(repDemand(at(0))).toBeCloseTo(1.05);
-    expect(repGoodwill(at(100))).toBeCloseTo(1.5);
+    // 2026-11-12 사용자 그릴 Q38: ±5%·±1.5런 → ±15%·±4런
+    expect(repDemand(at(100))).toBeCloseTo(0.85);
+    expect(repDemand(at(0))).toBeCloseTo(1.15);
+    expect(repGoodwill(at(100))).toBeCloseTo(4);
+    expect(repGoodwill(at(0))).toBeCloseTo(-4);
+  });
+
+  it('70에 닿는 길: 50에서 가을야구·목표 달성 시즌을 이어 가면 몇 해 안에 70을 넘는다', () => {
+    const L = { reputation: undefined } as unknown as LeagueState;
+    const years: number[] = [];
+    for (let y = 0; y < 6; y++) years.push(updateReputation(L, { ...base, year: 2026 + y, winPct: 0.55, postseason: true }).after);
+    // 승률 +2, 진출 +3, 목표 +2 = +7 → 해마다 약 +6, 셋째 해쯤 70
+    expect(years.findIndex((v) => v >= 70)).toBeGreaterThanOrEqual(0);
+    expect(years.findIndex((v) => v >= 70)).toBeLessThanOrEqual(3);
   });
 
   it('해고 뒤 제의: 보통은 예전과 같고, 평판이 높으면 위쪽 구단도, 낮으면 두 곳만', () => {

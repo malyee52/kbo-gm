@@ -10,7 +10,7 @@ import { foreignTag } from './foreignTag';
 
 export type Screen = 'home' | 'fantasy' | 'roster' | 'schedule' | 'standings' | 'leaders' | 'trade' | 'market' | 'club' | 'postseason' | 'growth' | 'awards' | 'records' | 'articles' | 'save' | 'season-end' | 'offseason'
   | 'finance' | 'budget' | 'stadium' | 'staff' | 'club-history' | 'editor'
-  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about' | 'search' | 'allstar'
+  | 'rec-career' | 'rec-season' | 'rec-teams' | 'rec-dynasty' | 'rec-hof' | 'about' | 'search'
   // 2026-10-22 UI 대개편 1차 (menu.ts): 결정함, 구단 소식, 기용 보드, 입대, 구단주
   | 'inbox' | 'news' | 'lineup' | 'enlist' | 'owner'
   // 2026-10-23 UI 2단계 공통 기능: 다른 구단 보기(arg = 구단 색인), 관심 명단, 전체 검색

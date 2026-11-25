@@ -16,14 +16,14 @@ import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPack
 import { currentRuns, playerValue, projectedValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
-import type { VoteChoice } from '../ai/vote';
+import type { VoteChoice } from '../league/legacyVote';
 import { leagueView } from '../league/offseason';
 import type { LeaguePlayer, LeagueState } from '../league/types';
 import { applyLeagueRunSkills, leagueDefense, worldFromLeague } from '../league/world';
 import { perkTeamsFor, ruleNews, ruleSnapshot, type RuleNews } from '../league/ruleNews';
 import { changeText, foreignRule, teamForeignRule } from '../league/eras';
 import { quoteLine, voice } from '../league/voices';
-import { condToday, ensureEvents, eventDef, formToday, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
+import { condToday, ensureEvents, eventDef, formToday, isNoticeEvent, resolveEvent, rollEvent, type EventContext, type PendingEvent } from '../league/events';
 import { avg, era, fixed2, ipText, ops, rate3 } from './stats';
 import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPlaces, strengthTier, type RankPlace, type StrengthTier } from './rank';
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
@@ -95,6 +95,9 @@ import { isFuturesTeam } from '../league/world';
 import { changeManagerInSeason, ensureManagers, fireManager, hireManager, infoOf, managerOf, openManagers, replaceManager, tacticsOf } from '../league/managers';
 import { DEFAULT_STOPS, stopRules, stopsOnEvent, type Attention, type StopRules } from './stops';
 import { ruleDate, ruleOf, RULE_DEFAULTS, RULE_DEFS } from '../league/rules';
+
+/** 이 이벤트에서 멈추나. 소식 이벤트(묻지 않음)에서는 멈추지 않는다 (2026-11-12 Q35) */
+const stopsOnEventOf = (r: StopRules, ev: PendingEvent) => !isNoticeEvent(ev.id) && stopsOnEvent(r, ev);
 
 /** 중계·하이라이트용 우리 경기 (정규시즌 또는 가을야구) */
 export interface CastGame {
@@ -206,6 +209,9 @@ function commandMode(c: CommandCtl | undefined): CommandMode | undefined {
   const from = c.from;
   return { ...(from !== undefined ? { takeover: (_r: CommandRequest, k: number) => k === from } : {}), ...(c.handoff !== undefined ? { handoff: c.handoff } : {}) };
 }
+
+/** 예전 조작 기록의 단장 회의 표 (구단 투표, 2026-11-12에 뺐다)를 재현할 때 돌려주는 문구 */
+export const RULE_VOTE_GONE = '구단 투표(단장 회의)는 없어졌습니다. 규칙은 리그가 정합니다.';
 
 /** 조작 기록의 지휘 선택을 물음 번호로 돌려주는 지휘자 (없으면 자동). 더블헤더 날은 물음의 dh로 그 차전 기록을 고른다 */
 function replayCommander(team: number, cmds: PendingCommand[]): GameCommand | null {
@@ -404,7 +410,10 @@ export type GameAction =
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
   | { year: number; type: 'claim'; id: string }
-  /** 단장 회의 우리 표 (구단 투표, league/ruleVote.ts). agenda = 안건 id (없으면 첫 안건). 마지막 표로 개표, 안 내면 반대 */
+  /**
+   * 단장 회의 우리 표 (구단 투표, 2026-10-23~11-11에만). 구단 투표는 2026-11-12에 뺐다: 예전 조작 기록에 남은 이 조작은 읽기만 하고
+   * 재현 때 아무것도 하지 않는다 (그 저장의 표는 오프시즌 상태에 남아 있어 불러올 때 개표한다, offseason.ts settleLegacyVote)
+   */
   | { year: number; type: 'rule-vote'; choice: VoteChoice; agenda?: string }
   | { year: number; type: 'next' }
   | { year: number; type: 'accept-offer'; team: number }
@@ -1054,6 +1063,11 @@ export class GameSession {
     ensureTitles(g.league, store, g.league.lastSeason?.year ?? g.league.startYear - 1);
     // 시작 전 구단 WAR 칸이 없는 예전 저장 (2026-11-05 전, league/franchise.ts)
     ensureTenureWar(g.league, store);
+    // 단장 회의 단계에 멈춘 예전 저장 (구단 투표는 2026-11-12에 뺐다): 저장된 AI 표와 우리 표(없으면 반대)로 개표하고 FA로 넘긴다
+    if (g.offseason) {
+      const before = g.offseason.log.length;
+      if (Off.settleLegacyVote(g.league, g.offseason, store, params)) g.offNews(before);
+    }
     // 예전 저장에는 없다: 불러온 직후 엔진 명단은 비어 있으므로 지금 날짜로 짜 본 임시 승격으로 대신한다
     g.lastCallUps = new Set(save.callUps ?? season.activeAt(save.teamIdx).callUps?.map((p) => p.idx) ?? []);
     return g;
@@ -2330,7 +2344,7 @@ export class GameSession {
       this.settlePending();
       const ev = this.league.events?.pending;
       if (ev) {
-        if (stopsOnEvent(r, ev)) { this.stopped = true; break; }
+        if (stopsOnEventOf(r, ev)) { this.stopped = true; break; }
         this.applyEventChoice(0, true);
       }
       // 위기 멈춤 (직접 지휘, B → A 끼어들기, 엔진 2 18단계): 오늘 우리 경기를 지휘 없이 미리 돌려 위기가 오면 그날을 진행하지 않고,
@@ -2358,7 +2372,7 @@ export class GameSession {
       n++;
       this.checkStops(r, streak0);
       const now = this.league.events?.pending;
-      if ((now && stopsOnEvent(r, now)) || this.attention.length) { this.stopped = true; break; }
+      if ((now && stopsOnEventOf(r, now)) || this.attention.length) { this.stopped = true; break; }
     }
     return n;
   }
@@ -2501,8 +2515,15 @@ export class GameSession {
       this.aiDevRegister();
       this.tradeOfferDay();
       // 무작위 이벤트 (정규시즌 중, events.ts)
-      const ev = rollEvent(ensureEvents(this.league), this.eventContext());
-      if (ev) this.addNews(this.season.day, 'event', `이벤트: ${eventDef(ev.id)!.title}`);
+      const ctx = this.eventContext();
+      const ev = rollEvent(ensureEvents(this.league), ctx);
+      if (ev) {
+        const def = eventDef(ev.id)!;
+        // 소식 이벤트 (2026-11-12 Q35): 묻지 않는다. 효과는 다음 진행 첫머리에 첫 선택지로 적용한다 (예전 자동 처리와 같은 때라
+        // 예전 저장의 조작 기록이 이 이벤트에 고른 선택도 그 자리에서 그대로 읽힌다)
+        if (def.notice) this.addNews(this.season.day, 'event', `소식: ${def.title} — ${def.text(ctx, ev.vars)} 프런트 처리: ${def.choices[0].label} (${def.choices[0].note(ctx, ev.vars)})`);
+        else this.addNews(this.season.day, 'event', `이벤트: ${def.title}`);
+      }
     }
     this.watchCheck(day);
   }
@@ -2525,9 +2546,10 @@ export class GameSession {
 
   // ---- 무작위 이벤트 (events.ts)
 
-  /** 답을 기다리는 이벤트 */
+  /** 답을 기다리는 이벤트. 소식 이벤트(묻지 않음)는 답할 것이 없어 null */
   get pendingEvent(): PendingEvent | null {
-    return this.league.events?.pending ?? null;
+    const ev = this.league.events?.pending ?? null;
+    return ev && !isNoticeEvent(ev.id) ? ev : null;
   }
 
   /** 이벤트 효과를 적용할 도구 */
@@ -2674,13 +2696,17 @@ export class GameSession {
     return { ok: true, message: result };
   }
 
-  /** auto: 답하지 않고 진행해 첫 번째 선택지로 자동 처리 (조작 기록에 남기지 않는다. 다시 돌려도 같은 자리에서 자동 처리된다) */
+  /**
+   * auto: 답하지 않고 진행해 첫 번째 선택지로 자동 처리 (조작 기록에 남기지 않는다. 다시 돌려도 같은 자리에서 자동 처리된다).
+   * 소식 이벤트도 여기서 처리한다: 자동이면 굴릴 때 소식을 이미 냈으니 더 쓰지 않고, 예전 저장의 조작 기록이 고른 선택이면 그대로 적용한다
+   */
   private applyEventChoice(choice: number, auto = false): string {
-    const ev = this.pendingEvent;
+    const ev = this.league.events?.pending;
     if (!ev) return '';
     const def = eventDef(ev.id)!;
+    if (!def.choices[choice]) return '';
     const result = resolveEvent(ensureEvents(this.league), this.eventContext(), choice);
-    this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
+    if (!(def.notice && auto)) this.addNews(this.season.day, 'event', `${def.title}: ${def.choices[choice].label}${auto ? ' (자동)' : ''} — ${result}`);
     return result;
   }
 
@@ -3003,7 +3029,10 @@ export class GameSession {
     addArticle(this.league, {
       year, day, kind: 'allstar', title: `올스타전 ${result}, MVP ${nameOf(rec.game.mvp)}`,
       body: `${josa(sides[0], '과', '와')} ${josa(sides[1], '이', '가')} 맞붙은 ${year} 올스타전은 ${josa(result, '으로', '로')} 끝났다. MVP는 ${nameOf(rec.game.mvp)}${mvpTeam !== undefined ? `(${this.world.teams[mvpTeam].name})` : ''}. `
-        + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다.`,
+        + `앞서 열린 홈런 더비에서는 ${josa(nameOf(rec.derby.winner), '이', '가')} 정상에 올랐다. `
+        // 올스타 화면을 빼서 (2026-11-12 사용자) 선발 명단은 기사에 남긴다
+        + `선발 명단은 ${([0, 1] as const).map((side) => `${sides[side]} ${rec.roster.filter((x) => x.side === side && x.starter)
+          .map((x) => `${x.name}(${x.pos} ${this.world.teams[x.team].name})`).join(', ')}`).join(' / ')}.`,
       ...(mvpTeam !== undefined ? { franchise: this.world.teams[mvpTeam].franchise } : {}),
     });
   }
@@ -3450,7 +3479,8 @@ export class GameSession {
           const w = worldFromLeague(L, this.store, this.params, { form: false });
           const userPick = L.campPlan?.year === L.year ? L.campPlan.pick : null;
           const teams = L.teams.map((_, i) => i).filter((i) => !isFuturesTeam(L, i, L.year));
-          twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w)));
+          twoWayNews.push(...runCamps(L, L.year, teams, this.teamIdx, userPick, (t) => cashOf(L, t), new Map(w.players.map((p) => [p.id, p])), valueContext(w),
+            (id) => this.seenValue(id)));
           delete L.campPlan;
         }
         twoWayNews.push(...openNaming(L, this.teamIdx)); // 구장 명명권 (league/naming.ts)
@@ -3576,8 +3606,8 @@ export class GameSession {
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
       case 'rule-vote':
-        // 해고된 채 맞은 단장 회의는 표를 막는다. 예전에 해고 중 낸 표가 기록에 있으면 재현 때 여기서 버려져 AI 표로 개표된다
-        res = Off.voteLockedByFiring(L, off) ? { ok: false, message: Off.VOTE_LOCKED_TEXT } : Off.castVote(off!, a.choice, a.agenda);
+        // 구단 투표는 2026-11-12에 뺐다. 예전 기록의 표는 버리고 기록에도 다시 남기지 않는다
+        res = { ok: false, message: RULE_VOTE_GONE };
         break;
       case 'accept-offer': {
         const o = L.owner;
@@ -4832,10 +4862,6 @@ export class GameSession {
   }
   /** 다른 구단이 방출한 선수를 데려온다 (정원 정리 단계, 방출 선수 시장) */
   claim(id: string) { return this.dispatchOff({ year: this.year, type: 'claim', id }); }
-  /** 이번 단장 회의에 우리 표를 낼 수 없는가 (이 결산에서 해고됨) */
-  get voteLocked(): boolean { return !!this.offseason && Off.voteLockedByFiring(this.league, this.offseason); }
-  /** 단장 회의 우리 표 (구단 투표). 단장 회의 단계에서만, 몇 번이고 바꿀 수 있다. 해고된 채 맞은 회의는 막힌다 */
-  voteRule(choice: VoteChoice, agenda?: string) { return this.dispatchOff({ year: this.year, type: 'rule-vote', choice, ...(agenda ? { agenda } : {}) }); }
   nextStage() { return this.dispatchOff({ year: this.year, type: 'next' }); }
   /** 해고된 뒤 영입 제의를 받아들인다 (M7) */
   acceptOffer(team: number) { return this.dispatchOff({ year: this.year, type: 'accept-offer', team }); }

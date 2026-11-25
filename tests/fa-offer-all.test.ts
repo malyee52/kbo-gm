@@ -17,7 +17,6 @@ beforeAll(() => {
   g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'fa-offer-all' }, FAST);
   g.advance(1000);
   g.beginOffseason();
-  if (g.offseason!.stage === 'vote') g.nextStage();
 }, 600_000);
 
 describe('우리 FA 모두 요구 조건대로 제시 (편의 U2)', () => {

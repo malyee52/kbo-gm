@@ -9,6 +9,7 @@ import { gamesBehind, rate3, recentForm } from '../../game/stats';
 import { shortDate } from '../../game/calendar';
 import { GM_STYLE_LABEL, gmStyle } from '../../league/gm';
 import { managerOf } from '../../league/managers';
+import { StyleTags } from './Manager';
 import { dollarText } from '../../league/salary';
 import { Grade, PlayerLink, Pos, TeamName, useGame, useWon } from '../context';
 import { DataTable, guessColumn, useSeen } from '../parts';
@@ -107,7 +108,7 @@ function TeamHero({ team }: { team: number }) {
             {r && r.g > 0 && <span className="num">{r.w}승 {r.l}패{r.t ? ` ${r.t}무` : ''} · 승률 {rate3(s.winPct(r))}</span>}
             {!ours && <span className="tag" title="상대 구단 성향 (트레이드 판단)">{TENDENCY_LABEL[session.tendency(team)]}</span>}
             {!ours && <span title="AI 단장 성향">단장 {GM_STYLE_LABEL[gmStyle(session.league, team)]}</span>}
-            {mgr && <span>감독 {mgr.name}{mgr.interim ? ' (대행)' : ''}</span>}
+            {mgr && <span>감독 {mgr.name}{mgr.interim ? ' (대행)' : ''} <StyleTags name={mgr.name} year={off ? session.year + 1 : session.year} /></span>}
           </p>
         </div>
         {ours ? (

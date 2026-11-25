@@ -1,12 +1,13 @@
 // 코치 (docs/roadmap.md 7.4, 2026-10-11). 2군과 육성 단계의 마지막.
 //
 // 사용자 결정으로 감독·코치는 실존 인물 이름만 쓰는데, 코치 실명 자료가 없어 이름 없이 역할·등급·성향으로만 다룬다.
-// 역할 4가지: 타격, 투수, 수비·주루, 2군(육성). 등급 1~5, 성향(유망주형·베테랑형·균형형). 연봉은 등급에 따라.
+// 역할 4가지: 타격, 투수, 수비·주루, 2군(육성). 등급 1~5, 성향(유망주형·베테랑형·균형형). 연봉은 역할·등급에 따라 (FA 1승당 값, coachSalaryAt).
 // 효과 (임시값):
 //  - 시즌 중: 타격 코치는 우리 타자, 투수·수비 코치는 우리 투수의 경기력(타석 edge)에 (등급 − 3) × COACH_EDGE. 3등급이 리그 평균
 //  - 결산 성장: 타격·투수 코치는 그 쪽 선수의 성장 폭을 늘리고(유망주형은 25세 이하에 더), 베테랑형은 31세 이상의 하락을 줄인다.
 //    2군 코치는 2군에서 주로 뛴 선수의 성장 폭을 늘린다
-// 오프시즌에 후보(시장)에서 고용한다. 계약이 끝나면 자리가 빈다. AI 구단은 자금에 맞춰 빈자리를 채운다.
+// 오프시즌에 후보(시장)에서 고용한다. 계약이 끝나면 자리가 빈다. AI 구단은 자금에 맞춘 연봉 한도 안에서 가성비로 빈자리를 채우고,
+// 플레이어 구단 빈자리는 개막 때 직원 추천(가성비, recommendCoach)으로 채운다.
 
 import { Rng } from '../engine';
 import type { LeagueState } from './types';
@@ -32,8 +33,57 @@ export interface Coach {
   career: string;
 }
 
-/** 등급별 연봉 (만 원, 임시값) */
-export const COACH_SALARY = [0, 10_000, 20_000, 35_000, 50_000, 70_000];
+/**
+ * 코치 연봉 (2026-11-12 사용자 그릴 Q37): 등급이 하나 오를 때 늘어나는 연봉 = 그 역할 한 등급의 승수 × FA 시장 1승당 값.
+ * 전에는 역할 구분 없이 1·2·3.5·5·7억이라 효과(성장이 해를 넘어 남는 몫 포함)에 비해 싸서 늘 최고 등급이 정답이었다
+ * (reports/nominal-content.md 3장, reports/coach-rep.md).
+ * FA_WIN_WON: 시장 단가 WON_PER_RUN 4,500만 원/런(salary.ts, 시장 연봉식의 주전급 기울기) × 득실 1승 11.0점(nominal-content.md 0장) ≈ 4.95억 → 5억 (임시값)
+ */
+export const FA_WIN_WON = 50_000;
+/** 1등급 연봉 (만 원, 임시값. 예전 1등급 1억 그대로) */
+export const COACH_BASE_SALARY = 10_000;
+/**
+ * 역할별 한 등급의 승수 (한 시즌 경기력 + 성장 몫, 임시값, 근거 reports/coach-rep.md 1장, 시드 cr-a 50시즌):
+ * - 경기력: 타자 edge +0.01 = 1.51승, 투수 +0.01 = 1.36승 (nominal-content.md 0장) × COACH_EDGE → 타격 0.227·투수 0.204·수비 0.102승 (수비·주루는 투수 쪽 절반)
+ * - 성장: 한 해 오른 몫(양수)마다 그 뒤 같은 구단 상위 25명으로 남은 해를 0.7^h로 줄여 센 '런·해'(타자 73.4·투수 64.6, 2군 유망주 84.8, 구단·해당)
+ *   × COACH_GROWTH ÷ 득실 1승 11점 → 타격 0.267·투수 0.235·2군 0.308승.
+ *   0.7은 잠재력 격차를 해마다 약 30%씩 메우는 성장 속도(ai/value.ts expectedGrowth, 23~25세 0.3)라 코치가 앞당긴 몫이 뒤에서 줄어드는 몫이다.
+ *   성향(유망주형 1.5배·베테랑형 절반·하락 완화)은 넣지 않았다
+ */
+export const COACH_WIN_PER_LEVEL: Record<CoachRole, number> = { bat: 0.49, pit: 0.44, def: 0.10, dev: 0.31 };
+
+/** 등급별 연봉 (만 원, 2026년 돈): 1등급 + (등급 − 1) × 한 등급 승수 × FA_WIN_WON */
+export function coachSalaryAt(role: CoachRole, level: number): number {
+  return Math.round((COACH_BASE_SALARY + Math.max(0, level - 1) * COACH_WIN_PER_LEVEL[role] * FA_WIN_WON) / 1000) * 1000;
+}
+
+/** 코치 한 사람의 기대 승수 (1등급 대비, 한 시즌 + 성장 지속 몫). 성향은 셈하지 않는다 */
+export function coachWins(c: Pick<Coach, 'role' | 'level'>): number {
+  return Math.max(0, c.level - 1) * COACH_WIN_PER_LEVEL[c.role];
+}
+
+/**
+ * 가성비 (만 원): 1등급 대비 기대 승수를 FA 1승당 값으로 친 돈 − 1등급 대비 더 내는 연봉. 클수록 몸값보다 효과가 크다.
+ * wage = 계약 해 연봉 상승 지수 (연봉은 지수가 곱해져 있다)
+ */
+export function coachSurplus(c: Pick<Coach, 'role' | 'level' | 'salary'>, wage: number): number {
+  return coachWins(c) * FA_WIN_WON * wage - (c.salary - COACH_BASE_SALARY * wage);
+}
+
+/** 1등급 대비 1승당 연봉 (만 원, 화면). 1등급은 null */
+export function coachCostPerWin(c: Pick<Coach, 'role' | 'level' | 'salary'>, wage: number): number | null {
+  const w = coachWins(c);
+  return w > 0 ? Math.max(0, c.salary - COACH_BASE_SALARY * wage) / w : null;
+}
+
+/**
+ * 직원 추천 (2026-11-12 사용자 그릴 Q37: 플레이어 빈자리 기본값 '가장 싼 후보' → 가성비): 연봉이 maxSalary 안인 후보 가운데 가성비가 가장 큰 코치.
+ * 같으면 등급이 높은 쪽, 그다음 싼 쪽
+ */
+export function recommendCoach(cands: Coach[], wage: number, maxSalary = Infinity): Coach | undefined {
+  return cands.filter((c) => c.salary <= maxSalary)
+    .sort((a, b) => coachSurplus(b, wage) - coachSurplus(a, wage) || b.level - a.level || a.salary - b.salary || a.id.localeCompare(b.id))[0];
+}
 /** 시즌 중 경기력: (등급 − 3) × 이 값 (홈 이점 0.013, 임시값) */
 export const COACH_EDGE = 0.0015;
 /** 성장 폭: (등급 − 3) × 이 값 (3등급 = 리그 평균 = 0, 장기 균형을 바꾸지 않게) */
@@ -59,7 +109,7 @@ function makeCoach(rng: Rng, role: CoachRole, year: number, n: number, minLevel 
   const level = Math.max(minLevel, u < 0.1 ? 1 : u < 0.35 ? 2 : u < 0.65 ? 3 : u < 0.88 ? 4 : 5);
   const sv = rng.next();
   const style: CoachStyle = sv < 0.35 ? 'young' : sv < 0.65 ? 'veteran' : 'balanced';
-  const salary = Math.round(COACH_SALARY[level] * (0.85 + rng.next() * 0.3) * wageIndex(year + 1, league) / 1000) * 1000;
+  const salary = Math.round(coachSalaryAt(role, level) * (0.85 + rng.next() * 0.3) * wageIndex(year + 1, league) / 1000) * 1000;
   return { id: `coach-${year}-${role}-${n}`, role, level, style, salary, until: year + 1 + rng.int(3), career: CAREERS[role][rng.int(CAREERS[role].length)] };
 }
 
@@ -151,23 +201,46 @@ export function fallbackCoach(league: Pick<LeagueState, 'seed' | 'ruleShifts'>, 
 }
 
 /**
- * AI 구단이 빈자리를 채운다 (오프시즌 끝). 자금이 넉넉하면 높은 등급, 모자라면 싼 코치.
+ * AI 구단 연봉 한도 (만 원, 2026년 돈 × 지수): 자금이 넉넉하면 제한 없음, 보통이면 4등급 몫, 모자라면 3등급 몫까지 (임시값).
+ * 예전에는 등급으로 막았다 (80억 이상 5등급, 30억 이상 4등급, 그 밑 3등급)
+ */
+export function aiCoachBudget(role: CoachRole, cash: number, wage: number): number {
+  if (cash >= 800_000 * wage) return Infinity;
+  return coachSalaryAt(role, cash >= 300_000 * wage ? 4 : 3) * 1.15 * wage;
+}
+
+/**
+ * AI 구단이 빈자리를 채운다 (오프시즌 끝). 자금에 맞춘 연봉 한도 안에서 가성비가 큰 코치 (2026-11-12, 예전에는 한도 안 최고 등급).
  * market에서 고른 코치는 빠진다. 후보가 없으면 2등급 코치를 만든다
  */
 export function aiHireCoaches(league: LeagueState, market: Coach[], year: number, userTeam: number, cashOf: (t: number) => number): Coach[] {
   league.coaches ??= league.teams.map(() => []);
+  const wage = wageIndex(year + 1, league);
   let left = [...market];
   for (let t = 0; t < league.teams.length; t++) {
     if (t === userTeam) continue;
     const cash = cashOf(t);
-    const maxLevel = cash >= 800_000 ? 5 : cash >= 300_000 ? 4 : 3;
     for (const role of COACH_ROLES) {
       if (coachOf(league, t, role)) continue;
-      const cands = left.filter((c) => c.role === role && c.level <= maxLevel).sort((a, b) => b.level - a.level || a.salary - b.salary || a.id.localeCompare(b.id));
-      const pick = cands[0] ?? fallbackCoach(league, role, year, t);
+      const pick = recommendCoach(left.filter((c) => c.role === role), wage, aiCoachBudget(role, cash, wage)) ?? fallbackCoach(league, role, year, t);
       left = left.filter((c) => c.id !== pick.id);
       league.coaches[t] = [...(league.coaches[t] ?? []), { ...pick }];
     }
   }
   return left;
+}
+
+/**
+ * 플레이어 구단 빈자리를 개막 때 채운다: 남은 후보 가운데 직원 추천(가성비, recommendCoach), 없으면 2등급 코치를 만든다
+ * (2026-11-12 사용자 그릴 Q37. 예전에는 가장 싼 후보). wage = 계약 해 연봉 상승 지수. 채운 코치를 돌려준다
+ */
+export function fillUserCoaches(league: LeagueState, left: Coach[], year: number, team: number, wage: number): Coach[] {
+  const out: Coach[] = [];
+  for (const role of COACH_ROLES) {
+    if (coachOf(league, team, role)) continue;
+    const pick = recommendCoach(left.filter((c) => c.role === role), wage) ?? fallbackCoach(league, role, year, team);
+    hireCoach(league, team, pick, year);
+    out.push(pick);
+  }
+  return out;
 }

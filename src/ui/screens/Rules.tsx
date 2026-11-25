@@ -3,8 +3,9 @@ import { useMemo } from 'react';
 import { perkTeamsFor, ruleSnapshot, ruleSummary } from '../../league/ruleNews';
 import { useGame } from '../context';
 import { RuleNewsBody } from '../RuleNews';
-import { voteAgendaText } from '../../league/ruleNews';
-import type { RuleVoteRecord } from '../../ai/vote';
+import { voteAgendaText, voteResultText, type RuleVoteRecord } from '../../league/legacyVote';
+import { FUTURE_RULE_LABEL, futureValueText, type RuleShift } from '../../league/futureRules';
+import { LEAGUE_DECISION } from '../../league/ruleNews';
 import { DataTable } from '../parts';
 import type { Column } from '../table';
 import { useShell } from '../shell';
@@ -34,6 +35,7 @@ export function Rules() {
         <ul className="rule-summary">{now.map((s) => <li key={s}>{s}</li>)}</ul>
         <p className="muted small">개막 때 "달라지는 규칙" 창은 시즌마다 한 번 뜹니다. 자동 진행으로 개막일을 지나쳤으면 진행이 멈출 때 뜹니다.</p>
       </section>
+      <ShiftHistory />
       <VoteHistory />
       {years.map((y) => <YearRules key={y} year={y} open={y === year} />)}
     </div>
@@ -54,7 +56,31 @@ function YearRules({ year, open }: { year: number; open: boolean }) {
   );
 }
 
-/** 단장 회의 표결 이력 (구단투표 기획안 2.3): 가결·부결 모두, 최근 것부터 */
+/** 미래 규칙 변경 이력 (2028~, futureRules.ts): 최근 것부터. 정한 곳은 리그 결정, 예전 저장의 단장 회의 가결은 표결 결과 */
+function ShiftHistory() {
+  const { session } = useGame();
+  const full = useShell().density === 'full';
+  const rows = useMemo(() => [...(session.league.ruleShifts ?? [])].reverse(), [session.league.ruleShifts]);
+  if (!rows.length) return null;
+  const cols: Column<RuleShift>[] = [
+    { key: 'year', label: '적용 시즌', value: (r) => r.year, fixed: true, brief: true },
+    { key: 'item', label: '항목 (전 → 후)', value: (r) => `${FUTURE_RULE_LABEL[r.key]} ${futureValueText(r.key, r.before)} → ${futureValueText(r.key, r.after)}`, text: true, brief: true },
+    { key: 'by', label: '정한 곳', value: (r) => (r.vote ? voteResultText(r.vote, true) : LEAGUE_DECISION), text: true, brief: true },
+    { key: 'reason', label: '까닭', value: (r) => r.reason, text: true },
+  ];
+  return (
+    <section className="panel">
+      <h2>리그 규칙 변경 이력</h2>
+      <p className="muted small">
+        결산 때 리그 흐름 신호가 2시즌 이어 기준을 벗어나면 리그가 다음 시즌 규칙을 바꿉니다 (게임 속 가상 결정). 바뀐 항목은 3시즌 쉬고,
+        바로 반대 방향으로는 5시즌 동안 되돌리지 않습니다.
+      </p>
+      <DataTable id="rule-shifts" label="리그 규칙 변경 이력" cols={cols} rows={rows} rowKey={(r) => `${r.year}-${r.key}`} full={full} empty="규칙 변경 기록이 없습니다." />
+    </section>
+  );
+}
+
+/** 지난 단장 회의 표결 이력 (구단 투표가 있던 2026-10-23~11-11 저장에만): 가결·부결 모두, 최근 것부터 */
 function VoteHistory() {
   const { session } = useGame();
   const full = useShell().density === 'full';
@@ -75,9 +101,9 @@ function VoteHistory() {
   ];
   return (
     <section className="panel">
-      <h2>단장 회의 표결 이력</h2>
-      <p className="muted small">결산 때 리그 흐름 신호로 올라온 규칙 안건을 구단들이 표결한 기록입니다 (게임 속 가상 결정). 문턱 이상 찬성하면 다음 시즌부터 바뀌고, 부결된 안건은 같은 방향으로 2시즌 쉽니다.</p>
-      <DataTable id="rule-votes" label="단장 회의 표결 이력" cols={cols} rows={rows} rowKey={(r) => r.id} full={full} empty="표결 기록이 없습니다." />
+      <h2>지난 단장 회의 표결 이력</h2>
+      <p className="muted small">구단 투표가 있던 때(이 저장의 지난 오프시즌) 구단들이 규칙 안건을 표결한 기록입니다 (게임 속 가상 결정). 지금은 구단 투표 없이 리그가 정합니다.</p>
+      <DataTable id="rule-votes" label="지난 단장 회의 표결 이력" cols={cols} rows={rows} rowKey={(r) => r.id} full={full} empty="표결 기록이 없습니다." />
     </section>
   );
 }

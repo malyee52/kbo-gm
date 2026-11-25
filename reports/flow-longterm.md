@@ -1,4 +1,21 @@
-# 장기 진행 흐름 (2026-10-25, 능력치 v2 16-5·16-5b)
+# 장기 진행 흐름 (2026-11-25 합친 판 재측정, 결정 Q46)
+
+`npx tsx tools/flow_longterm.ts --seasons 20 --seeds diag-a,diag-b,diag-c,diag-d`, 브랜치 `integrate/nominal-rework` (b37a093: 구단 투표 뺌·코치·평판·감독·이벤트·캠프 개편을 합친 판), `params.potential.draftScale` 9.75 그대로. 원표는 `reports/flow-longterm-2026-11-25.md`.
+
+상위 270명 기여 합, 시작 대비 (해마다 값의 평균):
+
+| 시드 | 2033\~36 | 2043\~45 | 2045 |
+|---|---|---|---|
+| diag-a | −2.7% | −1.4% | +0.1% |
+| diag-b | +3.4% | −3.8% | +1.6% |
+| diag-c | +6.5% | −5.2% | −2.0% |
+| diag-d | −5.0% | −2.5% | −6.6% |
+| **평균** | **+0.6%** | **−3.2%** | **−1.7%** |
+
+- 전 → 후 (네 시드 평균, 전 = 2026-11-10 장타 압력 카드의 9.75 측정, `docs/temp-values.md` "장타 압력"): 2033\~36 +0.2% → +0.6%, 2043\~45 −2.2% → −3.2%. 해마다 ±5\~7% 흔들림 안이다.
+- Q46 기준(20년 기량 시작값 ±5%): 네 시드 평균 −3.2%, diag-a\~c 세 시드 평균 −3.5%로 안이라 `draftScale`은 바꾸지 않았다. 한 시드(diag-c 2043\~45 −5.2%, diag-d 2045 한 해 −6.6%)만 조금 밖이다.
+
+## 예전 판: 장기 진행 흐름 (2026-10-25, 능력치 v2 16-5·16-5b)
 
 `npx tsx tools/flow_longterm.ts --seasons 20 --seeds diag-a,diag-b,diag-c` (2026 시작, 모든 구단 AI).
 설정: 잠재력 v2(기획안 17·18장), 하락 32세, **성장 여유분 실측**(`params.potential.room` 10.5·6·4.5·1.5런, `tools/fit_prospects.ts` → `reports/prospect-growth.md`), **가상 신인 배율 9.5**(`params.potential.draftScale`, 16-5 전 10.5 → 16-5 9 → 16-5b 9.5), ρ 중심 0.85 그대로.

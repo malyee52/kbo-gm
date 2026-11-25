@@ -11,7 +11,7 @@
 import { writeFileSync } from 'node:fs';
 import { loadDataStore } from '../src/data/loadNode';
 import { condWord, DEFAULT_PARAMS, Season, worldForYear, type CondWord, type EngineParams } from '../src/engine';
-import { distanceTable } from '../src/league/distance';
+import { distanceTable } from './distance';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);

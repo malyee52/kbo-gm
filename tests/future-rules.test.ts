@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS } from '../src/engine';
 import { createLeague } from '../src/league/create';
 import { foreignRule } from '../src/league/eras';
 import {
-  ballD2, ballHrMul, COR_HIGH, COR_LOW, corRange, FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureValue, judgeFutureRules, seasonCor, SHIFT_COOLDOWN, type FutureRuleKey, type RuleShift, type RuleSignal,
+  ballD2, ballHrMul, COR_HIGH, COR_LOW, corRange, FUTURE_RULE_SPEC, FUTURE_RULES_FROM, futureLimits, futureValue, judgeFutureRules, REVERSE_BAN, seasonCor, SHIFT_COOLDOWN, SHIFT_MAX_STEPS, type FutureRuleKey, type RuleShift, type RuleSignal,
 } from '../src/league/futureRules';
 import { ruleNews, ruleSnapshot } from '../src/league/ruleNews';
 import { salaryCap } from '../src/league/salary';
@@ -23,6 +23,8 @@ beforeAll(() => {
 const calm = (year: number, o: Partial<RuleSignal> = {}): RuleSignal => ({
   year, hr: 1, so: 1, bb: 1, draw: 0.025, absence: 1000, attendance: 12000, foreignShare: 0.08, deficit: 1, capOver: 0, capUse: 0.7, ...o,
 });
+
+const round2 = (x: number) => Math.round(x * 100) / 100;
 
 const bare = (seed = 'fr', fantasy = false): LeagueState => ({ seed, ...(fantasy ? { fantasy: {} } : {}) }) as unknown as LeagueState;
 
@@ -48,8 +50,78 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
       if (s) years.push(s.year);
     }
     for (let i = 1; i < years.length; i++) expect(years[i] - years[i - 1]).toBeGreaterThan(SHIFT_COOLDOWN);
-    expect(futureValue(L, 'ball', 2080)).toBeCloseTo(FUTURE_RULE_SPEC.ball.min + 0.01, 5); // 1 - 0.06 × 4 = 0.76 (0.70은 범위 밖)
+    // 2026-11-12 Q34 누적 한도 ±2칸: 1 - 0.06 × 2 = 0.88에서 멈춘다 (전에는 누적 범위 0.75까지 4번 내려 0.76)
+    expect(futureValue(L, 'ball', 2080)).toBeCloseTo(0.88, 5);
+    expect(L.ruleShifts!.map((s) => s.after)).toEqual([0.94, 0.88]);
     expect(L.ruleShifts!.every((s) => s.after >= FUTURE_RULE_SPEC.ball.min && s.after <= FUTURE_RULE_SPEC.ball.max)).toBe(true);
+  });
+
+  it('누적 한도 (2026-11-12 사용자 결정 Q34): 항목마다 시작 값 ±2칸, 한도에 닿은 방향 신호는 무시하고 이력에 남기지 않는다', () => {
+    expect(SHIFT_MAX_STEPS).toBe(2);
+    expect(futureLimits('ball')).toEqual({ lo: 0.88, hi: 1.12 });
+    expect(futureLimits('zone')).toEqual({ lo: 0.94, hi: 1.06 });
+    expect(futureLimits('extra')).toEqual({ lo: 10, hi: 13 }); // 누적 범위 10과 겹침
+    expect(futureLimits('roster')).toEqual({ lo: 28, hi: 31 });
+    expect(futureLimits('foreign')).toEqual({ lo: 2, hi: 4 });
+    expect(futureLimits('capGrowth')).toEqual({ lo: 0.03, hi: 0.09 });
+    // 존: 삼진 압력이 내내 높으면 0.97 → 0.94에서 멈추고, 그 뒤 신호는 이력·신호 판정 어디에도 변경을 만들지 않는다
+    const Z = bare();
+    for (let y = 2027; y < 2070; y++) judgeFutureRules(Z, calm(y, { so: 1.2 }));
+    expect(Z.ruleShifts!.map((s) => [s.key, s.after])).toEqual([['zone', 0.97], ['zone', 0.94]]);
+    // 연장: 무승부가 내내 많으면 11 → 12 → 13에서 멈춘다 (누적 범위 15까지 가지 않는다)
+    const E = bare();
+    for (let y = 2027; y < 2070; y++) judgeFutureRules(E, calm(y, { draw: 0.06 }));
+    expect(E.ruleShifts!.map((s) => s.after)).toEqual([12, 13]);
+    // 한 항목이 한도에 닿아도 다른 항목은 그대로 바뀐다: 공이 막힌 뒤 존 신호가 들어오면 존이 바뀐다
+    const B = bare();
+    for (let y = 2027; y < 2045; y++) judgeFutureRules(B, calm(y, { hr: 1.3, so: y >= 2040 ? 1.2 : 1 }));
+    expect(B.ruleShifts!.map((s) => [s.key, s.after])).toEqual([['ball', 0.94], ['ball', 0.88], ['zone', 0.97]]);
+  });
+
+  it('누적 한도 저장 호환: 한도 전 판에서 이미 한도 밖인 값은 그대로 두고, 한도 안쪽 방향으로만 움직인다', () => {
+    // 예전 판: 반발계수 기준 4번 내려 0.76 (한도 0.88 밖)
+    const L = bare();
+    L.ruleShifts = [0.94, 0.88, 0.82, 0.76].map((after, i) => ({ year: 2029 + 4 * i, key: 'ball' as const, before: round2(after + 0.06), after, reason: '예전 판', signal: 1.2 }));
+    // 그대로 둔다 (불러올 때 고치지 않는다)
+    expect(futureValue(L, 'ball', 2050)).toBeCloseTo(0.76, 5);
+    // 더 내리는 쪽(한도 밖으로)은 막힌다
+    for (let y = 2045; y < 2055; y++) expect(judgeFutureRules(L, calm(y, { hr: 1.3 }))).toBeNull();
+    // 올리는 쪽(안쪽)은 한도 밖에서도 된다: 0.76 → 0.82 (반대 방향 금지 5시즌은 이미 지났다)
+    judgeFutureRules(L, calm(2055, { hr: 0.8 }));
+    const up = judgeFutureRules(L, calm(2056, { hr: 0.8 }))!;
+    expect(up).toMatchObject({ year: 2057, key: 'ball', before: 0.76, after: 0.82 });
+    // 존이 위쪽 한도 밖(1.09)이면 내리는 쪽만
+    const Z = bare();
+    Z.ruleShifts = [{ year: 2029, key: 'zone', before: 1, after: 1.09, reason: '예전 판', signal: 0.8 }];
+    judgeFutureRules(Z, calm(2040, { so: 0.8 }));
+    expect(judgeFutureRules(Z, calm(2041, { so: 0.8 }))).toBeNull();
+    judgeFutureRules(Z, calm(2042, { so: 1.2 }));
+    expect(judgeFutureRules(Z, calm(2043, { so: 1.2 }))).toMatchObject({ key: 'zone', before: 1.09, after: 1.06 });
+  });
+
+  it('왕복 막기 (2026-11-12 사용자 결정): 바뀐 항목을 바로 반대 방향으로는 5시즌 동안 되돌리지 않는다 (같은 방향은 3시즌)', () => {
+    expect(REVERSE_BAN).toBe(5);
+    // 2027·2028 장타 압력 높음 → 2029 시즌 반발계수 기준 하향. 그 뒤로 내내 낮음(올리는 쪽) 신호
+    const L = bare();
+    const got: RuleShift[] = [];
+    for (let y = 2027; y < 2045; y++) { const s = judgeFutureRules(L, calm(y, { hr: y < 2029 ? 1.3 : 0.8 })); if (s) got.push(s); }
+    expect(got[0]).toMatchObject({ year: 2029, key: 'ball', after: 0.94 });
+    // 쉼(3시즌)만이면 2033 시즌에 되돌렸겠지만, 반대 방향이라 2029 + 5 + 1 = 2035 시즌부터
+    expect(got[1]).toMatchObject({ year: 2035, key: 'ball', before: 0.94, after: 1 });
+    // 되돌린 뒤 같은 방향(올림)은 쉼 3시즌만: 2039 시즌
+    expect(got[2]).toMatchObject({ year: 2039, key: 'ball', before: 1, after: 1.06 });
+    // 같은 방향만 이어지는 판은 쉼 3시즌 그대로 (2029 → 2033)
+    const M = bare();
+    const same: RuleShift[] = [];
+    for (let y = 2027; y < 2036; y++) { const s = judgeFutureRules(M, calm(y, { hr: 1.3 })); if (s) same.push(s); }
+    expect(same.map((s) => s.year)).toEqual([2029, 2033]);
+  });
+
+  it('예전 저장의 부결 기록(ruleVotes)은 판정에 쓰지 않는다 (구단 투표를 뺀 뒤)', () => {
+    const L = bare();
+    (L as LeagueState).ruleVotes = [{ id: '2029-ball', year: 2029, key: 'ball', before: 1, after: 0.94, reason: 'x', signal: 1.2, votes: [], yes: 2, no: 8, need: 7, passed: false }];
+    judgeFutureRules(L, calm(2027, { hr: 1.3 }));
+    expect(judgeFutureRules(L, calm(2028, { hr: 1.3 }))).toMatchObject({ year: 2029, key: 'ball' });
   });
 
   it('후보가 여럿이어도 한 해에 하나, 같은 시드 → 같은 선택', () => {
@@ -78,7 +150,7 @@ describe('판정 (임시값: 2시즌 연속, 한 해 최대 1개, 쿨다운 3시
     expect(up[0]).toMatchObject({ year: 2030, before: 3, after: 4 });
     expect(up[0].reason).toContain('관중이 2년 이어 줄어');
     expect(up[0].reason).toContain('12,000명');
-    expect(up[0].reason).toContain('외국인 보유 한도 확대에 합의');
+    expect(up[0].reason).toContain('리그가 볼거리를 늘리려 외국인 보유 한도를 1명 늘린다'); // 2026-11-12 구단 투표를 빼고 리그 결정 문구로
     // 줄다가 한 해 늘면 이어지지 않는다 (2029 시즌에 늘어 2029~2031 시즌으로 다시 세어 2032년), 줄어든 폭이 2% 밑이면 그대로
     expect(run((y) => ({ attendance: y === 2029 ? 12500 : 12000 - 300 * (y - 2027) }))[0]?.year).toBe(2032);
     expect(run((y) => ({ attendance: 12000 - 110 * (y - 2027) }))).toEqual([]); // 두 해 −1.8% 안팎
@@ -165,6 +237,11 @@ describe('반영 (자료 없는 해만)', () => {
     expect(roster).toHaveLength(1);
     expect(roster[0]).toMatchObject({ status: 'virtual', before: '29명', after: '30명' });
     expect(roster[0].title).toContain('게임 속 가상 결정');
+    // 정한 곳 (2026-11-12 구단 투표를 뺀 뒤): 리그 결정. 예전 저장의 단장 회의 가결은 표결 결과
+    expect(roster[0].decision).toBe('리그 결정 (게임 속 가상 결정)');
+    const voted = ruleNews({ year: 2031, data: store.ruleChanges, now: ruleSnapshot(store.meta, 2031, L), prev: ruleSnapshot(store.meta, 2030, L),
+      shifts: [{ ...shift('roster', 2031, 30), vote: { yes: 8, no: 2, need: 7, user: 'yes' } }] });
+    expect(voted.main.find((l) => l.key === 'rosterSize')!.decision).toBe('단장 회의 찬성 8 : 반대 2 가결 (문턱 7, 우리 구단 찬성)');
     expect(ruleSnapshot(store.meta, 2031, L).rosterSize).toBe(30);
     expect(ruleSnapshot(store.meta, 2031, L).sources.rosterSize).toBe('virtual');
     const b = ruleNews({ year: 2035, data: store.ruleChanges, now: ruleSnapshot(store.meta, 2035, L), prev: ruleSnapshot(store.meta, 2034, L), shifts: L.ruleShifts!.filter((s) => s.year === 2035) });
