@@ -123,32 +123,35 @@ function BudgetLines({ edit, planned = edit }: { edit: boolean; planned?: boolea
   return (
     <table>
       <thead>
-        <tr><th className="l">예산 줄</th><th>기준액 (2026년 돈)</th><th>{year} 비용</th>{edit && <th className="l">눈금</th>}<th className="l">배분</th><th className="l">효과</th></tr>
+        <tr><th className="l">예산 줄</th><th>기준액 (2026년 돈){edit ? ' · 눈금' : ''}</th><th>{year} 비용</th><th className="l">배분</th><th className="l">효과</th></tr>
       </thead>
       <tbody>
         {BUDGET_KINDS.map((k) => {
           const isLocked = locked.includes(k);
           return (
             <tr key={k}>
-              <td className="l">{BUDGET_LABEL[k]}{k === 'front' || k === 'futures' ? <span className="muted small"> · 운영비</span> : null}</td>
-              <td>{edit ? <AmountInput kind={k} amount={b[k]} onSet={(a) => run(session.setBudget(k, a))} /> : eok(b[k])}</td>
+              <td className="l name-cell">{BUDGET_LABEL[k]}{k === 'front' || k === 'futures' ? <span className="muted small"> · 운영비</span> : null}</td>
+              {/* 금액 입력과 눈금 단추를 한 칸에 (2026-11-25 Q57: 휴대폰에서 조절 칸이 표 오른쪽 밖으로 밀리던 것) */}
+              <td>
+                {edit ? (
+                  <div className="budget-ctl">
+                    <AmountInput kind={k} amount={b[k]} onSet={(a) => run(session.setBudget(k, a))} />
+                    <span className="budget-marks">
+                      {marksOf(k).map((m) => (
+                        <button key={m.label} type="button" className={`small-btn${m.amount === b[k] ? ' on' : ''}`} title={eok(m.amount)} onClick={() => run(session.setBudget(k, m.amount))}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                ) : eok(b[k])}
+              </td>
               <td>{plain(budgetCostOf(b[k], wage))}</td>
-              {edit && (
-                <td className="l">
-                  <span className="inline">
-                    {marksOf(k).map((m) => (
-                      <button key={m.label} type="button" className={`small-btn${m.amount === b[k] ? ' on' : ''}`} title={eok(m.amount)} onClick={() => run(session.setBudget(k, m.amount))}>
-                        {m.label}
-                      </button>
-                    ))}
-                  </span>
-                </td>
-              )}
               <td className="l">
                 <span className={`tag${isLocked ? ' on' : ''}`}>{isLocked ? '고정' : '자동'}</span>
                 {edit && isLocked && <button type="button" className="small-btn" onClick={() => run(session.setBudgetAuto(k))}>자동으로</button>}
               </td>
-              <td className="l small">
+              <td className="l small wrap-cell">
                 {budgetEffect(k, b[k])}
                 {k === 'marketing' && ` · 지금 쌓인 효과 ${marketingStock(L, session.teamIdx).toFixed(2)}단계`}
               </td>
@@ -224,7 +227,7 @@ function TicketLines({ season }: { season: boolean }) {
             const isLocked = locked.includes(g);
             return (
               <tr key={g}>
-                <td className="l">{SEAT_LABEL[g]} <span className="muted small">· {SEAT_NOTE[g]}</span></td>
+                <td className="l name-cell">{SEAT_LABEL[g]} <span className="muted small">· {SEAT_NOTE[g]}</span></td>
                 <td>{pctOf(SEAT[g].share)}</td>
                 <td>
                   {season ? pctOf(prices[g]) : (

@@ -17,6 +17,7 @@ import {
 } from '../../game/saber';
 import { avg, era, fixed2, ipText, obp, ops, rate3, slg, whip } from '../../game/stats';
 import { ForeignMark, HAND, linkOrder, posName, useGame, useWon } from '../context';
+import { useNarrow } from '../BoxScore';
 import { dollarText } from '../../league/salary';
 import type { FuturesLine } from '../../league/futures';
 import { ruleOf } from '../../league/rules';
@@ -41,6 +42,7 @@ type Col = TableColumn<SimPlayer>;
 
 export function Roster() {
   const { session, changed, version, openPlayer, go } = useGame();
+  const narrow = useNarrow();
   const seen = useSeen();
   const [kind, setKind] = useState<Kind>('hit');
   const [inFirst, setInFirst] = useState(true);
@@ -120,6 +122,7 @@ export function Roster() {
   };
   // 2군은 보기를 따로 기억한다 (1군에서 고른 열 목록에 2군 전용 '퓨처스' 열이 없어 꺼진 채로 남지 않게)
   const tableId = `roster-${kind}-${page}${inFirst ? '' : '-2'}`;
+  const roleCol: Col = { key: 'role', label: '역할', fixed: true, text: true, value: (p) => roleOf(p) || null, cell: (p) => <span className="small">{roleOf(p)}</span> };
   const cols: Col[] = [
     { key: 'name', label: '이름', fixed: true, text: true, value: (p) => p.name, cell: (p) => (
       <>
@@ -128,8 +131,10 @@ export function Roster() {
         {p.dev && <span className="tag" title="육성선수: 정원 밖, 정식 등록 전에는 1군에 못 나간다">육성</span>}
       </>
     ) },
-    { key: 'role', label: '역할', fixed: true, text: true, value: (p) => roleOf(p) || null, cell: (p) => <span className="small">{roleOf(p)}</span> },
+    // 휴대폰은 첫 화면에 능력·기록이 보이게 역할 열을 뒤로 (2026-11-25 Q57)
+    ...(narrow ? [] : [roleCol]),
     ...columnsFor(kind, page),
+    ...(narrow ? [roleCol] : []),
     ...(!inFirst ? [{ key: 'fut', label: '퓨처스', text: true, title: '퓨처스리그(2군) 성적. 능력과 2군 출전 몫으로 만든 값',
       value: (p: SimPlayer) => futuresSort(fut.get(p.idx), kind), cell: (p: SimPlayer) => <span className="small">{futuresText(fut.get(p.idx))}</span> }] : []),
     { key: 'act', label: '', fixed: true, value: () => null, cell: (p) => moveBtn(p) },
@@ -240,13 +245,12 @@ export function Roster() {
     const ip = (x: PL) => x.outs;
     if (k === 'hit') {
       if (pg === 'ability') {
-        return [
-          { key: 'pos', label: '포지션', lower: true, value: (p) => posRank(p), cell: (p) => posName(p.pos) }, age,
-          { key: 'bats', label: '타', text: true, value: (p) => (p.bats ? HAND[p.bats] : null) },
-          grade('contact', '컨택'), grade('power', '파워'), grade('eye', '선구안'), grade('speed', '주력'),
-          grade('defense', '수비', '지금 자리(서브는 주 포지션)의 수비 등급', defGrade),
-          status,
-        ];
+        const pos: Col = { key: 'pos', label: '포지션', lower: true, value: (p) => posRank(p), cell: (p) => posName(p.pos) };
+        const bats: Col = { key: 'bats', label: '타', text: true, value: (p) => (p.bats ? HAND[p.bats] : null) };
+        const grades = [grade('contact', '컨택'), grade('power', '파워'), grade('eye', '선구안'), grade('speed', '주력'),
+          grade('defense', '수비', '지금 자리(서브는 주 포지션)의 수비 등급', defGrade)];
+        // 휴대폰은 능력 열을 앞에 (Q57)
+        return narrow ? [pos, ...grades, age, bats, status] : [pos, age, bats, ...grades, status];
       }
       if (pg === 'classic') {
         return [
@@ -273,13 +277,11 @@ export function Roster() {
       ];
     }
     if (pg === 'ability') {
-      return [
-        age, { key: 'throws', label: '투', text: true, title: '투구손. 언 = 언더·사이드', value: (p) => (p.throws ? `${HAND[p.throws]}${p.underhand ? '언' : ''}` : null) },
-        grade('stuff', '구위'), grade('control', '제구'), grade('hrSuppression', '장타 억제'),
+      const throws: Col = { key: 'throws', label: '투', text: true, title: '투구손. 언 = 언더·사이드', value: (p) => (p.throws ? `${HAND[p.throws]}${p.underhand ? '언' : ''}` : null) };
+      const grades = [grade('stuff', '구위'), grade('control', '제구'), grade('hrSuppression', '장타 억제'),
         grade('stamina', '선발 체력', '선발로 나왔을 때 길게 던지는 정도'),
-        grade('reliefStamina', '구원 체력', '구원 한 번 등판에 길게 던지는 정도 (롱릴리프)'),
-        status,
-      ];
+        grade('reliefStamina', '구원 체력', '구원 한 번 등판에 길게 던지는 정도 (롱릴리프)')];
+      return narrow ? [...grades, age, throws, status] : [age, throws, ...grades, status];
     }
     if (pg === 'classic') {
       return [
