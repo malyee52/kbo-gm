@@ -4,7 +4,7 @@ import { deleteSave, isAutoSlot, listSaveInfos, renameSave, type SaveInfo } from
 import { EditorPanel } from '../editor/EditorToggle';
 import { DIFFICULTY_LABEL } from '../../league/owner';
 import { useGame } from '../context';
-import { PRESETS, settingsLabel, settingsOf } from '../../league/difficulty';
+import { filledSettings, PRESETS, settingsLabel } from '../../league/difficulty';
 import { DifficultyEditor } from '../DifficultyEditor';
 import { autoSlotFor, exportSession, reproOf, saveSession, whenText } from '../saving';
 import { ConfirmButton } from '../ConfirmButton';
@@ -135,7 +135,7 @@ export function SaveScreen({ onQuit }: { onQuit: () => void }) {
 function DifficultyPanel() {
   const { session, changed, autosave } = useGame();
   const [note, setNote] = useState<string | null>(null);
-  const cur = settingsOf(session.league);
+  const cur = filledSettings(session.league);
   const apply = (s: typeof cur) => {
     const r = session.setDifficulty(s);
     setNote(r.message);

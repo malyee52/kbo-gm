@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
-import { PRESETS, settingsLabel, settingsOf } from '../src/league/difficulty';
+import { filledSettings, pickResaleAllowed, pickShareLevelOf, PRESETS, settingsLabel, settingsOf } from '../src/league/difficulty';
 import { parentSupport } from '../src/league/finance';
 import { ensureEvents } from '../src/league/events';
 
@@ -22,6 +22,19 @@ describe('세부 난이도', () => {
     expect(settingsOf({ difficulty: 'normal', settings: custom })).toEqual(custom);
     expect(settingsLabel({ difficulty: 'normal', settings: custom })).toBe('사용자 설정');
     expect(settingsLabel({ settings: { ...PRESETS.easy } })).toBe('쉬움');
+  });
+
+  it('지명권 평가·넘겨받은 지명권 (2026-11-25): 묶음 값, 예전 사용자 설정에 칸이 없으면 그 판 난이도 기본값', () => {
+    expect([pickShareLevelOf({ difficulty: 'easy' }), pickShareLevelOf({ difficulty: 'normal' }), pickShareLevelOf({ difficulty: 'hard' })]).toEqual([0, 1, 2]);
+    expect([pickResaleAllowed({ difficulty: 'easy' }), pickResaleAllowed({ difficulty: 'normal' }), pickResaleAllowed({ difficulty: 'hard' })]).toEqual([true, false, false]);
+    const { pickShare: _a, pickResale: _b, ...old } = PRESETS.normal;
+    expect(pickShareLevelOf({ difficulty: 'easy', settings: old })).toBe(0);
+    expect(pickResaleAllowed({ difficulty: 'easy', settings: old })).toBe(true);
+    expect(pickShareLevelOf({ difficulty: 'hard', settings: old })).toBe(2);
+    expect(pickResaleAllowed({ difficulty: 'hard', settings: old })).toBe(false);
+    expect(filledSettings({ difficulty: 'hard', settings: old })).toMatchObject({ pickShare: 2, pickResale: 0 });
+    // 사용자가 고른 값은 그대로
+    expect(pickResaleAllowed({ difficulty: 'hard', settings: { ...old, pickResale: 1 } })).toBe(true);
   });
 
   it('트레이드: 같은 제안에 AI가 요구하는 이득이 배율만큼 커진다', () => {

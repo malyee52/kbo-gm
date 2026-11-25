@@ -1,6 +1,7 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
+import { CASH_ONLY_MAX_RUNS, CASH_ONLY_MESSAGE, evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
+import type { DraftPick } from '../src/league/picks';
 import { currentRuns, playerValue } from '../src/ai/value';
 import { PRESETS } from '../src/league/difficulty';
 import { Rng } from '../src/engine/rng';
@@ -555,4 +556,103 @@ describe('요구안은 AI 판단과 같은 조건 (부록 B 물음 6)', () => {
     for (let i = 0; i < 40; i++) expect(G.aiTradeOffer(new Rng(`dev/${i}`))).toBeNull();
     mark(false);
   }, 120_000);
+});
+
+describe('현금만 트레이드·지명권 되팔기 (2026-11-25 사용자 결정 Q-A·Q-B, 반증 확인 #1·#2)', () => {
+  /** AI가 그 구단 선수를 보는 가치 (evaluateTrade와 같은 성향 가중치) */
+  const aiValue = (g: GameSession, p: SimPlayer) => {
+    const s = g.situation(p.teamIdx);
+    return playerValue(p, g.values, horizonWeights(g.tendency(p.teamIdx), s.remaining));
+  };
+
+  it('E15 현금만으로 주전 사기: 문턱 이상 선수는 선수 없이 현금만이면 거절하고, 문턱 아래 선수는 현금을 다 친다', () => {
+    const g = newGame('cash-only');
+    const cash = g.cashNow();
+    const others = g.world.teams.filter((t) => t.idx !== g.teamIdx).flatMap((t) => byNow(g, t.org));
+    // 가치 계산만으로는 받았을 선수 (detail.gain ≥ need) 가운데 문턱 이상
+    let blocked = 0;
+    for (const p of others.filter((x) => aiValue(g, x) >= CASH_ONLY_MAX_RUNS)) {
+      const ev = g.evaluateTrade(p.teamIdx, [], [p], cash);
+      expect(ev.verdict, p.name).not.toBe('accept');
+      if (ev.detail.gain < ev.detail.need) continue;
+      expect(ev.verdict).toBe('reject-value');
+      expect(ev.detail.cashOnlyBlock).toBe(true);
+      expect(ev.message).toBe(CASH_ONLY_MESSAGE);
+      expect(ev.message).not.toMatch(/\d/);
+      // 지명권만 얹어도(선수 없이) 같다
+      const pk = g.ownedPicks(g.teamIdx)[0];
+      expect(g.evaluateTrade(p.teamIdx, [], [p], cash, { give: [pk], get: [] }).detail.cashOnlyBlock).toBe(true);
+      blocked++;
+    }
+    expect(blocked).toBeGreaterThanOrEqual(20);
+    // 문턱 아래는 지금처럼: 현금만으로 사 오는 선수가 남는다
+    const cheap = others.filter((x) => aiValue(g, x) < CASH_ONLY_MAX_RUNS && g.evaluateTrade(x.teamIdx, [], [x], cash).verdict === 'accept');
+    expect(cheap.length).toBeGreaterThan(0);
+    // 우리 선수를 하나라도 넣으면 이 규칙은 걸리지 않는다 (현금이 대부분인 제안은 이번 범위 밖)
+    const star = others.find((x) => aiValue(g, x) >= CASH_ONLY_MAX_RUNS)!;
+    const junk = byNow(g, g.team.org).at(-1)!;
+    expect(g.evaluateTrade(star.teamIdx, [junk], [star], cash).detail.cashOnlyBlock).toBeUndefined();
+    // 선수 내놓기(현금만)도 같은 판정: 문턱 이상 선수는 제안에 나오지 않는다
+    for (const o of g.shopOffers([], cash)) for (const p of o.get) expect(aiValue(g, p)).toBeLessThan(CASH_ONLY_MAX_RUNS);
+  }, 240_000);
+
+  /** 우승 도전 구단이 가진 자기 다음 드래프트 1라운드 지명권을 최저 현금으로 산다. 산 값(만 원)을 돌려준다 */
+  const buyPick = (g: GameSession, seller: number, pk: DraftPick): number => {
+    const ok = (c: number) => g.evaluateTrade(seller, [], [], c, { give: [], get: [pk] }).verdict === 'accept';
+    let lo = 0, hi = Math.min(g.cashNow(), 300_000);
+    expect(ok(hi)).toBe(true);
+    while (hi - lo > 500) { const m = Math.round((lo + hi) / 2); if (ok(m)) hi = m; else lo = m; }
+    expect(g.proposeTrade(seller, [], [], hi, { give: [], get: [pk] }).verdict).toBe('accept');
+    return hi;
+  };
+  /** 그 지명권을 다른 구단에 팔 때 가장 비싸게 받는 값 (만 원, 평가만). 아무도 안 사면 0 */
+  const bestSale = (g: GameSession, seller: number, pk: DraftPick): number => {
+    let best = 0;
+    for (const t of g.world.teams) {
+      if (t.idx === g.teamIdx || t.idx === seller) continue;
+      const ok = (c: number) => g.evaluateTrade(t.idx, [], [], -c, { give: [pk], get: [] }).verdict === 'accept';
+      if (!ok(1000)) continue;
+      let lo = 1000, hi = 400_000;
+      while (hi - lo > 500) { const m = Math.round((lo + hi) / 2); if (ok(m)) lo = m; else hi = m; }
+      best = Math.max(best, lo);
+    }
+    return best;
+  };
+  const contendPick = (g: GameSession): { seller: number; pk: DraftPick } => {
+    const rebuild = g.world.teams.some((t) => t.idx !== g.teamIdx && g.tendency(t.idx) === 'rebuild');
+    expect(rebuild).toBe(true);
+    const seller = g.world.teams.find((t) => t.idx !== g.teamIdx && g.tendency(t.idx) === 'contend')!.idx;
+    return { seller, pk: { draft: 2027, round: 1, from: seller } };
+  };
+
+  it('E16 지명권 되팔기: 쉬움은 우승 도전 → 리빌딩 차익이 남고, 보통 격차는 차익이 없으며, 보통·어려움은 넘겨받은 지명권을 다시 못 판다', () => {
+    const kt = store.season(2026)!.teams.findIndex((t) => t.name === 'KT');
+    const mk = (difficulty: 'easy' | 'normal' | 'hard', resale?: number) =>
+      GameSession.create(store, { year: 2026, teamIdx: kt, seed: 'pick-resale', difficulty,
+        ...(resale !== undefined ? { settings: { ...PRESETS[difficulty], pickResale: resale } } : {}) }, FAST);
+    // 쉬움: 지금 그대로 (차익이 남는다)
+    const easy = mk('easy');
+    const e = contendPick(easy);
+    const eBuy = buyPick(easy, e.seller, e.pk);
+    expect(bestSale(easy, e.seller, e.pk)).toBeGreaterThan(eBuy);
+    // 보통 격차만 (재트레이드 허용으로 바꿔도): 되판 값 ≤ 산 값
+    const normal = mk('normal', 1);
+    const n = contendPick(normal);
+    const nBuy = buyPick(normal, n.seller, n.pk);
+    expect(bestSale(normal, n.seller, n.pk)).toBeLessThanOrEqual(nBuy);
+    // 보통·어려움 기본값: 넘겨받은 지명권은 내줄 수 없다 (상대가 받아 둔 지명권도 받을 수 없다)
+    for (const d of ['normal', 'hard'] as const) {
+      const g = mk(d);
+      expect(g.pickResaleOpen).toBe(false);
+      const x = contendPick(g);
+      buyPick(g, x.seller, x.pk);
+      const buyer = g.world.teams.find((t) => t.idx !== g.teamIdx && t.idx !== x.seller)!.idx;
+      const ev = g.evaluateTrade(buyer, [], [], -1000, { give: [x.pk], get: [] });
+      expect(ev.verdict).toBe('reject-invalid');
+      expect(ev.message).toContain('넘겨받은 지명권');
+      // 우리 자기 지명권은 그대로 판다
+      expect(g.evaluateTrade(buyer, [], [], -1000, { give: [{ draft: 2027, round: 1, from: kt }], get: [] }).message).not.toContain('넘겨받은');
+    }
+    expect(easy.pickResaleOpen).toBe(true);
+  }, 300_000);
 });

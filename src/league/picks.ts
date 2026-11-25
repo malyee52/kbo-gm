@@ -100,6 +100,20 @@ export function applyPickOwners(league: Pick<LeagueState, 'pickOwners'>, draft: 
 const POOL = 150;
 /** 성향별로 신인 잠재력(전성기 런)을 지금 가치로 치는 비율 (임시값). 리빌딩 구단이 더 높게 친다 */
 export const PICK_SHARE: Record<Tendency, number> = { contend: 0.4, rebuild: 0.8 };
+/**
+ * 플레이어 제안을 평가할 때 쓰는 성향별 비율, 세부 난이도 '지명권 평가'(difficulty.ts pickShare) 단계마다 (임시값, 2026-11-25 사용자 결정 Q-B).
+ * 0 쉬움 = PICK_SHARE 그대로 (우승 도전 구단에서 사서 리빌딩 구단에 되팔면 차익이 남는다).
+ * 1 보통·2 어려움은 격차를 좁혀 되팔기 차익을 없앤다: 장마다 차익 ≈ 격차 × 기대 잠재력 − 사는 쪽 최소 이득 − 파는 쪽 최소 이득이고
+ * 기대 잠재력은 전체 1순위도 약 58런(DRAFT_POTENTIAL_SCALE 9.75), 두 최소 이득은 보통에서 합 4런 이상이라 격차 0.05면 어느 장이든 0 아래다
+ * (시드·성향 배치와 관계없다). 다만 단장 평판 호의(repGoodwill)가 사고팔 때 두 번 붙으면 격차 0이어도 남을 수 있어
+ * 보통·어려움은 넘겨받은 지명권 재트레이드 금지(difficulty.ts pickResale 0)도 건다. 어려움은 격차 0.
+ * AI 구단끼리의 거래는 늘 PICK_SHARE (세부 난이도는 우리 구단에만 걸린다)
+ */
+export const PICK_SHARE_LEVELS: Record<Tendency, number>[] = [
+  PICK_SHARE,
+  { contend: 0.55, rebuild: 0.6 },
+  { contend: 0.6, rebuild: 0.6 },
+];
 /** 두 번째 드래프트 지명권은 조금 덜 친다 */
 const LATER_DRAFT = 0.85;
 
@@ -113,8 +127,9 @@ export function expectedPotential(overall: number, scale: number): number {
  * AI가 보는 지명권 가치 (런, 트레이드 이득과 같은 단위).
  * 순번은 이번 시즌 뒤 드래프트면 원래 구단의 지금 순위 역순, 그 뒤 드래프트면 가운데로 친다.
  */
-export function pickValue(p: DraftPick, year: number, nTeams: number, rankOf: (t: number) => number, tendency: Tendency, scale: number): number {
+export function pickValue(p: DraftPick, year: number, nTeams: number, rankOf: (t: number) => number, tendency: Tendency, scale: number,
+                          share: Record<Tendency, number> = PICK_SHARE): number {
   const pos = p.draft === year + 1 ? nTeams - rankOf(p.from) + 1 : (nTeams + 1) / 2;
   const overall = (p.round - 1) * nTeams + pos;
-  return expectedPotential(overall, scale) * PICK_SHARE[tendency] * (p.draft === year + 1 ? 1 : LATER_DRAFT);
+  return expectedPotential(overall, scale) * share[tendency] * (p.draft === year + 1 ? 1 : LATER_DRAFT);
 }

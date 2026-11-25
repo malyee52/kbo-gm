@@ -33,12 +33,23 @@ export interface DifficultySettings {
    * 2026-10-13 사용자 요청 "난이도에 따라 AI의 설득 난이도도 쉽게", "7단계, 가장 쉬워도 어느 정도 명분은 있어야". 예전 저장에 없으면 보통(3)
    */
   aiLeniency?: number;
+  /**
+   * 지명권 평가 (2026-11-25 사용자 결정 Q-B): AI가 우리 제안 속 지명권을 성향별로 얼마나 다르게 치나 (league/picks.ts PICK_SHARE_LEVELS 색인).
+   * 0 쉬움 우승 도전 0.4·리빌딩 0.8 (되팔기 차익이 남는다), 1 보통 0.55·0.6, 2 어려움 0.6·0.6. 예전 저장의 사용자 설정에 없으면 그 판 난이도 기본값
+   */
+  pickShare?: number;
+  /**
+   * 넘겨받은 지명권 다시 트레이드: 1 허용, 0 금지 (원래 구단이 아닌 지명권은 우리 구단이 내줄 수도, AI에게서 받을 수도 없다).
+   * 보통·어려움은 금지 (2026-11-25 사용자 결정 Q-B: 어려움은 금지, 보통은 차익 0원이고 격차만으로 0이 안 되는 경우가 있으면 보통도 금지.
+   * 단장 평판 호의(reputation.ts repGoodwill, 평판 70이면 거래마다 +1.6런)가 사고팔 때 두 번 붙어 격차 0이어도 차익이 남는다). 예전 저장의 사용자 설정에 없으면 그 판 난이도 기본값
+   */
+  pickResale?: number;
 }
 
 export const PRESETS: Record<Difficulty, DifficultySettings> = {
-  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, ownerGain: 1, income: 1.15, pickTradeEra: 1, aiLeniency: 4 },
-  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, ownerGain: 0.5, income: 1, pickTradeEra: 1, aiLeniency: 3 },
-  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, ownerGain: 0.5, income: 0.9, pickTradeEra: 1, aiLeniency: 2 },
+  easy: { scoutNoise: 12, tradeStrict: 0.6, injury: 0.75, faDemand: 0.92, ownerPressure: 0.7, ownerGain: 1, income: 1.15, pickTradeEra: 1, aiLeniency: 4, pickShare: 0, pickResale: 1 },
+  normal: { scoutNoise: 6, tradeStrict: 1, injury: 1, faDemand: 1, ownerPressure: 1, ownerGain: 0.5, income: 1, pickTradeEra: 1, aiLeniency: 3, pickShare: 1, pickResale: 0 },
+  hard: { scoutNoise: 2, tradeStrict: 1.5, injury: 1.25, faDemand: 1.08, ownerPressure: 1.35, ownerGain: 0.5, income: 0.9, pickTradeEra: 1, aiLeniency: 2, pickShare: 2, pickResale: 0 },
 };
 
 /** 화면용: 항목마다 고를 수 있는 값 (쉬움 → 어려움 순) */
@@ -62,7 +73,29 @@ export const SETTING_DEFS: { key: keyof DifficultySettings; label: string; note:
   { key: 'aiLeniency', label: 'AI 판정 (판타지·자유 모드)', note: 'AI가 설득·행동을 얼마나 잘 받아 주나. 가장 쉬운 "판타지 리그"도 그럴듯한 명분은 있어야 한다', fallback: 3,
     options: [{ v: 6, label: '7 판타지 리그' }, { v: 5, label: '6 아주 관대' }, { v: 4, label: '5 관대 (쉬움)' }, { v: 3, label: '4 보통' },
       { v: 2, label: '3 조금 엄격 (어려움)' }, { v: 1, label: '2 엄격' }, { v: 0, label: '1 아주 엄격' }] },
+  { key: 'pickShare', label: '지명권 평가', note: 'AI가 지명권을 구단 사정(우승 도전·리빌딩)에 따라 얼마나 다르게 치나. 차이가 크면 싸게 사서 비싸게 되팔 수 있다',
+    options: [{ v: 0, label: '차이 큼 (쉬움)' }, { v: 1, label: '차이 작음 (보통)' }, { v: 2, label: '차이 없음 (어려움)' }] },
+  { key: 'pickResale', label: '넘겨받은 지명권', note: '다른 구단에서 넘겨받은 지명권을 다시 트레이드할 수 있나',
+    options: [{ v: 1, label: '다시 트레이드 가능 (쉬움)' }, { v: 0, label: '다시 트레이드 불가 (보통·어려움)' }] },
 ];
+
+/** 그 판 난이도 묶음 값 (사용자 설정에 없는 칸을 채울 때) */
+const presetOf = (league: Pick<LeagueState, 'difficulty'>): DifficultySettings => PRESETS[league.difficulty ?? 'normal'];
+
+/** 지명권 평가 단계 (league/picks.ts PICK_SHARE_LEVELS 색인). 사용자 설정에 칸이 없으면 그 판 난이도 기본값 */
+export function pickShareLevelOf(league: Pick<LeagueState, 'settings' | 'difficulty'>): number {
+  return settingsOf(league).pickShare ?? presetOf(league).pickShare ?? 1;
+}
+
+/** 넘겨받은 지명권을 다시 트레이드할 수 있나. 사용자 설정에 칸이 없으면 그 판 난이도 기본값 */
+export function pickResaleAllowed(league: Pick<LeagueState, 'settings' | 'difficulty'>): boolean {
+  return (settingsOf(league).pickResale ?? presetOf(league).pickResale ?? 1) === 1;
+}
+
+/** 화면에 보일 세부 난이도: 예전 사용자 설정에 없는 새 칸을 그 판 난이도 기본값으로 채운다 */
+export function filledSettings(league: Pick<LeagueState, 'settings' | 'difficulty'>): DifficultySettings {
+  return { ...settingsOf(league), pickShare: pickShareLevelOf(league), pickResale: pickResaleAllowed(league) ? 1 : 0 };
+}
 
 /** 그 해 지명권 트레이드가 되나 (설정: 모든 시대 허용이 기본) */
 export function pickTradeAllowed(league: Pick<LeagueState, 'settings' | 'difficulty'>, year: number, from: number): boolean {

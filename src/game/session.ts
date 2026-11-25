@@ -29,7 +29,7 @@ import { lastSeasonPlace, placeLabel, rankText, seasonPlace, seasonPostseasonPla
 import { futuresExtras, futuresSeason, registeredOf, type FuturesExtra } from '../league/futures';
 import { COACH_ROLE_LABEL, COACH_STYLE_LABEL, coachEdge, coachMarketInSeason, ensureCoaches, hireCoach, type Coach } from '../league/coaches';
 import { AI_TRADE_CHANCE, AI_TRADE_EVERY, ensureGm, gmStyle } from '../league/gm';
-import { ownerGainOf, pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
+import { ownerGainOf, pickResaleAllowed, pickShareLevelOf, pickTradeAllowed, settingsOf, type DifficultySettings } from '../league/difficulty';
 import { activeStep, medicalScale } from '../league/finance';
 import { capShareOf, dollarText, foreignCap, minSalary, teamCapPayroll, wageIndex, wonText } from '../league/salary';
 import { WON_PER_USD } from '../league/finance';
@@ -61,7 +61,7 @@ import { addArticle, crossed, josa, MILESTONES, STREAK_FROM, type ArticleKind } 
 import { ensureTenureWar, faSoon, franchiseTier, titleKeysOf, type FranchiseTier } from '../league/franchise';
 import { ensureTitles, judgeTitles, tierText, titleEvents, titlesOf, type TitleLookup, type TitleView } from '../league/titles';
 import {
-  ownedPicks, parsePick, PICK_MAX_ROUND, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
+  ownedPicks, parsePick, PICK_MAX_ROUND, PICK_SHARE_LEVELS, PICK_TRADE_FROM, PICK_YEARS_AHEAD, pickId, pickOwner, pickValue,
   pickLedger, tradablePick, transferPick, type DraftPick, type PickLedgerRow,
 } from '../league/picks';
 import { computeRivals, DYNASTY_TITLES, dynasties, rivalsOf, titleStreak } from '../league/rivals';
@@ -3107,7 +3107,9 @@ export class GameSession {
     const pickErr = this.checkPicks(aiTeam, give, get, picks, cash);
     if (pickErr) return { verdict: 'reject-invalid', message: pickErr, detail: none };
     const sit = this.situation(aiTeam);
-    const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit)), 0);
+    // 우리 제안 속 지명권은 세부 난이도 '지명권 평가'의 성향별 비율로 친다 (2026-11-25 사용자 결정 Q-B)
+    const share = PICK_SHARE_LEVELS[pickShareLevelOf(this.league)] ?? PICK_SHARE_LEVELS[1];
+    const pv = (ps: DraftPick[]) => ps.reduce((s, p) => s + this.pickValueFor(p, tendencyOf(sit), share), 0);
     const pickVals = picks.give.length || picks.get.length ? { receive: pv(picks.give), give: pv(picks.get) } : undefined;
     return evaluateTrade({ aiTeam, ...this.tradeTerms(aiTeam), receive: give, give: get, cash: cash / wageIndex(this.year, this.league), picks: pickVals },
       this.world.teams[aiTeam].org, sit, this.values);
@@ -3163,8 +3165,13 @@ export class GameSession {
   }
 
   /** AI가 보는 지명권 가치 (순번은 원래 구단의 지금 순위로) */
-  private pickValueFor(p: DraftPick, tendency: Tendency): number {
-    return pickValue(p, this.year, this.world.teams.length, (t) => this.situation(t).rank, tendency, Off.DRAFT_POTENTIAL_SCALE);
+  private pickValueFor(p: DraftPick, tendency: Tendency, share?: Record<Tendency, number>): number {
+    return pickValue(p, this.year, this.world.teams.length, (t) => this.situation(t).rank, tendency, Off.DRAFT_POTENTIAL_SCALE, share);
+  }
+
+  /** 넘겨받은 지명권(원래 구단이 아닌 구단이 가진 것)을 다시 트레이드할 수 있나 (세부 난이도 '넘겨받은 지명권', 보통·어려움은 금지) */
+  get pickResaleOpen(): boolean {
+    return pickResaleAllowed(this.league);
   }
 
   private checkPicks(aiTeam: number, give: SimPlayer[], get: SimPlayer[], picks: PickSwap, cash = 0): string | null {
@@ -3178,6 +3185,10 @@ export class GameSession {
     if (all.some((p) => !tradablePick(p, this.year) || !this.world.teams[p.from])) return `트레이드할 수 없는 지명권입니다 (다음 ${PICK_YEARS_AHEAD}번의 드래프트, ${PICK_MAX_ROUND}라운드까지).`;
     if (picks.give.some((p) => pickOwner(this.league, p) !== this.teamIdx)) return '우리 구단이 가진 지명권만 내줄 수 있습니다.';
     if (picks.get.some((p) => pickOwner(this.league, p) !== aiTeam)) return '상대 구단이 가진 지명권만 받을 수 있습니다.';
+    // 넘겨받은 지명권 재트레이드 금지 (세부 난이도, 2026-11-25 사용자 결정 Q-B): 우리가 받아 온 것도, 상대가 받아 둔 것도
+    if (!this.pickResaleOpen && all.some((p) => p.from !== pickOwner(this.league, p))) {
+      return "넘겨받은 지명권은 다시 트레이드할 수 없습니다 (세부 난이도 '넘겨받은 지명권').";
+    }
     return null;
   }
 
@@ -3210,7 +3221,7 @@ export class GameSession {
       // 받을 후보: 외국인·육성·지명권 첫해 선수 제외, 우리 쪽에서 본 가치 순 상위 30명 + 그 구단이 가진 지명권 (2026-10-12 사용자: AI 제안에 지명권)
       const players: Item[] = t.org.filter((p) => !p.foreign && !this.leaguePlayer(p.id)?.dev && this.leaguePlayer(p.id)?.noTradeYear !== this.year)
         .map((p) => ({ p, v: worth(p) })).filter((x) => x.v > 0);
-      const picks: Item[] = this.pickTradeOpen ? this.ownedPicks(t.idx).map((k) => ({ k, v: this.pickValueFor(k, myTendency) })).filter((x) => x.v > 0) : [];
+      const picks: Item[] = this.pickTradeOpen ? this.ownedPicks(t.idx).filter((k) => this.pickResaleOpen || k.from === t.idx).map((k) => ({ k, v: this.pickValueFor(k, myTendency) })).filter((x) => x.v > 0) : [];
       // 받고 싶은 것 (2026-10-12 사용자: 선수 또는 지명권을 고를 수 있게)
       const cands = [...(want === 'picks' ? [] : players.sort((a, b) => b.v - a.v).slice(0, 30)), ...(want === 'players' ? [] : picks)].sort((a, b) => b.v - a.v);
       let best: { items: Item[]; value: number } | null = null;

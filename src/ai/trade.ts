@@ -38,6 +38,14 @@ export const FRANCHISE_EASE_REBUILD = 0.7;
 export const FRANCHISE_EASE_FA = 0.7;
 /** 등급 선수를 내주는 거래에서 AI가 받는 현금을 쳐주는 몫 (임시값): A는 치지 않고 B는 절반. 현금 1런이 싸서 가산치를 돈으로 메우지 못하게 */
 export const FRANCHISE_CASH_SHARE = [1, 0.5, 0];
+/**
+ * 현금만으로 내주지 않는 선수 가치 (런, playerValue에 성향 가중치, 임시값, 2026-11-25 사용자 결정 Q-A):
+ * AI가 내주는 선수 가운데 이 값 이상이 있으면, 상대가 선수를 한 명도 내지 않는 제안(현금·지명권만)은 거절한다.
+ * 2026 개막일 KT·시드 probe 측정(tools/trade_cash_probe.ts --part cash): 10런이면 현금만으로 살 수 있는 주전급(구단 상위 14명)이 50 → 2명,
+ * 25세 이하 10런 이상 유망주가 0명. 12런이면 그런 유망주가 10명 남는다
+ */
+export const CASH_ONLY_MAX_RUNS = 10;
+export const CASH_ONLY_MESSAGE = '그 선수는 현금만으로는 내줄 수 없습니다. 선수를 같이 넣어 주세요.';
 /** 한쪽이 내줄 수 있는 최대 인원 (임시값) */
 export const MAX_PER_SIDE = 4;
 /** AI 구단이 트레이드 뒤에도 남겨야 하는 최소 인원 (임시값). 화면은 보내기 전 경고에 쓴다 (ui/tradeDesk.ts) */
@@ -127,6 +135,8 @@ export interface TradeEvaluation {
     premium?: number;
     /** 가산치·현금 제한이 없었으면 수락했을 제안 */
     franchiseBlock?: boolean;
+    /** 선수 없이(현금·지명권만) 가치 높은 선수를 달라고 해서 거절 (CASH_ONLY_MAX_RUNS) */
+    cashOnlyBlock?: boolean;
   };
 }
 
@@ -179,6 +189,11 @@ export function evaluateTrade(prop: TradeProposal, org: SimPlayer[], situation: 
   const need = Math.max(MIN_GAIN, outgoing * GAIN_SHARE) * (prop.strict ?? 1);
   const franchiseBlock = gain < need && gain + premium + cashCut >= need;
   const detail = { gain, need, before, after: afterV, tendency, ...(premium ? { premium } : {}), ...(franchiseBlock ? { franchiseBlock } : {}) };
+  // 가치 높은 선수는 현금(·지명권)만으로 내주지 않는다 (2026-11-25 사용자 결정 Q-A). 문턱 아래 선수는 그대로 현금을 다 친다.
+  // 판정 근거(detail.gain 등)는 그대로 셈해 둔다 (시험·측정이 현금 몫을 볼 수 있게)
+  if (prop.receive.length === 0 && prop.give.some((p) => playerValue(p, ctx, weights) >= CASH_ONLY_MAX_RUNS)) {
+    return { verdict: 'reject-value', message: CASH_ONLY_MESSAGE, detail: { ...detail, cashOnlyBlock: true } };
+  }
   if (gain >= need) return { verdict: 'accept', message: '좋습니다. 그 조건으로 하죠.', detail };
   if (franchiseBlock) return { verdict: 'reject-value', message: tier === 2 ? '구단을 상징하는 선수라 내줄 수 없습니다.' : '오래 함께한 선수라 그 조건으로는 어렵습니다.', detail };
 

@@ -772,7 +772,7 @@ function ShopPanel({ open }: { open: boolean }) {
               <button key={k} type="button" role="tab" aria-selected={want === k} className={want === k ? 'on' : ''} onClick={() => { setWant(k); setOffers(null); }} disabled={k === 'picks' && !session.pickTradeOpen}>받기: {label}</button>
             ))}
           </div>
-          <span className="muted small">선수 없이 현금만 걸면 현금으로 사 옵니다. 지금 자금 {won(session.cashNow())}.</span>
+          <span className="muted small">선수 없이 현금만 걸면 현금으로 사 옵니다 (구단이 아끼는 선수는 현금만으로는 내주지 않습니다). 지금 자금 {won(session.cashNow())}.</span>
         </div>
         <div className="scroll flat shop-list">
           <table>
@@ -884,11 +884,13 @@ function PickBoxes({ title, team, selected, other, onChange, disabled }: {
       <ul className="plain picks">
         {picks.map((p) => {
           const id = pickId(p);
+          // 넘겨받은 지명권 재트레이드 금지 (세부 난이도, 보통·어려움): 고를 수 없게 하고 까닭을 붙인다
+          const locked = p.from !== team && !session.pickResaleOpen && !selected.includes(id);
           return (
             <li key={id}>
-              <label className="small">
-                <input type="checkbox" checked={selected.includes(id)} disabled={disabled} onChange={() => toggle(id)} /> {session.pickLabel(p)}
-                {p.from !== team && <span className="tag">받은 지명권</span>}
+              <label className="small" title={locked ? '넘겨받은 지명권은 다시 트레이드할 수 없습니다 (세부 난이도).' : undefined}>
+                <input type="checkbox" checked={selected.includes(id)} disabled={disabled || locked} onChange={() => toggle(id)} /> {session.pickLabel(p)}
+                {p.from !== team && <span className="tag">{session.pickResaleOpen ? '받은 지명권' : '받은 지명권 · 다시 트레이드 불가'}</span>}
               </label>
             </li>
           );
