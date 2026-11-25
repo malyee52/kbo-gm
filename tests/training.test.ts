@@ -114,3 +114,36 @@ describe('훈련 효과', () => {
     }
   });
 });
+
+describe('추천대로 배정 (2026-11-25 Q57, session.recommendTraining)', () => {
+  it('빈 자리만 30세 이하로 채우고, 숨은 천장·성장 성향을 바꿔도 추천이 같다. 걸면 조작 기록으로 재현된다', async () => {
+    const { GameSession } = await import('../src/game/session');
+    const g = GameSession.create(store, { year: 2026, teamIdx: 3, seed: 'tr-rec' }, { ...DEFAULT_PARAMS, pilotSeasons: 1 });
+    const year = g.world.year;
+    const first = g.league.players.find((p) => p.team === 3 && !p.isPitcher)!;
+    expect(g.setTraining(first.id, { drill: 'hr' }).ok).toBe(true);
+    const rec = g.recommendTraining();
+    expect(rec.length).toBe(TRAIN_SLOTS - 1);
+    expect(rec.some((r) => r.id === first.id)).toBe(false);
+    for (const r of rec) {
+      const p = g.leaguePlayer(r.id)!;
+      expect(p.team).toBe(3);
+      expect(year - p.birthYear!).toBeLessThanOrEqual(30);
+      expect(p.isPitcher ? ['so', 'bb'] : ['s1', 'hr', 'bb']).toContain(r.drill);
+    }
+    // 숨은 값(갈래 천장·성장 성향·시기)을 흔들어도 추천은 그대로 (우리 스카우트 추측만 본다)
+    const saved = g.league.players.map((p) => p.ceil);
+    for (const p of g.league.players) {
+      if (!p.ceil) continue;
+      p.ceil = structuredClone(p.ceil);
+      for (const side of [p.ceil.bat, p.ceil.pit] as (Record<string, number> | undefined)[]) if (side) for (const k of Object.keys(side)) side[k] *= 1.7;
+    }
+    expect(g.recommendTraining()).toEqual(rec);
+    g.league.players.forEach((p, i) => { p.ceil = saved[i]; });
+    for (const r of rec) expect(g.setTraining(r.id, { drill: r.drill }).ok).toBe(true);
+    expect(g.training().length).toBe(TRAIN_SLOTS);
+    expect(g.recommendTraining()).toEqual([]);
+    const again = GameSession.replay(store, { year: 2026, teamIdx: 3, seed: 'tr-rec' }, [...g.actions], undefined, { ...DEFAULT_PARAMS, pilotSeasons: 1 });
+    expect(again.training()).toEqual(g.training());
+  }, 120_000);
+});

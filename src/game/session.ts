@@ -47,7 +47,7 @@ import { offerExpired, RIVAL_OFFER_DAYS } from '../fantasy/rivals';
 import { batValue, defenseAt, defenseGrade, FIELD_POS, makeDefense, pitValue, teamRules, type Defense, type FieldPos } from '../engine';
 import { shiftBat, shiftPit, skillForRuns } from '../league/growth';
 import { ensureAlts, setTwoWay as setTwoWayAbility } from '../league/twoway';
-import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining } from '../league/training';
+import { futuresTrainSlots, setTraining as setTrainingRule, teamTraining, TRAIN_SLOTS } from '../league/training';
 import {
   aiMarketDay, fxSendInSeason, fxSeasonOpen, scoutFxDay, financeMoves, foreignSwapsUsed, marketDeadlineDay, marketPlayers, releaseBlock, releaseCost, releasePlayer,
   settleMarketContracts, signBlock, signPlayer, endRehab, INJURY_SWAP_DAYS, INJURY_SWAP_FROM, rehabBlock, rehabDay, rehabEndBlock, rehabsDue, rehabsOf,
@@ -4459,6 +4459,34 @@ export class GameSession {
       return r;
     }
     return this.dispatchOff({ year: this.year, type: 'train-off', id, plan });
+  }
+
+  /**
+   * 집중 훈련 추천 (2026-11-25 Q57, 훈련 화면 "추천대로 배정"): 빈 자리만 채운다. 30세 이하에서 26세 이하를 먼저, 그 안은 우리 스카우트 가치 순.
+   * 능력 훈련은 추측 가운데값이 가장 낮은 갈래 (타자 컨택·파워·선구, 투수 구위·제구). 숨은 천장·성장 성향은 보지 않는다 (AI는 aiTraining).
+   * 26세 나눔은 임시값
+   */
+  recommendTraining(grades: DisplayGrades = this.currentGrades()): { id: string; drill: string }[] {
+    const year = this.phase === 'season' ? this.world.year : this.year + 1;
+    const taken = new Set(this.training().map((t) => t.id));
+    const room = TRAIN_SLOTS - taken.size;
+    if (room <= 0) return [];
+    const cands = this.league.players
+      .filter((p) => p.team === this.teamIdx && !taken.has(p.id) && p.birthYear && year - p.birthYear <= 30)
+      .map((p) => ({ p, young: year - p.birthYear! <= 26, v: this.seenValue(p.id) }))
+      .sort((a, b) => Number(b.young) - Number(a.young) || b.v - a.v || (a.p.id < b.p.id ? -1 : 1));
+    const out: { id: string; drill: string }[] = [];
+    for (const c of cands) {
+      if (out.length >= room) break;
+      const g = this.guessSet(c.p.id, grades);
+      if (!g || g.pitcher !== c.p.isPitcher) continue;
+      const map: Record<string, string> = c.p.isPitcher ? { stuff: 'so', control: 'bb' } : { contact: 's1', power: 'hr', eye: 'bb' };
+      const items = g.items.filter((it) => it.key in map);
+      if (!items.length) continue;
+      const low = items.reduce((a, b) => (guessMid(b.view) < guessMid(a.view) ? b : a));
+      out.push({ id: c.p.id, drill: map[low.key] });
+    }
+    return out;
   }
 
   /** 우리 구단 집중 훈련 명단 */

@@ -4,8 +4,8 @@
 import { useMemo, useState } from 'react';
 import { FIELD_POS, type FieldPos } from '../../engine';
 import { drillLabel, drillsFor, TRAIN_SLOTS } from '../../league/training';
-import { Pos, useGame } from '../context';
-import { DataTable } from '../parts';
+import { PlayerLink, Pos, useGame } from '../context';
+import { DataTable, guessColumn, useSeen } from '../parts';
 import { useShell } from '../shell';
 import type { Column } from '../table';
 import type { LeaguePlayer } from '../../league/types';
@@ -16,6 +16,8 @@ export function Training() {
   const { session, version, changed } = useGame();
   const { density } = useShell();
   const [msg, setMsg] = useState<string | null>(null);
+  const seen = useSeen();
+  const sim = useMemo(() => new Map(session.world.players.map((p) => [p.id, p])), [session, version]);
   const off = session.phase === 'offseason';
   const year = session.world.year + (off ? 1 : 0);
   const rows: Row[] = useMemo(() => {
@@ -36,10 +38,23 @@ export function Training() {
     if (res.ok) changed();
   };
 
+  // 추천대로 배정 (Q57): 빈 자리만 채운다 (session.recommendTraining). 한 명마다 조작 하나라 재현은 손으로 건 것과 같다
+  const recommend = () => {
+    const plans = session.recommendTraining();
+    if (!plans.length) { setMsg(used >= TRAIN_SLOTS ? '빈 훈련 자리가 없습니다.' : '추천할 선수가 없습니다 (30세 이하 우리 선수).'); return; }
+    let n = 0;
+    for (const t of plans) if (session.setTraining(t.id, { drill: t.drill }).ok) n++;
+    setMsg(`추천대로 ${n}명에게 훈련을 걸었습니다. 바꾸려면 표에서 고릅니다.`);
+    if (n) changed();
+  };
+
   const cols: Column<Row>[] = [
-    { key: 'name', label: '이름', fixed: true, text: true, value: (r) => r.p.name },
+    { key: 'name', label: '이름', fixed: true, text: true, value: (r) => r.p.name, cell: (r) => { const sp = sim.get(r.p.id); return sp ? <PlayerLink p={sp} /> : r.p.name; } },
     { key: 'slot', label: '자리', brief: true, value: (r) => (r.p.isPitcher ? 'P' : r.p.pos ?? 'DH'), cell: (r) => (r.p.isPitcher ? 'P' : <Pos pos={r.p.pos ?? 'DH'} />) },
     { key: 'age', label: '나이', brief: true, lower: true, value: (r) => r.age },
+    // 능력 요약 (2026-11-25 Q57): 우리 스카우트 추측과 보고 문구만 (숨은 천장·성장 성향은 보이지 않는다)
+    guessColumn((r) => seen.set(r.p.id)),
+    { key: 'note', label: '스카우트 보고', text: true, value: (r) => session.scoutPhrase(r.p.id), cell: (r) => <span className="small">{session.scoutPhrase(r.p.id) ?? '-'}</span> },
     { key: 'drill', label: '능력 훈련', fixed: true, text: true, title: '자라는 능력은 그쪽 성장 ×1.3·나머지 ×0.9, 자라지 않는 능력은 시즌당 조금씩 (그 나이 평균보다 크게 높아지지는 않음)',
       value: (r) => (r.drill ? drillLabel(r.p.isPitcher, r.drill) : null),
       cell: (r) => (
@@ -69,6 +84,11 @@ export function Training() {
         {off ? ' 지금 거는 훈련은 다음 시즌 개막부터 셉니다.' : ' 시즌 중에 걸거나 바꾸면 오늘부터 남은 기간만큼만 효과가 납니다.'}
         {' '}타고난 한계를 넘게 키우지는 못합니다. 한계에 가까운 능력일수록 효과가 줄어듭니다.
       </p>
+      <div className="actions">
+        <button type="button" onClick={recommend} disabled={used >= TRAIN_SLOTS} title="30세 이하에서 젊고 스카우트 평가가 높은 선수부터, 추측이 가장 낮은 능력을 훈련합니다. 이미 건 훈련은 그대로 둡니다">
+          추천대로 배정 ({TRAIN_SLOTS - used}자리)
+        </button>
+      </div>
       {msg && <p className="small status" role="status">{msg}</p>}
       <DataTable id="training" cols={cols} rows={rows} rowKey={(r) => r.p.id} full={density === 'full'} searchText={(r) => r.p.name}
         label="집중 훈련" empty="우리 구단 선수가 없습니다." />
