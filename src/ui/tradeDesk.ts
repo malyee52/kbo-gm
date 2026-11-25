@@ -1,7 +1,7 @@
 // 트레이드 작업대 (2026-10-23 UI 2단계 U2-5, 기획안 2.4): 화면 상태와 계산. 그리기는 screens/Trade.tsx.
 //
 // 다섯 단계: 후보 → 비교 → 제안 → 협상 → 최종 검토 (7장 결정 4: 합의 → 확정).
-// 협상의 "보내기"는 평가(session.evaluateTrade)만 하고, 상대가 받아들이면 "합의"가 된다.
+// 협상의 "보내기"는 평가(session.talkOffer: evaluateTrade + 떠보기 제한 셈)만 하고, 상대가 받아들이면 "합의"가 된다.
 // 최종 검토에서 "확정"을 눌러야 session.proposeTrade(다시 평가 + 성사)가 돈다. 엔진·AI 판단·조작 기록·재현은 그대로다.
 // 화면 상태(비교 칸·제안판·합의·보낸 안)는 세션마다 메모리에만 두고 저장하지 않는다. 선수 상세의 "트레이드에 넣기"·"비교에 넣기"가
 // 같은 상태를 쓴다 (비교 칸 공유).
@@ -46,13 +46,21 @@ export interface DeskState {
 // ---- 거절 이유 (엔진이 주는 구분만, 기획안 2.4.5. 가치 차이 숫자는 보이지 않는다)
 
 export const VERDICT_SHORT: Record<TradeVerdict, string> = {
-  accept: '합의', 'reject-value': '거절 (가치)', 'reject-roster': '거절 (선수단 규칙)', 'reject-invalid': '안 됨 (잘못된 제안)',
+  accept: '합의', 'reject-value': '거절 (가치)', 'reject-roster': '거절 (선수단 규칙)', 'reject-invalid': '안 됨 (잘못된 제안)', 'reject-talk': '안 됨 (협상 한도)',
 };
 export const REASON_TEXT: Record<Exclude<TradeVerdict, 'accept'>, string> = {
   'reject-value': '가치가 모자람',
   'reject-roster': '선수단 규칙 (상대의 최소 인원·포수)',
   'reject-invalid': '잘못된 제안 (규정·마감·자금)',
+  'reject-talk': '협상 한도 (오늘 이야기를 다 했거나, 무리한 제안이 거듭돼 당분간 협상이 막힘)',
 };
+
+/** 이 구단과 오늘 이야기할 수 있는지 한 줄 (떠보기 제한, session.talkStateOf). 막힌 기간 같은 숫자는 보이지 않는다 */
+export function talkLine(s: GameSession, team: number): { text: string; blocked: boolean } {
+  const block = s.talkBlock(team);
+  if (block) return { text: `${s.world.teams[team].name} 단장: "${block}"`, blocked: true };
+  return { text: `오늘 이 구단과 이야기 ${s.talkStateOf(team).left}번 남음 (제안 보내기·요구안 보기·선수 내놓기가 한 번씩, 같은 안은 다시 세지 않음)`, blocked: false };
+}
 
 /** 요구안을 찾지 못했을 때 알림 한 줄: 상대의 답 + 거절 이유 구분 (session.askPackageWhy) */
 export function noPackageNote(team: string, r: { verdict: TradeVerdict; message: string }): string {
@@ -105,9 +113,10 @@ export function tradeBlockReason(s: GameSession, p: SimPlayer): string | null {
 
 // ---- 합의와 확정
 
-/** 협상에 보낸다: 평가만 하고, 받아들이면 합의 */
+/** 협상에 보낸다: 평가하고(이야기 한 번으로 셈, session.talkOffer), 받아들이면 합의 */
 export function sendDraft(s: GameSession, d: TradeDraft): { ev: TradeEvaluation; agreement: Agreement | null } {
-  const ev = evaluateDraft(s, d);
+  const x = draftParts(s, d);
+  const ev = s.talkOffer(d.team, x.give, x.get, d.cash, x.picks);
   return { ev, agreement: ev.verdict === 'accept' ? { draft: d, key: draftKey(d), year: s.year, day: s.currentDay } : null };
 }
 

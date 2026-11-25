@@ -12,7 +12,7 @@ import {
   absenceLabel, assignSlots, computeGrades, type DisplayGrades, condLine, conditionOf, battingOrder, bullpenOrder, currentFatigue, DEFAULT_PARAMS, isStarterSkill, Rng, LINEUP_SLOTS, MIN_ACTIVE_HITTERS, MIN_ACTIVE_PITCHERS, Season, todaysStarter,
   type Absence, type BatLine, type PitLine, type DepthPlan, type PenRole, type EngineParams, type GameCommand, type SeasonSave, type SimPlayer, type Slot, type TeamSeason, type World,
 } from '../engine';
-import { coreAge, evaluateTrade, horizonWeights, SALARY_WON_PER_RUN, suggestPackageWhy, tendencyOf, type PackageResult, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
+import { coreAge, evaluateTrade, horizonWeights, isFarOffer, SALARY_WON_PER_RUN, suggestPackageWhy, TALK_BLOCK_MESSAGE, TALK_LIMIT_MESSAGE, talkState, tendencyOf, type PackageResult, type TalkRecord, type TalkState, type TeamSituation, type Tendency, type TradeEvaluation } from '../ai/trade';
 import { currentRuns, playerValue, projectedValue, teamStrength, valueContext, type ValueContext } from '../ai/value';
 import { createLeague } from '../league/create';
 import * as Off from '../league/offseason';
@@ -394,6 +394,9 @@ export type GameAction =
    *  'fx-drop'·'fx-drop-off': 관찰 명단에서 빼기 */
   | { year: number; day: number; type: 'fx-send'; region: FxRegion }
   | { year: number; day: number; type: 'fx-drop'; id: string }
+  /** AI 구단과 한 트레이드 이야기 한 번 (떠보기 제한, 2026-11-25 Q60, ai/trade.ts talkState): 제안 보내기·요구안·선수 내놓기·설득.
+   *  k: 같은 날 같은 안을 다시 세지 않게 견주는 열쇠, far: 터무니없는 제안(가치 거절, 모자란 몫이 큼). 상태는 기록에서 다시 센다 */
+  | { year: number; day: number; type: 'talk'; team: number; k: string; far?: true }
   | { year: number; type: 'fx-send-off'; region: FxRegion }
   | { year: number; type: 'fx-drop-off'; id: string }
   /** 집중 훈련 걸기·바꾸기·풀기 (16-4c, league/training.ts). plan null이면 풂. 시즌 중 'train'(그날부터 기간 비례), 오프시즌 'train-off'(다음 개막부터) */
@@ -1168,6 +1171,7 @@ export class GameSession {
     else if (a.type === 'train') setTrainingRule(this.league, this.teamIdx, a.id, a.plan, a.day);
     else if (a.type === 'fx-send') fxSendInSeason(this.marketCtx, this.teamIdx, a.region);
     else if (a.type === 'fx-drop') fxDrop(this.league, this.teamIdx, a.id);
+    else if (a.type === 'talk') { /* 셈은 기록에서 다시 낸다 (talksWith) */ }
     else this.applyTrade(a.team, idxs(a.give), idxs(a.get), a.cash ?? 0, { give: (a.pg ?? []).map(parsePick), get: (a.pr ?? []).map(parsePick) });
     this.actions.push(clone(a));
   }
@@ -3136,6 +3140,87 @@ export class GameSession {
     return ev;
   }
 
+  // ---- 떠보기 제한 (2026-11-25 사용자 결정 Q60, 반증 #15, ai/trade.ts talkState)
+  // 화면이 상대의 판단을 보여 주는 길은 아래 talk* 메서드를 거쳐 한 번씩 센다. evaluateTrade·askPackageWhy·shopOffers는 셈 없는 판정 그대로
+  // (AI 제안·합의 다시 보기·시험·도구가 쓴다). 확정(proposeTrade)은 합의한 안을 다시 평가할 뿐이라 세지 않는다.
+
+  /** 이번 시즌 이 구단과 한 이야기 (조작 기록에서, 날짜 순) */
+  private talksWith(aiTeam: number): (TalkRecord & { k: string })[] {
+    const out: (TalkRecord & { k: string })[] = [];
+    for (const a of this.actions) {
+      if (a.type === 'talk' && a.year === this.year && a.team === aiTeam) out.push({ day: a.day, k: a.k, ...(a.far ? { far: true } : {}) });
+    }
+    return out;
+  }
+
+  /** 이 구단과의 오늘 이야기 상태: 오늘 한 수·남은 수·막힘 */
+  talkStateOf(aiTeam: number): TalkState {
+    return talkState(this.talksWith(aiTeam), this.day);
+  }
+
+  /** 이 구단과 지금 이야기할 수 없는 이유 (막힘이면 막힘 문구, 오늘 한도면 한도 문구). 오늘 같은 열쇠로 이미 한 이야기는 다시 세지 않아 막지 않는다 */
+  talkBlock(aiTeam: number, key?: string): string | null {
+    if (!this.tradeOpen || this.gameLock || aiTeam === this.teamIdx || !this.world.teams[aiTeam]) return null;
+    const talks = this.talksWith(aiTeam);
+    const st = talkState(talks, this.day);
+    if (st.blocked) return TALK_BLOCK_MESSAGE;
+    if (key !== undefined && talks.some((t) => t.day === this.day && t.k === key)) return null;
+    return st.left > 0 ? null : TALK_LIMIT_MESSAGE;
+  }
+
+  /** 같은 안인지 견주는 열쇠 (순서와 상관없이) */
+  private talkKey(give: SimPlayer[], get: SimPlayer[], cash: number, picks: PickSwap): string {
+    const ids = (xs: string[]) => [...xs].sort().join(',');
+    return `o|${ids(give.map((p) => p.id))}|${ids(get.map((p) => p.id))}|${cash}|${ids(picks.give.map(pickId))}|${ids(picks.get.map(pickId))}`;
+  }
+
+  /** 이야기 한 번을 기록한다 (오늘 같은 열쇠가 있으면 세지 않음) */
+  private recordTalk(aiTeam: number, key: string, far = false): void {
+    if (this.talksWith(aiTeam).some((t) => t.day === this.day && t.k === key)) return;
+    this.dispatchSeason({ year: this.year, day: this.day, type: 'talk', team: aiTeam, k: key, ...(far ? { far: true as const } : {}) });
+  }
+
+  /** 제안을 보낸다 (화면의 "보내기"·설득): 평가하고 한 번으로 센다. 규정 위반(reject-invalid)은 세지 않는다 */
+  talkOffer(aiTeam: number, give: SimPlayer[], get: SimPlayer[], cash = 0, picks: PickSwap = NO_PICKS): TradeEvaluation {
+    const key = this.talkKey(give, get, cash, picks);
+    const block = this.talkBlock(aiTeam, key);
+    if (block) return { verdict: 'reject-talk', message: block, detail: { gain: 0, need: 0, before: 0, after: 0, tendency: this.tendency(aiTeam) } };
+    const ev = this.evaluateTrade(aiTeam, give, get, cash, picks);
+    if (ev.verdict !== 'reject-invalid') this.recordTalk(aiTeam, key, isFarOffer(ev));
+    return ev;
+  }
+
+  /** 요구안을 묻는다 (화면의 "상대 요구안 보기"): 한 번으로 센다. 규정 위반은 세지 않는다 */
+  talkAsk(aiTeam: number, want: SimPlayer[]): PackageResult {
+    const key = `a|${want.map((p) => p.id).sort().join(',')}`;
+    const block = this.talkBlock(aiTeam, key);
+    if (block) return { pkg: null, verdict: 'reject-talk', message: block };
+    const r = this.askPackageWhy(aiTeam, want);
+    if (r.verdict !== 'reject-invalid') this.recordTalk(aiTeam, key);
+    return r;
+  }
+
+  /**
+   * 선수 내놓기 (화면): 오늘 이야기할 수 있는 구단에만 묻고, 물은 구단마다 한 번으로 센다.
+   * 제안을 낸 구단은 그 안의 열쇠로 세서 곧바로 그 안을 보내도(talkOffer) 다시 세지 않는다. skipped: 막혔거나 오늘 한도라 묻지 않은 구단
+   */
+  talkShop(offer: SimPlayer[], cash = 0, want: ShopWant = 'any'): { offers: ShopOffer[]; skipped: number[] } {
+    const asked = this.world.teams.map((t) => t.idx).filter((i) => i !== this.teamIdx);
+    const skipped = asked.filter((i) => this.talkBlock(i) !== null);
+    const open = new Set(asked.filter((i) => !skipped.includes(i)));
+    // 묻기 전에 막을 일(마감·잘못된 내놓기)이면 shopOffers가 빈 목록을 내고, 그때는 세지 않는다
+    if (!this.tradeOpen || this.gameLock || offer.length > ruleOf(this.league, 'maxPerSide') || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)
+      || (offer.length === 0 && cash <= 0) || (cash > 0 && cash > this.cashNow())) return { offers: [], skipped: [] };
+    const offers = this.shopOffers(offer, cash, want, open);
+    const by = new Map(offers.map((o) => [o.team, o]));
+    const ids = (xs: string[]) => [...xs].sort().join(',');
+    for (const t of open) {
+      const o = by.get(t);
+      this.recordTalk(t, o ? this.talkKey(offer, o.get, cash, { give: [], get: o.picks }) : `s|${ids(offer.map((p) => p.id))}|${cash}|${want}`);
+    }
+    return { offers, skipped };
+  }
+
   // ---- 지명권 (league/picks.ts)
 
   /** 지명권 트레이드가 되는 시즌인가 */
@@ -3197,7 +3282,7 @@ export class GameSession {
    * 우리 쪽에서 가장 가치 있는 1~2명 조합을 제안한다. 직접 제안과 같은 판정(evaluateTrade, 세부 난이도 포함)으로 걸러서
    * 그대로 받으면 성사된다. 우리 쪽에서 본 가치가 높은 순. 제안이 없는 구단은 빠진다
    */
-  shopOffers(offer: SimPlayer[], cash = 0, want: ShopWant = 'any'): ShopOffer[] {
+  shopOffers(offer: SimPlayer[], cash = 0, want: ShopWant = 'any', only?: ReadonlySet<number>): ShopOffer[] {
     if (!this.tradeOpen || offer.length > ruleOf(this.league, 'maxPerSide') || offer.some((p) => p.teamIdx !== this.teamIdx || p.foreign)) return [];
     if (offer.length === 0 && cash <= 0) return [];
     if (cash > 0 && cash > this.cashNow()) return [];
@@ -3212,7 +3297,7 @@ export class GameSession {
     type Item = { p?: SimPlayer; k?: DraftPick; v: number };
     const out: ShopOffer[] = [];
     for (const t of this.world.teams) {
-      if (t.idx === this.teamIdx) continue;
+      if (t.idx === this.teamIdx || (only && !only.has(t.idx))) continue;
       const ok = (items: Item[]) => {
         const ps = items.flatMap((x) => (x.p ? [x.p] : []));
         const ks = items.flatMap((x) => (x.k ? [x.k] : []));

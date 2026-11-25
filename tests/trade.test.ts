@@ -1,6 +1,6 @@
 // M4 트레이드: 악용 시나리오(docs/trade-exploits.md)와 트레이드 뒤 상태.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { CASH_ONLY_MAX_RUNS, CASH_ONLY_MESSAGE, evaluateTrade, franchisePremium, horizonWeights, suggestPackageWhy, type TeamSituation } from '../src/ai/trade';
+import { CASH_ONLY_MAX_RUNS, CASH_ONLY_MESSAGE, evaluateTrade, franchisePremium, horizonWeights, isFarOffer, suggestPackageWhy, TALK_BLOCK_DAYS, TALK_BLOCK_MESSAGE, TALK_FAR_WINDOW, TALK_LIMIT_MESSAGE, talkState, TALKS_PER_DAY, type TeamSituation } from '../src/ai/trade';
 import type { DraftPick } from '../src/league/picks';
 import { currentRuns, playerValue } from '../src/ai/value';
 import { PRESETS } from '../src/league/difficulty';
@@ -655,4 +655,116 @@ describe('현금만 트레이드·지명권 되팔기 (2026-11-25 사용자 결�
     }
     expect(easy.pickResaleOpen).toBe(true);
   }, 300_000);
+});
+
+describe('떠보기 제한 (2026-11-25 사용자 결정 Q60, 반증 #15)', () => {
+  /** 우리 선수 하나를 공짜로 주는 안: 터무니없는 제안이 아니다 (받거나, 조금 모자라 거절) */
+  const gift = (g: GameSession, k: number) => [byNow(g, g.team.org)[k]];
+  /** 우리 최하위 노장으로 상대의 젊은 주축을 달라는 안: 터무니없는 제안 */
+  const farOffers = (g: GameSession, team: number) => {
+    const cheap = byNow(g, g.team.org.filter((p) => (p.age ?? 0) >= 31)).at(-1)!;
+    return byNow(g, g.world.teams[team].org.filter((p) => (p.age ?? 99) <= 27)).slice(0, 3).map((p) => ({ give: [cheap], get: [p] }));
+  };
+
+  it('talkState: 하루 한도, 되풀이 기간 안의 터무니없는 제안 두 번이면 막힘, 막힌 뒤에는 새로 센다', () => {
+    expect(talkState([], 0)).toEqual({ today: 0, left: TALKS_PER_DAY, blocked: false });
+    expect(talkState([{ day: 3 }, { day: 3 }, { day: 2 }].sort((a, b) => a.day - b.day), 3)).toMatchObject({ today: 2, left: TALKS_PER_DAY - 2 });
+    // 기간 밖의 두 번은 막지 않는다
+    expect(talkState([{ day: 0, far: true }, { day: TALK_FAR_WINDOW, far: true }], TALK_FAR_WINDOW).blocked).toBe(false);
+    // 기간 안 두 번: 그날부터 TALK_BLOCK_DAYS일 뒤까지 막힘
+    const two = [{ day: 1, far: true }, { day: 3, far: true }];
+    expect(talkState(two, 3).blocked).toBe(true);
+    expect(talkState(two, 3 + TALK_BLOCK_DAYS).blocked).toBe(true);
+    expect(talkState(two, 4 + TALK_BLOCK_DAYS).blocked).toBe(false);
+    // 막힌 뒤 한 번 더 터무니없는 제안을 해도 막힘 전 기록은 다시 쓰지 않는다
+    expect(talkState([...two, { day: 4 + TALK_BLOCK_DAYS, far: true }], 4 + TALK_BLOCK_DAYS).blocked).toBe(false);
+  });
+
+  it('E17 수락선 더듬기: 같은 구단에 하루 세 번까지, 넷째 안·요구안은 한도 문구, 같은 안 다시 보내기·다른 구단·다음 날은 된다', () => {
+    const g = newGame('talk-limit');
+    g.advance(5);
+    const ssg = teamIdx(g, 'SSG');
+    const kia = teamIdx(g, 'KIA');
+    const first = g.talkOffer(ssg, gift(g, 10), []);
+    expect(first.verdict).not.toBe('reject-talk');
+    for (const k of [11, 12]) {
+      const ev = g.talkOffer(ssg, gift(g, k), []);
+      expect(ev.verdict).not.toBe('reject-talk');
+      expect(isFarOffer(ev)).toBe(false);
+    }
+    expect(g.talkStateOf(ssg)).toMatchObject({ today: TALKS_PER_DAY, left: 0, blocked: false });
+    const fourth = g.talkOffer(ssg, gift(g, 13), []);
+    expect(fourth.verdict).toBe('reject-talk');
+    expect(fourth.message).toBe(TALK_LIMIT_MESSAGE);
+    expect(g.talkAsk(ssg, [byNow(g, g.world.teams[ssg].org)[3]]).verdict).toBe('reject-talk');
+    // 같은 날 같은 안은 새 정보가 없어 다시 세지 않는다 (E7: 판단에 난수가 없다)
+    expect(g.talkOffer(ssg, gift(g, 10), []).verdict).toBe(first.verdict);
+    expect(g.talkStateOf(ssg).today).toBe(TALKS_PER_DAY);
+    // 셈 없는 판정(evaluateTrade)은 그대로: AI 제안·합의 다시 보기·시험이 쓴다
+    expect(g.evaluateTrade(ssg, gift(g, 13), []).verdict).not.toBe('reject-talk');
+    expect(g.talkOffer(kia, gift(g, 13), []).verdict).not.toBe('reject-talk');
+    // 규정 위반(외국인)은 세지 않는다
+    const foreign = g.team.org.find((p) => p.foreign);
+    if (foreign) {
+      expect(g.talkOffer(kia, [foreign], []).verdict).toBe('reject-invalid');
+      expect(g.talkStateOf(kia).today).toBe(1);
+    }
+    g.advance(1);
+    expect(g.talkStateOf(ssg)).toMatchObject({ today: 0, left: TALKS_PER_DAY, blocked: false });
+    expect(g.talkOffer(ssg, gift(g, 13), []).verdict).not.toBe('reject-talk');
+  }, 120_000);
+
+  it('E18 터무니없는 제안 되풀이: 두 번이면 그 구단과 며칠 협상이 막히고(숫자 없는 문구), 기간이 지나면 풀린다. 재현·저장·불러오기가 같다', () => {
+    const g = newGame('talk-block');
+    g.advance(5);
+    const ssg = teamIdx(g, 'SSG');
+    const [a, b, c] = farOffers(g, ssg);
+    const evA = g.talkOffer(ssg, a.give, a.get);
+    expect(isFarOffer(evA)).toBe(true);
+    expect(g.talkBlock(ssg)).toBeNull();
+    g.advance(2);
+    expect(isFarOffer(g.talkOffer(ssg, b.give, b.get))).toBe(true);
+    const blockDay = g.day;
+    expect(g.talkBlock(ssg)).toBe(TALK_BLOCK_MESSAGE);
+    expect(TALK_BLOCK_MESSAGE).not.toMatch(/\d/);
+    const ev = g.talkOffer(ssg, c.give, c.get);
+    expect(ev.verdict).toBe('reject-talk');
+    expect(ev.message).not.toMatch(/\d/);
+    // 막힌 동안은 요구안도, 이미 보낸 같은 안도 안 된다
+    expect(g.talkAsk(ssg, c.get).verdict).toBe('reject-talk');
+    expect(g.talkOffer(ssg, b.give, b.get).verdict).toBe('reject-talk');
+    // 다른 구단은 그대로
+    const kia = teamIdx(g, 'KIA');
+    expect(g.talkBlock(kia)).toBeNull();
+    // 저장·불러오기, 조작 기록으로 다시 돌리기: 막힘이 같다. 예전 저장(talk 기록 없음)은 막힘 없이 시작한다
+    const saved = roundTrip(g.toSave());
+    expect(GameSession.load(store, saved, FAST).talkBlock(ssg)).toBe(TALK_BLOCK_MESSAGE);
+    const old = { ...saved, actions: saved.actions.filter((x: { type: string }) => x.type !== 'talk') };
+    expect(GameSession.load(store, old, FAST).talkBlock(ssg)).toBeNull();
+    const r = GameSession.replay(store, { year: 2026, teamIdx: g.teamIdx, seed: 'talk-block' }, g.actions, g.day, FAST);
+    expect(r.talkBlock(ssg)).toBe(TALK_BLOCK_MESSAGE);
+    expect(r.toSave().season).toEqual(g.toSave().season);
+    while (g.day < blockDay + TALK_BLOCK_DAYS) { g.advance(1); expect(g.talkBlock(ssg)).toBe(TALK_BLOCK_MESSAGE); }
+    g.advance(1);
+    expect(g.talkBlock(ssg)).toBeNull();
+    expect(g.talkOffer(ssg, gift(g, 10), []).verdict).not.toBe('reject-talk');
+  }, 180_000);
+
+  it('선수 내놓기도 물은 구단마다 한 번이고, 받은 제안을 그대로 보내면 다시 세지 않는다. 오늘 한도인 구단에는 묻지 않는다', () => {
+    const g = newGame('talk-shop');
+    g.advance(10);
+    const offer = [byNow(g, g.team.org)[6]];
+    const ssg = teamIdx(g, 'SSG');
+    for (const k of [10, 11, 12]) g.talkOffer(ssg, gift(g, k), []);
+    const { offers, skipped } = g.talkShop(offer);
+    expect(skipped).toEqual([ssg]);
+    expect(offers.some((o) => o.team === ssg)).toBe(false);
+    expect(offers.length).toBeGreaterThan(0);
+    // 결과는 셈 없는 shopOffers에서 SSG만 뺀 것과 같다
+    expect(offers.map((o) => o.team)).toEqual(g.shopOffers(offer).map((o) => o.team).filter((t) => t !== ssg));
+    for (const t of g.world.teams) if (t.idx !== g.teamIdx && t.idx !== ssg) expect(g.talkStateOf(t.idx).today).toBe(1);
+    const o = offers[0];
+    expect(g.talkOffer(o.team, offer, o.get, 0, { give: [], get: o.picks }).verdict).toBe('accept');
+    expect(g.talkStateOf(o.team).today).toBe(1);
+  }, 180_000);
 });

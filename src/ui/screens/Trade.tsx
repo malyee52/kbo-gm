@@ -24,7 +24,7 @@ import { useShell } from '../shell';
 import { useLeague } from './PlayerDetail';
 import {
   addToCompare, addToDraft, agreementStatus, COMPARE_MAX, confirmAgreement, deskOf, draftKey, draftParts, draftText, editDraft, isEmptyDraft, ourStarter,
-  pruneDraft, noPackageNote, REASON_TEXT, removeFromCompare, sendDraft, slotOf, SLOTS, STEPS, tradeBlockReason, tradeImpact, updateDesk, useDesk, VERDICT_SHORT, weakSlots,
+  pruneDraft, noPackageNote, REASON_TEXT, removeFromCompare, sendDraft, slotOf, SLOTS, STEPS, talkLine, tradeBlockReason, tradeImpact, updateDesk, useDesk, VERDICT_SHORT, weakSlots,
   type DeskState, type Step, type TradeDraft,
 } from '../tradeDesk';
 
@@ -332,7 +332,7 @@ function Compare() {
 // ---- ③ 제안 구성
 
 function Offer() {
-  const { session, version } = useGame();
+  const { session, version, autosave } = useGame();
   const desk = useDesk(session);
   const px = usePriceIndex();
   const won = useWon();
@@ -373,7 +373,8 @@ function Offer() {
   const ask = async () => {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
-    const r = session.askPackageWhy(other, get);
+    const r = session.talkAsk(other, get);
+    void autosave();
     const pkg = r.pkg;
     setBusy(false);
     const nm = session.world.teams[other].name;
@@ -383,6 +384,7 @@ function Offer() {
 
   const send = () => {
     const { ev, agreement } = sendDraft(session, draft);
+    void autosave();
     updateDesk(session, (d) => {
       const n = sentToday(session, d).filter((r) => r.team === other).length + 1;
       const row = { n, team: other, year: session.year, day: session.currentDay, key: draftKey(draft), verdict: ev.verdict, message: ev.message, text: draftText(session, draft, won) };
@@ -439,6 +441,7 @@ function Offer() {
           </details>
         )}
         {desk.note && <p className="note" role="status">{desk.note}</p>}
+        {open && other !== session.teamIdx && (() => { const t = talkLine(session, other); return <p className={t.blocked ? 'note' : 'muted small'}>{t.text}</p>; })()}
         <div className="actions sticky-actions">
           <button type="button" className="ghost" onClick={() => void ask()} disabled={!open || busy || get.length === 0} title="받을 선수를 고른 뒤 상대가 원하는 조건을 묻습니다 (바로 보내지 않음)">
             {busy ? '상대가 검토 중' : '상대가 원하는 조건 묻기'}
@@ -535,7 +538,7 @@ function Impact({ draft }: { draft: TradeDraft }) {
 // ---- ④ 협상
 
 function Talk() {
-  const { session } = useGame();
+  const { session, autosave } = useGame();
   const desk = useDesk(session);
   const [busy, setBusy] = useState(false);
   const team = desk.draft.team;
@@ -547,7 +550,8 @@ function Talk() {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 0));
     const get = draftParts(session, desk.draft).get;
-    const r = session.askPackageWhy(team, get);
+    const r = session.talkAsk(team, get);
+    void autosave();
     const pkg = r.pkg;
     setBusy(false);
     if (!pkg) { updateDesk(session, () => ({ note: noPackageNote(name, r) })); return; }
@@ -699,7 +703,7 @@ function History() {
  * 제안을 고르면 다시 평가해 합의로 만들고 ⑤ 최종 검토로 간다 (확정해야 성사)
  */
 function ShopPanel({ open }: { open: boolean }) {
-  const { session } = useGame();
+  const { session, autosave } = useGame();
   const won = useWon();
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [offers, setOffers] = useState<ShopOffer[] | null>(null);
@@ -729,14 +733,18 @@ function ShopPanel({ open }: { open: boolean }) {
     setBusy(true);
     setMsg({ text: '다른 구단 단장들에게 알리는 중입니다' });
     await new Promise((r) => setTimeout(r, 30));
-    const list = session.shopOffers([...sel].map((i) => session.world.players[i]), cashMan, want);
+    const { offers: list, skipped } = session.talkShop([...sel].map((i) => session.world.players[i]), cashMan, want);
+    void autosave();
     setBusy(false);
     setOffers(list);
-    setMsg(list.length ? null : { text: '지금은 이 조건에 관심을 보이는 구단이 없습니다.' });
+    // 떠보기 제한: 오늘 이야기를 다 했거나 협상이 막힌 구단에는 묻지 않는다 (session.talkShop, 막힌 기간은 보이지 않는다)
+    const left = skipped.length ? ` (오늘 이야기를 다 했거나 협상이 막힌 ${skipped.map((t) => session.world.teams[t].name).join('·')}에는 묻지 않았습니다)` : '';
+    setMsg(list.length ? (left ? { text: `구단마다 이야기 한 번으로 셉니다${left}` } : null) : { text: `지금은 이 조건에 관심을 보이는 구단이 없습니다${left}.` });
   };
   const take = (o: ShopOffer) => {
     const draft: TradeDraft = { team: o.team, give: [...sel], get: o.get.map((p) => p.idx), cash: cashMan, gp: [], rp: o.picks.map(pickId) };
     const { ev, agreement } = sendDraft(session, draft);
+    void autosave();
     if (agreement) {
       setSel(new Set());
       setOffers(null);

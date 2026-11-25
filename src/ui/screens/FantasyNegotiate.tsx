@@ -52,7 +52,9 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
         await judge.run(action);
         return;
       }
-      const ev = session.evaluateTrade(team, give, get, cash, picks);
+      // 설득도 상대의 판단을 보여 주므로 이야기 한 번으로 센다 (떠보기 제한, session.talkOffer). 막혔으면 설득하지 않는다
+      const ev = session.talkOffer(team, give, get, cash, picks);
+      if (ev.verdict === 'reject-talk') { setOut({ text: `${name}: "${ev.message}"`, error: true }); return; }
       const gap = Math.max(0, ev.detail.need - ev.detail.gain);
       const verdict = ev.verdict === 'accept' ? 'accept' : ev.verdict === 'reject-value' ? (gap <= 6 ? 'short' : 'far') : 'invalid';
       const lines = [

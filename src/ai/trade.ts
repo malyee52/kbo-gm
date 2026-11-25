@@ -122,7 +122,9 @@ export type TradeVerdict =
   | 'accept'
   | 'reject-value'
   | 'reject-roster'
-  | 'reject-invalid';
+  | 'reject-invalid'
+  /** 떠보기 제한: 오늘 이야기 한도를 넘었거나 협상이 막힘 (세션만 낸다, talkState) */
+  | 'reject-talk';
 
 export interface TradeEvaluation {
   verdict: TradeVerdict;
@@ -268,3 +270,59 @@ export function suggestPackageWhy(want: SimPlayer[], aiTeam: number, aiOrg: SimP
   if (seen['reject-roster'] !== undefined) return { pkg: null, verdict: 'reject-roster', message: seen['reject-roster'] };
   return { pkg: null, verdict: 'reject-invalid', message: seen['reject-invalid'] ?? '내줄 수 있는 선수가 없습니다.' };
 }
+
+// ---- 떠보기 제한 (2026-11-25 사용자 결정 Q60, 반증 #15): 같은 AI 구단에 하루 제안 횟수, 터무니없는 제안 되풀이 뒤 협상 막힘.
+// 화면에서 상대의 판단을 보여 주는 길(제안 보내기·요구안 묻기·선수 내놓기·설득)은 모두 한 번으로 센다 (game/session.ts talk*).
+// 셈은 조작 기록 'talk'으로 남기고 거기서 다시 센다 (재현·저장이 같게, 예전 저장은 기록이 없어 막힘 없이 시작).
+
+/** 같은 AI 구단과 하루에 이야기할 수 있는 횟수 (임시값) */
+export const TALKS_PER_DAY = 3;
+/** 터무니없는 제안: 가치로 거절했고 모자란 몫(need − gain)이 이 런보다 큼 (임시값) */
+export const TALK_FAR_RUNS = 10;
+/** 터무니없는 제안을 이 횟수만큼 (TALK_FAR_WINDOW일 안에) 되풀이하면 협상이 막힘 (임시값) */
+export const TALK_FAR_REPEAT = 2;
+/** 되풀이를 세는 기간 (일, 그날 포함, 임시값) */
+export const TALK_FAR_WINDOW = 7;
+/** 막힌 기간: 막힌 날 뒤로 이 일수 동안 (막힌 날 포함 나머지 그날도 막힘, 임시값) */
+export const TALK_BLOCK_DAYS = 5;
+
+/** 한 구단과 한 이야기 (조작 기록 'talk'에서 꺼낸 것, 같은 시즌) */
+export interface TalkRecord { day: number; far?: boolean }
+
+export interface TalkState {
+  /** 오늘 이 구단과 한 이야기 수 */
+  today: number;
+  /** 오늘 남은 이야기 수 */
+  left: number;
+  /** 협상이 막혔는가 (막힌 날 수는 화면에 보이지 않는다) */
+  blocked: boolean;
+}
+
+/** 한 구단과의 이야기 기록(날짜 순)에서 오늘 상태를 센다. 순수 함수 */
+export function talkState(talks: readonly TalkRecord[], day: number): TalkState {
+  let today = 0;
+  let until = -Infinity;
+  let lastBlock = -Infinity;
+  let fars: number[] = [];
+  for (const t of talks) {
+    if (t.day > day) break;
+    if (t.day === day) today++;
+    if (!t.far) continue;
+    fars = fars.filter((d) => d > t.day - TALK_FAR_WINDOW && d > lastBlock);
+    fars.push(t.day);
+    if (fars.length >= TALK_FAR_REPEAT) {
+      until = t.day + TALK_BLOCK_DAYS;
+      lastBlock = t.day;
+      fars = [];
+    }
+  }
+  return { today, left: Math.max(0, TALKS_PER_DAY - today), blocked: day <= until };
+}
+
+/** 평가가 터무니없는 제안인가 (가치 거절이고 모자란 몫이 큼) */
+export function isFarOffer(ev: TradeEvaluation): boolean {
+  return ev.verdict === 'reject-value' && ev.detail.need - ev.detail.gain > TALK_FAR_RUNS;
+}
+
+export const TALK_BLOCK_MESSAGE = '무리한 제안이 거듭돼서 당분간은 트레이드 이야기를 하지 않겠습니다.';
+export const TALK_LIMIT_MESSAGE = '오늘은 이만 이야기하시죠. 내일 다시 연락 주세요.';
