@@ -10,7 +10,7 @@ import { loadDataStore, type DataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { runHeavyJob } from '../src/game/heavy';
 import { joinSave, splitSave } from '../src/game/saveSplit';
-import { GameSession, type GameSave } from '../src/game/session';
+import { GameSession, type GameSave, type GameSaveV2 } from '../src/game/session';
 import { getSave, putSave, type SaveRecord } from '../src/game/storage';
 
 let store: DataStore;
@@ -89,7 +89,8 @@ describe('Worker 길 = 본 스레드 (Q55)', () => {
   }, 600_000);
 
   it('저장 나누기: 지난 시즌 몫을 떼고, 합치면 글자까지 같다', () => {
-    const { main, details } = splitSave(save2027);
+    const { main: m0, details } = splitSave(save2027);
+    const main = m0 as GameSaveV2;
     // 2026 시즌 몫 (그보다 앞 해는 시작 전 실제 칭호·시상처럼 시작 때 들어온 기록)
     expect(details.map((d) => d.year)).toContain(2026);
     expect(details.every((d) => d.year < 2027)).toBe(true);
@@ -185,7 +186,8 @@ describe('저장 나누기 규칙 (작은 예)', () => {
       [{ year: 2028, text: 'a' }, { year: 2029, text: 'b' }, { year: 2028, text: 'c' }, { year: 2030, text: 'd' }, { text: 'e' }],
       [[{ year: 2028 }, { year: 2029 }, { year: 2030 }], [{ year: 2030 }], [{ year: 2029 }, { year: 2028 }]],
     );
-    const { main, details } = splitSave(save);
+    const { main: m0, details } = splitSave(save);
+    const main = m0 as GameSaveV2;
     expect(details.map((d) => d.year)).toEqual([2028, 2029]);
     expect(main.news.map((n) => n.text)).toEqual(['c', 'd', 'e']);
     expect(main.league.players.map((p) => p.history.length)).toEqual([1, 1, 1]);
@@ -194,8 +196,9 @@ describe('저장 나누기 규칙 (작은 예)', () => {
 
   it('같은 id가 둘이면 그 묶음 선수 기록은 떼지 않는다', () => {
     const save = mk([], [[{ year: 2028 }], [{ year: 2028 }]]);
-    (save.league.players[1] as { id: string }).id = 'p0';
-    const { main, details } = splitSave(save);
+    ((save as GameSaveV2).league.players[1] as { id: string }).id = 'p0';
+    const { main: m0, details } = splitSave(save);
+    const main = m0 as GameSaveV2;
     expect(main.league.players.map((p) => p.history.length)).toEqual([1, 1]);
     expect(details.every((d) => !d.history.league)).toBe(true);
     expect(text(joinSave(main, details))).toBe(text(save));
