@@ -3,7 +3,7 @@ import { lineTeam } from '../engine';
 import { createContext, useContext, type ReactNode } from 'react';
 import type { BrowserStore } from '../data/loadBrowser';
 import type { DisplayGrades, SimPlayer } from '../engine';
-import type { GameSession } from '../game/session';
+import type { GameSave, GameSession } from '../game/session';
 import { darkBand, teamPalette } from './teams';
 import { priceIndex, wonText } from '../league/salary';
 import { foreignTag } from './foreignTag';
@@ -32,7 +32,12 @@ export interface GameUi {
   openPlayer(idx: number, order?: number[]): void;
   /** 직접 지휘 시작 (오늘 또는 다음 우리 경기). 시즌 중에만 */
   command(): void;
+  /** 오래 걸리는 일을 Web Worker에서 (Q55, ui/heavy.ts): 결산·개막은 세션에 들이고, 개막 미리 보기는 저장만 돌려준다 */
+  heavy(label: string, kind: 'begin-off' | 'open' | 'preview'): Promise<HeavyOutcome>;
 }
+
+/** heavy의 결과. cancelled = 멈추기로 그만둠 (세션은 그대로) */
+export type HeavyOutcome = { ok: true; save: GameSave; message?: string } | { ok: false; message: string; cancelled?: boolean };
 
 const Ctx = createContext<GameUi | null>(null);
 

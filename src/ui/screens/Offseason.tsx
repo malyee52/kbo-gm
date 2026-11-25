@@ -54,7 +54,7 @@ function useInfo() {
 }
 
 export function Offseason() {
-  const { session, changed, autosave, go } = useGame();
+  const { session, changed, autosave, go, heavy } = useGame();
   const { setPrimary } = useShell();
   const off = session.offseason;
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
@@ -118,11 +118,11 @@ export function Offseason() {
     setMsg({ text: `${session.year + 1} 시즌 개막 준비 중입니다 (리그 환경 맞춤, 몇 초 걸립니다)` });
     await afterPaint();
     // 개막 준비에서 기용 보드를 미리 고쳤으면 개막 직후 그대로 옮긴다 (openingBoard.ts)
-    const r = openWithPreview(session);
+    const r = await openWithPreview(session, () => heavy(`${session.year + 1} 시즌 개막 준비 중입니다 (리그 환경 맞춤)`, 'open'));
     setBusy(false);
     setOpening(false);
     if (!r.ok) {
-      setMsg({ text: r.message, error: true });
+      setMsg(r.cancelled ? { text: '개막 준비를 멈췄습니다. 오프시즌은 그대로입니다.' } : { text: r.message, error: true });
       return;
     }
     changed();

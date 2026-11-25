@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { computeGrades } from '../../engine';
 import type { GameSession } from '../../game/session';
 import { GameProvider, useGame, type GameUi } from '../context';
-import { openingPreview } from '../openingBoard';
+import { openingPreview, setOpeningPreview } from '../openingBoard';
 import { LineupBoard } from './LineupBoard';
 
 export function OpeningBoard() {
@@ -15,10 +15,15 @@ export function OpeningBoard() {
   const [version, setVersion] = useState(0);
   useEffect(() => {
     if (preview !== undefined) return;
-    // 개막은 리그 환경 맞춤이 있어 잠깐 걸린다: 안내 문구를 먼저 그리고 만든다
-    const t = setTimeout(() => setPreview(openingPreview(session)), 30);
-    return () => clearTimeout(t);
-  }, [preview, session]);
+    // 개막은 리그 환경 맞춤이 있어 몇 초 걸린다: Web Worker에서 만들고(Q55) 그동안 화면은 그대로 움직인다
+    let alive = true;
+    const at = session.actions.length;
+    void ui.heavy('개막 미리 보기', 'preview').then((r) => {
+      if (!alive) return;
+      setPreview(r.ok ? setOpeningPreview(session, at, r.save) : null);
+    });
+    return () => { alive = false; };
+  }, [preview, session]); // eslint-disable-line react-hooks/exhaustive-deps
   const grades = useMemo(() => (preview ? computeGrades(preview.world) : null), [preview]);
   const year = session.year + 1;
 

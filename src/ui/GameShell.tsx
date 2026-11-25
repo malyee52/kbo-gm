@@ -6,7 +6,8 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { computeGrades } from '../engine';
 import { formatDate } from '../game/calendar';
 import type { GameSession } from '../game/session';
-import { GameProvider, type GameUi, type Screen } from './context';
+import { GameProvider, type GameUi, type HeavyOutcome, type Screen } from './context';
+import { HeavyCancelled, startHeavy, type HeavyRun } from './heavy';
 import { autosaveSession, summaryOf } from './saving';
 import { Briefing } from './screens/Briefing';
 import { Inbox } from './screens/Inbox';
@@ -179,9 +180,37 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
   const stopReq = useRef(false);
   const [stop, setStop] = useState<'can' | 'asked' | null>(null);
   const askStop = () => { stopReq.current = true; setStop('asked'); };
-  const stopButton = stop && (
+  // 결산·개막처럼 Worker에서 도는 한 덩어리 일 (Q55): 멈추면 아무것도 바꾸지 않고 돌아간다
+  const [heavyRun, setHeavyRun] = useState<HeavyRun | null>(null);
+  const heavyBusy = useRef(false);
+  const stopButton = heavyRun?.inWorker ? (
+    <button type="button" className="ghost" onClick={() => heavyRun.cancel()} title="이 일을 그만두고 하기 전 상태로 돌아갑니다">멈추기</button>
+  ) : stop && (
     <button type="button" className="ghost" onClick={askStop} disabled={stop === 'asked'} title="이번 일주일 묶음을 마치고 멈춥니다">{stop === 'asked' ? '멈추는 중' : '멈추기'}</button>
   );
+  /**
+   * 오래 걸리는 일(결산·개막·개막 미리 보기)을 Worker에서 돌린다 (ui/heavy.ts). begin-off·open은 결과 저장을 이 세션에 들이고(adopt),
+   * preview는 저장만 돌려준다. 그만두면 cancelled, 세션은 그대로
+   */
+  const heavy = useCallback(async (label: string, kind: 'begin-off' | 'open' | 'preview'): Promise<HeavyOutcome> => {
+    if (heavyBusy.current) return { ok: false, message: '다른 일이 진행 중입니다' };
+    heavyBusy.current = true;
+    if (kind !== 'preview') setBusy(label);
+    const r = startHeavy(store, { kind, save: session.toSave() });
+    if (kind !== 'preview') setHeavyRun(r);
+    try {
+      const res = await r.result;
+      if (!res.ok) return res;
+      if (kind !== 'preview') session.adopt(res.save);
+      return res;
+    } catch (e) {
+      if (e instanceof HeavyCancelled) return { ok: false, message: '멈췄습니다', cancelled: true };
+      return { ok: false, message: (e as Error).message };
+    } finally {
+      heavyBusy.current = false;
+      if (kind !== 'preview') { setHeavyRun(null); setBusy(null); }
+    }
+  }, [session, store]);
 
   // 진행 멈춤 설정 (브라우저에 저장, stops.ts)
   const [stops, setStopsState] = useState<StopRules>(loadStops);
@@ -440,7 +469,7 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
     if (session.done) go(session.postseason ? 'postseason' : 'season-end');
   };
 
-  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer, autosave, command: () => void (session.commandInProgress ? resumeCommand() : startCommand()) };
+  const ui: GameUi = { store, session, grades, version, changed, go, openPlayer, autosave, heavy, command: () => void (session.commandInProgress ? resumeCommand() : startCommand()) };
   const team = session.teamInfo(session.teamIdx);
   const off = session.phase === 'offseason';
   const { when, left, rec: head } = (cast && castHead) || headOf(session);

@@ -18,13 +18,21 @@ export function FlowNext({ step, label, onNext, note }: { step: FlowStep; label:
   );
 }
 
-/** 결산을 시작한다: 오프시즌을 열고(구단주 평가·시상·성장 판정) 시상식으로. 해고되면 영입 제의를 고를 구단 화면으로 */
+/**
+ * 결산을 시작한다: 오프시즌을 열고(구단주 평가·시상·성장 판정) 시상식으로. 해고되면 영입 제의를 고를 구단 화면으로.
+ * 결산은 Web Worker에서 돈다 (Q55, ui.heavy). 멈추면 시즌 결산 화면 그대로
+ */
 export function useSettle(): () => void {
-  const { session, go, changed, autosave } = useGame();
-  return () => {
-    session.beginOffseason();
+  const { session, go, changed, autosave, heavy } = useGame();
+  return () => void (async () => {
+    if (session.phase !== 'season') return;
+    const r = await heavy('시즌 결산 중입니다 (구단주 평가·시상·성장 판정)', 'begin-off');
+    if (!r.ok) {
+      if (!r.cancelled) console.error(`결산하지 못했습니다: ${r.message}`);
+      return;
+    }
     changed();
     void autosave();
     go(session.league.owner?.offers?.length ? 'club' : 'awards');
-  };
+  })();
 }

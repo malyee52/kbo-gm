@@ -40,7 +40,7 @@ describe('개막 준비 단계의 기용 보드', () => {
     expect(blockOf(g, 'lineup')).toBeNull();
   });
 
-  it('개막 준비에서만 열리고, 고친 것은 개막 때 옮겨져 미리 보기와 같고, 재현된다', () => {
+  it('개막 준비에서만 열리고, 고친 것은 개막 때 옮겨져 미리 보기와 같고, 재현된다', async () => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     const opts = { year: 2026, teamIdx: lg, seed: 'opening-board' };
     const g = GameSession.create(store, opts, FAST);
@@ -70,7 +70,7 @@ describe('개막 준비 단계의 기용 보드', () => {
     expect(openingEdits(g)).toBe(edits.length);
     expect(g.phase).toBe('offseason'); // 실제 세션은 그대로
 
-    const r = openWithPreview(g);
+    const r = await openWithPreview(g);
     expect(r.ok).toBe(true);
     expect(r.carried).toBe(edits.length);
     expect(openingPreview(g, false)).toBeNull();
@@ -89,7 +89,7 @@ describe('개막 준비 단계의 기용 보드', () => {
     expect(re.effectivePlan()).toEqual(g.effectivePlan());
   }, 300_000);
 
-  it('미리 보기를 만든 뒤 오프시즌 조작을 하면 미리 보기와 고친 것은 버린다', () => {
+  it('미리 보기를 만든 뒤 오프시즌 조작을 하면 미리 보기와 고친 것은 버린다', async () => {
     const lg = store.season(2026)!.teams.findIndex((t) => t.name === 'LG');
     const g = GameSession.create(store, { year: 2026, teamIdx: lg, seed: 'opening-stale' }, FAST);
     g.advance(100000);
@@ -103,7 +103,7 @@ describe('개막 준비 단계의 기용 보드', () => {
     expect(g.setInvest('scout', 1).ok).toBe(true);
     expect(openingPreview(g, false)).toBeNull();
     expect(openingEdits(g)).toBe(0);
-    const r = openWithPreview(g);
+    const r = await openWithPreview(g);
     expect(r).toMatchObject({ ok: true, carried: 0 });
   }, 300_000);
 });

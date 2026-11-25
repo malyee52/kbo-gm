@@ -9,7 +9,8 @@ import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campai
 import { GameSession, type GameSave } from '../game/session';
 import { deleteSave, exportFile, getSave, isAutoSlot, listSaveInfos, OUTDATED_NOTICE, outdatedBundle, purgeOutdatedSaves, readSaveFile, type SaveInfo } from '../game/storage';
 import { whenText } from './saving';
-import { afterPaint } from './paint';
+import { HeavyCancelled, startHeavy, type HeavyRun } from './heavy';
+import type { NewGameOptions } from '../game/session';
 import { ConfirmButton } from './ConfirmButton';
 import { teamColor } from './teams';
 import { PLAN_SYNOPSIS, SEASON_SYNOPSIS } from '../league/synopses';
@@ -47,6 +48,8 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     ...(fantasy ? { fantasy: { ...(regressor ? { regressor: true } : {}), ...(mode === 'free' ? { free: true } : {}) } } : {}) };
   const [loadedYear, setLoadedYear] = useState<number | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // 새 게임 만들기는 Web Worker에서 (Q55): 도는 동안 '그만두기'로 멈출 수 있다
+  const [run, setRun] = useState<HeavyRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saves, setSaves] = useState<SaveInfo[] | null>(null);
   const [tier, setTier] = useState<Tier>('쉬움');
@@ -91,11 +94,26 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
     try {
       await store.ensureAll();
       setBusy('개막 준비 중: 리그를 만들고 환경을 맞추는 중입니다 (잠재력 산출, 리그 환경 맞춤, 몇 초 걸립니다)');
-      await afterPaint();
-      onStart(withEditor(GameSession.create(store, { year, teamIdx, seed: seed.trim(), difficulty, ...extra })));
+      await create({ year, teamIdx, seed: seed.trim(), difficulty, ...extra });
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
+    }
+  };
+
+  /** 새 게임을 Worker에서 만들고 그 저장을 불러온다. 그만두면 시작 화면 그대로 */
+  const create = async (opts: NewGameOptions) => {
+    const r = startHeavy(store, { kind: 'create', opts });
+    setRun(r);
+    try {
+      const res = await r.result;
+      if (!res.ok) throw new Error(res.message);
+      onStart(withEditor(GameSession.load(store, res.save)));
+    } catch (e) {
+      if (!(e instanceof HeavyCancelled)) throw e;
+      setBusy(null);
+    } finally {
+      setRun(null);
     }
   };
 
@@ -110,8 +128,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       const t = planTeam(store, ch);
       if (t === null) throw new Error(`${plan.year}년 자료에서 구단을 찾을 수 없습니다`);
       setBusy(`「${ch.title}」 개막 준비 중: 리그를 만들고 환경을 맞추는 중입니다 (몇 초 걸립니다)`);
-      await afterPaint();
-      onStart(withEditor(GameSession.create(store, { year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra })));
+      await create({ year: plan.year, teamIdx: t, seed: seed.trim() || randomSeed(), difficulty, challenge: ch.id, ...extra });
     } catch (e) {
       setError((e as Error).message);
       setBusy(null);
@@ -164,7 +181,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
-      {busy && <p className="note" role="status">{busy}</p>}
+      {busy && <p className="note" role="status">{busy}{run?.inWorker && <> <button type="button" className="ghost" onClick={() => run.cancel()}>그만두기</button></>}</p>}
       {purged && <p className="note" role="status">{purged}</p>}
       {outdated.length > 0 && (
         <section className="note outdated-saves" aria-label="이전 판 저장">

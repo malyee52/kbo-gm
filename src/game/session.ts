@@ -5006,6 +5006,15 @@ export class GameSession {
     return n;
   }
 
+  /**
+   * 다른 곳(Web Worker, game/heavy.ts)에서 이어 간 저장을 이 세션에 들인다 (Q55). 화면은 세션 객체를 그대로 쥐고 있으므로
+   * 불러온 세션의 상태를 이 객체로 옮긴다. 결과는 그 저장을 불러온 것과 같다 (저장 → 불러오기 → 이어 하기 = 끊김 없이 이어 하기).
+   */
+  adopt(save: GameSave): void {
+    const g = GameSession.load(this.store, save, this.params);
+    Object.assign(this, g);
+  }
+
   toSave(): GameSaveV2 {
     const base = {
       app: 'kbo-gm' as const,

@@ -3,6 +3,7 @@
 
 import { SEASON_SAVE_FORMAT } from '../engine';
 import type { GameSave } from './session';
+import { detailHash, joinSave, splitSave, type SaveDetail, type SplitMark } from './saveSplit';
 
 const DB_NAME = 'kbo-gm';
 const STORE = 'saves';
@@ -32,6 +33,14 @@ export interface SaveRecord {
   /** 플레이어가 붙인 이름 (2026-10-12, 없으면 칸 이름) */
   label?: string;
   data: GameSave;
+}
+
+/**
+ * 저장소에 들어가는 모습 (2026-11-25 Q55): data는 본 칸이고 split이 있으면 지난 시즌 기록 칸(DETAIL_STORE)과 합쳐야 원래 저장이다.
+ * split이 없는 기록(DB 버전 2까지 쓴 칸)은 data가 저장 전체다. 그대로 읽고, 다음에 저장할 때 나눈다.
+ */
+interface StoredRecord extends SaveRecord {
+  split?: SplitMark;
 }
 
 /**
@@ -65,8 +74,15 @@ export function infoOf(rec: SaveRecord): SaveInfo {
 }
 
 const INFO_STORE = 'save-info';
-/** DB 버전 2 (2026-11-11): 요약 store를 더했다. 1 → 2로 올릴 때 있던 칸의 요약을 채운다 */
-const DB_VERSION = 2;
+/**
+ * 지난 시즌 기록 칸 (2026-11-25 Q55, game/saveSplit.ts). 키는 [칸 이름, 연도, 지문], 값은 { text: 기록 칸 JSON }.
+ * 지문이 키에 있어 값을 읽지 않고(키만 훑어) 바뀐 칸만 다시 쓴다
+ */
+const DETAIL_STORE = 'save-detail';
+/** DB 버전 2 (2026-11-11): 요약 store를 더했다. 1 → 2로 올릴 때 있던 칸의 요약을 채운다. 버전 3 (2026-11-25): 기록 칸 store */
+const DB_VERSION = 3;
+/** 한 저장 칸의 기록 칸 키 범위 */
+const detailRange = (slot: string) => IDBKeyRange.bound([slot], [slot, []]);
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -75,6 +91,7 @@ function open(): Promise<IDBDatabase> {
       const db = req.result;
       const t = req.transaction!;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'slot' });
+      if (!db.objectStoreNames.contains(DETAIL_STORE)) db.createObjectStore(DETAIL_STORE);
       if (!db.objectStoreNames.contains(INFO_STORE)) {
         const info = db.createObjectStore(INFO_STORE, { keyPath: 'slot' });
         // 예전 칸의 요약 채우기: 한 번만 모든 칸을 읽는다
@@ -107,17 +124,91 @@ async function tx<T>(mode: IDBTransactionMode, stores: string[], fn: (t: IDBTran
   }
 }
 
-/** 칸에 저장한다: 데이터와 요약을 한 트랜잭션으로 */
-export function putSave(rec: SaveRecord): Promise<IDBValidKey> {
-  return tx('readwrite', [STORE, INFO_STORE], (t) => {
-    t.objectStore(INFO_STORE).put(infoOf(rec));
-    return t.objectStore(STORE).put(rec);
+/**
+ * 칸에 저장한다: 본 칸·요약·지난 시즌 기록 칸을 한 트랜잭션으로 (Q55).
+ * 기록 칸은 키(연도·지문)만 훑어 지문이 바뀐 해만 다시 쓰고, 이제 없는 해는 지운다
+ */
+export async function putSave(rec: SaveRecord): Promise<IDBValidKey> {
+  const { main, details } = splitSave(rec.data);
+  const texts = details.map((d) => JSON.stringify(d));
+  const split: SplitMark = { v: 1, years: {} };
+  const want = new Map<string, string>();
+  details.forEach((d, i) => {
+    const h = detailHash(texts[i]);
+    split.years[d.year] = h;
+    want.set(`${d.year}`, h);
   });
+  const stored: StoredRecord = { ...rec, data: main, ...(details.length ? { split } : {}) };
+  const db = await open();
+  try {
+    return await new Promise<IDBValidKey>((resolve, reject) => {
+      const t = db.transaction([STORE, INFO_STORE, DETAIL_STORE], 'readwrite');
+      t.objectStore(INFO_STORE).put(infoOf(rec));
+      const req = t.objectStore(STORE).put(stored);
+      const ds = t.objectStore(DETAIL_STORE);
+      const have = new Set<string>();
+      const cur = ds.openKeyCursor(detailRange(rec.slot));
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (c) {
+          const [, year, hash] = c.primaryKey as [string, number, string];
+          if (want.get(`${year}`) === hash) have.add(`${year}`);
+          else ds.delete(c.primaryKey);
+          c.continue();
+          return;
+        }
+        details.forEach((d, i) => {
+          if (!have.has(`${d.year}`)) ds.put({ text: texts[i] }, [rec.slot, d.year, split.years[d.year]]);
+        });
+      };
+      t.oncomplete = () => resolve(req.result);
+      t.onerror = () => reject(t.error ?? new Error('저장소 작업에 실패했습니다'));
+      t.onabort = () => reject(t.error ?? new Error('저장소 작업이 취소됐습니다 (저장 공간 부족일 수 있습니다)'));
+    });
+  } finally {
+    db.close();
+  }
 }
 
-/** 칸 하나를 데이터째 읽는다 (불러오기) */
-export function getSave(slot: string): Promise<SaveRecord | undefined> {
-  return tx('readonly', [STORE], (t) => t.objectStore(STORE).get(slot) as IDBRequest<SaveRecord | undefined>);
+/** 칸 하나를 데이터째 읽는다 (불러오기). 나눈 칸이면 기록 칸과 합쳐 원래 저장으로 */
+export async function getSave(slot: string): Promise<SaveRecord | undefined> {
+  const db = await open();
+  try {
+    return await new Promise<SaveRecord | undefined>((resolve, reject) => {
+      const t = db.transaction([STORE, DETAIL_STORE], 'readonly');
+      let rec: StoredRecord | undefined;
+      const parts: { year: number; hash: string; text: string }[] = [];
+      const r = t.objectStore(STORE).get(slot);
+      r.onsuccess = () => { rec = r.result as StoredRecord | undefined; };
+      const cur = t.objectStore(DETAIL_STORE).openCursor(detailRange(slot));
+      cur.onsuccess = () => {
+        const c = cur.result;
+        if (!c) return;
+        const [, year, hash] = c.primaryKey as [string, number, string];
+        parts.push({ year, hash, text: (c.value as { text: string }).text });
+        c.continue();
+      };
+      t.oncomplete = () => {
+        try { resolve(rec && joinRecord(rec, parts)); } catch (e) { reject(e); }
+      };
+      t.onerror = () => reject(t.error ?? new Error('저장소 작업에 실패했습니다'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** 본 칸 + 기록 칸 → 저장 기록. 표지의 해마다 지문이 맞는 칸이 있어야 한다 */
+function joinRecord(rec: StoredRecord, parts: { year: number; hash: string; text: string }[]): SaveRecord {
+  const { split, ...plain } = rec;
+  if (!split) return plain;
+  const details: SaveDetail[] = [];
+  for (const [year, hash] of Object.entries(split.years)) {
+    const p = parts.find((x) => `${x.year}` === year && x.hash === hash);
+    if (!p) throw new Error(`저장의 ${year} 시즌 기록 칸이 없거나 맞지 않습니다 (다른 탭에서 같은 칸에 저장했을 수 있습니다)`);
+    details.push(JSON.parse(p.text) as SaveDetail);
+  }
+  return { ...plain, data: joinSave(plain.data, details) };
 }
 
 /** 칸 하나의 요약만 */
@@ -136,8 +227,9 @@ export async function renameSave(slot: string, label: string): Promise<void> {
 }
 
 export function deleteSave(slot: string): Promise<undefined> {
-  return tx('readwrite', [STORE, INFO_STORE], (t) => {
+  return tx('readwrite', [STORE, INFO_STORE, DETAIL_STORE], (t) => {
     t.objectStore(INFO_STORE).delete(slot);
+    t.objectStore(DETAIL_STORE).delete(detailRange(slot));
     return t.objectStore(STORE).delete(slot) as IDBRequest<undefined>;
   });
 }
@@ -150,7 +242,8 @@ export async function listSaveInfos(): Promise<SaveInfo[]> {
 
 /** 저장 목록 (최근 저장 순), 데이터째. 진행마다 부르지 않는다 (목록은 listSaveInfos) */
 export async function listSaves(): Promise<SaveRecord[]> {
-  const all = await tx('readonly', [STORE], (t) => t.objectStore(STORE).getAll() as IDBRequest<SaveRecord[]>);
+  const slots = (await listSaveInfos()).map((r) => r.slot);
+  const all = (await Promise.all(slots.map((s) => getSave(s)))).filter((r): r is SaveRecord => !!r);
   return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
 }
 
