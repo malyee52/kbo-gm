@@ -521,6 +521,7 @@ table.cmp td .small-btn + .small-btn { margin-left: 4px; }
 .off-next .off-left { min-width: 0; }
 .off-next ul { margin: 2px 0 0; }
 .off-next > button { flex: none; }
+.off-next .off-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: none; }
 .warn-tag { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--line); }
 dialog.off-confirm { width: min(560px, calc(100vw / var(--z) - 32px)); }
 .stage-record .news li { grid-template-columns: minmax(0, 1fr); gap: 0; }

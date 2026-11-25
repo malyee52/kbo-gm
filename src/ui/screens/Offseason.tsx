@@ -80,6 +80,19 @@ export function Offseason() {
     if (f.offered.length) void autosave();
   };
 
+  // 남은 단계 추천대로 자동 진행 (2026-11-25 Q63, session.autoOffseason): 개막 준비 단계에서 멈춘다. 한 일은 소식 한 줄로
+  const autoRest = async () => {
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 0));
+    const r = session.autoOffseason();
+    setBusy(false);
+    setRecord(null);
+    // 일부 단계만 진행하고 멈췄어도 그만큼은 기록됐으니 저장한다
+    setMsg(r.ok ? { text: r.message } : { text: r.message, error: true });
+    changed();
+    void autosave();
+  };
+
   // 단계 넘기기. fix가 있으면 그 자동 처리(조작 하나)를 먼저 하고 넘긴다
   const step = async (fix?: LeftoverFix) => {
     setConfirm(null);
@@ -211,7 +224,10 @@ export function Offseason() {
               </>
             )}
           </div>
-          <button type="button" onClick={next} disabled={busy}>{label} ▶</button>
+          <div className="off-buttons">
+            <ConfirmButton label="남은 단계 추천대로 자동 진행" confirmLabel="정말 개막 준비까지 자동 진행" className="ghost" disabled={busy} onConfirm={() => void autoRest()} />
+            <button type="button" onClick={next} disabled={busy}>{label} ▶</button>
+          </div>
         </section>
       )}
       </>)}

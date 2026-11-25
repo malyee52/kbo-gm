@@ -410,6 +410,8 @@ export type GameAction =
   | { year: number; type: 'edit-off'; ops: EditOp[]; names?: string[]; log?: string[] }
   | { year: number; type: 'release'; id: string }
   | { year: number; type: 'release-auto' }
+  /** 오프시즌 자동 진행이 한 일 한 줄 (2026-11-25 Q63). 소식에만 남고 게임 상태는 바꾸지 않는다 (한 일은 앞의 조작들) */
+  | { year: number; type: 'auto-note'; text: string }
   | { year: number; type: 'claim'; id: string }
   /**
    * 단장 회의 우리 표 (구단 투표, 2026-10-23~11-11에만). 구단 투표는 2026-11-12에 뺐다: 예전 조작 기록에 남은 이 조작은 읽기만 하고
@@ -3605,6 +3607,7 @@ export class GameSession {
       case 'ai-choice-off': this.applyFantasyChoice(a.id, a.choice); break;
       case 'release': res = Off.releaseByUser(L, off, a.id); break;
       case 'release-auto': Off.autoReleaseUser(L, off, this.store, this.params); break;
+      case 'auto-note': off.log.push({ stage: off.stage, text: a.text, mine: true }); break;
       case 'claim': res = Off.claimByUser(L, off, a.id); break;
       case 'rule-vote':
         // 구단 투표는 2026-11-12에 뺐다. 예전 기록의 표는 버리고 기록에도 다시 남기지 않는다
@@ -4304,6 +4307,80 @@ export class GameSession {
     return { ok: list.length > 0 && failed.length === 0, message, offered, failed };
   }
   withdrawFa(id: string) { return this.dispatchOff({ year: this.year, type: 'fa-withdraw', id }); }
+
+  /**
+   * 오프시즌 남은 단계를 추천대로 자동 진행 (2026-11-25 사용자 Q63): 개막 준비(ready) 단계까지 '다음'을 누르되, 플레이어가 꼭 골라야 하는 것은
+   * 화면의 추천과 같은 길로 처리한다 — 우리 FA는 요구 조건대로 제시(offerAllOwnFa), 보상은 추천(autoComp), 외국인 빈자리는 우리 스카우트 가치가
+   * 높은 후보부터, 드래프트는 자동 지명(autoDraft), 정원 초과는 자동 정리(autoRelease). 그 밖의 단계(2차 드래프트·연봉·구단주 회의)는
+   * '다음'의 기본값을 따른다. 모두 보통 조작으로 남아 재현(replay)이 같고, 한 일은 마지막에 소식 한 줄(auto-note)로 남긴다
+   */
+  autoOffseason(): { ok: boolean; message: string; done: string[] } {
+    const done: string[] = [];
+    const me = this.teamIdx;
+    for (let guard = 0; guard < 60; guard++) {
+      const off = this.offseason;
+      if (this.phase !== 'offseason' || !off || off.stage === 'ready') break;
+      const L = this.league;
+      switch (off.stage) {
+        case 'fa': {
+          if (!this.ownFaOpen().some((e) => !off.fa.userOffers[e.id])) break;
+          const r = this.offerAllOwnFa();
+          if (r.offered.length) done.push(`우리 FA ${r.offered.map((id) => this.leaguePlayer(id)?.name ?? id).join(', ')} 요구 조건대로 제시`);
+          if (r.failed.length) done.push(`제시하지 못한 우리 FA ${r.failed.map((f) => f.name).join(', ')}`);
+          break;
+        }
+        case 'comp':
+          if ((off.comp ?? []).some((c) => c.from === me && c.pick === null) && this.autoComp().ok) done.push('FA 보상 추천대로 고름');
+          break;
+        case 'foreign': {
+          const names = this.autoForeign();
+          if (names.length) done.push(`외국인 ${names.join(', ')} 계약`);
+          break;
+        }
+        case 'draft': {
+          const d = off.draft;
+          if (d && d.pick < Off.draftTotal(off) && d.pool.length && this.autoDraft().ok) done.push('신인 자동 지명');
+          break;
+        }
+        case 'release': {
+          const over = Off.userOrgSize(L, off) - ruleOf(L, 'orgLimit');
+          if (over > 0 && this.autoRelease().ok) done.push(`정원 초과 ${over}명 자동 정리`);
+          break;
+        }
+        default: break;
+      }
+      const r = this.nextStage();
+      if (!r.ok) return { ok: false, message: `자동 진행을 멈췄습니다: ${r.message}`, done };
+    }
+    const text = `남은 오프시즌 단계를 추천대로 진행했습니다${done.length ? `: ${done.join(' · ')}` : ' (따로 고를 일 없음)'}.`;
+    if (this.phase === 'offseason') this.dispatchOff({ year: this.year, type: 'auto-note', text });
+    return { ok: true, message: text, done };
+  }
+
+  /** 자동 진행의 외국인: 우리 차례에 빈자리가 있으면 계약할 수 있는 후보를 우리 스카우트 가치 순으로 (진짜 능력은 보지 않는다). 계약한 이름 */
+  private autoForeign(): string[] {
+    const off = this.offseason;
+    const f = off?.foreign;
+    if (!off || !f || f.order[f.pointer] !== this.teamIdx) return [];
+    const L = this.league;
+    const tried = new Set<string>();
+    const signed: string[] = [];
+    for (let k = 0; k < 6; k++) {
+      const lim = Off.foreignLimits(off, L, this.teamIdx);
+      const sl = Off.foreignSlots(L, this.teamIdx, off);
+      if (lim.regular - sl.regular <= 0 && lim.asia - sl.asia <= 0) break;
+      const cands = f.pool
+        .map((id) => L.players.find((p) => p.id === id))
+        .filter((p): p is LeaguePlayer => !!p && !tried.has(p.id) && Off.canSignForeign(L, off, this.teamIdx, p).ok)
+        .map((p) => ({ p, v: this.seenValue(p.id) }))
+        .sort((a, b) => b.v - a.v || (a.p.id < b.p.id ? -1 : 1));
+      if (!cands.length) break;
+      const p = cands[0].p;
+      tried.add(p.id);
+      if (this.signForeign(p.id).ok) signed.push(p.name);
+    }
+    return signed;
+  }
   setForeignKeep(id: string, keep: boolean) { return this.dispatchOff({ year: this.year, type: 'foreign-keep', id, keep }); }
   signForeign(id: string) { return this.dispatchOff({ year: this.year, type: 'foreign-sign', id }); }
   draft(id: string | null) { return this.dispatchOff({ year: this.year, type: 'draft', id }); }
