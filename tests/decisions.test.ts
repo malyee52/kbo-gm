@@ -17,8 +17,16 @@ beforeAll(() => {
 }, 120_000);
 
 describe('결정함', () => {
-  it('개막일에는 처리할 일이 없다 (확인 완료)', () => {
+  // 2026-11-25 Q56: 예전에는 개막일에 아무 일도 없었지만(확인 완료) 집중 훈련 0/12를 알린다. 확인으로 내리면 처리할 일이 없다
+  it('개막일: 집중 훈련이 비어 있으면 한 줄, 확인하거나 훈련을 걸면 처리할 일이 없다 (확인 완료)', () => {
     const g = GameSession.create(store, { year: 2026, teamIdx: team, seed: 'inbox-1' }, FAST);
+    const d = decisions(g);
+    expect(d.map((x) => x.key)).toEqual(['training-empty']);
+    expect(d[0].go).toBe('training');
+    expect(d[0].title).toContain('0 / 12');
+    expect(decisions(g, { 'training-empty': d[0].ack! })).toEqual([]);
+    const p = g.league.players.find((x) => x.team === team && !x.isPitcher)!;
+    expect(g.setTraining(p.id, { pos: '1B' }).ok).toBe(true);
     expect(decisions(g)).toEqual([]);
   });
 
@@ -60,6 +68,10 @@ describe('결정함', () => {
     const off = decisions(g);
     // 오프시즌은 단계를 넘겨야 끝나므로 단계 항목이 늘 있다
     expect(off.some((d) => d.key.startsWith('stage:'))).toBe(true);
+    // 스프링캠프를 고르기 전에는 한 줄 (Q56), 고르면 빠진다
+    expect(off.find((d) => d.key === 'camp')?.go).toBe('offseason');
+    expect(g.setCamp({ place: 'home', focus: 'bat' }).ok).toBe(true);
+    expect(decisions(g).some((d) => d.key === 'camp')).toBe(false);
     expect(blockOf(g, 'offseason')).toBeNull();
     expect(blockOf(g, 'roster')).not.toBeNull();
   }, 120_000);

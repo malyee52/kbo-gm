@@ -11,6 +11,8 @@ import { meetingSlot, SLOT_LABEL } from '../fantasy/ownerMeeting';
 import { eventDef } from '../league/events';
 import { meetingOf, ASK_LABEL } from '../league/meeting';
 import { emptySlots, SLOT_LABEL as SPONSOR_SLOT_LABEL } from '../league/sponsor';
+import { DEFAULT_CAMP, PLACE as CAMP_PLACE, FOCUS as CAMP_FOCUS } from '../league/camp';
+import { TRAIN_SLOTS } from '../league/training';
 import type { Screen } from './context';
 import type { Group } from './menu';
 
@@ -154,12 +156,29 @@ export function decisions(s: GameSession, acked: Acked = {}): Decision[] {
       const open = emptySlots(s.league, me, so.year).filter((x) => so.slots[x]?.length);
       if (open.length) out.push({ key: 'sponsor', kind: '계약', group: '경영', title: `빈 스폰서 자리 ${open.length}곳`, why: `${open.map((x) => SPONSOR_SLOT_LABEL[x]).join('·')} 자리에 제안이 와 있습니다. 고르지 않으면 개막 때 기대 연액이 가장 큰 제안으로 자동 계약합니다.`, when: `${so.year} 시즌 개막 전`, go: 'stadium', ack: `${so.year}:${open.join(',')}` });
     }
+    // 스프링캠프를 아직 고르지 않았다 (2026-11-25 Q56): 고르지 않으면 기본 캠프로 간다
+    if (s.league.campPlan?.year !== s.year + 1) {
+      out.push({
+        key: 'camp', kind: '선수단', group: '전력', title: `${s.year + 1} 스프링캠프 고르기 전`,
+        why: `장소·훈련 방향을 고르지 않으면 기본 캠프(${CAMP_PLACE[DEFAULT_CAMP.place].label}·${CAMP_FOCUS[DEFAULT_CAMP.focus].label})로 갑니다.`,
+        when: `${s.year + 1} 시즌 개막 전`, go: 'offseason', ack: `${s.year + 1}`,
+      });
+    }
     // 단계 진행 자체: 다른 할 일이 없어도 오프시즌은 단계를 넘겨야 끝난다
     out.push({
       key: `stage:${off.stage}`, kind: '시즌', group: '영입',
       title: off.stage === 'ready' ? `${off.year + 1} 시즌 개막` : `오프시즌 ${stageText}`,
       why: off.stage === 'ready' ? '선수단 구성이 끝났습니다. 개막하면 새 시즌이 시작됩니다.' : '이 단계를 마치면 다음 단계로 넘어갑니다.',
       go: 'offseason',
+    });
+  }
+
+  // 집중 훈련이 비어 있다 (2026-11-25 Q56): 개막 0일차에 0/12인데 "확인 완료"가 뜨던 것. 시즌·오프시즌마다 한 번 확인으로 내릴 수 있다
+  if ((s.phase === 'offseason' || !s.done) && !s.gameLock && s.training().length === 0) {
+    out.push({
+      key: 'training-empty', kind: '선수단', group: '전력', title: `집중 훈련 0 / ${TRAIN_SLOTS}명`,
+      why: '집중 훈련을 건 선수가 없습니다. 훈련은 시즌을 마친 뒤 성장 판정 때 효과가 나고, 늦게 걸수록 효과가 줄어듭니다.',
+      go: 'training', ack: `${s.year}:${s.phase}`,
     });
   }
 
