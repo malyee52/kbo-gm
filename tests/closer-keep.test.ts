@@ -10,11 +10,11 @@ const UNIT = { s1: 1, d2: 1, t3: 1, hr: 1, bb: 1, hbp: 1, so: 1 };
 const NO_PILOT: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 0 };
 
 describe('조정값 (임시값)', () => {
-  it('마무리 피로 여유 45구, 마무리 부진 강등 2배, 마무리 고정 문턱 3세이브, 선발 보너스 0.12', () => {
+  it('마무리 피로 여유 45구, 마무리 부진 강등 2배, 마무리 고정 문턱 3세이브, 선발 보너스 0.10', () => {
     expect(DEFAULT_PARAMS.mgr.closerExtra).toBe(45);
     expect(DEFAULT_PARAMS.churnSlump?.closerRatio).toBe(2);
     expect(DEFAULT_PARAMS.mgr.closerKeep).toBe(3);
-    expect(DEFAULT_PARAMS.mgr.starterDeal.bonus).toBe(0.12);
+    expect(DEFAULT_PARAMS.mgr.starterDeal.bonus).toBe(0.1);
   });
 });
 

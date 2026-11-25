@@ -206,8 +206,9 @@ export interface Manager2Params {
   /**
    * 잘 던지는 선발 더 끌고 가기 (투수 이닝 밸런스, 2026-10-26): 선발의 감독 투구 수 기준(plan)에 1 + bonus − perRun × 그 경기 실점을 곱한다
    * (아래 floor·위 1 + bonus로 자른다). 감독이 경기 흐름을 보고 정하는 몫이라 투수의 한계·능력은 보지 않는다.
-   * bonus 0.08 → 0.12 (세이브·15승 엔진 카드, 2026-11-25 사용자 Q44): 2023~2025 시작 해 40시즌씩 선발 이닝/GS 5.34 → 5.49 (실제 5.57),
-   * 180이닝 투수 2.0 → 3.2 (실제 2.7). 0.14면 5.59·4.2. 임시값
+   * bonus 0.08 → 0.10 (세이브·15승 엔진 카드, 2026-11-25 사용자 Q44 '0.12 근처'): 2023~2025 시작 해 40시즌씩 선발 이닝/GS 5.33 → 5.41
+   * (실제 5.57), 180이닝 투수 2.3 → 2.7 (실제 2.7). 0.12면 5.50·3.4이지만 팀 홀드가 실제보다 7~14% 적어져(pen_check 10시즌, 기준 ±10%)
+   * 0.10에서 멈췄다 (홀드 −4.5~−8.1%, 선발 100구 이상 23~31% 대 실제 19~24%). 임시값
    */
   starterDeal: { bonus: number; perRun: number; floor: number };
   /**
@@ -842,7 +843,7 @@ export const DEFAULT_PARAMS: EngineParams = {
     setup: 2,
     closerWarmup: { rest: 3, inning: 9, leadMin: 4, leadMax: 5, trailMax: 2 },
     aceDays: 1,
-    starterDeal: { bonus: 0.12, perRun: 0.04, floor: 0.85 },
+    starterDeal: { bonus: 0.1, perRun: 0.04, floor: 0.85 },
     closerExtra: 45,
     closerKeep: 3,
   },

@@ -45,7 +45,7 @@ const EXPERIMENTS: { key: string; label: string; over: (p: EngineParams) => Over
   { key: 'old', label: '카드 전 (closerExtra 15·closerKeep 0·closerRatio 1.4·starterDeal.bonus 0.08)', over: (p) => ({ mgr: { closerExtra: 15, closerKeep: 0, starterDeal: { ...p.mgr.starterDeal, bonus: 0.08 } }, churnSlump: { ...p.churnSlump!, closerRatio: 1.4 } }) },
   { key: 'deal12', label: 'mgr.starterDeal.bonus 0.12', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.12 } } }) },
   { key: 'deal14', label: 'mgr.starterDeal.bonus 0.14', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.14 } } }) },
-  { key: 'deal10', label: 'mgr.starterDeal.bonus 0.10', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.10 } } }) },
+  { key: 'deal08', label: 'mgr.starterDeal.bonus 0.08', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.08 } } }) },
   { key: 'warm0', label: 'mgr.closerWarmup 끔 (몸 풀기 등판 없음)', over: (p) => ({ mgr: { closerWarmup: { ...p.mgr.closerWarmup, rest: 999 } } }) },
 ];
 const expArg = arg('exp') ?? 'all';
