@@ -7,7 +7,7 @@ import { SEASON_SAVE_FORMAT } from '../src/engine';
 import type { GameSave } from '../src/game/session';
 import {
   AUTO_KEEP, AUTO_SLOT, autoSlotOf, deleteSave, getSave, getSaveInfo, infoOf, listSaveInfos,
-  pruneAutoSaves, purgeOutdatedSaves, putSave, renameSave, type SaveRecord,
+  outdatedBundle, pruneAutoSaves, purgeOutdatedSaves, putSave, renameSave, type SaveRecord,
 } from '../src/game/storage';
 
 const data = (o: { phase?: string; news?: unknown[]; seasonFormat?: number; editor?: object } = {}) => ({
@@ -88,6 +88,25 @@ describe('자동 저장 정리', () => {
     expect(await getSave(autoSlotOf(2026, 'g0'))).toBeUndefined();
     // 자동 저장 칸 수 = 이 게임 + 다른 게임 AUTO_KEEP − 1개 (예전 'auto' 칸 빼고)
     expect(left.filter((s) => s.startsWith('auto:')).length).toBe(AUTO_KEEP);
+  });
+});
+
+describe('이전 판 저장 (2026-11-25 Q64: 묻지 않고 지우지 않는다)', () => {
+  it('자동 저장 정리는 이전 판 칸을 남기고, 내보내기 묶음에 데이터째 들어간다', async () => {
+    const mine = autoSlotOf(2026, 'me');
+    const old = autoSlotOf(2025, 'old');
+    await putSave(rec(old, '2026-01-01T00:00:00Z', data({ seasonFormat: 2 })));
+    for (let i = 0; i < 5; i++) await putSave(rec(autoSlotOf(2026, `h${i}`), `2026-02-0${i + 1}T00:00:00Z`));
+    await putSave(rec(mine, '2026-03-01T00:00:00Z'));
+    const gone = await pruneAutoSaves(mine);
+    expect(gone).not.toContain(old);
+    expect(await getSave(old)).toBeDefined();
+    const b = await outdatedBundle();
+    expect(b?.saves.map((r) => r.slot)).toEqual([old]);
+    expect(b?.saves[0].data).toBeDefined();
+    // 사용자가 '지우기'를 고르면 그때만 지운다
+    expect(await purgeOutdatedSaves()).toBe(1);
+    expect(await outdatedBundle()).toBeNull();
   });
 });
 

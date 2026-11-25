@@ -156,7 +156,8 @@ export async function listSaves(): Promise<SaveRecord[]> {
 
 /** 자동 저장 칸 정리: 이 게임 칸(keep)과 예전 'auto' 칸을 빼고 다른 게임의 자동 저장은 최근 AUTO_KEEP − 1개만 남긴다. 지운 칸 */
 export async function pruneAutoSaves(keep: string): Promise<string[]> {
-  const autos = (await listSaveInfos()).filter((r) => isAutoSlot(r.slot) && r.slot !== AUTO_SLOT && r.slot !== keep);
+  // 이전 판 저장은 사용자가 고를 때까지 남긴다 (Q64)
+  const autos = (await listSaveInfos()).filter((r) => isAutoSlot(r.slot) && r.slot !== AUTO_SLOT && r.slot !== keep && !r.outdated);
   const gone = autos.slice(Math.max(0, AUTO_KEEP - 1)).map((r) => r.slot);
   for (const slot of gone) await deleteSave(slot);
   return gone;
@@ -168,8 +169,19 @@ export function editorMarkOfSave(data: GameSave | undefined): '보기' | '고침
   return e ? (e.firstEdit ? '고침' : '보기') : null;
 }
 
-/** 예전 저장을 지운 뒤 한 번 보여 주는 문구 (일정 개편 기획안 6.1) */
-export const OUTDATED_NOTICE = '게임 규칙(정규시즌 일정·잠재력)이 바뀌어 예전 저장을 지웠습니다';
+/**
+ * 이전 판 저장 안내 (2026-11-25 사용자 Q64: 묻지 않고 지우지 않는다). 시작 화면이 개수와 함께 보이고
+ * 내보내기·지우기는 사용자가 고른다 (예전에는 게임을 열 때 purgeOutdatedSaves로 바로 지웠다)
+ */
+export const OUTDATED_NOTICE = '게임 규칙(정규시즌 일정·잠재력)이 바뀌어 지금 판에서는 불러올 수 없습니다. 파일로 내보내 보관하거나 지울 수 있습니다';
+
+/** 이전 판 저장을 파일 하나로 묶는다 (보관용, 지금 판에서는 불러올 수 없다) */
+export async function outdatedBundle(): Promise<{ kind: 'kbo-gm-outdated-saves'; exportedAt: string; saves: SaveRecord[] } | null> {
+  const old = (await listSaveInfos()).filter((r) => r.outdated);
+  if (!old.length) return null;
+  const saves = (await Promise.all(old.map((r) => getSave(r.slot)))).filter((r): r is SaveRecord => !!r);
+  return { kind: 'kbo-gm-outdated-saves', exportedAt: new Date().toISOString(), saves };
+}
 
 /** 불러올 수 없는 저장인가: 시즌 저장 형식이 지금(SEASON_SAVE_FORMAT)보다 낮거나(엔진 2·일정 개편 이전), 세션 형식 2(잠재력 v2 이전) */
 export function isOutdatedSave(data: GameSave | undefined): boolean {
@@ -178,7 +190,7 @@ export function isOutdatedSave(data: GameSave | undefined): boolean {
   return typeof f !== 'number' || f < SEASON_SAVE_FORMAT;
 }
 
-/** 불러올 수 없는 예전 형식 저장 칸(자동 저장·예전 'auto'·수동 칸)을 지운다. 지운 칸 수 */
+/** 불러올 수 없는 예전 형식 저장 칸(자동 저장·예전 'auto'·수동 칸)을 지운다. 지운 칸 수. 사용자가 시작 화면에서 '지우기'를 골랐을 때만 부른다 (Q64) */
 export async function purgeOutdatedSaves(): Promise<number> {
   const old = (await listSaveInfos()).filter((r) => r.outdated);
   for (const r of old) await deleteSave(r.slot);
@@ -186,7 +198,7 @@ export async function purgeOutdatedSaves(): Promise<number> {
 }
 
 /** 저장 데이터를 JSON 파일로 내려받게 한다 */
-export function exportFile(save: GameSave, fileName: string): void {
+export function exportFile(save: GameSave | object, fileName: string): void {
   const blob = new Blob([JSON.stringify(save)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

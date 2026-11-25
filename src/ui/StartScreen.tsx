@@ -7,7 +7,7 @@ import type { BrowserStore } from '../data/loadBrowser';
 import { CHALLENGES, challengeById, planTeam } from '../league/challenges';
 import { condText, PLAN_TIERS, type PlanKind, type Tier } from '../league/campaigns';
 import { GameSession, type GameSave } from '../game/session';
-import { deleteSave, getSave, isAutoSlot, listSaveInfos, OUTDATED_NOTICE, purgeOutdatedSaves, readSaveFile, type SaveInfo } from '../game/storage';
+import { deleteSave, exportFile, getSave, isAutoSlot, listSaveInfos, OUTDATED_NOTICE, outdatedBundle, purgeOutdatedSaves, readSaveFile, type SaveInfo } from '../game/storage';
 import { whenText } from './saving';
 import { afterPaint } from './paint';
 import { ConfirmButton } from './ConfirmButton';
@@ -61,13 +61,22 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
   }, [store, year]);
 
   const refreshSaves = () => listSaveInfos().then(setSaves, () => setSaves([]));
-  // 불러올 수 없는 예전 형식 저장은 지우고 한 번 알린다 (지운 뒤에는 남은 칸이 없어 다시 뜨지 않는다)
-  const [purged, setPurged] = useState(false);
+  // 불러올 수 없는 이전 판 저장: 묻지 않고 지우지 않는다. 안내와 함께 내보내기·지우기를 사용자가 고른다 (2026-11-25 Q64)
+  const [purged, setPurged] = useState<string | null>(null);
+  const usable = saves?.filter((s) => !s.outdated) ?? null;
+  const outdated = saves?.filter((s) => s.outdated) ?? [];
   // 가장 최근에 저장한 게임 (이어 하기)
-  const latest = saves?.length ? [...saves].sort((x, y) => y.savedAt.localeCompare(x.savedAt))[0] : null;
-  useEffect(() => {
-    void purgeOutdatedSaves().then((n) => { if (n) setPurged(true); }, () => undefined).finally(() => void refreshSaves());
-  }, []);
+  const latest = usable?.length ? [...usable].sort((x, y) => y.savedAt.localeCompare(x.savedAt))[0] : null;
+  useEffect(() => { void refreshSaves(); }, []);
+  const exportOutdated = async () => {
+    const b = await outdatedBundle();
+    if (b) exportFile(b, `kbo-gm-이전판-저장-${b.exportedAt.slice(0, 10)}.json`);
+  };
+  const purgeOutdated = async () => {
+    const n = await purgeOutdatedSaves();
+    setPurged(`이전 판 저장 ${n}개를 지웠습니다.`);
+    await refreshSaves();
+  };
 
   const current = loadedYear === year ? store.season(year) : undefined;
   const prev = store.season(year - 1);
@@ -156,7 +165,16 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
 
       {error && <p className="error" role="alert">{error}</p>}
       {busy && <p className="note" role="status">{busy}</p>}
-      {purged && <p className="note" role="status">{OUTDATED_NOTICE}</p>}
+      {purged && <p className="note" role="status">{purged}</p>}
+      {outdated.length > 0 && (
+        <section className="note outdated-saves" aria-label="이전 판 저장">
+          <p><b>이전 판 저장 {outdated.length}개</b> — {OUTDATED_NOTICE}.</p>
+          <div className="actions">
+            <button type="button" className="ghost" onClick={() => void exportOutdated()}>내보내기</button>
+            <ConfirmButton label="지우기" confirmLabel={`정말 ${outdated.length}개 지우기`} onConfirm={() => void purgeOutdated()} />
+          </div>
+        </section>
+      )}
 
       {/* 2026-10-12 UI 개편: 타이틀 화면처럼 큰 메뉴에서 시작한다 (이어 하기 · 새 게임 · 도전 시나리오 · 불러오기). 고르면 그 화면, '처음으로'로 돌아온다 */}
       {startTab === 'menu' ? (
@@ -178,7 +196,7 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
           </button>
           <button type="button" className="title-btn" onClick={() => setStartTab('load')} disabled={!!busy}>
             <strong>불러오기</strong>
-            <span>{saves?.length ? `저장 ${saves.length}개 · 파일에서 불러오기` : '파일에서 불러오기'}</span>
+            <span>{usable?.length ? `저장 ${usable.length}개 · 파일에서 불러오기` : '파일에서 불러오기'}</span>
           </button>
         </nav>
       ) : (
@@ -364,13 +382,13 @@ export function StartScreen({ store, onStart }: { store: BrowserStore; onStart: 
       {startTab === 'load' && (
       <section className="panel">
         <h2>불러오기</h2>
-        {saves === null ? (
+        {usable === null ? (
           <p className="muted">저장 목록을 읽는 중입니다.</p>
-        ) : saves.length === 0 ? (
+        ) : usable.length === 0 ? (
           <p className="muted">브라우저에 저장한 게임이 없습니다.</p>
         ) : (
           <div className="save-list">
-            {saves.map((s) => (
+            {usable.map((s) => (
               <div key={s.slot} className="save-item">
                 <div>
                   <span className="muted small">{isAutoSlot(s.slot) ? '자동 저장' : s.slot}{s.label ? ` "${s.label}"` : ''} · {new Date(s.savedAt).toLocaleString('ko-KR')}</span>
