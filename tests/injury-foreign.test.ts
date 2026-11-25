@@ -150,7 +150,9 @@ describe('부상 대체 외국인', () => {
     expect(movesOf(g.league, 2026).filter((x) => (x.kind === 'sign' || x.kind === 'keep') && x.id === m!.id)).toEqual([]);
     expect(rehabsOf(g.marketCtx, t).length).toBe(1);
     g.advance(50);
-    expect(rehabsOf(g.marketCtx, t).length).toBe(0);
+    // 이 부상의 재활 칸만 본다: 50일 사이 다른 외국인이 6주 넘게 다쳐 새 칸이 생기는 것은 경기 운이다
+    // (2026-11-25 세이브·15승 엔진 카드에서 운이 바뀌어 다른 외국인 칸이 하나 생겼다. 예전에는 칸 수 0을 봤다)
+    expect(rehabsOf(g.marketCtx, t).filter((r) => r.injured === p.id)).toEqual([]);
     const sub = g.world.players.find((x) => x.id === m!.id)!;
     expect([p.teamIdx, sub.teamIdx].filter((x) => x === t).length).toBe(1);
   }, 300_000);

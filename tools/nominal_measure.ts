@@ -39,7 +39,13 @@ import { installCalCache } from './calCache';
 const arg = (n: string, d?: string) => { const i = process.argv.indexOf(`--${n}`); return i < 0 ? d : process.argv[i + 1]; };
 const part = arg('part', 'report')!;
 const outPath = arg('out');
+// --params '{"mgr":{...}}': 조정값 덮어쓰기 (객체는 한 단계 합침, 같은 코드에서 예전 값과 견줄 때)
+const over = (arg('params') ? JSON.parse(arg('params')!) : {}) as Record<string, unknown>;
 const FAST: EngineParams = { ...DEFAULT_PARAMS, pilotSeasons: 1 };
+for (const [k, v] of Object.entries(over)) {
+  const d = (DEFAULT_PARAMS as unknown as Record<string, unknown>)[k];
+  (FAST as unknown as Record<string, unknown>)[k] = d && typeof d === 'object' && !Array.isArray(d) && v && typeof v === 'object' ? { ...(d as object), ...(v as object) } : v;
+}
 
 function writeOut(path: string | undefined, text: string): void {
   if (!path) { console.log(text); return; }
