@@ -255,6 +255,7 @@ describe('반영 (자료 없는 해만)', () => {
 
 describe('시즌 반발계수 (2026-10-22 사용자 결정)', () => {
   const shift = (key: FutureRuleKey, year: number, after: number): RuleShift => ({ year, key, before: FUTURE_RULE_SPEC[key].base, after, reason: '시험 (게임 속 가상 결정)', signal: 0 });
+  // bare 리그에는 ballCor 칸이 없어 예전 방식(해마다 따로 뽑음, 예전 저장 길)을 본다. AR(1)은 tests/ball-cor.test.ts
   it('2027년부터 기본 모드만, 시드로 재현되고 실제 퍼짐 안에서 정해지며 홈런 배율이 따라 움직인다', () => {
     const L = bare('cor');
     expect(seasonCor(L, 2026)).toBeNull();
