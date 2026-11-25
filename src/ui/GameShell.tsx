@@ -673,7 +673,6 @@ export function GameShell({ store, session, onQuit }: { store: BrowserStore; ses
                 {screen === 'watch' && <Watch />}
                 {screen === 'training' && <Training />}
                 {screen === 'scout-amateur' && <Scout tab="amateur" />}
-                {screen === 'scout-pro' && <Scout tab="pro" />}
                 {screen === 'scout-fx' && <Scout tab="fx" />}
                 {screen === 'find' && <Find key={searchKey} initialText={searchText.trim()} />}
                 {screen === 'leaders' && <Leaders />}

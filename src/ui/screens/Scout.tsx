@@ -1,4 +1,4 @@
-// 스카우트 (능력치 v2 기획안 19장, 16-7): 영입 > 스카우트. 탭 셋 — 아마추어(드래프트 보드), 프로(다른 구단·시장 선수 추측), 해외(파견·관찰 명단).
+// 스카우트 (능력치 v2 기획안 19장, 16-7): 영입 > 스카우트. 탭 둘 — 아마추어(드래프트 보드, 아래에 프로 스카우트 안내), 해외(파견·관찰 명단). 할 일이 없던 '프로' 탭은 2026-11-25 Q57로 뺐다.
 // 화면에 나오는 것은 우리 스카우트 팀의 평가뿐이다. 진짜 능력·천장·성장 성향 같은 숨은 값은 보여 주지 않는다 (추측 범위·보고 문구만).
 import { useMemo, useState } from 'react';
 import { budgetEffect, budgetOf, INVEST_LABEL, type InvestKind } from '../../league/finance';
@@ -10,7 +10,7 @@ import { useShell } from '../shell';
 import type { Column } from '../table';
 import type { LeaguePlayer } from '../../league/types';
 
-export type ScoutTab = 'amateur' | 'pro' | 'fx';
+export type ScoutTab = 'amateur' | 'fx';
 
 /** 스카우트 예산 한 줄 (정하기는 경영 > 재정 > 예산안) */
 function LevelLine({ kind }: { kind: InvestKind }) {
@@ -48,19 +48,25 @@ function Amateur() {
       {rows.length
         ? <DataTable id="scout-board" cols={cols} rows={rows} rowKey={(r) => r.p.id} full={density === 'full'} searchText={(r) => r.p.name} label="드래프트 보드" />
         : <p className="muted">드래프트 보드는 오프시즌 드래프트 단계에서 나옵니다.</p>}
+      <ProNote />
     </div>
   );
 }
 
-function Pro() {
+/**
+ * 프로 스카우트 안내 (2026-11-25 Q57: 버튼 없는 '프로' 탭을 빼고 한 줄로). 프로 스카우트는 따로 할 일이 없고,
+ * 다른 구단·시장 선수의 추측 범위가 좁아지는 효과만 있다
+ */
+function ProNote() {
   return (
-    <div className="stack">
+    <section className="panel">
+      <h2>프로 스카우트</h2>
       <LevelLine kind="scoutPro" />
       <p className="muted small">
         다른 구단 선수와 FA·방출 시장 선수의 세부 능력은 우리 스카우트 팀의 추측 범위(예: 55~65)로 보입니다. 기록이 많을수록,
-        프로 스카우트 단계가 높을수록 범위가 좁아집니다. 우리 구단 선수(2군·육성 포함)의 지금 능력은 정확한 값으로 보입니다. 기록(타율·OPS·평균자책 등)은 그대로 보입니다.
+        프로 스카우트 예산이 클수록 범위가 좁아집니다. 우리 구단 선수(2군·육성 포함)의 지금 능력은 정확한 값으로 보입니다.
       </p>
-    </div>
+    </section>
   );
 }
 
@@ -137,5 +143,5 @@ function Abroad() {
 }
 
 export function Scout({ tab }: { tab: ScoutTab }) {
-  return tab === 'amateur' ? <Amateur /> : tab === 'pro' ? <Pro /> : <Abroad />;
+  return tab === 'amateur' ? <Amateur /> : <Abroad />;
 }
