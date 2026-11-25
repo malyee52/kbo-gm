@@ -44,8 +44,9 @@ describe('합의 → 확정 (7장 결정 4)', () => {
     const { ev, agreement } = sendDraft(a, d);
     expect(ev.verdict).toBe('accept');
     expect(agreement).not.toBeNull();
-    // 합의만으로는 성사되지 않는다
-    expect(a.actions.length).toBe(before.actions);
+    // 합의만으로는 성사되지 않는다. 보내기는 떠보기 제한의 이야기 한 번(조작 기록 'talk')만 남긴다 (2026-11-25 Q60에서 고침: 전에는 기록이 없었다)
+    expect(a.actions.length).toBe(before.actions + 1);
+    expect(a.actions.at(-1)).toMatchObject({ type: 'talk', team: kt });
     expect(a.team.org.map((p) => p.idx).sort()).toEqual(before.org);
     expect(a.trades.length).toBe(before.trades);
     expect(agreementStatus(a, agreement!, d)).toBe('ok');
@@ -53,7 +54,8 @@ describe('합의 → 확정 (7장 결정 4)', () => {
     expect(confirmAgreement(a, agreement!).verdict).toBe('accept');
     const P = b.world.players;
     expect(b.proposeTrade(kt, d.give.map((i) => P[i]), d.get.map((i) => P[i])).verdict).toBe('accept');
-    expect(a.actions).toEqual(b.actions);
+    // 'talk' 기록을 빼면 바로 제안한 것과 같다 (talk은 경기·리그 상태를 바꾸지 않는다)
+    expect(a.actions.filter((x) => x.type !== 'talk')).toEqual(b.actions);
     expect(a.trades).toEqual(b.trades);
     a.advance(5);
     b.advance(5);
