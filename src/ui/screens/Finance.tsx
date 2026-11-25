@@ -355,7 +355,7 @@ export function BudgetPanel() {
           <p className="muted small">운영비 {won(-ops)}는 프런트·원정·경기 운영·구장 운영·2군 운영 네 줄이고, 그중 프런트와 2군 운영은 예산 줄에서 정합니다 (원정·구장 운영은 고정, 나눈 몫은 임시값).</p>
         </div>
       </div>
-      <p className="muted small">결산 때 자금이 0보다 작으면 모기업이 0까지 메웁니다(긴급 지원, 구단주 신뢰도 −). 결산 자금이 {won(Math.round(PARENT_RESERVE * wageIndex(year, session.league)))}을 넘으면 다음 시즌 모기업 지원금을 넘는 몫의 {Math.round(PARENT_CLAWBACK * 100)}%만큼 줄입니다 (자금을 가져가지는 않습니다). 예산안의 연말 자금은 결산 전 금액입니다.</p>
+      <p className="muted small">결산 때 자금이 0보다 작으면 모기업이 0까지 메웁니다(긴급 지원, 구단주 신뢰도 −). {year} 결산 자금이 {won(Math.round(PARENT_RESERVE * wageIndex(year + 1, session.league)))}을 넘으면 {year + 1} 시즌 모기업 지원금(그 해 개막 때 정함)을 넘는 몫의 {Math.round(PARENT_CLAWBACK * 100)}%만큼 줄입니다 (자금을 가져가지는 않습니다). 예산안의 연말 자금은 결산 전 금액입니다.</p>
     </section>
   );
 }
