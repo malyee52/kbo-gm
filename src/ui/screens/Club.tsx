@@ -1,5 +1,6 @@
 // 구단 현황 (M7, 화면 11): 구단주 목표와 신뢰도, 예산·샐러리캡, 지난 포스트시즌, 부임 이력, 업적, 해고 뒤 영입 제의.
 // 2026-11-12 사용자: 기본 모드에는 경영 > 구단주 칸이 없고 신뢰도 추이·예산 회의 기록을 여기(개요)에 둔다. 판타지 모드는 구단주 칸 그대로.
+import { runsWinsText } from '../../league/winsScale';
 import { strengthTier } from '../../game/rank';
 import { settingsLabel } from '../../league/difficulty';
 import { CoachPanel } from './Coaches';
@@ -258,7 +259,7 @@ function RepCard() {
       <div className="track trust" aria-label={`단장 평판 ${v} / 100`}><i style={{ width: `${v}%` }} /></div>
       <p className="muted small">
         리그가 단장을 보는 눈입니다. 구단을 옮겨도 따라가고, 해마다 50 쪽으로 조금 돌아갑니다.
-        높으면 FA·다년 계약 선수가 덜 부르고(100이면 −{REP_FA * 100}%), 트레이드 상대가 조금 너그러우며(±{REP_TRADE}런), 해고되더라도 강팀에서 제의가 옵니다.
+        높으면 FA·다년 계약 선수가 덜 부르고(100이면 −{REP_FA * 100}%), 트레이드 상대가 조금 너그러우며(평가 {runsWinsText(REP_TRADE).replace('+', '±')}까지), 해고되더라도 강팀에서 제의가 옵니다.
       </p>
       {log.length > 0 && (
         <ul className="plain small">

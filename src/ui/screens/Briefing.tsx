@@ -2,6 +2,7 @@
 // 확인할 일 → 다음 경기 → 전력 변화 → 순위(우리 팀 주변) → 소식 → 7일 일정.
 // 가을야구 중에는 시리즈 카드, 정규시즌이 끝나면 마무리 카드, 오프시즌에는 단계 카드가 다음 경기 자리에 온다.
 // '요약 / 상세'(shell.tsx)에 따라 같은 카드에서 보여 주는 양만 바뀐다.
+import { formWins, winsText } from '../../league/winsScale';
 import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
 import { formatDate, gameTime, shortDate } from '../../game/calendar';
@@ -555,7 +556,7 @@ function PregameTalk() {
   };
   if (today) {
     const fx = today.effects?.[0];
-    return <p className="small pregame">🗣 오늘 미팅: {today.text} {fx && fx.type === 'teamForm' && <span className={fx.edge > 0 ? 'up' : 'down'}>(선수단 경기력 {fx.edge > 0 ? '+' : ''}{Math.round(fx.edge * 1000) / 10}%p, {fx.days}일)</span>}</p>;
+    return <p className="small pregame">🗣 오늘 미팅: {today.text} {fx && fx.type === 'teamForm' && <span className={fx.edge > 0 ? 'up' : 'down'}>(선수단 경기력 {winsText(formWins(fx.edge, fx.days, fx.side === 'bat' || fx.side === 'pit' ? fx.side : 'all'))}, {fx.days}일)</span>}</p>;
   }
   if (block) return null;
   if (!open) return <button type="button" className="small-btn ghost" onClick={() => setOpen(true)}>경기 전 미팅</button>;

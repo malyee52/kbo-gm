@@ -1,4 +1,5 @@
 // 시즌 중 무작위 이벤트 선택 창 (league/events.ts). 답하기 전에는 진행 버튼이 막힌다.
+import { withWins } from '../league/winsScale';
 import { useState } from 'react';
 import { eventDef } from '../league/events';
 import { useGame } from './context';
@@ -31,7 +32,7 @@ export function EventDialog() {
             void autosave();
           }}>
             <strong>{c.label}</strong>
-            <span className="muted small">{c.note(ctx, ev.vars)}</span>
+            <span className="muted small">{withWins(c.note(ctx, ev.vars))}</span>
           </button>
         ))}
       </div>

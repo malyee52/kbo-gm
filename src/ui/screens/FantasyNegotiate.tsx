@@ -1,4 +1,5 @@
 // 판타지 협상 화면 조각 (src/fantasy/negotiate.ts): 트레이드 설득, 에이전트 설득. 판타지 게임에서만 보인다.
+import { runsWinsText } from '../../league/winsScale';
 import { useState } from 'react';
 import type { SimPlayer } from '../../engine';
 import { isStarterSkill } from '../../engine';
@@ -69,7 +70,7 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
       session.addFantasy(e);
       const runs = e.effects?.[0]?.type === 'tradeGoodwill' ? e.effects[0].runs : 0;
       const after = session.evaluateTrade(team, give, get, cash, picks);
-      setOut({ text: `${name}: "${e.text}"\n→ 호감 ${runs > 0 ? '+' : ''}${runs}런 (${GOODWILL_DAYS}일). 지금 제안은 ${after.verdict === 'accept' ? '받아들여질 만합니다. "제안하기"를 누르세요.' : '아직 모자랍니다.'}` });
+      setOut({ text: `${name}: "${e.text}"\n→ 호감 ${runsWinsText(runs)} (${GOODWILL_DAYS}일). 지금 제안은 ${after.verdict === 'accept' ? '받아들여질 만합니다. "제안하기"를 누르세요.' : '아직 모자랍니다.'}` });
       setArg('');
       changed();
       void autosave();
@@ -81,10 +82,10 @@ export function TradeTalk({ team, give, get, cash, picks, pickLabel }: {
   };
   return (
     <div className="negotiate">
-      <h3>설득하기 <span className="muted small">{role} {name} (가상 인물){free ? ' · AI가 직접 판정' : ` · 지금 호감 ${now > 0 ? '+' : ''}${now}런`}</span></h3>
+      <h3>설득하기 <span className="muted small">{role} {name} (가상 인물){free ? ' · AI가 직접 판정' : ` · 지금 호감 ${runsWinsText(now)}`}</span></h3>
       <p className="muted small">{free
         ? '자유 모드: 상대(AI)가 설득을 듣고 받아들이면 그 자리에서 트레이드가 성사됩니다. 조건을 바꿔 역제안할 수도 있습니다.'
-        : `고른 제안을 두고 상대를 설득합니다. 상대 구단 사정에 맞는 논리면 호감이 생겨 트레이드 평가에 더해지고(최대 ±6런, ${GOODWILL_DAYS}일), 무리한 압박은 오히려 깎입니다. 다시 협상하면 호감이 바뀝니다.`}</p>
+        : `고른 제안을 두고 상대를 설득합니다. 상대 구단 사정에 맞는 논리면 호감이 생겨 트레이드 평가에 더해지고(최대 ${runsWinsText(6).replace('+', '±')}, ${GOODWILL_DAYS}일), 무리한 압박은 오히려 깎입니다. 다시 협상하면 호감이 바뀝니다.`}</p>
       <textarea rows={3} maxLength={600} value={arg} placeholder="예: 리빌딩 중이시니 젊은 포수가 필요하실 겁니다. 우리 ○○는 2군에서…" disabled={busy || !!block} onChange={(e) => setArg(e.target.value)} />
       <div className="actions">
         <button type="button" onClick={() => void talk()} disabled={busy || judge.busy || !!judge.pending || !!block || !arg.trim() || (give.length === 0 && get.length === 0)}>{busy || judge.busy ? '상대가 듣는 중…' : '설득하기'}</button>

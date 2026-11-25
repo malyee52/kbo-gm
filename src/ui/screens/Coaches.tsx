@@ -1,4 +1,5 @@
 // 코치진 (league/coaches.ts): 지금 코치와 효과, 오프시즌에는 후보 고용.
+import { formWins, winsText, type FormSide } from '../../league/winsScale';
 import { useState } from 'react';
 import {
   COACH_BUYOUT, COACH_DECLINE, COACH_EDGE, COACH_GROWTH, COACH_ROLE_LABEL, COACH_ROLES, COACH_STYLE_LABEL, coachCostPerWin, coachEdge, coachOf, coachPayroll,
@@ -8,7 +9,8 @@ import { wageIndex } from '../../league/salary';
 import { useGame, useWon } from '../context';
 
 const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
-const pct = (x: number) => `${x > 0 ? '+' : ''}${(x * 100).toFixed(2)}`;
+// 경기력은 시즌 내내 걸었을 때 기대 승수로 (2026-11-25 Q65, league/winsScale.ts)
+const pct = (x: number, side: FormSide) => `${winsText(formWins(x, 365, side))} / 시즌`;
 
 export function CoachPanel() {
   const { session, changed, autosave } = useGame();
@@ -29,17 +31,17 @@ export function CoachPanel() {
   const effect = (c: Coach) => {
     const sgn = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x))}%`;
     if (c.role === 'dev') return `2군에서 뛴 선수 성장 ${sgn((c.level - 3) * COACH_GROWTH * (c.style === 'young' ? 125 : 100))}`;
-    if (c.role === 'def') return `투수진 경기력 ${pct((c.level - 3) * COACH_EDGE * 0.5)}`;
+    if (c.role === 'def') return `투수진 경기력 ${pct((c.level - 3) * COACH_EDGE * 0.5, 'pit')}`;
     const grow = (c.level - 3) * COACH_GROWTH * (c.style === 'veteran' ? 50 : 100);
-    return `경기력 ${pct((c.level - 3) * COACH_EDGE)} · 성장 ${sgn(grow)}${c.style === 'young' ? ' (25세 이하 1.5배)' : ''}${c.style === 'veteran' && c.level > 3 ? ` · 31세+ 하락 −${Math.round((c.level - 3) * COACH_DECLINE * 100)}%` : ''}`;
+    return `경기력 ${pct((c.level - 3) * COACH_EDGE, c.role === 'pit' ? 'pit' : 'bat')} · 성장 ${sgn(grow)}${c.style === 'young' ? ' (25세 이하 1.5배)' : ''}${c.style === 'veteran' && c.level > 3 ? ` · 31세+ 하락 −${Math.round((c.level - 3) * COACH_DECLINE * 100)}%` : ''}`;
   };
 
   return (
     <section className="panel">
       <h2>코치진 <span className="muted small">연봉 합 {won(coachPayroll(L, me))} / 년</span></h2>
       <p className="muted small">
-        코치는 실명 자료가 없어 역할·등급·성향으로만 나옵니다. 3등급이 리그 평균이고, 시즌 중 경기력(타석마다 유리한 정도, %p)과 결산 때 선수 성장에 영향을 줍니다.
-        지금: 타자 {pct(edge.bat)}, 투수 {pct(edge.pit)}. 아래 후보 가운데서 시즌 중에도 오프시즌에도 데려올 수 있습니다 (빈자리는 개막 때 직원 추천으로 채웁니다).
+        코치는 실명 자료가 없어 역할·등급·성향으로만 나옵니다. 3등급이 리그 평균이고, 시즌 중 경기력(시즌 내내 기대 승수로 적음, 근사)과 결산 때 선수 성장에 영향을 줍니다.
+        지금: 타자 {pct(edge.bat, 'bat')}, 투수 {pct(edge.pit, 'pit')}. 아래 후보 가운데서 시즌 중에도 오프시즌에도 데려올 수 있습니다 (빈자리는 개막 때 직원 추천으로 채웁니다).
         연봉은 기대 승 1승마다 FA 시장 1승당 값(약 {won(FA_WIN_WON * wage)})씩 비싸집니다 (같은 등급도 후보마다 ±15%). 직원 추천은 1등급보다 더 내는 연봉에 비해 효과가 가장 큰 후보입니다.
       </p>
       <table>

@@ -4,6 +4,7 @@
 // 흐름: 새 게임(createLeague) → 시즌 진행 → 시즌 종료 → beginOffseason(결산) → 오프시즌 단계들 → openNextSeason → 다음 시즌 ...
 // 시즌 중 리그 상태는 "그 시즌 개막 때"로 고정되고, 트레이드·기록은 Season이 가진다. 결산 때 리그 상태에 반영한다.
 
+import { withWins } from '../league/winsScale';
 import { GUESS_SET, guessMid, guessRuns, nowSigma, seenFor, seenGrade, seenPhrase, seenProjection, seenValue, type GuessSet, type GuessView, type Seen } from '../league/scout';
 import { fxDrop, fxSendBlock, FX_COST, regionName, type FxNews, type FxRegion, type FxTeam } from '../league/scoutfx';
 import { markTold, pruneUndrafted, watchNews, watchStatus, type WatchEntry, type WatchNewsCtx, type WatchStatus } from './watch';
@@ -2521,7 +2522,7 @@ export class GameSession {
         const def = eventDef(ev.id)!;
         // 소식 이벤트 (2026-11-12 Q35): 묻지 않는다. 효과는 다음 진행 첫머리에 첫 선택지로 적용한다 (예전 자동 처리와 같은 때라
         // 예전 저장의 조작 기록이 이 이벤트에 고른 선택도 그 자리에서 그대로 읽힌다)
-        if (def.notice) this.addNews(this.season.day, 'event', `소식: ${def.title} — ${def.text(ctx, ev.vars)} 프런트 처리: ${def.choices[0].label} (${def.choices[0].note(ctx, ev.vars)})`);
+        if (def.notice) this.addNews(this.season.day, 'event', `소식: ${def.title} — ${def.text(ctx, ev.vars)} 프런트 처리: ${def.choices[0].label} (${withWins(def.choices[0].note(ctx, ev.vars))})`);
         else this.addNews(this.season.day, 'event', `이벤트: ${def.title}`);
       }
     }

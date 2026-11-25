@@ -1,4 +1,5 @@
 // 브리핑 > 소식 > 구단 소식 (2026-10-22 UI 대개편 1차): 예전 홈의 '알림' 카드(종류별 보기)와 진행 중인 효과를 옮겼다.
+import { formWins, winsText } from '../../league/winsScale';
 import { useState } from 'react';
 import type { NewsKind } from '../../game/session';
 import { shortDate } from '../../game/calendar';
@@ -65,7 +66,7 @@ function ActiveEffects() {
     ...(ev.forms ?? []).filter((f) => f.year === year && f.team === session.teamIdx && day < f.until).map((f) => ({
       key: `f-${f.from}-${f.note}-${f.player ?? f.side ?? ''}`,
       who: f.player ? name(f.player) : f.side === 'bat' ? '타자진' : f.side === 'pit' ? '투수진' : '선수단',
-      what: `경기력 ${f.edge > 0 ? '+' : ''}${(f.edge * 100).toFixed(1)}`, up: f.edge > 0, note: f.note, from: f.from, until: f.until,
+      what: `경기력 ${winsText(formWins(f.edge, f.until - f.from, f.player ? 'player' : f.side === 'bat' || f.side === 'pit' ? f.side : 'all'))}`, up: f.edge > 0, note: f.note, from: f.from, until: f.until,
     })),
     ...ev.buffs.filter((b) => b.year === year && b.team === session.teamIdx && day < b.until).map((b) => ({
       key: `b-${b.from}-${b.note}`, who: '관중', what: `관중률 ${b.fill > 0 ? '+' : ''}${Math.round(b.fill * 100)}%p`, up: b.fill > 0, note: b.note, from: b.from, until: b.until,
@@ -74,7 +75,7 @@ function ActiveEffects() {
   if (!rows.length) return null;
   return (
     <section className="panel">
-      <h2>진행 중인 효과 <span className="muted small">경기력은 타석마다 유리한 정도 (%p, 홈 이점 1.3)</span></h2>
+      <h2>진행 중인 효과 <span className="muted small">경기력은 그 기간 전체의 기대 승수 (근사)</span></h2>
       <ul className="news">
         {rows.map((r) => (
           <li key={r.key}>
