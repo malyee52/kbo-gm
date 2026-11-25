@@ -217,13 +217,14 @@ export const CAT_LABEL: Record<RuleCat, string> = {
 export const EFFECT_LABEL: Record<RuleEffect, string> = {
   show: '표시만', 'show-env': '표시만 (게임은 그 해 리그 평균으로 반영)', league: '리그 운영에 반영', engine: '경기에 반영',
 };
-export const STATUS_LABEL: Record<RuleStatus, string> = { confirmed: '자료집 확인', research: '조사값', conflict: '출처 갈림', unknown: '미확인', virtual: '게임 속 가상 결정' };
+// 플레이어 말 (2026-11-25 사용자 Q56: '조사값'·'출처 갈림' 같은 내부 검수 낱말을 쓰지 않는다)
+export const STATUS_LABEL: Record<RuleStatus, string> = { confirmed: '실제 규정', research: '실제 보도 기준', conflict: '자료마다 다름', unknown: '추정', virtual: '게임 속 가상 결정' };
 export const STATUS_HELP: Record<RuleStatus, string> = {
-  confirmed: '자료집 "제도연표"에서 출처를 확인한 값',
-  research: '웹 조사 값, 자료집 제도연표 확인 전',
-  conflict: '출처끼리 값이 갈린다',
+  confirmed: '실제 KBO 규정을 따른 값',
+  research: '실제 보도를 따른 값 (규정 원문은 아직 못 봄)',
+  conflict: '자료마다 값이 달라 많이 쓰는 쪽을 따른 값',
   virtual: '게임이 리그 흐름을 보고 정한 가상 결정 (실제 KBO 결정이 아님)',
-  unknown: '확인하지 못한 값',
+  unknown: '자료가 없어 게임이 짐작한 값',
 };
 
 /** 위 칸에 들어가나: 공인구, 리그 운영·경기 반영 항목 */
@@ -358,7 +359,7 @@ export function ruleNews(input: RuleNewsInput): RuleNews {
       const status = now.sources[key] ?? 'unknown';
       lines.push({
         cat: KEY_CAT[key], title: KEY_TITLE[key], before: b, after: a, effect: 'league', status, key,
-        note: key === 'salaryCap' && status !== 'confirmed' ? '발표값 없음: 게임은 매년 5% 상향 (임시값)' : '게임 규칙 값의 변화',
+        note: key === 'salaryCap' && status !== 'confirmed' ? '발표값 없음: 게임은 매년 5% 상향' : '게임 규칙 값의 변화',
       });
     }
     // 규정 인상 (최저 연봉·외국인 금액 상한, salary.ts ruleStepIndex): 게임 속 가상 결정
@@ -424,9 +425,9 @@ function ballLine(data: RuleChangeData | undefined, year: number, seasonDays: nu
     if (day !== undefined && day <= 0) {
       detail.push(`${testText(t)}, ${mdText(t.date!)} 발표${t.round === 1 && lastFirst?.avg !== undefined ? ` (지난해 1차 ${lastFirst.avg.toFixed(4)})` : ''}`);
     } else if (day !== undefined && (seasonDays === undefined || day < seasonDays)) {
-      dated.push({ day, text: `[공인구] ${year} ${testText(t)} 발표 (기준 ${rangeText(cur.range)}, 조사값)` });
+      dated.push({ day, text: `[공인구] ${year} ${testText(t)} 발표 (기준 ${rangeText(cur.range)})` });
     } else {
-      closing.push(`[공인구] ${year} 시즌 ${testText(t)}${t.date ? ` (${mdText(t.date)} 발표)` : ' (발표일 모름)'}, 기준 ${rangeText(cur.range)} (조사값)`);
+      closing.push(`[공인구] ${year} 시즌 ${testText(t)}${t.date ? ` (${mdText(t.date)} 발표)` : ' (발표일 모름)'}, 기준 ${rangeText(cur.range)}`);
     }
   }
   if (!rangeChanged && !singleChanged && !detail.length && !start) return null;
@@ -467,7 +468,7 @@ function corLine(c: NonNullable<RuleNewsInput['cor']> & { prevReal?: boolean }, 
     ...(c.prev !== null ? { before: c.prev.toFixed(4) } : {}),
     after: c.value.toFixed(4),
     detail: [
-      `1차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)})${c.prevReal && c.prev !== null ? `, 지난해 ${year - 1} 실제 1차 ${c.prev.toFixed(4)} (조사값)` : ''}`,
+      `1차 수시검사 평균 ${c.value.toFixed(4)} (기준 ${rangeText(c.range)})${c.prevReal && c.prev !== null ? `, 지난해 ${year - 1} 실제 1차 ${c.prev.toFixed(4)}` : ''}`,
       `리그 홈런 기준 ×${c.hrMul.toFixed(2)} — ${feel}`,
     ],
     note: '시즌마다 공 반발계수가 실제 검사값의 퍼짐(2018~2026년 0.406~0.425) 안에서 바뀐다 (게임 속 가상 검사)',
@@ -487,7 +488,7 @@ export function ruleSummary(data: RuleChangeData | undefined, s: RuleSnapshot, p
   }
   out.push(s.salaryCap === null ? (s.year < 2023 ? '샐러리캡 없음 (2023년 도입)' : '샐러리캡 없음') : `샐러리캡 ${keyValueText('salaryCap', s)} (연봉 상위 40명)`);
   const b = ballState(data, s.year);
-  if (b.range) out.push(`공인구: ${b.single ? '단일' : '복수'} 공인구, 반발계수 기준 ${rangeText(b.range)}${STATUS_LABEL[b.status] === '조사값' ? ' (조사값)' : ''}`);
+  if (b.range) out.push(`공인구: ${b.single ? '단일' : '복수'} 공인구, 반발계수 기준 ${rangeText(b.range)}`);
   return out;
 }
 

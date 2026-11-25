@@ -165,3 +165,22 @@ describe('게임 진행 속 규칙 소식 (1-3)', () => {
     expect(ruleNewsOf(h)).toEqual(ruleNewsOf(g));
   });
 });
+
+describe('플레이어 말 (2026-11-25 Q56)', () => {
+  // 개막 창·소식에 내부 검수 낱말(조사값·출처 갈림·확인 필요·위키 출처)이 보이면 안 된다. 출처 칸(source)은 '정보·출처' 화면 몫이라 뺀다
+  const INTERNAL = /조사값|출처 갈림|출처가 갈린|확인 필요|확인 전|미확인|임시값|나무위키|위키백과|제도연표/;
+  it('1982~2027 알림의 보이는 글에 내부 검수 낱말이 없다', () => {
+    for (let y = 1983; y <= 2027; y++) {
+      const n = news(y);
+      const shown = [
+        ...all(n).flatMap((l) => [l.title, l.before, l.after, l.real, l.note, l.simplified, l.decision, ...(l.detail ?? [])]),
+        ...n.dated.map((d) => d.text), ...n.closing, n.headline, n.lastSeason, ...n.summary,
+      ].filter((t): t is string => typeof t === 'string');
+      for (const t of shown) expect(t, `${y}: ${t}`).not.toMatch(INTERNAL);
+    }
+  });
+  it('확인 상태 배지 이름도 플레이어 말이다', async () => {
+    const { STATUS_LABEL, STATUS_HELP } = await import('../src/league/ruleNews');
+    for (const t of [...Object.values(STATUS_LABEL), ...Object.values(STATUS_HELP)]) expect(t).not.toMatch(INTERNAL);
+  });
+});

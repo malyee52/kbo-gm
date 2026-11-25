@@ -29,7 +29,7 @@ export function Rules() {
         <h1>규칙 연표</h1>
         <p className="muted small">
           게임이 쓰는 규칙 값과 연도별로 달라진 규칙입니다. 리그 운영 항목(엔트리·외국인·FA·캡·연장)의 전·후 값은 게임 값에서 읽습니다.
-          <b> 조사값</b>은 웹 조사 값으로 자료집 제도연표로 확인하기 전입니다.
+          줄 끝 표시는 값의 근거입니다: <b>실제 규정</b>·<b>실제 보도 기준</b>·<b>자료마다 다름</b>(많이 쓰는 쪽)·<b>추정</b>·<b>게임 속 가상 결정</b>.
         </p>
         <h2>{year}년 리그 규칙{session.phase === 'offseason' ? ' (다음 시즌)' : ''}</h2>
         <ul className="rule-summary">{now.map((s) => <li key={s}>{s}</li>)}</ul>

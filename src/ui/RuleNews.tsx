@@ -130,7 +130,6 @@ export function RuleNewsDialog({ news, onClose }: { news: RuleNews; onClose: () 
             <h2>{news.start ? `${news.year} 시즌 리그 규칙` : `${news.year} 시즌, 달라지는 규칙`}</h2>
             {/* 시작 해가 아니면 개막 준비 단계에서 미리 본 내용과 같다 (UI 2단계 기획안 2.5.3: 반복을 덜 느끼게 한 줄) */}
             {!news.start && <p className="muted small">개막 준비에서 미리 본 내용과 같습니다.</p>}
-            <p className="muted small">조사값 배지는 웹 조사 값으로, 자료집 제도연표로 확인하기 전입니다.</p>
           </div>
           <button type="button" className="ghost" onClick={close}>닫기</button>
         </header>

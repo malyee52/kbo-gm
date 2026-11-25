@@ -140,11 +140,11 @@ export function leagueNews(cur: Divisions | null | undefined, teams: readonly { 
   return [];
 }
 
-/** 소식 한 줄: "1983 시즌 일정 (조사값): 정규시즌 경기 수 팀당 80경기 … → 팀당 100경기 … / …". 줄이 없으면 null */
+/** 소식 한 줄: "1983 시즌 일정: 정규시즌 경기 수 팀당 80경기 … → 팀당 100경기 … / …". 줄이 없으면 null */
 export function scheduleNewsText(year: number, lines: readonly ScheduleNewsLine[]): string | null {
   if (!lines.length) return null;
-  const statuses = [...new Set(lines.map((l) => l.status))].join('·');
   const parts = lines.map((l) => (l.simplified ? `${l.title}: ${l.simplified}`
     : `${l.title}: ${l.before !== undefined ? `${l.before} → ${l.after}` : l.after}`));
-  return `${year} 시즌 일정 (${statuses}): ${parts.join(' / ')}.`;
+  // 확인 상태(조사값·출처 갈림)는 내부 검수 낱말이라 소식에 붙이지 않는다 (2026-11-25 Q56)
+  return `${year} 시즌 일정: ${parts.join(' / ')}.`;
 }
