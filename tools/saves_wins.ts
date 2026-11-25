@@ -6,12 +6,13 @@
 //   2) 마무리: 시즌 중 마무리(ts.closer)가 몇 명 바뀌나, 주 마무리가 맡은 날 몫, 팀 세이브 중 1위 몫, 세이브 기회(9회 이후 세이브 상황 등판) 중 마무리 몫,
 //      마무리 아닌 투수가 세이브를 가져간 경기의 그날 마무리 상태 (없음·피로·3연투·이미 던짐·쉬었는데 안 씀)
 //   3) 선발: 선발 투수(GS 15+, 구원 3 이하)의 GS·이닝/GS·승/GS, 5이닝(15아웃) 채운 선발 몫, 채웠는데 승 못 얻은 몫 (실제는 같은 기준의 자료집 값)
-//   4) 실험 (params만, 엔진 코드 그대로): aceDays·starterDeal·planScale.starter·closerWarmup을 바꿔 1)의 지표와 득점 (환경 맞춤은 기본값 그대로 써서 득점 변화가 보인다)
+//   4) 실험 (params만): aceDays·starterDeal·planScale.starter·closerWarmup·closerExtra·closerKeep·churnSlump.closerRatio를 바꿔 1)의 지표와 득점
+//      (환경 맞춤은 기본값 그대로 써서 득점 변화가 보인다). 'old'는 세이브·15승 엔진 카드(2026-11-25) 전 값
+//   2-1) 주 마무리(시즌에 마무리를 가장 오래 맡은 투수)가 아닌 투수가 마무리를 맡은 날·세이브를 가져간 경기의 주 마무리 상태 (같은 시드로 두 번 돌림)
 // 사용법:  npx tsx tools/saves_wins.ts [--years 2025,2024,2023] [--seasons 6] [--exp all|none|이름,…] [--out reports/saves-wins.md]
 import { writeFileSync } from 'node:fs';
 import { loadDataStore } from '../src/data/loadNode';
 import { calibrate, DEFAULT_PARAMS, Rng, Season, worldForYear, type EngineParams } from '../src/engine';
-import { CLOSER_AVAILABLE_EXTRA } from '../src/engine/params';
 import { availableBelow, currentFatigue, needsRest } from '../src/engine/team';
 import { infoOf, realOpening, tacticsOf } from '../src/league/managers';
 
@@ -30,8 +31,21 @@ const EXPERIMENTS: { key: string; label: string; over: (p: EngineParams) => Over
   { key: 'base', label: '기본값', over: () => ({}) },
   { key: 'ace2', label: 'mgr.aceDays 1 → 2 (앞 순번 선발을 더 자주)', over: () => ({ mgr: { aceDays: 2 } }) },
   { key: 'ace0', label: 'mgr.aceDays 1 → 0 (가장 오래 쉰 투수)', over: () => ({ mgr: { aceDays: 0 } }) },
-  { key: 'deal', label: 'mgr.starterDeal.bonus 0.08 → 0.16 (잘 던지는 선발을 더 길게)', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.16 } } }) },
+  { key: 'deal', label: 'mgr.starterDeal.bonus 0.16 (잘 던지는 선발을 더 길게)', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.16 } } }) },
   { key: 'plan', label: 'planScale.starter 0.92 → 0.99 (선발 투구 수 기준 +7.6%)', over: (p) => ({ planScale: { ...p.planScale, starter: 0.99 } }) },
+  { key: 'cx25', label: 'mgr.closerExtra 25 (마무리 피로 여유)', over: () => ({ mgr: { closerExtra: 25 } }) },
+  { key: 'cx30', label: 'mgr.closerExtra 30', over: () => ({ mgr: { closerExtra: 30 } }) },
+  { key: 'cx45', label: 'mgr.closerExtra 45', over: () => ({ mgr: { closerExtra: 45 } }) },
+  { key: 'keep0', label: 'mgr.closerKeep 끔 (지난 시즌 세이브로만 마무리)', over: () => ({ mgr: { closerKeep: 0 } }) },
+  { key: 'keep1', label: 'mgr.closerKeep 1', over: () => ({ mgr: { closerKeep: 1 } }) },
+  { key: 'keep6', label: 'mgr.closerKeep 6', over: () => ({ mgr: { closerKeep: 6 } }) },
+  { key: 'slump2', label: 'churnSlump.closerRatio 1.4 (예전 마무리 부진 강등)', over: (p) => ({ churnSlump: { ...p.churnSlump!, closerRatio: 1.4 } }) },
+  { key: 'cx60', label: 'mgr.closerExtra 60', over: () => ({ mgr: { closerExtra: 60 } }) },
+  // 세이브·15승 엔진 카드(2026-11-25) 전 값 넷을 한꺼번에 (전 → 후 비교)
+  { key: 'old', label: '카드 전 (closerExtra 15·closerKeep 0·closerRatio 1.4·starterDeal.bonus 0.08)', over: (p) => ({ mgr: { closerExtra: 15, closerKeep: 0, starterDeal: { ...p.mgr.starterDeal, bonus: 0.08 } }, churnSlump: { ...p.churnSlump!, closerRatio: 1.4 } }) },
+  { key: 'deal12', label: 'mgr.starterDeal.bonus 0.12', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.12 } } }) },
+  { key: 'deal14', label: 'mgr.starterDeal.bonus 0.14', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.14 } } }) },
+  { key: 'deal10', label: 'mgr.starterDeal.bonus 0.10', over: (p) => ({ mgr: { starterDeal: { ...p.mgr.starterDeal, bonus: 0.10 } } }) },
   { key: 'warm0', label: 'mgr.closerWarmup 끔 (몸 풀기 등판 없음)', over: (p) => ({ mgr: { closerWarmup: { ...p.mgr.closerWarmup, rest: 999 } } }) },
 ];
 const expArg = arg('exp') ?? 'all';
@@ -100,11 +114,25 @@ const REASON_LABEL: Record<Reason, string> = {
 interface Diag {
   seasons: number; teamSeasons: number; closers: number[]; mainShare: number[]; topShare: number[]; teamSv: number[];
   svBy: { closer: number; other: number }; reasons: Record<Reason, number>;
+  /**
+   * 주 마무리(시즌에 마무리를 가장 오래 맡은 투수, 같은 시드로 한 번 더 돌려 앎)가 아닌 투수가 마무리를 맡은 날의 주 마무리 상태 (팀·날):
+   * 결장, 1군 밖(순환·2군), 선발 로테이션, 불펜에 있는데 지난 시즌 세이브가 더 많은 투수에게 밀림, 불펜에 있는데 그 밖, 다른 구단
+   */
+  swap: Record<'absent' | 'down' | 'rotation' | 'bullpenLast' | 'bullpen' | 'gone', number>; closerDays: number;
+  /** 주 마무리가 아닌 투수의 세이브: 그날 주 마무리 상태 (위 swap 갈래, 또는 마무리였는데 Reason) */
+  lost: Record<string, number>; mainSv: number;
   /** 선발 등판: 모두, 15아웃 이상, 15아웃 이상인데 팀 승리, 그중 선발 승 */
   starts: number; q5: number; q5TeamWin: number; q5Win: number; startWin: number;
 }
 
 function runSeason(world: ReturnType<typeof worldForYear>, params: EngineParams, cal: ReturnType<typeof calibrate>, seed: string, tac: ReturnType<typeof tacticsOf>[] | undefined, dg: Diag | null) {
+  if (!dg) return runOnce(world, params, cal, seed, tac, null, null);
+  // 첫 판으로 팀마다 주 마무리를 알고, 같은 시드 둘째 판에서 나눠 센다 (결과는 같다)
+  const first = runOnce(world, params, cal, seed, tac, null, null);
+  return runOnce(world, params, cal, seed, tac, dg, first.main);
+}
+
+function runOnce(world: ReturnType<typeof worldForYear>, params: EngineParams, cal: ReturnType<typeof calibrate>, seed: string, tac: ReturnType<typeof tacticsOf>[] | undefined, dg: Diag | null, mainOf: number[] | null) {
   const s = Season.start(world, params, seed, { cal });
   if (tac) s.teamSeasons.forEach((ts, t) => { ts.tactics = tac[t]; });
   if (dg) for (let t = 0; t < world.teams.length; t++) s.boxTeams.add(t);
@@ -117,13 +145,27 @@ function runSeason(world: ReturnType<typeof worldForYear>, params: EngineParams,
       if (!c || s.states.absentUntil[c.idx] > day) return { idx: -1, st: 'none' as Reason };
       const pen = ts.tactics?.pen ?? 1;
       if (needsRest(s.states, c.idx, day, pen)) return { idx: c.idx, st: 'three' as Reason };
-      if (currentFatigue(s.states, c.idx, day) >= availableBelow(pen) + CLOSER_AVAILABLE_EXTRA) return { idx: c.idx, st: 'fatigue' as Reason };
+      if (currentFatigue(s.states, c.idx, day) >= availableBelow(pen) + params.mgr.closerExtra) return { idx: c.idx, st: 'fatigue' as Reason };
       return { idx: c.idx, st: 'idle' as Reason };
     });
     const before = s.log.length;
     s.simulateDay();
+    const mk: string[] = world.teams.map(() => 'none');
+    s.teamSeasons.forEach((ts, t) => {
+      if (mainOf && mainOf[t] >= 0 && ts.closer?.idx === mainOf[t]) mk[t] = 'closer';
+      if (!ts.closer) return;
+      closerDays[t].set(ts.closer.idx, (closerDays[t].get(ts.closer.idx) ?? 0) + 1);
+      if (!dg || !mainOf) return;
+      dg.closerDays++;
+      const o = mainOf[t];
+      if (o < 0 || ts.closer.idx === o) return;
+      const op = world.players[o];
+      const k = op.teamIdx !== t ? 'gone' : s.states.absentUntil[o] > day ? 'absent' : ts.rotation.some((p) => p.idx === o) ? 'rotation'
+        : ts.bullpen.some((p) => p.idx === o) ? (ts.closer.lastSaves > op.lastSaves ? 'bullpenLast' : 'bullpen') : 'down';
+      dg.swap[k]++;
+      mk[t] = k;
+    });
     if (!dg) continue;
-    s.teamSeasons.forEach((ts, t) => { if (ts.closer) closerDays[t].set(ts.closer.idx, (closerDays[t].get(ts.closer.idx) ?? 0) + 1); });
     for (let gi = before; gi < s.log.length; gi++) {
       const g = s.log[gi];
       const box = s.boxes.get(gi);
@@ -140,6 +182,14 @@ function runSeason(world: ReturnType<typeof worldForYear>, params: EngineParams,
               if (dw > 0) dg.q5Win++;
               const won = team === g.home ? g.homeRuns > g.awayRuns : g.awayRuns > g.homeRuns;
               if (won) dg.q5TeamWin++;
+            }
+          }
+          if (dsv > 0 && mainOf) {
+            if (p.idx === mainOf[team]) dg.mainSv++;
+            else {
+              const stt = status[team];
+              const key = mk[team] === 'closer' ? `closer:${stt.st === 'idle' && side.pitchers.some((q) => q.idx === stt.idx) ? 'used' : stt.st}` : mk[team];
+              dg.lost[key] = (dg.lost[key] ?? 0) + 1;
             }
           }
           if (dsv > 0) {
@@ -173,7 +223,14 @@ function runSeason(world: ReturnType<typeof worldForYear>, params: EngineParams,
   const lines = s.pit.filter((q) => q.g > 0);
   const runs = s.teams.reduce((a, t) => a + t.rs, 0);
   const games = s.teams.reduce((a, t) => a + t.w + t.l + t.t, 0);
-  return { lead: leaders(lines, runs, games), st: starterAgg(lines) };
+  // 팀 세이브 중 1위 투수 몫 (모든 실험에서)
+  const top = mean(world.teams.map((team) => {
+    const svs = team.org.map((p) => s.pit[p.idx]?.sv ?? 0);
+    const sum = svs.reduce((a, b) => a + b, 0);
+    return sum ? Math.max(...svs) / sum : 0;
+  }));
+  const main = closerDays.map((m) => { let best = -1, n = -1; for (const [i, d] of m) if (d > n) { best = i; n = d; } return best; });
+  return { lead: leaders(lines, runs, games), st: starterAgg(lines), top, main };
 }
 
 const md: string[] = [];
@@ -185,6 +242,8 @@ log();
 
 const expRows = new Map<string, Leaders[]>();
 const expSt = new Map<string, StarterAgg[]>();
+const expTop = new Map<string, number[]>();
+const realRows: { lead: Leaders; top: number; ipgs: number; gs: number }[] = [];
 for (const year of years) {
   const base = withOver({});
   const world = worldForYear(store, year, base);
@@ -194,8 +253,9 @@ for (const year of years) {
     return name ? tacticsOf(infoOf(store, name), name, year) : undefined;
   }) as ReturnType<typeof tacticsOf>[];
   const real = realYear(year);
+  realRows.push({ lead: real.lead, top: real.topShare, ipgs: real.st.ipgs, gs: real.st.gs });
   const dg: Diag = {
-    seasons: 0, teamSeasons: 0, closers: [], mainShare: [], topShare: [], teamSv: [], svBy: { closer: 0, other: 0 },
+    seasons: 0, teamSeasons: 0, closers: [], mainShare: [], topShare: [], teamSv: [], svBy: { closer: 0, other: 0 }, swap: { absent: 0, down: 0, rotation: 0, bullpenLast: 0, bullpen: 0, gone: 0 }, closerDays: 0, lost: {}, mainSv: 0,
     reasons: { none: 0, fatigue: 0, three: 0, used: 0, idle: 0 }, starts: 0, q5: 0, q5TeamWin: 0, q5Win: 0, startWin: 0,
   };
   const t0 = Date.now();
@@ -206,6 +266,7 @@ for (const year of years) {
     for (let i = 0; i < nSeasons; i++) res.push(runSeason(w, params, cal, `sw-${year}-${i}`, tac, e.key === 'base' ? dg : null));
     const L = avgLeaders(res.map((r) => r.lead));
     (expRows.get(e.key) ?? expRows.set(e.key, []).get(e.key)!).push(L);
+    (expTop.get(e.key) ?? expTop.set(e.key, []).get(e.key)!).push(mean(res.map((r) => r.top)));
     const S = res.map((r) => r.st);
     (expSt.get(e.key) ?? expSt.set(e.key, []).get(e.key)!).push({ n: mean(S.map((x) => x.n)), gs: mean(S.map((x) => x.gs)), ipgs: mean(S.map((x) => x.ipgs)), wgs: mean(S.map((x) => x.wgs)), gsMax: mean(S.map((x) => x.gsMax)) });
     console.error(`[${year}] ${e.key} ${((Date.now() - t0) / 1000).toFixed(0)}초`);
@@ -227,6 +288,11 @@ for (const year of years) {
   const sv = dg.svBy.closer + dg.svBy.other;
   log(`- 팀 시즌 세이브: 시뮬 ${f1(mean(dg.teamSv))} (144경기 기준), 실제 ${f1(real.teamSv)}. 팀 세이브 중 1위 투수 몫: 시뮬 ${pct(mean(dg.topShare))}, 실제 ${pct(real.topShare)}`);
   log(`- 시즌 중 마무리(엔진 ts.closer)를 맡은 투수 수 (팀당): 평균 ${f2(mean(dg.closers))}, 1명뿐인 팀 ${pct(mean(dg.closers.map((c) => (c === 1 ? 1 : 0))))}, 주 마무리가 맡은 날 몫 ${pct(mean(dg.mainShare))}`);
+  log(`- 주 마무리가 아닌 투수가 마무리인 날 (전체 마무리 날 중)의 주 마무리 상태: 결장 ${pct(dg.swap.absent / dg.closerDays)}, 1군 밖 ${pct(dg.swap.down / dg.closerDays)}, 선발 ${pct(dg.swap.rotation / dg.closerDays)}, 불펜에 있는데 지난 시즌 세이브가 더 많은 투수에게 밀림 ${pct(dg.swap.bullpenLast / dg.closerDays)}, 불펜에 있는데 그 밖 ${pct(dg.swap.bullpen / dg.closerDays)}, 다른 구단 ${pct(dg.swap.gone / dg.closerDays)}`);
+  {
+    const lostAll = Object.values(dg.lost).reduce((a, b) => a + b, 0);
+    log(`- 주 마무리 세이브 몫 ${pct(dg.mainSv / (dg.mainSv + lostAll))}. 주 마무리가 아닌 투수의 세이브 (팀 시즌당 ${f1(lostAll / dg.teamSeasons)}개)의 그날 주 마무리 상태: ${Object.entries(dg.lost).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${f1(v / dg.teamSeasons)}`).join(' · ')}`);
+  }
   log(`- 세이브를 그날 마무리가 가져간 몫: ${pct(dg.svBy.closer / sv)} (${dg.svBy.closer} / ${sv})`);
   log(`- 마무리 아닌 투수의 세이브 (${dg.svBy.other}개, 팀 시즌당 ${f1(dg.svBy.other / dg.teamSeasons)}개)의 그날 마무리 상태:`);
   for (const r of Object.keys(REASON_LABEL) as Reason[]) log(`  - ${REASON_LABEL[r]}: ${pct(dg.reasons[r] / Math.max(1, dg.svBy.other))} (팀 시즌당 ${f1(dg.reasons[r] / dg.teamSeasons)}개)`);
@@ -246,12 +312,16 @@ log('## 실험 (params만 바꿈, 엔진 코드 그대로)');
 log();
 log(`해마다 ${nSeasons}시즌, ${years.join('·')} 평균. 득점은 기본값 환경 맞춤 그대로 (맞춤을 다시 하면 리그 평균은 목표로 돌아가고 남는 것은 맞춤 계수 변화).`);
 log();
-log('| 실험 | 30세이브 | 최다 세이브 | 15승 | 최다 승 | 180이닝 | 최다 이닝 | 선발 이닝/GS | 선발 평균 GS | 경기당 득점 (기본 대비) |');
-log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
+log('| 실험 | 30세이브 | 최다 세이브 | 세이브 1위 몫 | 15승 | 최다 승 | 180이닝 | 최다 이닝 | 선발 이닝/GS | 선발 평균 GS | 경기당 득점 (기본 대비) |');
+log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
 const baseL = avgLeaders(expRows.get('base')!);
+{
+  const R = avgLeaders(realRows.map((r) => r.lead));
+  log(`| 실제 | ${f1(R.sv30)} | ${f1(R.svMax)} | ${pct(mean(realRows.map((r) => r.top)))} | ${f1(R.w15)} | ${f1(R.wMax)} | ${f1(R.ip180)} | ${f1(R.ipMax)} | ${f2(mean(realRows.map((r) => r.ipgs)))} | ${f1(mean(realRows.map((r) => r.gs)))} | ${f2(R.rpg)} |`);
+}
 for (const e of exps) {
   const L = avgLeaders(expRows.get(e.key)!);
   const S = expSt.get(e.key)!;
-  log(`| ${e.label} | ${f1(L.sv30)} | ${f1(L.svMax)} | ${f1(L.w15)} | ${f1(L.wMax)} | ${f1(L.ip180)} | ${f1(L.ipMax)} | ${f2(mean(S.map((x) => x.ipgs)))} | ${f1(mean(S.map((x) => x.gs)))} | ${f2(L.rpg)} (${e.key === 'base' ? '-' : `${L.rpg >= baseL.rpg ? '+' : ''}${(((L.rpg / baseL.rpg) - 1) * 100).toFixed(1)}%`}) |`);
+  log(`| ${e.label} | ${f1(L.sv30)} | ${f1(L.svMax)} | ${pct(mean(expTop.get(e.key)!))} | ${f1(L.w15)} | ${f1(L.wMax)} | ${f1(L.ip180)} | ${f1(L.ipMax)} | ${f2(mean(S.map((x) => x.ipgs)))} | ${f1(mean(S.map((x) => x.gs)))} | ${f2(L.rpg)} (${e.key === 'base' ? '-' : `${L.rpg >= baseL.rpg ? '+' : ''}${(((L.rpg / baseL.rpg) - 1) * 100).toFixed(1)}%`}) |`);
 }
 if (out) writeFileSync(out, md.join('\n') + '\n');

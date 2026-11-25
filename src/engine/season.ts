@@ -393,6 +393,9 @@ export class Season {
   /** 엔트리 순환 대상인 부진한 투수: 순환 주기(slumpCycle)가 시작할 때 기록으로 정해 그 주기 동안 그대로 쓴다 (저장에 넣는다) */
   private slump: Uint8Array | null = null;
   private slumpCycle = -1;
+  /** 마무리 고르기에 쓰는 이번 시즌 세이브 (closerSavesOn): 순환 주기가 시작하기 전 경기 기록(log)으로 센다. 저장된 log에서 다시 나와 저장에 넣지 않는다 */
+  private closerSv: Int16Array | null = null;
+  private closerSvCycle = -1;
   /** 숨은 능력 시드 (SeasonInit.hiddenSeed) */
   readonly hiddenSeed: string;
   /** 컨디션 흐름 난수의 뿌리 (condition.ts). 날마다 `${날}`, 개막은 'open'으로 갈라 쓴다: 경기·결장·이벤트 난수와 따로다 */
@@ -603,10 +606,29 @@ export class Season {
     return this.slump;
   }
 
+  /**
+   * 마무리 고정 (params.mgr.closerKeep, 2026-11-25 사용자 Q44): 그날 순환 주기가 시작하기 전까지의 선수별 이번 시즌 세이브.
+   * 주기 안에서는 같은 값이라 화면 조회·저장·불러오기를 끼워도 마무리가 같다 (log는 저장에 있다). closerKeep이 0이면 null
+   */
+  private closerSavesOn(day: number, cache = true): { sv: ArrayLike<number>; min: number } | null {
+    const min = this.params.mgr.closerKeep;
+    if (!(min > 0)) return null;
+    const cycle = Math.floor(day / CHURN_DAYS);
+    if (cache && cycle === this.closerSvCycle && this.closerSv) return { sv: this.closerSv, min };
+    const sv = new Int16Array(this.world.players.length);
+    const from = cycle * CHURN_DAYS;
+    for (const g of this.log) if (g.day < from && g.save !== null && g.save < sv.length) sv[g.save]++;
+    if (cache) {
+      this.closerSv = sv;
+      this.closerSvCycle = cycle;
+    }
+    return { sv, min };
+  }
+
   /** 다음 경기일 기준으로 1군을 다시 짠다 (화면에 현재 1군을 보여줄 때). 난수를 쓰지 않으므로 결과에 영향이 없다 */
   refresh(teamIdx: number, day = this.day): TeamSeason {
     const ts = this.teamSeasons[teamIdx];
-    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0, this.closerSavesOn(day));
     return ts;
   }
 
@@ -624,7 +646,7 @@ export class Season {
     const cycle = Math.floor(day / CHURN_DAYS);
     const slump = !rule || !(this.params.rosterChurn ?? 0) ? null
       : cycle === this.slumpCycle && this.slump ? this.slump : this.slumpList();
-    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, slump, this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0);
+    refreshActive(ts, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, slump, this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0, this.closerSavesOn(day, false));
     return ts;
   }
 
@@ -681,7 +703,7 @@ export class Season {
     }
     // 엔트리 확대가 시작되는 날(9월 1일 등)도 다시 짠다
     const extra = this.rosterExtraOn(day);
-    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay || (ts.rosterExtra ?? 0) !== extra) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day), extra, params.rosterChurnBat ?? 0);
+    for (const ts of season) if (ts.dirty || day >= ts.nextReturnDay || (ts.rosterExtra ?? 0) !== extra) refreshActive(ts, world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day), extra, params.rosterChurnBat ?? 0, this.closerSavesOn(day));
     // 1군 연차는 경기가 있는 날을 하루로 센다 (더블헤더 날도 하루)
     for (const t of new Set(games.flatMap((g) => [g.home, g.away]))) {
       const ts = season[t];
@@ -698,7 +720,7 @@ export class Season {
     const order = second.length ? [...games.filter((g) => g.dh !== 2), ...second] : games;
     for (const g of order) {
       if (g === second[0]) {
-        for (const x of second) for (const t of [x.home, x.away]) refreshActive(season[t], world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day), extra, params.rosterChurnBat ?? 0);
+        for (const x of second) for (const t of [x.home, x.away]) refreshActive(season[t], world, states, day, params.rosterChurn ?? 0, params.rosterJitter ?? 0, this.slumpOn(day), extra, params.rosterChurnBat ?? 0, this.closerSavesOn(day));
       }
       const h = season[g.home];
       const a = season[g.away];
@@ -930,8 +952,8 @@ export class Season {
     const a = this.teamSeasons[away];
     h.away = false;
     a.away = true;
-    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0);
-    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0);
+    refreshActive(h, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0, this.closerSavesOn(day));
+    refreshActive(a, this.world, this.states, day, this.params.rosterChurn ?? 0, this.params.rosterJitter ?? 0, this.slumpOn(day), this.rosterExtraOn(day), this.params.rosterChurnBat ?? 0, this.closerSavesOn(day));
     const cond = (p: SimPlayer) => condToday(ctx, p.idx);
     const hs = todaysStarter(h, this.states, day, params, cond);
     const aws = todaysStarter(a, this.states, day, params, cond);

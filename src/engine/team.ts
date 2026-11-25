@@ -418,9 +418,11 @@ export function slumpingHitters(world: World, bat: readonly BatLine[], rule: { m
 
 /**
  * 그날 뛸 수 있는 선수로 1군 엔트리를 짠다. churn: 엔트리 순환 확률 (EngineParams.rosterChurn, 직접 정한 1군에는 쓰지 않는다).
- * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상
+ * slump: 순환 대상인 부진한 투수 (slumpingPitchers). 없으면 모든 국내 투수가 대상.
+ * keep: 마무리 고정 (params.mgr.closerKeep, Season.closerSavesOn): 선수별 이번 시즌 세이브(순환 주기 시작 전까지)와 문턱. 없으면 지난 시즌 세이브로만 고른다
  */
-export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null, extra = 0, batChurn = 0): void {
+export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, day: number, churn = 0, jitter = 0, slump: ArrayLike<number> | null = null, extra = 0, batChurn = 0,
+  keep: { sv: ArrayLike<number>; min: number } | null = null): void {
   const { rosterSize, foreignLimit: limit } = teamRules(world, ts.team, extra);
   ts.rosterExtra = extra;
   const manual = ts.manual ?? null;
@@ -524,6 +526,16 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
     .sort((a, b) => callUpScore(a) - callUpScore(b))
     .slice(0, Math.max(0, nPit - rotation.length));
   let closer: SimPlayer | null = plan?.closer !== null && plan?.closer !== undefined ? bullpen.find((p) => p.idx === plan.closer) ?? null : null;
+  const autoCloser = !closer;
+  // 마무리 고정 (2026-11-25 사용자 Q44): 이번 시즌 세이브가 keep.min개 이상인 투수가 불펜에 있으면 그중 가장 많은 투수 (같으면 지난 시즌 세이브, 가치).
+  // 마무리가 다쳐 대신 맡은 투수는 원래 마무리가 돌아오면 비켜 주고, 대신 맡은 투수가 더 많이 쌓았으면 그대로 맡는다
+  if (!closer && keep) {
+    const sv = (p: SimPlayer) => keep.sv[p.idx] ?? 0;
+    for (const p of bullpen) {
+      if (sv(p) < keep.min) continue;
+      if (!closer || sv(p) > sv(closer) || (sv(p) === sv(closer) && (p.lastSaves > closer.lastSaves || (p.lastSaves === closer.lastSaves && p.value < closer.value)))) closer = p;
+    }
+  }
   if (!closer) for (const p of bullpen) if (p.lastSaves >= 5 && (!closer || p.lastSaves > closer.lastSaves)) closer = p;
   // 지난 시즌 마무리가 없으면 불펜에서 가장 좋은 투수 (흔들림 없이 가치로: 엔트리 순환 주기마다 마무리가 바뀌지 않게, 첫 시즌 밸런스 3차)
   if (!closer) for (const p of bullpen) if (!closer || p.value < closer.value) closer = p;
@@ -567,7 +579,8 @@ export function refreshActive(ts: TeamSeason, world: World, st: PlayerStates, da
   let next = Number.MAX_SAFE_INTEGER;
   for (const p of ts.team.org) if (st.absentUntil[p.idx] > day && st.absentUntil[p.idx] < next) next = st.absentUntil[p.idx];
   for (const p of ts.team.org) if (p.homeOnlyUntil !== undefined && p.homeOnlyUntil > day && p.homeOnlyUntil < next) next = p.homeOnlyUntil;
-  if (rotating) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
+  // 마무리 고정의 세이브는 순환 주기마다 바뀌므로 그때 다시 짠다 (직접 정한 1군도: 화면 조회로 앞당겨 바뀌지 않게)
+  if (rotating || (keep && autoCloser)) next = Math.min(next, (Math.floor(day / CHURN_DAYS) + 1) * CHURN_DAYS);
   // 이도류 선수가 있으면 날마다 다시 짠다 (등판 다음 날 타석 휴식)
   if (ts.team.org.some((p) => p.alt)) next = Math.min(next, day + 1);
   ts.nextReturnDay = next;

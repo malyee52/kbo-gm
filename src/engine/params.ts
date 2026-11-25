@@ -205,9 +205,24 @@ export interface Manager2Params {
   aceDays: number;
   /**
    * 잘 던지는 선발 더 끌고 가기 (투수 이닝 밸런스, 2026-10-26): 선발의 감독 투구 수 기준(plan)에 1 + bonus − perRun × 그 경기 실점을 곱한다
-   * (아래 floor·위 1 + bonus로 자른다). 감독이 경기 흐름을 보고 정하는 몫이라 투수의 한계·능력은 보지 않는다
+   * (아래 floor·위 1 + bonus로 자른다). 감독이 경기 흐름을 보고 정하는 몫이라 투수의 한계·능력은 보지 않는다.
+   * bonus 0.08 → 0.12 (세이브·15승 엔진 카드, 2026-11-25 사용자 Q44): 2023~2025 시작 해 40시즌씩 선발 이닝/GS 5.34 → 5.49 (실제 5.57),
+   * 180이닝 투수 2.0 → 3.2 (실제 2.7). 0.14면 5.59·4.2. 임시값
    */
   starterDeal: { bonus: number; perRun: number; floor: number };
+  /**
+   * 마무리(TeamSeason.closer)에게만 더하는 등판 가능 피로 여유 (공, manager.ts availableRelievers). 3연투 기준은 같다.
+   * 실제 2023~2025 팀 세이브 1위의 연투율은 0.229~0.237(data-src/pbp_derived/relief_usage.csv). 여유 없이 모든 구원과 같은 기준(전날 15구)이면
+   * 시뮬 마무리 연투율 0.120·세이브 몫 0.47이었고, 15(첫 시즌 밸런스 2차, 2026-10-25, 예전 상수 CLOSER_AVAILABLE_EXTRA)이면 2025 4시즌에서
+   * 연투율 0.196·세이브 몫 0.57·등판 35 → 40경기였다. 45 (세이브·15승 엔진 카드, 2026-11-25 사용자 Q44): 2023~2025 시작 해 40시즌씩
+   * 팀 세이브 1위 몫 15 → 30 → 45 → 60에서 마무리 고정과 함께 약 64.8 → 67.5 → 69.7 → 70.6% (실제 73.7%, reports/saves-wins.md 뒤쪽). 임시값
+   */
+  closerExtra: number;
+  /**
+   * 마무리 고정 (2026-11-25 사용자 Q44, team.ts refreshActive): 이번 시즌 세이브가 이 값 이상인 불펜 투수가 있으면 그중 가장 많은 투수를 마무리로
+   * (순환 주기 시작 전 경기 기록으로 셈, season.ts closerSavesOn). 0이면 지난 시즌 세이브로만 고른다 (예전 규칙). 임시값
+   */
+  closerKeep: number;
 }
 
 /** 시대별 주루·병살·희생플라이·도루 배율 한 줄 (엔진 2 13단계). 현대 값(params의 기본값)에 곱한다 */
@@ -700,8 +715,9 @@ export const DEFAULT_PARAMS: EngineParams = {
   seasonRegressScale: 0.5,
   seasonPitRegressScale: 0.25,
   rosterChurn: 0.5,
-  // closerRatio (첫 시즌 밸런스 3차, 임시값): 세이브 5개 이상 마무리는 평균자책 기준을 이만큼 더 늦춘다 (개막 마무리가 부진 순환으로 2군에 간 날 13%)
-  churnSlump: { minOuts: 15, priorOuts: 30, eraRatio: 1.15, closerRatio: 1.4 },
+  // closerRatio (첫 시즌 밸런스 3차, 임시값): 세이브 5개 이상 마무리는 평균자책 기준을 이만큼 더 늦춘다 (개막 마무리가 부진 순환으로 2군에 간 날 13%).
+  // 1.4 → 2 (세이브·15승 엔진 카드, 2026-11-25 사용자 Q44 '마무리는 부상·부진 때만 바꿈'): 마무리를 깊은 부진 때만 내린다 (임시값)
+  churnSlump: { minOuts: 15, priorOuts: 30, eraRatio: 1.15, closerRatio: 2 },
   rosterJitter: 0.06,
   // 야수 엔트리 순환 (첫 시즌 밸런스 3차, 임시값): 휴식 배율(restRank)과 함께 맞춤. 상위 9명 타석 비중은 바꾸기 전과 같게 (2025 6시즌 0.720 → 0.723)
   rosterChurnBat: 0.65,
@@ -826,7 +842,9 @@ export const DEFAULT_PARAMS: EngineParams = {
     setup: 2,
     closerWarmup: { rest: 3, inning: 9, leadMin: 4, leadMax: 5, trailMax: 2 },
     aceDays: 1,
-    starterDeal: { bonus: 0.08, perRun: 0.04, floor: 0.85 },
+    starterDeal: { bonus: 0.12, perRun: 0.04, floor: 0.85 },
+    closerExtra: 45,
+    closerKeep: 3,
   },
   outOnAdvance: 0.11,
   // 2010~2025 그 해 값(groundBallShareByYear)의 평균 (임시값, 출처 미확인 참고값). 2009년 이전·2027년 이후에 쓴다 (시대별 값은 13단계)
@@ -1098,13 +1116,6 @@ export const DEFAULT_PARAMS: EngineParams = {
 export const BULLPEN_RECOVERY_PER_DAY = 12;
 export const BULLPEN_AVAILABLE_BELOW = 3;
 export const BULLPEN_THIRD_DAY_BELOW = 10;
-/**
- * 마무리(TeamSeason.closer)에게만 더하는 등판 가능 피로 여유 (공). 감독은 마무리를 더 자주 연투시킨다: 실제 2023~2025 팀 세이브 1위의
- * 연투율은 0.229~0.237(data-src/pbp_derived/relief_usage.csv)인데 모든 구원과 같은 기준(전날 15구)이면 시뮬 마무리 연투율이 0.120, 세이브 몫 0.47(실제 약 0.75)이었다.
- * 15이면 전날 30구까지 다음 날도 나오고 2025 4시즌에서 연투율 0.196·세이브 몫 0.57·등판 35 → 40경기 (첫 시즌 밸런스 2차, 2026-10-25, 임시값)
- */
-export const CLOSER_AVAILABLE_EXTRA = 15;
-
 /** 그 해의 볼카운트 사슬 모양 */
 export function chainShapeFor(params: EngineParams, year: number): ChainShape {
   return params.chainShapeByYear[year] ?? params.chainShape;
