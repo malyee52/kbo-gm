@@ -96,8 +96,9 @@ describe('Worker 길 = 본 스레드 (Q55)', () => {
     expect(details.every((d) => d.year < 2027)).toBe(true);
     expect(text(main).length).toBeLessThan(text(save2027).length);
     const d = details.find((x) => x.year === 2026)!;
-    expect(Object.keys(d.arrays)).toEqual(expect.arrayContaining(['news', 'actions']));
-    expect(Object.keys(d.history.league ?? {}).length).toBeGreaterThan(300);
+    expect(Object.keys(d.arrays)).toEqual(expect.arrayContaining(['["news"]', '["actions"]', '["league","ledger"]']));
+    // 선수 시즌 기록은 선수 id로
+    expect(Object.keys(d.arrays).filter((k) => k.startsWith('["league","players","@') && k.endsWith('"history"]')).length).toBeGreaterThan(300);
     // 본 칸에는 2027 몫만
     expect(main.news.every((n) => (n.year ?? 2026) >= 2027)).toBe(true);
     expect(main.league.players.every((p) => (p.history ?? []).every((h) => h.year >= 2027))).toBe(true);
@@ -178,30 +179,45 @@ describe('저장 나누기 규칙 (작은 예)', () => {
   const mk = (news: { year?: number; text: string }[], history: { year: number }[][]) => ({
     app: 'kbo-gm', format: 3, year: 2030, phase: 'season', teamIdx: 0, teamName: 'A', seed: 's',
     season: {}, news, actions: [],
-    league: { players: history.map((h, i) => ({ id: `p${i}`, history: h })), ledger: [{ year: 2028, amount: 1 }, { year: 2030, amount: 2 }] },
+    league: {
+      players: history.map((h, i) => ({ id: `p${i}`, history: h })),
+      ledger: [{ year: 2028, amount: 1 }, { year: 2030, amount: 2 }],
+      finance: [{ history: [{ year: 2029 }, { year: 2030 }] }, { history: [] }],
+    },
   }) as unknown as GameSave;
 
-  it('앞부분에서 연도가 줄지 않는 동안만 떼고, 순서가 섞인 뒤는 본 칸에 남긴다', () => {
+  it('연도 순서가 섞여도 앞 해 항목을 자리째 떼고, 합치면 원래 자리로 돌아온다', () => {
     const save = mk(
-      [{ year: 2028, text: 'a' }, { year: 2029, text: 'b' }, { year: 2028, text: 'c' }, { year: 2030, text: 'd' }, { text: 'e' }],
+      [{ year: 2028, text: 'a' }, { year: 2030, text: 'b' }, { year: 2029, text: 'c' }, { year: 2028, text: 'd' }, { text: 'e' }],
       [[{ year: 2028 }, { year: 2029 }, { year: 2030 }], [{ year: 2030 }], [{ year: 2029 }, { year: 2028 }]],
     );
     const { main: m0, details } = splitSave(save);
     const main = m0 as GameSaveV2;
     expect(details.map((d) => d.year)).toEqual([2028, 2029]);
-    expect(main.news.map((n) => n.text)).toEqual(['c', 'd', 'e']);
-    expect(main.league.players.map((p) => p.history.length)).toEqual([1, 1, 1]);
+    expect(main.news.map((n) => n.text)).toEqual(['b', 'e']);
+    expect(main.league.players.map((p) => p.history.length)).toEqual([1, 1, 0]);
+    expect(details[0].arrays['["news"]']).toEqual({ at: [0, 3], items: [{ year: 2028, text: 'a' }, { year: 2028, text: 'd' }] });
+    expect(details[1].arrays['["league","finance","0","history"]']).toEqual({ at: [0], items: [{ year: 2029 }] });
+    expect(text(joinSave(main, details))).toBe(text(save));
+    // 넣은 저장은 그대로
+    expect(save.news.length).toBe(5);
+  });
+
+  it('같은 id가 둘이면 선수를 번호로 가리키고, 그래도 합치면 같다', () => {
+    const save = mk([], [[{ year: 2028 }], [{ year: 2028 }]]);
+    ((save as GameSaveV2).league.players[1] as { id: string }).id = 'p0';
+    const { main, details } = splitSave(save);
+    expect(Object.keys(details[0].arrays)).toEqual(expect.arrayContaining(['["league","players","0","history"]', '["league","players","1","history"]']));
     expect(text(joinSave(main, details))).toBe(text(save));
   });
 
-  it('같은 id가 둘이면 그 묶음 선수 기록은 떼지 않는다', () => {
-    const save = mk([], [[{ year: 2028 }], [{ year: 2028 }]]);
-    ((save as GameSaveV2).league.players[1] as { id: string }).id = 'p0';
+  it('본 칸에서 빠진 선수의 몫은 합칠 때 버린다', () => {
+    const save = mk([], [[{ year: 2028 }], [{ year: 2029 }]]);
     const { main: m0, details } = splitSave(save);
     const main = m0 as GameSaveV2;
-    expect(main.league.players.map((p) => p.history.length)).toEqual([1, 1]);
-    expect(details.every((d) => !d.history.league)).toBe(true);
-    expect(text(joinSave(main, details))).toBe(text(save));
+    main.league = { ...main.league, players: [main.league.players[1]] };
+    const joined = joinSave(main, details) as GameSaveV2;
+    expect(joined.league.players).toEqual([{ id: 'p1', history: [{ year: 2029 }] }]);
   });
 
   it('형식 1 저장과 연도 없는 저장은 나누지 않는다', () => {
