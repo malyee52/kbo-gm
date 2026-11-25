@@ -1,8 +1,8 @@
 // 저장 크기·직렬화 시간 측정 (Q55, 2026-11-25).
 // 시즌마다 개막 저장의 JSON 크기, 칸별 크기, JSON.stringify·parse 시간, 나눠 저장(splitSave) 뒤 본 칸 크기를 잰다.
 // IndexedDB 쓰기 시간은 Node에 IndexedDB가 없어 여기서 재지 않는다 (브라우저 측정은 보고서에 따로).
-// 쓰는 법: npx tsx tools/save_size.ts --seasons 50 --seed size-a --out reports/save-size.md [--breakdown]
-import { writeFileSync } from 'node:fs';
+// 쓰는 법: npx tsx tools/save_size.ts --seasons 50 --seed size-a --out reports/save-size.md [--breakdown] [--dump 2027,2036,2051,2076]
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { loadDataStore } from '../src/data/loadNode';
 import { DEFAULT_PARAMS } from '../src/engine';
 import { GameSession } from '../src/game/session';
@@ -14,6 +14,8 @@ const seasons = Number(arg('seasons', '5'));
 const seed = arg('seed', 'size-a');
 const out = arg('out', '');
 const breakdown = process.argv.includes('--breakdown');
+// 브라우저 측정(tools/save_bench.html)에 쓸 저장을 이 해 개막마다 reports/tmp/save-bench-<해>.json으로 쓴다
+const dump = new Set(arg('dump', '').split(',').filter(Boolean).map(Number));
 installCalCache();
 
 const store = loadDataStore();
@@ -51,6 +53,7 @@ function measure() {
     parts['league.players.history'] = players.reduce((s, p) => s + len(p.history), 0);
     if (save.finishedLeague) parts['finishedLeague'] = len(save.finishedLeague);
   }
+  if (dump.has(g.year)) { mkdirSync('reports/tmp', { recursive: true }); writeFileSync(`reports/tmp/save-bench-${g.year}.json`, text); }
   rows.push({ year: g.year, full: text.length, stringify: ts, parse: tp, main: mainText.length, mainStringify: tms, detail, ok, parts });
   console.log(`${g.year} 개막: 전체 ${kb(text.length)}KB (stringify ${ts.toFixed(0)}ms, parse ${tp.toFixed(0)}ms) → 본 칸 ${kb(mainText.length)}KB (stringify ${tms.toFixed(0)}ms) + 기록 칸 ${kb(detail)}KB, 합치기 ${ok ? '같음' : '다름!'}`);
   if (breakdown) {
