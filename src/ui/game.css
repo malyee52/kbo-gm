@@ -1353,3 +1353,7 @@ dialog.editor-confirm .inline { margin-top: 12px; }
 .editor-curve-table { width: auto; }
 .editor-bulk { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
 .editor-bulk input[type="number"] { width: 6em; }
+
+/* 브리핑 머리의 요약/상세 토글: 상태 줄에 같은 토글이 보이는 넓은 화면(1180px 넘음)에서는 숨긴다 (2026-11-25 Q65) */
+.brief-density { display: none; }
+@media (max-width: 1180px) { .brief-density { display: inline-flex; } }
